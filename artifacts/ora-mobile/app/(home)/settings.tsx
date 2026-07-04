@@ -6,6 +6,8 @@ import {
   AudioLines,
   Brain,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   CreditCard,
   Focus,
@@ -16,6 +18,7 @@ import {
   Monitor,
   Moon,
   RefreshCw,
+  Shield,
   Sun,
   User as UserIcon,
   Volume2,
@@ -921,6 +924,12 @@ export default function SettingsScreen() {
     void writeStoredVoicePreset(preset);
   }, []);
 
+  /* ── About sub-view ─────────────────────────────────────────────────────── */
+
+  const [aboutView, setAboutView] = useState<null | "diagnostics" | "account-sync" | "legal">(
+    null,
+  );
+
   /* ── Diagnostics ───────────────────────────────────────────────────────── */
 
   const [diagSteps, setDiagSteps] = useState<DiagStep[]>([]);
@@ -1504,123 +1513,10 @@ export default function SettingsScreen() {
           </View>
         </SectionCard>
 
-        {/* 7. Account sync */}
-        <SectionCard
-          icon={RefreshCw}
-          title="Account sync"
-          description="Confirm this device resolves to the same Ora account, plan, and data as the website."
-        >
-          {acctLocalSignedIn !== null && (
-            <View style={{ gap: 4 }}>
-              <InfoRow label="Local signed in" value={acctLocalSignedIn ? "yes" : "no"} />
-              {acctLocalSignedIn && (
-                <InfoRow
-                  label="Token present"
-                  value={acctTokenPresent === null ? "checking" : acctTokenPresent ? "yes" : "no"}
-                  warn={acctTokenPresent === false}
-                />
-              )}
-              {acctDiag && (
-                <InfoRow
-                  label="Server recognized"
-                  value={acctDiag.identity.clerkUserIdLast4 ? "yes" : "no"}
-                  warn={acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
-                />
-              )}
-            </View>
-          )}
-          {acctDiag ? (
-            <View style={{ gap: 6 }}>
-              <InfoRow
-                label="User fingerprint"
-                value={acctDiag.identity.userIdHash || "anonymous"}
-              />
-              <InfoRow
-                label="Account id ending"
-                value={
-                  acctDiag.identity.clerkUserIdLast4
-                    ? `…${acctDiag.identity.clerkUserIdLast4}`
-                    : "—"
-                }
-              />
-              <InfoRow label="Email" value={acctDiag.identity.email ?? "anonymous"} />
-              <InfoRow label="Billing tier" value={planLabel(acctDiag.billing.billingTier)} />
-              <InfoRow
-                label="Chat tier"
-                value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`}
-                warn={acctTierMismatch}
-              />
-              <InfoRow
-                label="Public session tier"
-                value={
-                  acctPublicSessionTier !== null
-                    ? `${planLabel(acctPublicSessionTier)}${acctPublicSessionIsPaid ? " (paid)" : ""}`
-                    : "—"
-                }
-              />
-              <InfoRow
-                label="Local session tier"
-                value={acctLocalSessionTier !== null ? planLabel(acctLocalSessionTier) : "—"}
-                warn={acctLocalSessionMismatch}
-              />
-              <InfoRow
-                label="Session authenticated"
-                value={acctSessionAuthenticated ?? "—"}
-                warn={acctLocalSessionMismatch}
-              />
-              <InfoRow
-                label="Ora session auth"
-                value={
-                  acctDiag.identity.clerkUserIdLast4
-                    ? acctDiag.chatSession.isPaid
-                      ? "authenticated (paid)"
-                      : "authenticated (free)"
-                    : "anonymous"
-                }
-                warn={!!acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
-              />
-              <InfoRow label="Conversations" value={String(acctDiag.counts.conversations)} />
-              <InfoRow label="Projects" value={String(acctDiag.counts.projects)} />
-              <InfoRow label="Saved memories" value={String(acctDiag.counts.userLevelMemories)} />
-              <InfoRow label="Project memories" value={String(acctDiag.counts.projectMemories)} />
-              <InfoRow label="Assets" value={String(acctDiag.counts.assets)} />
-              <InfoRow label="Support tickets" value={String(acctDiag.counts.supportTickets)} />
-              <InfoRow label="API host" value={acctDiag.api.host ?? "—"} />
-              <InfoRow label="Environment" value={acctDiag.api.environment ?? "—"} />
-            </View>
-          ) : (
-            <View
-              style={{
-                backgroundColor: c.muted,
-                borderRadius: c.radius,
-                paddingHorizontal: 14,
-                paddingVertical: 12,
-              }}
-            >
-              <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
-                {acctError
-                  ? `Could not load account sync: ${acctError}`
-                  : "Run the check to compare this device against your website account."}
-              </Text>
-            </View>
-          )}
-          {acctWarnMessage ? (
-            <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>
-              {acctWarnMessage}
-            </Text>
-          ) : null}
-          <Button
-            label={acctLoading ? "Checking account sync…" : "Check account sync"}
-            onPress={() => void runAccountCheck()}
-            disabled={acctLoading}
-            full
-          />
-        </SectionCard>
-
-        {/* 8. Memory & references */}
+        {/* 7. Memory & references */}
         <MemorySection />
 
-        {/* 9. Plan & billing (signed-in only) */}
+        {/* 8. Plan & billing (signed-in only) */}
         {isSignedIn && (
           <SectionCard
             icon={CreditCard}
@@ -1838,162 +1734,9 @@ export default function SettingsScreen() {
           </SectionCard>
         )}
 
-        {/* 10. Diagnostics (mobile-only) */}
-        <SectionCard
-          icon={Wifi}
-          title="Diagnostics"
-          description="Step-by-step connectivity and chat-path check."
-        >
-          <View style={{ gap: 6 }}>
-            <InfoRow label="API URL" value={API_BASE} />
-            <InfoRow label="Streaming" value={STREAMING_ENABLED ? "on" : "off"} />
-            <InfoRow label="Signed in" value={isSignedIn ? "yes" : "no"} warn={!isSignedIn} />
-            <InfoRow label="Email" value={isSignedIn ? signedInEmail : "anonymous"} />
-            <InfoRow label="Clerk token" value={tokenStatusLabel} warn={signedInMissingToken} />
-            <InfoRow
-              label="Billing tier"
-              value={billingTierLabel}
-              warn={!!isSignedIn && !billingTier}
-            />
-            <InfoRow label="Chat tier" value={chatTierLabel} warn={planSyncWarn} />
-            <InfoRow
-              label="Clerk key"
-              value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
-              warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
-            />
-            <InfoRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
-            <InfoRow label="Build" value={APP_VERSION_LABEL} />
-            {/* Streaming runtime — populated after the last Ora chat turn */}
-            {(() => {
-              const sd = getLastStreamDiagnostics();
-              if (!sd) return null;
-              return (
-                <View style={{ marginTop: 6, gap: 4 }}>
-                  <Text
-                    style={{
-                      color: c.mutedForeground,
-                      fontSize: 11,
-                      fontFamily: "Inter_600SemiBold",
-                      letterSpacing: 0.5,
-                      textTransform: "uppercase",
-                      marginBottom: 2,
-                    }}
-                  >
-                    Streaming runtime (last chat)
-                  </Text>
-                  <InfoRow
-                    label="ReadableStream"
-                    value={sd.readableStreamAvailable ? "available" : "unavailable"}
-                  />
-                  <InfoRow
-                    label="Kill switch"
-                    value={sd.killSwitchActive ? "ON" : "off"}
-                    warn={sd.killSwitchActive}
-                  />
-                  <InfoRow
-                    label="Auth"
-                    value={
-                      sd.authResult + (sd.authMs != null ? ` (${sd.authMs}ms)` : "")
-                    }
-                    warn={sd.authResult === "threw"}
-                  />
-                  <InfoRow
-                    label="XHR used"
-                    value={sd.xhrUsed ? "yes" : "no"}
-                    warn={!sd.xhrUsed && !sd.killSwitchActive}
-                  />
-                  {sd.endpointUrl ? (
-                    <InfoRow
-                      label="Endpoint"
-                      value={sd.endpointUrl.replace(`https://${DOMAIN}`, "")}
-                    />
-                  ) : null}
-                  {sd.httpStatus != null ? (
-                    <InfoRow
-                      label="HTTP status"
-                      value={String(sd.httpStatus)}
-                      warn={sd.httpStatus >= 400}
-                    />
-                  ) : null}
-                  {sd.contentType ? (
-                    <InfoRow
-                      label="Content-Type"
-                      value={(sd.contentType.split(";")[0] ?? sd.contentType).trim()}
-                      warn={!sd.contentType.includes("text/event-stream")}
-                    />
-                  ) : null}
-                  {sd.headersMs != null ? (
-                    <InfoRow label="Headers in" value={`${sd.headersMs}ms`} />
-                  ) : null}
-                  {sd.firstTokenMs != null ? (
-                    <InfoRow label="First token in" value={`${sd.firstTokenMs}ms`} />
-                  ) : null}
-                  <InfoRow
-                    label="Tokens received"
-                    value={String(sd.tokenCount)}
-                    warn={sd.tokenCount === 0 && sd.returnValue === "ok"}
-                  />
-                  <InfoRow
-                    label="Done arrived"
-                    value={sd.doneArrived ? "yes" : "no"}
-                    warn={!sd.doneArrived && sd.returnValue === "ok"}
-                  />
-                  <InfoRow
-                    label="Result"
-                    value={sd.returnValue}
-                    warn={sd.returnValue !== "ok"}
-                  />
-                  <InfoRow
-                    label="Fell back to /chat"
-                    value={sd.fallbackCalled ? "yes" : "no"}
-                    warn={sd.fallbackCalled}
-                  />
-                  <Text style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}>
-                    Captured {new Date(sd.capturedAt).toLocaleTimeString()}
-                  </Text>
-                </View>
-              );
-            })()}
-          </View>
-          {planSyncMessage ? (
-            <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>
-              {planSyncMessage}
-            </Text>
-          ) : null}
-          <Button
-            label={diagLoading ? "Testing Ora chat…" : "Test Ora chat"}
-            onPress={() => void runDiagnostics()}
-            disabled={diagLoading}
-            full
-          />
-          {diagSteps.length > 0 && (
-            <View style={{ gap: 8, marginTop: 4 }}>
-              {diagSteps.map((step) => (
-                <DiagStepRow key={step.id} step={step} />
-              ))}
-              {!diagLoading && (
-                <Text
-                  style={{
-                    color: anyFail ? "#f87171" : allOk ? "#4ade80" : c.mutedForeground,
-                    fontSize: 13,
-                    textAlign: "center",
-                    marginTop: 4,
-                    fontFamily: "Inter_600SemiBold",
-                  }}
-                >
-                  {anyFail
-                    ? "One or more steps failed — see details above."
-                    : allOk
-                      ? "All checks passed."
-                      : "Check in progress…"}
-                </Text>
-              )}
-            </View>
-          )}
-        </SectionCard>
-
-        {/* 11. About */}
-        <SectionCard icon={Info} title="About" description="App version and build.">
+        {/* 9. About */}
+        <SectionCard icon={Info} title="About" description="App version, diagnostics, and legal.">
+          {/* Version row — always visible */}
           <View
             style={{
               flexDirection: "row",
@@ -2008,6 +1751,377 @@ export default function SettingsScreen() {
             <Text style={{ color: c.foreground, fontSize: 14 }}>Ora</Text>
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{APP_VERSION_LABEL}</Text>
           </View>
+
+          {aboutView === null ? (
+            /* ── Sub-section menu ──────────────────────────────────────────── */
+            <View style={{ gap: 1 }}>
+              {(
+                [
+                  { id: "diagnostics", label: "Diagnostics", Icon: Wifi },
+                  { id: "account-sync", label: "Account sync", Icon: RefreshCw },
+                  { id: "legal", label: "Legal & Privacy", Icon: Shield },
+                ] as const
+              ).map(({ id, label, Icon }) => (
+                <Pressable
+                  key={id}
+                  onPress={() => setAboutView(id)}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    backgroundColor: pressed ? c.muted : "transparent",
+                    borderRadius: c.radius,
+                    paddingHorizontal: 14,
+                    paddingVertical: 13,
+                  })}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <Icon size={16} color={c.mutedForeground} />
+                    <Text style={{ color: c.foreground, fontSize: 14 }}>{label}</Text>
+                  </View>
+                  <ChevronRight size={16} color={c.mutedForeground} />
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            /* ── Back row ──────────────────────────────────────────────────── */
+            <Pressable
+              onPress={() => setAboutView(null)}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingVertical: 4,
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <ChevronLeft size={16} color={c.primary} />
+              <Text style={{ color: c.primary, fontSize: 14, fontFamily: "Inter_500Medium" }}>
+                Back
+              </Text>
+            </Pressable>
+          )}
+
+          {/* ── Diagnostics sub-view ─────────────────────────────────────── */}
+          {aboutView === "diagnostics" && (
+            <View style={{ gap: 12 }}>
+              <View style={{ gap: 6 }}>
+                <InfoRow label="API URL" value={API_BASE} />
+                <InfoRow label="Streaming" value={STREAMING_ENABLED ? "on" : "off"} />
+                <InfoRow label="Signed in" value={isSignedIn ? "yes" : "no"} warn={!isSignedIn} />
+                <InfoRow label="Email" value={isSignedIn ? signedInEmail : "anonymous"} />
+                <InfoRow label="Clerk token" value={tokenStatusLabel} warn={signedInMissingToken} />
+                <InfoRow
+                  label="Billing tier"
+                  value={billingTierLabel}
+                  warn={!!isSignedIn && !billingTier}
+                />
+                <InfoRow label="Chat tier" value={chatTierLabel} warn={planSyncWarn} />
+                <InfoRow
+                  label="Clerk key"
+                  value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
+                  warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
+                />
+                <InfoRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
+                <InfoRow label="Build" value={APP_VERSION_LABEL} />
+                {(() => {
+                  const sd = getLastStreamDiagnostics();
+                  if (!sd) return null;
+                  return (
+                    <View style={{ marginTop: 6, gap: 4 }}>
+                      <Text
+                        style={{
+                          color: c.mutedForeground,
+                          fontSize: 11,
+                          fontFamily: "Inter_600SemiBold",
+                          letterSpacing: 0.5,
+                          textTransform: "uppercase",
+                          marginBottom: 2,
+                        }}
+                      >
+                        Streaming runtime (last chat)
+                      </Text>
+                      <InfoRow
+                        label="ReadableStream"
+                        value={sd.readableStreamAvailable ? "available" : "unavailable"}
+                      />
+                      <InfoRow
+                        label="Kill switch"
+                        value={sd.killSwitchActive ? "ON" : "off"}
+                        warn={sd.killSwitchActive}
+                      />
+                      <InfoRow
+                        label="Auth"
+                        value={sd.authResult + (sd.authMs != null ? ` (${sd.authMs}ms)` : "")}
+                        warn={sd.authResult === "threw"}
+                      />
+                      <InfoRow
+                        label="XHR used"
+                        value={sd.xhrUsed ? "yes" : "no"}
+                        warn={!sd.xhrUsed && !sd.killSwitchActive}
+                      />
+                      {sd.endpointUrl ? (
+                        <InfoRow
+                          label="Endpoint"
+                          value={sd.endpointUrl.replace(`https://${DOMAIN}`, "")}
+                        />
+                      ) : null}
+                      {sd.httpStatus != null ? (
+                        <InfoRow
+                          label="HTTP status"
+                          value={String(sd.httpStatus)}
+                          warn={sd.httpStatus >= 400}
+                        />
+                      ) : null}
+                      {sd.contentType ? (
+                        <InfoRow
+                          label="Content-Type"
+                          value={(sd.contentType.split(";")[0] ?? sd.contentType).trim()}
+                          warn={!sd.contentType.includes("text/event-stream")}
+                        />
+                      ) : null}
+                      {sd.headersMs != null ? (
+                        <InfoRow label="Headers in" value={`${sd.headersMs}ms`} />
+                      ) : null}
+                      {sd.firstTokenMs != null ? (
+                        <InfoRow label="First token in" value={`${sd.firstTokenMs}ms`} />
+                      ) : null}
+                      <InfoRow
+                        label="Tokens received"
+                        value={String(sd.tokenCount)}
+                        warn={sd.tokenCount === 0 && sd.returnValue === "ok"}
+                      />
+                      <InfoRow
+                        label="Done arrived"
+                        value={sd.doneArrived ? "yes" : "no"}
+                        warn={!sd.doneArrived && sd.returnValue === "ok"}
+                      />
+                      <InfoRow
+                        label="Result"
+                        value={sd.returnValue}
+                        warn={sd.returnValue !== "ok"}
+                      />
+                      <InfoRow
+                        label="Fell back to /chat"
+                        value={sd.fallbackCalled ? "yes" : "no"}
+                        warn={sd.fallbackCalled}
+                      />
+                      <Text style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}>
+                        Captured {new Date(sd.capturedAt).toLocaleTimeString()}
+                      </Text>
+                    </View>
+                  );
+                })()}
+              </View>
+              {planSyncMessage ? (
+                <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18 }}>
+                  {planSyncMessage}
+                </Text>
+              ) : null}
+              <Button
+                label={diagLoading ? "Testing Ora chat…" : "Test Ora chat"}
+                onPress={() => void runDiagnostics()}
+                disabled={diagLoading}
+                full
+              />
+              {diagSteps.length > 0 && (
+                <View style={{ gap: 8 }}>
+                  {diagSteps.map((step) => (
+                    <DiagStepRow key={step.id} step={step} />
+                  ))}
+                  {!diagLoading && (
+                    <Text
+                      style={{
+                        color: anyFail ? "#f87171" : allOk ? "#4ade80" : c.mutedForeground,
+                        fontSize: 13,
+                        textAlign: "center",
+                        marginTop: 4,
+                        fontFamily: "Inter_600SemiBold",
+                      }}
+                    >
+                      {anyFail
+                        ? "One or more steps failed — see details above."
+                        : allOk
+                          ? "All checks passed."
+                          : "Check in progress…"}
+                    </Text>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* ── Account sync sub-view ────────────────────────────────────── */}
+          {aboutView === "account-sync" && (
+            <View style={{ gap: 12 }}>
+              {acctLocalSignedIn !== null && (
+                <View style={{ gap: 4 }}>
+                  <InfoRow label="Local signed in" value={acctLocalSignedIn ? "yes" : "no"} />
+                  {acctLocalSignedIn && (
+                    <InfoRow
+                      label="Token present"
+                      value={
+                        acctTokenPresent === null ? "checking" : acctTokenPresent ? "yes" : "no"
+                      }
+                      warn={acctTokenPresent === false}
+                    />
+                  )}
+                  {acctDiag && (
+                    <InfoRow
+                      label="Server recognized"
+                      value={acctDiag.identity.clerkUserIdLast4 ? "yes" : "no"}
+                      warn={acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
+                    />
+                  )}
+                </View>
+              )}
+              {acctDiag ? (
+                <View style={{ gap: 6 }}>
+                  <InfoRow
+                    label="User fingerprint"
+                    value={acctDiag.identity.userIdHash || "anonymous"}
+                  />
+                  <InfoRow
+                    label="Account id ending"
+                    value={
+                      acctDiag.identity.clerkUserIdLast4
+                        ? `…${acctDiag.identity.clerkUserIdLast4}`
+                        : "—"
+                    }
+                  />
+                  <InfoRow label="Email" value={acctDiag.identity.email ?? "anonymous"} />
+                  <InfoRow label="Billing tier" value={planLabel(acctDiag.billing.billingTier)} />
+                  <InfoRow
+                    label="Chat tier"
+                    value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`}
+                    warn={acctTierMismatch}
+                  />
+                  <InfoRow
+                    label="Public session tier"
+                    value={
+                      acctPublicSessionTier !== null
+                        ? `${planLabel(acctPublicSessionTier)}${acctPublicSessionIsPaid ? " (paid)" : ""}`
+                        : "—"
+                    }
+                  />
+                  <InfoRow
+                    label="Local session tier"
+                    value={acctLocalSessionTier !== null ? planLabel(acctLocalSessionTier) : "—"}
+                    warn={acctLocalSessionMismatch}
+                  />
+                  <InfoRow
+                    label="Session authenticated"
+                    value={acctSessionAuthenticated ?? "—"}
+                    warn={acctLocalSessionMismatch}
+                  />
+                  <InfoRow
+                    label="Ora session auth"
+                    value={
+                      acctDiag.identity.clerkUserIdLast4
+                        ? acctDiag.chatSession.isPaid
+                          ? "authenticated (paid)"
+                          : "authenticated (free)"
+                        : "anonymous"
+                    }
+                    warn={!!acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
+                  />
+                  <InfoRow label="Conversations" value={String(acctDiag.counts.conversations)} />
+                  <InfoRow label="Projects" value={String(acctDiag.counts.projects)} />
+                  <InfoRow
+                    label="Saved memories"
+                    value={String(acctDiag.counts.userLevelMemories)}
+                  />
+                  <InfoRow
+                    label="Project memories"
+                    value={String(acctDiag.counts.projectMemories)}
+                  />
+                  <InfoRow label="Assets" value={String(acctDiag.counts.assets)} />
+                  <InfoRow label="Support tickets" value={String(acctDiag.counts.supportTickets)} />
+                  <InfoRow label="API host" value={acctDiag.api.host ?? "—"} />
+                  <InfoRow label="Environment" value={acctDiag.api.environment ?? "—"} />
+                </View>
+              ) : (
+                <View
+                  style={{
+                    backgroundColor: c.muted,
+                    borderRadius: c.radius,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                  }}
+                >
+                  <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
+                    {acctError
+                      ? `Could not load account sync: ${acctError}`
+                      : "Run the check to compare this device against your website account."}
+                  </Text>
+                </View>
+              )}
+              {acctWarnMessage ? (
+                <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18 }}>
+                  {acctWarnMessage}
+                </Text>
+              ) : null}
+              <Button
+                label={acctLoading ? "Checking account sync…" : "Check account sync"}
+                onPress={() => void runAccountCheck()}
+                disabled={acctLoading}
+                full
+              />
+            </View>
+          )}
+
+          {/* ── Legal & Privacy sub-view ─────────────────────────────────── */}
+          {aboutView === "legal" && (
+            <View style={{ gap: 16 }}>
+              {(
+                [
+                  {
+                    heading: "How Ora works",
+                    body: "Ora is an AI assistant. Responses are generated by AI models and may not always be accurate.",
+                  },
+                  {
+                    heading: "What we collect",
+                    body: "Account identifiers, conversation messages, uploaded file content (processed temporarily and not retained beyond the session), and usage counts. Voice audio is processed in real time and is not stored.",
+                  },
+                  {
+                    heading: "Memory",
+                    body: "Ora can save notes about you to improve future replies. You control this. All saved memories can be viewed and deleted from Settings at any time.",
+                  },
+                  {
+                    heading: "Third-party AI",
+                    body: "Responses are generated via third-party AI providers. Content you send may be processed by those providers subject to their own terms.",
+                  },
+                  {
+                    heading: "Not professional advice",
+                    body: "Ora is not a licensed medical, legal, financial, or safety professional. Do not rely on Ora for decisions in those areas.",
+                  },
+                  {
+                    heading: "Acceptable use",
+                    body: "Ora may not be used for illegal activity, harassment, generating harmful content, or attempting to bypass its safety guidelines.",
+                  },
+                  {
+                    heading: "Contact",
+                    body: "For questions or to request data deletion, contact us at support on mustaflow.com.",
+                  },
+                ] as const
+              ).map(({ heading, body }) => (
+                <View key={heading} style={{ gap: 4 }}>
+                  <Text
+                    style={{
+                      color: c.foreground,
+                      fontFamily: "Inter_600SemiBold",
+                      fontSize: 13,
+                    }}
+                  >
+                    {heading}
+                  </Text>
+                  <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 20 }}>
+                    {body}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </SectionCard>
       </ScrollView>
     </View>
