@@ -1,0 +1,37 @@
+Confirmed. This Talk to Ora reliability fix looks correct and addresses the manual QA blocker directly.
+
+Please do not make more product changes in this area unless the next physical-device QA finds another blocker. The next step is a fresh TestFlight build and real-device validation.
+
+For the next build, include this merged Talk to Ora watchdog/reconnect fix and run this manual QA checklist:
+
+1. Normal long session:
+Run Talk to Ora on a physical iPhone for at least 15 assistant responses.
+Expected: every turn completes and returns to listening. No stuck “thinking,” no stuck “speaking,” no frozen UI.
+
+2. Focus mode:
+Keep Speaker Focus enabled and run a long reply, then say a short follow-up like “continue” or “that’s good.”
+Expected: Ora accepts the follow-up after the reply finishes. It should not silently reject the user because the focus window expired.
+
+3. Missing/late events simulation through real usage:
+During a response, briefly interrupt network or move to weak Wi-Fi.
+Expected: Ora either recovers to listening, cancels the stuck response, reconnects, or falls back clearly. It must not stay stuck in thinking.
+
+4. Consecutive failure path:
+If two turns fail back-to-back, confirm the session reconnects or moves to a clear fallback state instead of pretending the realtime card is still working.
+
+5. Plan-tier duration:
+Test the session duration for the current account tier. If the user reaches the realtime cap, the UI must show a clear limit/cap state, not “thinking.”
+
+6. Website parity:
+Run a shorter 10+ turn Talk to Ora session on website too, since the same watchdog/recovery logic was applied there.
+
+7. Regression checks:
+Confirm normal chat, Deep mode, image generation, file generation, and image/file upload still work. This fix should only affect Talk to Ora realtime hooks.
+
+Please provide:
+- source commit SHA
+- iOS TestFlight build number
+- EAS build ID
+- submit ID
+- results of the 15-turn physical-device QA
+- whether the stuck-thinking issue is resolved or still reproducible
