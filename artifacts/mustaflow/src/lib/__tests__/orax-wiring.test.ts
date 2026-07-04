@@ -2612,4 +2612,74 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("handoffCta");
     }
   });
+
+  // ── Phase 3B: Git Branch, Commit, and Pull Request Flow ──────────────────────
+
+  it("Phase 3B: project-git-workflow.ts exists and exports prepareProjectPr", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).toContain("prepareProjectPr");
+    expect(src).toContain("buildBranchName");
+    expect(src).toContain("validateGitRepo");
+    expect(src).toContain("getGitRemoteUrl");
+  });
+
+  it("Phase 3B: project-git-workflow.ts uses no destructive git commands or shell execution", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).not.toContain("shell:true");
+    expect(src).not.toContain("git reset --hard");
+    expect(src).not.toContain("git clean -fd");
+    expect(src).not.toContain("--force");
+  });
+
+  it("Phase 3B: project-git-workflow.ts branches follow orax/<threadId8>/<slug> pattern", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).toContain("orax/");
+    expect(src).toContain("buildBranchName");
+  });
+
+  it("Phase 3B: relay-client.ts handles prepare_project_pr action and imports project-git-workflow", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("prepare_project_pr");
+    expect(src).toContain("project-git-workflow");
+    expect(src).toContain("prepareProjectPr");
+  });
+
+  it("Phase 3B: orax-projects.ts has prepare-pr endpoint", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("prepare-pr");
+    expect(src).toContain("prepare_project_pr");
+    expect(src).toContain("project_pr_prepare_queued");
+  });
+
+  it("Phase 3B: orax-desktop.ts declares isPrepPr and writes project_pr_ready event", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("isPrepPr");
+    expect(src).toContain("prepare_project_pr");
+    expect(src).toContain("project_pr_ready");
+    expect(src).toContain("project_pr_failed");
+  });
+
+  it("Phase 3B: orax-workspace.tsx renders project_pr_ready and project_pr_failed and has Create pull request button", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_pr_ready");
+    expect(src).toContain("project_pr_failed");
+    expect(src).toContain("Create pull request");
+    expect(src).toContain("preparePr");
+    expect(src).toContain("preparingPr");
+  });
+
+  it("Phase 3B: mobile has ProjectPrReadyCard and ProjectPrFailedCard for project_pr_ready and project_pr_failed", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPrReadyCard");
+    expect(src).toContain("ProjectPrFailedCard");
+    expect(src).toContain("project_pr_ready");
+    expect(src).toContain("project_pr_failed");
+  });
+
+  it("Phase 3B: no Ora/public-ai in project-git-workflow", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).not.toContain("/api/public-ai/");
+    expect(src).not.toContain("oraChat");
+    expect(src).not.toContain("handoffCta");
+  });
 });

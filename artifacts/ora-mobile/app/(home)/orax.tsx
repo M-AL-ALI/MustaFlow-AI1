@@ -3986,6 +3986,87 @@ function ProjectFixDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
   );
 }
 
+// Phase 3B: compact card for project_pr_ready thread messages
+function ProjectPrReadyCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  const branchName = msg.payload?.branchName as string | undefined;
+  const commitSha = msg.payload?.commitSha as string | undefined;
+  const prUrl = msg.payload?.prUrl as string | null | undefined;
+  const warnings = msg.payload?.warnings as string[] | undefined;
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#22c55e55",
+        borderRadius: 12,
+        padding: 12,
+        backgroundColor: "#22c55e08",
+      }}
+    >
+      <Text style={{ color: "#22c55e", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        Pull request ready
+      </Text>
+      {branchName ? (
+        <Text
+          style={{
+            color: c.mutedForeground,
+            fontSize: 11,
+            fontFamily: "SpaceMono_400Regular",
+            marginTop: 4,
+          }}
+          numberOfLines={1}
+        >
+          {branchName}
+        </Text>
+      ) : null}
+      {commitSha ? (
+        <Text style={{ color: c.mutedForeground, fontSize: 11, marginTop: 2 }}>
+          {`Commit: ${commitSha.slice(0, 8)}`}
+        </Text>
+      ) : null}
+      {prUrl ? (
+        <Text style={{ color: "#3b82f6", fontSize: 12, marginTop: 6 }} numberOfLines={2}>
+          {prUrl}
+        </Text>
+      ) : (
+        <Text style={{ color: c.mutedForeground, fontSize: 11, marginTop: 4 }}>
+          Branch committed locally — push to remote to open a PR.
+        </Text>
+      )}
+      {warnings && warnings.length > 0
+        ? warnings.slice(0, 2).map((w, i) => (
+            <Text key={i} style={{ color: "#f59e0b", fontSize: 11, marginTop: 2 }}>
+              {w}
+            </Text>
+          ))
+        : null}
+    </View>
+  );
+}
+
+// Phase 3B: compact card for project_pr_failed thread messages
+function ProjectPrFailedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#ef444455",
+        borderRadius: 12,
+        padding: 12,
+        backgroundColor: "#ef444408",
+      }}
+    >
+      <Text style={{ color: "#ef4444", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        Pull request failed
+      </Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+        {msg.content}
+      </Text>
+    </View>
+  );
+}
+
 function isOraxVisibleThreadMessage(message: OraxTaskMessage): boolean {
   if (message.role === "user" || message.role === "assistant") return true;
   const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";

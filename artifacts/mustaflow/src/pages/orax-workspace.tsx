@@ -231,6 +231,9 @@ type ThreadPayload = {
   checks?: VerifyCheck[];
   allPassed?: boolean;
   totalDurationMs?: number;
+  branchName?: string;
+  commitSha?: string;
+  prUrl?: string | null;
 };
 type ThreadMessage = {
   id: string;
@@ -287,6 +290,17 @@ async function prepareFix(projectId: string, threadId: string): Promise<void> {
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "Failed to queue fix preparation");
+  }
+}
+
+async function preparePr(projectId: string, threadId: string): Promise<void> {
+  const res = await authFetch(
+    `/api/orax/projects/${projectId}/threads/${threadId}/prepare-pr`,
+    { method: "POST", headers: { "Content-Type": "application/json" } },
+  );
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? "Failed to queue pull request preparation");
   }
 }
 
@@ -348,6 +362,7 @@ function ThreadDetail({
   const [sending, setSending] = useState(false);
   const [applyingPatch, setApplyingPatch] = useState<string | null>(null);
   const [preparingFix, setPreparingFix] = useState(false);
+  const [preparingPr, setPreparingPr] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -679,6 +694,28 @@ function ThreadDetail({
                       {(msg.payload?.checks ?? []).length === 0 && (
                         <div className="mt-1 text-muted-foreground">{msg.content}</div>
                       )}
+                      <button
+                        className="mt-2 btn btn-secondary text-xs py-1 px-2.5 h-auto"
+                        disabled={preparingPr}
+                        onClick={() => {
+                          setPreparingPr(true);
+                          preparePr(projectId, thread.id)
+                            .then(() => void reload())
+                            .catch((err: unknown) =>
+                              setError(
+                                err instanceof Error ? err.message : "Create PR failed",
+                              ),
+                            )
+                            .finally(() => setPreparingPr(false));
+                        }}
+                      >
+                        {preparingPr ? (
+                          <Loader2 size={10} className="animate-spin" />
+                        ) : (
+                          <GitBranch size={10} />
+                        )}
+                        {preparingPr ? "Queuing…" : "Create pull request"}
+                      </button>
                     </div>
                   )}
                   {/* Phase 2M: verification failed */}
@@ -778,6 +815,55 @@ function ThreadDetail({
                         )}
                         {applyingPatch === msg.id ? "Applying…" : "Apply fix"}
                       </button>
+                    </div>
+                  )}
+                  {/* Phase 3B: PR ready */}
+                  {msg.eventType === "project_pr_ready" && (
+                    <div className="mt-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400 mb-1.5">
+                        <GitBranch size={11} />
+                        Pull request ready
+                      </div>
+                      {msg.payload?.branchName && (
+                        <div className="font-mono text-muted-foreground mb-1 truncate">
+                          {msg.payload.branchName as string}
+                        </div>
+                      )}
+                      {msg.payload?.commitSha && (
+                        <div className="text-muted-foreground/60 mb-1">
+                          Commit: {(msg.payload.commitSha as string).slice(0, 8)}
+                        </div>
+                      )}
+                      {msg.payload?.prUrl ? (
+                        <a
+                          href={msg.payload.prUrl as string}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline mt-1"
+                        >
+                          <ExternalLink size={9} />
+                          Open pull request
+                        </a>
+                      ) : (
+                        <div className="text-muted-foreground mt-1">
+                          Branch committed locally — push to remote to open a PR.
+                        </div>
+                      )}
+                      {(msg.payload?.warnings as string[] | undefined)?.slice(0, 2).map((w, i) => (
+                        <div key={i} className="text-amber-600 dark:text-amber-400 mt-0.5">
+                          {w}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Phase 3B: PR failed */}
+                  {msg.eventType === "project_pr_failed" && (
+                    <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400">
+                        <AlertTriangle size={11} />
+                        Pull request failed
+                      </div>
+                      <div className="mt-1 text-muted-foreground">{msg.content}</div>
                     </div>
                   )}
                 </div>

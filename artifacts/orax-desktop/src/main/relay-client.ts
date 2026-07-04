@@ -36,6 +36,7 @@ import { draftProjectPatch } from "./project-patch-drafter";
 import { applyProjectPatch, type ApplyFilePatch } from "./project-patch-applier";
 import { verifyProjectPatch } from "./project-patch-verifier";
 import { draftProjectFix, type FailedCheck } from "./project-fix-drafter";
+import { prepareProjectPr } from "./project-git-workflow";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -752,6 +753,89 @@ export class RelayClient {
           failedChecks: failedChecks.slice(0, 3),
           originalUserMessage,
           warnings: fixResult.warnings,
+        };
+        // Falls through to the common postActionEvent("completed") call below
+      } else if (action.type === "prepare_project_pr") {
+        // Phase 3B: Git branch, commit, and push after verified patch.
+        // Uses a fixed arg array via project-git-workflow.ts — no shell execution, no force-push,
+        // no hard-resets, no working-tree wipes.
+        const payload = action.payload as {
+          projectId?: unknown;
+          threadId?: unknown;
+          executionSourceId?: unknown;
+          sourceLocalPath?: unknown;
+          changedFiles?: unknown;
+          commitMessage?: unknown;
+          projectSlug?: unknown;
+          githubToken?: unknown;
+        };
+
+        const projectId =
+          typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId =
+          typeof payload.threadId === "string" ? payload.threadId : null;
+        const executionSourceId =
+          typeof payload.executionSourceId === "string"
+            ? payload.executionSourceId
+            : null;
+        const sourceLocalPath =
+          typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
+
+        if (!projectId || !threadId || !sourceLocalPath) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error:
+              "prepare_project_pr: missing required payload fields " +
+              "(projectId, threadId, sourceLocalPath).",
+          });
+          return;
+        }
+
+        if (!fs.existsSync(sourceLocalPath)) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: "prepare_project_pr: sourceLocalPath does not exist",
+          });
+          return;
+        }
+
+        const changedFiles = Array.isArray(payload.changedFiles)
+          ? (payload.changedFiles as unknown[]).filter(
+              (f): f is string => typeof f === "string",
+            )
+          : [];
+        const commitMessage =
+          typeof payload.commitMessage === "string"
+            ? payload.commitMessage
+            : "Orax approved patch";
+        const projectSlug =
+          typeof payload.projectSlug === "string" ? payload.projectSlug : "patch";
+        const githubToken =
+          typeof payload.githubToken === "string" ? payload.githubToken : undefined;
+
+        await this.api.postActionEvent(action.id, "running", {
+          projectId,
+          threadId,
+          executionSourceId,
+        });
+
+        const prResult = await prepareProjectPr({
+          projectDir: sourceLocalPath,
+          threadId,
+          projectSlug,
+          changedFiles,
+          commitMessage,
+          githubToken,
+        });
+
+        result = {
+          projectId,
+          threadId,
+          executionSourceId,
+          branchName: prResult.branchName,
+          commitSha: prResult.commitSha,
+          changedFiles: prResult.changedFiles,
+          prUrl: prResult.prUrl,
+          warnings: prResult.warnings,
+          durationMs: prResult.durationMs,
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {

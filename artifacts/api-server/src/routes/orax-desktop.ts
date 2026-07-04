@@ -928,6 +928,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       const isApplyPatch = action.type === "apply_project_patch";
       const isVerifyPatch = action.type === "verify_project_patch";
       const isFixDraft = action.type === "draft_project_fix";
+      const isPrepPr = action.type === "prepare_project_pr";
 
       let content: string;
       let eventType: string;
@@ -1291,6 +1292,48 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         const errMsg = (payload as { error?: string }).error ?? "unknown error";
         content = `Could not draft a fix: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
         eventType = "project_fix_draft_failed";
+        role = "assistant";
+      } else if (isPrepPr && type === "completed") {
+        // Phase 3B: PR branch + commit completed — write project_pr_ready message
+        const pp = (payload ?? {}) as {
+          branchName?: string;
+          commitSha?: string;
+          changedFiles?: string[];
+          prUrl?: string | null;
+          warnings?: string[];
+          durationMs?: number;
+        };
+        const branchName = pp.branchName ?? "orax/patch";
+        const commitSha = pp.commitSha ?? "";
+        const prUrl = pp.prUrl ?? null;
+        const shortSha = commitSha.slice(0, 8);
+        content = prUrl
+          ? `Branch \`${branchName}\` pushed. Commit: ${shortSha}. Pull request ready.`
+          : `Branch \`${branchName}\` committed (${shortSha}). No remote push — open a PR manually.`;
+        eventType = "project_pr_ready";
+        role = "assistant";
+
+        await db.insert(oraxThreadMessagesTable).values({
+          threadId: action.threadId,
+          role,
+          content,
+          eventType,
+          payload: {
+            actionId,
+            actionType: action.type,
+            branchName,
+            commitSha,
+            changedFiles: pp.changedFiles ?? [],
+            prUrl,
+            warnings: pp.warnings ?? [],
+            durationMs: pp.durationMs ?? 0,
+          },
+        });
+        skipSharedInsert = true;
+      } else if (isPrepPr && type === "failed") {
+        const errMsg = (payload as { error?: string }).error ?? "unknown error";
+        content = `Could not prepare the pull request: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
+        eventType = "project_pr_failed";
         role = "assistant";
       } else {
         content =
