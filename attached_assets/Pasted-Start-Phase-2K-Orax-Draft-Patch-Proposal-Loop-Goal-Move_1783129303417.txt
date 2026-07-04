@@ -1,0 +1,148 @@
+Start Phase 2K — Orax Draft Patch Proposal Loop
+
+Goal:
+Move Orax from “inspect files + suggest plan” into the next Codex-style step: produce a reviewable draft patch proposal from the selected/read files, but do not write files yet.
+
+Important:
+Do not touch Ora, public-ai chat, AI Builder, credits, or normal Ora project chat.
+Only work inside Orax desktop / Orax backend / Orax website / Orax mobile wiring.
+
+What & Why:
+Phase 2J lets the desktop agent inspect a local project, select relevant files, read safe previews, and create a suggested plan. The next missing Codex-like behavior is the “here is the change I would make” step.
+
+Orax should now be able to create a draft patch preview inline in the thread, using the files it safely read. This should feel like Codex: user asks for a coding task, Orax inspects context, reads files, proposes a plan, then prepares a patch preview for review. It must not write to disk until a later approval phase.
+
+Done Looks Like:
+- Desktop receives a `draft_project_patch` action.
+- Desktop uses Phase 2J `fileReadSummary` / selected file previews to build a draft patch proposal.
+- No actual source files are modified in Phase 2K.
+- Patch proposal is returned to backend as structured data.
+- Backend writes an inline `project_patch_drafted` assistant message to the Orax thread.
+- Website renders patch preview inline, not as a dashboard/log wall.
+- Mobile can fetch and display the same thread message safely.
+- All patch paths are relative and validated under the local project root.
+- Secret files, blocked files, absolute paths, `..`, symlinks, and outside-root paths remain blocked.
+- No shell execution for draft generation.
+- Wiring tests cover backend, desktop, website, mobile, and Ora isolation.
+
+Implementation Steps:
+
+1. Add desktop patch drafter
+Create:
+`artifacts/orax-desktop/src/main/project-patch-drafter.ts`
+
+Responsibilities:
+- Input: localPath, userMessage, selectedFiles/fileReadSummary/suggestedPlan.
+- Output: structured draft patch object.
+- Keep it deterministic for now. No AI call yet unless existing architecture already supports safe server-side AI generation.
+- Generate a reviewable patch proposal with:
+  - summary
+  - changedFiles[]
+  - per-file intended operation: update/create/delete, but Phase 2K should only propose update/create unless delete is explicitly safe and approval-gated later
+  - unifiedDiffPreview or structured hunks
+  - risks[]
+  - verificationPlan[]
+- Do not write files.
+- Do not use shell.
+- Do not call process.cwd().
+- Validate every path with the same safety rules as project-file-reader.
+
+2. Add relay action handling
+Update:
+`artifacts/orax-desktop/src/main/relay-client.ts`
+
+Add support for:
+`draft_project_patch`
+
+Flow:
+- Validate payload includes projectId, threadId, executionSourceId, sourceLocalPath, userMessage.
+- Verify `.orax/project.json` binding matches projectId / executionSourceId.
+- Reuse selected/read file context from payload when available.
+- If missing, safely re-run selector + reader.
+- Call `draftProjectPatch(...)`.
+- Post `running`, then `completed` with:
+  - draftPatch
+  - selectedFiles
+  - warnings
+  - suggestedPlan
+- On failure, post `failed` with redacted path-safe error.
+
+3. Add backend action queue path
+Update:
+`artifacts/api-server/src/routes/orax-projects.ts`
+or existing Orax project thread continue route.
+
+After project files are inspected/read:
+- Queue `draft_project_patch` for local desktop execution.
+- Keep execution inline in the thread.
+- Do not expose internal action IDs in normal user-facing messages.
+- Preserve chat_only behavior: if no desktop/local source is online, return a clear inline blocker instead of pretending to run.
+
+4. Add backend completed-event handling
+Update:
+`artifacts/api-server/src/routes/orax-desktop.ts`
+
+When relay event type is completed and action type is `draft_project_patch`:
+- Store assistant message with:
+  - role: assistant
+  - eventType: `project_patch_drafted`
+  - content: human-readable summary
+  - payload: draftPatch structured object
+- Do not JSON-dump raw payload into visible content.
+- Add audit log / usage event if current pattern supports it.
+
+5. Website rendering
+Update:
+`artifacts/mustaflow/src/pages/orax-workspace.tsx`
+
+Add renderer for:
+`project_patch_drafted`
+
+UI should be inline:
+- Summary text
+- Compact changed file chips
+- Diff preview block
+- Risks / verification plan if present
+- Button label should be review-oriented, e.g. “Review patch”
+- Do not show raw artifact IDs or action IDs.
+
+6. Mobile parity
+Update:
+`artifacts/ora-mobile/app/(home)/orax.tsx`
+and API/types if needed.
+
+Mobile should:
+- Preserve same thread flow.
+- Show `project_patch_drafted` messages clearly.
+- Show changed files and summary compactly.
+- Avoid raw JSON dumps.
+- No Ora code touched.
+
+7. Tests / wiring guards
+Update:
+`artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts`
+
+Add assertions:
+- `project-patch-drafter.ts` exists.
+- `draft_project_patch` is handled in relay-client.
+- relay-client does not use `exec(`, `spawn(`, `shell: true`, or `process.cwd()` for patch drafting.
+- drafter validates relative paths and blocks absolute / `..` / secret files.
+- backend handles `project_patch_drafted`.
+- website renders `project_patch_drafted`.
+- mobile recognizes or safely displays `project_patch_drafted`.
+- no Ora/public-ai routes touched.
+- no raw action IDs/artifact IDs in normal thread UI.
+
+Verification:
+Run:
+
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Expected result:
+All clean. Push to GitHub after verification.
