@@ -16,6 +16,7 @@ import type { LocalProjectsManager } from "./local-projects";
 import type { RelayState } from "../shared/types";
 import { executeCommand } from "./command-executor";
 import { isCommandPermitted } from "./permission-gate";
+import { inspectLocalProject } from "./project-inspector";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -226,12 +227,23 @@ export class RelayClient {
           "utf8",
         );
 
+        // Inspect the local project safely — no shell, no secrets
+        let projectInspection: Record<string, unknown> | null = null;
+        try {
+          const inspection = await inspectLocalProject(sourceLocalPath);
+          projectInspection = inspection as unknown as Record<string, unknown>;
+        } catch (inspErr) {
+          const msg =
+            inspErr instanceof Error ? inspErr.message : "Inspection failed";
+          projectInspection = { error: msg };
+        }
+
         result = {
           projectId,
           threadId,
           executionSourceId,
           localPathVerified: true,
-          message: "Project thread context verified on desktop.",
+          projectInspection,
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {

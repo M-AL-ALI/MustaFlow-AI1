@@ -1711,4 +1711,113 @@ describe("ORAX product-surface wiring", () => {
     expect(dts).toContain("executionSourceId");
     expect(dts).toContain("localPath");
   });
+
+  // ── Phase 2I: project-inspector ──────────────────────────────────────────
+
+  it("Phase 2I: project-inspector.ts exists and exports inspectLocalProject", () => {
+    const src = read("../../../../orax-desktop/src/main/project-inspector.ts");
+    expect(src).toContain("inspectLocalProject");
+    expect(src).toContain("export");
+  });
+
+  it("Phase 2I: project-inspector blocks node_modules, .git, dist, build, out", () => {
+    const src = read("../../../../orax-desktop/src/main/project-inspector.ts");
+    expect(src).toContain("node_modules");
+    expect(src).toContain(".git");
+    expect(src).toContain("dist");
+    expect(src).toContain("build");
+    expect(src).toContain('"out"');
+  });
+
+  it("Phase 2I: project-inspector blocks .env, pem, key, id_rsa secret files", () => {
+    const src = read("../../../../orax-desktop/src/main/project-inspector.ts");
+    expect(src).toContain(".env");
+    expect(src).toContain("pem");
+    expect(src).toContain("key");
+    expect(src).toContain("id_rsa");
+  });
+
+  it("Phase 2I: project-inspector has MAX_DEPTH and MAX_FILES limits", () => {
+    const src = read("../../../../orax-desktop/src/main/project-inspector.ts");
+    expect(src).toContain("MAX_DEPTH");
+    expect(src).toContain("MAX_FILES");
+  });
+
+  it("Phase 2I: project-inspector reads package.json safely with size limit", () => {
+    const src = read("../../../../orax-desktop/src/main/project-inspector.ts");
+    expect(src).toContain("package.json");
+    expect(src).toContain("MAX_PACKAGE_JSON");
+  });
+
+  it("Phase 2I: project-inspector uses only Node fs APIs — no exec or shell", () => {
+    const src = read("../../../../orax-desktop/src/main/project-inspector.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+    expect(src).not.toContain("spawn(");
+  });
+
+  it("Phase 2I: relay-client imports and calls inspectLocalProject inside run_project_thread", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("inspectLocalProject");
+    expect(relay).toContain("project-inspector");
+    expect(relay).toContain("projectInspection");
+  });
+
+  it("Phase 2I: relay-client includes projectInspection in completed payload", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("localPathVerified: true");
+    expect(relay).toContain("projectInspection");
+  });
+
+  it("Phase 2I: relay-client does not use process.cwd() in run_project_thread", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).not.toContain("process.cwd()");
+  });
+
+  // ── Phase 2I: backend action event handler ───────────────────────────────
+
+  it("Phase 2I: backend special-cases run_project_thread in action event handler", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("run_project_thread");
+    expect(src).toContain("project_context_inspected");
+    expect(src).toContain("projectInspection");
+    expect(src).toContain("summaryText");
+  });
+
+  it("Phase 2I: backend writes assistant message for run_project_thread completed", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain(`role = "assistant"`);
+    expect(src).toContain(`eventType = "project_context_inspected"`);
+  });
+
+  it("Phase 2I: backend writes safe assistant message for run_project_thread failed", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("I could not inspect the desktop project");
+    expect(src).toContain("project_run_failed");
+  });
+
+  // ── Phase 2I: website UI ─────────────────────────────────────────────────
+
+  it("Phase 2I: orax-workspace renders project_context_inspected chips not raw JSON", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_context_inspected");
+    expect(src).toContain("frameworkHints");
+    expect(src).toContain("packageManager");
+  });
+
+  it("Phase 2I: orax-workspace uses pre-formatted content display not raw JSON dump", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("whitespace-pre-wrap");
+    expect(src).toContain("msgText");
+  });
+
+  // ── Phase 2I: safety ─────────────────────────────────────────────────────
+
+  it("Phase 2I: mobile orax.tsx has no Ora/public-ai coupling in project thread path", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).not.toContain("useOraChat");
+    expect(src).not.toContain("/public-ai/chat");
+    expect(src).not.toContain("sendChat");
+  });
 });

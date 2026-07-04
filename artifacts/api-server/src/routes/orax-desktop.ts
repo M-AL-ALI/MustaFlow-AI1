@@ -805,15 +805,41 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       .where(eq(oraxDesktopActionsTable.id, actionId));
 
     if (action.threadId && (type === "completed" || type === "failed")) {
-      const content =
-        type === "completed"
-          ? JSON.stringify(payload, null, 2)
-          : `Action failed: ${(payload as { error?: string }).error ?? "unknown error"}`;
+      const isProjectThread = action.type === "run_project_thread";
+
+      let content: string;
+      let eventType: string;
+      let role: string;
+
+      if (isProjectThread && type === "completed") {
+        const p = (payload ?? {}) as {
+          projectInspection?: { summaryText?: string; error?: string };
+        };
+        content =
+          p.projectInspection?.summaryText ??
+          "Orax connected to the desktop project and verified the local workspace.";
+        eventType = "project_context_inspected";
+        role = "assistant";
+      } else if (isProjectThread && type === "failed") {
+        const errMsg = (payload as { error?: string }).error ?? "unknown error";
+        const safeErr = errMsg.replace(/\/[^\s]*/g, "[path]");
+        content = `I could not inspect the desktop project: ${safeErr}`;
+        eventType = "project_run_failed";
+        role = "assistant";
+      } else {
+        content =
+          type === "completed"
+            ? JSON.stringify(payload, null, 2)
+            : `Action failed: ${(payload as { error?: string }).error ?? "unknown error"}`;
+        eventType = `action_${type}`;
+        role = "system";
+      }
+
       await db.insert(oraxThreadMessagesTable).values({
         threadId: action.threadId,
-        role: "system",
+        role,
         content,
-        eventType: `action_${type}`,
+        eventType,
         payload: { actionId, actionType: action.type, ...(payload as object) },
       });
     }

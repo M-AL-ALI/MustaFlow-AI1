@@ -172,7 +172,24 @@ async function listHosts(): Promise<OraxHost[]> {
   return data.hosts ?? [];
 }
 
-type ThreadMessage = { id: string; role: string; content: string; createdAt: string };
+type ProjectInspectionPayload = {
+  projectInspection?: {
+    frameworkHints?: string[];
+    packageManager?: string | null;
+    scripts?: { name: string; command: string }[];
+    gitBranch?: string | null;
+    hasGit?: boolean;
+    warnings?: { message: string }[];
+  };
+};
+type ThreadMessage = {
+  id: string;
+  role: string;
+  content: string;
+  createdAt: string;
+  eventType?: string | null;
+  payload?: ProjectInspectionPayload | null;
+};
 type ThreadExecCtx = {
   canExecute: boolean;
   mode: string;
@@ -391,7 +408,9 @@ function ThreadDetail({
             </p>
           </div>
         ) : (
-          messages.map((msg) => (
+          messages.map((msg) => {
+            const msgText = msg.content;
+            return (
             <div
               key={msg.id}
               className={cn(
@@ -407,10 +426,49 @@ function ThreadDetail({
                     : "border border-border bg-card text-foreground",
                 )}
               >
-                {msg.content}
+                <pre className="whitespace-pre-wrap font-sans">{msgText}</pre>
+                {msg.eventType === "project_context_inspected" &&
+                  msg.payload?.projectInspection && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
+                      {msg.payload.projectInspection.packageManager && (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                          <Terminal size={10} />
+                          {msg.payload.projectInspection.packageManager}
+                        </span>
+                      )}
+                      {(msg.payload.projectInspection.frameworkHints ?? []).map(
+                        (h) => (
+                          <span
+                            key={h}
+                            className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
+                          >
+                            {h}
+                          </span>
+                        ),
+                      )}
+                      {msg.payload.projectInspection.hasGit &&
+                        msg.payload.projectInspection.gitBranch && (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                            <GitBranch size={10} />
+                            {msg.payload.projectInspection.gitBranch}
+                          </span>
+                        )}
+                      {(msg.payload.projectInspection.scripts ?? [])
+                        .slice(0, 4)
+                        .map((s) => (
+                          <span
+                            key={s.name}
+                            className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-mono text-muted-foreground"
+                          >
+                            {s.name}
+                          </span>
+                        ))}
+                    </div>
+                  )}
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
