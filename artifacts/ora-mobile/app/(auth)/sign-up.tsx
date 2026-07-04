@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { LegalPrivacyModal } from "@/components/LegalPrivacyModal";
 import { Logo } from "@/components/Logo";
 import { Button, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
@@ -25,6 +26,7 @@ export default function SignUpScreen() {
   const [code, setCode] = useState("");
   const [ssoLoading, setSsoLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [legalVisible, setLegalVisible] = useState(false);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -79,6 +81,7 @@ export default function SignUpScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
+      <LegalPrivacyModal visible={legalVisible} onClose={() => setLegalVisible(false)} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -241,6 +244,25 @@ export default function SignUpScreen() {
                   </Pressable>
                 </Link>
               </View>
+
+              <Pressable
+                onPress={() => setLegalVisible(true)}
+                style={({ pressed }) => ({
+                  alignItems: "center",
+                  marginTop: 8,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontFamily: "Inter_400Regular",
+                    fontSize: 12,
+                  }}
+                >
+                  Legal &amp; Privacy
+                </Text>
+              </Pressable>
             </>
           )}
           <View nativeID="clerk-captcha" />
