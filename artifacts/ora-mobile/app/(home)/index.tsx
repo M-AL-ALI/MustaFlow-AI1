@@ -365,6 +365,8 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     memorySaveCandidateSensitive: res.memorySaveCandidateSensitive,
     memoriesUsed: res.memoriesUsed,
     generatedFile: buildGeneratedFile(res),
+    ...(res.searchFallback ? { searchFallback: true } : {}),
+    ...(res.searchRetryable ? { searchRetryable: true } : {}),
   };
 }
 
@@ -2589,6 +2591,8 @@ export default function OraChatScreen() {
                 setEditInstruction("");
               }}
               onImagePreview={openImagePreview}
+              onRetrySearch={handleRegenerate}
+              isLatest={item.id === messages.at(-1)?.id}
             />
           )}
         />
@@ -3482,6 +3486,8 @@ function MessageBubbleBase({
   onLongPress,
   onEditImage,
   onImagePreview,
+  onRetrySearch,
+  isLatest,
 }: {
   message: OraMessage;
   accentColor: string;
@@ -3492,6 +3498,8 @@ function MessageBubbleBase({
   onLongPress: () => void;
   onEditImage?: (imageId: number) => void;
   onImagePreview?: (source: string) => void;
+  onRetrySearch?: (message: OraMessage) => void;
+  isLatest?: boolean;
 }) {
   const c = useColors();
   const isUser = message.role === "user";
@@ -3615,6 +3623,27 @@ function MessageBubbleBase({
                 <Text style={{ color: c.destructive, fontSize: 12, marginTop: 8 }}>
                   Ora&apos;s response was cut off. The partial reply above may be incomplete.
                 </Text>
+              )}
+
+              {message.searchRetryable && isLatest && !message.isStreaming && (
+                <Pressable
+                  onPress={() => onRetrySearch?.(message)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry live search"
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}
+                >
+                  <RefreshCw size={13} color={c.mutedForeground} />
+                  <Text
+                    style={{
+                      color: c.mutedForeground,
+                      fontSize: 13,
+                      fontFamily: "Inter_500Medium",
+                    }}
+                  >
+                    Retry live search
+                  </Text>
+                </Pressable>
               )}
 
               {message.imageUrl && (
@@ -3851,6 +3880,9 @@ const MessageBubble = React.memo(
     prev.message === next.message &&
     prev.accentColor === next.accentColor &&
     prev.speaking === next.speaking &&
+    // isLatest gates the "Retry live search" affordance; when a newer message
+    // arrives the previously-latest bubble must re-render to hide the button.
+    prev.isLatest === next.isLatest &&
     // onSaveMemory is stable (deps []); its presence only flips when temporary
     // mode toggles, so this keeps the memory chip from going stale without
     // re-rendering on every streaming token.

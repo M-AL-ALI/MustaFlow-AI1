@@ -63,6 +63,17 @@ export interface OraMessage extends OraMessageData {
    */
   viaFallback?: boolean;
   /**
+   * True when this reply is a general-knowledge fallback because live web
+   * search failed/timed out. The honest caveat is already prepended to the
+   * content by the backend.
+   */
+  searchFallback?: boolean;
+  /**
+   * True when the failed search was freshness-critical, so a "Retry live
+   * search" affordance is worth offering below the message.
+   */
+  searchRetryable?: boolean;
+  /**
    * Local device URI of an uploaded image attachment (client-only, mirrors
    * Attachment.localUri). Lets the user bubble render a tappable thumbnail that
    * opens the full-screen preview. Ephemeral — not persisted, so it is absent
@@ -287,6 +298,16 @@ export interface ChatResponse {
   imageLimit?: number;
   resetsAt?: string | null;
   windowHours?: number;
+  /**
+   * True when this reply is a general-knowledge fallback because live web
+   * search failed/timed out. The honest caveat is already prepended to `reply`.
+   */
+  searchFallback?: boolean;
+  /**
+   * True when the failed search was freshness-critical, so a "Retry live
+   * search" affordance is worth offering.
+   */
+  searchRetryable?: boolean;
 }
 
 export interface UploadResponse {

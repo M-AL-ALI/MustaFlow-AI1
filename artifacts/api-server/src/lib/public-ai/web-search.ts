@@ -114,6 +114,59 @@ function getClient(): OpenAI {
 }
 
 /**
+ * Per-request timeout caps for the live web-search provider call. The OpenAI SDK
+ * default request timeout is ~10 minutes, which allowed a slow or stuck
+ * web_search call to hang Ora's Deep mode for 10+ seconds. We cap each attempt
+ * and allow exactly ONE retry, so a transient failure is recovered without ever
+ * blocking the user for long. Worst case ≈ 5000 + 250 + 3000 = 8250 ms before
+ * the route degrades to a general-knowledge answer.
+ */
+export const ORA_SEARCH_TIMEOUT_MS = 5_000;
+export const ORA_SEARCH_RETRY_TIMEOUT_MS = 3_000;
+export const ORA_SEARCH_RETRY_BACKOFF_MS = 250;
+
+/**
+ * Thrown when the live web-search provider call fails or times out on every
+ * attempt, so the route can distinguish a provider failure (degrade to a
+ * general-knowledge answer) from an empty answer.
+ */
+export class OraWebSearchError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "OraWebSearchError";
+  }
+}
+
+/**
+ * Run the Responses API call with a hard per-attempt timeout and a single capped
+ * retry, never falling back to the SDK's ~10-minute default. Throws
+ * OraWebSearchError once every attempt has been exhausted.
+ */
+async function createSearchResponse(
+  client: OpenAI,
+  params: object,
+): Promise<{ output_text?: string; output?: unknown }> {
+  const timeouts = [ORA_SEARCH_TIMEOUT_MS, ORA_SEARCH_RETRY_TIMEOUT_MS];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < timeouts.length; attempt++) {
+    try {
+      return (await client.responses.create(params as never, {
+        timeout: timeouts[attempt],
+        maxRetries: 0,
+      })) as { output_text?: string; output?: unknown };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < timeouts.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, ORA_SEARCH_RETRY_BACKOFF_MS));
+      }
+    }
+  }
+  throw new OraWebSearchError("Live web search request failed or timed out.", {
+    cause: lastErr,
+  });
+}
+
+/**
  * Reject hostnames that point at the local machine or a private/internal
  * network (loopback, RFC1918, link-local, unique-local IPv6, and cloud
  * metadata IPs). The media URLs Ora surfaces are auto-fetched by the browser
@@ -839,7 +892,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
 
   const start = Date.now();
   const client = getClient();
-  const resp = (await client.responses.create({
+  const resp = await createSearchResponse(client, {
     model,
     instructions: buildInstructions(
       language,
@@ -852,7 +905,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     tools: [{ type: "web_search" }] as never,
     max_output_tokens: profile.maxOutputTokens,
     input: messages as never,
-  })) as { output_text?: string; output?: unknown };
+  });
 
   const rawReply = (resp.output_text ?? "").trim();
   const sources = dedupeSources(extractSources(resp.output), profile.sourceLimit);

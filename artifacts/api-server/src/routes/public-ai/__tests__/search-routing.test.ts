@@ -27,6 +27,10 @@ import {
   dedupeSources,
   sourceQualityScore,
   inferOraSearchPlan,
+  ORA_SEARCH_TIMEOUT_MS,
+  ORA_SEARCH_RETRY_TIMEOUT_MS,
+  ORA_SEARCH_RETRY_BACKOFF_MS,
+  OraWebSearchError,
   type OraSource,
 } from "../../../lib/public-ai/web-search";
 
@@ -507,7 +511,9 @@ describe("inferOraSearchPlan", () => {
     });
     expect(plan.freshness).toBe("current");
     expect(plan.sourceStrategy).toBe("official");
-    expect(plan.instruction).toContain("exact dates");
+    // The freshness instruction asks the model to cite publication dates (and to
+    // say "date not confirmed" rather than omit) for volatile facts.
+    expect(plan.instruction).toContain("publication date");
   });
 
   it("detects image-search intent separately from image generation", () => {
@@ -548,5 +554,115 @@ describe("extractSources never returns unsafe links", () => {
     const sources = extractSources(output);
     expect(sources.every((s) => isSafeHttpUrl(s.url))).toBe(true);
     expect(sources.some((s) => s.url.startsWith("javascript:"))).toBe(false);
+  });
+});
+
+// ─── Deep mode must NOT force every prompt through web search ──────────────────
+// The QA blocker was Deep mode over-eagerly routing to live web search (dead red
+// "Web search failed" banner + latency). The routing invariant: only explicit
+// search asks or current/live/volatile questions run a live search — ordinary
+// reasoning/how-to/evergreen prompts stay conversational in BOTH modes.
+
+describe("routeOraMessage — Deep mode does not hijack ordinary prompts into search", () => {
+  it("keeps evergreen reasoning/how-to prompts OFF the search path in deep mode", async () => {
+    for (const message of [
+      "explain how closures work in JavaScript",
+      "how do I structure a good cover letter",
+      "what are the tradeoffs between REST and GraphQL",
+      "write me a short poem about the ocean",
+    ]) {
+      const decision = await routeOraMessage({
+        message,
+        mode: "deep",
+        // Deterministic classifier so the conversational fallthrough makes no
+        // live AI call.
+        classifier: STUB_CLASSIFIER,
+      });
+      expect(decision.tool, `"${message}" (deep) must not route to search`).not.toBe("search");
+    }
+  });
+
+  it("still routes explicit search asks and current/live questions to search in deep mode", async () => {
+    for (const message of [
+      "search the web for the best laptops",
+      "what's the latest news on the election",
+      "what is the current bitcoin price",
+      "who won the game today",
+    ]) {
+      const decision = await routeOraMessage({ message, mode: "deep" });
+      expect(decision.tool, `"${message}" (deep) should route to search`).toBe("search");
+    }
+  });
+
+  it("routes an evergreen prompt identically in instant and deep mode (no deep-only search)", async () => {
+    const message = "explain how photosynthesis works";
+    const instant = await routeOraMessage({ message, mode: "instant", classifier: STUB_CLASSIFIER });
+    const deep = await routeOraMessage({ message, mode: "deep", classifier: STUB_CLASSIFIER });
+    expect(instant.tool).not.toBe("search");
+    expect(deep.tool).not.toBe("search");
+  });
+});
+
+// ─── inferOraSearchPlan.freshness backs the client "Retry live search" gate ────
+// The chat route computes `searchRetryable = inferOraSearchPlan({query}).freshness
+// === "current"` so the retry affordance only appears for volatile prompts where
+// a general-knowledge fallback might be stale. Evergreen prompts get no retry.
+
+describe("inferOraSearchPlan.freshness (backs searchRetryable)", () => {
+  it("marks volatile/live prompts as current (retryable)", () => {
+    for (const query of [
+      "what is the current bitcoin price",
+      "what's the latest news on the election",
+      "who won the game today",
+      "what's the weather in Paris tomorrow",
+    ]) {
+      expect(
+        inferOraSearchPlan({ query }).freshness,
+        `"${query}" should be current`,
+      ).toBe("current");
+    }
+  });
+
+  it("marks evergreen prompts as not current (no retry affordance)", () => {
+    for (const query of [
+      "search the web for the history of the eiffel tower",
+      "look up online how sourdough fermentation works",
+      "find the official documentation for React hooks",
+    ]) {
+      expect(
+        inferOraSearchPlan({ query }).freshness,
+        `"${query}" should be evergreen`,
+      ).not.toBe("current");
+    }
+  });
+});
+
+// ─── Web-search timeout budget + typed failure ────────────────────────────────
+// Deep mode used to hang 10+s because the SDK default request timeout is ~10 min.
+// The per-attempt caps + single capped retry bound the worst case, and the typed
+// error lets the route distinguish a provider failure from an empty answer.
+
+describe("web-search timeout budget", () => {
+  it("caps each attempt and bounds the worst-case retry ceiling well under 10s", () => {
+    expect(ORA_SEARCH_TIMEOUT_MS).toBe(5_000);
+    expect(ORA_SEARCH_RETRY_TIMEOUT_MS).toBe(3_000);
+    expect(ORA_SEARCH_RETRY_BACKOFF_MS).toBe(250);
+    // First attempt + backoff + single retry — the total time a user can wait
+    // before the route degrades to a general-knowledge answer.
+    const worstCaseMs =
+      ORA_SEARCH_TIMEOUT_MS + ORA_SEARCH_RETRY_BACKOFF_MS + ORA_SEARCH_RETRY_TIMEOUT_MS;
+    expect(worstCaseMs).toBe(8_250);
+    expect(worstCaseMs).toBeLessThan(10_000);
+  });
+});
+
+describe("OraWebSearchError", () => {
+  it("is an Error subclass with a stable name and preserved cause", () => {
+    const cause = new Error("upstream timeout");
+    const err = new OraWebSearchError("Live web search request failed or timed out.", { cause });
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(OraWebSearchError);
+    expect(err.name).toBe("OraWebSearchError");
+    expect(err.cause).toBe(cause);
   });
 });

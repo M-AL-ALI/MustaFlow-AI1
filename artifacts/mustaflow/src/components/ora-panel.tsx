@@ -571,8 +571,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   // Connection-quality dot for the live-voice button. Only meaningful while a
   // realtime call is active (or reconnecting); mirrors the mobile status dot.
   const networkQuality = realtime.networkQuality;
-  const showQualityDot =
-    realtimeActive || (voiceConvActive && networkQuality === "reconnecting");
+  const showQualityDot = realtimeActive || (voiceConvActive && networkQuality === "reconnecting");
   const qualityDot =
     networkQuality === "good"
       ? { color: "#3fb950", label: "Live voice connection is stable", pulse: false }
@@ -1637,6 +1636,21 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   )}
 
                   {msg.role === "assistant" &&
+                    msg.searchRetryable &&
+                    isLatestAssistant &&
+                    !msg.isStreaming && (
+                      <button
+                        type="button"
+                        onClick={() => void retryLastMessage()}
+                        className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-foreground transition-colors"
+                        title="Retry live search"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        <span>Retry live search</span>
+                      </button>
+                    )}
+
+                  {msg.role === "assistant" &&
                     Array.isArray(msg.sources) &&
                     msg.sources.length > 0 && <OraSourceCards sources={msg.sources} />}
 
@@ -1800,7 +1814,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
             <div className="mx-4 mb-3 mt-3 rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
               <span>{error}</span>
               <div className="flex items-center gap-2 shrink-0">
-                {messages.at(-1)?.role === "assistant" && !!messages.at(-1)?.content && (
+                {((messages.at(-1)?.role === "assistant" && !!messages.at(-1)?.content) ||
+                  messages.at(-1)?.role === "user") && (
                   <button
                     type="button"
                     onClick={() => void retryLastMessage()}

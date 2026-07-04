@@ -118,6 +118,18 @@ export interface OraMessage {
    * token delivery. Useful for developer monitoring of real vs fallback ratios.
    */
   viaFallback?: boolean;
+  /**
+   * True when this assistant reply is a general-knowledge fallback delivered
+   * because live web search failed or timed out. The honest caveat is already
+   * prepended to `content` by the backend.
+   */
+  searchFallback?: boolean;
+  /**
+   * True when the failed search was freshness-critical (e.g. "latest price"),
+   * so a "Retry live search" affordance is worth offering. Evergreen questions
+   * answerable from general knowledge leave this false.
+   */
+  searchRetryable?: boolean;
 }
 
 export interface OraSession {
@@ -431,8 +443,16 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status });
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      searchRetryable?: boolean;
+    };
+    // Carry searchRetryable so the caller can distinguish a recoverable
+    // live-search double-failure (keep the message, offer Retry) from a hard error.
+    throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), {
+      status: res.status,
+      ...(data.searchRetryable ? { searchRetryable: true } : {}),
+    });
   }
   return res.json() as Promise<T>;
 }
@@ -516,6 +536,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   videos?: OraVideo[];
   memoriesUsed?: OraMemoryUsed[];
   conversationSummary?: string;
+  searchFallback?: boolean;
+  searchRetryable?: boolean;
 }> {
   return messages.map((m) => ({
     role: m.role,
@@ -555,6 +577,9 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.memoriesUsed && m.memoriesUsed.length > 0 ? { memoriesUsed: m.memoriesUsed } : {}),
     // Persist the rolling summary so it can be re-sent after a reload
     ...(m.conversationSummary ? { conversationSummary: m.conversationSummary } : {}),
+    // Persist the search-fallback flags so the caveat/Retry state survives reload
+    ...(m.searchFallback ? { searchFallback: true } : {}),
+    ...(m.searchRetryable ? { searchRetryable: true } : {}),
   }));
 }
 
@@ -1599,6 +1624,8 @@ export function useOraChat(): UseOraChatReturn {
             imageLimit?: number;
             resetsAt?: string | null;
             windowHours?: number;
+            searchFallback?: boolean;
+            searchRetryable?: boolean;
           };
 
           const buildAssistantMsg = (d: ChatResponseData): OraMessage => ({
@@ -1610,6 +1637,8 @@ export function useOraChat(): UseOraChatReturn {
             ...(d.sources && d.sources.length > 0 ? { sources: d.sources } : {}),
             ...(d.images && d.images.length > 0 ? { images: d.images } : {}),
             ...(d.videos && d.videos.length > 0 ? { videos: d.videos } : {}),
+            ...(d.searchFallback ? { searchFallback: true } : {}),
+            ...(d.searchRetryable ? { searchRetryable: true } : {}),
             ...(d.memoriesUsed && d.memoriesUsed.length > 0
               ? { memoriesUsed: d.memoriesUsed }
               : {}),
@@ -1864,6 +1893,17 @@ export function useOraChat(): UseOraChatReturn {
               ? "This image has expired. Please upload it again."
               : "The attached file has expired. Please upload it again.",
           );
+        } else if (status === 503 && (err as { searchRetryable?: boolean }).searchRetryable) {
+          // Rare double failure: live web search AND the general-knowledge
+          // fallback both failed. Keep the user's message in the thread so Retry
+          // can replay this exact turn, and show an honest, recoverable message
+          // instead of a dead banner. Return before the slice below so the user
+          // message is preserved (mirrors the mobile inline-error behavior).
+          setError(
+            msg ??
+              "I couldn't reach live web results just now. Please try again in a moment — your message is still here.",
+          );
+          return;
         } else {
           setError(msg ?? "Something went wrong. Please try again.");
           // For transient image-analysis failures (502, network, etc.) restore the chip
