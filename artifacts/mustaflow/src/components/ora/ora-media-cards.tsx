@@ -82,7 +82,7 @@ export function OraImageGallery({ images }: { images: OraImage[] }) {
                   className="h-full w-full object-cover transition-transform group-hover:scale-105"
                 />
               </a>
-              <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="absolute top-1 right-1 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                 <button
                   type="button"
                   title="Download image"
