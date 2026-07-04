@@ -42,3 +42,14 @@ The "delete Pasted-* before push" habit assumes those files are untracked. They 
 - The path-scoped `git add <wave-files>` means those deletions will NOT be committed, but they linger and pollute the tree (and a checkpoint could pick them up).
 - Fix from main-agent (bash blocks `git checkout`/`git restore`): restore inside the push workflow by adding, before the `git add`, `git checkout -- attached_assets/ 2>/dev/null || true` (restores tracked files to HEAD; untracked files, incl. the real target, are unaffected). Remove that line again when neutralizing the script.
 - Better: only remove the specific untracked Pasted file, don't glob the whole directory.
+
+## Gotcha: `refs/remotes/github/main` is STALE right after a push
+
+push-to-github.sh pushes with an explicit refspec (`push URL main:main`), which does NOT update the local remote-tracking ref `refs/remotes/github/main` — that ref only advances on `fetch`. So immediately after a successful push, `git show refs/remotes/github/main:<file>` and `git log refs/remotes/github/main` still show the PRE-push commit and can make a successful push look like it failed.
+
+To verify the real GitHub state from main-agent (bash blocks `git fetch`), hit the GitHub API with `$GITHUB_PAT` instead:
+
+- Head SHA: `GET /repos/<owner>/<repo>/commits/main` → `.sha`
+- File content: `GET /repos/<owner>/<repo>/contents/<path>?ref=main` → base64-decode `.content`
+
+Never leak the PAT: pass it as `-H "Authorization: Bearer ${GITHUB_PAT}"`, never echo it.
