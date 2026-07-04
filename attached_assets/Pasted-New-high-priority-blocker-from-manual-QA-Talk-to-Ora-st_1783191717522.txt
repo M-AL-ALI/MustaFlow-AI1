@@ -1,0 +1,72 @@
+New high-priority blocker from manual QA: Talk to Ora still degrades after about 8–10 assistant responses. It starts glitching, gets stuck in “thinking,” and stops responding even though the session/card still appears active. This must be fixed before final TestFlight/store submission.
+
+Important: this is not a copy/identity issue. This is realtime session reliability across long conversations and plan-tier session duration. Talk to Ora must remain stable for the full allowed realtime session for each plan tier.
+
+Please investigate and fix both website and mobile, but prioritize mobile/TestFlight because that is where the user is seeing it.
+
+Required investigation:
+1. Reproduce a 10–15 turn Talk to Ora session on mobile and website.
+2. Capture diagnostics for every turn:
+   - turn number
+   - state transitions: listening → thinking → speaking → listening
+   - response.created
+   - output_audio_buffer.started
+   - output_audio_buffer.stopped
+   - response.done
+   - data channel open/close/error
+   - iceConnectionState / connectionState changes
+   - heartbeat success/failure
+   - realtime session remaining seconds/minutes
+   - whether any watchdog fired
+   - whether fallback/legacy mode activated
+3. Identify whether the stuck state is caused by:
+   - missing response.done
+   - lost data-channel event
+   - assistantResponseActiveRef never cleared
+   - assistantSpeakingRef never cleared
+   - output_audio_buffer.stopped debounce not clearing
+   - heartbeat/session cap ending silently
+   - data channel still open but model no longer responding
+   - peer connection degraded after multiple turns
+   - focus-mode rejecting valid follow-up speech after long turns
+   - plan-tier realtime minute cap being reached or miscomputed
+
+Required fixes:
+1. Add or strengthen a per-turn watchdog, not just a session-level watchdog.
+   - Each assistant response turn needs its own turnId/responseId.
+   - If state is “thinking” too long without output_audio_buffer.started, recover cleanly to listening or reconnect.
+   - If state is “speaking” too long without response.done, recover cleanly after a safe timeout.
+   - Stale events from old turns must not affect the new turn.
+
+2. Make state transitions idempotent.
+   - response.done, output_audio_buffer.stopped, error, data-channel close, and watchdog timeout should all safely clear the same active-response flags.
+   - The UI should never remain stuck in “thinking” after a failed or incomplete turn.
+
+3. Add automatic recovery before fallback.
+   - If one turn gets stuck, try to cancel/clear the active realtime response and return to listening.
+   - If the next turn also fails, reconnect the realtime session.
+   - Only switch to legacy/basic mode after the reconnect fails.
+
+4. Validate plan-tier session duration.
+   - Free/Core/Deep Wave session minute limits must be respected.
+   - The session should not silently stop early before the user reaches the allowed plan limit.
+   - If the user reaches the cap, show a clear “session limit reached” message instead of “thinking.”
+
+5. Preserve UI layout.
+   - Weak network or repeated turns must not visually distort the Talk to Ora card.
+   - Only status text/dot should change.
+
+6. Add regression tests.
+   - Simulate 12+ consecutive turns and assert every turn returns to listening.
+   - Simulate missing response.done and assert watchdog recovery.
+   - Simulate missing output_audio_buffer.started and assert thinking timeout recovery.
+   - Simulate data-channel error after turn 8 and assert reconnect/fallback path.
+   - Simulate plan-tier minute cap and assert the UI shows a clear cap state.
+   - Run these tests for both web hook and mobile hook.
+
+7. Manual QA requirement.
+   - After automated tests pass, run a real-device TestFlight session for at least 15 turns.
+   - Test normal Wi-Fi and weak network.
+   - Record whether it stays stable, whether it recovers after a network drop, and whether it respects the plan-tier time limit.
+
+Do not mark this ready for final store submission until Talk to Ora passes a real 15-turn physical-device QA session without getting stuck in thinking.
