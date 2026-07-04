@@ -232,8 +232,14 @@ type ThreadPayload = {
   allPassed?: boolean;
   totalDurationMs?: number;
   branchName?: string;
+  baseBranch?: string | null;
   commitSha?: string;
+  repoOwner?: string | null;
+  repoName?: string | null;
   prUrl?: string | null;
+  prNumber?: number | null;
+  blockerType?: string | null;
+  blockerReason?: string | null;
 };
 type ThreadMessage = {
   id: string;
@@ -864,6 +870,23 @@ function ThreadDetail({
                         Pull request failed
                       </div>
                       <div className="mt-1 text-muted-foreground">{msg.content}</div>
+                    </div>
+                  )}
+                  {/* Phase 3C: GitHub connection blocker */}
+                  {msg.eventType === "project_pr_blocked" && (
+                    <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400 mb-1.5">
+                        <AlertTriangle size={11} />
+                        GitHub connection required
+                      </div>
+                      <div className="text-muted-foreground">{msg.content}</div>
+                      <a
+                        href="/orax/devices"
+                        className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline mt-2"
+                      >
+                        <ExternalLink size={9} />
+                        Open device settings
+                      </a>
                     </div>
                   )}
                 </div>
