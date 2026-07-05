@@ -37,10 +37,9 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
-  artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts \
-  artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts \
-  artifacts/mustaflow/src/lib/__tests__/ora-realtime-watchdog.test.ts \
-  artifacts/ora-mobile/hooks/__tests__/ora-mobile-reconnect.test.ts \
+  .agents/memory/MEMORY.md \
+  .agents/memory/ora-realtime-audio-liveness-verdict.md \
+  .agents/memory/orax-source-string-test-pitfalls.md \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
