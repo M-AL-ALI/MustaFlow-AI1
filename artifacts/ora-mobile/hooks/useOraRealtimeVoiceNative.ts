@@ -2041,13 +2041,22 @@ export function useOraRealtimeVoiceNative(
           // arrives with no audible audio and the in-turn watchdog never fired (a
           // fast silent reply), count it as a silent-audio failure so consecutive
           // silent turns escalate to a reconnect instead of resetting every turn.
+          // Only score turns that completed normally: a "cancelled" response is a
+          // user barge-in/interrupt and a "failed" response is a model error —
+          // both legitimately deliver no audio, so they must neither count as a
+          // silent-audio failure nor reset the counter.
+          const responseStatus = (evt.response as { status?: string } | undefined)?.status;
+          const responseCompletedNormally =
+            responseStatus !== "cancelled" && responseStatus !== "failed";
           const audioDeliveredThisResponse = audioStartedForResponseRef.current;
           const audioRecoveredThisResponse = audioResumeAttemptedForResponseRef.current;
           stopAudioLivenessTracking();
-          if (activeRef.current && !audioDeliveredThisResponse && !audioRecoveredThisResponse) {
-            recoverSilentAudio("response_done_no_audio");
-          } else if (audioDeliveredThisResponse && !audioRecoveredThisResponse) {
-            consecutiveSilentAudioRef.current = 0;
+          if (responseCompletedNormally) {
+            if (activeRef.current && !audioDeliveredThisResponse && !audioRecoveredThisResponse) {
+              recoverSilentAudio("response_done_no_audio");
+            } else if (audioDeliveredThisResponse && !audioRecoveredThisResponse) {
+              consecutiveSilentAudioRef.current = 0;
+            }
           }
           audioStartedForResponseRef.current = false;
           audioResumeAttemptedForResponseRef.current = false;

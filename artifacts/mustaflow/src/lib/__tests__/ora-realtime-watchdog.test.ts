@@ -293,7 +293,7 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // every silent turn's incident is wiped before the next turn can accumulate.
       const blockStart = src.indexOf("Audio-liveness verdict for this turn");
       expect(blockStart).toBeGreaterThan(-1);
-      const block = src.slice(blockStart, blockStart + 1300);
+      const block = src.slice(blockStart, blockStart + 1700);
       // The verdict is derived from whether audible audio actually started.
       expect(block).toContain("audioDeliveredThisResponse = audioStartedForResponseRef.current");
       // A response.done with no audible audio counts as a silent-audio failure.
@@ -303,6 +303,15 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       const resetIdx = block.indexOf("consecutiveSilentAudioRef.current = 0");
       expect(elseIfIdx).toBeGreaterThan(-1);
       expect(resetIdx).toBeGreaterThan(elseIfIdx);
+      // The whole verdict runs only for a normally-completed response: a cancelled
+      // (user barge-in) or failed (model error) turn must not count as silent nor
+      // reset the counter, otherwise two consecutive barge-ins force a reconnect.
+      expect(block).toContain('responseStatus !== "cancelled"');
+      expect(block).toContain('responseStatus !== "failed"');
+      const guardIdx = block.indexOf("if (responseCompletedNormally)");
+      const recoverIdx = block.indexOf('recoverSilentAudio("response_done_no_audio")');
+      expect(guardIdx).toBeGreaterThan(-1);
+      expect(recoverIdx).toBeGreaterThan(guardIdx);
     });
 
     it("stops audio-liveness tracking in the error event handler", () => {
@@ -422,12 +431,30 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       for (const [_label, src] of hooks) {
         const blockStart = src.indexOf("Audio-liveness verdict for this turn");
         expect(blockStart).toBeGreaterThan(-1);
-        const block = src.slice(blockStart, blockStart + 1300);
+        const block = src.slice(blockStart, blockStart + 1700);
         expect(block).toContain('recoverSilentAudio("response_done_no_audio")');
         const elseIfIdx = block.indexOf("else if (audioDeliveredThisResponse");
         const resetIdx = block.indexOf("consecutiveSilentAudioRef.current = 0");
         expect(elseIfIdx).toBeGreaterThan(-1);
         expect(resetIdx).toBeGreaterThan(elseIfIdx);
+      }
+    });
+
+    it("both hooks skip the audio-liveness verdict for cancelled/failed responses", () => {
+      for (const [_label, src] of hooks) {
+        const blockStart = src.indexOf("Audio-liveness verdict for this turn");
+        expect(blockStart).toBeGreaterThan(-1);
+        const block = src.slice(blockStart, blockStart + 1700);
+        // Read the server-reported response status and gate the verdict on it.
+        expect(block).toContain("const responseStatus = (evt.response");
+        expect(block).toContain('responseStatus !== "cancelled"');
+        expect(block).toContain('responseStatus !== "failed"');
+        // The recover/reset verdict must be nested inside the completed-normally
+        // guard so a barge-in or model error never counts as a silent-audio blip.
+        const guardIdx = block.indexOf("if (responseCompletedNormally)");
+        const recoverIdx = block.indexOf('recoverSilentAudio("response_done_no_audio")');
+        expect(guardIdx).toBeGreaterThan(-1);
+        expect(recoverIdx).toBeGreaterThan(guardIdx);
       }
     });
   });
