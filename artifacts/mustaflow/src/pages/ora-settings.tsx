@@ -1414,9 +1414,13 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
     };
   }, [isSignedIn]);
 
-  // Scroll to the targeted sub-section once data is loaded
+  // Scroll to the targeted sub-section (e.g. mobile "Manage Ora plan" deep-links
+  // here with ?section=plan). The sections above this one fetch their data
+  // asynchronously and grow after mount, so a single early scroll lands in the
+  // wrong place and the user ends up back at the top. Re-scroll a few times until
+  // the layout settles.
   useEffect(() => {
-    if (loading || scrolledRef.current || !targetSection) return;
+    if (scrolledRef.current || !targetSection) return;
     const sectionIdMap: Record<string, string> = {
       plan: "ora-section-plan",
       "payment-method": "ora-section-payment-method",
@@ -1425,12 +1429,15 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
     const id = sectionIdMap[targetSection];
     if (!id) return;
     scrolledRef.current = true;
-    const timer = window.setTimeout(() => {
-      const el = document.getElementById(id);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, [loading, targetSection]);
+    const delays = [150, 500, 1000, 1600];
+    const timers = delays.map((d) =>
+      window.setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: d >= 1000 ? "smooth" : "auto", block: "start" });
+      }, d),
+    );
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [targetSection]);
 
   async function startOraCheckout(tier: "core" | "wave") {
     setPlanAction(tier);

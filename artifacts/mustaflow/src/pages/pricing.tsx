@@ -95,6 +95,10 @@ const ORA_PLAN_LIMITS = [
   { plan: "Wave", messages: "280 / 3 hrs", images: "30 / 3 hrs", deep: "Included" },
 ];
 
+// Ordered so we can tell whether a plan is the user's current tier, an upgrade,
+// or already included in a higher tier they hold.
+const TIER_RANK: Record<string, number> = { free: 0, core: 1, wave: 2 };
+
 export default function PricingPage() {
   const { isSignedIn } = useAuthState();
   const [, navigate] = useLocation();
@@ -105,6 +109,8 @@ export default function PricingPage() {
   const [highlightTier, setHighlightTier] = useState<string | null>(null);
   const tierParam = new URLSearchParams(searchString).get("tier");
   const scrolledRef = useRef(false);
+  // The signed-in user's current Ora tier (null until known / when signed out).
+  const [currentTier, setCurrentTier] = useState<string | null>(null);
 
   // Server (ORA_TIERS_META) is the single source of truth. Fall back to the
   // hardcoded Ora-only tiers until the public endpoint resolves.
@@ -124,6 +130,30 @@ export default function PricingPage() {
       cancelled = true;
     };
   }, []);
+
+  // When signed in, load the user's current Ora plan so the cards can show
+  // "Current plan" (and offer upgrades) instead of re-selling a plan they hold.
+  useEffect(() => {
+    if (!isSignedIn) {
+      setCurrentTier(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch("/api/billing/subscription");
+        if (!res.ok) return;
+        const data = (await res.json()) as { tier?: string | null };
+        // A signed-in user with no paid subscription is on the free tier.
+        if (!cancelled) setCurrentTier(data.tier ?? "free");
+      } catch {
+        // Leave the tier unknown; cards fall back to generic CTAs.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   // After plan data loads, highlight and scroll the tier card requested via ?tier=
   useEffect(() => {
@@ -188,6 +218,21 @@ export default function PricingPage() {
     }
   }
 
+  // Decide what a paid tier's CTA should do relative to the user's current plan.
+  function ctaKind(tier: "core" | "wave"): "checkout" | "current" | "included" {
+    if (!isSignedIn || !currentTier) return "checkout";
+    if (currentTier === tier) return "current";
+    if ((TIER_RANK[currentTier] ?? 0) > (TIER_RANK[tier] ?? 0)) return "included";
+    return "checkout";
+  }
+
+  const currentPill = (
+    <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[11px] font-semibold text-green-600 dark:text-green-400">
+      <CheckCircle2 className="h-3 w-3" />
+      Current plan
+    </span>
+  );
+
   return (
     <div className="pb-24">
       <MobileAppBanner />
@@ -224,6 +269,7 @@ export default function PricingPage() {
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">No credit card required</p>
+              {isSignedIn && currentTier === "free" && <div className="mt-2">{currentPill}</div>}
             </div>
 
             <ul className="space-y-2 flex-1">
@@ -235,11 +281,18 @@ export default function PricingPage() {
               ))}
             </ul>
 
-            <Button asChild variant="outline" className="w-full">
-              <Link href={isSignedIn ? "/projects" : "/sign-up"}>
-                {isSignedIn ? "Go to dashboard" : "Get started free"}
-              </Link>
-            </Button>
+            {isSignedIn && currentTier === "free" ? (
+              <Button variant="outline" className="w-full gap-2" disabled>
+                <CheckCircle2 className="h-4 w-4" />
+                Current plan
+              </Button>
+            ) : (
+              <Button asChild variant="outline" className="w-full">
+                <Link href={isSignedIn ? "/projects" : "/sign-up"}>
+                  {isSignedIn ? "Go to dashboard" : "Get started free"}
+                </Link>
+              </Button>
+            )}
           </div>
 
           {/* Core Pack */}
@@ -265,6 +318,7 @@ export default function PricingPage() {
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">Cancel anytime</p>
+              {isSignedIn && currentTier === "core" && <div className="mt-2">{currentPill}</div>}
             </div>
 
             <ul className="space-y-2 flex-1">
@@ -278,11 +332,18 @@ export default function PricingPage() {
 
             <Button
               className="w-full gap-2"
+              variant={ctaKind("core") === "checkout" ? "default" : "outline"}
               onClick={() => void handleSubscribe("core")}
-              disabled={loading !== null}
+              disabled={loading !== null || ctaKind("core") !== "checkout"}
             >
               {loading === "core" ? (
                 "Redirecting…"
+              ) : ctaKind("core") === "current" ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4" /> Current plan
+                </>
+              ) : ctaKind("core") === "included" ? (
+                "Included in your plan"
               ) : isSignedIn ? (
                 <>
                   Get Core Pack <ArrowRight className="h-4 w-4" />
@@ -313,6 +374,7 @@ export default function PricingPage() {
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">For power builders</p>
+              {isSignedIn && currentTier === "wave" && <div className="mt-2">{currentPill}</div>}
             </div>
 
             <ul className="space-y-2 flex-1">
@@ -328,10 +390,18 @@ export default function PricingPage() {
               variant="outline"
               className="w-full gap-2"
               onClick={() => void handleSubscribe("wave")}
-              disabled={loading !== null}
+              disabled={loading !== null || ctaKind("wave") !== "checkout"}
             >
               {loading === "wave" ? (
                 "Redirecting…"
+              ) : ctaKind("wave") === "current" ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4" /> Current plan
+                </>
+              ) : isSignedIn && currentTier === "core" ? (
+                <>
+                  Upgrade to Deep Wave <ArrowRight className="h-4 w-4" />
+                </>
               ) : isSignedIn ? (
                 <>
                   Get Deep Wave <ArrowRight className="h-4 w-4" />
