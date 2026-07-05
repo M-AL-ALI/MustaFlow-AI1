@@ -596,7 +596,11 @@ describe("routeOraMessage — Deep mode does not hijack ordinary prompts into se
 
   it("routes an evergreen prompt identically in instant and deep mode (no deep-only search)", async () => {
     const message = "explain how photosynthesis works";
-    const instant = await routeOraMessage({ message, mode: "instant", classifier: STUB_CLASSIFIER });
+    const instant = await routeOraMessage({
+      message,
+      mode: "instant",
+      classifier: STUB_CLASSIFIER,
+    });
     const deep = await routeOraMessage({ message, mode: "deep", classifier: STUB_CLASSIFIER });
     expect(instant.tool).not.toBe("search");
     expect(deep.tool).not.toBe("search");
@@ -616,10 +620,9 @@ describe("inferOraSearchPlan.freshness (backs searchRetryable)", () => {
       "who won the game today",
       "what's the weather in Paris tomorrow",
     ]) {
-      expect(
-        inferOraSearchPlan({ query }).freshness,
-        `"${query}" should be current`,
-      ).toBe("current");
+      expect(inferOraSearchPlan({ query }).freshness, `"${query}" should be current`).toBe(
+        "current",
+      );
     }
   });
 
@@ -629,30 +632,34 @@ describe("inferOraSearchPlan.freshness (backs searchRetryable)", () => {
       "look up online how sourdough fermentation works",
       "find the official documentation for React hooks",
     ]) {
-      expect(
-        inferOraSearchPlan({ query }).freshness,
-        `"${query}" should be evergreen`,
-      ).not.toBe("current");
+      expect(inferOraSearchPlan({ query }).freshness, `"${query}" should be evergreen`).not.toBe(
+        "current",
+      );
     }
   });
 });
 
 // ─── Web-search timeout budget + typed failure ────────────────────────────────
-// Deep mode used to hang 10+s because the SDK default request timeout is ~10 min.
-// The per-attempt caps + single capped retry bound the worst case, and the typed
-// error lets the route distinguish a provider failure from an empty answer.
+// The SDK default request timeout is ~10 min, so without caps a stuck web_search
+// call would hang the (non-streaming) search request indefinitely. The first
+// attempt gets a generous cap because web_search legitimately needs several
+// seconds; the single retry is only for fast-failing transient errors (a real
+// timeout is not retried), and the typed error lets the route distinguish a
+// provider failure from an empty answer.
 
 describe("web-search timeout budget", () => {
-  it("caps each attempt and bounds the worst-case retry ceiling well under 10s", () => {
-    expect(ORA_SEARCH_TIMEOUT_MS).toBe(5_000);
-    expect(ORA_SEARCH_RETRY_TIMEOUT_MS).toBe(3_000);
+  it("gives the first attempt a generous cap and bounds the transient-retry ceiling", () => {
+    expect(ORA_SEARCH_TIMEOUT_MS).toBe(12_000);
+    expect(ORA_SEARCH_RETRY_TIMEOUT_MS).toBe(8_000);
     expect(ORA_SEARCH_RETRY_BACKOFF_MS).toBe(250);
-    // First attempt + backoff + single retry — the total time a user can wait
-    // before the route degrades to a general-knowledge answer.
+    // A genuine timeout is NOT retried (see createSearchResponse), so the timeout
+    // path is bounded by the first attempt alone.
+    expect(ORA_SEARCH_TIMEOUT_MS).toBeLessThanOrEqual(12_000);
+    // Worst case is the transient-error path: first attempt + backoff + retry,
+    // the longest a user can wait before the route degrades.
     const worstCaseMs =
       ORA_SEARCH_TIMEOUT_MS + ORA_SEARCH_RETRY_BACKOFF_MS + ORA_SEARCH_RETRY_TIMEOUT_MS;
-    expect(worstCaseMs).toBe(8_250);
-    expect(worstCaseMs).toBeLessThan(10_000);
+    expect(worstCaseMs).toBe(20_250);
   });
 });
 

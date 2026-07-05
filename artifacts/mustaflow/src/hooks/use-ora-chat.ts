@@ -218,7 +218,7 @@ export interface UseOraChatReturn {
   setMode: (mode: OraMode) => void;
   sendMessage: (
     content: string,
-    opts?: { truncateTo?: number; editedFrom?: boolean },
+    opts?: { truncateTo?: number; editedFrom?: boolean; forceSearch?: boolean },
   ) => Promise<void>;
   generateFile: (content: string, format: FileFormat) => Promise<void>;
   editInlineImage: (sourceImageId: number, instruction: string) => Promise<void>;
@@ -1379,7 +1379,10 @@ export function useOraChat(): UseOraChatReturn {
   }, []);
 
   const sendMessage = useCallback(
-    async (content: string, opts?: { truncateTo?: number; editedFrom?: boolean }) => {
+    async (
+      content: string,
+      opts?: { truncateTo?: number; editedFrom?: boolean; forceSearch?: boolean },
+    ) => {
       if (!content.trim() || isLoading) return;
 
       const currentAttachment = attachedFile;
@@ -1601,6 +1604,11 @@ export function useOraChat(): UseOraChatReturn {
           } else {
             body.languageHint = navigator.language;
           }
+          // "Retry live search" forces the backend to re-run the live web-search
+          // tool this turn instead of re-classifying the message.
+          if (opts?.forceSearch) {
+            body.forceSearch = true;
+          }
           type ChatResponseData = {
             reply: string;
             suggestions?: string[];
@@ -1678,105 +1686,13 @@ export function useOraChat(): UseOraChatReturn {
           // Only meaningful when usedStreaming=true; irrelevant for /chat fallback.
           let isRealStreamingPayload = true;
 
-          try {
-            // Optimistically add a streaming placeholder that updates in real time.
-            setMessages((prev) => [
-              ...prev,
-              { role: "assistant" as const, content: "", isStreaming: true },
-            ]);
-
-            const donePayload = await consumeOraStream(
-              BASE,
-              body,
-              (delta) => {
-                // flushSync forces React to commit this update synchronously,
-                // bypassing automatic batching. Without it, when the Replit dev
-                // proxy delivers all SSE frames in one TCP chunk, every onToken
-                // call lands in the same event-loop turn and React 18 batches
-                // them all into a single render — the entire response appears at
-                // once instead of word-by-word.
-                flushSync(() => {
-                  setMessages((prev) => {
-                    const last = prev[prev.length - 1];
-                    if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
-                    return [
-                      ...prev.slice(0, -1),
-                      {
-                        ...last,
-                        content: last.content + delta,
-                      },
-                    ];
-                  });
-                });
-              },
-              streamAbort.signal,
-            );
-
-            isRealStreamingPayload = donePayload.isRealStreaming ?? true;
-            data = donePayload as ChatResponseData;
-            usedStreaming = true;
-          } catch (streamErr: unknown) {
-            const se = streamErr as {
-              streamingFallback?: boolean;
-              streamFallbackToken?: string;
-              partialContent?: string;
-              name?: string;
-              status?: number;
-            };
-
-            if (se.name === "AbortError") {
-              // Mid-stream navigation — abort cleanly, no error shown, and
-              // remove any empty streaming placeholder.
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant" && last.isStreaming && !last.content)
-                  return prev.slice(0, -1);
-                return prev;
-              });
-              streamAbortRef.current = null;
-              return;
-            }
-
-            if (se.partialContent !== undefined) {
-              // SSE `error` event received after one or more tokens were already
-              // emitted. Preserve the partial reply (mark it done) rather than
-              // silently discarding it. Do NOT re-throw — the outer catch would
-              // remove the user message too, leaving the thread with no trace.
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant" && last.isStreaming) {
-                  return [...prev.slice(0, -1), { ...last, isStreaming: false }];
-                }
-                return prev;
-              });
-              setError("Ora's response was cut off. The partial reply above may be incomplete.");
-              streamAbortRef.current = null;
-              return; // Do not fall through to the outer catch
-            }
-
-            // Remove the empty streaming placeholder before any fallback/rethrow.
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last?.role === "assistant" && last.isStreaming) return prev.slice(0, -1);
-              return prev;
-            });
-
-            if (!se.streamingFallback) {
-              // Real error (429, 401, network, etc.) — rethrow for the outer
-              // catch block to surface the right message.
-              streamAbortRef.current = null;
-              throw streamErr;
-            }
-
-            // Streaming unavailable (503, specialist-tool signal, or error
-            // before first token) — silently fall back to /chat.
-            // streamFallbackToken (when present) proves to /chat that the
-            // streaming route already pre-incremented the session counter so
-            // it should not double-charge the anonymous-session slot.
-            data = await apiPost<ChatResponseData>("/api/public-ai/chat", {
-              ...body,
-              ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),
-            });
+          if (opts?.forceSearch) {
+            // A "Retry live search" must deterministically re-run the LIVE
+            // web-search tool. Search is a non-streaming specialist branch, so
+            // the stream route would only bounce it back with a streamingFallback
+            // signal — skip that round-trip and POST straight to /chat with
+            // forceSearch:true.
+            data = await apiPost<ChatResponseData>("/api/public-ai/chat", body);
             setLastOraStreamDiagnostics(
               mapOraStreamDiagnostics({
                 mode: body.mode,
@@ -1787,6 +1703,117 @@ export function useOraChat(): UseOraChatReturn {
                 viaFallback: true,
               }),
             );
+          } else {
+            try {
+              // Optimistically add a streaming placeholder that updates in real time.
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant" as const, content: "", isStreaming: true },
+              ]);
+
+              const donePayload = await consumeOraStream(
+                BASE,
+                body,
+                (delta) => {
+                  // flushSync forces React to commit this update synchronously,
+                  // bypassing automatic batching. Without it, when the Replit dev
+                  // proxy delivers all SSE frames in one TCP chunk, every onToken
+                  // call lands in the same event-loop turn and React 18 batches
+                  // them all into a single render — the entire response appears at
+                  // once instead of word-by-word.
+                  flushSync(() => {
+                    setMessages((prev) => {
+                      const last = prev[prev.length - 1];
+                      if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
+                      return [
+                        ...prev.slice(0, -1),
+                        {
+                          ...last,
+                          content: last.content + delta,
+                        },
+                      ];
+                    });
+                  });
+                },
+                streamAbort.signal,
+              );
+
+              isRealStreamingPayload = donePayload.isRealStreaming ?? true;
+              data = donePayload as ChatResponseData;
+              usedStreaming = true;
+            } catch (streamErr: unknown) {
+              const se = streamErr as {
+                streamingFallback?: boolean;
+                streamFallbackToken?: string;
+                partialContent?: string;
+                name?: string;
+                status?: number;
+              };
+
+              if (se.name === "AbortError") {
+                // Mid-stream navigation — abort cleanly, no error shown, and
+                // remove any empty streaming placeholder.
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "assistant" && last.isStreaming && !last.content)
+                    return prev.slice(0, -1);
+                  return prev;
+                });
+                streamAbortRef.current = null;
+                return;
+              }
+
+              if (se.partialContent !== undefined) {
+                // SSE `error` event received after one or more tokens were already
+                // emitted. Preserve the partial reply (mark it done) rather than
+                // silently discarding it. Do NOT re-throw — the outer catch would
+                // remove the user message too, leaving the thread with no trace.
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "assistant" && last.isStreaming) {
+                    return [...prev.slice(0, -1), { ...last, isStreaming: false }];
+                  }
+                  return prev;
+                });
+                setError("Ora's response was cut off. The partial reply above may be incomplete.");
+                streamAbortRef.current = null;
+                return; // Do not fall through to the outer catch
+              }
+
+              // Remove the empty streaming placeholder before any fallback/rethrow.
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant" && last.isStreaming) return prev.slice(0, -1);
+                return prev;
+              });
+
+              if (!se.streamingFallback) {
+                // Real error (429, 401, network, etc.) — rethrow for the outer
+                // catch block to surface the right message.
+                streamAbortRef.current = null;
+                throw streamErr;
+              }
+
+              // Streaming unavailable (503, specialist-tool signal, or error
+              // before first token) — silently fall back to /chat.
+              // streamFallbackToken (when present) proves to /chat that the
+              // streaming route already pre-incremented the session counter so
+              // it should not double-charge the anonymous-session slot.
+              data = await apiPost<ChatResponseData>("/api/public-ai/chat", {
+                ...body,
+                ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),
+              });
+              setLastOraStreamDiagnostics(
+                mapOraStreamDiagnostics({
+                  mode: body.mode,
+                  tapToFirstTokenMs: null,
+                  firstSentenceMs: null,
+                  completeMs: null,
+                  tokenCount: 0,
+                  viaFallback: true,
+                }),
+              );
+            }
           }
 
           streamAbortRef.current = null;
@@ -2380,8 +2407,14 @@ export function useOraChat(): UseOraChatReturn {
     if (lastUserIdx === -1) return;
     const lastUserMsg = messages[lastUserIdx];
     if (!lastUserMsg?.content.trim()) return;
+    // When the previous answer degraded to a general-knowledge search fallback,
+    // this retry must re-run a LIVE search — not re-route the message (which
+    // could land on a plain conversational answer). Force the search tool so
+    // "Retry live search" always means exactly that.
+    const lastAssistant = messages[messages.length - 1];
+    const forceSearch = lastAssistant?.role === "assistant" && !!lastAssistant.searchFallback;
     setError(null);
-    await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx });
+    await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx, forceSearch });
   }, [messages, isLoading, sendMessage]);
 
   // Append a finalized realtime-voice turn into the transcript without a server

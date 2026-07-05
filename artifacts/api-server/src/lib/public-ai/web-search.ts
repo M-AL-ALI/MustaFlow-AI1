@@ -13,7 +13,7 @@
  *
  * Scope: per-query fetches only — no crawling, no indexing, no persistence.
  */
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError } from "openai";
 import { logger } from "../logger";
 import { normalizeOraPlanTier, openAiModelForOraSearch, type OraPlanTier } from "./model-router";
 
@@ -115,14 +115,22 @@ function getClient(): OpenAI {
 
 /**
  * Per-request timeout caps for the live web-search provider call. The OpenAI SDK
- * default request timeout is ~10 minutes, which allowed a slow or stuck
- * web_search call to hang Ora's Deep mode for 10+ seconds. We cap each attempt
- * and allow exactly ONE retry, so a transient failure is recovered without ever
- * blocking the user for long. Worst case ≈ 5000 + 250 + 3000 = 8250 ms before
- * the route degrades to a general-knowledge answer.
+ * default request timeout is ~10 minutes, which would let a slow or stuck
+ * web_search call hang this (non-streaming) search request indefinitely. The
+ * `web_search` tool does real web fetching plus reasoning, so it legitimately
+ * needs several seconds — the previous 5000 ms cap was so aggressive that live
+ * search timed out and degraded to a general-knowledge answer far too often.
+ *
+ * The first attempt now gets a generous cap. A single retry is allowed ONLY for
+ * fast-failing transient errors (connection resets, 5xx, etc.); a genuine
+ * timeout is NOT retried, because a call that could not finish within
+ * ORA_SEARCH_TIMEOUT_MS almost never finishes in the shorter retry window and
+ * would only add latency before the route degrades. Worst case for the timeout
+ * path ≈ 12000 ms; worst case for a transient-error path ≈ 12000 + 250 + 8000 =
+ * 20250 ms before the route degrades to a general-knowledge answer.
  */
-export const ORA_SEARCH_TIMEOUT_MS = 5_000;
-export const ORA_SEARCH_RETRY_TIMEOUT_MS = 3_000;
+export const ORA_SEARCH_TIMEOUT_MS = 12_000;
+export const ORA_SEARCH_RETRY_TIMEOUT_MS = 8_000;
 export const ORA_SEARCH_RETRY_BACKOFF_MS = 250;
 
 /**
@@ -138,8 +146,11 @@ export class OraWebSearchError extends Error {
 }
 
 /**
- * Run the Responses API call with a hard per-attempt timeout and a single capped
- * retry, never falling back to the SDK's ~10-minute default. Throws
+ * Run the Responses API call with a hard per-attempt timeout and at most one
+ * capped retry, never falling back to the SDK's ~10-minute default. The retry is
+ * skipped when the first failure is a genuine request timeout (retrying a call
+ * that could not finish in the longer first window only adds latency before we
+ * degrade); it is only used for fast-failing transient errors. Throws
  * OraWebSearchError once every attempt has been exhausted.
  */
 async function createSearchResponse(
@@ -156,6 +167,11 @@ async function createSearchResponse(
       })) as { output_text?: string; output?: unknown };
     } catch (err) {
       lastErr = err;
+      // A real timeout is not worth retrying: the retry window is shorter than
+      // the attempt that just timed out, so it would almost certainly time out
+      // again and only delay the degrade to a general-knowledge answer. Retry
+      // ONLY for fast-failing transient errors.
+      if (err instanceof APIConnectionTimeoutError) break;
       if (attempt < timeouts.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, ORA_SEARCH_RETRY_BACKOFF_MS));
       }
@@ -282,7 +298,11 @@ export function extractSources(output: unknown): OraSource[] {
           (ann?.publishedDate as string | undefined) ??
           undefined;
         const date = typeof rawDate === "string" && rawDate.trim() ? rawDate.trim() : undefined;
-        sources.push({ title: title ?? hostnameOf(cleaned), url: cleaned, ...(date ? { date } : {}) });
+        sources.push({
+          title: title ?? hostnameOf(cleaned),
+          url: cleaned,
+          ...(date ? { date } : {}),
+        });
       }
     }
   }

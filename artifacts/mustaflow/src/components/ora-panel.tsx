@@ -1642,10 +1642,11 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       <button
                         type="button"
                         onClick={() => void retryLastMessage()}
-                        className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-foreground transition-colors"
+                        disabled={isLoading}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:border-primary/60 hover:bg-primary/20 disabled:pointer-events-none disabled:opacity-50"
                         title="Retry live search"
                       >
-                        <RotateCcw className="h-3 w-3" />
+                        <RotateCcw className="h-3.5 w-3.5" />
                         <span>Retry live search</span>
                       </button>
                     )}

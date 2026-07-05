@@ -31,8 +31,14 @@ import jwt from "jsonwebtoken";
 const TEST_SECRET = "search-fallback-test-secret";
 
 // The honest degradation note the route prepends (mirrors SEARCH_FALLBACK_NOTE
-// in chat.ts, which is module-local and not exported).
+// in chat.ts, which is module-local and not exported). Used for evergreen
+// queries, where a general-knowledge answer is acceptable.
 const FALLBACK_NOTE_FRAGMENT = "answering from general knowledge";
+
+// The freshness-critical note (mirrors SEARCH_FALLBACK_NOTE_FRESH) used when the
+// query needed CURRENT info: it must NOT present general knowledge as verified
+// headlines and must point the user at the Retry affordance.
+const FRESH_FALLBACK_NOTE_FRAGMENT = "Tap Retry live search";
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +50,10 @@ vi.mock("openai", () => ({
   default: class {
     responses = { create: createMock };
   },
+  // web-search.ts imports this named export and uses `err instanceof
+  // APIConnectionTimeoutError` to skip the retry on a genuine timeout; the mock
+  // must provide it or that check throws a TypeError under test.
+  APIConnectionTimeoutError: class extends Error {},
 }));
 
 // Control the general-knowledge fallback chain. runCandidateChain invokes this
@@ -134,12 +144,18 @@ async function buildApp() {
   return app;
 }
 
-function postChat(app: express.Express, message: string) {
+function postChat(app: express.Express, message: string, extraBody: Record<string, unknown> = {}) {
   const { token } = makeSession();
   return request(app)
     .post("/public-ai/chat")
     .set("Cookie", `ora-session=${token}`)
-    .send({ message, mode: "deep", messages: [], referenceSavedMemories: false });
+    .send({
+      message,
+      mode: "deep",
+      messages: [],
+      referenceSavedMemories: false,
+      ...extraBody,
+    });
 }
 
 describe("POST /public-ai/chat — graceful fallback when live web search fails", () => {
@@ -163,14 +179,33 @@ describe("POST /public-ai/chat — graceful fallback when live web search fails"
 
     expect(res.status).toBe(200);
     expect(res.body.searchFallback).toBe(true);
-    // Honest degradation note is prepended to the reply.
-    expect(res.body.reply).toContain(FALLBACK_NOTE_FRAGMENT);
+    // Freshness-critical query: the note must NOT claim the answer is current
+    // and must point the user at the Retry affordance instead.
+    expect(res.body.reply).toContain(FRESH_FALLBACK_NOTE_FRAGMENT);
+    expect(res.body.reply).not.toContain(FALLBACK_NOTE_FRAGMENT);
     expect(res.body.reply).toContain("Bitcoin is a decentralized digital currency.");
     // A volatile/current query is worth a live-verification retry.
     expect(res.body.searchRetryable).toBe(true);
     // An answer WAS delivered, so the quota stays consumed.
     expect(refundOraQuotaMock).not.toHaveBeenCalled();
     // The web-search provider was actually attempted (and failed) first.
+    expect(createMock).toHaveBeenCalled();
+  });
+
+  it("forceSearch routes a non-search message to the live web-search tool", async () => {
+    createChatCompletionMock.mockResolvedValue({
+      choices: [{ message: { content: "Here is some general background." } }],
+    });
+
+    // A plain greeting would normally route to a conversational answer (no
+    // search). With forceSearch:true (the "Retry live search" affordance) the
+    // route must attempt the live web-search tool anyway — so the mocked
+    // provider is called and the request degrades to the fallback path.
+    const res = await postChat(app, "hello there, how are you", { forceSearch: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.searchFallback).toBe(true);
+    // Proof the search branch was entered: the web-search provider was attempted.
     expect(createMock).toHaveBeenCalled();
   });
 

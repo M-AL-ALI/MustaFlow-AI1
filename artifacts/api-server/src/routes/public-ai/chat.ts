@@ -131,6 +131,18 @@ const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKIN
 const SEARCH_FALLBACK_NOTE =
   "I couldn't verify live web results right now, so I'm answering from general knowledge.\n\n";
 
+/**
+ * Freshness-critical variant of the fallback note, used when the query needed
+ * CURRENT information (news, "today", "latest", live prices). In that case a
+ * general-knowledge answer must NOT be presented as today's verified headlines,
+ * so this note is explicit that the latest could not be confirmed and points the
+ * user at the Retry affordance to run a live search again. Any background that
+ * follows is framed as possibly out of date. Kept clutter-free per the product
+ * copy rule: no markdown, no bold.
+ */
+const SEARCH_FALLBACK_NOTE_FRESH =
+  "I couldn't verify live results right now, so I can't confirm the latest. Tap Retry live search below to try again. Here's some general background in the meantime, which may be out of date:\n\n";
+
 // ── Saved-memory retrieval (relevance-ranked) ────────────────────────────────
 
 /**
@@ -925,6 +937,15 @@ const bodySchema = z.object({
    * endpoint before the error occurred).
    */
   streamFallbackToken: z.string().optional(),
+  /**
+   * Set to true when the user explicitly taps "Retry live search" after a
+   * search degraded to a general-knowledge fallback. Pins this turn to the live
+   * web-search tool instead of re-classifying the message (which might route it
+   * to a plain conversational answer), so a retry always attempts a fresh LIVE
+   * search. Auth/plan gating still applies, so anonymous callers are still
+   * funneled to the sign-in CTA.
+   */
+  forceSearch: z.boolean().optional(),
 });
 
 /**
@@ -1063,6 +1084,7 @@ router.post("/public-ai/chat", async (req, res) => {
     temporary,
     conversationId,
     streamFallbackToken,
+    forceSearch,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -1193,12 +1215,21 @@ router.post("/public-ai/chat", async (req, res) => {
   // Route the message through the Ora orchestrator. Ora is a STANDALONE
   // assistant: build/"make me an app" requests are answered as normal
   // conversation — never refused, never auto-handed-off to the Builder.
-  const decision = await routeOraMessage({
+  let decision = await routeOraMessage({
     message,
     mode,
     recentMessages: messages.slice(-8),
     classifier: classifierResult, // pre-computed above — skips the internal AI call
   });
+  // A user-initiated "Retry live search" (forceSearch) pins this turn to the
+  // live web-search tool instead of re-classifying the message, so a retry always
+  // attempts a fresh LIVE search rather than possibly falling back to a plain
+  // conversational answer. Placed BEFORE the tool-access/quota/spend checks below
+  // so all auth and metering gating stays intact (anonymous callers still hit the
+  // sign-in CTA, quota is still consumed and refunded normally).
+  if (forceSearch) {
+    decision = { ...decision, tool: "search" };
+  }
   const deepAllowed = decision.tool === "deep_thinking";
   const routedTool = decision.tool;
   const searchUsed = decision.tool === "search";
@@ -1647,11 +1678,16 @@ router.post("/public-ai/chat", async (req, res) => {
         // "retry live search" affordance; evergreen questions do not need one.
         const searchRetryable =
           webSearchModule.inferOraSearchPlan({ query: message }).freshness === "current";
+        // Freshness-critical prompts must never present general knowledge as
+        // today's verified headlines, so those get the explicit "couldn't
+        // confirm the latest, tap Retry" note; evergreen questions keep the
+        // generic note.
+        const fallbackNote = searchRetryable ? SEARCH_FALLBACK_NOTE_FRESH : SEARCH_FALLBACK_NOTE;
         const { token, payload } = chargeSession(session, streamFallbackToken);
         setSessionCookie(res, token);
         const usage = await oraUsageResponse(authed, payload.msgCount);
         res.json({
-          reply: SEARCH_FALLBACK_NOTE + fallbackReply,
+          reply: fallbackNote + fallbackReply,
           searchFallback: true,
           searchRetryable,
           ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
