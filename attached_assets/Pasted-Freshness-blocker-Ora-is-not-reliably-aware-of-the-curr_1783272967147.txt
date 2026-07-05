@@ -1,0 +1,64 @@
+Freshness blocker: Ora is not reliably aware of the current date/time and does not reliably answer live sports/current-event questions.
+
+Requirements:
+
+1. Add an authoritative Current Date/Time context block to every Ora system prompt.
+   Include:
+   - full date
+   - local timezone
+   - UTC timestamp
+   - weekday
+   - clear instruction: use this for “today,” “tomorrow,” “yesterday,” “this week,” “current time,” and date math.
+   Do not let the model infer today's date from training data.
+
+2. Apply the date/time block to all Ora surfaces:
+   - /api/public-ai/chat
+   - /api/public-ai/chat/stream
+   - realtime Talk to Ora session prompt
+   - mobile Ora, because mobile uses the same backend routes
+   - landing Ask Ora bubble
+   - file/image analysis if the user asks date-sensitive questions there
+
+3. Route current/live questions to search.
+   If the user asks:
+   - latest
+   - today
+   - current
+   - now
+   - this week
+   - news
+   - weather
+   - prices
+   - sports scores
+   - sports schedule
+   - World Cup games today
+   then Ora must either:
+   - answer from live search with sources, or
+   - say live search is temporarily unavailable and offer Retry live search.
+   It must not guess.
+
+4. Add sports/schedule-specific handling.
+   For questions like “who is playing soccer today?” or “World Cup games today,” use a sports/schedule source or targeted live web search.
+   The answer should include:
+   - teams
+   - match time
+   - competition
+   - timezone
+   - source link
+   If no match is found, say “I could not verify scheduled matches for today” instead of guessing.
+
+5. Improve fallback behavior.
+   If live search fails:
+   - For date/time questions, still answer from the server date/time block.
+   - For live facts/sports/news, do not provide stale confident answers.
+   - Show: “I couldn’t verify live results right now. Tap Retry live search.”
+   - Keep the user’s message and Retry button.
+
+6. Add tests:
+   - “What is today’s date?” returns the injected server date, no web search needed.
+   - “What time is it?” uses server time/timezone.
+   - “What day is tomorrow?” computes from server date.
+   - “Who is playing in the World Cup today?” routes to live search/sports lookup.
+   - “Latest soccer games today” routes to live search.
+   - If search fails, current-event questions do not hallucinate.
+   - Verify web and mobile use the same backend behavior.
