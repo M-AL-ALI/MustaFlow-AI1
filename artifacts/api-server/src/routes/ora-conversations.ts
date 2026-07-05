@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, desc, isNull, isNotNull, or, sql, not } from "drizzle-orm";
+import { and, eq, desc, isNull, isNotNull, or, sql } from "drizzle-orm";
 import {
   db,
   oraConversationsTable,
@@ -776,7 +776,6 @@ async function maybeGenerateSmartTitle(
     if (current.titleSource !== "client") return;
 
     const { createChatCompletion } = await import("../lib/ai-providers");
-    const userTier = await resolveTierForUser(userId);
 
     const userText = String(userMsg.content).slice(0, 400);
     const assistantText = String(assistantMsg.content).slice(0, 400);
