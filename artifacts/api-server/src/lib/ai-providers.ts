@@ -953,6 +953,14 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
     // leaving the actual reply empty (content = "" → null → 502). Mirrors the
     // same flag already used on the streaming path (streamGemini / streamChatCompletion).
     config.thinkingConfig = { thinkingBudget: 0 };
+    // Non-streaming generateContent has been observed returning an entirely
+    // empty completion for gemini-3-* at very low ceilings (e.g. 75) even with
+    // thinkingBudget:0 — the model still reserves internal headroom that eats
+    // the whole budget. maxOutputTokens is a ceiling, not a target, so raising a
+    // small floor here leaves room for actual reply tokens without forcing
+    // longer answers. The empty-completion fallback in the candidate chain still
+    // guards the residual case. Streaming (streamGemini) is unaffected.
+    config.maxOutputTokens = Math.max(config.maxOutputTokens as number, 256);
   }
   if (systemParts.length > 0) {
     config.systemInstruction = { parts: [{ text: systemParts.join("\n\n") }] };

@@ -34,6 +34,7 @@ import {
   openAiModelForOraRoute,
   selectOraModelRoute,
   runCandidateChain,
+  assertNonEmptyCompletion,
   type OraRouteTier,
   type OraPlanTier,
   type ModelCandidate,
@@ -1695,16 +1696,20 @@ router.post("/public-ai/chat", async (req, res) => {
           openCircuits,
           openaiModel: fallbackModel,
         });
-        const chain = await runCandidateChain(fallbackCandidates, (candidate) =>
-          createChatCompletion({
+        const chain = await runCandidateChain(fallbackCandidates, async (candidate) => {
+          const completion = await createChatCompletion({
             provider: candidate.provider,
             model: candidate.model,
             messages: fallbackMessages,
             response_format: { type: "text" },
             max_completion_tokens: fallbackDeep ? 1400 : 900,
             disableThinking: true,
-          }),
-        );
+          });
+          // Fall through to the next provider on a blank completion instead of
+          // failing the whole search-fallback with an empty answer.
+          assertNonEmptyCompletion(completion);
+          return completion;
+        });
         const fallbackReply = chain.result.choices[0]?.message?.content?.trim() ?? "";
         if (!fallbackReply) {
           // Preserve the original search failure as the cause so both the search
@@ -1925,15 +1930,22 @@ router.post("/public-ai/chat", async (req, res) => {
     (async () => {
       const chain = await runCandidateChain(
         candidates,
-        (candidate) =>
-          createChatCompletion({
+        async (candidate) => {
+          const completion = await createChatCompletion({
             provider: candidate.provider,
             model: candidate.model,
             messages: callMessages,
             response_format: { type: "text" },
             max_completion_tokens: maxTokens,
             disableThinking: true,
-          }),
+          });
+          // A blank HTTP-200 completion (observed with gemini-3-flash-preview at
+          // low token ceilings) does not throw, so without this the chain would
+          // "succeed" with empty content and 502 instead of trying the next
+          // provider. Throwing here advances to the Anthropic/OpenAI fallback.
+          assertNonEmptyCompletion(completion);
+          return completion;
+        },
         (candidate, i, candidateErr) =>
           logger.warn(
             {
@@ -2014,6 +2026,7 @@ router.post("/public-ai/chat", async (req, res) => {
       classifierSkipped,
       routedTool,
       searchUsed,
+      replyEmpty: !reply,
     },
     "Ora chat completion",
   );

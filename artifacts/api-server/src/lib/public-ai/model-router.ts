@@ -681,13 +681,51 @@ export type ProviderErrorKind =
   | "malformed_response"
   | "safety_refusal"
   | "circuit_open"
+  | "empty_completion"
   | "unknown";
+
+/**
+ * Thrown when a provider returns an HTTP-success response whose message has no
+ * usable text content and no tool calls. Providers occasionally return an empty
+ * completion (observed with gemini-3-flash-preview at low max_completion_tokens):
+ * a 200 with blank content that does NOT throw, so `runCandidateChain` would
+ * otherwise treat it as a "success" and never fall through to the next provider.
+ * Throwing this inside the attempt closure lets the chain advance to the next
+ * candidate (Anthropic / OpenAI) and classifies cleanly as `empty_completion`
+ * in structured logs.
+ */
+export class EmptyCompletionError extends Error {
+  constructor(message = "Provider returned an empty completion") {
+    super(message);
+    this.name = "EmptyCompletionError";
+  }
+}
+
+/**
+ * Throws `EmptyCompletionError` when a completion has neither non-blank text
+ * content nor any tool calls. Call this inside a `runCandidateChain` attempt so
+ * a blank-but-HTTP-200 provider response falls through to the next candidate
+ * instead of surfacing to the user as a 502.
+ */
+export function assertNonEmptyCompletion(completion: {
+  choices: ReadonlyArray<{
+    message: { content?: string | null; tool_calls?: ReadonlyArray<unknown> };
+  }>;
+}): void {
+  const msg = completion.choices[0]?.message;
+  const hasText = typeof msg?.content === "string" && msg.content.trim().length > 0;
+  const hasToolCalls = Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0;
+  if (!hasText && !hasToolCalls) {
+    throw new EmptyCompletionError();
+  }
+}
 
 export function classifyProviderError(err: unknown): ProviderErrorKind {
   if (!err || typeof err !== "object") return "unknown";
   const e = err as Record<string, unknown>;
 
   if (e.name === "CircuitOpenError") return "circuit_open";
+  if (e.name === "EmptyCompletionError") return "empty_completion";
 
   const status = typeof e.status === "number" ? e.status : 0;
   const code = typeof e.code === "string" ? e.code : "";

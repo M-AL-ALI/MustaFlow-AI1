@@ -29,6 +29,9 @@ import {
   selectOraModelRoute,
   selectOraVisionModelRoute,
   runCandidateChain,
+  assertNonEmptyCompletion,
+  EmptyCompletionError,
+  classifyProviderError,
   type OraModelRouteInput,
   type ModelCandidate,
 } from "../model-router";
@@ -551,5 +554,66 @@ describe("runCandidateChain — chat.ts fallback loop", () => {
     const attempt = vi.fn();
     await expect(runCandidateChain([], attempt)).rejects.toThrow("All Ora model candidates failed");
     expect(attempt).not.toHaveBeenCalled();
+  });
+});
+
+describe("assertNonEmptyCompletion — blank HTTP-200 fallthrough guard", () => {
+  const makeCompletion = (content: string | null, toolCalls?: unknown[]) => ({
+    choices: [
+      {
+        message: {
+          content,
+          ...(toolCalls ? { tool_calls: toolCalls } : {}),
+        },
+      },
+    ],
+  });
+
+  it("does not throw when the completion has non-blank text content", () => {
+    expect(() => assertNonEmptyCompletion(makeCompletion("Here is your answer."))).not.toThrow();
+  });
+
+  it("throws EmptyCompletionError when content is null and there are no tool calls", () => {
+    expect(() => assertNonEmptyCompletion(makeCompletion(null))).toThrow(EmptyCompletionError);
+  });
+
+  it("throws when content is whitespace-only and there are no tool calls", () => {
+    expect(() => assertNonEmptyCompletion(makeCompletion("   \n  "))).toThrow(EmptyCompletionError);
+  });
+
+  it("does not throw when content is blank but tool calls are present", () => {
+    expect(() =>
+      assertNonEmptyCompletion(makeCompletion("", [{ id: "call_1", type: "function" }])),
+    ).not.toThrow();
+  });
+
+  it("classifies EmptyCompletionError as 'empty_completion'", () => {
+    expect(classifyProviderError(new EmptyCompletionError())).toBe("empty_completion");
+  });
+
+  it("advances runCandidateChain to the next provider on a blank completion (chat.ts pattern)", async () => {
+    // Mirrors the chat.ts attempt closure: call the provider, then assert the
+    // completion is non-empty. A blank HTTP-200 from the first provider must
+    // fall through to the next candidate instead of 'succeeding' with empty text.
+    const chain: ModelCandidate[] = [
+      { provider: "gemini", model: "gemini-3-flash-preview" },
+      { provider: "anthropic", model: "claude-haiku-4-5" },
+    ];
+    const attempt = vi.fn(async (c: ModelCandidate) => {
+      const completion =
+        c.provider === "gemini" ? makeCompletion(null) : makeCompletion("real answer");
+      assertNonEmptyCompletion(completion);
+      return completion;
+    });
+    const onError = vi.fn();
+
+    const result = await runCandidateChain(chain, attempt, onError);
+
+    expect(attempt).toHaveBeenCalledTimes(2);
+    expect(result.candidate.provider).toBe("anthropic");
+    expect(result.usedFallback).toBe(true);
+    expect(result.result.choices[0].message.content).toBe("real answer");
+    // The failed gemini attempt classifies cleanly for structured logging.
+    expect(classifyProviderError(onError.mock.calls[0][2])).toBe("empty_completion");
   });
 });
