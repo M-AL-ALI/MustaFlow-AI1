@@ -468,7 +468,7 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(body.session.instructions).toContain(
       "Do not default to English when the selected language or the user's speech is non-English.",
     );
-    expect(buildSystemPrompt).toHaveBeenCalledWith("ar", undefined, false);
+    expect(buildSystemPrompt).toHaveBeenCalledWith("ar", undefined, false, undefined, "the start of this voice session");
   });
 
   it("anon: buildSystemPrompt called with isSignedIn=false; no profile/memory", async () => {
@@ -477,7 +477,7 @@ describe("Talk to Ora realtime — anonymous mint", () => {
       .set("Cookie", freshCookie())
       .send({ message: "what's the weather" });
 
-    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, false);
+    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, false, undefined, "the start of this voice session");
     expect(buildProfileContext).not.toHaveBeenCalled();
     expect(buildMemoryContext).not.toHaveBeenCalled();
   });
@@ -613,7 +613,7 @@ describe("Talk to Ora realtime — signed-in reservation + context injection", (
 
     expect(res.status).toBe(200);
     expect(metering.startRealtimeSession).toHaveBeenCalledWith("user_123", "core");
-    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, true);
+    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, true, undefined, "the start of this voice session");
     expect(buildProfileContext).toHaveBeenCalledWith("user_123");
   });
 });
