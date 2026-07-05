@@ -194,6 +194,28 @@ const THINKING_WATCHDOG_MS = 8_000;
 // the audio-playing gap.
 const SPEAKING_WATCHDOG_MS = 40_000;
 
+// ─── Audio-liveness detection (mirrored in the website hook) ─────────────────
+// Per-response audible-output tracking, independent of the thinking/speaking
+// watchdogs above (which key off response-lifecycle events, not real audio).
+// Two failure modes are covered: (1) the model produces transcript deltas — it
+// IS responding — but NO audible audio ever starts; (2) audio starts then goes
+// silently stale mid-reply (a degraded-WebRTC pattern after many turns). Both
+// run a resume -> reconnect recovery ladder.
+//
+// If assistant transcript deltas arrive but output_audio_buffer.started has NOT
+// fired within this window, the audible path is silent even though the model is
+// producing output. Fast (2.5 s) because the deltas prove the model is alive.
+const SILENT_AUDIO_START_MS = 2_500;
+// While audio is playing, poll this often to confirm playback keeps advancing
+// (web: audioEl.currentTime; mobile: inbound-rtp packetsReceived).
+const AUDIO_STALL_POLL_MS = 1_000;
+// Consecutive stalled polls (no audio progress while still speaking) before the
+// audio is treated as silently stalled and the recovery ladder runs.
+const AUDIO_STALL_MAX_STALE_POLLS = 2;
+// Consecutive silent-audio incidents (per response) before escalating past the
+// single in-place resume attempt to the reconnect -> legacy fallback ladder.
+const MAX_SILENT_AUDIO_FAILURES = 2;
+
 // ─── Poor-network resilience tuning (mirrored in the website hook) ───────────
 // On the first connection drop the app waits this long before the single
 // automatic reconnect attempt, giving a flaky link a moment to settle. A NetInfo
@@ -812,6 +834,17 @@ interface DataChannelLike {
   close: () => void;
   addEventListener: (type: string, cb: (event: { data?: unknown }) => void) => void;
 }
+// A single getStats() entry we care about (audio inbound-rtp). react-native-webrtc
+// returns a Map-like RTCStatsReport whose entries are loosely typed.
+interface RTCInboundStatLike {
+  type?: string;
+  kind?: string;
+  mediaType?: string;
+  packetsReceived?: number;
+}
+interface RTCStatsReportLike {
+  forEach: (cb: (stat: RTCInboundStatLike) => void) => void;
+}
 interface PeerConnectionLike {
   iceConnectionState: string;
   connectionState?: string;
@@ -823,6 +856,9 @@ interface PeerConnectionLike {
   addEventListener: (type: string, cb: (event: unknown) => void) => void;
   getReceivers: () => { track?: RTCTrackLike | null }[];
   getSenders: () => { track?: RTCTrackLike | null }[];
+  // Optional: react-native-webrtc exposes getStats() -> Promise<RTCStatsReport>.
+  // Optional so the hook degrades gracefully where it is unavailable.
+  getStats?: () => Promise<RTCStatsReportLike>;
   close: () => void;
 }
 
@@ -933,6 +969,27 @@ export function useOraRealtimeVoiceNative(
   // Two consecutive watchdog fires escalate to the auto-reconnect path so the
   // user is not left stuck in a silently degraded session.
   const consecutiveWatchdogFiresRef = useRef(0);
+  // ── Audio-liveness tracking (per response) ────────────────────────────────
+  // The id of the response currently in flight (response.created.response.id),
+  // captured so a silent-audio watchdog/poll only acts for the response it was
+  // armed for — a stale timer from a superseded/cancelled response is ignored.
+  const activeResponseIdRef = useRef<string | null>(null);
+  // Whether output_audio_buffer.started has fired for the current response.
+  const audioStartedForResponseRef = useRef(false);
+  // Whether the single in-place resume has already been tried for this response
+  // (the recovery ladder is resume-once -> reconnect, never resume repeatedly).
+  const audioResumeAttemptedForResponseRef = useRef(false);
+  // Silent-start watchdog: transcript deltas arrived but no audible audio yet.
+  const silentAudioWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mid-response stall poll: confirms audio playback keeps advancing.
+  const audioStallPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Last observed audio-progress marker (inbound-rtp packetsReceived) + timestamp.
+  const lastAudioProgressRef = useRef<{ value: number; at: number }>({ value: 0, at: 0 });
+  // Consecutive stalled polls for the current playback (reset on progress).
+  const audioStallStaleCountRef = useRef(0);
+  // Consecutive silent-audio incidents; MAX_SILENT_AUDIO_FAILURES escalate to
+  // reconnect. Reset on a clean response.done (like consecutiveWatchdogFiresRef).
+  const consecutiveSilentAudioRef = useRef(0);
 
   const clearDurationTimer = useCallback(() => {
     if (durationTimerRef.current) {
@@ -1043,6 +1100,19 @@ export function useOraRealtimeVoiceNative(
       clearTimeout(speakingWatchdogRef.current);
       speakingWatchdogRef.current = null;
     }
+    if (silentAudioWatchdogRef.current) {
+      clearTimeout(silentAudioWatchdogRef.current);
+      silentAudioWatchdogRef.current = null;
+    }
+    if (audioStallPollRef.current) {
+      clearInterval(audioStallPollRef.current);
+      audioStallPollRef.current = null;
+    }
+    audioStallStaleCountRef.current = 0;
+    consecutiveSilentAudioRef.current = 0;
+    audioStartedForResponseRef.current = false;
+    audioResumeAttemptedForResponseRef.current = false;
+    activeResponseIdRef.current = null;
     consecutiveWatchdogFiresRef.current = 0;
     assistantResponseActiveRef.current = false;
     assistantSpeakingRef.current = false;
@@ -1278,6 +1348,156 @@ export function useOraRealtimeVoiceNative(
     }
   }, []);
 
+  // ── Audio-liveness recovery (mirrors the website hook) ────────────────────
+  // Stop all per-response audio-liveness timers (silent-start watchdog + stall
+  // poll) and clear the per-response progress markers. Called whenever a
+  // response ends (response.done/error/barge-in), on teardown, and before a
+  // recovery attempt so a stale timer never double-fires.
+  const stopAudioLivenessTracking = useCallback(() => {
+    if (silentAudioWatchdogRef.current) {
+      clearTimeout(silentAudioWatchdogRef.current);
+      silentAudioWatchdogRef.current = null;
+    }
+    if (audioStallPollRef.current) {
+      clearInterval(audioStallPollRef.current);
+      audioStallPollRef.current = null;
+    }
+    audioStallStaleCountRef.current = 0;
+    lastAudioProgressRef.current = { value: 0, at: 0 };
+  }, []);
+
+  // Recovery ladder for a "responding but silent" response. Rung 1: a single
+  // in-place resume (re-enable the remote audio track, respecting mute) — covers
+  // a sink left silenced/blocked. Rung 2 (>= MAX_SILENT_AUDIO_FAILURES
+  // incidents): escalate to the shared connection-drop ladder (one reconnect,
+  // then legacy voice fallback).
+  const recoverSilentAudio = useCallback(
+    (source: string) => {
+      if (!activeRef.current) return;
+      stopAudioLivenessTracking();
+      const incidents = (consecutiveSilentAudioRef.current += 1);
+      logVoiceDiag("silent_audio_detected", { source, incidents });
+      if (incidents < MAX_SILENT_AUDIO_FAILURES && !audioResumeAttemptedForResponseRef.current) {
+        audioResumeAttemptedForResponseRef.current = true;
+        logVoiceDiag("silent_audio_resume_attempt", { source });
+        // The remote MediaStream stays bound across responses; re-enabling the
+        // track (respecting mute) is enough to recover a silenced sink.
+        const track = remoteTrackRef.current;
+        if (track) track.enabled = !mutedRef.current;
+        return;
+      }
+      // Escalate: reset the incident counter and hand to the reconnect ladder.
+      consecutiveSilentAudioRef.current = 0;
+      handleConnectionDrop(source);
+    },
+    [stopAudioLivenessTracking, handleConnectionDrop],
+  );
+
+  // Arm the silent-start watchdog: called when assistant transcript deltas prove
+  // the model is producing output but no audible audio has started yet. Captures
+  // the current response id so a fire only recovers the response it was armed for.
+  const armSilentAudioWatchdog = useCallback(() => {
+    if (silentAudioWatchdogRef.current) return; // already armed for this gap
+    if (audioStartedForResponseRef.current) return; // audio already flowing
+    if (!activeResponseIdRef.current) return; // no active response (stale trailing delta)
+    const armedResponseId = activeResponseIdRef.current;
+    silentAudioWatchdogRef.current = setTimeout(() => {
+      silentAudioWatchdogRef.current = null;
+      if (!activeRef.current) return;
+      if (audioStartedForResponseRef.current) return;
+      // Response-id guard: ignore if the response we armed for is gone.
+      if (activeResponseIdRef.current !== armedResponseId) return;
+      recoverSilentAudio("silent_audio_start");
+    }, SILENT_AUDIO_START_MS);
+  }, [recoverSilentAudio]);
+
+  // Read the current inbound audio packet count from getStats(). Mobile has no
+  // audioEl.currentTime, so packetsReceived is the progress marker for the stall
+  // poll. Returns null if getStats is unavailable/unreadable (degrade safely).
+  const readInboundAudioPackets = useCallback(async (): Promise<number | null> => {
+    const pc = pcRef.current;
+    if (!pc || typeof pc.getStats !== "function") return null;
+    try {
+      const report = (await pc.getStats()) as RTCStatsReportLike | null;
+      if (!report || typeof report.forEach !== "function") return null;
+      let packets: number | null = null;
+      report.forEach((stat) => {
+        if (
+          stat &&
+          stat.type === "inbound-rtp" &&
+          (stat.kind === "audio" || stat.mediaType === "audio") &&
+          typeof stat.packetsReceived === "number"
+        ) {
+          packets = stat.packetsReceived;
+        }
+      });
+      return packets;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Poll that audio playback keeps advancing while Ora is speaking. A sustained
+  // stall (AUDIO_STALL_MAX_STALE_POLLS polls with no new inbound packets) runs
+  // the recovery ladder. Response-id guarded. If getStats yields no data the
+  // poll never accrues a stall — the silent-start + speaking watchdogs still cover.
+  const startAudioStallPoll = useCallback(() => {
+    if (audioStallPollRef.current) clearInterval(audioStallPollRef.current);
+    lastAudioProgressRef.current = { value: 0, at: Date.now() };
+    audioStallStaleCountRef.current = 0;
+    const armedResponseId = activeResponseIdRef.current;
+    // Seed the baseline packet count so the first comparison is meaningful.
+    void readInboundAudioPackets().then((p) => {
+      if (p != null && activeResponseIdRef.current === armedResponseId) {
+        lastAudioProgressRef.current = { value: p, at: Date.now() };
+      }
+    });
+    audioStallPollRef.current = setInterval(() => {
+      if (!activeRef.current || activeResponseIdRef.current !== armedResponseId) {
+        if (audioStallPollRef.current) {
+          clearInterval(audioStallPollRef.current);
+          audioStallPollRef.current = null;
+        }
+        return;
+      }
+      // Only evaluate while Ora is actively speaking; between chunks the buffer
+      // legitimately pauses (output_audio_buffer.stopped handles that path).
+      if (!assistantSpeakingRef.current) {
+        audioStallStaleCountRef.current = 0;
+        return;
+      }
+      void readInboundAudioPackets().then((packets) => {
+        if (!activeRef.current || activeResponseIdRef.current !== armedResponseId) return;
+        if (packets == null) {
+          // No stats available: cannot judge progress, so don't accrue a stall.
+          audioStallStaleCountRef.current = 0;
+          return;
+        }
+        const prev = lastAudioProgressRef.current.value;
+        if (packets > prev) {
+          lastAudioProgressRef.current = { value: packets, at: Date.now() };
+          audioStallStaleCountRef.current = 0;
+          return;
+        }
+        const stale = (audioStallStaleCountRef.current += 1);
+        if (stale >= AUDIO_STALL_MAX_STALE_POLLS) {
+          recoverSilentAudio("audio_stall");
+        }
+      });
+    }, AUDIO_STALL_POLL_MS);
+  }, [readInboundAudioPackets, recoverSilentAudio]);
+
+  // Called on output_audio_buffer.started: audible audio has begun for this
+  // response. Cancel the silent-start watchdog and begin stall polling.
+  const startAudioLivenessTracking = useCallback(() => {
+    audioStartedForResponseRef.current = true;
+    if (silentAudioWatchdogRef.current) {
+      clearTimeout(silentAudioWatchdogRef.current);
+      silentAudioWatchdogRef.current = null;
+    }
+    startAudioStallPoll();
+  }, [startAudioStallPoll]);
+
   const stopAssistantOutput = useCallback(() => {
     clientCancelledAtRef.current = Date.now();
     sendEvent({ type: "response.cancel" });
@@ -1286,9 +1506,13 @@ export function useOraRealtimeVoiceNative(
     if (track) track.enabled = false;
     assistantResponseActiveRef.current = false;
     assistantSpeakingRef.current = false;
+    // A cancelled response has no more audio coming; stop its liveness timers so
+    // a stale silent-audio watchdog can't fire against the next turn.
+    stopAudioLivenessTracking();
+    audioStartedForResponseRef.current = false;
     setInterimAssistantTranscript("");
     assistantTextRef.current = "";
-  }, [sendEvent]);
+  }, [sendEvent, stopAudioLivenessTracking]);
 
   // In focused mode, automatic barge-in is intentionally stricter than turn
   // acceptance. If Ora is already speaking, only addressed/directed speech may
@@ -1567,6 +1791,16 @@ export function useOraRealtimeVoiceNative(
           t.outputStartedAt = 0;
           t.outputStoppedAt = 0;
           assistantResponseActiveRef.current = true;
+          // Capture this response's id so any silent-audio watchdog/poll only
+          // recovers the response it was armed for (stale timers are ignored).
+          {
+            const responseObj = evt.response as { id?: string } | undefined;
+            activeResponseIdRef.current = responseObj?.id ?? `resp-${createdAt}`;
+          }
+          audioStartedForResponseRef.current = false;
+          audioResumeAttemptedForResponseRef.current = false;
+          // Clear any leftover audio-liveness timers from a prior/overlapping response.
+          stopAudioLivenessTracking();
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
           recordDiag("response.created", { focus_mode: focusModeRef.current });
@@ -1620,6 +1854,11 @@ export function useOraRealtimeVoiceNative(
             recentAssistantSpeechRef.current = assistantTextRef.current;
             setInterimAssistantTranscript(assistantTextRef.current);
             if (activeRef.current) setState("speaking");
+            // Deltas prove the model is producing output. If no audible audio has
+            // begun yet, arm the silent-start watchdog so a silent reply recovers.
+            if (activeRef.current && !audioStartedForResponseRef.current) {
+              armSilentAudioWatchdog();
+            }
           }
           break;
         }
@@ -1696,6 +1935,9 @@ export function useOraRealtimeVoiceNative(
           // Audio is flowing: the media path is healthy again, so clear any
           // lingering instability signal.
           noteAudioProgress();
+          // Audible audio has begun for this response: cancel the silent-start
+          // watchdog and begin polling that playback keeps advancing.
+          startAudioLivenessTracking();
           if (activeRef.current) setState("speaking");
           break;
         }
@@ -1793,6 +2035,23 @@ export function useOraRealtimeVoiceNative(
           // intervention: reset the consecutive-failure counter so two isolated
           // blips are not misread as a degraded session requiring reconnect.
           consecutiveWatchdogFiresRef.current = 0;
+          // Audio-liveness verdict for this turn, computed BEFORE clearing
+          // per-response state. A turn is only "healthy" when audible audio
+          // actually started and no in-turn recovery was needed. If response.done
+          // arrives with no audible audio and the in-turn watchdog never fired (a
+          // fast silent reply), count it as a silent-audio failure so consecutive
+          // silent turns escalate to a reconnect instead of resetting every turn.
+          const audioDeliveredThisResponse = audioStartedForResponseRef.current;
+          const audioRecoveredThisResponse = audioResumeAttemptedForResponseRef.current;
+          stopAudioLivenessTracking();
+          if (activeRef.current && !audioDeliveredThisResponse && !audioRecoveredThisResponse) {
+            recoverSilentAudio("response_done_no_audio");
+          } else if (audioDeliveredThisResponse && !audioRecoveredThisResponse) {
+            consecutiveSilentAudioRef.current = 0;
+          }
+          audioStartedForResponseRef.current = false;
+          audioResumeAttemptedForResponseRef.current = false;
+          activeResponseIdRef.current = null;
           // Refresh the focus window so the user can follow up naturally right
           // after Ora finishes speaking — casual replies like "that's great" or
           // "continue" pass the focus filter within FOCUS_FOLLOWUP_WINDOW_MS of
@@ -1848,6 +2107,10 @@ export function useOraRealtimeVoiceNative(
               clearTimeout(outputStopDebounceRef.current);
               outputStopDebounceRef.current = null;
             }
+            // A model error ends the response with no more audio; stop its
+            // audio-liveness timers so they can't fire against the next turn.
+            stopAudioLivenessTracking();
+            audioStartedForResponseRef.current = false;
             if (activeRef.current) setState("listening");
           }
           break;
@@ -1863,6 +2126,10 @@ export function useOraRealtimeVoiceNative(
       bargeInRequiresDirection,
       sendEvent,
       handleConnectionDrop,
+      recoverSilentAudio,
+      armSilentAudioWatchdog,
+      startAudioLivenessTracking,
+      stopAudioLivenessTracking,
     ],
   );
 

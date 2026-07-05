@@ -36,10 +36,13 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const WEB = readFileSync(path.resolve(__dirname, "../../hooks/use-ora-realtime-voice.ts"), "utf8");
-const MOBILE = readFileSync(
+// Normalize CRLF -> LF so slice/index assertions behave identically on Windows
+// checkouts (the mobile hook can be committed with CRLF there).
+const readSource = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+
+const WEB = readSource(path.resolve(__dirname, "../../hooks/use-ora-realtime-voice.ts"));
+const MOBILE = readSource(
   path.resolve(__dirname, "../../../../../artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts"),
-  "utf8",
 );
 
 const hooks: [string, string][] = [
@@ -192,6 +195,144 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       expect(deps).toContain("sendEvent");
       expect(deps).toContain("handleConnectionDrop");
     });
+
+    // ── Audio-liveness: per-response silent-audio detection ───────────────────
+    // A separate reliability regression: after many turns Ora could keep
+    // "responding" (transcript deltas / response.done arriving) while producing
+    // NO audible audio, or audio could go silently stale mid-reply. These
+    // assertions verify the per-response audio-liveness tracking and the
+    // resume -> reconnect recovery ladder are wired identically on both surfaces.
+
+    it("declares the audio-liveness tuning constants at expected values", () => {
+      const num = (name: string) => {
+        const m = src.match(new RegExp(`const ${name}\\s*=\\s*(\\d[\\d_]*)`));
+        expect(m, `${name} constant missing`).toBeTruthy();
+        return Number(m![1].replace(/_/g, ""));
+      };
+      expect(num("SILENT_AUDIO_START_MS")).toBe(2_500);
+      expect(num("AUDIO_STALL_POLL_MS")).toBe(1_000);
+      expect(num("AUDIO_STALL_MAX_STALE_POLLS")).toBe(2);
+      expect(num("MAX_SILENT_AUDIO_FAILURES")).toBe(2);
+    });
+
+    it("declares the per-response audio-liveness refs", () => {
+      expect(src).toContain("activeResponseIdRef");
+      expect(src).toContain("audioStartedForResponseRef");
+      expect(src).toContain("audioResumeAttemptedForResponseRef");
+      expect(src).toContain("silentAudioWatchdogRef");
+      expect(src).toContain("audioStallPollRef");
+      expect(src).toContain("consecutiveSilentAudioRef");
+    });
+
+    it("declares the audio-liveness helper callbacks", () => {
+      expect(src).toContain("const stopAudioLivenessTracking = useCallback");
+      expect(src).toContain("const recoverSilentAudio = useCallback");
+      expect(src).toContain("const armSilentAudioWatchdog = useCallback");
+      expect(src).toContain("const startAudioStallPoll = useCallback");
+      expect(src).toContain("const startAudioLivenessTracking = useCallback");
+    });
+
+    it("captures the active response id in the response.created handler", () => {
+      const createdIdx = src.indexOf('case "response.created"');
+      expect(createdIdx).toBeGreaterThan(-1);
+      const deltaIdx = src.indexOf('case "response.audio_transcript.delta"', createdIdx);
+      expect(deltaIdx).toBeGreaterThan(createdIdx);
+      const assignIdx = src.indexOf("activeResponseIdRef.current", createdIdx);
+      expect(assignIdx).toBeGreaterThan(createdIdx);
+      expect(assignIdx).toBeLessThan(deltaIdx);
+    });
+
+    it("arms the silent-start watchdog on the SILENT_AUDIO_START_MS deadline", () => {
+      expect(src).toContain("armSilentAudioWatchdog()");
+      const armStart = src.indexOf("const armSilentAudioWatchdog = useCallback");
+      expect(armStart).toBeGreaterThan(-1);
+      const armEnd = src.indexOf("= useCallback", armStart + 50);
+      const armBody = src.slice(armStart, armEnd > armStart ? armEnd : armStart + 700);
+      expect(armBody).toContain("SILENT_AUDIO_START_MS");
+    });
+
+    it("guards the silent-start watchdog by the response id it was armed for", () => {
+      const armStart = src.indexOf("const armSilentAudioWatchdog = useCallback");
+      expect(armStart).toBeGreaterThan(-1);
+      const armEnd = src.indexOf("= useCallback", armStart + 50);
+      const armBody = src.slice(armStart, armEnd > armStart ? armEnd : armStart + 700);
+      expect(armBody).toContain("armedResponseId");
+      expect(armBody).toContain("activeResponseIdRef.current !== armedResponseId");
+    });
+
+    it("begins audio-liveness tracking in the output_audio_buffer.started handler", () => {
+      const startedIdx = src.indexOf('case "output_audio_buffer.started"');
+      expect(startedIdx).toBeGreaterThan(-1);
+      const stoppedIdx = src.indexOf('case "output_audio_buffer.stopped"', startedIdx);
+      expect(stoppedIdx).toBeGreaterThan(startedIdx);
+      const trackIdx = src.indexOf("startAudioLivenessTracking()", startedIdx);
+      expect(trackIdx).toBeGreaterThan(startedIdx);
+      expect(trackIdx).toBeLessThan(stoppedIdx);
+    });
+
+    it("escalates to handleConnectionDrop after MAX_SILENT_AUDIO_FAILURES incidents", () => {
+      const recStart = src.indexOf("const recoverSilentAudio = useCallback");
+      expect(recStart).toBeGreaterThan(-1);
+      const recEnd = src.indexOf("= useCallback", recStart + 50);
+      const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 900);
+      expect(recBody).toContain("MAX_SILENT_AUDIO_FAILURES");
+      expect(recBody).toContain("handleConnectionDrop");
+    });
+
+    it("resets audio-liveness state in the response.done handler", () => {
+      const doneIdx = src.indexOf('case "response.done"');
+      expect(doneIdx).toBeGreaterThan(-1);
+      expect(src.indexOf("stopAudioLivenessTracking()", doneIdx)).toBeGreaterThan(doneIdx);
+      expect(src.indexOf("activeResponseIdRef.current = null", doneIdx)).toBeGreaterThan(doneIdx);
+    });
+
+    it("resets the silent-audio counter in response.done only for a healthy turn", () => {
+      // Regression: an unconditional `consecutiveSilentAudioRef.current = 0` in
+      // response.done makes the reconnect escalation unreachable for the exact
+      // reported symptom (response.done arrives while audio is silent), because
+      // every silent turn's incident is wiped before the next turn can accumulate.
+      const blockStart = src.indexOf("Audio-liveness verdict for this turn");
+      expect(blockStart).toBeGreaterThan(-1);
+      const block = src.slice(blockStart, blockStart + 1300);
+      // The verdict is derived from whether audible audio actually started.
+      expect(block).toContain("audioDeliveredThisResponse = audioStartedForResponseRef.current");
+      // A response.done with no audible audio counts as a silent-audio failure.
+      expect(block).toContain('recoverSilentAudio("response_done_no_audio")');
+      // The counter reset is guarded (else-if branch), never unconditional.
+      const elseIfIdx = block.indexOf("else if (audioDeliveredThisResponse");
+      const resetIdx = block.indexOf("consecutiveSilentAudioRef.current = 0");
+      expect(elseIfIdx).toBeGreaterThan(-1);
+      expect(resetIdx).toBeGreaterThan(elseIfIdx);
+    });
+
+    it("stops audio-liveness tracking in the error event handler", () => {
+      const errIdx = src.indexOf('case "error"');
+      expect(errIdx).toBeGreaterThan(-1);
+      expect(src.indexOf("stopAudioLivenessTracking()", errIdx)).toBeGreaterThan(errIdx);
+    });
+
+    it("clears the silent-audio watchdog and stall poll in fullTeardown", () => {
+      const teardownIdx = src.indexOf("const fullTeardown = useCallback");
+      expect(teardownIdx).toBeGreaterThan(-1);
+      expect(src.indexOf("silentAudioWatchdogRef.current = null", teardownIdx)).toBeGreaterThan(
+        teardownIdx,
+      );
+      expect(src.indexOf("audioStallPollRef.current = null", teardownIdx)).toBeGreaterThan(
+        teardownIdx,
+      );
+    });
+
+    it("includes the audio-liveness callbacks in handleServerEvent deps", () => {
+      const handleIdx = src.indexOf("const handleServerEvent = useCallback");
+      expect(handleIdx).toBeGreaterThan(-1);
+      const depsIdx = src.indexOf("[", handleIdx);
+      const depsEndIdx = src.indexOf("],", depsIdx);
+      const deps = src.slice(depsIdx, depsEndIdx);
+      expect(deps).toContain("recoverSilentAudio");
+      expect(deps).toContain("armSilentAudioWatchdog");
+      expect(deps).toContain("startAudioLivenessTracking");
+      expect(deps).toContain("stopAudioLivenessTracking");
+    });
   });
 
   // ── Turn-count sanity: SPEAKING_WATCHDOG_MS > THINKING_WATCHDOG_MS ─────────
@@ -234,6 +375,59 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
         const debounceCallbackEnd = src.indexOf("OUTPUT_STOP_DEBOUNCE_MS);", debounceCallbackStart);
         const debounceBody = src.slice(debounceCallbackStart, debounceCallbackEnd);
         expect(debounceBody).toContain("lastAcceptedUserTurnAtRef.current = Date.now()");
+      }
+    });
+
+    it("both hooks declare the audio-liveness tuning constants at the same values", () => {
+      const names = [
+        "SILENT_AUDIO_START_MS",
+        "AUDIO_STALL_POLL_MS",
+        "AUDIO_STALL_MAX_STALE_POLLS",
+        "MAX_SILENT_AUDIO_FAILURES",
+      ];
+      const extract = (src: string, name: string) =>
+        Number(
+          (src.match(new RegExp(`const ${name}\\s*=\\s*(\\d[\\d_]*)`)) || [])[1]?.replace(/_/g, ""),
+        );
+      for (const name of names) {
+        const w = extract(WEB, name);
+        const m = extract(MOBILE, name);
+        expect(w, `${name} missing/NaN on web`).toBeGreaterThan(0);
+        expect(m, `${name} on mobile must equal web`).toBe(w);
+      }
+    });
+
+    it("both hooks begin audio-liveness tracking on the output_audio_buffer.started event", () => {
+      for (const [_label, src] of hooks) {
+        expect(src).toContain("armSilentAudioWatchdog()");
+        const startedIdx = src.indexOf('case "output_audio_buffer.started"');
+        const stoppedIdx = src.indexOf('case "output_audio_buffer.stopped"', startedIdx);
+        const trackIdx = src.indexOf("startAudioLivenessTracking()", startedIdx);
+        expect(trackIdx).toBeGreaterThan(startedIdx);
+        expect(trackIdx).toBeLessThan(stoppedIdx);
+      }
+    });
+
+    it("both hooks escalate silent-audio recovery to the reconnect ladder", () => {
+      for (const [_label, src] of hooks) {
+        const recStart = src.indexOf("const recoverSilentAudio = useCallback");
+        const recEnd = src.indexOf("= useCallback", recStart + 50);
+        const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 900);
+        expect(recBody).toContain("MAX_SILENT_AUDIO_FAILURES");
+        expect(recBody).toContain("handleConnectionDrop");
+      }
+    });
+
+    it("both hooks count a silent response.done and guard the counter reset", () => {
+      for (const [_label, src] of hooks) {
+        const blockStart = src.indexOf("Audio-liveness verdict for this turn");
+        expect(blockStart).toBeGreaterThan(-1);
+        const block = src.slice(blockStart, blockStart + 1300);
+        expect(block).toContain('recoverSilentAudio("response_done_no_audio")');
+        const elseIfIdx = block.indexOf("else if (audioDeliveredThisResponse");
+        const resetIdx = block.indexOf("consecutiveSilentAudioRef.current = 0");
+        expect(elseIfIdx).toBeGreaterThan(-1);
+        expect(resetIdx).toBeGreaterThan(elseIfIdx);
       }
     });
   });
