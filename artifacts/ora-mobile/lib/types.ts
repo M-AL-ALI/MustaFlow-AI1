@@ -419,10 +419,19 @@ export interface MemoryUsage {
 
 export interface OraConversationSummary {
   id: number;
-  title: string;
+  title: string | null;
+  titleSource?: "client" | "ai" | "user" | null;
   projectId: number | null;
-  preview: string;
+  preview: string | null;
   lastMessageAt: string;
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
+  messageCount?: number | null;
+  metaHasImages?: boolean;
+  metaHasGeneratedFiles?: boolean;
+  metaHasSources?: boolean;
+  metaHasVoice?: boolean;
+  metaLastActivityType?: string | null;
 }
 
 export interface OraConversationDetail {

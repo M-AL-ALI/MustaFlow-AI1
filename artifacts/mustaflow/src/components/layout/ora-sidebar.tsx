@@ -1,5 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import logoUrl from "/logo.png";
 import {
@@ -26,6 +26,14 @@ import {
   LifeBuoy,
   Clock,
   Code2,
+  Pin,
+  PinOff,
+  Archive,
+  RotateCcw,
+  Search,
+  File as FileIcon,
+  Globe,
+  Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -241,29 +249,56 @@ function OraUserSection() {
   );
 }
 
-/** A single conversation row with inline rename + delete + move. */
+/** Tiny icon badges below the conversation title showing its content types. */
+function ConversationMetaBadges({ conversation }: { conversation: OraConversationSummary }) {
+  const badges: { icon: React.ElementType; label: string }[] = [];
+  if (conversation.metaHasImages) badges.push({ icon: ImageIcon, label: "Has images" });
+  if (conversation.metaHasGeneratedFiles) badges.push({ icon: FileIcon, label: "Has files" });
+  if (conversation.metaHasSources) badges.push({ icon: Globe, label: "Has web sources" });
+  if (conversation.metaHasVoice) badges.push({ icon: Mic, label: "Has voice" });
+  if (badges.length === 0) return null;
+  return (
+    <span className="flex items-center gap-0.5 ml-1 shrink-0">
+      {badges.map(({ icon: Icon, label }) => (
+        <Icon key={label} className="h-2.5 w-2.5 text-muted-foreground/60" aria-label={label} />
+      ))}
+    </span>
+  );
+}
+
+/** A single conversation row with inline rename + delete + move + pin. */
 function ConversationRow({
   conversation,
   active,
   onSelect,
   onRename,
   onDelete,
+  onRestore,
+  onPermanentDelete,
+  onPin,
   projects,
   onMove,
+  archived,
 }: {
   conversation: OraConversationSummary;
   active: boolean;
   onSelect: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
+  onRestore?: () => void;
+  onPermanentDelete?: () => void;
+  onPin?: (pinned: boolean) => void;
   /** All of the user's projects, for the "Move to project" menu. */
   projects: OraProjectSummary[];
   /** Move this conversation to a project (or null for standalone). */
   onMove: (projectId: number | null) => void;
+  /** If true, show archive-mode actions (restore / permanent delete). */
+  archived?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(conversation.title ?? "");
   const label = conversation.title?.trim() || "New chat";
+  const isPinned = conversation.pinnedAt != null;
 
   const commit = () => {
     const trimmed = draft.trim();
@@ -322,65 +357,268 @@ function ConversationRow({
           active ? "text-primary font-medium" : "text-muted-foreground hover:text-foreground",
         )}
       >
-        <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+        {isPinned ? (
+          <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        ) : (
+          <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+        )}
         <span className="truncate">{label}</span>
+        <ConversationMetaBadges conversation={conversation} />
       </button>
       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              aria-label="Move conversation"
+              aria-label="More actions"
               className="p-1 text-muted-foreground hover:text-foreground"
             >
               <MoreHorizontal className="h-3 w-3" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel className="flex items-center gap-1.5 text-xs">
-              <FolderInput className="h-3.5 w-3.5" />
-              Move to
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {conversation.projectId != null ? (
-              <DropdownMenuItem onSelect={() => onMove(null)} className="text-xs">
-                <MessageSquare className="mr-2 h-3.5 w-3.5" />
-                Recent (no project)
-              </DropdownMenuItem>
-            ) : null}
-            {projects
-              .filter((p) => p.id !== conversation.projectId)
-              .map((p) => (
-                <DropdownMenuItem key={p.id} onSelect={() => onMove(p.id)} className="text-xs">
-                  <Folder className="mr-2 h-3.5 w-3.5" />
-                  <span className="truncate">{p.name}</span>
+            {!archived && onPin && (
+              <>
+                <DropdownMenuItem
+                  onSelect={() => onPin(!isPinned)}
+                  className="text-xs"
+                >
+                  {isPinned ? (
+                    <>
+                      <PinOff className="mr-2 h-3.5 w-3.5" />
+                      Unpin
+                    </>
+                  ) : (
+                    <>
+                      <Pin className="mr-2 h-3.5 w-3.5" />
+                      Pin
+                    </>
+                  )}
                 </DropdownMenuItem>
-              ))}
-            {projects.filter((p) => p.id !== conversation.projectId).length === 0 &&
-            conversation.projectId == null ? (
-              <DropdownMenuItem disabled className="text-xs">
-                No projects yet
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {!archived && (
+              <>
+                <DropdownMenuLabel className="flex items-center gap-1.5 text-xs">
+                  <FolderInput className="h-3.5 w-3.5" />
+                  Move to
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {conversation.projectId != null ? (
+                  <DropdownMenuItem onSelect={() => onMove(null)} className="text-xs">
+                    <MessageSquare className="mr-2 h-3.5 w-3.5" />
+                    Recent (no project)
+                  </DropdownMenuItem>
+                ) : null}
+                {projects
+                  .filter((p) => p.id !== conversation.projectId)
+                  .map((p) => (
+                    <DropdownMenuItem key={p.id} onSelect={() => onMove(p.id)} className="text-xs">
+                      <Folder className="mr-2 h-3.5 w-3.5" />
+                      <span className="truncate">{p.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                {projects.filter((p) => p.id !== conversation.projectId).length === 0 &&
+                conversation.projectId == null ? (
+                  <DropdownMenuItem disabled className="text-xs">
+                    No projects yet
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {!archived && (
+              <>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setDraft(conversation.title ?? "");
+                    setEditing(true);
+                  }}
+                  className="text-xs"
+                >
+                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                  Rename
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onDelete} className="text-xs text-destructive focus:text-destructive">
+                  <Archive className="mr-2 h-3.5 w-3.5" />
+                  Archive
+                </DropdownMenuItem>
+              </>
+            )}
+            {archived && onRestore && (
+              <DropdownMenuItem onSelect={onRestore} className="text-xs">
+                <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                Restore
               </DropdownMenuItem>
-            ) : null}
+            )}
+            {archived && onPermanentDelete && (
+              <DropdownMenuItem
+                onSelect={onPermanentDelete}
+                className="text-xs text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete permanently
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
-        <button
-          onClick={() => {
-            setDraft(conversation.title ?? "");
-            setEditing(true);
-          }}
-          aria-label="Rename conversation"
-          className="p-1 text-muted-foreground hover:text-foreground"
-        >
-          <Pencil className="h-3 w-3" />
-        </button>
+        {!archived && (
+          <button
+            onClick={() => {
+              setDraft(conversation.title ?? "");
+              setEditing(true);
+            }}
+            aria-label="Rename conversation"
+            className="p-1 text-muted-foreground hover:text-foreground"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        )}
         <button
           onClick={onDelete}
-          aria-label="Delete conversation"
+          aria-label={archived ? "Delete permanently" : "Archive conversation"}
           className="p-1 text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Shows conversations that have been pinned, across all projects. */
+function PinnedSection({ close }: { close: () => void }) {
+  const {
+    conversations,
+    projects,
+    currentConversationId,
+    selectConversation,
+    moveConversation,
+    renameConversation,
+    deleteConversation,
+    pinConversation,
+  } = useOraConversations();
+
+  const pinned = conversations.filter((c) => c.pinnedAt != null && c.archivedAt == null);
+
+  if (pinned.length === 0) return null;
+
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-1.5 px-2 pb-1">
+        <Pin className="h-3 w-3 text-muted-foreground shrink-0" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Pinned
+        </span>
+      </div>
+      <div className="space-y-0.5">
+        {pinned.map((c) => (
+          <ConversationRow
+            key={c.id}
+            conversation={c}
+            active={c.id === currentConversationId}
+            projects={projects}
+            onMove={(projectId) => void moveConversation(c.id, projectId)}
+            onSelect={() => {
+              selectConversation(c.id);
+              close();
+            }}
+            onRename={(title) => void renameConversation(c.id, title)}
+            onDelete={() => {
+              if (window.confirm("Archive this conversation?")) void deleteConversation(c.id);
+            }}
+            onPin={(pinned) => void pinConversation(c.id, pinned)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Archived conversations sheet — lazy-loaded when the user opens it. */
+function ArchivedSection({ close }: { close: () => void }) {
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const { projects, restoreConversation, permanentDeleteConversation } = useOraConversations();
+  const [open, setOpen] = useState(false);
+  const [archived, setArchived] = useState<OraConversationSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch(`${BASE}/api/ora/conversations?archived=true`);
+      if (res.ok) {
+        const data = (await res.json()) as { conversations: OraConversationSummary[] };
+        setArchived(data.conversations);
+      }
+    } catch {
+      /* best-effort */
+    } finally {
+      setLoading(false);
+    }
+  }, [BASE]);
+
+  const toggle = () => {
+    if (!open) void load();
+    setOpen((o) => !o);
+  };
+
+  return (
+    <div className="px-3 py-1">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 px-2 py-1.5 w-full text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0" />
+        )}
+        <Archive className="h-3 w-3 shrink-0" />
+        Archived
+      </button>
+      {open && (
+        <div className="mt-1 space-y-0.5">
+          {loading ? (
+            <p className="px-2 py-1 text-[10px] text-muted-foreground">Loading…</p>
+          ) : archived.length === 0 ? (
+            <p className="px-2 py-1 text-[10px] text-muted-foreground">No archived conversations</p>
+          ) : (
+            archived.map((c) => (
+              <ConversationRow
+                key={c.id}
+                conversation={c}
+                active={false}
+                archived
+                projects={projects}
+                onMove={() => {/* n/a for archived */}}
+                onSelect={() => {}}
+                onRename={() => {}}
+                onDelete={() => {
+                  if (window.confirm("Permanently delete this conversation? This cannot be undone.")) {
+                    void permanentDeleteConversation(c.id).then(() => {
+                      setArchived((prev) => prev.filter((x) => x.id !== c.id));
+                    });
+                  }
+                }}
+                onRestore={() => {
+                  void restoreConversation(c.id).then(() => {
+                    setArchived((prev) => prev.filter((x) => x.id !== c.id));
+                    close();
+                  });
+                }}
+                onPermanentDelete={() => {
+                  if (window.confirm("Permanently delete this conversation? This cannot be undone.")) {
+                    void permanentDeleteConversation(c.id).then(() => {
+                      setArchived((prev) => prev.filter((x) => x.id !== c.id));
+                    });
+                  }
+                }}
+              />
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -397,6 +635,7 @@ function ProjectsSection({ close }: { close: () => void }) {
     moveConversation,
     renameConversation,
     deleteConversation,
+    pinConversation,
     renameProject,
     deleteProject,
   } = useOraConversations();
@@ -448,7 +687,9 @@ function ProjectsSection({ close }: { close: () => void }) {
       <div className="space-y-0.5">
         {projects.map((p) => {
           const isOpen = expanded.has(p.id);
-          const projectConvs = conversations.filter((c) => c.projectId === p.id);
+          const projectConvs = conversations.filter(
+            (c) => c.projectId === p.id && c.archivedAt == null,
+          );
           return (
             <div key={p.id}>
               {editingProjectId === p.id ? (
@@ -582,9 +823,10 @@ function ProjectsSection({ close }: { close: () => void }) {
                         }}
                         onRename={(title) => void renameConversation(c.id, title)}
                         onDelete={() => {
-                          if (window.confirm("Delete this conversation?"))
+                          if (window.confirm("Archive this conversation?"))
                             void deleteConversation(c.id);
                         }}
+                        onPin={(pinned) => void pinConversation(c.id, pinned)}
                       />
                     ))
                   )}
@@ -604,7 +846,8 @@ function ProjectsSection({ close }: { close: () => void }) {
  * created from the "New conversation" button (projectId === null) had no home in
  * the sidebar and appeared to "disappear" from history.
  */
-function RecentConversationsSection({ close }: { close: () => void }) {
+function RecentConversationsSection({ close, searchQuery }: { close: () => void; searchQuery: string }) {
+  const BASE_URL = import.meta.env.BASE_URL.replace(/\/$/, "");
   const {
     projects,
     conversations,
@@ -614,14 +857,75 @@ function RecentConversationsSection({ close }: { close: () => void }) {
     moveConversation,
     renameConversation,
     deleteConversation,
+    pinConversation,
   } = useOraConversations();
   const [, setLocation] = useLocation();
 
   const [open, setOpen] = useState(true);
+  const [searchResults, setSearchResults] = useState<OraConversationSummary[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Backend already returns conversations ordered by lastMessageAt desc.
+  // Debounced server-side search when the user is typing.
+  useEffect(() => {
+    if (!searchQuery) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void authFetch(`${BASE_URL}/api/ora/conversations?q=${encodeURIComponent(searchQuery)}&limit=30`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data: { conversations: OraConversationSummary[] } | null) => {
+          if (data) setSearchResults(data.conversations);
+        })
+        .catch(() => {})
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchQuery, BASE_URL]);
+
+  // When search is active, show flat search results instead of the normal list.
+  if (searchQuery) {
+    return (
+      <div className="px-3 py-2">
+        {searchLoading ? (
+          <p className="px-2 py-1 text-[10px] text-muted-foreground">Searching…</p>
+        ) : searchResults.length === 0 ? (
+          <p className="px-2 py-1 text-[10px] text-muted-foreground">No conversations found</p>
+        ) : (
+          <div className="space-y-0.5">
+            {searchResults.map((c) => (
+              <ConversationRow
+                key={c.id}
+                conversation={c}
+                active={c.id === currentConversationId}
+                projects={projects}
+                onMove={(projectId) => void moveConversation(c.id, projectId)}
+                onSelect={() => {
+                  selectConversation(c.id);
+                  close();
+                }}
+                onRename={(title) => void renameConversation(c.id, title)}
+                onDelete={() => {
+                  if (window.confirm("Archive this conversation?")) void deleteConversation(c.id);
+                }}
+                onPin={(pinned) => void pinConversation(c.id, pinned)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Backend already returns conversations ordered pinned-first, then by lastMessageAt desc.
   // Standalone chats (no project) live here; project chats live under Projects.
-  const recent = conversations.filter((c) => c.projectId == null);
+  const recent = conversations.filter((c) => c.projectId == null && c.archivedAt == null);
 
   return (
     <div className="px-3 py-2">
@@ -673,8 +977,9 @@ function RecentConversationsSection({ close }: { close: () => void }) {
                 }}
                 onRename={(title) => void renameConversation(c.id, title)}
                 onDelete={() => {
-                  if (window.confirm("Delete this conversation?")) void deleteConversation(c.id);
+                  if (window.confirm("Archive this conversation?")) void deleteConversation(c.id);
                 }}
+                onPin={(pinned) => void pinConversation(c.id, pinned)}
               />
             ))
           )}
@@ -696,8 +1001,12 @@ interface OraSidebarProps {
 export function OraSidebar({ onNewConversation }: OraSidebarProps) {
   const [open, setOpen] = useState(false);
   const [location] = useLocation();
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => {
+    setOpen(false);
+    setSearchQuery("");
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -757,41 +1066,67 @@ export function OraSidebar({ onNewConversation }: OraSidebarProps) {
           </button>
         </div>
 
+        {/* Search */}
+        <div className="px-3 pb-3 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="search"
+              placeholder="Search conversations…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-md border border-border bg-background pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        </div>
+
         <hr className="border-border mx-3" />
 
         {/* Conversations + projects history */}
         <div className="flex-1 overflow-y-auto py-2">
-          <RecentConversationsSection close={close} />
+          {/* Pinned conversations — only visible when not searching */}
+          {!searchQuery && <PinnedSection close={close} />}
 
-          <hr className="border-border mx-3 my-2" />
+          <RecentConversationsSection close={close} searchQuery={searchQuery} />
 
-          <ProjectsSection close={close} />
+          {!searchQuery && (
+            <>
+              <hr className="border-border mx-3 my-2" />
+              <ProjectsSection close={close} />
+              <hr className="border-border mx-3 my-2" />
+              <ArchivedSection close={close} />
+            </>
+          )}
 
-          <hr className="border-border mx-3 my-2" />
+          {!searchQuery && (
+            <>
+              <hr className="border-border mx-3 my-2" />
 
-          {/* Nav items */}
-          <div className="px-3 py-2 space-y-1">
-            {NAV_ITEMS.map(({ name, href, icon: Icon }) => {
-              const isActive =
-                location === href || (href !== "/" && location.startsWith(href + "/"));
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  onClick={close}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer no-underline",
-                    isActive
-                      ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-                      : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {name}
-                </Link>
-              );
-            })}
-          </div>
+              {/* Nav items */}
+              <div className="px-3 py-2 space-y-1">
+                {NAV_ITEMS.map(({ name, href, icon: Icon }) => {
+                  const isActive =
+                    location === href || (href !== "/" && location.startsWith(href + "/"));
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={close}
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer no-underline",
+                        isActive
+                          ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                          : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      {name}
+                    </Link>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
 
         <hr className="border-border mx-3" />

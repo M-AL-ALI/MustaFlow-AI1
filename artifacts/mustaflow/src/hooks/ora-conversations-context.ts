@@ -3,12 +3,27 @@ import { createContext, useContext } from "react";
 export interface OraConversationSummary {
   id: number;
   title: string | null;
+  titleSource?: "client" | "ai" | "user" | null;
   projectId: number | null;
+  pinnedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   lastMessageAt: string;
+  archivedAt?: string | null;
   /** Short snippet of the last message, for the History list. */
   preview?: string | null;
+  /** Total number of stored messages (computed without loading bodies). */
+  messageCount?: number | null;
+  /** True if any message in this conversation contains a generated image. */
+  metaHasImages?: boolean;
+  /** True if any message contains a generated file (doc/sheet/slide/etc.). */
+  metaHasGeneratedFiles?: boolean;
+  /** True if any message includes web-search citation sources. */
+  metaHasSources?: boolean;
+  /** True if any message was sent/received via voice. */
+  metaHasVoice?: boolean;
+  /** Short tag for the last significant activity ('chat'|'image'|'file'|'search'). */
+  metaLastActivityType?: string | null;
 }
 
 export interface OraProjectSummary {
@@ -46,8 +61,15 @@ export interface OraConversationsContextValue {
   /** Called by the chat hook after messages persist, to re-sort the list. */
   notifyPersisted: () => void;
   renameConversation: (id: number, title: string) => Promise<void>;
+  /** Soft-delete (move to archive). */
   deleteConversation: (id: number) => Promise<void>;
+  /** Restore an archived conversation. */
+  restoreConversation: (id: number) => Promise<void>;
+  /** Permanently hard-delete a conversation (irreversible). */
+  permanentDeleteConversation: (id: number) => Promise<void>;
   moveConversation: (id: number, projectId: number | null) => Promise<void>;
+  /** Pin (pinned=true) or unpin (pinned=false) a conversation. */
+  pinConversation: (id: number, pinned: boolean) => Promise<void>;
   createProject: (name: string) => Promise<OraProjectSummary | null>;
   renameProject: (id: number, name: string) => Promise<void>;
   deleteProject: (id: number) => Promise<void>;

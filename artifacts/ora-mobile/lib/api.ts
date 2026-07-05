@@ -1030,6 +1030,44 @@ export function deleteConversation(id: number): Promise<unknown> {
   return jsonRequest(`/api/ora/conversations/${id}`, { method: "DELETE" });
 }
 
+export function restoreConversation(id: number): Promise<unknown> {
+  return jsonRequest(`/api/ora/conversations/${id}/restore`, { method: "PATCH" });
+}
+
+export function permanentDeleteConversation(id: number): Promise<unknown> {
+  return jsonRequest(`/api/ora/conversations/${id}?permanent=true`, { method: "DELETE" });
+}
+
+export function pinConversation(id: number, pinned: boolean): Promise<unknown> {
+  return jsonRequest(`/api/ora/conversations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ pinned }),
+  });
+}
+
+export async function listArchivedConversations(): Promise<OraConversationSummary[]> {
+  const data = await jsonRequest<{ conversations: OraConversationSummary[] }>(
+    "/api/ora/conversations?archived=true",
+  );
+  return data.conversations ?? [];
+}
+
+export async function getOraUserSettings(): Promise<{ lastConversationId?: number | null }> {
+  const data = await jsonRequest<{ settings: { lastConversationId?: number | null } }>(
+    "/api/ora/settings",
+  );
+  return data.settings ?? {};
+}
+
+export function patchOraUserSettings(settings: {
+  lastConversationId?: number | null;
+}): Promise<unknown> {
+  return jsonRequest("/api/ora/settings", {
+    method: "PATCH",
+    body: JSON.stringify(settings),
+  });
+}
+
 // Move a conversation to a project (`projectId`) or back to standalone (`null`),
 // mirroring the website's per-conversation "Move to" menu. The server validates
 // project ownership. Backend: PATCH /api/ora/conversations/:id { projectId }.

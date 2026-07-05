@@ -1,56 +1,165 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, desc, isNull, sql } from "drizzle-orm";
-import { db, oraConversationsTable, oraProjectsTable, knowledgeEntriesTable } from "@workspace/db";
+import { and, eq, desc, isNull, isNotNull, or, sql, not } from "drizzle-orm";
+import {
+  db,
+  oraConversationsTable,
+  oraProjectsTable,
+  oraUserSettingsTable,
+  knowledgeEntriesTable,
+} from "@workspace/db";
 import { logger } from "../lib/logger";
 import { resolveTierForUser } from "../lib/public-ai/authed-user";
 import { oraMessageSchema as messageSchema } from "@workspace/ora-contracts";
 
 const router = Router();
 
-/* ─── Message validation ───────────────────────────────────────────────────
- * The canonical Ora message schema lives in @workspace/ora-contracts so the
- * server, the legacy/anonymous transcript store, and the mobile client share a
- * single wire contract. Imported above as `messageSchema`. */
+/* ─── Constants ───────────────────────────────────────────────────────────── */
 
 const MAX_STORED = 100;
 const MAX_PAYLOAD_BYTES = 256_000;
 const MAX_TITLE_LEN = 120;
 const MAX_NAME_LEN = 80;
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 100;
+
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Derive history metadata badges from a parsed messages array.
+ * Called synchronously (messages already in memory after Zod parse) so we
+ * never do an extra DB round-trip just to compute these flags.
+ */
+function computeConversationMetadata(messages: { role: string; content: string; [k: string]: unknown }[]): {
+  metaHasImages: boolean;
+  metaHasGeneratedFiles: boolean;
+  metaHasSources: boolean;
+  metaHasVoice: boolean;
+  metaLastActivityType: string | null;
+} {
+  let hasImages = false;
+  let hasGeneratedFiles = false;
+  let hasSources = false;
+  let hasVoice = false;
+  let lastActivityType: string | null = null;
+
+  for (const msg of messages) {
+    if (msg.imageUrl || msg.imageId || (Array.isArray(msg.images) && (msg.images as unknown[]).length > 0)) {
+      hasImages = true;
+    }
+    if (msg.generatedFile) {
+      hasGeneratedFiles = true;
+    }
+    if (Array.isArray(msg.sources) && (msg.sources as unknown[]).length > 0) {
+      hasSources = true;
+    }
+    if (msg.isVoice) {
+      hasVoice = true;
+    }
+  }
+
+  // lastActivityType from last assistant message
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (lastAssistant) {
+    if (lastAssistant.imageUrl || lastAssistant.imageId) {
+      lastActivityType = "image";
+    } else if (lastAssistant.generatedFile) {
+      lastActivityType = "file";
+    } else if (Array.isArray(lastAssistant.sources) && (lastAssistant.sources as unknown[]).length > 0) {
+      lastActivityType = "search";
+    } else {
+      lastActivityType = "chat";
+    }
+  }
+
+  return {
+    metaHasImages: hasImages,
+    metaHasGeneratedFiles: hasGeneratedFiles,
+    metaHasSources: hasSources,
+    metaHasVoice: hasVoice,
+    metaLastActivityType: lastActivityType,
+  };
+}
 
 /* ─── Conversations ───────────────────────────────────────────────────────── */
 
+const listQuerySchema = z.object({
+  q: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
+  offset: z.coerce.number().int().min(0).default(0),
+  archived: z.enum(["true", "false"]).optional(),
+});
+
 // List the signed-in user's conversations (lightweight — no message bodies).
+// Query params: ?q= (search title + content), ?limit=, ?offset=, ?archived=true
 router.get("/ora/conversations", async (req, res) => {
   const userId = req.userId!;
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid query parameters" });
+    return;
+  }
+
+  const { q, limit, offset, archived } = parsed.data;
+  const showArchived = archived === "true";
+
   try {
+    const baseConditions = and(
+      eq(oraConversationsTable.userId, userId),
+      eq(oraConversationsTable.surface, "normal"),
+      showArchived
+        ? isNotNull(oraConversationsTable.archivedAt)
+        : isNull(oraConversationsTable.archivedAt),
+    );
+
+    const searchCondition = q
+      ? or(
+          sql`${oraConversationsTable.title} ILIKE ${"%" + q + "%"}`,
+          sql`CAST(${oraConversationsTable.messages} AS TEXT) ILIKE ${"%" + q + "%"}`,
+        )
+      : undefined;
+
+    const whereCondition = searchCondition
+      ? and(baseConditions, searchCondition)
+      : baseConditions;
+
+    // Fetch limit+1 rows to determine hasMore
     const rows = await db
       .select({
         id: oraConversationsTable.id,
         title: oraConversationsTable.title,
+        titleSource: oraConversationsTable.titleSource,
         projectId: oraConversationsTable.projectId,
+        pinnedAt: oraConversationsTable.pinnedAt,
+        metaHasImages: oraConversationsTable.metaHasImages,
+        metaHasGeneratedFiles: oraConversationsTable.metaHasGeneratedFiles,
+        metaHasSources: oraConversationsTable.metaHasSources,
+        metaHasVoice: oraConversationsTable.metaHasVoice,
+        metaLastActivityType: oraConversationsTable.metaLastActivityType,
         createdAt: oraConversationsTable.createdAt,
         updatedAt: oraConversationsTable.updatedAt,
         lastMessageAt: oraConversationsTable.lastMessageAt,
-        // Short preview = last message's text, truncated. Computed in SQL so we
-        // never transfer full message bodies just to render the History list.
-        preview: sql<
-          string | null
-        >`left((${oraConversationsTable.messages} -> (jsonb_array_length(${oraConversationsTable.messages}) - 1) ->> 'content'), 140)`,
+        archivedAt: oraConversationsTable.archivedAt,
+        // messageCount from jsonb array length — no message body transfer
+        messageCount: sql<number>`jsonb_array_length(${oraConversationsTable.messages})`,
+        // Short preview = last message's text, truncated
+        preview: sql<string | null>`left((${oraConversationsTable.messages} -> (jsonb_array_length(${oraConversationsTable.messages}) - 1) ->> 'content'), 140)`,
       })
       .from(oraConversationsTable)
-      .where(
-        and(
-          eq(oraConversationsTable.userId, userId),
-          // Support Mode conversations live on a separate surface and must never
-          // appear in the normal Ora sidebar/history (Task #1312).
-          eq(oraConversationsTable.surface, "normal"),
-          isNull(oraConversationsTable.archivedAt),
-        ),
+      .where(whereCondition)
+      // Pinned conversations float to the top regardless of activity time,
+      // then sort by most-recent activity.
+      .orderBy(
+        sql`${oraConversationsTable.pinnedAt} IS NOT NULL DESC`,
+        desc(oraConversationsTable.lastMessageAt),
       )
-      .orderBy(desc(oraConversationsTable.lastMessageAt));
+      .limit(limit + 1)
+      .offset(offset);
 
-    res.json({ conversations: rows });
+    const hasMore = rows.length > limit;
+    const conversations = hasMore ? rows.slice(0, limit) : rows;
+
+    res.json({ conversations, hasMore });
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to list conversations");
     res.status(500).json({ error: "Failed to load conversations" });
@@ -72,7 +181,6 @@ router.post("/ora/conversations", async (req, res) => {
   }
 
   try {
-    // Validate project ownership if a projectId was supplied.
     if (parsed.data.projectId != null) {
       const [proj] = await db
         .select({ id: oraProjectsTable.id })
@@ -96,6 +204,7 @@ router.post("/ora/conversations", async (req, res) => {
         userId,
         title: parsed.data.title ?? null,
         projectId: parsed.data.projectId ?? null,
+        titleSource: "client",
         messages: [],
       })
       .returning();
@@ -123,10 +232,9 @@ router.get("/ora/conversations/:id", async (req, res) => {
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
-          // Support Mode conversations are isolated — never reachable via the
-          // normal Ora single-conversation endpoints (Task #1312).
           eq(oraConversationsTable.surface, "normal"),
-          isNull(oraConversationsTable.archivedAt),
+          // Allow fetching archived conversations by ID (e.g. restore flow)
+          // so the archived view can open a conversation for review.
         ),
       );
     if (!row) {
@@ -143,9 +251,11 @@ router.get("/ora/conversations/:id", async (req, res) => {
 const patchConversationSchema = z.object({
   title: z.string().max(MAX_TITLE_LEN).nullable().optional(),
   projectId: z.number().int().positive().nullable().optional(),
+  // true = pin this conversation; false = unpin
+  pinned: z.boolean().optional(),
 });
 
-// Rename a conversation or move it between projects (null = standalone).
+// Rename/move/pin a conversation.
 router.patch("/ora/conversations/:id", async (req, res) => {
   const userId = req.userId!;
   const id = Number(req.params.id);
@@ -160,8 +270,15 @@ router.patch("/ora/conversations/:id", async (req, res) => {
   }
 
   const updates: Partial<typeof oraConversationsTable.$inferInsert> = { updatedAt: new Date() };
-  if (parsed.data.title !== undefined) updates.title = parsed.data.title;
+  if (parsed.data.title !== undefined) {
+    updates.title = parsed.data.title;
+    // Track that the user explicitly renamed this conversation so the async
+    // smart-title job will never overwrite it.
+    updates.titleSource = "user";
+  }
   if (parsed.data.projectId !== undefined) updates.projectId = parsed.data.projectId;
+  if (parsed.data.pinned === true) updates.pinnedAt = new Date();
+  if (parsed.data.pinned === false) updates.pinnedAt = null;
 
   try {
     if (parsed.data.projectId != null) {
@@ -188,7 +305,6 @@ router.patch("/ora/conversations/:id", async (req, res) => {
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
-          // Support Mode conversations are isolated (Task #1312).
           eq(oraConversationsTable.surface, "normal"),
           isNull(oraConversationsTable.archivedAt),
         ),
@@ -232,22 +348,31 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
     return;
   }
 
+  // Compute metadata badges before the DB write (messages are already in memory).
+  const meta = computeConversationMetadata(messages as { role: string; content: string; [k: string]: unknown }[]);
+
   try {
     const now = new Date();
     const [row] = await db
       .update(oraConversationsTable)
-      .set({ messages, updatedAt: now, lastMessageAt: now })
+      .set({
+        messages,
+        updatedAt: now,
+        lastMessageAt: now,
+        ...meta,
+      })
       .where(
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
-          // Support Mode conversations are isolated (Task #1312).
           eq(oraConversationsTable.surface, "normal"),
           isNull(oraConversationsTable.archivedAt),
         ),
       )
       .returning({
         id: oraConversationsTable.id,
+        title: oraConversationsTable.title,
+        titleSource: oraConversationsTable.titleSource,
         summary: oraConversationsTable.summary,
         summaryMsgCount: oraConversationsTable.summaryMsgCount,
       });
@@ -257,78 +382,22 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
     }
     res.json({ ok: true });
 
-    // Cross-conversation recall (single writer): keep a rolling, model-generated
-    // summary of this conversation so another conversation can recall its gist.
-    // This PUT is the ONLY place that writes ora_conversations.summary, so there
-    // is no double-write race. Best-effort and fully detached from the response:
-    // it never blocks the save and never throws into the request.
+    // Background: update cross-conversation recall summary (throttled)
     void maybeUpdateConversationSummary(userId, row.id, messages, row.summary, row.summaryMsgCount);
+
+    // Background: generate a smart title when the conversation only has a
+    // client-truncated title and now has at least one user+assistant pair
+    if (row.titleSource === "client") {
+      void maybeGenerateSmartTitle(userId, row.id, messages);
+    }
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to save messages");
     res.status(500).json({ error: "Failed to save conversation" });
   }
 });
 
-/**
- * Throttled, best-effort rolling-summary updater for a single conversation.
- *
- * Only the persisted user/assistant turns with real content count. We
- * (re)generate the summary when there are at least 2 turns AND either no summary
- * exists yet, or at least 3 new turns have accumulated since the last summary —
- * so we don't call the model on every keystroke-debounced save.
- *
- * Never throws: any failure is logged and swallowed so transcript saving and
- * the chat reply are unaffected.
- */
-async function maybeUpdateConversationSummary(
-  userId: string,
-  conversationId: number,
-  rawMessages: { role: "user" | "assistant"; content: string }[],
-  priorSummary: string | null,
-  priorCount: number,
-): Promise<void> {
-  try {
-    const turns = rawMessages.filter(
-      (m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0,
-    );
-    if (turns.length < 2) return;
-
-    const hasSummary = (priorSummary ?? "").trim().length > 0;
-    const newTurnCount = turns.length - priorCount;
-    if (hasSummary && newTurnCount < 3) return;
-
-    const { updateConversationSummary } = await import("../lib/public-ai/conversation-summary");
-    const userTier = await resolveTierForUser(userId);
-    // When we already have a summary, only fold in the turns added since it was
-    // generated; otherwise summarise the whole (bounded) conversation.
-    const source = hasSummary ? turns.slice(priorCount) : turns;
-    if (source.length === 0) return;
-
-    const summary = await updateConversationSummary({
-      priorSummary: priorSummary ?? "",
-      newMessages: source.slice(-40).map((m) => ({ role: m.role, content: m.content })),
-      subscriptionTier: userTier.tier,
-    });
-    if (!summary || summary.trim().length === 0) return;
-
-    await db
-      .update(oraConversationsTable)
-      .set({
-        summary,
-        summaryMsgCount: turns.length,
-        summaryUpdatedAt: new Date(),
-      })
-      .where(eq(oraConversationsTable.id, conversationId));
-  } catch (err) {
-    logger.warn(
-      { component: "ora-conversations", err, conversationId },
-      "Rolling conversation summary update failed (non-fatal)",
-    );
-  }
-}
-
-// Soft-delete a conversation.
-router.delete("/ora/conversations/:id", async (req, res) => {
+// Restore an archived conversation (clears archivedAt).
+router.patch("/ora/conversations/:id/restore", async (req, res) => {
   const userId = req.userId!;
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
@@ -338,21 +407,71 @@ router.delete("/ora/conversations/:id", async (req, res) => {
   try {
     const [row] = await db
       .update(oraConversationsTable)
-      .set({ archivedAt: new Date() })
+      .set({ archivedAt: null, updatedAt: new Date() })
       .where(
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
-          // Support Mode conversations are isolated (Task #1312). A support-surface
-          // id matches nothing here, so the endpoint 404s instead of silently
-          // reporting success (Task #1314).
           eq(oraConversationsTable.surface, "normal"),
+          isNotNull(oraConversationsTable.archivedAt),
         ),
       )
       .returning({ id: oraConversationsTable.id });
     if (!row) {
-      res.status(404).json({ error: "Conversation not found" });
+      res.status(404).json({ error: "Conversation not found or not archived" });
       return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to restore conversation");
+    res.status(500).json({ error: "Failed to restore conversation" });
+  }
+});
+
+// Soft-delete a conversation (sets archivedAt). Add ?permanent=true for hard delete.
+router.delete("/ora/conversations/:id", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid conversation id" });
+    return;
+  }
+  const permanent = req.query.permanent === "true";
+
+  try {
+    if (permanent) {
+      // Hard delete — no recovery
+      const [row] = await db
+        .delete(oraConversationsTable)
+        .where(
+          and(
+            eq(oraConversationsTable.id, id),
+            eq(oraConversationsTable.userId, userId),
+            eq(oraConversationsTable.surface, "normal"),
+          ),
+        )
+        .returning({ id: oraConversationsTable.id });
+      if (!row) {
+        res.status(404).json({ error: "Conversation not found" });
+        return;
+      }
+    } else {
+      // Soft-delete (move to archive)
+      const [row] = await db
+        .update(oraConversationsTable)
+        .set({ archivedAt: new Date() })
+        .where(
+          and(
+            eq(oraConversationsTable.id, id),
+            eq(oraConversationsTable.userId, userId),
+            eq(oraConversationsTable.surface, "normal"),
+          ),
+        )
+        .returning({ id: oraConversationsTable.id });
+      if (!row) {
+        res.status(404).json({ error: "Conversation not found" });
+        return;
+      }
     }
     res.json({ ok: true });
   } catch (err) {
@@ -375,6 +494,65 @@ router.delete("/ora/conversations", async (req, res) => {
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to clear conversations");
     res.status(500).json({ error: "Failed to clear conversations" });
+  }
+});
+
+/* ─── User Settings (cross-device last-active conversation sync) ─────────── */
+
+const patchSettingsSchema = z.object({
+  lastConversationId: z.number().int().positive().nullable().optional(),
+});
+
+// Get the signed-in user's Ora settings.
+router.get("/ora/settings", async (req, res) => {
+  const userId = req.userId!;
+  try {
+    const [row] = await db
+      .select()
+      .from(oraUserSettingsTable)
+      .where(eq(oraUserSettingsTable.userId, userId));
+    // Return empty settings object if no row yet — non-error, just first visit
+    res.json({ settings: (row?.settings as Record<string, unknown>) ?? {} });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to get user settings");
+    res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+// Save/merge Ora settings for the signed-in user.
+router.patch("/ora/settings", async (req, res) => {
+  const userId = req.userId!;
+  const parsed = patchSettingsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  try {
+    // Merge the new values into the existing settings jsonb using jsonb || operator
+    const patch = Object.fromEntries(
+      Object.entries(parsed.data).filter(([, v]) => v !== undefined),
+    );
+    if (Object.keys(patch).length === 0) {
+      res.json({ ok: true });
+      return;
+    }
+
+    await db
+      .insert(oraUserSettingsTable)
+      .values({ userId, settings: patch, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: oraUserSettingsTable.userId,
+        set: {
+          settings: sql`ora_user_settings.settings || ${JSON.stringify(patch)}::jsonb`,
+          updatedAt: new Date(),
+        },
+      });
+
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to save user settings");
+    res.status(500).json({ error: "Failed to save settings" });
   }
 });
 
@@ -487,8 +665,7 @@ router.delete("/ora/projects/:id", async (req, res) => {
       .where(
         and(eq(oraConversationsTable.projectId, id), eq(oraConversationsTable.userId, userId)),
       );
-    // Remove this project's persistent memories — they are scoped to the project
-    // and must not survive (or leak into user-level retrieval) once it's gone.
+    // Remove this project's persistent memories
     await db
       .update(knowledgeEntriesTable)
       .set({ archivedAt: new Date() })
@@ -506,5 +683,142 @@ router.delete("/ora/projects/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to delete project" });
   }
 });
+
+/* ─── Background: rolling conversation summary ────────────────────────────── */
+
+/**
+ * Throttled, best-effort rolling-summary updater for a single conversation.
+ *
+ * Only the persisted user/assistant turns with real content count. We
+ * (re)generate the summary when there are at least 2 turns AND either no summary
+ * exists yet, or at least 3 new turns have accumulated since the last summary —
+ * so we don't call the model on every keystroke-debounced save.
+ *
+ * Never throws: any failure is logged and swallowed.
+ */
+async function maybeUpdateConversationSummary(
+  userId: string,
+  conversationId: number,
+  rawMessages: { role: "user" | "assistant"; content: string }[],
+  priorSummary: string | null,
+  priorCount: number,
+): Promise<void> {
+  try {
+    const turns = rawMessages.filter(
+      (m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0,
+    );
+    if (turns.length < 2) return;
+
+    const hasSummary = (priorSummary ?? "").trim().length > 0;
+    const newTurnCount = turns.length - priorCount;
+    if (hasSummary && newTurnCount < 3) return;
+
+    const { updateConversationSummary } = await import("../lib/public-ai/conversation-summary");
+    const userTier = await resolveTierForUser(userId);
+    const source = hasSummary ? turns.slice(priorCount) : turns;
+    if (source.length === 0) return;
+
+    const summary = await updateConversationSummary({
+      priorSummary: priorSummary ?? "",
+      newMessages: source.slice(-40).map((m) => ({ role: m.role, content: m.content })),
+      subscriptionTier: userTier.tier,
+    });
+    if (!summary || summary.trim().length === 0) return;
+
+    await db
+      .update(oraConversationsTable)
+      .set({ summary, summaryMsgCount: turns.length, summaryUpdatedAt: new Date() })
+      .where(eq(oraConversationsTable.id, conversationId));
+  } catch (err) {
+    logger.warn(
+      { component: "ora-conversations", err, conversationId },
+      "Rolling conversation summary update failed (non-fatal)",
+    );
+  }
+}
+
+/* ─── Background: async smart title generation (T003) ────────────────────── */
+
+/**
+ * Generate a concise 4-6 word title for a conversation after the first
+ * assistant reply arrives, replacing the raw client-truncated title.
+ *
+ * Guards:
+ *   - Only runs when titleSource === 'client' (user rename = 'user', AI = 'ai')
+ *   - Requires at least one complete user+assistant exchange
+ *   - Never blocks the PUT /messages response (fire-and-forget)
+ *   - Never runs for support-surface or temporary chats
+ *   - Skips when the conversation already has a good title (> 30 chars, i.e.
+ *     the user typed something meaningful as their first message)
+ */
+async function maybeGenerateSmartTitle(
+  userId: string,
+  conversationId: number,
+  messages: { role: string; content: string; [k: string]: unknown }[],
+): Promise<void> {
+  try {
+    const userMsg = messages.find((m) => m.role === "user");
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    if (!userMsg || !assistantMsg) return;
+
+    // Only generate when we have a short auto-derived title (≤ 60 chars) or no title
+    const [current] = await db
+      .select({ title: oraConversationsTable.title, titleSource: oraConversationsTable.titleSource })
+      .from(oraConversationsTable)
+      .where(
+        and(
+          eq(oraConversationsTable.id, conversationId),
+          eq(oraConversationsTable.userId, userId),
+        ),
+      );
+    if (!current) return;
+    // Re-check titleSource — might have changed since the PUT /messages returned
+    if (current.titleSource !== "client") return;
+
+    const { createChatCompletion } = await import("../lib/ai-providers");
+    const userTier = await resolveTierForUser(userId);
+
+    const userText = String(userMsg.content).slice(0, 400);
+    const assistantText = String(assistantMsg.content).slice(0, 400);
+
+    const result = await createChatCompletion({
+      provider: "openai",
+      model: "gpt-5-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Generate a concise conversation title (4-6 words, no punctuation, no quotes). Respond with the title only.",
+        },
+        {
+          role: "user",
+          content: `User said: "${userText}"\n\nAssistant replied: "${assistantText}"`,
+        },
+      ],
+      max_completion_tokens: 20,
+    });
+
+    const title = result?.choices?.[0]?.message?.content?.trim();
+    if (!title || title.length < 3 || title.length > MAX_TITLE_LEN) return;
+
+    // Only update if titleSource is still 'client' (prevent race with user rename)
+    await db
+      .update(oraConversationsTable)
+      .set({ title, titleSource: "ai", updatedAt: new Date() })
+      .where(
+        and(
+          eq(oraConversationsTable.id, conversationId),
+          eq(oraConversationsTable.userId, userId),
+          eq(oraConversationsTable.titleSource, "client"),
+        ),
+      );
+  } catch (err) {
+    // Non-fatal: smart title gen failures should never surface to the user
+    logger.warn(
+      { component: "ora-conversations", err, conversationId },
+      "Smart title generation failed (non-fatal)",
+    );
+  }
+}
 
 export default router;

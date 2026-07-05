@@ -94,6 +94,8 @@ export function OraConversationsProvider({
   const activeProjectIdRef = useRef<number | null>(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const creatingPromiseRef = useRef<Promise<number | null> | null>(null);
+  // Track whether we've synced last-active from server settings on mount.
+  const lastActiveSyncedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) {
@@ -108,7 +110,10 @@ export function OraConversationsProvider({
         authFetch(`${BASE}/api/ora/projects`),
       ]);
       if (convRes.ok) {
-        const data = (await convRes.json()) as { conversations: OraConversationSummary[] };
+        const data = (await convRes.json()) as {
+          conversations: OraConversationSummary[];
+          hasMore?: boolean;
+        };
         setConversations(data.conversations);
         // If the stored current id no longer exists, drop it.
         if (
@@ -133,6 +138,37 @@ export function OraConversationsProvider({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // After the first load, sync the last-active conversation from server settings
+  // so the user picks up where they left off (e.g. different browser/device).
+  useEffect(() => {
+    if (loading) return;
+    if (!isSignedIn) return;
+    if (lastActiveSyncedRef.current) return;
+    lastActiveSyncedRef.current = true;
+    // Only apply if there's no locally-stored id already.
+    if (currentIdRef.current != null) return;
+    void (async () => {
+      try {
+        const res = await authFetch(`${BASE}/api/ora/settings`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { settings?: { lastConversationId?: number | null } };
+        const lastId = data.settings?.lastConversationId ?? null;
+        if (lastId == null) return;
+        if (currentIdRef.current != null) return; // user already selected something
+        // Confirm the id still exists in the loaded list.
+        setConversations((prev) => {
+          if (prev.some((c) => c.id === lastId)) {
+            setCurrentConversationId(lastId);
+            storeCurrentId(lastId);
+          }
+          return prev;
+        });
+      } catch {
+        /* best-effort */
+      }
+    })();
+  }, [loading, isSignedIn]);
 
   // When arriving from the dedicated "New project" page, open a fresh chat
   // scoped to that project so the first message is saved under it (not as a
@@ -185,12 +221,25 @@ export function OraConversationsProvider({
     }
   }, [activeProjectId, conversations]);
 
-  const selectConversation = useCallback((id: number | null) => {
-    // Selecting an existing conversation clears any pending new-chat scope.
-    pendingProjectIdRef.current = undefined;
-    setCurrentConversationId(id);
-    storeCurrentId(id);
-  }, []);
+  const selectConversation = useCallback(
+    (id: number | null) => {
+      // Selecting an existing conversation clears any pending new-chat scope.
+      pendingProjectIdRef.current = undefined;
+      setCurrentConversationId(id);
+      storeCurrentId(id);
+      // Fire-and-forget: sync the last-active id to server settings.
+      if (id != null && isSignedIn) {
+        void authFetch(`${BASE}/api/ora/settings`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lastConversationId: id }),
+        }).catch(() => {
+          /* best-effort */
+        });
+      }
+    },
+    [isSignedIn],
+  );
 
   const newConversation = useCallback((projectId?: number | null) => {
     // `projectId` may be a number (scope to it), null (explicit standalone) or
@@ -254,7 +303,7 @@ export function OraConversationsProvider({
         await authFetch(`${BASE}/api/ora/conversations/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: title.trim().slice(0, 120) || null }),
+          body: JSON.stringify({ title: title.trim().slice(0, 120) || null, titleSource: "user" }),
         });
         await refresh();
       } catch {
@@ -272,6 +321,50 @@ export function OraConversationsProvider({
           setCurrentConversationId(null);
           storeCurrentId(null);
         }
+        await refresh();
+      } catch {
+        /* best-effort */
+      }
+    },
+    [refresh],
+  );
+
+  const restoreConversation = useCallback(
+    async (id: number) => {
+      try {
+        await authFetch(`${BASE}/api/ora/conversations/${id}/restore`, { method: "PATCH" });
+        await refresh();
+      } catch {
+        /* best-effort */
+      }
+    },
+    [refresh],
+  );
+
+  const permanentDeleteConversation = useCallback(
+    async (id: number) => {
+      try {
+        await authFetch(`${BASE}/api/ora/conversations/${id}?permanent=true`, { method: "DELETE" });
+        if (currentIdRef.current === id) {
+          setCurrentConversationId(null);
+          storeCurrentId(null);
+        }
+        await refresh();
+      } catch {
+        /* best-effort */
+      }
+    },
+    [refresh],
+  );
+
+  const pinConversation = useCallback(
+    async (id: number, pinned: boolean) => {
+      try {
+        await authFetch(`${BASE}/api/ora/conversations/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pinned }),
+        });
         await refresh();
       } catch {
         /* best-effort */
@@ -376,6 +469,9 @@ export function OraConversationsProvider({
     notifyPersisted,
     renameConversation,
     deleteConversation,
+    restoreConversation,
+    permanentDeleteConversation,
+    pinConversation,
     moveConversation,
     createProject,
     renameProject,

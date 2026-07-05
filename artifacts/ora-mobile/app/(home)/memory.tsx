@@ -773,7 +773,7 @@ function HistoryTab() {
   const projectMap = new Map(projects.map((p) => [p.id, p.name]));
   const filtered = search.trim()
     ? conversations.filter((c) =>
-        c.title.toLowerCase().includes(search.toLowerCase()) ||
+        (c.title ?? "").toLowerCase().includes(search.toLowerCase()) ||
         c.preview?.toLowerCase().includes(search.toLowerCase()),
       )
     : conversations;
@@ -852,7 +852,7 @@ function HistoryTab() {
                   </Pressable>
                   <View style={{ flexDirection: "row", gap: 16, marginTop: 2 }}>
                     <Pressable
-                      onPress={() => { setRenamingId(conv.id); setRenameValue(conv.title); }}
+                      onPress={() => { setRenamingId(conv.id); setRenameValue(conv.title ?? ""); }}
                       style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
                       hitSlop={6}
                     >
@@ -860,7 +860,7 @@ function HistoryTab() {
                       <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Rename</Text>
                     </Pressable>
                     <Pressable
-                      onPress={() => handleDelete(conv.id, conv.title)}
+                      onPress={() => handleDelete(conv.id, conv.title ?? "")}
                       style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
                       hitSlop={6}
                     >

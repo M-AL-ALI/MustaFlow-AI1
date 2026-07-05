@@ -60,6 +60,9 @@ import {
   VolumeX,
   X,
   Zap,
+  Pin,
+  PinOff,
+  Search,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -113,6 +116,12 @@ import {
   createConversation,
   createProject,
   deleteConversation,
+  restoreConversation,
+  permanentDeleteConversation,
+  pinConversation,
+  listArchivedConversations,
+  getOraUserSettings,
+  patchOraUserSettings,
   deleteProject,
   editImage,
   exportFile,
@@ -2082,6 +2091,8 @@ export default function OraChatScreen() {
       try {
         const detail = await getConversation(id);
         setConversationId(id);
+        // Sync last-active to server settings (fire-and-forget).
+        void patchOraUserSettings({ lastConversationId: id }).catch(() => {});
         // Follow the loaded chat's scope so a subsequent "new chat" stays in the
         // same project (mirrors the website's route-as-source-of-truth).
         setActiveProjectId(detail.projectId ?? null);
@@ -3274,6 +3285,12 @@ export default function OraChatScreen() {
         onRenameProject={openRenameProject}
         onDeleteProject={handleDeleteProject}
         onMoveConversation={(conv) => setMoveTarget(conv)}
+        onPinConversation={async (id, pinned) => {
+          try {
+            await pinConversation(id, pinned);
+            void refreshChatLists();
+          } catch { /* best-effort */ }
+        }}
       />
 
       <MoveConversationSheet
@@ -3996,6 +4013,7 @@ function ConversationRow({
   onSelect,
   onDelete,
   onMove,
+  onPin,
 }: {
   conv: OraConversationSummary;
   active: boolean;
@@ -4003,8 +4021,12 @@ function ConversationRow({
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
   onMove: (conversation: OraConversationSummary) => void;
+  onPin?: (id: number, pinned: boolean) => void;
 }) {
   const c = useColors();
+  const isPinned = conv.pinnedAt != null;
+  const hasBadges =
+    conv.metaHasImages || conv.metaHasGeneratedFiles || conv.metaHasSources || conv.metaHasVoice;
   return (
     <View
       style={{
@@ -4018,7 +4040,11 @@ function ConversationRow({
         backgroundColor: active ? c.accent : "transparent",
       }}
     >
-      <MessageSquare size={16} color={c.mutedForeground} />
+      {isPinned ? (
+        <Pin size={15} color={c.mutedForeground} />
+      ) : (
+        <MessageSquare size={16} color={c.mutedForeground} />
+      )}
       <Pressable
         style={{ flex: 1 }}
         onPress={() => onSelect(conv.id)}
@@ -4036,7 +4062,37 @@ function ConversationRow({
             {conv.preview}
           </Text>
         ) : null}
+        {hasBadges ? (
+          <View style={{ flexDirection: "row", gap: 4, marginTop: 3 }}>
+            {conv.metaHasImages ? (
+              <ImageIcon size={11} color={c.mutedForeground} />
+            ) : null}
+            {conv.metaHasGeneratedFiles ? (
+              <FileText size={11} color={c.mutedForeground} />
+            ) : null}
+            {conv.metaHasSources ? (
+              <Globe size={11} color={c.mutedForeground} />
+            ) : null}
+            {conv.metaHasVoice ? (
+              <Mic size={11} color={c.mutedForeground} />
+            ) : null}
+          </View>
+        ) : null}
       </Pressable>
+      {onPin ? (
+        <Pressable
+          onPress={() => onPin(conv.id, !isPinned)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isPinned ? `Unpin ${conv.title || "chat"}` : `Pin ${conv.title || "chat"}`}
+        >
+          {isPinned ? (
+            <PinOff size={15} color={c.mutedForeground} />
+          ) : (
+            <Pin size={15} color={c.mutedForeground} />
+          )}
+        </Pressable>
+      ) : null}
       <Pressable
         onPress={() => onMove(conv)}
         hitSlop={8}
@@ -4073,6 +4129,7 @@ function ChatsDrawer({
   onRenameProject,
   onDeleteProject,
   onMoveConversation,
+  onPinConversation,
 }: {
   visible: boolean;
   loading: boolean;
@@ -4089,10 +4146,12 @@ function ChatsDrawer({
   onRenameProject: (project: OraProjectSummary) => void;
   onDeleteProject: (project: OraProjectSummary) => void;
   onMoveConversation: (conversation: OraConversationSummary) => void;
+  onPinConversation: (id: number, pinned: boolean) => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Always expand the active project when it changes (mirrors the website, which
   // keeps the current project open). The user can still manually collapse it.
@@ -4104,7 +4163,15 @@ function ChatsDrawer({
 
   // Standalone chats (no project) live under "Recent"; the rest nest under
   // their project. Server returns projectId per conversation.
-  const standalone = conversations.filter((cv) => cv.projectId == null);
+  const filtered = searchQuery
+    ? conversations.filter(
+        (cv) =>
+          (cv.title ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (cv.preview ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : conversations;
+  const pinned = filtered.filter((cv) => cv.pinnedAt != null && cv.archivedAt == null);
+  const standalone = filtered.filter((cv) => cv.projectId == null && cv.archivedAt == null);
 
   const labelStyle = {
     color: c.mutedForeground,
@@ -4160,10 +4227,72 @@ function ChatsDrawer({
             </Pressable>
           </View>
 
+          {/* Search */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginHorizontal: 18,
+              marginBottom: 10,
+              paddingHorizontal: 10,
+              borderRadius: 10,
+              backgroundColor: c.muted,
+              gap: 6,
+            }}
+          >
+            <Search size={15} color={c.mutedForeground} />
+            <TextInput
+              placeholder="Search…"
+              placeholderTextColor={c.mutedForeground}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={{
+                flex: 1,
+                paddingVertical: 8,
+                fontSize: 14,
+                color: c.foreground,
+                fontFamily: "Inter_400Regular",
+              }}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+          </View>
+
           {loading ? (
             <ActivityIndicator color={c.primary} style={{ marginVertical: 32 }} />
           ) : (
             <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+              {/* Pinned conversations */}
+              {pinned.length > 0 && (
+                <>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      paddingHorizontal: 12,
+                      paddingTop: 4,
+                      paddingBottom: 6,
+                    }}
+                  >
+                    <Pin size={12} color={c.mutedForeground} />
+                    <Text style={labelStyle}>Pinned</Text>
+                  </View>
+                  {pinned.map((conv) => (
+                    <ConversationRow
+                      key={conv.id}
+                      conv={conv}
+                      active={conv.id === activeId}
+                      onSelect={onSelect}
+                      onDelete={onDelete}
+                      onMove={onMoveConversation}
+                      onPin={onPinConversation}
+                    />
+                  ))}
+                  <View style={{ height: 8 }} />
+                </>
+              )}
+
               <View
                 style={{
                   flexDirection: "row",
@@ -4297,6 +4426,7 @@ function ChatsDrawer({
                               onSelect={onSelect}
                               onDelete={onDelete}
                               onMove={onMoveConversation}
+                              onPin={onPinConversation}
                             />
                           ))
                         ))}
@@ -4345,6 +4475,7 @@ function ChatsDrawer({
                     onSelect={onSelect}
                     onDelete={onDelete}
                     onMove={onMoveConversation}
+                    onPin={onPinConversation}
                   />
                 ))
               )}

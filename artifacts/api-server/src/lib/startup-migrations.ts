@@ -4120,6 +4120,60 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  {
+    name: "ora-history-v2",
+    run: async (client) => {
+      await client.query("BEGIN");
+
+      // Pinned conversations
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ`,
+      );
+
+      // Title source: 'client' (first-msg truncation) | 'ai' (smart title) | 'user' (renamed)
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS title_source TEXT NOT NULL DEFAULT 'client'`,
+      );
+
+      // History metadata badges — stored columns for fast list queries (no jsonb scan on every list)
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS meta_has_images BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS meta_has_generated_files BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS meta_has_sources BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS meta_has_voice BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS meta_last_activity_type TEXT`,
+      );
+
+      // Partial index to speed up pinned-first sorting
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_conversations_pinned_idx ON ora_conversations(user_id, pinned_at) WHERE pinned_at IS NOT NULL`,
+      );
+
+      // Full-text search index on title for fast ?q= queries
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_conversations_title_gin_idx ON ora_conversations USING gin(to_tsvector('english', coalesce(title,'')))`,
+      );
+
+      // Per-user Ora settings (last-active conversation ID, etc.)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ora_user_settings (
+          user_id    TEXT PRIMARY KEY,
+          settings   JSONB NOT NULL DEFAULT '{}',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**
