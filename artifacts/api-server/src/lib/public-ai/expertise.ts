@@ -178,8 +178,10 @@ function tokenBudgetFor(input: {
   const domainBoost = substantiveDomain.has(input.domain) || input.hasDocumentContext ? 250 : 0;
 
   if (input.routeTier === "deep") {
-    const base = input.planTier === "wave" ? 3200 : 2600;
-    return base + domainBoost;
+    const base = input.planTier === "wave" ? 2400 : 1800;
+    const specialistBoost = substantiveDomain.has(input.domain) ? 200 : 0;
+    const documentBoost = input.hasDocumentContext ? 350 : 0;
+    return base + specialistBoost + documentBoost;
   }
 
   if (input.planTier === "wave") return 2000 + domainBoost;
@@ -227,7 +229,7 @@ function depthGuidance(depth: OraAnswerDepth): string {
     case "expert":
       return "Give an expert-level answer: structure the response, compare viable options, surface assumptions and risks, and include a concrete recommendation. Internally check for missing edge cases before finalizing, but do not reveal hidden reasoning.";
     case "deep":
-      return "Give the most thorough answer the question warrants: analyze alternatives, assumptions, edge cases, sequencing, and verification steps. Keep reasoning clear without exposing private chain-of-thought.";
+      return "Give a deep answer with answer-first structure. Analyze alternatives, assumptions, edge cases, sequencing, and verification steps, but keep the length proportional to the task and avoid padded coverage. Keep reasoning clear without exposing private chain-of-thought.";
   }
 }
 

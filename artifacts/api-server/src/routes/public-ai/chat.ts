@@ -19,11 +19,7 @@ import {
   summarizePastedReferenceSignals,
 } from "../../lib/public-ai/prompt";
 
-import {
-  classifyIntent,
-  CLASSIFIER_FALLBACK,
-  type OraTopic,
-} from "../../lib/public-ai/classifier";
+import { classifyIntent, CLASSIFIER_FALLBACK, type OraTopic } from "../../lib/public-ai/classifier";
 import {
   routeOraMessage,
   checkToolAccess,
@@ -125,7 +121,7 @@ async function refundOraQuotaFor(
   await refundOraQuota(authed.userId, quotaKind);
 }
 
-const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
+const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Be careful and substantive, but do not be verbose by default. Answer first with the clearest recommendation or conclusion, then add the reasoning, trade-offs, edge cases, sequencing, and verification steps only as much as the task warrants. Prefer concrete specifics (data models, flows, calculations, risks, next actions) over generalities. Keep length proportional to complexity: simple comparisons should be compact, medium planning answers should be structured but not padded, and only genuinely complex analysis should be long. Treat the token budget as a ceiling, not a target. Stop when the useful answer is complete.`;
 
 /**
  * Prepended to a reply when live web search failed and we answered from the
@@ -1720,7 +1716,9 @@ router.post("/public-ai/chat", async (req, res) => {
   // Fast-lane limits to the last 3 turns (6 messages) to minimise prompt size.
   const historyMessages: Array<{ role: "user" | "assistant"; content: string }> =
     referenceChatHistory
-      ? messages.slice(isInstantFastLane ? -6 : -20).map((m) => ({ role: m.role, content: m.content }))
+      ? messages
+          .slice(isInstantFastLane ? -6 : -20)
+          .map((m) => ({ role: m.role, content: m.content }))
       : [];
 
   // Await the context builders that were started in parallel after auth.
@@ -1737,7 +1735,7 @@ router.post("/public-ai/chat", async (req, res) => {
       ? withTimeout(
           buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId),
           CTX_BUDGET_MS,
-          ""
+          "",
         )
       : Promise.resolve(""),
     withTimeout(earlyProfileP, CTX_BUDGET_MS, ""),
@@ -1753,7 +1751,8 @@ router.post("/public-ai/chat", async (req, res) => {
   if (referenceChatHistory && !temporary && summarizeMessages.length > 0) {
     const priorForSummary = conversationSummary;
     summaryPromise = (async () => {
-      const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
+      const { updateConversationSummary } =
+        await import("../../lib/public-ai/conversation-summary");
       return updateConversationSummary({
         priorSummary: priorForSummary,
         newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -2375,7 +2374,9 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Fast-lane limits to the last 3 turns (6 messages) to minimise prompt size.
   const historyMessages: Array<{ role: "user" | "assistant"; content: string }> =
     referenceChatHistory
-      ? messages.slice(isInstantFastLane ? -6 : -20).map((m) => ({ role: m.role, content: m.content }))
+      ? messages
+          .slice(isInstantFastLane ? -6 : -20)
+          .map((m) => ({ role: m.role, content: m.content }))
       : [];
 
   // Await the context builders that were started in parallel with auth (above).
@@ -2396,7 +2397,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       ? withTimeout(
           buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId),
           CTX_BUDGET_MS,
-          ""
+          "",
         )
       : Promise.resolve(""),
     withTimeout(earlyProfileP, CTX_BUDGET_MS, ""),

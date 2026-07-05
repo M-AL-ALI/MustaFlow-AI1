@@ -199,4 +199,50 @@ describe("buildOraExpertiseProfile", () => {
 
     expect(withDocs.maxTokens).toBeGreaterThan(withoutDocs.maxTokens);
   });
+
+  it("right-sizes Deep mode budgets while preserving the Core < Wave plan ladder", () => {
+    const base = {
+      message: "compare Postgres and MongoDB for a SaaS app",
+      topic: "technical" as const,
+      routeTier: "deep" as const,
+      intent: "premium" as const,
+      confidence: "high" as const,
+      hasDocumentContext: false,
+    };
+
+    const core = buildOraExpertiseProfile({ ...base, planTier: "core" });
+    const wave = buildOraExpertiseProfile({ ...base, planTier: "wave" });
+
+    expect(core.depth).toBe("deep");
+    expect(wave.depth).toBe("deep");
+    expect(core.maxTokens).toBe(2000);
+    expect(wave.maxTokens).toBe(2600);
+    expect(wave.maxTokens).toBeGreaterThan(core.maxTokens);
+    expect(wave.systemAddendum).toContain("answer-first");
+    expect(wave.systemAddendum).toContain("avoid padded coverage");
+  });
+
+  it("keeps extra Deep budget for uploaded-document context without restoring padded ceilings", () => {
+    const withoutDocs = buildOraExpertiseProfile({
+      message: "analyze the risks in this agreement",
+      topic: "general",
+      planTier: "core",
+      routeTier: "deep",
+      intent: "premium",
+      confidence: "high",
+      hasDocumentContext: false,
+    });
+    const withDocs = buildOraExpertiseProfile({
+      message: "analyze the risks in this agreement",
+      topic: "general",
+      planTier: "core",
+      routeTier: "deep",
+      intent: "premium",
+      confidence: "high",
+      hasDocumentContext: true,
+    });
+
+    expect(withDocs.maxTokens).toBeGreaterThan(withoutDocs.maxTokens);
+    expect(withDocs.maxTokens).toBeLessThan(2600);
+  });
 });
