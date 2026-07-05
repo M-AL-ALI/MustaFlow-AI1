@@ -39,12 +39,15 @@ import {
   createMemory,
   deleteConversation,
   deleteMemory,
+  listArchivedConversations,
   getMemoryUsage,
   getProfile,
   listConversations,
   listMemories,
   listProjects,
+  permanentDeleteConversation,
   renameConversation,
+  restoreConversation,
   restoreMemory,
   updateMemory,
   updateProfile,
@@ -104,7 +107,10 @@ export default function MemoryScreen() {
   if (!isSignedIn) {
     return (
       <View style={{ flex: 1, backgroundColor: c.background }}>
-        <ScreenHeader title="Memory" subtitle="Manage what Ora knows about you and your conversation history." />
+        <ScreenHeader
+          title="Memory"
+          subtitle="Manage what Ora knows about you and your conversation history."
+        />
         <SignInWall
           title="Sign in for Memory"
           description="Your profile and saved memories are stored with your account."
@@ -115,15 +121,56 @@ export default function MemoryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader title="Memory" subtitle="Manage what Ora knows about you and your conversation history." />
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}>
-        <Pill label="Profile" icon={User} active={tab === "profile"} onPress={() => setTab("profile")} />
-        <Pill label="Saved Memories" icon={Bookmark} active={tab === "memories"} onPress={() => setTab("memories")} />
-        <Pill label="Preferences" icon={Settings2} active={tab === "preferences"} onPress={() => setTab("preferences")} />
-        <Pill label="History" icon={History} active={tab === "history"} onPress={() => setTab("history")} />
-        <Pill label="Data Controls" icon={Shield} active={tab === "data-controls"} onPress={() => setTab("data-controls")} />
+      <ScreenHeader
+        title="Memory"
+        subtitle="Manage what Ora knows about you and your conversation history."
+      />
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: "wrap",
+          gap: 8,
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+        }}
+      >
+        <Pill
+          label="Profile"
+          icon={User}
+          active={tab === "profile"}
+          onPress={() => setTab("profile")}
+        />
+        <Pill
+          label="Saved Memories"
+          icon={Bookmark}
+          active={tab === "memories"}
+          onPress={() => setTab("memories")}
+        />
+        <Pill
+          label="Preferences"
+          icon={Settings2}
+          active={tab === "preferences"}
+          onPress={() => setTab("preferences")}
+        />
+        <Pill
+          label="History"
+          icon={History}
+          active={tab === "history"}
+          onPress={() => setTab("history")}
+        />
+        <Pill
+          label="Data Controls"
+          icon={Shield}
+          active={tab === "data-controls"}
+          onPress={() => setTab("data-controls")}
+        />
         {activeProjectId != null && (
-          <Pill label="Project" icon={FolderOpen} active={tab === "project"} onPress={() => setTab("project")} />
+          <Pill
+            label="Project"
+            icon={FolderOpen}
+            active={tab === "project"}
+            onPress={() => setTab("project")}
+          />
         )}
       </View>
       {tab === "profile" ? (
@@ -177,8 +224,14 @@ function ProfileTab() {
   if (loading) return <Loading label="Loading profile…" />;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
           Share details so Ora can tailor every reply to you. This is private to your account.
         </Text>
@@ -208,10 +261,19 @@ function UsageMeter({ usage }: { usage: MemoryUsage | null }) {
     <View style={{ gap: 6 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Memory capacity</Text>
-        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{usage.count} / {usage.limit}</Text>
+        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+          {usage.count} / {usage.limit}
+        </Text>
       </View>
       <View style={{ height: 4, borderRadius: 2, backgroundColor: c.muted, overflow: "hidden" }}>
-        <View style={{ height: 4, borderRadius: 2, width: `${pct}%`, backgroundColor: pct >= 90 ? "#f87171" : c.primary }} />
+        <View
+          style={{
+            height: 4,
+            borderRadius: 2,
+            width: `${pct}%`,
+            backgroundColor: pct >= 90 ? "#f87171" : c.primary,
+          }}
+        />
       </View>
     </View>
   );
@@ -223,15 +285,31 @@ function CategoryBadge({ category }: { category: string | null | undefined }) {
   const meta = categoryMeta(category);
   if (!meta) return null;
   return (
-    <View style={{ backgroundColor: `${meta.color}22`, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: "flex-start" }}>
-      <Text style={{ color: meta.color, fontSize: 11, fontFamily: "Inter_500Medium" }}>{meta.label}</Text>
+    <View
+      style={{
+        backgroundColor: `${meta.color}22`,
+        borderRadius: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        alignSelf: "flex-start",
+      }}
+    >
+      <Text style={{ color: meta.color, fontSize: 11, fontFamily: "Inter_500Medium" }}>
+        {meta.label}
+      </Text>
     </View>
   );
 }
 
 /* ── Category selector ───────────────────────────────────────────────────── */
 
-function CategorySelector({ value, onSelect }: { value: string | null; onSelect: (v: string | null) => void }) {
+function CategorySelector({
+  value,
+  onSelect,
+}: {
+  value: string | null;
+  onSelect: (v: string | null) => void;
+}) {
   const c = useColors();
   return (
     <View style={{ gap: 4 }}>
@@ -239,9 +317,24 @@ function CategorySelector({ value, onSelect }: { value: string | null; onSelect:
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
         <Pressable
           onPress={() => onSelect(null)}
-          style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: value == null ? c.primary : c.border, backgroundColor: value == null ? `${c.primary}18` : c.muted }}
+          style={{
+            paddingVertical: 4,
+            paddingHorizontal: 10,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: value == null ? c.primary : c.border,
+            backgroundColor: value == null ? `${c.primary}18` : c.muted,
+          }}
         >
-          <Text style={{ color: value == null ? c.primary : c.mutedForeground, fontSize: 12, fontFamily: value == null ? "Inter_600SemiBold" : "Inter_400Regular" }}>None</Text>
+          <Text
+            style={{
+              color: value == null ? c.primary : c.mutedForeground,
+              fontSize: 12,
+              fontFamily: value == null ? "Inter_600SemiBold" : "Inter_400Regular",
+            }}
+          >
+            None
+          </Text>
         </Pressable>
         {ORA_MEMORY_CATEGORIES.map((cat) => {
           const active = value === cat.value;
@@ -249,9 +342,24 @@ function CategorySelector({ value, onSelect }: { value: string | null; onSelect:
             <Pressable
               key={cat.value}
               onPress={() => onSelect(active ? null : cat.value)}
-              style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: active ? cat.color : c.border, backgroundColor: active ? `${cat.color}22` : c.muted }}
+              style={{
+                paddingVertical: 4,
+                paddingHorizontal: 10,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: active ? cat.color : c.border,
+                backgroundColor: active ? `${cat.color}22` : c.muted,
+              }}
             >
-              <Text style={{ color: active ? cat.color : c.mutedForeground, fontSize: 12, fontFamily: active ? "Inter_600SemiBold" : "Inter_400Regular" }}>{cat.label}</Text>
+              <Text
+                style={{
+                  color: active ? cat.color : c.mutedForeground,
+                  fontSize: 12,
+                  fontFamily: active ? "Inter_600SemiBold" : "Inter_400Regular",
+                }}
+              >
+                {cat.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -276,22 +384,45 @@ function MemoryCard({
   const c = useColors();
   return (
     <Card style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>{memory.title}</Text>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+            {memory.title}
+          </Text>
           <CategoryBadge category={memory.category} />
         </View>
-        <Switch value={memory.enabled} onValueChange={() => onToggle(memory)} trackColor={{ false: c.muted, true: c.primary }} />
+        <Switch
+          value={memory.enabled}
+          onValueChange={() => onToggle(memory)}
+          trackColor={{ false: c.muted, true: c.primary }}
+        />
       </View>
-      <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>{memory.content}</Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+        {memory.content}
+      </Text>
       <View style={{ flexDirection: "row", gap: 16, marginTop: 2 }}>
         {onEdit && (
-          <Pressable onPress={() => onEdit(memory)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} hitSlop={6}>
+          <Pressable
+            onPress={() => onEdit(memory)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+            hitSlop={6}
+          >
             <Pencil size={14} color={c.mutedForeground} />
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Edit</Text>
           </Pressable>
         )}
-        <Pressable onPress={() => onDelete(memory.id)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} hitSlop={6}>
+        <Pressable
+          onPress={() => onDelete(memory.id)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+          hitSlop={6}
+        >
           <Trash2 size={14} color="#f87171" />
           <Text style={{ color: "#f87171", fontSize: 13 }}>Delete</Text>
         </Pressable>
@@ -314,19 +445,52 @@ function SupersededCard({
   const c = useColors();
   return (
     <Card style={{ gap: 8, opacity: 0.6 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <Text style={{ color: c.mutedForeground, fontFamily: "Inter_600SemiBold", fontSize: 15, flex: 1 }}>{memory.title}</Text>
-        <View style={{ borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: c.muted }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
+        <Text
+          style={{
+            color: c.mutedForeground,
+            fontFamily: "Inter_600SemiBold",
+            fontSize: 15,
+            flex: 1,
+          }}
+        >
+          {memory.title}
+        </Text>
+        <View
+          style={{
+            borderRadius: 4,
+            paddingHorizontal: 6,
+            paddingVertical: 2,
+            backgroundColor: c.muted,
+          }}
+        >
           <Text style={{ color: c.mutedForeground, fontSize: 11 }}>Superseded</Text>
         </View>
       </View>
-      <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>{memory.content}</Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+        {memory.content}
+      </Text>
       <View style={{ flexDirection: "row", gap: 16, marginTop: 2 }}>
-        <Pressable onPress={() => onRestore(memory)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} hitSlop={6}>
+        <Pressable
+          onPress={() => onRestore(memory)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+          hitSlop={6}
+        >
           <RotateCcw size={14} color={c.primary} />
           <Text style={{ color: c.primary, fontSize: 13 }}>Restore</Text>
         </Pressable>
-        <Pressable onPress={() => onDelete(memory.id)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} hitSlop={6}>
+        <Pressable
+          onPress={() => onDelete(memory.id)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+          hitSlop={6}
+        >
           <Trash2 size={14} color="#f87171" />
           <Text style={{ color: "#f87171", fontSize: 13 }}>Delete</Text>
         </Pressable>
@@ -367,32 +531,57 @@ function MemoriesTab() {
     }
   }, []);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const add = useCallback(async () => {
     if (!newTitle.trim() || !newContent.trim()) return;
     setSaving(true);
     try {
       await createMemory(newTitle.trim(), newContent.trim(), null, newCategory);
-      setNewTitle(""); setNewContent(""); setNewCategory(null); setAdding(false);
+      setNewTitle("");
+      setNewContent("");
+      setNewCategory(null);
+      setAdding(false);
       await reload();
-    } catch { /* ignore */ } finally { setSaving(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setSaving(false);
+    }
   }, [newTitle, newContent, newCategory, reload]);
 
   const toggle = useCallback(async (m: OraMemory) => {
     setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: !x.enabled } : x)));
-    try { await updateMemory(m.id, { enabled: !m.enabled }); }
-    catch { setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x))); }
+    try {
+      await updateMemory(m.id, { enabled: !m.enabled });
+    } catch {
+      setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)));
+    }
   }, []);
 
-  const restore = useCallback(async (m: OraMemory) => {
-    setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: true, supersededBy: null } : x)));
-    try { await restoreMemory(m.id); } catch { await reload(); }
-  }, [reload]);
+  const restore = useCallback(
+    async (m: OraMemory) => {
+      setMemories((prev) =>
+        prev.map((x) => (x.id === m.id ? { ...x, enabled: true, supersededBy: null } : x)),
+      );
+      try {
+        await restoreMemory(m.id);
+      } catch {
+        await reload();
+      }
+    },
+    [reload],
+  );
 
   const remove = useCallback(async (id: number) => {
     setMemories((prev) => prev.filter((x) => x.id !== id));
-    try { await deleteMemory(id); } catch { /* ignore */ }
+    try {
+      await deleteMemory(id);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const startEdit = useCallback((m: OraMemory) => {
@@ -406,10 +595,24 @@ function MemoriesTab() {
     if (editingId == null || !editTitle.trim()) return;
     setEditSaving(true);
     try {
-      await updateMemory(editingId, { title: editTitle.trim(), content: editContent.trim(), category: editCategory });
-      setMemories((prev) => prev.map((x) => x.id === editingId ? { ...x, title: editTitle.trim(), content: editContent.trim(), category: editCategory } : x));
+      await updateMemory(editingId, {
+        title: editTitle.trim(),
+        content: editContent.trim(),
+        category: editCategory,
+      });
+      setMemories((prev) =>
+        prev.map((x) =>
+          x.id === editingId
+            ? { ...x, title: editTitle.trim(), content: editContent.trim(), category: editCategory }
+            : x,
+        ),
+      );
       setEditingId(null);
-    } catch { /* ignore */ } finally { setEditSaving(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setEditSaving(false);
+    }
   }, [editingId, editTitle, editContent, editCategory]);
 
   if (loading) return <Loading label="Loading memories…" />;
@@ -419,10 +622,17 @@ function MemoriesTab() {
   const filtered = categoryFilter ? active.filter((m) => m.category === categoryFilter) : active;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
-          Memories Ora has saved about you. Pause one to keep it without letting Ora reference it, or delete it entirely.
+          Memories Ora has saved about you. Pause one to keep it without letting Ora reference it,
+          or delete it entirely.
         </Text>
 
         <UsageMeter usage={usage} />
@@ -432,19 +642,51 @@ function MemoriesTab() {
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             <Pressable
               onPress={() => setCategoryFilter(null)}
-              style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: categoryFilter == null ? c.primary : c.border, backgroundColor: categoryFilter == null ? `${c.primary}18` : c.muted }}
+              style={{
+                paddingVertical: 4,
+                paddingHorizontal: 10,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: categoryFilter == null ? c.primary : c.border,
+                backgroundColor: categoryFilter == null ? `${c.primary}18` : c.muted,
+              }}
             >
-              <Text style={{ color: categoryFilter == null ? c.primary : c.mutedForeground, fontSize: 12, fontFamily: categoryFilter == null ? "Inter_600SemiBold" : "Inter_400Regular" }}>All</Text>
+              <Text
+                style={{
+                  color: categoryFilter == null ? c.primary : c.mutedForeground,
+                  fontSize: 12,
+                  fontFamily: categoryFilter == null ? "Inter_600SemiBold" : "Inter_400Regular",
+                }}
+              >
+                All
+              </Text>
             </Pressable>
-            {ORA_MEMORY_CATEGORIES.filter((cat) => active.some((m) => m.category === cat.value)).map((cat) => {
+            {ORA_MEMORY_CATEGORIES.filter((cat) =>
+              active.some((m) => m.category === cat.value),
+            ).map((cat) => {
               const active2 = categoryFilter === cat.value;
               return (
                 <Pressable
                   key={cat.value}
                   onPress={() => setCategoryFilter(active2 ? null : cat.value)}
-                  style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: active2 ? cat.color : c.border, backgroundColor: active2 ? `${cat.color}22` : c.muted }}
+                  style={{
+                    paddingVertical: 4,
+                    paddingHorizontal: 10,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: active2 ? cat.color : c.border,
+                    backgroundColor: active2 ? `${cat.color}22` : c.muted,
+                  }}
                 >
-                  <Text style={{ color: active2 ? cat.color : c.mutedForeground, fontSize: 12, fontFamily: active2 ? "Inter_600SemiBold" : "Inter_400Regular" }}>{cat.label}</Text>
+                  <Text
+                    style={{
+                      color: active2 ? cat.color : c.mutedForeground,
+                      fontSize: 12,
+                      fontFamily: active2 ? "Inter_600SemiBold" : "Inter_400Regular",
+                    }}
+                  >
+                    {cat.label}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -455,43 +697,107 @@ function MemoriesTab() {
         {adding ? (
           <Card style={{ gap: 12 }}>
             <TextField label="Title" value={newTitle} onChangeText={setNewTitle} />
-            <TextField label="What should Ora remember?" value={newContent} onChangeText={setNewContent} multiline style={{ minHeight: 80, textAlignVertical: "top" }} />
+            <TextField
+              label="What should Ora remember?"
+              value={newContent}
+              onChangeText={setNewContent}
+              multiline
+              style={{ minHeight: 80, textAlignVertical: "top" }}
+            />
             <CategorySelector value={newCategory} onSelect={setNewCategory} />
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <Button label="Cancel" variant="ghost" onPress={() => { setAdding(false); setNewTitle(""); setNewContent(""); setNewCategory(null); }} style={{ flex: 1 }} />
-              <Button label="Save" onPress={() => void add()} loading={saving} style={{ flex: 1 }} />
+              <Button
+                label="Cancel"
+                variant="ghost"
+                onPress={() => {
+                  setAdding(false);
+                  setNewTitle("");
+                  setNewContent("");
+                  setNewCategory(null);
+                }}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Save"
+                onPress={() => void add()}
+                loading={saving}
+                style={{ flex: 1 }}
+              />
             </View>
           </Card>
         ) : (
-          <Button label="Add a memory" icon={Plus} variant="secondary" onPress={() => setAdding(true)} full />
+          <Button
+            label="Add a memory"
+            icon={Plus}
+            variant="secondary"
+            onPress={() => setAdding(true)}
+            full
+          />
         )}
 
         {/* Edit form */}
         {editingId != null && (
           <Card style={{ gap: 12 }}>
             <TextField label="Title" value={editTitle} onChangeText={setEditTitle} />
-            <TextField label="Content" value={editContent} onChangeText={setEditContent} multiline style={{ minHeight: 80, textAlignVertical: "top" }} />
+            <TextField
+              label="Content"
+              value={editContent}
+              onChangeText={setEditContent}
+              multiline
+              style={{ minHeight: 80, textAlignVertical: "top" }}
+            />
             <CategorySelector value={editCategory} onSelect={setEditCategory} />
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <Button label="Cancel" variant="ghost" onPress={() => setEditingId(null)} style={{ flex: 1 }} />
-              <Button label="Save" onPress={() => void saveEdit()} loading={editSaving} style={{ flex: 1 }} />
+              <Button
+                label="Cancel"
+                variant="ghost"
+                onPress={() => setEditingId(null)}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Save"
+                onPress={() => void saveEdit()}
+                loading={editSaving}
+                style={{ flex: 1 }}
+              />
             </View>
           </Card>
         )}
 
         {active.length === 0 && superseded.length === 0 ? (
-          <EmptyState icon={Bookmark} title="No saved memories" subtitle="Memories help Ora remember important facts across conversations." />
+          <EmptyState
+            icon={Bookmark}
+            title="No saved memories"
+            subtitle="Memories help Ora remember important facts across conversations."
+          />
         ) : (
           <>
             {filtered.map((m) => (
-              <MemoryCard key={m.id} memory={m} onToggle={toggle} onDelete={remove} onEdit={startEdit} />
+              <MemoryCard
+                key={m.id}
+                memory={m}
+                onToggle={toggle}
+                onDelete={remove}
+                onEdit={startEdit}
+              />
             ))}
             {categoryFilter && filtered.length === 0 && (
-              <Text style={{ color: c.mutedForeground, fontSize: 13, textAlign: "center" }}>No memories in this category.</Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 13, textAlign: "center" }}>
+                No memories in this category.
+              </Text>
             )}
             {superseded.length > 0 && (
               <>
-                <Text style={{ color: c.mutedForeground, fontSize: 12, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 4 }}>
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 12,
+                    fontFamily: "Inter_600SemiBold",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    marginTop: 4,
+                  }}
+                >
                   Superseded
                 </Text>
                 {superseded.map((m) => (
@@ -531,32 +837,56 @@ function ProjectMemoriesTab({ projectId }: { projectId: number }) {
     }
   }, [projectId]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const add = useCallback(async () => {
     if (!title.trim() || !content.trim()) return;
     setSaving(true);
     try {
       await createMemory(title.trim(), content.trim(), projectId);
-      setTitle(""); setContent(""); setAdding(false);
+      setTitle("");
+      setContent("");
+      setAdding(false);
       await reload();
-    } catch { /* ignore */ } finally { setSaving(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setSaving(false);
+    }
   }, [title, content, projectId, reload]);
 
   const toggle = useCallback(async (m: OraMemory) => {
     setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: !x.enabled } : x)));
-    try { await updateMemory(m.id, { enabled: !m.enabled }); }
-    catch { setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x))); }
+    try {
+      await updateMemory(m.id, { enabled: !m.enabled });
+    } catch {
+      setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)));
+    }
   }, []);
 
-  const restore = useCallback(async (m: OraMemory) => {
-    setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: true, supersededBy: null } : x)));
-    try { await restoreMemory(m.id); } catch { await reload(); }
-  }, [reload]);
+  const restore = useCallback(
+    async (m: OraMemory) => {
+      setMemories((prev) =>
+        prev.map((x) => (x.id === m.id ? { ...x, enabled: true, supersededBy: null } : x)),
+      );
+      try {
+        await restoreMemory(m.id);
+      } catch {
+        await reload();
+      }
+    },
+    [reload],
+  );
 
   const remove = useCallback(async (id: number) => {
     setMemories((prev) => prev.filter((x) => x.id !== id));
-    try { await deleteMemory(id); } catch { /* ignore */ }
+    try {
+      await deleteMemory(id);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   if (loading) return <Loading label="Loading project memories…" />;
@@ -565,8 +895,14 @@ function ProjectMemoriesTab({ projectId }: { projectId: number }) {
   const superseded = memories.filter((m) => m.supersededBy != null);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
           These memories are scoped to this project and injected into every conversation within it.
         </Text>
@@ -574,24 +910,65 @@ function ProjectMemoriesTab({ projectId }: { projectId: number }) {
         {adding ? (
           <Card style={{ gap: 12 }}>
             <TextField label="Title" value={title} onChangeText={setTitle} />
-            <TextField label="What should Ora remember for this project?" value={content} onChangeText={setContent} multiline style={{ minHeight: 80, textAlignVertical: "top" }} />
+            <TextField
+              label="What should Ora remember for this project?"
+              value={content}
+              onChangeText={setContent}
+              multiline
+              style={{ minHeight: 80, textAlignVertical: "top" }}
+            />
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <Button label="Cancel" variant="ghost" onPress={() => setAdding(false)} style={{ flex: 1 }} />
-              <Button label="Save" onPress={() => void add()} loading={saving} style={{ flex: 1 }} />
+              <Button
+                label="Cancel"
+                variant="ghost"
+                onPress={() => setAdding(false)}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Save"
+                onPress={() => void add()}
+                loading={saving}
+                style={{ flex: 1 }}
+              />
             </View>
           </Card>
         ) : (
-          <Button label="Add project memory" icon={Plus} variant="secondary" onPress={() => setAdding(true)} full />
+          <Button
+            label="Add project memory"
+            icon={Plus}
+            variant="secondary"
+            onPress={() => setAdding(true)}
+            full
+          />
         )}
         {active.length === 0 && superseded.length === 0 ? (
-          <EmptyState icon={FolderOpen} title="No project memories" subtitle="Add memories that apply specifically to this project's conversations." />
+          <EmptyState
+            icon={FolderOpen}
+            title="No project memories"
+            subtitle="Add memories that apply specifically to this project's conversations."
+          />
         ) : (
           <>
-            {active.map((m) => <MemoryCard key={m.id} memory={m} onToggle={toggle} onDelete={remove} />)}
+            {active.map((m) => (
+              <MemoryCard key={m.id} memory={m} onToggle={toggle} onDelete={remove} />
+            ))}
             {superseded.length > 0 && (
               <>
-                <Text style={{ color: c.mutedForeground, fontSize: 12, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 4 }}>Superseded</Text>
-                {superseded.map((m) => <SupersededCard key={m.id} memory={m} onRestore={restore} onDelete={remove} />)}
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 12,
+                    fontFamily: "Inter_600SemiBold",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    marginTop: 4,
+                  }}
+                >
+                  Superseded
+                </Text>
+                {superseded.map((m) => (
+                  <SupersededCard key={m.id} memory={m} onRestore={restore} onDelete={remove} />
+                ))}
               </>
             )}
           </>
@@ -618,10 +995,34 @@ function ToggleRow({
 }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, borderRadius: 8, borderWidth: 1, borderColor: `${c.border}99`, paddingHorizontal: 12, paddingVertical: 10 }}>
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: `${c.border}99`,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+      }}
+    >
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ color: disabled ? c.mutedForeground : c.foreground, fontFamily: "Inter_500Medium", fontSize: 14 }}>{label}</Text>
-        {description ? <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 17 }}>{description}</Text> : null}
+        <Text
+          style={{
+            color: disabled ? c.mutedForeground : c.foreground,
+            fontFamily: "Inter_500Medium",
+            fontSize: 14,
+          }}
+        >
+          {label}
+        </Text>
+        {description ? (
+          <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 17 }}>
+            {description}
+          </Text>
+        ) : null}
       </View>
       <Switch
         value={value}
@@ -661,9 +1062,18 @@ function PreferencesTab() {
       setAutoSaveMemories(false);
     }
   };
-  const handleRefHistory = (v: boolean) => { setRefHistoryLocal(v); setReferenceChatHistory(v); };
-  const handleAutoSave = (v: boolean) => { setAutoSaveLocal(v); setAutoSaveMemories(v); };
-  const handleAskSensitive = (v: boolean) => { setAskSensitiveLocal(v); setAskBeforeSensitive(v); };
+  const handleRefHistory = (v: boolean) => {
+    setRefHistoryLocal(v);
+    setReferenceChatHistory(v);
+  };
+  const handleAutoSave = (v: boolean) => {
+    setAutoSaveLocal(v);
+    setAutoSaveMemories(v);
+  };
+  const handleAskSensitive = (v: boolean) => {
+    setAskSensitiveLocal(v);
+    setAskBeforeSensitive(v);
+  };
 
   if (!loaded) return <Loading label="Loading preferences…" />;
 
@@ -721,13 +1131,20 @@ function HistoryTab() {
   const [projects, setProjects] = useState<OraProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const [convs, projs] = await Promise.all([listConversations(), listProjects()]);
+      const q = search.trim() || undefined;
+      const [convs, projs] = await Promise.all([
+        showArchived
+          ? listArchivedConversations({ q, limit: 100 })
+          : listConversations({ q, limit: 100 }),
+        listProjects(),
+      ]);
       setConversations(convs);
       setProjects(projs);
     } catch {
@@ -735,58 +1152,133 @@ function HistoryTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, showArchived]);
 
-  useEffect(() => { void reload(); }, [reload]);
-
-  const handleDelete = useCallback((id: number, title: string) => {
-    Alert.alert(
-      "Delete conversation",
-      `Delete "${title}"? This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setConversations((prev) => prev.filter((c) => c.id !== id));
-            try { await deleteConversation(id); } catch { await reload(); }
-          },
-        },
-      ],
-    );
+  useEffect(() => {
+    setLoading(true);
+    const handle = setTimeout(() => {
+      void reload();
+    }, 250);
+    return () => clearTimeout(handle);
   }, [reload]);
 
-  const handleRename = useCallback(async (id: number) => {
-    const trimmed = renameValue.trim();
-    if (!trimmed) { setRenamingId(null); return; }
-    setRenameSaving(true);
-    try {
-      await renameConversation(id, trimmed);
-      setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: trimmed } : c)));
-      setRenamingId(null);
-    } catch { /* ignore */ } finally { setRenameSaving(false); }
-  }, [renameValue]);
+  const handleDelete = useCallback(
+    (id: number, title: string) => {
+      Alert.alert(
+        showArchived ? "Permanently delete conversation" : "Archive conversation",
+        showArchived
+          ? `Permanently delete "${title}"? This cannot be undone.`
+          : `Archive "${title}"? You can restore it from Archived conversations.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: showArchived ? "Delete forever" : "Archive",
+            style: "destructive",
+            onPress: async () => {
+              setConversations((prev) => prev.filter((c) => c.id !== id));
+              try {
+                if (showArchived) {
+                  await permanentDeleteConversation(id);
+                } else {
+                  await deleteConversation(id);
+                }
+              } catch {
+                await reload();
+              }
+            },
+          },
+        ],
+      );
+    },
+    [reload, showArchived],
+  );
+
+  const handleRestoreConversation = useCallback(
+    async (id: number) => {
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      try {
+        await restoreConversation(id);
+      } catch {
+        await reload();
+      }
+    },
+    [reload],
+  );
+
+  const handleRename = useCallback(
+    async (id: number) => {
+      const trimmed = renameValue.trim();
+      if (!trimmed) {
+        setRenamingId(null);
+        return;
+      }
+      setRenameSaving(true);
+      try {
+        await renameConversation(id, trimmed);
+        setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: trimmed } : c)));
+        setRenamingId(null);
+      } catch {
+        /* ignore */
+      } finally {
+        setRenameSaving(false);
+      }
+    },
+    [renameValue],
+  );
 
   if (loading) return <Loading label="Loading history…" />;
 
   const projectMap = new Map(projects.map((p) => [p.id, p.name]));
-  const filtered = search.trim()
-    ? conversations.filter((c) =>
-        (c.title ?? "").toLowerCase().includes(search.toLowerCase()) ||
-        c.preview?.toLowerCase().includes(search.toLowerCase()),
-      )
-    : conversations;
+  const filtered = conversations;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
-          All your Ora conversations. Open one to pick up where you left off, or rename and delete them here.
+          All your Ora conversations. Open one to pick up where you left off, or rename and archive
+          them here.
         </Text>
 
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+            {showArchived ? "Archived conversations" : "Active conversations"}
+          </Text>
+          <Button
+            label={showArchived ? "Show active" : "Show archived"}
+            variant="ghost"
+            onPress={() => {
+              setSearch("");
+              setRenamingId(null);
+              setShowArchived((value) => !value);
+            }}
+          />
+        </View>
+
         {/* Search */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: c.muted, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            backgroundColor: c.muted,
+            borderRadius: 10,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+          }}
+        >
           <Search size={16} color={c.mutedForeground} />
           <TextInput
             value={search}
@@ -803,7 +1295,23 @@ function HistoryTab() {
         </View>
 
         {filtered.length === 0 ? (
-          <EmptyState icon={History} title={search ? "No results" : "No conversations"} subtitle={search ? "Try a different search." : "Your Ora conversations will appear here."} />
+          <EmptyState
+            icon={History}
+            title={
+              search
+                ? "No results"
+                : showArchived
+                  ? "No archived conversations"
+                  : "No conversations"
+            }
+            subtitle={
+              search
+                ? "Try a different search."
+                : showArchived
+                  ? "Archived conversations will appear here."
+                  : "Your Ora conversations will appear here."
+            }
+          />
         ) : (
           filtered.map((conv) => (
             <Card key={conv.id} style={{ gap: 6 }}>
@@ -813,11 +1321,28 @@ function HistoryTab() {
                     value={renameValue}
                     onChangeText={setRenameValue}
                     autoFocus
-                    style={{ color: c.foreground, fontSize: 15, fontFamily: "Inter_500Medium", borderBottomWidth: 1, borderBottomColor: c.primary, paddingVertical: 4 }}
+                    style={{
+                      color: c.foreground,
+                      fontSize: 15,
+                      fontFamily: "Inter_500Medium",
+                      borderBottomWidth: 1,
+                      borderBottomColor: c.primary,
+                      paddingVertical: 4,
+                    }}
                   />
                   <View style={{ flexDirection: "row", gap: 8 }}>
-                    <Button label="Cancel" variant="ghost" onPress={() => setRenamingId(null)} style={{ flex: 1 }} />
-                    <Button label={renameSaving ? "Saving…" : "Save"} onPress={() => void handleRename(conv.id)} loading={renameSaving} style={{ flex: 1 }} />
+                    <Button
+                      label="Cancel"
+                      variant="ghost"
+                      onPress={() => setRenamingId(null)}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      label={renameSaving ? "Saving…" : "Save"}
+                      onPress={() => void handleRename(conv.id)}
+                      loading={renameSaving}
+                      style={{ flex: 1 }}
+                    />
                   </View>
                 </View>
               ) : (
@@ -829,8 +1354,23 @@ function HistoryTab() {
                     }}
                     style={{ gap: 4 }}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                      <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 15, flex: 1 }} numberOfLines={1}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: c.foreground,
+                          fontFamily: "Inter_500Medium",
+                          fontSize: 15,
+                          flex: 1,
+                        }}
+                        numberOfLines={1}
+                      >
                         {conv.title}
                       </Text>
                       <Text style={{ color: c.mutedForeground, fontSize: 12, marginTop: 1 }}>
@@ -838,34 +1378,61 @@ function HistoryTab() {
                       </Text>
                     </View>
                     {conv.projectId != null && (
-                      <View style={{ backgroundColor: `${c.primary}18`, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: "flex-start" }}>
+                      <View
+                        style={{
+                          backgroundColor: `${c.primary}18`,
+                          borderRadius: 4,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          alignSelf: "flex-start",
+                        }}
+                      >
                         <Text style={{ color: c.primary, fontSize: 11 }}>
                           {projectMap.get(conv.projectId) ?? "Project"}
                         </Text>
                       </View>
                     )}
                     {conv.preview ? (
-                      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
+                      <Text
+                        style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}
+                        numberOfLines={2}
+                      >
                         {conv.preview}
                       </Text>
                     ) : null}
                   </Pressable>
-                  <View style={{ flexDirection: "row", gap: 16, marginTop: 2 }}>
-                    <Pressable
-                      onPress={() => { setRenamingId(conv.id); setRenameValue(conv.title ?? ""); }}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                      hitSlop={6}
-                    >
-                      <Pencil size={14} color={c.mutedForeground} />
-                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Rename</Text>
-                    </Pressable>
+                  <View style={{ flexDirection: "row", gap: 16, marginTop: 2, flexWrap: "wrap" }}>
+                    {showArchived ? (
+                      <Pressable
+                        onPress={() => void handleRestoreConversation(conv.id)}
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                        hitSlop={6}
+                      >
+                        <RotateCcw size={14} color={c.primary} />
+                        <Text style={{ color: c.primary, fontSize: 13 }}>Restore</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        onPress={() => {
+                          setRenamingId(conv.id);
+                          setRenameValue(conv.title ?? "");
+                        }}
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                        hitSlop={6}
+                      >
+                        <Pencil size={14} color={c.mutedForeground} />
+                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Rename</Text>
+                      </Pressable>
+                    )}
                     <Pressable
                       onPress={() => handleDelete(conv.id, conv.title ?? "")}
                       style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
                       hitSlop={6}
                     >
                       <Trash2 size={14} color="#f87171" />
-                      <Text style={{ color: "#f87171", fontSize: 13 }}>Delete</Text>
+                      <Text style={{ color: "#f87171", fontSize: 13 }}>
+                        {showArchived ? "Delete forever" : "Archive"}
+                      </Text>
                     </Pressable>
                   </View>
                 </>
@@ -916,12 +1483,12 @@ function DataControlsTab() {
 
   const handleClearHistory = () => {
     Alert.alert(
-      "Clear all conversations",
-      "This will permanently delete all your Ora conversations and their messages. This cannot be undone.",
+      "Archive all conversations",
+      "This will move all active Ora conversations to Archived conversations. You can restore them later.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Clear history",
+          text: "Archive all",
           style: "destructive",
           onPress: async () => {
             setClearingHistory(true);
@@ -943,15 +1510,19 @@ function DataControlsTab() {
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}>
       <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
-        Manage your Ora data. These actions only affect Ora — your AI Builder projects and their data are never touched.
+        Manage your Ora data. These actions only affect Ora — your AI Builder projects and their
+        data are never touched.
       </Text>
 
       {/* Clear memories */}
       <Card style={{ gap: 10 }}>
         <View style={{ gap: 3 }}>
-          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>Clear all memories</Text>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+            Clear all memories
+          </Text>
           <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
-            Permanently delete all saved Ora memories. Ora will no longer reference them in future conversations.
+            Permanently delete all saved Ora memories. Ora will no longer reference them in future
+            conversations.
           </Text>
         </View>
         {memoriesCleared && (
@@ -966,19 +1537,22 @@ function DataControlsTab() {
         />
       </Card>
 
-      {/* Clear history */}
+      {/* Archive history */}
       <Card style={{ gap: 10 }}>
         <View style={{ gap: 3 }}>
-          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>Clear conversation history</Text>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+            Archive conversation history
+          </Text>
           <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
-            Permanently delete all your Ora conversations and messages. This does not affect your saved memories.
+            Move all active Ora conversations out of your main history. Archived conversations can
+            be restored from the History tab.
           </Text>
         </View>
         {historyCleared && (
-          <Text style={{ color: "#4ade80", fontSize: 13 }}>All conversations cleared.</Text>
+          <Text style={{ color: "#4ade80", fontSize: 13 }}>All conversations archived.</Text>
         )}
         <Button
-          label={clearingHistory ? "Clearing…" : "Clear all conversations"}
+          label={clearingHistory ? "Archiving…" : "Archive all conversations"}
           variant="destructive"
           onPress={handleClearHistory}
           loading={clearingHistory}
