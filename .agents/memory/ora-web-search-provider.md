@@ -41,8 +41,10 @@ non-reasoning model, that guard must still match — otherwise every search 400s
 VARIANCE vs the 12s cap, not the wiring. Env overrides
 `ORA_{FREE,CORE,WAVE}_SEARCH_MODEL` → `ORA_SEARCH_MODEL` win over the default and
 are the revert path (e.g. set `ORA_SEARCH_MODEL=gpt-5-mini` to go back). The
-default model name is asserted in `model-router.test.ts` — grep it when changing.
-Mobile TestFlight + the published website hit the PROD www API, and
+default model name is asserted in BOTH `model-router.test.ts` AND
+`routing-diagnostics.test.ts` (the search-tool diagnostic checks `openaiModel`)
+— grep both when changing it. Mobile TestFlight + the published website hit the
+PROD www API, and
 `OPENAI_API_KEY` is a GLOBAL secret (present in prod), so the fix only takes
 effect after a **republish**.
 
