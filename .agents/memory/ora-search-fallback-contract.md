@@ -23,6 +23,12 @@ Keep these invariants when touching web-search.ts / chat.ts / the Ora clients.
 - Fallback answer itself fails/empty → **refund quota exactly once** (guarded for anonymous)
   and return **503** `{ searchRetryable:true }`.
   **Why:** no answer delivered, so don't charge; 503 signals "recoverable, keep the message."
+- **Forced-retry exception:** when `forceSearch` is set and the (harder) forced search STILL
+  fails, do NOT run the general-knowledge fallback at all. Refund once and return **503**
+  `{ error, searchRetryable:true }` directly. This is the FIRST branch of the search catch, so
+  it runs before/instead of the fallback → guarantees one refund and never calls
+  `createChatCompletion`. **Why:** the user already saw and rejected the fallback answer via the
+  first Retry; regenerating the same long answer is worse than an honest "couldn't verify" + Retry.
 
 ## Freshness-critical note (two notes, not one)
 - There are TWO fallback notes. For `searchRetryable` (freshness=current) prompts, use the
@@ -37,24 +43,38 @@ Keep these invariants when touching web-search.ts / chat.ts / the Ora clients.
   `tool:"search"`. It MUST be applied AFTER `routeOraMessage` but BEFORE checkToolAccess /
   quota / deepAllowed, so tier gates + single-charge semantics stay intact (no double-charge,
   anonymous still gets the uncharged sign-in CTA).
+- forceSearch also runs a HARDER live-search strategy inside runOraWebSearch (`forceLive:true`):
+  a longer first-attempt timeout + a low-effort secondary attempt + `retryOnTimeout` (see Latency).
 - Only the non-streaming `/chat` route honors forceSearch; `/chat/stream` already bounces search
   to the non-streaming path, so leave it untouched.
-- Frontend: sendMessage takes forceSearch; when set it SKIPS the streaming-first path and posts
-  direct. retryLastMessage derives forceSearch from the last assistant message's persisted
-  `searchFallback` flag (survives reload). Retry button gated on `searchRetryable`, disabled while
-  loading. Mobile retry does NOT yet send forceSearch (re-classifies; usually re-routes anyway).
+- Frontend (web AND mobile parity): sendMessage takes a `forceSearch` opt; when set it SKIPS the
+  streaming-first path and POSTs direct to `/chat` with `forceSearch:true` (streaming would only
+  bounce search back). The Retry-live-search handler always sends `forceSearch:true` for that turn.
+  On the forced **503** the client must keep the user's message AND keep a working Retry — mobile
+  detects `ApiRequestError` with `body.searchRetryable===true`, flags the error bubble with
+  `searchRetryable`, and renders Retry in BOTH the error branch and the success-fallback branch.
 
 ## Latency + timeouts
 - web-search.ts caps each attempt (ORA_SEARCH_TIMEOUT_MS=12000 / ORA_SEARCH_RETRY_TIMEOUT_MS=8000
   / backoff 250) and throws typed `OraWebSearchError`. web_search legitimately needs several
   seconds, so the first cap is generous (was 5000 and caused false timeouts on news prompts).
-- **Do NOT retry a genuine timeout.** createSearchResponse `break`s (no retry) when
-  `err instanceof APIConnectionTimeoutError` (named export of the `openai` SDK); only fast-failing
-  transient errors get the single retry. Worst case (transient path) ~20.25s; timeout path bounded
-  by the first attempt alone.
+- createSearchResponse takes an explicit `retryOnTimeout` flag and builds an `attempts[]` list.
+  - **Normal (degrade-fast) path:** `retryOnTimeout=false`. It `break`s (no retry) on
+    `err instanceof APIConnectionTimeoutError`; only fast-failing transient errors get the one retry.
+  - **Forced path (`forceLive`):** `retryOnTimeout=true` with longer caps
+    (ORA_SEARCH_FORCE_TIMEOUT_MS=26000 first, ORA_SEARCH_FORCE_RETRY_TIMEOUT_MS=12000 secondary).
+    A timeout does NOT break — it runs the low-effort secondary attempt. **Why:** the user
+    explicitly asked to retry live; spend more time before giving up (but bounded, and still 503s).
+  - Forced attempts use `reasoning:{effort:"low"}` (NOT `search_context_size` — that 400s on gpt-5);
+    the secondary also trims instructions + lowers maxOutputTokens (min(profile,900)).
+- OraWebSearchError carries triage metadata: `attemptCount`, `latencyMs`, `failureReason`
+  (classifyWebSearchFailure → timeout/…), `searchProvider`. chat.ts logs these on both the forced
+  503 and the non-forced fallback so forced vs normal failures are distinguishable in prod.
 - Test gotcha: any test that `vi.mock("openai")` MUST also export a stub
   `APIConnectionTimeoutError: class extends Error {}`, or `err instanceof APIConnectionTimeoutError`
-  throws a TypeError inside web-search.ts under test.
+  throws a TypeError inside web-search.ts under test. To assert the forced timeout retry, import
+  that same mocked class in the test and `mockRejectedValue(new APIConnectionTimeoutError())` — the
+  provider mock should then be called TWICE (initial + forced secondary).
 
 ## Web/mobile parity (easy to break)
 - On the rare **503 double-failure**, the client MUST keep the user's message in the thread and

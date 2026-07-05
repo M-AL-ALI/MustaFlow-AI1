@@ -1602,6 +1602,9 @@ router.post("/public-ai/chat", async (req, res) => {
         documentContext: carriedDocs || undefined,
         wantsVideos: decision.wantsVideos,
         subscriptionTier: oraPlanTier(authed),
+        // A user-initiated "Retry live search" runs the harder forced strategy
+        // (longer timeout + low-effort secondary attempt) inside runOraWebSearch.
+        forceLive: forceSearch,
       });
       const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
@@ -1622,8 +1625,43 @@ router.post("/public-ai/chat", async (req, res) => {
       // queries) so it can surface a working Retry affordance. The quota already
       // consumed for this turn stays consumed because an answer is delivered; it
       // is refunded ONLY if the fallback answer itself also fails.
+      // Structured triage metadata: the search module attaches attempt count,
+      // latency, and a coarse failure reason to OraWebSearchError. Log it once so
+      // forced vs. normal search failures are distinguishable in production.
+      const searchErrMeta =
+        err instanceof webSearchModule.OraWebSearchError
+          ? {
+              searchAttemptCount: err.attemptCount,
+              searchLatencyMs: err.latencyMs,
+              searchFailureReason: err.failureReason,
+              searchProvider: err.searchProvider,
+            }
+          : {};
+      // FORCED-RETRY CONTRACT: when the user explicitly tapped "Retry live
+      // search", we already ran the harder forced strategy and it still failed.
+      // Regenerating the long general-knowledge fallback here would just repeat
+      // the exact answer they rejected. Instead, refund the quota (no answer
+      // delivered) and return a retryable 503 so the client keeps the user's
+      // message and the Retry affordance. This is the FIRST branch of the catch
+      // so it runs BEFORE (and instead of) the general-knowledge fallback, which
+      // guarantees exactly one refund and never calls createChatCompletion.
+      if (forceSearch) {
+        await refundOraQuotaFor(authed, quotaKind);
+        logger.warn(
+          { component: "ora-chat-search", forceSearch: true, ...searchErrMeta, err },
+          "Ora forced live search failed — returning retryable 503 (no general-knowledge fallback)",
+        );
+        res.status(503).json({
+          error:
+            "Live search is temporarily unavailable. I could not verify current results. Please try again in a moment — your message is still here.",
+          searchRetryable: true,
+        });
+        return;
+      }
+      // Graceful degradation for a NON-forced search failure: answer from the
+      // model's own knowledge with an honest caveat instead of a dead banner.
       logger.warn(
-        { component: "ora-chat-search", err },
+        { component: "ora-chat-search", ...searchErrMeta, err },
         "Ora web search failed — degrading to a general-knowledge answer",
       );
       try {

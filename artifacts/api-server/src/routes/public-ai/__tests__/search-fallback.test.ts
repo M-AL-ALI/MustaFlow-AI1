@@ -15,6 +15,13 @@
  *   3. search fails → fallback answer empty → treated as a failure (503 + refund).
  *   4. an evergreen search that fails → searchFallback:true but searchRetryable
  *      is false (a general-knowledge answer is not stale for evergreen topics).
+ *   5. a FORCED "Retry live search" that still fails → retryable 503 WITHOUT the
+ *      general-knowledge fallback (createChatCompletion is never called), quota
+ *      refunded exactly once. The user already rejected the fallback answer, so
+ *      repeating it verbatim is worse than an honest "couldn't verify" + Retry.
+ *   6. a forced search whose provider TIMES OUT runs the harder secondary attempt
+ *      (retryOnTimeout) instead of bailing on the first timeout like a normal
+ *      degrade-fast search would.
  *
  * The provider boundary is mocked: the OpenAI Responses API (web search) always
  * rejects, and ai-providers.createChatCompletion (the fallback chain) is
@@ -27,6 +34,10 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import jwt from "jsonwebtoken";
+// Resolves to the mocked class from vi.mock("openai") below, so `new
+// APIConnectionTimeoutError()` in a test is instanceof the same class
+// web-search.ts checks against when deciding whether to retry on timeout.
+import { APIConnectionTimeoutError } from "openai";
 
 const TEST_SECRET = "search-fallback-test-secret";
 
@@ -192,21 +203,53 @@ describe("POST /public-ai/chat — graceful fallback when live web search fails"
     expect(createMock).toHaveBeenCalled();
   });
 
-  it("forceSearch routes a non-search message to the live web-search tool", async () => {
+  it("forceSearch pins a non-search message to the live web-search tool", async () => {
+    // Make the fallback chain resolve so that IF the forced path incorrectly fell
+    // through to the general-knowledge fallback, this test would observe a 200 —
+    // proving the forced path bypasses it (see the 503 assertion below).
     createChatCompletionMock.mockResolvedValue({
       choices: [{ message: { content: "Here is some general background." } }],
     });
 
     // A plain greeting would normally route to a conversational answer (no
     // search). With forceSearch:true (the "Retry live search" affordance) the
-    // route must attempt the live web-search tool anyway — so the mocked
-    // provider is called and the request degrades to the fallback path.
+    // route must attempt the LIVE web-search tool anyway.
     const res = await postChat(app, "hello there, how are you", { forceSearch: true });
 
-    expect(res.status).toBe(200);
-    expect(res.body.searchFallback).toBe(true);
     // Proof the search branch was entered: the web-search provider was attempted.
     expect(createMock).toHaveBeenCalled();
+    // A forced search that exhausts its strategy must NOT regenerate the long
+    // general-knowledge fallback the user just rejected. It returns a retryable
+    // 503 so the client keeps the user's message and the Retry affordance.
+    expect(res.status).toBe(503);
+    expect(res.body.searchRetryable).toBe(true);
+    expect(typeof res.body.error).toBe("string");
+    expect(res.body.error.length).toBeGreaterThan(0);
+    // The general-knowledge fallback must NOT run for a forced retry.
+    expect(createChatCompletionMock).not.toHaveBeenCalled();
+    // No answer was delivered, so the turn's quota is refunded exactly once.
+    expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("forced search runs the harder secondary attempt when the provider times out", async () => {
+    // Both forced attempts time out. Because forceSearch enables retryOnTimeout,
+    // the module must run the SECOND (low-effort, shorter-timeout) attempt rather
+    // than bailing on the first timeout the way a normal degrade-fast search does.
+    createMock.mockRejectedValue(new APIConnectionTimeoutError({ message: "timed out" }));
+    createChatCompletionMock.mockResolvedValue({
+      choices: [{ message: { content: "Here is some general background." } }],
+    });
+
+    const res = await postChat(app, "what is the current bitcoin price", { forceSearch: true });
+
+    // The provider was attempted TWICE (initial + forced secondary), proving the
+    // timeout retry ran — a non-forced search stops after a single timeout.
+    expect(createMock).toHaveBeenCalledTimes(2);
+    // Forced search that still fails returns the retryable 503, never the fallback.
+    expect(res.status).toBe(503);
+    expect(res.body.searchRetryable).toBe(true);
+    expect(createChatCompletionMock).not.toHaveBeenCalled();
+    expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns searchRetryable:false for an evergreen search that degrades", async () => {

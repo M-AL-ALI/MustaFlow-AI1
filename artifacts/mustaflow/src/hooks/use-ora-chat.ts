@@ -2411,8 +2411,16 @@ export function useOraChat(): UseOraChatReturn {
     // this retry must re-run a LIVE search — not re-route the message (which
     // could land on a plain conversational answer). Force the search tool so
     // "Retry live search" always means exactly that.
-    const lastAssistant = messages[messages.length - 1];
-    const forceSearch = lastAssistant?.role === "assistant" && !!lastAssistant.searchFallback;
+    //
+    // Two shapes qualify: (a) the trailing message is the degraded assistant
+    // answer flagged searchFallback; (b) after a forced-search 503 double
+    // failure the outer catch preserves the user's turn (returns before the
+    // slice), so the trailing message IS the user turn. That is the only path
+    // that leaves a trailing user message with a recoverable error, so treat it
+    // as forced too — otherwise the post-503 retry re-degrades to the fallback.
+    const lastMsg = messages[messages.length - 1];
+    const forceSearch =
+      (lastMsg?.role === "assistant" && !!lastMsg.searchFallback) || lastMsg?.role === "user";
     setError(null);
     await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx, forceSearch });
   }, [messages, isLoading, sendMessage]);

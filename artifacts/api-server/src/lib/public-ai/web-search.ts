@@ -68,6 +68,16 @@ export interface OraWebSearchInput {
    * Treated as data, not user-identity context.
    */
   documentContext?: string;
+  /**
+   * True for a user-initiated "Retry live search". A forced retry must try
+   * HARDER than the normal degrade-fast path: it uses a longer first-attempt
+   * timeout, runs a lighter secondary attempt even after a genuine timeout, and
+   * drops the model to low reasoning effort (the default medium effort on gpt-5
+   * is the dominant cause of these search timeouts). The route turns a forced
+   * failure into a retryable 503 instead of repeating the general-knowledge
+   * answer the user just rejected.
+   */
+  forceLive?: boolean;
 }
 
 export interface OraWebSearchResult {
@@ -134,15 +144,57 @@ export const ORA_SEARCH_RETRY_TIMEOUT_MS = 8_000;
 export const ORA_SEARCH_RETRY_BACKOFF_MS = 250;
 
 /**
+ * Forced-retry ("Retry live search") caps. A user who taps Retry has explicitly
+ * asked us to try harder, so the first attempt gets a much longer window, and a
+ * lighter second attempt runs EVEN AFTER a genuine timeout (the normal path
+ * skips that). Worst case ≈ 26000 + 250 + 12000 = 38250 ms before the route
+ * returns a retryable 503 — well under the autoscale gateway's minutes-scale
+ * request cap, and the clients impose no shorter timeout.
+ */
+export const ORA_SEARCH_FORCE_TIMEOUT_MS = 26_000;
+export const ORA_SEARCH_FORCE_RETRY_TIMEOUT_MS = 12_000;
+
+/** How a live-search attempt failed, for structured logging + triage. */
+export type OraWebSearchFailureReason = "timeout" | "connection" | "http_status" | "error";
+
+/**
  * Thrown when the live web-search provider call fails or times out on every
  * attempt, so the route can distinguish a provider failure (degrade to a
- * general-knowledge answer) from an empty answer.
+ * general-knowledge answer) from an empty answer. Carries structured metadata so
+ * the route can emit one triage log (attempt count, latency, why it failed)
+ * without re-deriving it.
  */
 export class OraWebSearchError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  readonly attemptCount: number;
+  readonly failureReason: OraWebSearchFailureReason;
+  readonly latencyMs: number;
+  readonly searchProvider: string;
+  constructor(
+    message: string,
+    options?: {
+      cause?: unknown;
+      attemptCount?: number;
+      failureReason?: OraWebSearchFailureReason;
+      latencyMs?: number;
+      searchProvider?: string;
+    },
+  ) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "OraWebSearchError";
+    this.attemptCount = options?.attemptCount ?? 0;
+    this.failureReason = options?.failureReason ?? "error";
+    this.latencyMs = options?.latencyMs ?? 0;
+    this.searchProvider = options?.searchProvider ?? "openai-web-search";
   }
+}
+
+/** Classify a provider error into a coarse, log-friendly failure reason. */
+function classifyWebSearchFailure(err: unknown): OraWebSearchFailureReason {
+  if (err instanceof APIConnectionTimeoutError) return "timeout";
+  const e = err as { name?: unknown; status?: unknown };
+  if (typeof e?.status === "number") return "http_status";
+  if (typeof e?.name === "string" && /connection/i.test(e.name)) return "connection";
+  return "error";
 }
 
 /**
@@ -153,32 +205,57 @@ export class OraWebSearchError extends Error {
  * degrade); it is only used for fast-failing transient errors. Throws
  * OraWebSearchError once every attempt has been exhausted.
  */
+/** One ordered attempt: its own request params and its own timeout cap. */
+interface SearchAttempt {
+  params: object;
+  timeoutMs: number;
+}
+
+interface SearchResponsePayload {
+  output_text?: string;
+  output?: unknown;
+}
+
+interface SearchResponseResult {
+  response: SearchResponsePayload;
+  attemptCount: number;
+  latencyMs: number;
+}
+
 async function createSearchResponse(
   client: OpenAI,
-  params: object,
-): Promise<{ output_text?: string; output?: unknown }> {
-  const timeouts = [ORA_SEARCH_TIMEOUT_MS, ORA_SEARCH_RETRY_TIMEOUT_MS];
+  attempts: SearchAttempt[],
+  retryOnTimeout: boolean,
+): Promise<SearchResponseResult> {
+  const start = Date.now();
   let lastErr: unknown;
-  for (let attempt = 0; attempt < timeouts.length; attempt++) {
+  let attemptCount = 0;
+  for (let i = 0; i < attempts.length; i++) {
+    attemptCount++;
     try {
-      return (await client.responses.create(params as never, {
-        timeout: timeouts[attempt],
+      const response = (await client.responses.create(attempts[i].params as never, {
+        timeout: attempts[i].timeoutMs,
         maxRetries: 0,
-      })) as { output_text?: string; output?: unknown };
+      })) as SearchResponsePayload;
+      return { response, attemptCount, latencyMs: Date.now() - start };
     } catch (err) {
       lastErr = err;
-      // A real timeout is not worth retrying: the retry window is shorter than
-      // the attempt that just timed out, so it would almost certainly time out
-      // again and only delay the degrade to a general-knowledge answer. Retry
-      // ONLY for fast-failing transient errors.
-      if (err instanceof APIConnectionTimeoutError) break;
-      if (attempt < timeouts.length - 1) {
+      // Normal (degrade-fast) path: a real timeout is not worth retrying — the
+      // shorter retry window would almost certainly time out again and only add
+      // latency before the route degrades. A forced "Retry live search" flips
+      // retryOnTimeout ON: the next attempt is a lighter, low-effort call that
+      // can realistically finish where the heavy first attempt stalled.
+      if (err instanceof APIConnectionTimeoutError && !retryOnTimeout) break;
+      if (i < attempts.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, ORA_SEARCH_RETRY_BACKOFF_MS));
       }
     }
   }
   throw new OraWebSearchError("Live web search request failed or timed out.", {
     cause: lastErr,
+    attemptCount,
+    failureReason: classifyWebSearchFailure(lastErr),
+    latencyMs: Date.now() - start,
   });
 }
 
@@ -900,6 +977,7 @@ export function buildInstructions(
  */
 export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebSearchResult> {
   const { query, history = [], language, personalContext, wantsVideos, documentContext } = input;
+  const forceLive = input.forceLive === true;
   const planTier: OraPlanTier = normalizeOraPlanTier(input.subscriptionTier);
   const model = openAiModelForOraSearch(planTier);
   const profile = resolveOraSearchProfile({ query, planTier, wantsVideos });
@@ -910,22 +988,72 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     { role: "user" as const, content: query },
   ];
 
-  const start = Date.now();
-  const client = getClient();
-  const resp = await createSearchResponse(client, {
+  const fullInstructions = buildInstructions(
+    language,
+    personalContext,
+    wantsVideos,
+    profile,
+    documentContext,
+  );
+  // Shared request shape. `reasoning:{effort:"low"}` is applied ONLY on a forced
+  // retry: openAiModelForOraSearch defaults to gpt-5 for every tier, and its
+  // default medium reasoning effort is the dominant cause of these search
+  // timeouts. Dropping to low effort is what makes a forced retry actually
+  // finish where the normal attempt stalled. `search_context_size` is
+  // deliberately NOT used — it is unsupported on reasoning models and would 400.
+  const buildParams = (instructions: string, maxOutputTokens: number, lowEffort: boolean) => ({
     model,
-    instructions: buildInstructions(
+    instructions,
+    // The web_search tool is enabled per request; the model decides when to call it.
+    tools: [{ type: "web_search" }],
+    max_output_tokens: maxOutputTokens,
+    input: messages,
+    ...(lowEffort ? { reasoning: { effort: "low" } } : {}),
+  });
+
+  let attempts: SearchAttempt[];
+  let retryOnTimeout: boolean;
+  if (forceLive) {
+    // Primary forced attempt: full personalization/context, low effort, long cap.
+    // Secondary "lite" attempt: low effort + reduced tokens + trimmed instructions
+    // (no personal/document context) so it can finish fast even after the primary
+    // timed out. Both run at low effort; the lite pass is the safety net.
+    const liteTokens = Math.min(profile.maxOutputTokens, 900);
+    const liteInstructions = buildInstructions(
       language,
-      personalContext,
+      undefined,
       wantsVideos,
       profile,
-      documentContext,
-    ),
-    // The web_search tool is enabled per request; the model decides when to call it.
-    tools: [{ type: "web_search" }] as never,
-    max_output_tokens: profile.maxOutputTokens,
-    input: messages as never,
-  });
+      undefined,
+    );
+    attempts = [
+      {
+        params: buildParams(fullInstructions, profile.maxOutputTokens, true),
+        timeoutMs: ORA_SEARCH_FORCE_TIMEOUT_MS,
+      },
+      {
+        params: buildParams(liteInstructions, liteTokens, true),
+        timeoutMs: ORA_SEARCH_FORCE_RETRY_TIMEOUT_MS,
+      },
+    ];
+    retryOnTimeout = true;
+  } else {
+    // Normal degrade-fast path: identical params on both attempts, no timeout retry.
+    const params = buildParams(fullInstructions, profile.maxOutputTokens, false);
+    attempts = [
+      { params, timeoutMs: ORA_SEARCH_TIMEOUT_MS },
+      { params, timeoutMs: ORA_SEARCH_RETRY_TIMEOUT_MS },
+    ];
+    retryOnTimeout = false;
+  }
+
+  const start = Date.now();
+  const client = getClient();
+  const {
+    response: resp,
+    attemptCount,
+    latencyMs: searchLatencyMs,
+  } = await createSearchResponse(client, attempts, retryOnTimeout);
 
   const rawReply = (resp.output_text ?? "").trim();
   const sources = dedupeSources(extractSources(resp.output), profile.sourceLimit);
@@ -958,6 +1086,11 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
       mediaIntent: profile.searchPlan.mediaIntent,
       maxOutputTokens: profile.maxOutputTokens,
       wantsVideos: wantsVideos === true,
+      forceSearch: forceLive,
+      searchProvider: "openai-web-search",
+      searchAttemptCount: attemptCount,
+      secondaryUsed: attemptCount > 1,
+      searchLatencyMs,
       latencyMs: Date.now() - start,
       sourceCount: sources.length,
       imageCount: images.length,

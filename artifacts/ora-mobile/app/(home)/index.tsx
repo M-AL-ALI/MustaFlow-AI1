@@ -138,7 +138,11 @@ import {
 import { useActiveProject } from "@/context/ActiveProjectContext";
 import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode } from "@/lib/focus-mode";
-import { getAutoSaveMemories, getReferenceChatHistory, getReferenceSavedMemories } from "@/lib/memory-settings";
+import {
+  getAutoSaveMemories,
+  getReferenceChatHistory,
+  getReferenceSavedMemories,
+} from "@/lib/memory-settings";
 import { setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredVoicePreset } from "@/lib/voice-preset";
 import type {
@@ -870,7 +874,11 @@ export default function OraChatScreen() {
   }, [realtimeState, realtimeOverLimit, scheduleTalkRestart]);
 
   const sendMessage = useCallback(
-    async (text: string, attch: Attachment | null, opts?: { truncateTo?: number }) => {
+    async (
+      text: string,
+      attch: Attachment | null,
+      opts?: { truncateTo?: number; forceSearch?: boolean },
+    ) => {
       if ((!text && !attch) || sending) return;
 
       // Capture this turn's temporary state so a toggle mid-send can't change
@@ -976,27 +984,17 @@ export default function OraChatScreen() {
             referenceChatHistory: getReferenceChatHistory() && !!isSignedIn && !temporary,
             temporary,
             oraProjectId: activeProjectIdRef.current,
+            ...(opts?.forceSearch ? { forceSearch: true } : {}),
           };
 
-          // Try streaming first; fall back to regular sendChat when unavailable.
-          let streamedContent = "";
-          const streamResult = await streamChatNative(
-            chatReq,
-            (delta) => {
-              streamedContent += delta;
-              const content = streamedContent;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
-                ),
-              );
-            },
-            abortController.signal,
-          );
-
-          if (streamResult === null) {
-            // Streaming could not start — fall back to regular /chat.
-            notifyStreamFallbackCalled();
+          if (opts?.forceSearch) {
+            // "Retry live search" must deterministically re-run the LIVE web-search
+            // tool. Search is a non-streaming specialist branch that the stream
+            // route only bounces back with a streamingFallback signal, so skip
+            // streaming and POST straight to /chat with forceSearch:true. If the
+            // forced search still fails the server returns a retryable 503 (handled
+            // in catch) instead of repeating the general-knowledge fallback the
+            // user just rejected.
             const res = await sendChat(chatReq);
             assistant = {
               id: pendingId,
@@ -1010,65 +1008,99 @@ export default function OraChatScreen() {
                 s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
               );
             }
-          } else if (streamResult.ok) {
-            // Streaming succeeded — apply final metadata from the done payload.
-            // The conversational stream carries suggestions/videos/memory only
-            // (never sources/images/files — those come from the /chat path).
-            assistant = {
-              id: pendingId,
-              role: "assistant",
-              content: streamResult.reply || streamedContent,
-              isStreaming: false,
-              suggestions: streamResult.suggestions,
-              videos: streamResult.videos,
-              memorySaveCandidate: streamResult.memorySaveCandidate,
-              memorySaveCandidateConfidence: streamResult.memorySaveCandidateConfidence,
-              memorySaveCandidateSensitive: streamResult.memorySaveCandidateSensitive,
-              memoriesUsed: streamResult.memoriesUsed,
-              ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
-            };
-            if (streamResult.msgCount != null && streamResult.msgLimit != null) {
-              setSession((s) =>
-                s
-                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
-                  : s,
-              );
-            }
-          } else if (!streamResult.firstToken) {
-            // Pre-first-token failure — the stream pre-incremented the session.
-            // Retry via /chat with the signed fallback token so the server
-            // acknowledges the increment without double-charging.
-            notifyStreamFallbackCalled();
-            const res = await sendChat({
-              ...chatReq,
-              ...(streamResult.fallbackToken
-                ? { streamFallbackToken: streamResult.fallbackToken }
-                : {}),
-            });
-            assistant = {
-              id: pendingId,
-              role: "assistant",
-              content: res.reply,
-              viaFallback: true,
-              ...buildChatExtras(res),
-            };
-            if (res.msgCount != null && res.msgLimit != null) {
-              setSession((s) =>
-                s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
-              );
-            }
           } else {
-            // Post-first-token interruption — partial content already rendered
-            // via onToken callbacks. Keep what the user saw and flag it cut off
-            // so a "response was cut off" note renders beneath the partial reply
-            // (mirrors the web hook). Do not retry.
-            assistant = {
-              id: pendingId,
-              role: "assistant",
-              content: streamedContent,
-              isStreaming: false,
-              streamCutOff: true,
-            };
+            // Try streaming first; fall back to regular sendChat when unavailable.
+            let streamedContent = "";
+            const streamResult = await streamChatNative(
+              chatReq,
+              (delta) => {
+                streamedContent += delta;
+                const content = streamedContent;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
+                  ),
+                );
+              },
+              abortController.signal,
+            );
+
+            if (streamResult === null) {
+              // Streaming could not start — fall back to regular /chat.
+              notifyStreamFallbackCalled();
+              const res = await sendChat(chatReq);
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                viaFallback: true,
+                ...buildChatExtras(res),
+              };
+              if (res.msgCount != null && res.msgLimit != null) {
+                setSession((s) =>
+                  s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
+                );
+              }
+            } else if (streamResult.ok) {
+              // Streaming succeeded — apply final metadata from the done payload.
+              // The conversational stream carries suggestions/videos/memory only
+              // (never sources/images/files — those come from the /chat path).
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: streamResult.reply || streamedContent,
+                isStreaming: false,
+                suggestions: streamResult.suggestions,
+                videos: streamResult.videos,
+                memorySaveCandidate: streamResult.memorySaveCandidate,
+                memorySaveCandidateConfidence: streamResult.memorySaveCandidateConfidence,
+                memorySaveCandidateSensitive: streamResult.memorySaveCandidateSensitive,
+                memoriesUsed: streamResult.memoriesUsed,
+                ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
+              };
+              if (streamResult.msgCount != null && streamResult.msgLimit != null) {
+                setSession((s) =>
+                  s
+                    ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
+                    : s,
+                );
+              }
+            } else if (!streamResult.firstToken) {
+              // Pre-first-token failure — the stream pre-incremented the session.
+              // Retry via /chat with the signed fallback token so the server
+              // acknowledges the increment without double-charging.
+              notifyStreamFallbackCalled();
+              const res = await sendChat({
+                ...chatReq,
+                ...(streamResult.fallbackToken
+                  ? { streamFallbackToken: streamResult.fallbackToken }
+                  : {}),
+              });
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                viaFallback: true,
+                ...buildChatExtras(res),
+              };
+              if (res.msgCount != null && res.msgLimit != null) {
+                setSession((s) =>
+                  s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
+                );
+              }
+            } else {
+              // Post-first-token interruption — partial content already rendered
+              // via onToken callbacks. Keep what the user saw and flag it cut off
+              // so a "response was cut off" note renders beneath the partial reply
+              // (mirrors the web hook). Do not retry.
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: streamedContent,
+                isStreaming: false,
+                streamCutOff: true,
+              };
+            }
           }
         }
 
@@ -1087,10 +1119,25 @@ export default function OraChatScreen() {
       } catch (err) {
         if (abortController.signal.aborted) return;
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
+        // A forced "Retry live search" that still failed returns a retryable 503
+        // with searchRetryable in the body. Keep the user's message and re-surface
+        // the Retry affordance on the error bubble instead of a dead banner.
+        const searchRetryable =
+          err instanceof ApiRequestError &&
+          typeof err.body === "object" &&
+          err.body !== null &&
+          (err.body as { searchRetryable?: unknown }).searchRetryable === true;
         setMessages((prev) =>
           prev.map((m) =>
             m.id === pendingId
-              ? { ...m, pending: false, isStreaming: false, error: true, content: msg }
+              ? {
+                  ...m,
+                  pending: false,
+                  isStreaming: false,
+                  error: true,
+                  content: msg,
+                  ...(searchRetryable ? { searchRetryable: true } : {}),
+                }
               : m,
           ),
         );
@@ -1248,6 +1295,30 @@ export default function OraChatScreen() {
       const sourceUser = messages[userIdx];
       if (sourceUser.attachment || sourceUser.hadAttachment || !sourceUser.content.trim()) return;
       void sendMessage(sourceUser.content, null, { truncateTo: userIdx });
+    },
+    [messages, sending, sendMessage],
+  );
+
+  // "Retry live search": replay the user turn but force the LIVE web-search tool
+  // (forceSearch:true) instead of a plain regenerate, which would just re-classify
+  // and could answer conversationally. Mirrors handleRegenerate's truncation so
+  // history excludes the stale answer/error being retried.
+  const handleRetrySearch = useCallback(
+    (message: OraMessage) => {
+      if (sending) return;
+      const idx = messages.findIndex((m) => m.id === message.id);
+      if (idx < 0) return;
+      let userIdx = -1;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          userIdx = i;
+          break;
+        }
+      }
+      if (userIdx < 0) return;
+      const sourceUser = messages[userIdx];
+      if (sourceUser.attachment || sourceUser.hadAttachment || !sourceUser.content.trim()) return;
+      void sendMessage(sourceUser.content, null, { truncateTo: userIdx, forceSearch: true });
     },
     [messages, sending, sendMessage],
   );
@@ -1838,7 +1909,8 @@ export default function OraChatScreen() {
         .start({
           language: language !== "auto" ? language : undefined,
           temporary: temporaryRef.current,
-          referenceSavedMemories: getReferenceSavedMemories() && !!isSignedInRef.current && !temporaryRef.current,
+          referenceSavedMemories:
+            getReferenceSavedMemories() && !!isSignedInRef.current && !temporaryRef.current,
           oraProjectId: activeProjectIdRef.current,
           conversationId,
           message: lastUser?.content,
@@ -1921,7 +1993,14 @@ export default function OraChatScreen() {
     }
     // Entering Talk mode: open the realtime session.
     beginRealtimeSession();
-  }, [beginRealtimeSession, cancelTalkRestart, recording, speakingId, stopRealtimeSession, talkMode]);
+  }, [
+    beginRealtimeSession,
+    cancelTalkRestart,
+    recording,
+    speakingId,
+    stopRealtimeSession,
+    talkMode,
+  ]);
 
   // Retry live voice after a poor-network legacy fallback: re-open the realtime
   // session from scratch (start() resets the single-attempt reconnect budget).
@@ -2584,14 +2663,14 @@ export default function OraChatScreen() {
               speaking={speakingId === item.id}
               onSpeak={() => speakRef.current(item)}
               onSuggestion={handleSuggestion}
-              onSaveMemory={(!temporary && getAutoSaveMemories()) ? handleSaveMemory : undefined}
+              onSaveMemory={!temporary && getAutoSaveMemories() ? handleSaveMemory : undefined}
               onLongPress={() => setActionsMessage(item)}
               onEditImage={(id) => {
                 setEditingImageId(id);
                 setEditInstruction("");
               }}
               onImagePreview={openImagePreview}
-              onRetrySearch={handleRegenerate}
+              onRetrySearch={handleRetrySearch}
               isLatest={item.id === messages.at(-1)?.id}
             />
           )}
@@ -3346,10 +3425,7 @@ export default function OraChatScreen() {
         }}
       />
 
-      <ImagePreviewModal
-        source={previewImageSource}
-        onClose={() => setPreviewImageSource(null)}
-      />
+      <ImagePreviewModal source={previewImageSource} onClose={() => setPreviewImageSource(null)} />
     </View>
   );
 }
@@ -3614,7 +3690,29 @@ function MessageBubbleBase({
           {message.pending ? (
             <ActivityIndicator size="small" color={c.mutedForeground} />
           ) : message.error ? (
-            <Text style={{ color: c.destructive, fontSize: 14 }}>{message.content}</Text>
+            <>
+              <Text style={{ color: c.destructive, fontSize: 14 }}>{message.content}</Text>
+              {message.searchRetryable && isLatest && (
+                <Pressable
+                  onPress={() => onRetrySearch?.(message)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry live search"
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}
+                >
+                  <RefreshCw size={13} color={c.mutedForeground} />
+                  <Text
+                    style={{
+                      color: c.mutedForeground,
+                      fontSize: 13,
+                      fontFamily: "Inter_500Medium",
+                    }}
+                  >
+                    Retry live search
+                  </Text>
+                </Pressable>
+              )}
+            </>
           ) : (
             <>
               <Markdown isStreaming={message.isStreaming}>{message.content}</Markdown>

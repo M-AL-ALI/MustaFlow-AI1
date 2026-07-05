@@ -272,6 +272,14 @@ export interface ChatRequest {
    * the current user; the server enforces ownership.
    */
   oraProjectId?: number | null;
+  /**
+   * True for a user-initiated "Retry live search". The server pins this turn to
+   * the live web-search tool and runs a harder forced strategy (longer timeout +
+   * low-effort secondary attempt). If that still fails, the server returns a
+   * retryable 503 instead of repeating the general-knowledge fallback, so the
+   * client keeps the user's message and the Retry affordance.
+   */
+  forceSearch?: boolean;
 }
 
 export interface ChatResponse {

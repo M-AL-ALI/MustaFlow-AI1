@@ -365,3 +365,56 @@ describe("Ora mobile parity — project conversation sync", () => {
     expect(api).toContain("export async function listConversations(");
   });
 });
+
+describe("Ora mobile parity — Retry live search (forceSearch)", () => {
+  const types = read("../types.ts");
+  const index = read("../../app/(home)/index.tsx");
+
+  it("ChatRequest carries the optional forceSearch flag (matches the website body)", () => {
+    expect(types).toContain("forceSearch?: boolean;");
+  });
+
+  it("sendMessage accepts a forceSearch option alongside truncateTo", () => {
+    expect(index).toContain("opts?: { truncateTo?: number; forceSearch?: boolean }");
+  });
+
+  it("forceSearch is threaded into the /chat request body", () => {
+    expect(index).toContain("...(opts?.forceSearch ? { forceSearch: true } : {})");
+  });
+
+  it("forced search skips streaming and POSTs straight to /chat via sendChat", () => {
+    // The stream route bounces the search tool back with a streamingFallback
+    // signal, so a forced live search must use the non-streaming sendChat path
+    // (mirrors use-ora-chat.ts on the website).
+    const branchStart = index.indexOf("if (opts?.forceSearch) {");
+    expect(branchStart).toBeGreaterThan(-1);
+    const branchBody = index.slice(branchStart, branchStart + 700);
+    expect(branchBody).toContain("const res = await sendChat(chatReq);");
+  });
+
+  it("a retryable 503 (searchRetryable) is detected via ApiRequestError body", () => {
+    expect(index).toContain("err instanceof ApiRequestError");
+    expect(index).toContain("(err.body as { searchRetryable?: unknown }).searchRetryable === true");
+    // The flagged error message must carry searchRetryable so the bubble keeps
+    // the Retry affordance instead of showing a dead error banner.
+    expect(index).toContain("...(searchRetryable ? { searchRetryable: true } : {})");
+  });
+
+  it("handleRetrySearch replays the user turn with forceSearch:true", () => {
+    expect(index).toContain("const handleRetrySearch = useCallback(");
+    const fnStart = index.indexOf("const handleRetrySearch = useCallback(");
+    const fnBody = index.slice(fnStart, fnStart + 700);
+    expect(fnBody).toContain("{ truncateTo: userIdx, forceSearch: true }");
+  });
+
+  it("the message row wires Retry live search to handleRetrySearch (not plain regenerate)", () => {
+    expect(index).toContain("onRetrySearch={handleRetrySearch}");
+  });
+
+  it("the error branch renders a Retry live search affordance for retryable failures", () => {
+    // Both the success-fallback (searchFallback) and the forced-503 error bubble
+    // must expose Retry. The error branch specifically guards on message.error.
+    expect(index).toContain("message.searchRetryable && isLatest && (");
+    expect(index).toContain('accessibilityLabel="Retry live search"');
+  });
+});
