@@ -369,7 +369,7 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
 
   // ─── 2. Focus window refresh after each Ora reply ─────────────────────────
 
-  it("keeps all follow-up transcripts inside the 12 s focus window after response.done", async () => {
+  it("keeps all follow-up transcripts inside the 6 s focus window after response.done", async () => {
     const onUserTranscript = vi.fn();
     const hook = renderHook(() =>
       useOraRealtimeVoice({ onUserTranscript, onAssistantTranscript: vi.fn() }),
@@ -380,11 +380,11 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
     for (let i = 0; i < 5; i++) {
       await simulateAssistantReply(dc!);
 
-      // Advance time to just inside the 12 s follow-up window (11 999 ms).
+      // Advance time to just inside the 6 s follow-up window (5 999 ms).
       // response.done refreshes lastAcceptedUserTurnAtRef at this base time,
       // so the next transcript is always within the window regardless of how
       // many turns have elapsed.
-      await advanceMs(11_999);
+      await advanceMs(5_999);
 
       const accepted = await simulateUserTurn(
         dc!,

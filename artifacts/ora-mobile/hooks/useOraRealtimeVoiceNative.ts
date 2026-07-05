@@ -326,11 +326,10 @@ export type FocusMode = "normal" | "focused";
 // window only; outside it, speech must be addressed/directed so a nearby side
 // conversation no longer makes Ora speak or interrupt.
 const FOCUS_COLD_START_WINDOW_MS = 12_000;
-// 12 s matches the cold-start window, giving the same consistent experience
-// throughout the whole conversation. The old 4 s left only 1–3 s of effective
-// speaking time once transcription latency (1–3 s) was subtracted, causing
-// natural conversational pauses to silently fail the focus filter on every turn.
-const FOCUS_FOLLOWUP_WINDOW_MS = 12_000;
+// Follow-ups use a shorter window than cold start. This keeps quick natural
+// replies working while preventing a nearby side conversation from waking Ora
+// several seconds after the last accepted turn.
+const FOCUS_FOLLOWUP_WINDOW_MS = 6_000;
 
 // Wake / address tokens that re-open focus after silence or background chatter.
 // Latin "ora" plus common ASR variants and non-Latin transliterations, so the
@@ -1857,7 +1856,14 @@ export function useOraRealtimeVoiceNative(
           break;
       }
     },
-    [confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer, bargeInRequiresDirection, sendEvent, handleConnectionDrop],
+    [
+      confirmBargeIn,
+      cancelPendingBargeIn,
+      clearBargeInTimer,
+      bargeInRequiresDirection,
+      sendEvent,
+      handleConnectionDrop,
+    ],
   );
 
   // ── Start ────────────────────────────────────────────────────────────────

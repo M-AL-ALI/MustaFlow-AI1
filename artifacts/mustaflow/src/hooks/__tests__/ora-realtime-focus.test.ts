@@ -79,6 +79,11 @@ describe("scoreTranscriptFocus — focused mode, inside the focus window", () =>
     expect(v).toEqual({ accepted: true, viaWindow: true });
   });
 
+  it("accepts an undirected follow-up at the 6s follow-up boundary", () => {
+    const v = score("and the second one", "focused", 6_000);
+    expect(v).toEqual({ accepted: true, viaWindow: true });
+  });
+
   it("accepts the first utterance exactly at the 12s cold-start boundary", () => {
     expect(score("keep going please", "focused", 12_000, {}, 0).accepted).toBe(true);
   });
