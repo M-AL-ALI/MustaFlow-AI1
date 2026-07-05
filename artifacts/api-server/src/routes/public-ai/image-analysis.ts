@@ -9,7 +9,11 @@ import {
   IMAGE_ANALYSIS_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { getImage } from "../../lib/public-ai/image-store";
-import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import {
+  scanUserInput,
+  ORA_SYSTEM_PROMPT,
+  buildCurrentDateTimeBlock,
+} from "../../lib/public-ai/prompt";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import type { Provider } from "../../lib/ai-providers";
@@ -38,6 +42,7 @@ const bodySchema = z.object({
   message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
+  timeZone: z.string().max(64).optional(),
 });
 
 const IMAGE_SAFETY_ADDENDUM = `
@@ -54,8 +59,9 @@ const IMAGE_SAFETY_ADDENDUM = `
 function buildImageSystemPrompt(
   language: string | undefined,
   analysisProfile: OraImageAnalysisProfile,
+  timeZone?: string,
 ): string {
-  let prompt = `${ORA_SYSTEM_PROMPT}${IMAGE_SAFETY_ADDENDUM}
+  let prompt = `${ORA_SYSTEM_PROMPT}${buildCurrentDateTimeBlock(timeZone)}${IMAGE_SAFETY_ADDENDUM}
 
 ## Image task profile
 ${analysisProfile.guidance}`;
@@ -91,7 +97,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     return;
   }
 
-  const { imageRef, message, messages, language } = parsed.data;
+  const { imageRef, message, messages, language, timeZone } = parsed.data;
 
   if (isKillSwitchActive("image_analysis")) {
     res.status(503).json(killSwitchBody("image_analysis"));
@@ -189,7 +195,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     message,
     subscriptionTier: planTier,
   });
-  const systemPrompt = buildImageSystemPrompt(language, analysisProfile);
+  const systemPrompt = buildImageSystemPrompt(language, analysisProfile, timeZone);
   const imageUserBlock = buildImageUserBlock(message);
 
   const historyMessages = messages

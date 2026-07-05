@@ -183,6 +183,21 @@ export type OraMode = "instant" | "deep";
  * language). Derived from the exact same internal state the `/chat` body uses so
  * isolation/memory behavior stays in a single place.
  */
+/**
+ * The visitor's IANA timezone (e.g. "America/New_York"), resolved from the
+ * browser and wrapped in try/catch because some engines can throw. Sent with
+ * every Ora request so the backend renders the user's local date/time in the
+ * authoritative date/time block. Returns undefined when unavailable — the field
+ * is optional server-side and simply omitted from the JSON payload.
+ */
+export function clientTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface OraRealtimeContext {
   temporary: boolean;
   referenceSavedMemories: boolean;
@@ -192,6 +207,8 @@ export interface OraRealtimeContext {
   language?: string;
   /** Browser language label, sent only when no explicit language is selected. */
   languageHint?: string;
+  /** IANA timezone resolved from the browser; used for local date/time. */
+  timeZone?: string;
   /**
    * The most recent user utterance from the text conversation, forwarded ONLY as
    * a ranking hint for saved-memory recall (the realtime session has no "current
@@ -1448,6 +1465,7 @@ export function useOraChat(): UseOraChatReturn {
           const body: Record<string, unknown> = {
             message: content,
             messages: history,
+            timeZone: clientTimeZone(),
           };
           if (language && language !== "auto") {
             body.language = language;
@@ -1560,6 +1578,7 @@ export function useOraChat(): UseOraChatReturn {
             mode,
             referenceSavedMemories: getReferenceSavedMemories(),
             referenceChatHistory: useChatHistory,
+            timeZone: clientTimeZone(),
           };
           // Temporary ("incognito") turn: the backend skips all memory/chat
           // history injection, cross-conversation recall, and memory-candidate
@@ -1973,7 +1992,12 @@ export function useOraChat(): UseOraChatReturn {
 
       try {
         const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
-        const body: Record<string, unknown> = { message: content, messages: history, format };
+        const body: Record<string, unknown> = {
+          message: content,
+          messages: history,
+          format,
+          timeZone: clientTimeZone(),
+        };
         if (language && language !== "auto") {
           body.language = language;
         } else {
@@ -2048,6 +2072,7 @@ export function useOraChat(): UseOraChatReturn {
               message: content,
               messages: retryHistory,
               format,
+              timeZone: clientTimeZone(),
             };
             if (language && language !== "auto") {
               retryBody.language = language;
@@ -2461,6 +2486,7 @@ export function useOraChat(): UseOraChatReturn {
       referenceSavedMemories: getReferenceSavedMemories(),
       oraProjectId: typeof oraProjectId === "number" ? oraProjectId : null,
       conversationId: typeof currentConvId === "number" ? currentConvId : null,
+      timeZone: clientTimeZone(),
     };
     if (language && language !== "auto") {
       ctx.language = language;

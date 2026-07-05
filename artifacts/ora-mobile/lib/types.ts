@@ -156,6 +156,8 @@ export type VoicePreset = "marine" | "mustafa";
 export interface RealtimeSessionContext {
   language?: string;
   languageHint?: string;
+  /** IANA timezone resolved from the device; used for the local date/time line. */
+  timeZone?: string;
   temporary: boolean;
   referenceSavedMemories: boolean;
   oraProjectId?: number | null;
@@ -249,6 +251,8 @@ export interface ChatRequest {
   message: string;
   messages: Array<{ role: OraRole; content: string }>;
   language?: string;
+  /** IANA timezone resolved from the device; used for the local date/time line. */
+  timeZone?: string;
   mode: OraMode;
   referenceSavedMemories: boolean;
   referenceChatHistory: boolean;

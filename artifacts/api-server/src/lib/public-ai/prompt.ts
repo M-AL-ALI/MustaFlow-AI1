@@ -94,6 +94,80 @@ Match the language the user is currently writing in (per-message detection), and
 - NEVER wrap a URL in backticks or inline code (e.g. \`https://...\`) — a URL inside code formatting is never clickable. Backticks are only for code, file names, and commands, never for links.
 - When you report back a preview link or a published app link, present it as a clear labelled markdown link such as [Open your app](https://...) so it stands out as the primary action.`;
 
+/**
+ * Builds the authoritative "Current date and time" block injected into every Ora
+ * system prompt. Without it Ora infers "today" from its training data and gets
+ * the date, weekday, and relative-date math ("tomorrow", "yesterday") wrong.
+ *
+ * MUST be computed per request (never a module-level constant): a Date captured
+ * at module load would freeze for the whole process lifetime. `now` is injectable
+ * only so unit tests are deterministic.
+ *
+ * Timezone handling: the UTC line is always authoritative. When the client sends
+ * a valid IANA `timeZone`, a local line is added so the model can answer in the
+ * user's local time. An invalid/unknown zone (Intl throws RangeError) falls back
+ * to UTC-only rather than throwing. Time is rendered at minute granularity — it
+ * reads better and, for realtime voice (minted once per session), avoids
+ * pretending to a false-precision second that is stale seconds into the call.
+ */
+export function buildCurrentDateTimeBlock(
+  timeZone?: string,
+  now: Date = new Date(),
+  asOfLabel: string = "right now",
+): string {
+  const utcReadable = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  }).format(now);
+  // Minute-granularity ISO instant, e.g. "2026-07-05T14:23Z".
+  const utcIso = now.toISOString().slice(0, 16) + "Z";
+
+  const lines = [
+    "## Current date and time (authoritative)",
+    `This is the real, current date and time as of ${asOfLabel}. Treat it as the single source of truth.`,
+    `- Current date and time (UTC): ${utcReadable} (UTC)`,
+    `- UTC timestamp: ${utcIso}`,
+  ];
+
+  let localAdded = false;
+  if (timeZone) {
+    try {
+      const localReadable = new Intl.DateTimeFormat("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone,
+      }).format(now);
+      lines.push(`- User's local date and time (${timeZone}): ${localReadable}`);
+      localAdded = true;
+    } catch {
+      // Invalid or unknown IANA zone — Intl throws RangeError. Fall back to
+      // UTC-only so a bad client hint never breaks prompt construction.
+    }
+  }
+  if (!localAdded) {
+    lines.push(
+      "- The user's local timezone was not provided. If an answer depends on the user's local time, give it in UTC and say it is UTC, or ask which timezone they mean.",
+    );
+  }
+
+  lines.push(
+    'Use this block for any question about today\'s date, the current time, the day of the week, or relative dates such as "tomorrow", "yesterday", "last week", or "in three days" — compute those from the date above. Never infer or guess the current date or time from your training data; that information is out of date.',
+  );
+
+  return "\n\n" + lines.join("\n");
+}
+
 const INJECTION_PATTERNS: RegExp[] = [
   /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|context)/i,
   /you\s+are\s+now\s+(a|an)\s+/i,

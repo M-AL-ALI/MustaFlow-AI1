@@ -7,7 +7,11 @@ import {
   MSG_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { resolveFileEntry } from "../../lib/public-ai/file-context-store";
-import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import {
+  scanUserInput,
+  ORA_SYSTEM_PROMPT,
+  buildCurrentDateTimeBlock,
+} from "../../lib/public-ai/prompt";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import {
   buildDocumentAnalysisFraming,
@@ -36,6 +40,7 @@ const bodySchema = z.object({
   message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
+  timeZone: z.string().max(64).optional(),
 });
 
 /**
@@ -43,8 +48,12 @@ const bodySchema = z.object({
  * The document text is NEVER injected into the system prompt — it is placed
  * in the user turn as clearly delimited untrusted reference material.
  */
-function buildSystemPrompt(language: string | undefined, analysisAddendum: string): string {
-  let prompt = ORA_SYSTEM_PROMPT + analysisAddendum;
+function buildSystemPrompt(
+  language: string | undefined,
+  analysisAddendum: string,
+  timeZone?: string,
+): string {
+  let prompt = ORA_SYSTEM_PROMPT + buildCurrentDateTimeBlock(timeZone) + analysisAddendum;
   if (language && language !== "auto") {
     prompt += `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`;
   }
@@ -91,7 +100,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     return;
   }
 
-  const { fileRef, message, messages, language } = parsed.data;
+  const { fileRef, message, messages, language, timeZone } = parsed.data;
 
   if (isKillSwitchActive("file_analysis")) {
     res.status(503).json(killSwitchBody("file_analysis"));
@@ -191,7 +200,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     filename: fileEntry.filename,
     extractedText: fileEntry.extractedText,
   });
-  const systemPrompt = buildSystemPrompt(language, framing.addendum);
+  const systemPrompt = buildSystemPrompt(language, framing.addendum, timeZone);
   const documentUserBlock = buildDocumentUserBlock(
     fileEntry.filename,
     fileEntry.extractedText,

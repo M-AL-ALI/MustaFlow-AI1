@@ -37,9 +37,21 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
-  .agents/memory/MEMORY.md \
-  .agents/memory/ora-realtime-audio-liveness-verdict.md \
-  .agents/memory/orax-source-string-test-pitfalls.md \
+  artifacts/api-server/src/lib/public-ai/prompt.ts \
+  artifacts/api-server/src/lib/public-ai/orchestrator.ts \
+  artifacts/api-server/src/lib/public-ai/web-search.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/ora-quality-identity.test.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/current-datetime-block.test.ts \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  artifacts/api-server/src/routes/public-ai/file-analysis.ts \
+  artifacts/api-server/src/routes/public-ai/image-analysis.ts \
+  artifacts/api-server/src/routes/public-ai/realtime.ts \
+  artifacts/api-server/src/routes/public-ai/__tests__/search-routing.test.ts \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts \
+  artifacts/ora-mobile/app/\(home\)/index.tsx \
+  artifacts/ora-mobile/lib/api.ts \
+  artifacts/ora-mobile/lib/types.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

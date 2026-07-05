@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isWebSearchRequest,
+  isSportsScheduleRequest,
   isVideoRequest,
   routeOraMessage,
   checkToolAccess,
@@ -81,6 +82,42 @@ describe("isWebSearchRequest", () => {
     expect(isWebSearchRequest("look up this value in my uploaded file")).toBe(false);
     expect(isWebSearchRequest("search for duplicates in this CSV")).toBe(false);
     expect(isWebSearchRequest("look up this function in the docs I pasted")).toBe(false);
+  });
+});
+
+// ─── isSportsScheduleRequest ─────────────────────────────────────────────────
+
+describe("isSportsScheduleRequest", () => {
+  it("matches live fixtures / scores / schedule questions", () => {
+    expect(isSportsScheduleRequest("who's playing tonight")).toBe(true);
+    expect(isSportsScheduleRequest("any premier league fixtures this weekend")).toBe(true);
+    expect(isSportsScheduleRequest("what are the nba scores today")).toBe(true);
+    expect(isSportsScheduleRequest("world cup games today")).toBe(true);
+    expect(isSportsScheduleRequest("kickoff times today")).toBe(true);
+    expect(isSportsScheduleRequest("did arsenal win last night")).toBe(true);
+  });
+
+  it("does NOT hijack build/create requests that merely mention a sport", () => {
+    // A build/create verb near a buildable noun vetoes the match.
+    expect(isSportsScheduleRequest("what games can I build today")).toBe(false);
+    expect(isSportsScheduleRequest("make a soccer game")).toBe(false);
+    expect(isSportsScheduleRequest("build a football scoreboard today")).toBe(false);
+    expect(isSportsScheduleRequest("create a basketball stats tracker")).toBe(false);
+  });
+
+  it("does NOT match ordinary phrasing that lacks a sport + time signal", () => {
+    expect(isSportsScheduleRequest("who is playing the villain in the new movie")).toBe(false);
+    expect(isSportsScheduleRequest("what is today's date")).toBe(false);
+    expect(isSportsScheduleRequest("what time is it")).toBe(false);
+    expect(isSportsScheduleRequest("let's play a game tonight")).toBe(false);
+  });
+
+  it("feeds isWebSearchRequest so sports questions route to live search", () => {
+    expect(isWebSearchRequest("any premier league fixtures this weekend")).toBe(true);
+    expect(isWebSearchRequest("did arsenal win last night")).toBe(true);
+    // Negatives stay conversational through isWebSearchRequest too.
+    expect(isWebSearchRequest("what games can I build today")).toBe(false);
+    expect(isWebSearchRequest("what is today's date")).toBe(false);
   });
 });
 
@@ -522,6 +559,24 @@ describe("inferOraSearchPlan", () => {
     });
     expect(plan.mediaIntent).toBe("image");
     expect(plan.instruction).toContain("direct image URLs");
+  });
+
+  it("adds sports-schedule formatting guidance for live fixtures questions", () => {
+    const plan = inferOraSearchPlan({
+      query: "what are the premier league fixtures this weekend",
+    });
+    // The step tells the model to report teams/time+timezone/competition/source,
+    // and to give the exact honest fallback rather than guessing.
+    expect(plan.instruction).toContain("live sports fixtures");
+    expect(plan.instruction).toContain("timezone");
+    expect(plan.instruction).toContain("I could not verify scheduled matches for today");
+  });
+
+  it("does NOT add sports guidance to a non-sports search", () => {
+    const plan = inferOraSearchPlan({
+      query: "find the latest official pricing page for OpenAI",
+    });
+    expect(plan.instruction).not.toContain("I could not verify scheduled matches for today");
   });
 });
 

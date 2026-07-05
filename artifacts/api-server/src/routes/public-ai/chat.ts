@@ -15,6 +15,7 @@ import {
 import {
   scanUserInput,
   ORA_SYSTEM_PROMPT,
+  buildCurrentDateTimeBlock,
   isPastedReferenceAnalysisRequest,
   summarizePastedReferenceSignals,
 } from "../../lib/public-ai/prompt";
@@ -884,6 +885,9 @@ const bodySchema = z.object({
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
   languageHint: z.string().max(20).optional(),
+  // IANA timezone (e.g. "America/New_York") the client resolves from the browser.
+  // Used to render the user's local date/time in the authoritative date block.
+  timeZone: z.string().max(64).optional(),
   mode: z.enum(["instant", "deep"]).default("instant"),
   referenceSavedMemories: z.boolean().default(true),
   referenceChatHistory: z.boolean().default(true),
@@ -970,22 +974,27 @@ export function buildSystemPrompt(
   language: string | undefined,
   languageHint: string | undefined,
   isSignedIn: boolean,
+  timeZone?: string,
+  dateTimeAsOfLabel?: string,
 ): string {
   const authBlock = sessionAuthBlock(isSignedIn);
+  // Authoritative current date/time — computed per request (never cached at
+  // module load) so today/tomorrow/date-math and freshness judgments are correct
+  // on every surface (chat, stream, realtime, file/image analysis).
+  const dateBlock = buildCurrentDateTimeBlock(timeZone, undefined, dateTimeAsOfLabel);
+  const base = ORA_SYSTEM_PROMPT + dateBlock + authBlock;
   if (!language || language === "auto") {
-    if (!languageHint) return ORA_SYSTEM_PROMPT + authBlock;
+    if (!languageHint) return base;
     // Normalise: "fr-FR" → "fr", "en-US" → "en"
     const primaryLang = languageHint.split("-")[0].toLowerCase();
-    if (primaryLang === "en") return ORA_SYSTEM_PROMPT + authBlock; // English is the default — no hint needed
+    if (primaryLang === "en") return base; // English is the default — no hint needed
     return (
-      ORA_SYSTEM_PROMPT +
-      authBlock +
+      base +
       `\n\n## Language tiebreaker\nThe visitor's browser is set to "${languageHint}". When their message is too short or ambiguous to reliably detect a language, default to responding in ${primaryLang}. If the message is clearly in a different language, match that language instead.`
     );
   }
   return (
-    ORA_SYSTEM_PROMPT +
-    authBlock +
+    base +
     `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`
   );
 }
@@ -1670,7 +1679,7 @@ router.post("/public-ai/chat", async (req, res) => {
         const fallbackRouteTier: OraRouteTier = fallbackDeep ? "deep" : "premium";
         const fallbackModel = openAiModelForOraRoute(fallbackRouteTier, planTier);
         const fallbackSystemPrompt =
-          buildSystemPrompt(language, languageHint, !!authed) +
+          buildSystemPrompt(language, languageHint, !!authed, parsed.data.timeZone) +
           (fallbackDeep ? DEEP_SYSTEM_ADDENDUM : "") +
           searchPersonalContext +
           buildFileContextAddendum(carriedDocs, documentRefs);
@@ -1855,7 +1864,7 @@ router.post("/public-ai/chat", async (req, res) => {
   const fileContextAddendum = buildFileContextAddendum(carriedDocs, documentRefs);
 
   const systemPrompt =
-    buildSystemPrompt(language, languageHint, !!authed) +
+    buildSystemPrompt(language, languageHint, !!authed, parsed.data.timeZone) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
     (referenceAnalysisTurn
       ? PASTED_REFERENCE_ANALYSIS_ADDENDUM + summarizePastedReferenceSignals(message)
@@ -2533,7 +2542,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   const fileContextAddendum = buildFileContextAddendum(carriedDocs, documentRefs);
 
   const systemPrompt =
-    buildSystemPrompt(language, languageHint, !!authed) +
+    buildSystemPrompt(language, languageHint, !!authed, parsed.data.timeZone) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
     (referenceAnalysisTurn
       ? PASTED_REFERENCE_ANALYSIS_ADDENDUM + summarizePastedReferenceSignals(message)

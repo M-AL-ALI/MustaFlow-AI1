@@ -317,8 +317,69 @@ export const ORA_SEARCH_PATTERNS: RegExp[] = [
   /\bwho\s+is\s+(?:the\s+)?(?:current|new|acting|latest)\b[^.?!]{0,50}\b(?:ceo|cto|coo|cfo|president|prime\s+minister|chancellor|mayor|governor|secretary|director|head|chief|leader|coach|manager|owner)\b/i,
 ];
 
+// ── Sports / live-schedule intent ───────────────────────────────────────────
+// Live fixtures, scores, and schedules are highly time-sensitive and must be
+// answered by a real web search (or an honest "could not verify") rather than
+// the model's static knowledge. Patterns are anchored to an explicit sport noun
+// OR to inherently-sporting schedule words ("fixtures", "kickoff") + a time
+// word, so ordinary app-building talk ("what games can I build today", "make a
+// soccer game") is NOT hijacked. A build/create verb near a buildable noun
+// additionally vetoes the match as a guard for "build a football game today".
+const SPORT_NOUNS =
+  "soccer|football|basketball|baseball|hockey|tennis|cricket|rugby|golf|boxing|f1|formula\\s*1|nascar|nba|wnba|nfl|nhl|mlb|mls|ncaa|ufc|world\\s+cup|champions\\s+league|premier\\s+league|la\\s+liga|bundesliga|serie\\s+a|ligue\\s+1|europa\\s+league|euros?|olympics?|super\\s+bowl|world\\s+series|grand\\s+prix|wimbledon|ipl|the\\s+ashes";
+const SPORT_EVENT_WORDS =
+  "games?|match(?:es|ups?)?|fixtures?|schedules?|scores?|results?|standings?|kick[-\\s]?off|matchday|line[-\\s]?ups?|tip[-\\s]?off|finals?|semi[-\\s]?finals?|quarter[-\\s]?finals?";
+const SPORT_TIME_ANCHORS =
+  "today|today'?s|tonight|tomorrow|this\\s+(?:week|weekend|afternoon|evening|morning)|weekend|right\\s+now|now|currently|live|this\\s+season|upcoming|next\\s+(?:game|match|week|weekend)|yesterday|last\\s+night";
+
+export const ORA_SPORTS_SCHEDULE_PATTERNS: RegExp[] = [
+  // "who's playing (tonight|today|this weekend|...)" — very sports-specific
+  // phrasing, time-anchored so "who is playing the villain" never matches.
+  new RegExp(
+    `\\bwho(?:'?s|\\s+is|\\s+are)\\s+playing\\b[^.?!]{0,40}\\b(?:${SPORT_TIME_ANCHORS})\\b`,
+    "i",
+  ),
+  // "is/are/will/when <team> playing (this weekend|...)".
+  new RegExp(
+    `\\b(?:is|are|will|when(?:'?s|\\s+is|\\s+are)?)\\b[^.?!]{0,30}\\bplaying\\b[^.?!]{0,30}\\b(?:${SPORT_TIME_ANCHORS})\\b`,
+    "i",
+  ),
+  // Sport noun + event/schedule word, either order: "world cup games today",
+  // "premier league fixtures", "scores for the nba tonight".
+  new RegExp(`\\b(?:${SPORT_NOUNS})\\b[^.?!]{0,40}\\b(?:${SPORT_EVENT_WORDS})\\b`, "i"),
+  new RegExp(`\\b(?:${SPORT_EVENT_WORDS})\\b[^.?!]{0,40}\\b(?:${SPORT_NOUNS})\\b`, "i"),
+  // Inherently-sporting schedule words + a time anchor, no named sport needed:
+  // "any fixtures this weekend", "kickoff times today", "matchday tomorrow".
+  new RegExp(
+    `\\b(?:fixtures?|matchday|kick[-\\s]?off|matchups?)\\b[^.?!]{0,40}\\b(?:${SPORT_TIME_ANCHORS})\\b`,
+    "i",
+  ),
+  // "did <team> win (last night|today|the game|the <sport>)".
+  new RegExp(
+    `\\bdid\\b[^.?!]{0,40}\\bwin\\b[^.?!]{0,25}\\b(?:${SPORT_NOUNS}|game|match|last\\s+night|today|yesterday|this\\s+(?:week|weekend))\\b`,
+    "i",
+  ),
+];
+
+// A build/create verb near a buildable noun means the user wants to BUILD
+// something sports-themed, not look up live results. This veto keeps
+// "build a football game today" / "make a soccer scoreboard" conversational.
+const SPORTS_BUILD_VETO =
+  /\b(build|create|make|develop|design|code|program|writ(?:e|ing)|clone|prototype|generate|scaffold|implement)\b[^.?!]{0,30}\b(games?|apps?|application|websites?|sites?|clones?|projects?|prototypes?|trackers?|scoreboards?|dashboards?|components?|features?)\b/i;
+
+/**
+ * True when the message asks about LIVE sports fixtures/scores/schedules and
+ * should be routed to a real web search (or an honest "could not verify").
+ * A build/create verb near a buildable noun vetoes the match so build requests
+ * that merely mention a sport stay conversational.
+ */
+export function isSportsScheduleRequest(message: string): boolean {
+  if (SPORTS_BUILD_VETO.test(message)) return false;
+  return ORA_SPORTS_SCHEDULE_PATTERNS.some((p) => p.test(message));
+}
+
 export function isWebSearchRequest(message: string): boolean {
-  return ORA_SEARCH_PATTERNS.some((p) => p.test(message));
+  return ORA_SEARCH_PATTERNS.some((p) => p.test(message)) || isSportsScheduleRequest(message);
 }
 
 // ── Video-request intent detection ──────────────────────────────────────────

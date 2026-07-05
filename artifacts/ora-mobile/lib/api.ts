@@ -88,6 +88,21 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * The device's IANA timezone (e.g. "America/New_York"). Wrapped in try/catch
+ * because Hermes' Intl can throw or be absent on some builds. Sent with every
+ * Ora chat/realtime request so the backend renders the user's local date/time
+ * in the authoritative date/time block. Returns undefined when unavailable —
+ * the field is optional server-side and simply omitted from the payload.
+ */
+export function clientTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function authHeaders(extra?: Record<string, string>): Promise<Headers> {
   const headers = new Headers(extra);
   const token = await getAuthToken();
@@ -238,6 +253,7 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
     body: JSON.stringify({
       language: ctx.language,
       languageHint: ctx.languageHint,
+      timeZone: ctx.timeZone ?? clientTimeZone(),
       temporary: ctx.temporary,
       referenceSavedMemories: ctx.referenceSavedMemories,
       oraProjectId: ctx.oraProjectId ?? null,

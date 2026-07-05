@@ -16,6 +16,7 @@
 import OpenAI, { APIConnectionTimeoutError } from "openai";
 import { logger } from "../logger";
 import { normalizeOraPlanTier, openAiModelForOraSearch, type OraPlanTier } from "./model-router";
+import { isSportsScheduleRequest } from "./orchestrator";
 
 export interface OraSource {
   title: string;
@@ -549,6 +550,8 @@ export function inferOraSearchPlan(input: { query: string; wantsVideos?: boolean
       ? "image"
       : "none";
 
+  const sportsSchedule = isSportsScheduleRequest(query);
+
   const steps = [
     researchIntent
       ? "silently decompose the request into targeted searches before answering"
@@ -566,7 +569,10 @@ export function inferOraSearchPlan(input: { query: string; wantsVideos?: boolean
       : mediaIntent === "video"
         ? "the user is asking for videos; return verified watch-page URLs in the media block"
         : "include media only when it materially helps the answer",
-  ];
+    sportsSchedule
+      ? 'this is a live sports fixtures/scores question: for each match report the teams, the local match time WITH its timezone, the competition, and the source; if you cannot verify scheduled matches for the requested day, reply exactly "I could not verify scheduled matches for today" rather than guessing'
+      : null,
+  ].filter((step): step is string => step !== null);
 
   return {
     researchIntent,

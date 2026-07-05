@@ -154,6 +154,9 @@ const VOICE_ADDENDUM =
 const bodySchema = z.object({
   language: z.string().max(20).optional(),
   languageHint: z.string().max(40).optional(),
+  // IANA timezone (e.g. "America/New_York") the client resolves from the device.
+  // Used to render the user's local date/time in the authoritative date block.
+  timeZone: z.string().max(64).optional(),
   voice: z.string().max(40).optional(),
   // Product-facing voice selection sent by normal clients (never a raw provider
   // voice id). The server maps it to a provider voice: marine -> female, mustafa
@@ -338,6 +341,7 @@ async function buildRealtimeInstructions(opts: {
   authed: AuthedOraUser | null;
   language?: string;
   languageHint?: string;
+  timeZone?: string;
   temporary?: boolean;
   referenceSavedMemories?: boolean;
   oraProjectId?: number | null;
@@ -347,13 +351,23 @@ async function buildRealtimeInstructions(opts: {
     authed,
     language,
     languageHint,
+    timeZone,
     temporary,
     referenceSavedMemories,
     oraProjectId,
     message,
   } = opts;
 
-  let instructions = buildSystemPrompt(language, languageHint, !!authed);
+  // Realtime instructions are minted ONCE at session start, so the date block is
+  // labeled accordingly — a long voice call must not confidently state a stale
+  // wall-clock time as if it were the current second.
+  let instructions = buildSystemPrompt(
+    language,
+    languageHint,
+    !!authed,
+    timeZone,
+    "the start of this voice session",
+  );
 
   if (authed) {
     const profile = await buildProfileContext(authed.userId).catch(() => "");
@@ -534,6 +548,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     authed,
     language: parsed.data.language,
     languageHint: parsed.data.languageHint,
+    timeZone: parsed.data.timeZone,
     temporary: parsed.data.temporary,
     referenceSavedMemories: parsed.data.referenceSavedMemories,
     oraProjectId: parsed.data.oraProjectId,

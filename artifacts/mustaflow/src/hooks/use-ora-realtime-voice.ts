@@ -75,6 +75,8 @@ export interface RealtimeStartContext {
   language?: string;
   /** Optional human-readable language label for the system prompt. */
   languageHint?: string;
+  /** IANA timezone resolved from the browser; used for local date/time. */
+  timeZone?: string;
   temporary: boolean;
   referenceSavedMemories: boolean;
   oraProjectId?: number | null;
@@ -2194,6 +2196,7 @@ export function useOraRealtimeVoice(
           body: JSON.stringify({
             language: ctx.language,
             languageHint: ctx.languageHint,
+            timeZone: ctx.timeZone,
             temporary: ctx.temporary,
             referenceSavedMemories: ctx.referenceSavedMemories,
             oraProjectId: ctx.oraProjectId ?? null,

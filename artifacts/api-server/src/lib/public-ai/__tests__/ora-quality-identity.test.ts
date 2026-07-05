@@ -210,6 +210,26 @@ describe("buildSystemPrompt identity propagation", () => {
       expect(p).toContain("MustaFlow AI");
     }
   });
+
+  it("injects the authoritative current date/time block into every path", () => {
+    const paths = [
+      buildSystemPrompt(undefined, undefined, false),
+      buildSystemPrompt(undefined, undefined, true),
+      buildSystemPrompt("es", undefined, true),
+      buildSystemPrompt(undefined, "ar-SA", false),
+      buildSystemPrompt(undefined, undefined, true, "America/New_York"),
+    ];
+    for (const p of paths) {
+      expect(p).toContain("## Current date and time (authoritative)");
+      expect(p).toContain("UTC timestamp:");
+      expect(p).toContain("Never infer or guess the current date or time");
+    }
+  });
+
+  it("passes the caller's timezone into the date block", () => {
+    const prompt = buildSystemPrompt(undefined, undefined, true, "America/New_York");
+    expect(prompt).toContain("America/New_York");
+  });
 });
 
 describe("file-builder system prompts — identity embedding", () => {
