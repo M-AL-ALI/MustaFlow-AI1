@@ -399,6 +399,7 @@ export default function OraChatScreen() {
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [uploading, setUploading] = useState(false);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const lastActiveRestoreAttemptedRef = useRef(false);
   const [showConversations, setShowConversations] = useState(false);
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
@@ -2056,7 +2057,10 @@ export default function OraChatScreen() {
     setLoadingConversations(true);
     // Load conversations and projects independently so one failing endpoint
     // does not blank the other list.
-    const [convs, projs] = await Promise.allSettled([listConversations(), listProjects()]);
+    const [convs, projs] = await Promise.allSettled([
+      listConversations({ limit: 100 }),
+      listProjects(),
+    ]);
     setConversations(convs.status === "fulfilled" ? convs.value : []);
     if (projs.status === "fulfilled") {
       projectsLoadedRef.current = true;
@@ -2068,12 +2072,21 @@ export default function OraChatScreen() {
   // Refresh just the project + conversation lists (after create/rename/delete)
   // without reopening or toggling the loading state.
   const refreshChatLists = useCallback(async () => {
-    const [convs, projs] = await Promise.allSettled([listConversations(), listProjects()]);
+    const [convs, projs] = await Promise.allSettled([
+      listConversations({ limit: 100 }),
+      listProjects(),
+    ]);
     if (convs.status === "fulfilled") setConversations(convs.value);
     if (projs.status === "fulfilled") {
       projectsLoadedRef.current = true;
       setProjects(projs.value);
     }
+  }, []);
+
+  const searchChatLists = useCallback(async (query: string) => {
+    const q = query.trim() || undefined;
+    const convs = await listConversations({ q, limit: 100 });
+    setConversations(convs);
   }, []);
 
   const loadConversation = useCallback(
@@ -2143,6 +2156,24 @@ export default function OraChatScreen() {
   }, []);
 
   // ── Drawer → chat bridge ──────────────────────────────────────────────────
+  // On a clean signed-in launch, restore the last active Ora conversation saved
+  // by the website/mobile settings endpoint. Explicit drawer/project selections
+  // still win because pendingConversationId is handled below.
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    if (lastActiveRestoreAttemptedRef.current) return;
+    if (pendingConversationId != null || conversationId != null || messagesRef.current.length > 0)
+      return;
+    lastActiveRestoreAttemptedRef.current = true;
+    void getOraUserSettings()
+      .then((settings) => {
+        if (settings.lastConversationId != null) {
+          void loadConversation(settings.lastConversationId);
+        }
+      })
+      .catch(() => {});
+  }, [conversationId, isLoaded, isSignedIn, loadConversation, pendingConversationId]);
+
   // When the sidebar taps a conversation, load it here and clear the pending id.
   useEffect(() => {
     if (pendingConversationId != null) {
@@ -3285,11 +3316,14 @@ export default function OraChatScreen() {
         onRenameProject={openRenameProject}
         onDeleteProject={handleDeleteProject}
         onMoveConversation={(conv) => setMoveTarget(conv)}
+        onSearchConversations={searchChatLists}
         onPinConversation={async (id, pinned) => {
           try {
             await pinConversation(id, pinned);
             void refreshChatLists();
-          } catch { /* best-effort */ }
+          } catch {
+            /* best-effort */
+          }
         }}
       />
 
@@ -4064,18 +4098,10 @@ function ConversationRow({
         ) : null}
         {hasBadges ? (
           <View style={{ flexDirection: "row", gap: 4, marginTop: 3 }}>
-            {conv.metaHasImages ? (
-              <ImageIcon size={11} color={c.mutedForeground} />
-            ) : null}
-            {conv.metaHasGeneratedFiles ? (
-              <FileText size={11} color={c.mutedForeground} />
-            ) : null}
-            {conv.metaHasSources ? (
-              <Globe size={11} color={c.mutedForeground} />
-            ) : null}
-            {conv.metaHasVoice ? (
-              <Mic size={11} color={c.mutedForeground} />
-            ) : null}
+            {conv.metaHasImages ? <ImageIcon size={11} color={c.mutedForeground} /> : null}
+            {conv.metaHasGeneratedFiles ? <FileText size={11} color={c.mutedForeground} /> : null}
+            {conv.metaHasSources ? <Globe size={11} color={c.mutedForeground} /> : null}
+            {conv.metaHasVoice ? <Mic size={11} color={c.mutedForeground} /> : null}
           </View>
         ) : null}
       </Pressable>
@@ -4084,7 +4110,9 @@ function ConversationRow({
           onPress={() => onPin(conv.id, !isPinned)}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel={isPinned ? `Unpin ${conv.title || "chat"}` : `Pin ${conv.title || "chat"}`}
+          accessibilityLabel={
+            isPinned ? `Unpin ${conv.title || "chat"}` : `Pin ${conv.title || "chat"}`
+          }
         >
           {isPinned ? (
             <PinOff size={15} color={c.mutedForeground} />
@@ -4129,6 +4157,7 @@ function ChatsDrawer({
   onRenameProject,
   onDeleteProject,
   onMoveConversation,
+  onSearchConversations,
   onPinConversation,
 }: {
   visible: boolean;
@@ -4146,6 +4175,7 @@ function ChatsDrawer({
   onRenameProject: (project: OraProjectSummary) => void;
   onDeleteProject: (project: OraProjectSummary) => void;
   onMoveConversation: (conversation: OraConversationSummary) => void;
+  onSearchConversations: (query: string) => Promise<void>;
   onPinConversation: (id: number, pinned: boolean) => void;
 }) {
   const c = useColors();
@@ -4161,15 +4191,17 @@ function ChatsDrawer({
     }
   }, [activeProjectId]);
 
+  useEffect(() => {
+    if (!visible) return;
+    const handle = setTimeout(() => {
+      void onSearchConversations(searchQuery);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [onSearchConversations, searchQuery, visible]);
+
   // Standalone chats (no project) live under "Recent"; the rest nest under
   // their project. Server returns projectId per conversation.
-  const filtered = searchQuery
-    ? conversations.filter(
-        (cv) =>
-          (cv.title ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (cv.preview ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : conversations;
+  const filtered = conversations;
   const pinned = filtered.filter((cv) => cv.pinnedAt != null && cv.archivedAt == null);
   const standalone = filtered.filter((cv) => cv.projectId == null && cv.archivedAt == null);
 

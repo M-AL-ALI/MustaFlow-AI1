@@ -418,3 +418,50 @@ describe("Ora mobile parity — Retry live search (forceSearch)", () => {
     expect(index).toContain('accessibilityLabel="Retry live search"');
   });
 });
+
+describe("Ora mobile parity — conversation history v2 completion", () => {
+  const api = read("../api.ts");
+  const index = read("../../app/(home)/index.tsx");
+  const memory = read("../../app/(home)/memory.tsx");
+
+  it("listConversations accepts backend search/pagination/archive query options", () => {
+    expect(api).toContain("export interface ListConversationsOptions");
+    expect(api).toContain("q?: string;");
+    expect(api).toContain("limit?: number;");
+    expect(api).toContain("offset?: number;");
+    expect(api).toContain("archived?: boolean;");
+    expect(api).toContain('params.set("q", q)');
+    expect(api).toContain('params.set("limit", String(options.limit))');
+    expect(api).toContain('params.set("archived", "true")');
+  });
+
+  it("mobile chat drawer search calls the backend instead of only filtering loaded rows", () => {
+    expect(index).toContain("onSearchConversations={searchChatLists}");
+    expect(index).toContain("listConversations({ q, limit: 100 })");
+    expect(index).toContain("const filtered = conversations;");
+    expect(index).not.toContain(
+      '(cv.preview ?? "").toLowerCase().includes(searchQuery.toLowerCase())',
+    );
+  });
+
+  it("mobile restores the server-synced last active conversation on clean launch", () => {
+    expect(index).toContain("lastActiveRestoreAttemptedRef");
+    expect(index).toContain("getOraUserSettings()");
+    expect(index).toContain("settings.lastConversationId");
+    expect(index).toContain("void loadConversation(settings.lastConversationId)");
+  });
+
+  it("mobile History exposes archived conversations with restore and permanent delete", () => {
+    expect(memory).toContain("listArchivedConversations({ q, limit: 100 })");
+    expect(memory).toContain("restoreConversation(id)");
+    expect(memory).toContain("permanentDeleteConversation(id)");
+    expect(memory).toContain("Show archived");
+    expect(memory).toContain("Delete forever");
+  });
+
+  it("mobile data controls use archive wording for the soft-delete all endpoint", () => {
+    expect(memory).toContain("Archive all conversations");
+    expect(memory).toContain("All conversations archived.");
+    expect(memory).not.toContain("Permanently delete all your Ora conversations and messages");
+  });
+});

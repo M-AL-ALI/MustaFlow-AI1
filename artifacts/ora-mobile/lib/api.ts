@@ -995,9 +995,29 @@ export function restoreMemory(id: number): Promise<unknown> {
   return jsonRequest(`/api/ora/memories/${id}/restore`, { method: "POST" });
 }
 
-export async function listConversations(): Promise<OraConversationSummary[]> {
+export interface ListConversationsOptions {
+  q?: string;
+  limit?: number;
+  offset?: number;
+  archived?: boolean;
+}
+
+function conversationListPath(options?: ListConversationsOptions): string {
+  const params = new URLSearchParams();
+  const q = options?.q?.trim();
+  if (q) params.set("q", q);
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  if (options?.offset != null) params.set("offset", String(options.offset));
+  if (options?.archived === true) params.set("archived", "true");
+  const query = params.toString();
+  return `/api/ora/conversations${query ? `?${query}` : ""}`;
+}
+
+export async function listConversations(
+  options?: ListConversationsOptions,
+): Promise<OraConversationSummary[]> {
   const data = await jsonRequest<{ conversations: OraConversationSummary[] }>(
-    "/api/ora/conversations",
+    conversationListPath(options),
   );
   return data.conversations ?? [];
 }
@@ -1045,9 +1065,11 @@ export function pinConversation(id: number, pinned: boolean): Promise<unknown> {
   });
 }
 
-export async function listArchivedConversations(): Promise<OraConversationSummary[]> {
+export async function listArchivedConversations(
+  options?: Omit<ListConversationsOptions, "archived">,
+): Promise<OraConversationSummary[]> {
   const data = await jsonRequest<{ conversations: OraConversationSummary[] }>(
-    "/api/ora/conversations?archived=true",
+    conversationListPath({ ...options, archived: true }),
   );
   return data.conversations ?? [];
 }
