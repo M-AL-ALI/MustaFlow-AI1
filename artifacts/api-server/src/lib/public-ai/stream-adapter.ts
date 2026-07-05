@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { Provider } from "../ai-provider-config";
+import { classifyProviderError, type ProviderErrorKind } from "./model-router";
 
 /**
  * SSE event shapes emitted by /api/public-ai/chat/stream.
@@ -58,6 +59,16 @@ export interface OraStreamDonePayload {
     provider: string;
     routeTier: string;
     fastLane: boolean;
+    /** Isolated time (ms) spent awaiting the intent classifier (0 when skipped). */
+    classifierMs: number;
+    /** True when the intent classifier call was skipped (fast-lane or deep mode). */
+    classifierSkipped: boolean;
+    /** Tool the orchestrator routed to (e.g. "chat", "deep_thinking", "search"). */
+    routedTool: string;
+    /** True when the routed tool was web search. */
+    searchUsed: boolean;
+    /** Classified fallback reason when a non-primary provider served the reply. */
+    fallbackReason: string | null;
   } | null;
 }
 
@@ -142,7 +153,14 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pr
  *             was already forwarded so the route can choose code + refund.
  */
 export type OraStreamProviderEvent =
-  | { type: "candidate"; provider: string; model: string; usedFallback: boolean }
+  | {
+      type: "candidate";
+      provider: string;
+      model: string;
+      usedFallback: boolean;
+      /** Classified failure kind of the previous candidate when usedFallback. */
+      reason?: ProviderErrorKind;
+    }
   | { type: "token"; text: string }
   | { type: "metrics"; usedSimulatedChunks: boolean; providerDeltaCount: number }
   | { type: "done" }
@@ -257,6 +275,10 @@ export async function* streamOraMessage(
   const { streamChatCompletion } = await import("../ai-providers");
 
   let firstTokenSent = false;
+  // Classified failure kind of the most recent candidate that threw before
+  // first token; attached to the next candidate event so the route can log why
+  // a fallback occurred. Undefined until a candidate fails.
+  let lastFailKind: ProviderErrorKind | undefined;
 
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
@@ -266,6 +288,7 @@ export async function* streamOraMessage(
       provider: candidate.provider,
       model: candidate.model,
       usedFallback,
+      ...(usedFallback && lastFailKind ? { reason: lastFailKind } : {}),
     };
 
     try {
@@ -376,6 +399,7 @@ export async function* streamOraMessage(
         yield { type: "error", firstTokenSent: true, err: candidateErr as Error };
         return;
       }
+      lastFailKind = classifyProviderError(candidateErr);
       logger.warn(
         {
           component: "ora-chat-stream",

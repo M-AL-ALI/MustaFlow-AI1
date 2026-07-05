@@ -1105,10 +1105,15 @@ router.post("/public-ai/chat", async (req, res) => {
     !looksLikeWebSearchIntent(message) &&
     !looksLikeFileGenIntent(message);
 
-  // Only fire the intent classifier when fast-lane is NOT active.
+  // Skip the intent classifier when it cannot change routing: fast-lane turns
+  // (already forced to the mini model) and explicit deep mode. routeOraMessage
+  // always routes deep to deep_thinking, and deep already fed CLASSIFIER_FALLBACK
+  // to routing on every turn (the classifier reliably returns empty for deep and
+  // defaults to premium/high/general), so skipping the ~1.7s call is byte-identical.
   // routeOraMessage accepts a pre-computed `classifier` result and skips its
   // own internal AI call when we supply one.
-  const classifierPromise = isInstantFastLane ? null : classifyIntent(message);
+  const skipClassifier = isInstantFastLane || mode === "deep";
+  const classifierPromise = skipClassifier ? null : classifyIntent(message);
   // Attach a no-op catch so any unexpected rejection from classifyIntent does
   // not become an unhandled rejection when an early-return path exits before
   // `await classifierPromise` is reached.
@@ -1179,12 +1184,15 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
 
-  // isInstantFastLane was computed before auth (above) so classifier was either
-  // skipped entirely (fast-lane) or already fired in parallel with auth.
+  // The classifier was either skipped entirely (fast-lane / deep mode) or fired
+  // in parallel with auth. classifierMs isolates the await cost for diagnostics.
   const classifierTimeoutMs = mode === "instant" ? 500 : 2_000;
-  const classifierResult = isInstantFastLane
-    ? CLASSIFIER_FALLBACK // fast-lane: classifier call was skipped entirely
+  const classifierSkipped = classifierPromise === null;
+  const tClassifier0 = Date.now();
+  const classifierResult = classifierSkipped
+    ? CLASSIFIER_FALLBACK // skipped: routing uses the premium/high/general default
     : await withTimeout(classifierPromise!, classifierTimeoutMs, CLASSIFIER_FALLBACK);
+  const classifierMs = classifierSkipped ? 0 : Date.now() - tClassifier0;
 
   // Route the message through the Ora orchestrator. Ora is a STANDALONE
   // assistant: build/"make me an app" requests are answered as normal
@@ -1196,6 +1204,8 @@ router.post("/public-ai/chat", async (req, res) => {
     classifier: classifierResult, // pre-computed above — skips the internal AI call
   });
   const deepAllowed = decision.tool === "deep_thinking";
+  const routedTool = decision.tool;
+  const searchUsed = decision.tool === "search";
 
   // Re-hydrate any documents the user uploaded earlier this conversation so
   // follow-up questions ("what did that file say?") and "make a summary of it"
@@ -1870,6 +1880,7 @@ router.post("/public-ai/chat", async (req, res) => {
         usedFallback: chain.usedFallback,
         modelUsed: chain.candidate.model,
         provider: chain.candidate.provider,
+        fallbackReason: chain.fallbackReason ?? null,
       };
     })(),
     referenceAnalysisTurn
@@ -1898,9 +1909,10 @@ router.post("/public-ai/chat", async (req, res) => {
   let usedFallback = false;
   let modelUsed = primaryModel;
   let provider: Provider = "openai";
+  let fallbackReason: string | null = null;
 
   if (mainResult.status === "fulfilled") {
-    ({ reply, usedFallback, modelUsed, provider } = mainResult.value);
+    ({ reply, usedFallback, modelUsed, provider, fallbackReason } = mainResult.value);
   } else {
     logger.error(
       { component: "ora-chat", err: mainResult.reason },
@@ -1923,7 +1935,12 @@ router.post("/public-ai/chat", async (req, res) => {
       candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       latencyMs,
       usedFallback,
+      fallbackReason,
       maxTokens,
+      classifierMs,
+      classifierSkipped,
+      routedTool,
+      searchUsed,
     },
     "Ora chat completion",
   );
@@ -2016,11 +2033,15 @@ router.post("/public-ai/chat", async (req, res) => {
       routeTier,
       planTier,
       totalMs,
+      classifierSkipped,
+      routedTool,
+      searchUsed,
       timingMs: {
         sessionMs: timing.t1 - timing.t0,
         authMs: timing.t2 - timing.t1,
         spendCapMs: timing.t3 - timing.t2,
         quotaMs: timing.t4 - timing.t3,
+        classifierMs, // isolated intent-classifier await (0 when skipped)
         contextMs: timing.t5 - timing.t4,
         modelMs: totalMs - (timing.t5 - timing.t0),
       },
@@ -2140,10 +2161,14 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     !looksLikeWebSearchIntent(message) &&
     !looksLikeFileGenIntent(message);
 
-  // Only fire the intent classifier when fast-lane is NOT active.
-  // routeOraMessage accepts a pre-computed `classifier` result so it skips its
-  // own internal AI call when we supply one.
-  const classifierPromise = isInstantFastLane ? null : classifyIntent(message);
+  // Skip the intent classifier when it cannot change routing: fast-lane turns
+  // and explicit deep mode. Deep always routes to deep_thinking and already fed
+  // CLASSIFIER_FALLBACK to routing on every turn (the classifier reliably returns
+  // empty for deep and defaults to premium/high/general), so skipping the ~1.7s
+  // call is byte-identical. routeOraMessage accepts a pre-computed `classifier`
+  // result so it skips its own internal AI call when we supply one.
+  const skipClassifier = isInstantFastLane || mode === "deep";
+  const classifierPromise = skipClassifier ? null : classifyIntent(message);
   // Attach a no-op catch so any unexpected rejection from classifyIntent does
   // not become an unhandled rejection when an early-return path (429, spend cap)
   // exits before `await classifierPromise` is reached.
@@ -2206,12 +2231,15 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   }
   timing.t3 = Date.now(); // spend-cap check complete
 
-  // isInstantFastLane was computed before auth (above) so classifier was either
-  // skipped entirely (fast-lane) or already fired in parallel with auth.
+  // The classifier was either skipped entirely (fast-lane / deep mode) or fired
+  // in parallel with auth. classifierMs isolates the await cost for diagnostics.
   const classifierTimeoutMsStream = mode === "instant" ? 500 : 2_000;
-  const classifierResult = isInstantFastLane
-    ? CLASSIFIER_FALLBACK // fast-lane: classifier call was skipped entirely
+  const classifierSkipped = classifierPromise === null;
+  const tClassifier0 = Date.now();
+  const classifierResult = classifierSkipped
+    ? CLASSIFIER_FALLBACK // skipped: routing uses the premium/high/general default
     : await withTimeout(classifierPromise!, classifierTimeoutMsStream, CLASSIFIER_FALLBACK);
+  const classifierMs = classifierSkipped ? 0 : Date.now() - tClassifier0;
 
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
@@ -2233,6 +2261,8 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     classifier: classifierResult, // pre-computed above — skips the internal AI call
   });
   const deepAllowed = decision.tool === "deep_thinking";
+  const routedTool = decision.tool;
+  const searchUsed = decision.tool === "search";
 
   const carriedDocs = await buildCarriedDocumentContext(
     documentRefs,
@@ -2560,6 +2590,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   let streamedReply = "";
   let firstTokenSent = false;
   let usedFallback = false;
+  let fallbackReason: string | null = null;
   let streamProvider: Provider = candidates[0]?.provider ?? "openai";
   let streamModel = candidates[0]?.model ?? primaryModel;
   let streamFailed = false;
@@ -2575,6 +2606,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     })) {
       if (event.type === "candidate") {
         usedFallback = event.usedFallback;
+        fallbackReason = event.reason ?? null;
         streamProvider = event.provider as Provider;
         streamModel = event.model;
       } else if (event.type === "token") {
@@ -2658,14 +2690,19 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       latencyMs,
       usedFallback,
+      fallbackReason,
       maxTokens,
       replyChars: streamedReply.length,
+      classifierSkipped,
+      routedTool,
+      searchUsed,
       // Per-bucket timing breakdown (ms) — privacy-safe, no user content.
       timingMs: {
         sessionMs: timing.t1 - timing.t0, // session cookie validation
         authMs: timing.t2 - timing.t1, // Clerk JWT + DB user resolve
         spendCapMs: timing.t3 - timing.t2, // global / per-IP spend-cap check
         quotaMs: timing.t4 - timing.t3, // routing decision + quota reserve
+        classifierMs, // isolated intent-classifier await (0 when skipped)
         contextMs: timing.t5 - timing.t4, // memory + cross-conv + profile (concurrent)
         headerFlushMs: timing.t6 - timing.t5, // model selection + SSE headers flush
         ttftMs: timing.tFirstToken >= 0 ? timing.tFirstToken - timing.t0 : -1,
@@ -2759,6 +2796,11 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         provider: streamProvider,
         routeTier,
         fastLane: isInstantFastLane,
+        classifierMs,
+        classifierSkipped,
+        routedTool,
+        searchUsed,
+        fallbackReason,
       },
     },
   });

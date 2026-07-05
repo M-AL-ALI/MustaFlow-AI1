@@ -660,6 +660,13 @@ export interface CandidateChainResult<T> {
   index: number;
   /** True when the winner was not the first-choice provider (index > 0). */
   usedFallback: boolean;
+  /**
+   * When a fallback was used, the classified error kind of the last candidate
+   * that failed before the winner succeeded. Null when the first candidate won.
+   * Optional so existing test mocks that omit it still satisfy the type.
+   * Structured-logging only — never surfaced to user-facing responses.
+   */
+  fallbackReason?: ProviderErrorKind | null;
 }
 
 /**
@@ -740,6 +747,7 @@ export async function runCandidateChain<T>(
   onError?: (candidate: ModelCandidate, index: number, err: unknown) => void,
 ): Promise<CandidateChainResult<T>> {
   let lastErr: unknown = null;
+  let lastFailKind: ProviderErrorKind | null = null;
   const startMs = Date.now();
 
   for (let i = 0; i < candidates.length; i++) {
@@ -760,10 +768,17 @@ export async function runCandidateChain<T>(
           "ora provider fallback succeeded",
         );
       }
-      return { result, candidate, index: i, usedFallback: i > 0 };
+      return {
+        result,
+        candidate,
+        index: i,
+        usedFallback: i > 0,
+        fallbackReason: i > 0 ? lastFailKind : null,
+      };
     } catch (candidateErr) {
       lastErr = candidateErr;
       const errorKind = classifyProviderError(candidateErr);
+      lastFailKind = errorKind;
       logger.warn(
         {
           event: "ora_provider_failed",
