@@ -1,0 +1,32 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Sx_6PBoUBtoGL8o6iDNo5"
+uri = "file://app-store-screenshots/screenshot_1_ora_home_dark.png"
+type = "image"
+title = "1 — Ora Home (Dark)"
+
+[[outputs]]
+id = "owVY5M181IQ1f99_4j7vt"
+uri = "file://app-store-screenshots/screenshot_2_ora_home_light.png"
+type = "image"
+title = "2 — Ora Home (Light)"
+
+[[outputs]]
+id = "FT8Ra779kho5A-0Iubmqh"
+uri = "file://app-store-screenshots/screenshot_3_sign_in.png"
+type = "image"
+title = "3 — Sign In"
+
+[[outputs]]
+id = "pA_RAV2oFlJI86pk5EFZq"
+uri = "file://app-store-screenshots/screenshot_4_menu_light.png"
+type = "image"
+title = "4 — Menu (Light)"
+
+[[outputs]]
+id = "njMgsDiHXYQoulaE6_P8B"
+uri = "file://app-store-screenshots/screenshot_5_menu_dark.png"
+type = "image"
+title = "5 — Menu (Dark)"
