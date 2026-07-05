@@ -38,8 +38,7 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
   .agents/memory/MEMORY.md \
-  .agents/memory/ora-current-datetime-freshness.md \
-  artifacts/api-server/src/routes/public-ai/__tests__/realtime-session.test.ts \
+  artifacts/ora-mobile/app.json \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
