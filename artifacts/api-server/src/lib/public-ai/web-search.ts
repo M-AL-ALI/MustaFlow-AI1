@@ -995,12 +995,17 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     profile,
     documentContext,
   );
-  // Shared request shape. `reasoning:{effort:"low"}` is applied on BOTH the normal
-  // and forced paths: openAiModelForOraSearch defaults to gpt-5-mini, a fast
-  // gpt-5-family reasoning model, and running it at low effort is what keeps live
-  // search comfortably under the timeout caps (~9s in production benchmarks vs.
-  // full gpt-5's 27-56s). `search_context_size` is deliberately NOT used — it is
-  // unsupported on reasoning models and would 400.
+  // Shared request shape. The default search model is gpt-4o-mini: in live
+  // benchmarks it returns grounded results in ~4-9s, comfortably under the
+  // timeout caps, whereas gpt-5-mini at low effort spiked past the 12s normal
+  // cap on a meaningful fraction of calls — degrading live search to a
+  // general-knowledge answer (the "search doesn't work" symptom). Only reasoning
+  // models (gpt-5 / o-series) accept `reasoning.effort`; non-reasoning models
+  // like gpt-4o-mini reject it with a hard 400, so the param is gated on model
+  // support and applied on BOTH the normal and forced paths when supported.
+  // `search_context_size` is deliberately NOT used — unsupported on reasoning
+  // models, and it would 400.
+  const supportsReasoningEffort = /^(?:gpt-5|o\d)/.test(model);
   const buildParams = (instructions: string, maxOutputTokens: number, lowEffort: boolean) => ({
     model,
     instructions,
@@ -1008,7 +1013,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     tools: [{ type: "web_search" }],
     max_output_tokens: maxOutputTokens,
     input: messages,
-    ...(lowEffort ? { reasoning: { effort: "low" } } : {}),
+    ...(lowEffort && supportsReasoningEffort ? { reasoning: { effort: "low" } } : {}),
   });
 
   let attempts: SearchAttempt[];
