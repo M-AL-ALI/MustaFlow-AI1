@@ -1,0 +1,64 @@
+BLOCK TESTFLIGHT: Talk to Ora audio reliability regression on both web and mobile.
+
+User symptom:
+- Ora starts speaking, then voice goes silent mid-answer.
+- The text transcript continues/completes, so the model/data channel is alive.
+- After several turns, Talk to Ora can get stuck in “thinking” and stop responding.
+- Mobile diagnostics also showed POST /api/public-ai/chat returning 502:
+  {"error":"Ora is temporarily unavailable. Please try again in a moment."}
+
+Important verification:
+- The previous watchdog fixes are still present in both hooks:
+  - use-ora-realtime-voice.ts
+  - useOraRealtimeVoiceNative.ts
+- Existing fixes cover missing response.done / output_audio_buffer.stopped / stuck lifecycle state.
+- They do NOT fully cover “audio playback went silent while transcript/data continues.”
+
+Root cause area:
+This is likely an audio-output liveness failure, not a model-generation failure.
+
+Required fix:
+1. Add per-response audio liveness tracking on both web and mobile.
+   Track:
+   - response.created / response.done / response.error
+   - response audio transcript deltas
+   - output_audio_buffer.started / stopped / cleared
+   - remote audio track mute / unmute / ended
+   - audio element/native playback errors
+   - data channel open / close / error
+   - ICE / peer connection state
+   - watchdog fires and reconnect reasons
+
+2. Add a “silent audio watchdog.”
+   If transcript/text deltas continue but no real audio progress/playback is detected for a short window, recover immediately.
+   Do not wait 40 seconds for the speaking watchdog.
+
+3. Recovery behavior:
+   - First try to resume/re-enable playback:
+     - Web: audioEl.play(), check audio element error/waiting/stalled states, track mute/unmute/ended.
+     - Mobile: re-enable remoteTrack, check native WebRTC track mute/ended and audio session interruptions.
+   - If audio still does not resume, cleanly reconnect the realtime session.
+   - Preserve the visible transcript text.
+   - Do not leave the UI stuck in thinking or speaking.
+
+4. Add response-id/item-id guards.
+   Stale timers or stale events from an old turn must never modify the state of a newer response.
+
+5. Fix fallback safety.
+   If realtime drops to legacy mode, /api/public-ai/chat must not leave the voice UI with a dead 502.
+   Investigate the 502 path shown in diagnostics and log provider/fallback reason clearly.
+
+6. Add regression tests for both web and mobile:
+   - Transcript continues but no output_audio_buffer.started/audio progress → reconnect.
+   - Audio starts, then remote track mutes/ends while transcript continues → reconnect.
+   - response.done is lost → existing watchdog still recovers.
+   - output_audio_buffer.stopped is lost → speaking watchdog still recovers.
+   - Two consecutive silent-audio failures → reconnect or explicit fallback, never stuck thinking.
+   - Web/mobile parity assertions for constants, diagnostics, and recovery behavior.
+
+Acceptance:
+- 10+ consecutive Talk to Ora turns on web and mobile without stuck thinking.
+- Simulate bad network/audio interruption and confirm recovery.
+- Voice must not go silent while transcript continues.
+- If audio fails, user sees recoverable state: reconnecting / call back / switch to basic.
+- No TestFlight until this passes on a physical device.
