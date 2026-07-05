@@ -995,12 +995,12 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     profile,
     documentContext,
   );
-  // Shared request shape. `reasoning:{effort:"low"}` is applied ONLY on a forced
-  // retry: openAiModelForOraSearch defaults to gpt-5 for every tier, and its
-  // default medium reasoning effort is the dominant cause of these search
-  // timeouts. Dropping to low effort is what makes a forced retry actually
-  // finish where the normal attempt stalled. `search_context_size` is
-  // deliberately NOT used — it is unsupported on reasoning models and would 400.
+  // Shared request shape. `reasoning:{effort:"low"}` is applied on BOTH the normal
+  // and forced paths: openAiModelForOraSearch defaults to gpt-5-mini, a fast
+  // gpt-5-family reasoning model, and running it at low effort is what keeps live
+  // search comfortably under the timeout caps (~9s in production benchmarks vs.
+  // full gpt-5's 27-56s). `search_context_size` is deliberately NOT used — it is
+  // unsupported on reasoning models and would 400.
   const buildParams = (instructions: string, maxOutputTokens: number, lowEffort: boolean) => ({
     model,
     instructions,
@@ -1038,8 +1038,8 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     ];
     retryOnTimeout = true;
   } else {
-    // Normal degrade-fast path: identical params on both attempts, no timeout retry.
-    const params = buildParams(fullInstructions, profile.maxOutputTokens, false);
+    // Normal degrade-fast path: low effort, identical params on both attempts, no timeout retry.
+    const params = buildParams(fullInstructions, profile.maxOutputTokens, true);
     attempts = [
       { params, timeoutMs: ORA_SEARCH_TIMEOUT_MS },
       { params, timeoutMs: ORA_SEARCH_RETRY_TIMEOUT_MS },

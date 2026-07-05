@@ -207,7 +207,7 @@ describe("Ora model helper functions", () => {
   });
 
   it("uses plan-aware OpenAI env overrides for web search while preserving the default", () => {
-    expect(openAiModelForOraSearch("free")).toBe("gpt-5");
+    expect(openAiModelForOraSearch("free")).toBe("gpt-5-mini");
 
     process.env.ORA_FREE_SEARCH_MODEL = "gpt-free-search";
     process.env.ORA_CORE_SEARCH_MODEL = "gpt-core-search";

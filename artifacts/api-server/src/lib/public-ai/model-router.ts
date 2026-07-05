@@ -227,7 +227,7 @@ export function openAiModelForOraSearch(planTier: OraPlanTier): string {
         "ORA_SEARCH_MODEL",
         "ORA_WAVE_MODEL",
         "ORA_PREMIUM_MODEL",
-      ) ?? "gpt-5"
+      ) ?? "gpt-5-mini"
     );
   }
   if (planTier === "core") {
@@ -237,10 +237,10 @@ export function openAiModelForOraSearch(planTier: OraPlanTier): string {
         "ORA_SEARCH_MODEL",
         "ORA_CORE_MODEL",
         "ORA_PREMIUM_MODEL",
-      ) ?? "gpt-5"
+      ) ?? "gpt-5-mini"
     );
   }
-  return envModel("ORA_FREE_SEARCH_MODEL", "ORA_SEARCH_MODEL") ?? "gpt-5";
+  return envModel("ORA_FREE_SEARCH_MODEL", "ORA_SEARCH_MODEL") ?? "gpt-5-mini";
 }
 
 export function openAiModelForOraMemory(task: OraMemoryTask, planTier: OraPlanTier): string {

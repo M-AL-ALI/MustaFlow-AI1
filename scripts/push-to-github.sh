@@ -38,14 +38,11 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
   scripts/push-to-github.sh \
-  .agents/memory/ora-search-fallback-contract.md \
+  .agents/memory/ora-web-search-provider.md \
+  artifacts/api-server/src/lib/public-ai/model-router.ts \
   artifacts/api-server/src/lib/public-ai/web-search.ts \
-  artifacts/api-server/src/routes/public-ai/chat.ts \
-  artifacts/api-server/src/routes/public-ai/__tests__/search-fallback.test.ts \
-  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
-  artifacts/ora-mobile/lib/types.ts \
-  artifacts/ora-mobile/app/\(home\)/index.tsx \
-  artifacts/ora-mobile/lib/__tests__/ora-mobile-parity.test.ts 2>/dev/null || true
+  artifacts/api-server/src/lib/public-ai/__tests__/model-router.test.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/routing-diagnostics.test.ts 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then

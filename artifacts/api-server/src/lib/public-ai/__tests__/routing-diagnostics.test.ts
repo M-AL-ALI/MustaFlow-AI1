@@ -79,7 +79,7 @@ describe("Ora routing diagnostics", () => {
     expect(imageLookup.tool).toBe("search");
     expect(imageLookup.quotaKind).toBe("message");
     expect(imageLookup.searchProfile?.searchPlan.mediaIntent).toBe("image");
-    expect(imageLookup.openaiModel).toBe("gpt-5");
+    expect(imageLookup.openaiModel).toBe("gpt-5-mini");
     expect(imageLookup.providerOrder).toEqual([]);
 
     const videoSearch = await buildOraRoutingDiagnostic({
