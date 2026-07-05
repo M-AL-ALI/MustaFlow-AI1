@@ -1,11 +1,25 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { useUpdateMyPreferences, getGetMyPreferencesQueryKey } from "@workspace/api-client-react";
+import {
+  useUpdateMyPreferences,
+  getGetMyPreferencesQueryKey,
+  ApiError,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BUILDER_ENABLED } from "@/lib/builder-flag";
-import { Sparkles, MessageCircle, ArrowRight, Loader2, Lock, Code2, Wifi, WifiOff, Monitor } from "lucide-react";
+import {
+  Sparkles,
+  MessageCircle,
+  ArrowRight,
+  Loader2,
+  Lock,
+  Code2,
+  Wifi,
+  WifiOff,
+  Monitor,
+} from "lucide-react";
 import { authFetch } from "@/lib/api-fetch";
 
 interface OraxHostBrief {
@@ -44,17 +58,49 @@ export default function ModeSelectPage() {
     if (selecting) return;
     if (mode === "builder" && !BUILDER_ENABLED) return;
     setSelecting(mode);
-    try {
+
+    const dest = mode === "builder" ? "/projects" : "/ora";
+
+    const savePreference = async () => {
       await updatePreferences.mutateAsync({ data: { preferredMode: mode } });
       await queryClient.invalidateQueries({ queryKey: getGetMyPreferencesQueryKey() });
-      setLocation(mode === "builder" ? "/projects" : "/ora");
-    } catch {
-      toast({
-        title: "Something went wrong",
-        description: "Could not save your preference. Please try again.",
-        variant: "destructive",
-      });
-      setSelecting(null);
+    };
+
+    try {
+      await savePreference();
+      setLocation(dest);
+      return;
+    } catch (err) {
+      // A genuine auth failure (expired session) — send them to sign in rather
+      // than silently proceeding into a surface that will also reject them.
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        toast({
+          title: "Please sign in again",
+          description: "Your session expired. Sign in to continue.",
+          variant: "destructive",
+        });
+        setLocation("/sign-in");
+        return;
+      }
+
+      // Otherwise the failure is transient (e.g. a 5xx during a fresh deploy's
+      // boot window, or a brief network blip). Retry once after a short delay.
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        await savePreference();
+        setLocation(dest);
+        return;
+      } catch {
+        // Saving the chosen mode is best-effort — it only pre-selects this
+        // surface on the next visit. Never hard-block access to the product on
+        // it; let the user in and just re-prompt next time.
+        toast({
+          title: "Couldn't save your choice",
+          description: `Taking you to ${mode === "builder" ? "Build" : "Ora"} anyway. You may need to choose again next time.`,
+          variant: "destructive",
+        });
+        setLocation(dest);
+      }
     }
   }
 

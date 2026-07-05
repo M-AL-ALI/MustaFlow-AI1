@@ -38,11 +38,7 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
   scripts/push-to-github.sh \
-  .agents/memory/ora-web-search-provider.md \
-  artifacts/api-server/src/lib/public-ai/model-router.ts \
-  artifacts/api-server/src/lib/public-ai/web-search.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/model-router.test.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/routing-diagnostics.test.ts 2>/dev/null || true
+  artifacts/mustaflow/src/pages/mode-select.tsx 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
