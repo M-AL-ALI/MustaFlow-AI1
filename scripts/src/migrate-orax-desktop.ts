@@ -294,6 +294,76 @@ async function migrate() {
         ON orax_audit_log (user_id, created_at)
     `);
 
+    // ── orax_desktop_auth_challenges / orax_desktop_sessions ────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS orax_desktop_auth_challenges (
+        id                       TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        user_id                  TEXT,
+        status                   TEXT NOT NULL DEFAULT 'pending',
+        user_code                TEXT NOT NULL,
+        poll_token_hash          TEXT NOT NULL,
+        session_id               TEXT,
+        session_token_ciphertext TEXT,
+        install_id               TEXT,
+        device_name              TEXT,
+        platform                 TEXT,
+        app_version              TEXT,
+        expires_at               TIMESTAMPTZ NOT NULL,
+        approved_at              TIMESTAMPTZ,
+        redeemed_at              TIMESTAMPTZ,
+        denied_at                TIMESTAMPTZ,
+        created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS orax_desktop_auth_challenges_user_code_uidx
+        ON orax_desktop_auth_challenges (user_code)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS orax_desktop_auth_challenges_user_id_idx
+        ON orax_desktop_auth_challenges (user_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS orax_desktop_auth_challenges_status_idx
+        ON orax_desktop_auth_challenges (status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS orax_desktop_auth_challenges_expires_at_idx
+        ON orax_desktop_auth_challenges (expires_at)
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS orax_desktop_sessions (
+        id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        user_id      TEXT NOT NULL,
+        token_hash   TEXT NOT NULL UNIQUE,
+        challenge_id TEXT,
+        install_id   TEXT,
+        device_name  TEXT,
+        platform     TEXT,
+        app_version  TEXT,
+        metadata     JSONB NOT NULL DEFAULT '{}',
+        expires_at   TIMESTAMPTZ NOT NULL,
+        last_used_at TIMESTAMPTZ,
+        revoked_at   TIMESTAMPTZ,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS orax_desktop_sessions_user_id_idx
+        ON orax_desktop_sessions (user_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS orax_desktop_sessions_token_hash_idx
+        ON orax_desktop_sessions (token_hash)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS orax_desktop_sessions_expires_at_idx
+        ON orax_desktop_sessions (expires_at)
+    `);
+
     await client.query("COMMIT");
     console.log(
       "Migration complete: all 9 Phase 2B Orax Desktop tables created\n" +

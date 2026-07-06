@@ -483,6 +483,76 @@ export const ORAX_DESKTOP_ACTION_STATUSES = [
 ] as const;
 export type OraxDesktopActionStatus = (typeof ORAX_DESKTOP_ACTION_STATUSES)[number];
 
+export const ORAX_DESKTOP_AUTH_STATUSES = ["pending", "approved", "expired", "denied"] as const;
+export type OraxDesktopAuthStatus = (typeof ORAX_DESKTOP_AUTH_STATUSES)[number];
+
+// Orax Desktop browser-approved sign-in challenge. The desktop receives only a
+// poll token; the website approves the challenge under a signed-in account.
+export const oraxDesktopAuthChallengesTable = pgTable(
+  "orax_desktop_auth_challenges",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: text("user_id"),
+    status: text("status").notNull().default("pending"),
+    userCode: text("user_code").notNull(),
+    pollTokenHash: text("poll_token_hash").notNull(),
+    sessionId: text("session_id"),
+    sessionTokenCiphertext: text("session_token_ciphertext"),
+    installId: text("install_id"),
+    deviceName: text("device_name"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+    deniedAt: timestamp("denied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("orax_desktop_auth_challenges_user_code_uidx").on(t.userCode),
+    index("orax_desktop_auth_challenges_user_id_idx").on(t.userId),
+    index("orax_desktop_auth_challenges_status_idx").on(t.status),
+    index("orax_desktop_auth_challenges_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+// Orax Desktop long-lived session. The raw token is returned once through the
+// challenge status endpoint; this table stores only its hash.
+export const oraxDesktopSessionsTable = pgTable(
+  "orax_desktop_sessions",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: text("user_id").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    challengeId: text("challenge_id"),
+    installId: text("install_id"),
+    deviceName: text("device_name"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    metadata: jsonb("metadata").notNull().default({}),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("orax_desktop_sessions_user_id_idx").on(t.userId),
+    index("orax_desktop_sessions_token_hash_idx").on(t.tokenHash),
+    index("orax_desktop_sessions_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+export type OraxDesktopAuthChallenge = typeof oraxDesktopAuthChallengesTable.$inferSelect;
+export type InsertOraxDesktopAuthChallenge = typeof oraxDesktopAuthChallengesTable.$inferInsert;
+export type OraxDesktopSession = typeof oraxDesktopSessionsTable.$inferSelect;
+export type InsertOraxDesktopSession = typeof oraxDesktopSessionsTable.$inferInsert;
+
 // ── orax_desktop_actions ────────────────────────────────────────────────────
 // One row per action dispatched from web/mobile to a desktop host.
 // Status lifecycle: queued → sent → acknowledged → running → completed/failed.

@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { getAuth } from "@clerk/express";
-import { and, eq, isNull } from "drizzle-orm";
-import { db, projectsTable, orgMembersTable } from "@workspace/db";
+import { createHash } from "node:crypto";
+import { and, eq, gt, isNull } from "drizzle-orm";
+import { db, projectsTable, orgMembersTable, oraxDesktopSessionsTable } from "@workspace/db";
 import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ class DevOnlyAuthAdapter implements AuthAdapter {
 // ─── Active adapter ───────────────────────────────────────────────────────────
 // SWAP POINT: change to DevOnlyAuthAdapter for local testing without Clerk.
 const activeAdapter: AuthAdapter = new ClerkAuthAdapter();
+const ORAX_DESKTOP_TOKEN_PREFIX = "oraxdt_";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -75,6 +77,8 @@ declare global {
   namespace Express {
     interface Request {
       userId?: string;
+      /** Set when an Orax Desktop session token authenticates an /orax request. */
+      oraxDesktopSessionId?: string;
       /** Set by aiBuilderLimiter when concurrent AI slots are full. */
       forceBackground?: boolean;
       /** Queue position (1-based) set by aiBuilderLimiter when forceBackground is true. */
@@ -108,7 +112,61 @@ export function attachUser(req: Request, res: Response, next: NextFunction): voi
       return;
     }
   }
-  void activeAdapter.attachUser(req, res, next);
+
+  void attachOraxDesktopUser(req)
+    .then((attached) => {
+      if (attached) {
+        next();
+        return;
+      }
+      void activeAdapter.attachUser(req, res, next);
+    })
+    .catch((err) => {
+      logger.warn({ err }, "Orax Desktop token auth failed; falling back to Clerk auth");
+      void activeAdapter.attachUser(req, res, next);
+    });
+}
+
+function extractBearerToken(req: Request): string | null {
+  const value = req.get("authorization");
+  if (!value) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(value.trim());
+  return match?.[1] ?? null;
+}
+
+function isOraxPath(req: Request): boolean {
+  return req.path === "/orax" || req.path.startsWith("/orax/");
+}
+
+function hashDesktopToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+async function attachOraxDesktopUser(req: Request): Promise<boolean> {
+  if (!isOraxPath(req)) return false;
+  const token = extractBearerToken(req);
+  if (!token?.startsWith(ORAX_DESKTOP_TOKEN_PREFIX)) return false;
+
+  const [session] = await db
+    .select()
+    .from(oraxDesktopSessionsTable)
+    .where(
+      and(
+        eq(oraxDesktopSessionsTable.tokenHash, hashDesktopToken(token)),
+        isNull(oraxDesktopSessionsTable.revokedAt),
+        gt(oraxDesktopSessionsTable.expiresAt, new Date()),
+      ),
+    );
+
+  if (!session) return false;
+
+  req.userId = session.userId;
+  req.oraxDesktopSessionId = session.id;
+  void db
+    .update(oraxDesktopSessionsTable)
+    .set({ lastUsedAt: new Date(), updatedAt: new Date() })
+    .where(eq(oraxDesktopSessionsTable.id, session.id));
+  return true;
 }
 
 export async function requireProjectOwnership(

@@ -92,6 +92,10 @@ requireJsonScript("verify:phase3d");
 
 requireContains("artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx", "No password is entered here");
 requireNotContains("artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx", 'type="password"');
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx", "future update");
+requireContains("artifacts/orax-desktop/src/main/auth.ts", "/api/orax/desktop-auth/start");
+requireContains("artifacts/orax-desktop/src/main/auth.ts", "/api/orax/desktop-auth/status/");
+requireContains("artifacts/orax-desktop/src/main/auth.ts", "storeEncrypted(SESSION_STORE_KEY");
 requireContains("artifacts/orax-desktop/src/renderer/pages/SetupScreen.tsx", "Welcome to Orax");
 requireContains("artifacts/orax-desktop/src/renderer/pages/SetupScreen.tsx", "after your approval");
 requireContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx", "Generate Pairing Code");

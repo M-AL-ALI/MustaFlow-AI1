@@ -2786,4 +2786,66 @@ describe("ORAX product-surface wiring", () => {
     expect(doc).toContain("Do not include Ora/public-ai chat");
     expect(doc).toContain("Orax must remain separate from Ora");
   });
+
+  // ── Phase 3F: Production Desktop Sign-In + Session Persistence ───────────
+
+  it("Phase 3F: DB schema has desktop auth challenge and session tables", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("oraxDesktopAuthChallengesTable");
+    expect(schema).toContain("oraxDesktopSessionsTable");
+    expect(schema).toContain("pollTokenHash");
+    expect(schema).toContain("sessionTokenCiphertext");
+    expect(schema).toContain("tokenHash");
+    expect(schema).toContain("ORAX_DESKTOP_AUTH_STATUSES");
+  });
+
+  it("Phase 3F: API exposes public start/status and authenticated completion routes", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop-auth.ts");
+    const index = read("../../../../api-server/src/routes/index.ts");
+    expect(route).toContain("/orax/desktop-auth/start");
+    expect(route).toContain("/orax/desktop-auth/status/:challengeId");
+    expect(route).toContain("/orax/desktop-auth/complete");
+    expect(route).toContain("encryptionService.encrypt");
+    expect(route).toContain("encryptionService.decrypt");
+    expect(route).toContain("hashOraxDesktopToken");
+    expect(index).toContain("oraxDesktopAuthPublicRouter");
+    expect(index).toContain("oraxDesktopAuthRouter");
+  });
+
+  it("Phase 3F: desktop tokens are scoped to Orax routes and do not touch Ora", () => {
+    const auth = read("../../../../api-server/src/lib/auth.ts");
+    expect(auth).toContain("oraxDesktopSessionsTable");
+    expect(auth).toContain("ORAX_DESKTOP_TOKEN_PREFIX");
+    expect(auth).toContain('req.path === "/orax" || req.path.startsWith("/orax/")');
+    expect(auth).toContain("oraxDesktopSessionId");
+    expect(auth).not.toContain("/api/public-ai");
+    expect(auth).not.toContain("oraChat");
+  });
+
+  it("Phase 3F: Orax Desktop polls browser approval and stores session locally", () => {
+    const auth = read("../../../../orax-desktop/src/main/auth.ts");
+    const signIn = read("../../../../orax-desktop/src/renderer/pages/SignInScreen.tsx");
+    const smoke = read("../../../../orax-desktop/scripts/smoke-readiness.mjs");
+    expect(auth).toContain("/api/orax/desktop-auth/start");
+    expect(auth).toContain("/api/orax/desktop-auth/status/");
+    expect(auth).toContain("shell.openExternal");
+    expect(auth).toContain("storeEncrypted(SESSION_STORE_KEY");
+    expect(auth).toContain("deleteEncrypted(SESSION_STORE_KEY)");
+    expect(signIn).toContain("Waiting for browser approval");
+    expect(signIn).toContain("No password is entered here");
+    expect(signIn).not.toContain("future update");
+    expect(smoke).toContain("/api/orax/desktop-auth/start");
+  });
+
+  it("Phase 3F: website approval page is protected and confirms desktop code", () => {
+    const app = read("../../App.tsx");
+    const page = read("../../pages/orax-desktop-auth-approve.tsx");
+    expect(app).toContain("OraxDesktopAuthApprovePage");
+    expect(app).toContain("/orax/desktop-auth/approve");
+    expect(page).toContain("Approve Orax Desktop");
+    expect(page).toContain("Desktop code");
+    expect(page).toContain("/api/orax/desktop-auth/complete");
+    expect(page).toContain("getToken");
+    expect(page).toContain("does not grant access to Ora chat routes");
+  });
 });

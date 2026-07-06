@@ -107,6 +107,7 @@ import developerModeRouter from "./developer-mode";
 import helpRouter from "./help";
 import oraxRouter from "./orax";
 import oraxDesktopRouter from "./orax-desktop";
+import { oraxDesktopAuthPublicRouter, oraxDesktopAuthRouter } from "./orax-desktop-auth";
 import oraxProjectsRouter from "./orax-projects";
 import { attachUser } from "../lib/auth";
 import {
@@ -172,6 +173,7 @@ router.use(publicAiRouter);
 // 401 when signed out. Mounted before the auth wall so public browse works.
 router.post("/help/support/chat", oraLimiter);
 router.use(helpRouter);
+router.use(oraxDesktopAuthPublicRouter);
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -355,6 +357,7 @@ router.use(ecosystemExtensionsRouter);
 router.use(profilesRouter);
 router.use(gdprRouter); // GET /me/export, DELETE /me
 router.use(tokensRouter); // GET/POST/DELETE /me/tokens
+router.use(oraxDesktopAuthRouter); // Clerk-approved Orax Desktop browser sign-in completion
 router.use(oraTranscriptRouter); // GET/POST/DELETE /ora/transcript
 router.use(oraConversationsRouter); // CRUD /ora/conversations + /ora/projects
 router.use(oraProfileRouter); // GET/PUT /ora/profile (Ora-only custom instructions)

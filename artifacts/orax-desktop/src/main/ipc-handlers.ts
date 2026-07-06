@@ -30,6 +30,7 @@ export function registerIpcHandlers(deps: Deps): void {
 
   ipcMain.handle("auth:signOut", async () => {
     await auth.signOut();
+    relayClient.stop();
     hostManager.stop();
     pairingManager.clearState();
   });

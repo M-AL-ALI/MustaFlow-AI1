@@ -36,6 +36,7 @@ const OraxPage = lazy(() => import("./pages/orax"));
 const OraxProductPage = lazy(() => import("./pages/orax-product"));
 const OraxDevicesPage = lazy(() => import("./pages/orax-devices"));
 const OraxWorkspacePage = lazy(() => import("./pages/orax-workspace"));
+const OraxDesktopAuthApprovePage = lazy(() => import("./pages/orax-desktop-auth-approve"));
 const KnowledgePage = lazy(() => import("./pages/knowledge"));
 const VaultPage = lazy(() => import("./pages/vault"));
 const MemoryPage = lazy(() => import("./pages/memory"));
@@ -529,6 +530,11 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                   <Route path="/orax/devices">
                     <Protected>
                       <OraxDevicesPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/orax/desktop-auth/approve">
+                    <Protected>
+                      <OraxDesktopAuthApprovePage />
                     </Protected>
                   </Route>
                   <Route path="/orax/workspace/:projectId">

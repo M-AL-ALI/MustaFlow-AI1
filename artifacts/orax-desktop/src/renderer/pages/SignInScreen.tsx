@@ -33,12 +33,26 @@ export function SignInScreen() {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            background: "var(--accent)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <Monitor size={24} color="#fff" />
         </div>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 20, color: "var(--text-primary)" }}>Orax Desktop</div>
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Connect your computer to MustaFlow</div>
+          <div style={{ fontWeight: 700, fontSize: 20, color: "var(--text-primary)" }}>
+            Orax Desktop
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+            Connect your computer to MustaFlow
+          </div>
         </div>
       </div>
 
@@ -46,14 +60,30 @@ export function SignInScreen() {
         className="card"
         style={{ width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 16 }}
       >
-        <p style={{ fontSize: 13, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>
-          Sign in with your MustaFlow account to register this computer as an Orax host.
-          Clicking the button opens your browser — full device-flow sign-in will be active
-          in a future update.
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            textAlign: "center",
+            lineHeight: 1.6,
+          }}
+        >
+          Sign in with your MustaFlow account to register this computer as an Orax host. Clicking
+          the button opens your browser so you can approve this desktop and return here
+          automatically.
         </p>
 
         {error && (
-          <div style={{ background: "var(--danger-dim)", border: "1px solid var(--danger)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 13, color: "var(--danger)" }}>
+          <div
+            style={{
+              background: "var(--danger-dim)",
+              border: "1px solid var(--danger)",
+              borderRadius: "var(--radius-sm)",
+              padding: "8px 12px",
+              fontSize: 13,
+              color: "var(--danger)",
+            }}
+          >
             {error}
           </div>
         )}
@@ -64,7 +94,7 @@ export function SignInScreen() {
           onClick={() => void handleSignIn()}
           disabled={busy}
         >
-          {busy ? "Opening browser…" : "Sign in with MustaFlow"}
+          {busy ? "Waiting for browser approval..." : "Sign in with MustaFlow"}
         </button>
 
         <p style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>

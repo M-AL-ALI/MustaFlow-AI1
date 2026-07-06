@@ -183,7 +183,19 @@ Expected:
 - If GitHub auth/remote is missing, Orax shows `project_pr_blocked` with a clear next step.
 - No force-push, hard reset, or clean command is used.
 
-### 12. Mobile Observation
+### 12. Production Sign-In
+
+Start Orax Desktop without `ORAX_DEV_AUTH=true`.
+
+Expected:
+
+- Clicking **Sign in with MustaFlow** opens `/orax/desktop-auth/approve` in the browser.
+- The browser page asks the signed-in MustaFlow user to approve the desktop code.
+- After approval, Orax Desktop finishes sign-in automatically and registers the host.
+- No password is typed into Orax Desktop.
+- The stored token only authenticates `/api/orax/*` routes.
+
+### 13. Mobile Observation
 
 Open Orax mobile.
 
@@ -200,7 +212,7 @@ The smoke test passes when a user can complete the desktop-backed flow from setu
 ## Known Gaps After Phase 3D
 
 - Installer packaging/signing is not production-ready.
-- Full OAuth/device-flow sign-in may still be placeholder depending on environment.
+- Browser-approved Orax Desktop sign-in is available; installer packaging/signing is still pending.
 - Real GitHub PR creation needs a valid token or authenticated git credentials.
 - Mobile is a remote-control observer/controller, not a remote desktop stream.
 - Billing/usage accounting for Orax execution still needs a dedicated pass.

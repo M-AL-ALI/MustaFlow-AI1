@@ -3,6 +3,7 @@ export interface AuthSession {
   email: string;
   displayName: string;
   token: string;
+  expiresAt?: string;
 }
 
 export type HostStatus = "unregistered" | "online" | "offline" | "reconnecting";
