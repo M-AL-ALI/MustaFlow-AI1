@@ -7,7 +7,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "smoke:readiness": "node scripts/smoke-readiness.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "verify:phase3d": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",

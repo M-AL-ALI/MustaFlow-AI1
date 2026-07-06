@@ -513,9 +513,7 @@ describe("ORAX product-surface wiring", () => {
     expect(collapse(oraxPage)).toContain(
       "const hasVisibleInlineAction = (latestAssistantSuggestions.length > 0 && !pendingSuggestionConfirmation) || pendingApprovals.length > 0;",
     );
-    expect(collapse(oraxPage)).toContain(
-      "return activeThreadState && !hasVisibleInlineAction ?",
-    );
+    expect(collapse(oraxPage)).toContain("return activeThreadState && !hasVisibleInlineAction ?");
     expect(collapse(mobileOraxScreen)).toContain(
       "const hasVisibleInlineAction = latestAssistantSuggestion !== null || pendingThreadApprovals.length > 0;",
     );
@@ -637,12 +635,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxDesktopSchema).toContain("uniqueIndex");
 
     // Key field presence
-    expect(oraxDesktopSchema).toContain("local_path");       // orax_projects
-    expect(oraxDesktopSchema).toContain("git_remote_url");   // orax_projects
-    expect(oraxDesktopSchema).toContain("thread_id");        // orax_thread_messages / approvals
-    expect(oraxDesktopSchema).toContain("action_type");      // orax_usage_events
-    expect(oraxDesktopSchema).toContain("compute_ms");       // orax_usage_events
-    expect(oraxDesktopSchema).toContain("error_msg");        // orax_audit_log
+    expect(oraxDesktopSchema).toContain("local_path"); // orax_projects
+    expect(oraxDesktopSchema).toContain("git_remote_url"); // orax_projects
+    expect(oraxDesktopSchema).toContain("thread_id"); // orax_thread_messages / approvals
+    expect(oraxDesktopSchema).toContain("action_type"); // orax_usage_events
+    expect(oraxDesktopSchema).toContain("compute_ms"); // orax_usage_events
+    expect(oraxDesktopSchema).toContain("error_msg"); // orax_audit_log
 
     // Audit log is intentionally denormalized (no FK constraints).
     // Confirmed by absence of REFERENCES keyword next to audit log table name.
@@ -659,11 +657,11 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2C: Orax Desktop app skeleton files exist", () => {
-    const mainEntry    = read("../../../../orax-desktop/src/main/index.ts");
-    const preload      = read("../../../../orax-desktop/src/preload/index.ts");
+    const mainEntry = read("../../../../orax-desktop/src/main/index.ts");
+    const preload = read("../../../../orax-desktop/src/preload/index.ts");
     const rendererMain = read("../../../../orax-desktop/src/renderer/main.tsx");
-    const appTsx       = read("../../../../orax-desktop/src/renderer/App.tsx");
-    const sharedTypes  = read("../../../../orax-desktop/src/shared/types.ts");
+    const appTsx = read("../../../../orax-desktop/src/renderer/App.tsx");
+    const sharedTypes = read("../../../../orax-desktop/src/shared/types.ts");
 
     // Main process entry point wires electron app lifecycle
     expect(mainEntry).toContain(".whenReady()");
@@ -700,9 +698,9 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2C: Orax Desktop references all required backend endpoints", () => {
-    const apiClient  = read("../../../../orax-desktop/src/main/api-client.ts");
+    const apiClient = read("../../../../orax-desktop/src/main/api-client.ts");
     const ipcHandlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
-    const hostMgr    = read("../../../../orax-desktop/src/main/host-manager.ts");
+    const hostMgr = read("../../../../orax-desktop/src/main/host-manager.ts");
 
     // Host registration
     expect(apiClient).toContain("/api/orax/hosts/register");
@@ -737,8 +735,8 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2C: Orax Desktop renderer uses IPC, not direct Node.js fs APIs", () => {
-    const ipcLib    = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
-    const appCtx    = read("../../../../orax-desktop/src/renderer/context/AppContext.tsx");
+    const ipcLib = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
+    const appCtx = read("../../../../orax-desktop/src/renderer/context/AppContext.tsx");
     const pairingPg = read("../../../../orax-desktop/src/renderer/pages/PairingScreen.tsx");
     const projectsPg = read("../../../../orax-desktop/src/renderer/pages/ProjectsScreen.tsx");
     const settingsPg = read("../../../../orax-desktop/src/renderer/pages/SettingsScreen.tsx");
@@ -1052,9 +1050,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E startup migration: orax_desktop_actions CREATE TABLE registered", () => {
-    const migrations = read(
-      "../../../../api-server/src/lib/startup-migrations.ts",
-    );
+    const migrations = read("../../../../api-server/src/lib/startup-migrations.ts");
     expect(migrations).toContain("migrate-orax-desktop-actions");
     expect(migrations).toContain("orax_desktop_actions");
     expect(migrations).toContain("idempotency_key");
@@ -1062,9 +1058,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E backend: all 4 relay routes present in orax-desktop router", () => {
-    const router = read(
-      "../../../../api-server/src/routes/orax-desktop.ts",
-    );
+    const router = read("../../../../api-server/src/routes/orax-desktop.ts");
     expect(router).toContain('router.post("/orax/hosts/:hostId/actions"');
     expect(router).toContain('router.get("/orax/hosts/:hostId/actions"');
     expect(router).toContain('router.get("/orax/relay/pending-actions"');
@@ -1072,9 +1066,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E backend: action creation uses idempotency key + onConflictDoNothing", () => {
-    const router = read(
-      "../../../../api-server/src/routes/orax-desktop.ts",
-    );
+    const router = read("../../../../api-server/src/routes/orax-desktop.ts");
     expect(router).toContain("idempotencyKey");
     expect(router).toContain("onConflictDoNothing");
     expect(router).toContain("ping_desktop");
@@ -1083,24 +1075,18 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E backend: pending-actions poll marks actions as sent", () => {
-    const router = read(
-      "../../../../api-server/src/routes/orax-desktop.ts",
-    );
+    const router = read("../../../../api-server/src/routes/orax-desktop.ts");
     expect(router).toContain('"sent"');
     expect(router).toContain('status: "queued"');
   });
 
   it("Phase 2E backend: pending-actions query is account-scoped by userId", () => {
-    const router = read(
-      "../../../../api-server/src/routes/orax-desktop.ts",
-    );
+    const router = read("../../../../api-server/src/routes/orax-desktop.ts");
     expect(router).toContain("eq(oraxDesktopActionsTable.userId, userId)");
   });
 
   it("Phase 2E backend: action event endpoint updates result + completedAt on completed/failed", () => {
-    const router = read(
-      "../../../../api-server/src/routes/orax-desktop.ts",
-    );
+    const router = read("../../../../api-server/src/routes/orax-desktop.ts");
     expect(router).toContain("completedAt");
     expect(router).toContain("patch.result = payload");
     expect(router).toContain('"completed"');
@@ -1108,9 +1094,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E desktop: RelayClient exported from relay-client.ts", () => {
-    const relayClient = read(
-      "../../../../orax-desktop/src/main/relay-client.ts",
-    );
+    const relayClient = read("../../../../orax-desktop/src/main/relay-client.ts");
     expect(relayClient).toContain("export class RelayClient");
     expect(relayClient).toContain("getPendingActions");
     expect(relayClient).toContain("postActionEvent");
@@ -1143,9 +1127,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E desktop: electron-api.d.ts declares relay.getStatus and relayStatusChanged", () => {
-    const apiD = read(
-      "../../../../orax-desktop/src/renderer/electron-api.d.ts",
-    );
+    const apiD = read("../../../../orax-desktop/src/renderer/electron-api.d.ts");
     expect(apiD).toContain("RelayState");
     expect(apiD).toContain("relay:");
     expect(apiD).toContain("getStatus(): Promise<RelayState>");
@@ -1160,9 +1142,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E desktop: ipc-handlers wires relay:getStatus IPC and relayStatusChanged push", () => {
-    const ipcHandlers = read(
-      "../../../../orax-desktop/src/main/ipc-handlers.ts",
-    );
+    const ipcHandlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
     expect(ipcHandlers).toContain("relay:getStatus");
     expect(ipcHandlers).toContain("relay:statusChanged");
     expect(ipcHandlers).toContain("relayClient.getState()");
@@ -1172,9 +1152,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E desktop: HomeScreen shows relay status card", () => {
-    const homeScreen = read(
-      "../../../../orax-desktop/src/renderer/pages/HomeScreen.tsx",
-    );
+    const homeScreen = read("../../../../orax-desktop/src/renderer/pages/HomeScreen.tsx");
     expect(homeScreen).toContain("relayState");
     expect(homeScreen).toContain("relay.getStatus");
     expect(homeScreen).toContain("relayStatusChanged");
@@ -1207,9 +1185,7 @@ describe("ORAX product-surface wiring", () => {
   });
 
   it("Phase 2E relay: desktop api-client has getPendingActions + postActionEvent", () => {
-    const apiClient = read(
-      "../../../../orax-desktop/src/main/api-client.ts",
-    );
+    const apiClient = read("../../../../orax-desktop/src/main/api-client.ts");
     expect(apiClient).toContain("getPendingActions");
     expect(apiClient).toContain("postActionEvent");
     expect(apiClient).toContain("/api/orax/relay/pending-actions");
@@ -2744,5 +2720,70 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("/api/public-ai/");
       expect(src).not.toContain("oraChat");
     }
+  });
+
+  // ── Phase 3D: Windows Desktop Smoke Test + Installer Prep ───────────────────
+
+  it("Phase 3D: orax-desktop package exposes repeatable readiness scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"smoke:readiness"');
+    expect(pkg).toContain('"verify:phase3d"');
+    expect(pkg).toContain("scripts/smoke-readiness.mjs");
+  });
+
+  it("Phase 3D: smoke-readiness script verifies the complete desktop-backed Orax chain", () => {
+    const src = read("../../../../orax-desktop/scripts/smoke-readiness.mjs");
+    for (const token of [
+      "run_project_thread",
+      "draft_project_patch",
+      "apply_project_patch",
+      "verify_project_patch",
+      "draft_project_fix",
+      "prepare_project_pr",
+      "Welcome to Orax",
+      "after your approval",
+      ".orax",
+      "checkpoints",
+    ]) {
+      expect(src).toContain(token);
+    }
+  });
+
+  it("Phase 3D: smoke-readiness script rejects unsafe desktop helper patterns", () => {
+    const src = read("../../../../orax-desktop/scripts/smoke-readiness.mjs");
+    expect(src).toContain("exec(");
+    expect(src).toContain("shell: true");
+    expect(src).toContain("process.cwd()");
+    expect(src).toContain("git reset --hard");
+    expect(src).toContain("git clean -fd");
+    expect(src).toContain("--force");
+  });
+
+  it("Phase 3D: smoke-readiness script blocks Phase 3 pasted prompt assets", () => {
+    const src = read("../../../../orax-desktop/scripts/smoke-readiness.mjs");
+    expect(src).toContain("Pasted-Start-Phase-3");
+    expect(src).toContain("no Phase 3 pasted task prompts in attached_assets");
+  });
+
+  it("Phase 3D: smoke-test runbook covers setup, pairing, patch, verification, fix, and PR", () => {
+    const doc = read("../../../../../docs/orax-desktop-e2e-smoke-test.md");
+    for (const token of [
+      "Open Orax Desktop",
+      "Pair Device",
+      "Draft Patch",
+      "Apply Patch",
+      "Verify Patch",
+      "Prepare Fix",
+      "Prepare Pull Request",
+      "Mobile Observation",
+    ]) {
+      expect(doc).toContain(token);
+    }
+  });
+
+  it("Phase 3D: smoke-test runbook keeps Ora out of the desktop smoke flow", () => {
+    const doc = read("../../../../../docs/orax-desktop-e2e-smoke-test.md");
+    expect(doc).toContain("Do not include Ora/public-ai chat");
+    expect(doc).toContain("Orax must remain separate from Ora");
   });
 });
