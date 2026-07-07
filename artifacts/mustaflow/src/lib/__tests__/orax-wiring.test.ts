@@ -3106,4 +3106,78 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3K: Update/Recovery Hardening + Support Diagnostics
+
+  it("Phase 3K: package exposes update/recovery readiness and verification scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"update:recovery-readiness"');
+    expect(pkg).toContain('"verify:phase3k"');
+    expect(pkg).toContain("scripts/update-recovery-readiness.mjs");
+  });
+
+  it("Phase 3K: support diagnostics builder excludes secrets, env vars, and local paths", () => {
+    const src = read("../../../../orax-desktop/src/main/support-diagnostics.ts");
+    expect(src).toContain("buildSupportDiagnostics");
+    expect(src).toContain("includesSessionToken: false");
+    expect(src).toContain("includesPasswords: false");
+    expect(src).toContain("includesEnvironmentVariables: false");
+    expect(src).toContain("includesLocalProjectPaths: false");
+    expect(src).not.toContain("session.token");
+    expect(src).not.toContain("process.env");
+  });
+
+  it("Phase 3K: desktop IPC exposes support diagnostics export end to end", () => {
+    const main = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    const preload = read("../../../../orax-desktop/src/preload/index.ts");
+    const rendererTypes = read("../../../../orax-desktop/src/renderer/electron-api.d.ts");
+    const ipc = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
+    expect(main).toContain("support:exportDiagnostics");
+    expect(main).toContain("buildSupportDiagnostics");
+    expect(preload).toContain("support:exportDiagnostics");
+    expect(rendererTypes).toContain("SupportDiagnosticsExport");
+    expect(ipc).toContain("exportDiagnostics");
+  });
+
+  it("Phase 3K: Settings screen lets users export support diagnostics", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/SettingsScreen.tsx");
+    expect(src).toContain("Export Support Diagnostics");
+    expect(src).toContain("does not include session tokens");
+    expect(src).toContain("environment variables");
+    expect(src).toContain("local project paths");
+  });
+
+  it("Phase 3K: update/recovery readiness script checks diagnostics and Ora isolation", () => {
+    const src = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    expect(src).toContain("support-diagnostics.ts");
+    expect(src).toContain("support:exportDiagnostics");
+    expect(src).toContain("Export Support Diagnostics");
+    expect(src).toContain("Do not include Ora/public-ai chat");
+    expect(src).toContain("leaks Ora/public-ai references");
+  });
+
+  it("Phase 3K: update/recovery runbook documents rollback and support diagnostics", () => {
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(doc).toContain("Update and Recovery");
+    expect(doc).toContain("Failed Update Recovery");
+    expect(doc).toContain("Rollback");
+    expect(doc).toContain("Support Diagnostics");
+    expect(doc).toContain("verify:phase3k");
+    expect(doc).toContain("session tokens");
+    expect(doc).toContain("local project paths");
+  });
+
+  it("Phase 3K: update/recovery files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/main/support-diagnostics.ts"),
+      read("../../../../orax-desktop/src/main/ipc-handlers.ts"),
+      read("../../../../orax-desktop/src/preload/index.ts"),
+      read("../../../../orax-desktop/src/renderer/pages/SettingsScreen.tsx"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

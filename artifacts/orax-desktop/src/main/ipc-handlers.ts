@@ -1,10 +1,12 @@
 import { ipcMain, dialog, BrowserWindow } from "electron";
+import { writeFile } from "node:fs/promises";
 import type { AuthAdapter } from "./auth";
 import type { HostManager } from "./host-manager";
 import type { PairingManager } from "./pairing-manager";
 import type { LocalProjectsManager } from "./local-projects";
 import type { RelayClient } from "./relay-client";
 import type { PermissionMode } from "../shared/types";
+import { buildSupportDiagnostics } from "./support-diagnostics";
 
 interface Deps {
   auth: AuthAdapter;
@@ -129,8 +131,27 @@ export function registerIpcHandlers(deps: Deps): void {
     return app.getVersion();
   });
 
-  ipcMain.handle("logs:getRecent", () => {
-    return [];
+  ipcMain.handle("support:exportDiagnostics", async () => {
+    const session = await auth.getSession();
+    const diagnostics = buildSupportDiagnostics({
+      session,
+      hostState: hostManager.getState(),
+      relayState: relayClient.getState(),
+      localProjects: localProjects.list(),
+    });
+    const defaultPath = `orax-desktop-diagnostics-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")}.json`;
+    const result = await dialog.showSaveDialog(win, {
+      title: "Export Orax Support Diagnostics",
+      defaultPath,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    await writeFile(result.filePath, `${JSON.stringify(diagnostics, null, 2)}\n`, "utf8");
+    return { filePath: result.filePath, diagnostics };
   });
 
   ipcMain.handle("relay:getStatus", () => {

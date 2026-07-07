@@ -57,3 +57,36 @@ export interface RelayState {
   lastPollAt: string | null;
   errorMsg: string | null;
 }
+
+export interface SupportDiagnostics {
+  generatedAt: string;
+  app: {
+    name: "Orax Desktop";
+    version: string;
+    electronVersion: string;
+    platform: NodeJS.Platform;
+    arch: string;
+  };
+  auth: {
+    signedIn: boolean;
+    userId: string | null;
+    email: string | null;
+  };
+  host: HostState | null;
+  relay: RelayState;
+  localProjects: {
+    count: number;
+    displayNames: string[];
+  };
+  safety: {
+    includesSessionToken: false;
+    includesPasswords: false;
+    includesEnvironmentVariables: false;
+    includesLocalProjectPaths: false;
+  };
+}
+
+export interface SupportDiagnosticsExport {
+  filePath: string;
+  diagnostics: SupportDiagnostics;
+}

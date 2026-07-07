@@ -14,13 +14,15 @@
     "release:upload": "node scripts/release-upload.mjs",
     "release:upload-readiness": "node scripts/release-upload-readiness.mjs",
     "release:public-readiness": "node scripts/release-public-readiness.mjs",
+    "update:recovery-readiness": "node scripts/update-recovery-readiness.mjs",
     "smoke:readiness": "node scripts/smoke-readiness.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "verify:phase3d": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness",
     "verify:phase3g": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness && pnpm run installer:readiness",
     "verify:phase3h": "pnpm run verify:phase3g && pnpm run release:readiness",
     "verify:phase3i": "pnpm run verify:phase3h && pnpm run release:upload-readiness",
-    "verify:phase3j": "pnpm run verify:phase3i && pnpm run release:public-readiness"
+    "verify:phase3j": "pnpm run verify:phase3i && pnpm run release:public-readiness",
+    "verify:phase3k": "pnpm run verify:phase3j && pnpm run update:recovery-readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",

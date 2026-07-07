@@ -1,13 +1,16 @@
 import { useState } from "react";
-import { Shield, Check } from "lucide-react";
+import { Shield, Check, FileDown } from "lucide-react";
 import { useApp } from "../context/AppContext";
+import { support } from "../lib/ipc";
 import { PERMISSION_MODES, PERMISSION_MODE_LABELS, type PermissionMode } from "../../shared/types";
 
 const MODE_DESCRIPTIONS: Record<PermissionMode, string> = {
   read_only: "Orax can only read files and status. No changes are made.",
   ask_everything: "Every action requires your explicit approval before running.",
-  ask_risky: "Approval required for risky actions (file writes, git, shell). Safe reads are automatic.",
-  trusted_project: "Actions are allowed within a trusted project scope without per-action approval.",
+  ask_risky:
+    "Approval required for risky actions (file writes, git, shell). Safe reads are automatic.",
+  trusted_project:
+    "Actions are allowed within a trusted project scope without per-action approval.",
   full_access: "All actions run without approval. Use only in secure, isolated environments.",
   custom: "Custom permission rules (configured per action type).",
 };
@@ -20,6 +23,9 @@ export function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
+  const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
 
   async function handleSave() {
     setSaving(true);
@@ -36,6 +42,24 @@ export function SettingsScreen() {
     }
   }
 
+  async function handleExportDiagnostics() {
+    setExportingDiagnostics(true);
+    setDiagnosticsError(null);
+    setDiagnosticsPath(null);
+    try {
+      const result = await support.exportDiagnostics();
+      if (result) {
+        setDiagnosticsPath(result.filePath);
+      }
+    } catch (err) {
+      setDiagnosticsError(
+        err instanceof Error ? err.message : "Failed to export support diagnostics.",
+      );
+    } finally {
+      setExportingDiagnostics(false);
+    }
+  }
+
   return (
     <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 24 }}>
       <div>
@@ -48,7 +72,9 @@ export function SettingsScreen() {
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
           <Shield size={15} color="var(--accent)" />
-          <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>Permission Mode</span>
+          <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
+            Permission Mode
+          </span>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -84,13 +110,22 @@ export function SettingsScreen() {
                   justifyContent: "center",
                 }}
               >
-                {selected === mode && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />}
+                {selected === mode && (
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
                   {PERMISSION_MODE_LABELS[mode]}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2, lineHeight: 1.5 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    marginTop: 2,
+                    lineHeight: 1.5,
+                  }}
+                >
                   {MODE_DESCRIPTIONS[mode]}
                 </div>
               </div>
@@ -99,7 +134,17 @@ export function SettingsScreen() {
         </div>
 
         {error && (
-          <div style={{ background: "var(--danger-dim)", border: "1px solid var(--danger)", borderRadius: "var(--radius-sm)", padding: "10px 14px", fontSize: 13, color: "var(--danger)", marginTop: 12 }}>
+          <div
+            style={{
+              background: "var(--danger-dim)",
+              border: "1px solid var(--danger)",
+              borderRadius: "var(--radius-sm)",
+              padding: "10px 14px",
+              fontSize: 13,
+              color: "var(--danger)",
+              marginTop: 12,
+            }}
+          >
             {error}
           </div>
         )}
@@ -110,7 +155,15 @@ export function SettingsScreen() {
             onClick={() => void handleSave()}
             disabled={saving || selected === hostState?.permissionMode}
           >
-            {saved ? <><Check size={13} /> Saved</> : saving ? "Saving…" : "Save Permission Mode"}
+            {saved ? (
+              <>
+                <Check size={13} /> Saved
+              </>
+            ) : saving ? (
+              "Saving…"
+            ) : (
+              "Save Permission Mode"
+            )}
           </button>
           {selected !== hostState?.permissionMode && (
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Unsaved changes</span>
@@ -119,8 +172,51 @@ export function SettingsScreen() {
       </div>
 
       <div className="card" style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
-        Capabilities (shell, filesystem, git) are all disabled in Phase 2C regardless of
-        permission mode. Modes apply to future phases when execution is enabled.
+        Capabilities (shell, filesystem, git) are all disabled in Phase 2C regardless of permission
+        mode. Modes apply to future phases when execution is enabled.
+      </div>
+
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <FileDown size={15} color="var(--accent)" />
+          <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
+            Support Diagnostics
+          </span>
+        </div>
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+          Export a small JSON file for MustaFlow support. It includes app version, host state, relay
+          state, and project display names. It does not include session tokens, passwords,
+          environment variables, or local project paths.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button
+            className="btn"
+            onClick={() => void handleExportDiagnostics()}
+            disabled={exportingDiagnostics}
+          >
+            <FileDown size={13} />
+            {exportingDiagnostics ? "Exporting..." : "Export Support Diagnostics"}
+          </button>
+          {diagnosticsPath && (
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              Saved to {diagnosticsPath}
+            </span>
+          )}
+        </div>
+        {diagnosticsError && (
+          <div
+            style={{
+              background: "var(--danger-dim)",
+              border: "1px solid var(--danger)",
+              borderRadius: "var(--radius-sm)",
+              padding: "10px 14px",
+              fontSize: 13,
+              color: "var(--danger)",
+            }}
+          >
+            {diagnosticsError}
+          </div>
+        )}
       </div>
     </div>
   );

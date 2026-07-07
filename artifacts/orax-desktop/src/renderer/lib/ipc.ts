@@ -41,6 +41,10 @@ export const appInfo = {
   getVersion: () => api().app.getVersion(),
 };
 
+export const support = {
+  exportDiagnostics: () => api().support.exportDiagnostics(),
+};
+
 export const events = {
   onHostStateChanged: (cb: (state: import("../../shared/types").HostState) => void) =>
     api().on.hostStateChanged(cb),

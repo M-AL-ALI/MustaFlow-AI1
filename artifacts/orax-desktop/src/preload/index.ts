@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AuthSession, HostState, PairingState, LocalProject, PermissionMode, RelayState } from "../shared/types";
+import type {
+  AuthSession,
+  HostState,
+  PairingState,
+  LocalProject,
+  PermissionMode,
+  RelayState,
+  SupportDiagnosticsExport,
+} from "../shared/types";
 
 type RemoveFn = () => void;
 
@@ -23,8 +31,7 @@ const electronAPI = {
   project: {
     addLocalFolder: (): Promise<LocalProject | null> =>
       ipcRenderer.invoke("project:addLocalFolder"),
-    listLocalFolders: (): Promise<LocalProject[]> =>
-      ipcRenderer.invoke("project:listLocalFolders"),
+    listLocalFolders: (): Promise<LocalProject[]> => ipcRenderer.invoke("project:listLocalFolders"),
     removeLocalFolder: (id: string): Promise<void> =>
       ipcRenderer.invoke("project:removeLocalFolder", id),
     listCloudProjects: (): Promise<{ projects: unknown[] }> =>
@@ -46,6 +53,10 @@ const electronAPI = {
   },
   relay: {
     getStatus: (): Promise<RelayState> => ipcRenderer.invoke("relay:getStatus"),
+  },
+  support: {
+    exportDiagnostics: (): Promise<SupportDiagnosticsExport | null> =>
+      ipcRenderer.invoke("support:exportDiagnostics"),
   },
   on: {
     hostStateChanged: (cb: (state: HostState) => void): RemoveFn => {
