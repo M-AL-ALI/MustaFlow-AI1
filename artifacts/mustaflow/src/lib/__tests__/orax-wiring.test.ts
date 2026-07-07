@@ -2960,4 +2960,85 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3I: Signed Release Workflow + Download Host Integration
+
+  it("Phase 3I: package exposes upload and verification scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"release:upload"');
+    expect(pkg).toContain('"release:upload-readiness"');
+    expect(pkg).toContain('"verify:phase3i"');
+  });
+
+  it("Phase 3I: GitHub release workflow builds, manifests, artifacts, and gated publish", () => {
+    const workflow = read("../../../../../.github/workflows/orax-desktop-release.yml");
+    expect(workflow).toContain("workflow_dispatch");
+    expect(workflow).toContain("windows-latest");
+    expect(workflow).toContain("pnpm --filter @workspace/orax-desktop run verify:phase3i");
+    expect(workflow).toContain("pnpm --filter @workspace/orax-desktop run package:win");
+    expect(workflow).toContain("pnpm --filter @workspace/orax-desktop run release:manifest");
+    expect(workflow).toContain("actions/upload-artifact@v4");
+    expect(workflow).toContain("pnpm --filter @workspace/orax-desktop run release:upload");
+    expect(workflow).toContain("if: ${{ inputs.publish }}");
+  });
+
+  it("Phase 3I: GitHub release workflow requires signing and download-host configuration", () => {
+    const workflow = read("../../../../../.github/workflows/orax-desktop-release.yml");
+    expect(workflow).toContain("ORAX_WINDOWS_CSC_LINK");
+    expect(workflow).toContain("ORAX_WINDOWS_CSC_KEY_PASSWORD");
+    expect(workflow).toContain("ORAX_RELEASE_AWS_ACCESS_KEY_ID");
+    expect(workflow).toContain("ORAX_RELEASE_AWS_SECRET_ACCESS_KEY");
+    expect(workflow).toContain("ORAX_DESKTOP_RELEASE_S3_URI");
+    expect(workflow).toContain("ORAX_DESKTOP_RELEASE_S3_ENDPOINT");
+  });
+
+  it("Phase 3I: release upload script defaults to dry run and requires explicit publish", () => {
+    const script = read("../../../../orax-desktop/scripts/release-upload.mjs");
+    expect(script).toContain("ORAX_DESKTOP_RELEASE_PUBLISH");
+    expect(script).toContain('process.env.ORAX_DESKTOP_RELEASE_PUBLISH === "true"');
+    expect(script).toContain("Release upload dry run");
+    expect(script).toContain("ORAX_DESKTOP_RELEASE_S3_URI");
+    expect(script).toContain("aws");
+    expect(script).toContain("s3");
+    expect(script).toContain("orax-desktop-windows-latest.json");
+  });
+
+  it("Phase 3I: upload readiness script guards workflow, upload script, docs, and generated output", () => {
+    const script = read("../../../../orax-desktop/scripts/release-upload-readiness.mjs");
+    expect(script).toContain(".github/workflows/orax-desktop-release.yml");
+    expect(script).toContain("artifacts/orax-desktop/scripts/release-upload.mjs");
+    expect(script).toContain("ORAX_DESKTOP_RELEASE_S3_URI");
+    expect(script).toContain("GitHub Actions release workflow");
+    expect(script).toContain("Required GitHub secrets");
+    expect(script).toContain("artifacts/orax-desktop/release");
+  });
+
+  it("Phase 3I: release docs describe workflow inputs, secrets, variables, and publish gate", () => {
+    const doc = read("../../../../../docs/orax-desktop-release-channel.md");
+    expect(doc).toContain("GitHub Actions release workflow");
+    expect(doc).toContain("Required GitHub secrets");
+    expect(doc).toContain("ORAX_WINDOWS_CSC_LINK");
+    expect(doc).toContain("ORAX_DESKTOP_RELEASE_S3_URI");
+    expect(doc).toContain("publish=false");
+  });
+
+  it("Phase 3I: product page shows release automation without opening public direct download", () => {
+    const page = read("../../pages/orax-product.tsx");
+    expect(page).toContain("Release automation");
+    expect(page).toContain("Manual release workflow is ready for signed upload");
+    expect(page).not.toContain('href="/downloads/');
+  });
+
+  it("Phase 3I: release upload files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../../.github/workflows/orax-desktop-release.yml"),
+      read("../../../../orax-desktop/scripts/release-upload.mjs"),
+      read("../../../../orax-desktop/scripts/release-upload-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-release-channel.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

@@ -1,0 +1,101 @@
+name: Orax Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: internal
+        type: choice
+        options:
+          - internal
+          - beta
+          - stable
+      publish:
+        description: Upload artifacts to the configured download host
+        required: true
+        default: false
+        type: boolean
+      release_base_url:
+        description: Public base URL used inside the generated manifest
+        required: true
+        default: https://downloads.mustaflow.com/orax/desktop/windows
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Orax Desktop Windows installer
+    runs-on: windows-latest
+    env:
+      ORAX_DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel }}
+      ORAX_DESKTOP_RELEASE_BASE_URL: ${{ inputs.release_base_url }}
+      CSC_LINK: ${{ secrets.ORAX_WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.ORAX_WINDOWS_CSC_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Orax Desktop release readiness
+        run: pnpm --filter @workspace/orax-desktop run verify:phase3i
+
+      - name: Require signing secrets before publish
+        if: ${{ inputs.publish }}
+        shell: pwsh
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
+            throw "Publishing requires ORAX_WINDOWS_CSC_LINK and ORAX_WINDOWS_CSC_KEY_PASSWORD secrets."
+          }
+
+      - name: Build Windows installer
+        run: pnpm --filter @workspace/orax-desktop run package:win
+
+      - name: Generate release manifest
+        run: pnpm --filter @workspace/orax-desktop run release:manifest
+
+      - name: Upload release artifacts to workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: orax-desktop-windows-${{ inputs.channel }}
+          path: |
+            artifacts/orax-desktop/release/Orax-Desktop-*.exe
+            artifacts/orax-desktop/release/Orax-Desktop-*.exe.blockmap
+            artifacts/orax-desktop/release/latest.yml
+            artifacts/orax-desktop/release/orax-desktop-windows-latest.json
+          if-no-files-found: error
+
+      - name: Configure download-host credentials
+        if: ${{ inputs.publish }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.ORAX_RELEASE_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.ORAX_RELEASE_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.ORAX_RELEASE_AWS_REGION || 'us-east-1' }}
+
+      - name: Upload release artifacts to download host
+        if: ${{ inputs.publish }}
+        env:
+          ORAX_DESKTOP_RELEASE_PUBLISH: "true"
+          ORAX_DESKTOP_RELEASE_S3_URI: ${{ vars.ORAX_DESKTOP_RELEASE_S3_URI }}
+          ORAX_DESKTOP_RELEASE_S3_ENDPOINT: ${{ vars.ORAX_DESKTOP_RELEASE_S3_ENDPOINT }}
+        run: pnpm --filter @workspace/orax-desktop run release:upload

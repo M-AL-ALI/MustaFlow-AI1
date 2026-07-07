@@ -81,6 +81,56 @@ pnpm --filter @workspace/orax-desktop run package:win
 pnpm --filter @workspace/orax-desktop run release:manifest
 ```
 
+Release workflow readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3i
+```
+
+## GitHub Actions release workflow
+
+Manual workflow:
+
+```text
+.github/workflows/orax-desktop-release.yml
+```
+
+Workflow inputs:
+
+- `channel`: `internal`, `beta`, or `stable`
+- `publish`: `false` by default; `true` uploads to the configured download host
+- `release_base_url`: public base URL written into the generated manifest
+
+The workflow always:
+
+1. Installs dependencies from the lockfile.
+2. Runs `verify:phase3i`.
+3. Builds the Windows installer.
+4. Generates `orax-desktop-windows-latest.json`.
+5. Uploads the installer, blockmap, `latest.yml`, and manifest as GitHub workflow artifacts.
+
+The workflow only publishes to the download host when `publish=true`.
+
+## Required GitHub secrets and variables
+
+Signing secrets:
+
+- `ORAX_WINDOWS_CSC_LINK`
+- `ORAX_WINDOWS_CSC_KEY_PASSWORD`
+
+Download-host secrets:
+
+- `ORAX_RELEASE_AWS_ACCESS_KEY_ID`
+- `ORAX_RELEASE_AWS_SECRET_ACCESS_KEY`
+
+Download-host repository variables:
+
+- `ORAX_RELEASE_AWS_REGION`
+- `ORAX_DESKTOP_RELEASE_S3_URI`
+- `ORAX_DESKTOP_RELEASE_S3_ENDPOINT` (optional, for S3-compatible hosts such as R2)
+
+The workflow fails before publish if signing secrets are missing. Keep `publish=false` for dry-run builds and internal verification.
+
 Before upload:
 
 1. Confirm `verify:phase3h` passes.
