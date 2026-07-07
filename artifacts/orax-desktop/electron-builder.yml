@@ -25,4 +25,6 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: Orax Desktop
-publish: []
+publish:
+  - provider: generic
+    url: https://downloads.mustaflow.com/orax/desktop/windows

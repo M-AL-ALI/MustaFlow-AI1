@@ -238,6 +238,18 @@ export default function OraxProductPage() {
               signing and release review.
             </p>
           </div>
+          <div className="mx-auto grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
+            {[
+              ["Installer", "Windows NSIS build is ready for internal testing"],
+              ["Signed release channel", "Download channel is staged for internal release review"],
+              ["Public access", "Direct download opens after signing and smoke tests pass"],
+            ].map(([label, detail]) => (
+              <div key={label} className="rounded-2xl border border-border bg-background p-4">
+                <p className="text-sm font-semibold">{label}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+              </div>
+            ))}
+          </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/support/tickets"

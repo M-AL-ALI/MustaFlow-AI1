@@ -2865,7 +2865,8 @@ describe("ORAX product-surface wiring", () => {
     expect(config).toContain("appId: ai.mustaflow.orax.desktop");
     expect(config).toContain("target: nsis");
     expect(config).toContain("Orax-Desktop-${version}-${arch}-Setup.${ext}");
-    expect(config).toContain("publish: []");
+    expect(config).toContain("provider: generic");
+    expect(config).toContain("https://downloads.mustaflow.com/orax/desktop/windows");
   });
 
   it("Phase 3G: installer readiness script checks icon, ignored output, and no generated binaries", () => {
@@ -2895,6 +2896,64 @@ describe("ORAX product-surface wiring", () => {
       read("../../../../orax-desktop/scripts/installer-readiness.mjs"),
       read("../../../../orax-desktop/package.json"),
       read("../../../../../docs/orax-desktop-windows-installer.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
+
+  // Phase 3H: Signed Release Channel + Manifest Readiness
+
+  it("Phase 3H: package exposes release manifest and release readiness scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"release:manifest"');
+    expect(pkg).toContain('"release:readiness"');
+    expect(pkg).toContain('"verify:phase3h"');
+  });
+
+  it("Phase 3H: release manifest script produces checksum metadata without committing artifacts", () => {
+    const script = read("../../../../orax-desktop/scripts/release-manifest.mjs");
+    const gitignore = read("../../../../../.gitignore");
+    expect(script).toContain("createHash");
+    expect(script).toContain("sha256");
+    expect(script).toContain("ORAX_DESKTOP_RELEASE_BASE_URL");
+    expect(script).toContain("orax-desktop-windows-latest.json");
+    expect(script).toContain("Orax-Desktop-${version}-x64-Setup.exe");
+    expect(gitignore).toContain("artifacts/orax-desktop/release/");
+  });
+
+  it("Phase 3H: release readiness script checks channel, docs, and tracked release output", () => {
+    const script = read("../../../../orax-desktop/scripts/release-readiness.mjs");
+    expect(script).toContain("docs/orax-desktop-release-channel.md");
+    expect(script).toContain("provider: generic");
+    expect(script).toContain("artifacts/orax-desktop/release");
+    expect(script).toContain("Signed release channel");
+    expect(script).toContain("Release artifact manifest");
+  });
+
+  it("Phase 3H: release-channel runbook defines signing, upload, and rollback controls", () => {
+    const doc = read("../../../../../docs/orax-desktop-release-channel.md");
+    expect(doc).toContain("Code signing gate");
+    expect(doc).toContain("Release artifact manifest");
+    expect(doc).toContain("Upload Flow");
+    expect(doc).toContain("Rollback");
+    expect(doc).toContain("Do not expose a direct public download link");
+  });
+
+  it("Phase 3H: product page shows release-channel status without public direct download", () => {
+    const page = read("../../pages/orax-product.tsx");
+    expect(page).toContain("Signed release channel");
+    expect(page).toContain("internal release review");
+    expect(page).toContain("Direct download opens after signing and smoke tests pass");
+    expect(page).not.toContain('href="/downloads/');
+  });
+
+  it("Phase 3H: release-channel files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/scripts/release-manifest.mjs"),
+      read("../../../../orax-desktop/scripts/release-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-release-channel.md"),
     ]) {
       expect(src).not.toContain("/api/public-ai/");
       expect(src).not.toContain("oraChat");

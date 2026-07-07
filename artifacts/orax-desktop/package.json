@@ -9,10 +9,13 @@
     "preview": "electron-vite preview",
     "package:win": "pnpm run build && electron-builder --win nsis --x64 --config electron-builder.yml",
     "installer:readiness": "node scripts/installer-readiness.mjs",
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "release:readiness": "node scripts/release-readiness.mjs",
     "smoke:readiness": "node scripts/smoke-readiness.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "verify:phase3d": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness",
-    "verify:phase3g": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness && pnpm run installer:readiness"
+    "verify:phase3g": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness && pnpm run installer:readiness",
+    "verify:phase3h": "pnpm run verify:phase3g && pnpm run release:readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",
