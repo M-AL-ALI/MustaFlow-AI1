@@ -176,3 +176,45 @@ Until public signing is complete, the Orax product page should show:
 - internal release review copy
 
 Do not expose a direct public download link until signing and production smoke are complete.
+
+## Public download switch
+
+The website download button is fail-closed. It only becomes a direct Windows installer link when
+both conditions are true:
+
+```text
+VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED=true
+VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL=https://downloads.mustaflow.com/orax/desktop/windows/orax-desktop-windows-latest.json
+```
+
+The product page fetches the manifest at runtime and validates:
+
+- product is `Orax Desktop`
+- app id is `ai.mustaflow.orax.desktop`
+- platform is `win32`
+- architecture is `x64`
+- SHA-256 checksum is present
+- `downloadUrl` points to the controlled Orax Desktop Windows release channel
+
+If the switch is off, the manifest URL is missing, the manifest request fails, or the manifest does
+not validate, the product page must keep showing the early-access request flow. Do not hard-code an
+installer URL into the website. The public download link must always come from the signed release
+manifest.
+
+Readiness check:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3j
+```
+
+Before enabling public download:
+
+1. Confirm `verify:phase3j` passes.
+2. Confirm GitHub Actions built and signed the installer.
+3. Confirm `orax-desktop-windows-latest.json` is uploaded to the download host.
+4. Confirm the manifest `downloadUrl` points to the signed installer.
+5. Confirm a clean Windows machine can install, sign in, register heartbeat, pair mobile, run a
+   small desktop-backed Orax task, and prepare a pull request.
+6. Set `VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED=true` and the manifest URL in the website
+   deployment environment.
+7. Deploy the website and verify the product page shows `Download for Windows`.

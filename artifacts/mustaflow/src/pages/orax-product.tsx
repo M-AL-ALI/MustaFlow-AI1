@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState, type ElementType } from "react";
 import { Link } from "wouter";
 import {
   ArrowLeft,
@@ -17,9 +18,15 @@ import {
   Zap,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  formatOraxDesktopReleaseSize,
+  getOraxDesktopReleaseStatus,
+  isValidOraxDesktopManifest,
+  type OraxDesktopReleaseManifest,
+} from "@/lib/orax-desktop-release";
 import { useGetMyPreferences } from "@workspace/api-client-react";
 
-const CAPABILITIES: { icon: React.ElementType; label: string }[] = [
+const CAPABILITIES: { icon: ElementType; label: string }[] = [
   { icon: FileSearch, label: "Understand full codebases" },
   { icon: Code2, label: "Edit local files" },
   { icon: Terminal, label: "Run PowerShell and terminal commands" },
@@ -99,6 +106,70 @@ const SECURITY = [
 
 export default function OraxProductPage() {
   const { data: prefs } = useGetMyPreferences();
+  const releaseStatus = useMemo(() => getOraxDesktopReleaseStatus(), []);
+  const [releaseManifest, setReleaseManifest] = useState<OraxDesktopReleaseManifest | null>(null);
+  const [releaseLoading, setReleaseLoading] = useState(false);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!releaseStatus.publicDownloadEnabled || !releaseStatus.manifestUrl) {
+      setReleaseManifest(null);
+      setReleaseError(null);
+      setReleaseLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setReleaseLoading(true);
+    setReleaseError(null);
+
+    fetch(releaseStatus.manifestUrl, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Manifest request failed (${response.status})`);
+        }
+        return response.json();
+      })
+      .then((json) => {
+        if (!isValidOraxDesktopManifest(json)) {
+          throw new Error("Release manifest did not pass validation");
+        }
+        if (!cancelled) {
+          setReleaseManifest(json);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setReleaseManifest(null);
+          setReleaseError(error instanceof Error ? error.message : "Release manifest unavailable");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setReleaseLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [releaseStatus.manifestUrl, releaseStatus.publicDownloadEnabled]);
+
+  const publicDownloadReady =
+    releaseStatus.publicDownloadEnabled && Boolean(releaseManifest?.downloadUrl);
+  const releaseCards = [
+    ["Installer", "Windows NSIS build is ready for internal testing"],
+    ["Signed release channel", "Download channel is staged for internal release review"],
+    ["Release automation", "Manual release workflow is ready for signed upload"],
+    [
+      "Public access",
+      publicDownloadReady
+        ? `Public download is live for version ${releaseManifest?.version}`
+        : releaseStatus.publicDownloadEnabled
+          ? "Public switch is on; waiting for a verified release manifest"
+          : "Direct download opens after signing and smoke tests pass; public download disabled until then",
+    ],
+  ];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -234,31 +305,65 @@ export default function OraxProductPage() {
           <div>
             <h2 className="text-2xl font-bold">Download Orax Desktop</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Windows installer builds are ready for internal testing. Public download opens after
-              signing and release review.
+              Windows installer builds are ready for internal testing and controlled by the signed
+              release channel. Public download opens only when the release switch and manifest are
+              both verified.
             </p>
           </div>
           <div className="mx-auto grid max-w-3xl grid-cols-1 gap-3 text-left sm:grid-cols-4">
-            {[
-              ["Installer", "Windows NSIS build is ready for internal testing"],
-              ["Signed release channel", "Download channel is staged for internal release review"],
-              ["Release automation", "Manual release workflow is ready for signed upload"],
-              ["Public access", "Direct download opens after signing and smoke tests pass"],
-            ].map(([label, detail]) => (
+            {releaseCards.map(([label, detail]) => (
               <div key={label} className="rounded-2xl border border-border bg-background p-4">
                 <p className="text-sm font-semibold">{label}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
               </div>
             ))}
           </div>
+          <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-background p-4 text-left">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold">Release status</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {releaseStatus.publicDownloadEnabled
+                    ? releaseManifest
+                      ? `Verified release manifest for ${releaseManifest.version}`
+                      : releaseLoading
+                        ? "Checking release manifest before enabling download"
+                        : releaseError
+                          ? `Release manifest unavailable: ${releaseError}`
+                          : "Release manifest URL is not configured"
+                    : "Public download disabled"}
+                </p>
+              </div>
+              <span className="inline-flex w-fit rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
+                {publicDownloadReady ? "Download ready" : "Early access"}
+              </span>
+            </div>
+            {releaseManifest ? (
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                <span>Channel: {releaseManifest.channel}</span>
+                <span>Size: {formatOraxDesktopReleaseSize(releaseManifest.sizeBytes)}</span>
+                <span>SHA-256: {releaseManifest.sha256.slice(0, 12)}...</span>
+              </div>
+            ) : null}
+          </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link
-              href="/support/tickets"
-              className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
-            >
-              <Download className="h-4 w-4" />
-              Request early access
-            </Link>
+            {publicDownloadReady && releaseManifest ? (
+              <a
+                href={releaseManifest.downloadUrl}
+                className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
+              >
+                <Download className="h-4 w-4" />
+                Download for Windows
+              </a>
+            ) : (
+              <Link
+                href="/support/tickets"
+                className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
+              >
+                <Download className="h-4 w-4" />
+                Request early access
+              </Link>
+            )}
             <Link
               href="/orax"
               className="inline-flex h-12 items-center gap-2 rounded-full border border-border bg-background px-8 text-sm font-medium hover:bg-muted"
@@ -268,8 +373,9 @@ export default function OraxProductPage() {
             </Link>
           </div>
           <p className="text-xs text-muted-foreground">
-            Installer build pending public release. Internal builds are produced from the Orax
-            Desktop package and are not committed to the repository.
+            Installer build pending public release. Public download remains off unless
+            VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED is true and
+            VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL points to a valid signed release manifest.
           </p>
         </section>
       </main>

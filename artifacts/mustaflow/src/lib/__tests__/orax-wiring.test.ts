@@ -3041,4 +3041,69 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3J: Public Download Switch + Release Status UI
+
+  it("Phase 3J: package exposes public download readiness and verification scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"release:public-readiness"');
+    expect(pkg).toContain('"verify:phase3j"');
+    expect(pkg).toContain("scripts/release-public-readiness.mjs");
+  });
+
+  it("Phase 3J: release helper gates public download on env and manifest validation", () => {
+    const helper = read("../../lib/orax-desktop-release.ts");
+    expect(helper).toContain("VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED");
+    expect(helper).toContain("VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL");
+    expect(helper).toContain("getOraxDesktopReleaseStatus");
+    expect(helper).toContain("isValidOraxDesktopManifest");
+    expect(helper).toContain("downloadUrl");
+    expect(helper).toContain("sha256");
+    expect(helper).toContain("https://downloads.mustaflow.com/orax/desktop/windows/");
+  });
+
+  it("Phase 3J: product page fetches release manifest and fails closed to early access", () => {
+    const page = read("../../pages/orax-product.tsx");
+    expect(page).toContain("getOraxDesktopReleaseStatus");
+    expect(page).toContain("isValidOraxDesktopManifest");
+    expect(page).toContain("Release manifest unavailable");
+    expect(page).toContain("Public download disabled");
+    expect(page).toContain("Request early access");
+    expect(page).toContain("Download for Windows");
+    expect(page).toContain("releaseManifest.downloadUrl");
+    expect(page).not.toContain('href="/downloads/');
+  });
+
+  it("Phase 3J: release public readiness script checks product page, helper, docs, and Ora isolation", () => {
+    const script = read("../../../../orax-desktop/scripts/release-public-readiness.mjs");
+    expect(script).toContain("artifacts/mustaflow/src/lib/orax-desktop-release.ts");
+    expect(script).toContain("artifacts/mustaflow/src/pages/orax-product.tsx");
+    expect(script).toContain("VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED");
+    expect(script).toContain("VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL");
+    expect(script).toContain("Public download switch");
+    expect(script).toContain("leaks Ora/public-ai references");
+  });
+
+  it("Phase 3J: release docs describe env switch and manifest URL validation", () => {
+    const doc = read("../../../../../docs/orax-desktop-release-channel.md");
+    expect(doc).toContain("Public download switch");
+    expect(doc).toContain("VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED=true");
+    expect(doc).toContain("VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL");
+    expect(doc).toContain("downloadUrl");
+    expect(doc).toContain("Do not hard-code an");
+    expect(doc).toContain("verify:phase3j");
+  });
+
+  it("Phase 3J: public download switch files stay Orax-only", () => {
+    for (const src of [
+      read("../../lib/orax-desktop-release.ts"),
+      read("../../pages/orax-product.tsx"),
+      read("../../../../orax-desktop/scripts/release-public-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-release-channel.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });
