@@ -1,0 +1,28 @@
+appId: ai.mustaflow.orax.desktop
+productName: Orax Desktop
+copyright: Copyright (c) 2026 MustaFlow AI
+asar: true
+compression: maximum
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  executableName: Orax Desktop
+  requestedExecutionLevel: asInvoker
+nsis:
+  artifactName: Orax-Desktop-${version}-${arch}-Setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Orax Desktop
+publish: []

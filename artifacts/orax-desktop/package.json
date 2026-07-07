@@ -7,9 +7,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "package:win": "pnpm run build && electron-builder --win nsis --x64 --config electron-builder.yml",
+    "installer:readiness": "node scripts/installer-readiness.mjs",
     "smoke:readiness": "node scripts/smoke-readiness.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify:phase3d": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness"
+    "verify:phase3d": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness",
+    "verify:phase3g": "pnpm run typecheck && pnpm run build && pnpm run smoke:readiness && pnpm run installer:readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",
@@ -22,6 +25,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "electron": "^35.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "~5.9.2"
   }

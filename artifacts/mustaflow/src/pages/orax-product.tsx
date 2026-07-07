@@ -234,19 +234,18 @@ export default function OraxProductPage() {
           <div>
             <h2 className="text-2xl font-bold">Download Orax Desktop</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Windows — macOS and Linux support coming soon.
+              Windows installer builds are ready for internal testing. Public download opens after
+              signing and release review.
             </p>
           </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <button
-              type="button"
-              className="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background opacity-50"
-              disabled
-              title="Desktop installer coming soon"
+            <Link
+              href="/support/tickets"
+              className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
             >
               <Download className="h-4 w-4" />
-              Download for Windows
-            </button>
+              Request early access
+            </Link>
             <Link
               href="/orax"
               className="inline-flex h-12 items-center gap-2 rounded-full border border-border bg-background px-8 text-sm font-medium hover:bg-muted"
@@ -256,7 +255,8 @@ export default function OraxProductPage() {
             </Link>
           </div>
           <p className="text-xs text-muted-foreground">
-            Desktop installer coming soon. Use the web workspace to connect repositories and manage tasks in the meantime.
+            Installer build pending public release. Internal builds are produced from the Orax
+            Desktop package and are not committed to the repository.
           </p>
         </section>
       </main>

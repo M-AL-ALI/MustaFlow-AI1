@@ -2544,7 +2544,7 @@ describe("ORAX product-surface wiring", () => {
 
   it("Phase 3A: orax-product has coming-soon state and remote-control copy", () => {
     const src = read("../../pages/orax-product.tsx");
-    expect(src).toContain("Desktop installer coming soon");
+    expect(src).toContain("Installer build pending public release");
     expect(src).toContain("remote control");
   });
 
@@ -2847,5 +2847,58 @@ describe("ORAX product-surface wiring", () => {
     expect(page).toContain("/api/orax/desktop-auth/complete");
     expect(page).toContain("getToken");
     expect(page).toContain("does not grant access to Ora chat routes");
+  });
+
+  // ── Phase 3G: Windows Installer + Distribution Readiness ─────────────────
+
+  it("Phase 3G: Orax Desktop package exposes Windows packaging scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"package:win"');
+    expect(pkg).toContain('"verify:phase3g"');
+    expect(pkg).toContain('"installer:readiness"');
+    expect(pkg).toContain("electron-builder");
+  });
+
+  it("Phase 3G: electron-builder config targets Orax Desktop NSIS installer", () => {
+    const config = read("../../../../orax-desktop/electron-builder.yml");
+    expect(config).toContain("productName: Orax Desktop");
+    expect(config).toContain("appId: ai.mustaflow.orax.desktop");
+    expect(config).toContain("target: nsis");
+    expect(config).toContain("Orax-Desktop-${version}-${arch}-Setup.${ext}");
+    expect(config).toContain("publish: []");
+  });
+
+  it("Phase 3G: installer readiness script checks icon, ignored output, and no generated binaries", () => {
+    const script = read("../../../../orax-desktop/scripts/installer-readiness.mjs");
+    const gitignore = read("../../../../../.gitignore");
+    const icon = read("../../../../orax-desktop/build/icon.svg");
+    expect(script).toContain("artifacts/orax-desktop/electron-builder.yml");
+    expect(script).toContain("artifacts/orax-desktop/build/icon.svg");
+    expect(script).toContain("git");
+    expect(script).toContain("ls-files");
+    expect(script).toContain("artifacts/orax-desktop/release");
+    expect(gitignore).toContain("artifacts/orax-desktop/release/");
+    expect(icon).toContain("Orax Desktop");
+  });
+
+  it("Phase 3G: product page shows controlled early-access installer copy", () => {
+    const page = read("../../pages/orax-product.tsx");
+    expect(page).toContain("Request early access");
+    expect(page).toContain("Installer build pending public release");
+    expect(page).toContain("Windows installer builds are ready for internal testing");
+    expect(page).not.toContain("Desktop installer coming soon");
+  });
+
+  it("Phase 3G: installer files remain Orax-only and do not reference Ora/public-ai", () => {
+    for (const src of [
+      read("../../../../orax-desktop/electron-builder.yml"),
+      read("../../../../orax-desktop/scripts/installer-readiness.mjs"),
+      read("../../../../orax-desktop/package.json"),
+      read("../../../../../docs/orax-desktop-windows-installer.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
   });
 });
