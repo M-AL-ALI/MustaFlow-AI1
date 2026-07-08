@@ -6,7 +6,10 @@ import type { PairingManager } from "./pairing-manager";
 import type { LocalProjectsManager } from "./local-projects";
 import type { RelayClient } from "./relay-client";
 import type { PermissionMode } from "../shared/types";
-import { buildSupportDiagnostics } from "./support-diagnostics";
+import {
+  buildSupportDiagnostics,
+  serializeValidatedSupportDiagnostics,
+} from "./support-diagnostics";
 
 interface Deps {
   auth: AuthAdapter;
@@ -139,6 +142,7 @@ export function registerIpcHandlers(deps: Deps): void {
       relayState: relayClient.getState(),
       localProjects: localProjects.list(),
     });
+    const diagnosticsJson = serializeValidatedSupportDiagnostics(diagnostics);
     const defaultPath = `orax-desktop-diagnostics-${new Date()
       .toISOString()
       .replace(/[:.]/g, "-")}.json`;
@@ -150,7 +154,7 @@ export function registerIpcHandlers(deps: Deps): void {
     if (result.canceled || !result.filePath) {
       return null;
     }
-    await writeFile(result.filePath, `${JSON.stringify(diagnostics, null, 2)}\n`, "utf8");
+    await writeFile(result.filePath, diagnosticsJson, "utf8");
     return { filePath: result.filePath, diagnostics };
   });
 

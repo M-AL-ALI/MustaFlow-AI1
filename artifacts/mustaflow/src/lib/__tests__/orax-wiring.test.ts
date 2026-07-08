@@ -3180,4 +3180,66 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3L: Diagnostics Redaction Guard + Export Verification
+
+  it("Phase 3L: package exposes diagnostics validation verification script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3l"');
+    expect(pkg).toContain("update:recovery-readiness");
+  });
+
+  it("Phase 3L: support diagnostics validator scans secrets, env values, and local paths", () => {
+    const src = read("../../../../orax-desktop/src/main/support-diagnostics.ts");
+    expect(src).toContain("findSupportDiagnosticsViolations");
+    expect(src).toContain("serializeValidatedSupportDiagnostics");
+    expect(src).toContain("SENSITIVE_KEY_PATTERN");
+    expect(src).toContain("Bearer");
+    expect(src).toContain("GitHub token");
+    expect(src).toContain("PRIVATE KEY");
+    expect(src).toContain("environment assignment");
+    expect(src).toContain("Windows local path");
+    expect(src).toContain("Unix local path");
+    expect(src).not.toContain("session.token");
+    expect(src).not.toContain("process.env");
+  });
+
+  it("Phase 3L: diagnostics export validates before writing the JSON file", () => {
+    const src = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    const validateIndex = src.indexOf("serializeValidatedSupportDiagnostics(diagnostics)");
+    const writeIndex = src.indexOf("writeFile(result.filePath");
+    expect(validateIndex).toBeGreaterThan(-1);
+    expect(writeIndex).toBeGreaterThan(-1);
+    expect(validateIndex).toBeLessThan(writeIndex);
+  });
+
+  it("Phase 3L: update/recovery readiness checks validator and validation order", () => {
+    const src = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    expect(src).toContain("findSupportDiagnosticsViolations");
+    expect(src).toContain("serializeValidatedSupportDiagnostics");
+    expect(src).toContain("requireOrder");
+    expect(src).toContain("serializeValidatedSupportDiagnostics(diagnostics)");
+    expect(src).toContain("writeFile(result.filePath");
+  });
+
+  it("Phase 3L: update/recovery docs describe fail-closed diagnostics validation", () => {
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(doc).toContain("validated before it is written");
+    expect(doc).toContain("export fails and no diagnostics file is created");
+    expect(doc).toContain("verify:phase3l");
+    expect(doc).toContain("rejected before `writeFile`");
+  });
+
+  it("Phase 3L: diagnostics validation files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/main/support-diagnostics.ts"),
+      read("../../../../orax-desktop/src/main/ipc-handlers.ts"),
+      read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

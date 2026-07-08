@@ -52,6 +52,10 @@ Rollback checklist:
 
 Orax Desktop Settings includes `Export Support Diagnostics`.
 
+The diagnostics payload is validated before it is written to disk. If validation detects a bearer
+token, API key, private key, password-like value, environment assignment, or absolute local path, the
+export fails and no diagnostics file is created.
+
 The exported JSON includes:
 
 - Orax Desktop version
@@ -82,6 +86,12 @@ Repository-safe readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3k
 ```
 
+Stricter diagnostics validation readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3l
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -92,3 +102,4 @@ Manual smoke after any update:
 6. Run a small Orax task.
 7. Export Support Diagnostics and confirm the file contains no token, password, environment variable,
    or local path.
+8. Confirm a forced unsafe diagnostics payload is rejected before `writeFile`.

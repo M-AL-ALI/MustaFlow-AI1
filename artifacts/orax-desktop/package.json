@@ -22,7 +22,8 @@
     "verify:phase3h": "pnpm run verify:phase3g && pnpm run release:readiness",
     "verify:phase3i": "pnpm run verify:phase3h && pnpm run release:upload-readiness",
     "verify:phase3j": "pnpm run verify:phase3i && pnpm run release:public-readiness",
-    "verify:phase3k": "pnpm run verify:phase3j && pnpm run update:recovery-readiness"
+    "verify:phase3k": "pnpm run verify:phase3j && pnpm run update:recovery-readiness",
+    "verify:phase3l": "pnpm run verify:phase3k && pnpm run update:recovery-readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",
