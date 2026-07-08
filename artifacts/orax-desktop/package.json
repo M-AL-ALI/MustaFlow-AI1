@@ -29,7 +29,8 @@
     "verify:phase3n": "pnpm run verify:phase3m && pnpm run health:readiness",
     "verify:phase3o": "pnpm run verify:phase3n && pnpm run health:readiness",
     "verify:phase3p": "pnpm run verify:phase3o && pnpm run update:recovery-readiness && pnpm run health:readiness",
-    "verify:phase3q": "pnpm run verify:phase3p && pnpm run update:recovery-readiness && pnpm run health:readiness"
+    "verify:phase3q": "pnpm run verify:phase3p && pnpm run update:recovery-readiness && pnpm run health:readiness",
+    "verify:phase3r": "pnpm run verify:phase3q && pnpm run update:recovery-readiness && pnpm run health:readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",

@@ -58,6 +58,7 @@ requireContains("artifacts/orax-desktop/package.json", '"update:recovery-readine
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3k"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3r"');
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "buildSupportDiagnostics");
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
@@ -109,11 +110,14 @@ requireContains("docs/orax-desktop-update-recovery.md", "Support Diagnostics");
 requireContains("docs/orax-desktop-update-recovery.md", "diagnostics payload may include");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3p");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3q");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3r");
 requireContains(
   "docs/orax-desktop-update-recovery.md",
   "Diagnostics exported. Health timeline included.",
 );
 requireContains("docs/orax-desktop-update-recovery.md", "Settings export may have an empty");
+requireContains("docs/orax-desktop-update-recovery.md", "Health Smoke Checklist");
+requireContains("docs/orax-desktop-update-recovery.md", "Confirm diagnostics success/cancel messages");
 requireContains("docs/orax-desktop-update-recovery.md", "validated before it is written");
 requireContains("docs/orax-desktop-update-recovery.md", "Do not include Ora/public-ai chat");
 

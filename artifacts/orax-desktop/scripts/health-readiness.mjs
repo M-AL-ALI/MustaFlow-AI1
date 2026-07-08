@@ -48,6 +48,7 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3n"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3o"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3r"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -148,6 +149,29 @@ requireContains(
   "Diagnostics exported. Health timeline included.",
 );
 requireContains("docs/orax-desktop-update-recovery.md", "Settings export may have an empty");
+
+// --- Phase 3R: Health Smoke Checklist ---
+
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "HealthSmokeChecklist");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "smokeChecklistItems");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health smoke checklist");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Sign in with MustaFlow AI");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Register host");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Confirm heartbeat");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Confirm relay polling");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Open pairing");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Export support diagnostics");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Confirm diagnostics success/cancel messages",
+);
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "smokeStatusLabel");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "needs-action");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "manual");
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "diagnosticsJson");
+requireContains("docs/orax-desktop-update-recovery.md", "Health Smoke Checklist");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3r");
+requireContains("docs/orax-desktop-update-recovery.md", "Confirm diagnostics success/cancel messages");
 
 // --- Ora isolation check (all health files) ---
 

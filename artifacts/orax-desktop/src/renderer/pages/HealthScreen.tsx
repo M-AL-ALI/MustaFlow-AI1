@@ -18,6 +18,7 @@ import type { RelayState, SupportDiagnosticsHealthTimelineEntry } from "../../sh
 type HealthLevel = "ok" | "warn" | "blocked";
 type ActionStatus = "idle" | "running" | "success" | "failed";
 type ActionResultMessage = string | void;
+type SmokeChecklistStatus = "ready" | "needs-action" | "manual";
 
 interface ActionState {
   status: ActionStatus;
@@ -87,6 +88,18 @@ function actionStateColor(status: ActionStatus): string {
   return "var(--text-muted)";
 }
 
+function smokeStatusColor(status: SmokeChecklistStatus): string {
+  if (status === "ready") return "#10b981";
+  if (status === "needs-action") return "#ef4444";
+  return "#f59e0b";
+}
+
+function smokeStatusLabel(status: SmokeChecklistStatus): string {
+  if (status === "ready") return "Ready";
+  if (status === "needs-action") return "Needs action";
+  return "Manual";
+}
+
 interface HealthRowAction {
   key: ActionKey;
   label: string;
@@ -100,6 +113,12 @@ interface HealthItem {
   level: HealthLevel;
   detail: string;
   action?: HealthRowAction;
+}
+
+interface SmokeChecklistItem {
+  label: string;
+  status: SmokeChecklistStatus;
+  detail: string;
 }
 
 function ActionButton({
@@ -241,6 +260,69 @@ function ActionTimeline({ entries }: { entries: ActionHistoryEntry[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function HealthSmokeChecklist({ items }: { items: SmokeChecklistItem[] }) {
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <ShieldCheck size={14} color="var(--text-secondary)" />
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+          Health smoke checklist
+        </span>
+      </div>
+      <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+        Use this checklist on Windows after install or update. Derived items update from live Health
+        state; manual items require the user to click through and confirm the result.
+      </p>
+      <div style={{ display: "grid", gap: 8 }}>
+        {items.map((item) => {
+          const Icon =
+            item.status === "ready" ? CheckCircle2 : item.status === "manual" ? Activity : XCircle;
+          return (
+            <div
+              key={item.label}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "8px 10px",
+                background: "rgba(255,255,255,0.55)",
+                display: "flex",
+                gap: 10,
+                alignItems: "flex-start",
+              }}
+            >
+              <Icon
+                size={14}
+                color={smokeStatusColor(item.status)}
+                style={{ marginTop: 2, flexShrink: 0 }}
+              />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                    {item.label}
+                  </span>
+                  <span style={{ fontSize: 11, color: smokeStatusColor(item.status) }}>
+                    {smokeStatusLabel(item.status)}
+                  </span>
+                </div>
+                <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-secondary)" }}>
+                  {item.detail}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -493,6 +575,67 @@ export function HealthScreen() {
     return { label: "All systems ready", level: "ok" as const };
   }, [healthItems]);
 
+  const smokeChecklistItems = useMemo<SmokeChecklistItem[]>(() => {
+    const signedIn = Boolean(session);
+    const hostRegistered = Boolean(hostState?.hostId);
+    const hostOnline = hostState?.status === "online";
+    const relayPolling = relayState?.status === "polling";
+    const pairingReady = hostRegistered && hostOnline;
+    const pairingOpened = actionStates.openPairing.status === "success";
+    const diagnosticsMessage = actionStates.exportDiagnostics.message ?? "";
+    const diagnosticsResultConfirmed =
+      actionStates.exportDiagnostics.status === "success" &&
+      (diagnosticsMessage.includes("Diagnostics exported. Health timeline included.") ||
+        diagnosticsMessage.includes("Diagnostics export cancelled."));
+
+    return [
+      {
+        label: "Sign in with MustaFlow AI",
+        status: signedIn ? "ready" : "needs-action",
+        detail: signedIn ? "Signed-in session is active." : "Use Sign in again before continuing.",
+      },
+      {
+        label: "Register host",
+        status: hostRegistered ? "ready" : "needs-action",
+        detail: hostRegistered ? "This computer has a host id." : "Use Reconnect host.",
+      },
+      {
+        label: "Confirm heartbeat",
+        status: hostOnline ? "ready" : "needs-action",
+        detail: hostOnline ? "Desktop heartbeat is online." : "Host must be online.",
+      },
+      {
+        label: "Confirm relay polling",
+        status: relayPolling ? "ready" : "needs-action",
+        detail: relayPolling ? "Relay is polling for actions." : "Use Restart relay.",
+      },
+      {
+        label: "Open pairing",
+        status: pairingOpened ? "ready" : pairingReady ? "manual" : "needs-action",
+        detail: pairingOpened
+          ? "Pairing page was opened in this session."
+          : pairingReady
+            ? "Open Pairing and confirm the code screen."
+            : "Pairing requires an online registered host.",
+      },
+      {
+        label: "Export support diagnostics",
+        status: actionStates.exportDiagnostics.status === "success" ? "ready" : "manual",
+        detail:
+          actionStates.exportDiagnostics.status === "success"
+            ? "Diagnostics export flow returned a safe result message."
+            : "Click Export Support Diagnostics and choose save or cancel.",
+      },
+      {
+        label: "Confirm diagnostics success/cancel messages",
+        status: diagnosticsResultConfirmed ? "ready" : "manual",
+        detail: diagnosticsResultConfirmed
+          ? "Health shows a safe result message without the saved file path."
+          : "Confirm success or cancel copy appears and no local path is shown.",
+      },
+    ];
+  }, [actionStates, hostState?.hostId, hostState?.status, relayState?.status, session]);
+
   return (
     <div style={{ maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
@@ -561,6 +704,8 @@ export function HealthScreen() {
           <HealthRow key={item.label} item={item} />
         ))}
       </div>
+
+      <HealthSmokeChecklist items={smokeChecklistItems} />
 
       <ActionTimeline entries={actionHistory} />
 

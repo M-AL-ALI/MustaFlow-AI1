@@ -3589,4 +3589,69 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3R: Health Smoke Checklist
+
+  it("Phase 3R: package exposes verify:phase3r script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3r"');
+    expect(pkg).toContain("verify:phase3q");
+    expect(pkg).toContain("health:readiness");
+    expect(pkg).toContain("update:recovery-readiness");
+  });
+
+  it("Phase 3R: Health page renders a guided Windows smoke checklist", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("HealthSmokeChecklist");
+    expect(src).toContain("smokeChecklistItems");
+    expect(src).toContain("Health smoke checklist");
+    expect(src).toContain("Sign in with MustaFlow AI");
+    expect(src).toContain("Register host");
+    expect(src).toContain("Confirm heartbeat");
+    expect(src).toContain("Confirm relay polling");
+    expect(src).toContain("Open pairing");
+    expect(src).toContain("Export support diagnostics");
+    expect(src).toContain("Confirm diagnostics success/cancel messages");
+  });
+
+  it("Phase 3R: Health smoke checklist derives safe statuses from existing Health state", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain('type SmokeChecklistStatus = "ready" | "needs-action" | "manual"');
+    expect(src).toContain("smokeStatusLabel");
+    expect(src).toContain("const signedIn = Boolean(session)");
+    expect(src).toContain("const hostRegistered = Boolean(hostState?.hostId)");
+    expect(src).toContain('hostState?.status === "online"');
+    expect(src).toContain('relayState?.status === "polling"');
+    expect(src).toContain('actionStates.exportDiagnostics.status === "success"');
+    expect(src).not.toContain("diagnosticsJson");
+    expect(src).not.toContain("result.filePath");
+    expect(src).not.toContain("process.env");
+  });
+
+  it("Phase 3R: readiness scripts and docs cover Health smoke checklist", () => {
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(health).toContain("HealthSmokeChecklist");
+    expect(health).toContain("Confirm diagnostics success/cancel messages");
+    expect(recovery).toContain('"verify:phase3r"');
+    expect(doc).toContain("Health Smoke Checklist");
+    expect(doc).toContain("Ready");
+    expect(doc).toContain("Needs action");
+    expect(doc).toContain("Manual");
+    expect(doc).toContain("verify:phase3r");
+  });
+
+  it("Phase 3R: Health smoke checklist files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

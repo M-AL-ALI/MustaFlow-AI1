@@ -171,6 +171,30 @@ Settings export may have an empty `healthTimeline` because Settings does not own
 Both entry points still build diagnostics in the main process and validate the JSON before it is
 written.
 
+## Health Smoke Checklist
+
+The Health page includes a `Health smoke checklist` for the installed Windows app. It is a guided
+manual validation surface for the desktop-to-cloud chain after install or update.
+
+The checklist includes:
+
+- Sign in with MustaFlow AI
+- Register host
+- Confirm heartbeat
+- Confirm relay polling
+- Open pairing
+- Export support diagnostics
+- Confirm diagnostics success/cancel messages
+
+Checklist rows show one of three states:
+
+- `Ready` means the Health page can derive the result from live app state.
+- `Needs action` means an existing recovery action should be used before continuing.
+- `Manual` means the user must click through and confirm the UI result.
+
+The checklist must not render local file paths, raw diagnostics JSON, tokens, environment variables,
+or command output. It is a user-facing validation guide, not a log viewer.
+
 ## Verification
 
 Repository-safe readiness:
@@ -215,6 +239,12 @@ Health diagnostics export result readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3q
 ```
 
+Health smoke checklist readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3r
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -235,3 +265,5 @@ Manual smoke after any update:
 13. Confirm the Health page shows `Diagnostics exported. Health timeline included.` after a
     successful export and never displays the saved file path.
 14. Cancel the save dialog and confirm the Health page shows `Diagnostics export cancelled.`
+15. Confirm the Health Smoke Checklist shows ready/needs-action/manual status for sign-in, host
+    registration, heartbeat, relay polling, pairing, diagnostics export, and diagnostics result copy.
