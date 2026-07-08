@@ -3717,4 +3717,56 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3T: Health Checklist Completion Summary
+
+  it("Phase 3T: package exposes verify:phase3t script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3t"');
+    expect(pkg).toContain("verify:phase3s");
+    expect(pkg).toContain("health:readiness");
+    expect(pkg).toContain("update:recovery-readiness");
+  });
+
+  it("Phase 3T: Health smoke checklist derives a compact completion summary", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("getSmokeChecklistSummary");
+    expect(src).toContain("SmokeChecklistSummary");
+    expect(src).toContain("Windows smoke checklist complete");
+    expect(src).toContain("checks ready");
+    expect(src).toContain("need action");
+    expect(src).toContain("summary.manual");
+    expect(src).toContain("ready === total");
+    expect(src).not.toContain("diagnosticsJson");
+    expect(src).not.toContain("result.filePath");
+    expect(src).not.toContain("process.env");
+    expect(src).not.toContain("stdout");
+    expect(src).not.toContain("stderr");
+  });
+
+  it("Phase 3T: readiness scripts and docs cover the checklist summary", () => {
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(health).toContain("getSmokeChecklistSummary");
+    expect(health).toContain("Windows smoke checklist complete");
+    expect(recovery).toContain('"verify:phase3t"');
+    expect(recovery).toContain("Health Checklist Completion Summary");
+    expect(doc).toContain("Health Checklist Completion Summary");
+    expect(doc).toContain("Windows smoke checklist complete");
+    expect(doc).toContain("verify:phase3t");
+  });
+
+  it("Phase 3T: Health checklist summary files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

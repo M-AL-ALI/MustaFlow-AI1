@@ -126,6 +126,22 @@ interface SmokeChecklistItem {
   };
 }
 
+interface SmokeChecklistSummary {
+  ready: number;
+  needsAction: number;
+  manual: number;
+  total: number;
+  complete: boolean;
+}
+
+function getSmokeChecklistSummary(items: SmokeChecklistItem[]): SmokeChecklistSummary {
+  const ready = items.filter((item) => item.status === "ready").length;
+  const needsAction = items.filter((item) => item.status === "needs-action").length;
+  const manual = items.filter((item) => item.status === "manual").length;
+  const total = items.length;
+  return { ready, needsAction, manual, total, complete: ready === total };
+}
+
 function ActionButton({
   label,
   state,
@@ -270,6 +286,8 @@ function ActionTimeline({ entries }: { entries: ActionHistoryEntry[] }) {
 }
 
 function HealthSmokeChecklist({ items }: { items: SmokeChecklistItem[] }) {
+  const summary = getSmokeChecklistSummary(items);
+
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -282,6 +300,55 @@ function HealthSmokeChecklist({ items }: { items: SmokeChecklistItem[] }) {
         Use this checklist on Windows after install or update. Derived items update from live Health
         state; manual items require the user to click through and confirm the result.
       </p>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          gap: 8,
+        }}
+      >
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "8px 10px",
+            background: "rgba(16,185,129,0.08)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Ready</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+            {summary.complete
+              ? "Windows smoke checklist complete"
+              : `${summary.ready} of ${summary.total} checks ready`}
+          </div>
+        </div>
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "8px 10px",
+            background: "rgba(239,68,68,0.06)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Action</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+            {summary.needsAction} need action
+          </div>
+        </div>
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "8px 10px",
+            background: "rgba(245,158,11,0.08)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Manual</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+            {summary.manual} manual
+          </div>
+        </div>
+      </div>
       <div style={{ display: "grid", gap: 8 }}>
         {items.map((item) => {
           const Icon =

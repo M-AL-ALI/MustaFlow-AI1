@@ -50,6 +50,7 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3r"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3s"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3t"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -197,6 +198,22 @@ requireContains(
 requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Action Shortcuts");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3s");
 requireContains("docs/orax-desktop-update-recovery.md", "No new IPC APIs");
+
+// --- Phase 3T: Health Checklist Completion Summary ---
+
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3t"');
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "getSmokeChecklistSummary");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "SmokeChecklistSummary");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Windows smoke checklist complete");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "checks ready");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "need action");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "summary.manual");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "ready === total");
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "diagnosticsJson");
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "result.filePath");
+requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Completion Summary");
+requireContains("docs/orax-desktop-update-recovery.md", "Windows smoke checklist complete");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3t");
 
 // --- Ora isolation check (all health files) ---
 

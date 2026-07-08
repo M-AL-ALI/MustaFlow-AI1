@@ -209,6 +209,23 @@ No new IPC APIs, backend routes, or diagnostics export paths are added for these
 the same handlers as the Health rows above, and they inherit the same redaction and validation rules.
 Rows that do not have a safe direct action remain informational.
 
+## Health Checklist Completion Summary
+
+The Health Smoke Checklist includes a compact completion summary above the checklist rows:
+
+- `X of 7 checks ready`
+- `Y need action`
+- `Z manual`
+
+When all checklist rows are ready, the ready count changes to `Windows smoke checklist complete`.
+
+The summary is derived from the current `smokeChecklistItems` array. It does not persist separate
+state, does not call new IPC APIs, and does not create backend routes. It is a user-facing progress
+summary only.
+
+The summary must not render local file paths, raw diagnostics JSON, tokens, environment variables,
+stdout/stderr, or command output.
+
 ## Verification
 
 Repository-safe readiness:
@@ -265,6 +282,12 @@ Health checklist action shortcut readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3s
 ```
 
+Health checklist completion summary readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3t
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -289,3 +312,5 @@ Manual smoke after any update:
     registration, heartbeat, relay polling, pairing, diagnostics export, and diagnostics result copy.
 16. Confirm checklist shortcuts call the same Health recovery actions and do not expose any path,
     raw diagnostics JSON, token, environment variable, stdout/stderr, or command output.
+17. Confirm the Health Smoke Checklist summary shows `X of 7 checks ready`, `Y need action`, and
+    `Z manual`, then shows `Windows smoke checklist complete` when all checklist rows are ready.
