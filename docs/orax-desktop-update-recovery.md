@@ -195,6 +195,20 @@ Checklist rows show one of three states:
 The checklist must not render local file paths, raw diagnostics JSON, tokens, environment variables,
 or command output. It is a user-facing validation guide, not a log viewer.
 
+## Health Checklist Action Shortcuts
+
+Checklist rows may expose shortcuts for the existing Health recovery actions:
+
+- Sign in with MustaFlow AI uses `Sign in again`.
+- Register host uses `Reconnect host`.
+- Confirm relay polling uses `Restart relay`.
+- Open pairing uses `Open pairing`.
+- Export support diagnostics uses `Export Support Diagnostics`.
+
+No new IPC APIs, backend routes, or diagnostics export paths are added for these shortcuts. They call
+the same handlers as the Health rows above, and they inherit the same redaction and validation rules.
+Rows that do not have a safe direct action remain informational.
+
 ## Verification
 
 Repository-safe readiness:
@@ -245,6 +259,12 @@ Health smoke checklist readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3r
 ```
 
+Health checklist action shortcut readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3s
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -267,3 +287,5 @@ Manual smoke after any update:
 14. Cancel the save dialog and confirm the Health page shows `Diagnostics export cancelled.`
 15. Confirm the Health Smoke Checklist shows ready/needs-action/manual status for sign-in, host
     registration, heartbeat, relay polling, pairing, diagnostics export, and diagnostics result copy.
+16. Confirm checklist shortcuts call the same Health recovery actions and do not expose any path,
+    raw diagnostics JSON, token, environment variable, stdout/stderr, or command output.

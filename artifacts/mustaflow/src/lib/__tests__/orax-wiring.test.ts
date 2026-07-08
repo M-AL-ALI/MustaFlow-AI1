@@ -3654,4 +3654,67 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3S: Health Checklist Action Shortcuts
+
+  it("Phase 3S: package exposes verify:phase3s script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3s"');
+    expect(pkg).toContain("verify:phase3r");
+    expect(pkg).toContain("health:readiness");
+    expect(pkg).toContain("update:recovery-readiness");
+  });
+
+  it("Phase 3S: Health checklist shortcuts reuse existing Health handlers", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain('item.action && item.status !== "ready"');
+    expect(src).toContain("onClick: handleSignIn");
+    expect(src).toContain("onClick: handleReconnectHost");
+    expect(src).toContain("onClick: handleRestartRelay");
+    expect(src).toContain("onClick: handleOpenPairing");
+    expect(src).toContain("onClick: handleExportDiagnostics");
+    expect(src).toContain("state: actionStates.signIn");
+    expect(src).toContain("state: actionStates.reconnectHost");
+    expect(src).toContain("state: actionStates.restartRelay");
+    expect(src).toContain("state: actionStates.openPairing");
+    expect(src).toContain("state: actionStates.exportDiagnostics");
+  });
+
+  it("Phase 3S: Health checklist shortcuts do not add new execution surfaces", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).not.toContain("ipcRenderer.invoke");
+    expect(src).not.toContain("window.electronAPI.support.exportDiagnostics(");
+    expect(src).not.toContain("fetch(");
+    expect(src).not.toContain("/api/orax/");
+    expect(src).not.toContain("result.filePath");
+    expect(src).not.toContain("diagnosticsJson");
+    expect(src).not.toContain("stdout");
+    expect(src).not.toContain("stderr");
+  });
+
+  it("Phase 3S: readiness scripts and docs cover Health checklist shortcuts", () => {
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(health).toContain("onClick: handleSignIn");
+    expect(health).toContain("onClick: handleExportDiagnostics");
+    expect(recovery).toContain('"verify:phase3s"');
+    expect(doc).toContain("Health Checklist Action Shortcuts");
+    expect(doc).toContain("No new IPC APIs");
+    expect(doc).toContain("Rows that do not have a safe direct action remain informational.");
+    expect(doc).toContain("verify:phase3s");
+  });
+
+  it("Phase 3S: Health checklist shortcut files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

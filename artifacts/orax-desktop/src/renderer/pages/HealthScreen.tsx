@@ -119,6 +119,11 @@ interface SmokeChecklistItem {
   label: string;
   status: SmokeChecklistStatus;
   detail: string;
+  action?: {
+    label: string;
+    state: ActionState;
+    onClick: () => void;
+  };
 }
 
 function ActionButton({
@@ -318,6 +323,38 @@ function HealthSmokeChecklist({ items }: { items: SmokeChecklistItem[] }) {
                 <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-secondary)" }}>
                   {item.detail}
                 </div>
+                {item.action && item.status !== "ready" && (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      className="btn"
+                      style={{ fontSize: 12, padding: "4px 10px", gap: 6 }}
+                      onClick={item.action.onClick}
+                      disabled={item.action.state.status === "running"}
+                    >
+                      {item.action.state.status === "running" ? (
+                        <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                      ) : (
+                        <RefreshCw size={11} />
+                      )}
+                      {item.action.state.status === "running" ? "Working..." : item.action.label}
+                    </button>
+                    {(item.action.state.status === "success" ||
+                      item.action.state.status === "failed") && (
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 11,
+                          color: actionStateColor(item.action.state.status),
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {item.action.state.status === "success"
+                          ? (item.action.state.message ?? "Done.")
+                          : (item.action.state.message ?? "Action failed.")}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -593,11 +630,21 @@ export function HealthScreen() {
         label: "Sign in with MustaFlow AI",
         status: signedIn ? "ready" : "needs-action",
         detail: signedIn ? "Signed-in session is active." : "Use Sign in again before continuing.",
+        action: {
+          label: "Sign in again",
+          state: actionStates.signIn,
+          onClick: handleSignIn,
+        },
       },
       {
         label: "Register host",
         status: hostRegistered ? "ready" : "needs-action",
         detail: hostRegistered ? "This computer has a host id." : "Use Reconnect host.",
+        action: {
+          label: "Reconnect host",
+          state: actionStates.reconnectHost,
+          onClick: handleReconnectHost,
+        },
       },
       {
         label: "Confirm heartbeat",
@@ -608,6 +655,11 @@ export function HealthScreen() {
         label: "Confirm relay polling",
         status: relayPolling ? "ready" : "needs-action",
         detail: relayPolling ? "Relay is polling for actions." : "Use Restart relay.",
+        action: {
+          label: "Restart relay",
+          state: actionStates.restartRelay,
+          onClick: handleRestartRelay,
+        },
       },
       {
         label: "Open pairing",
@@ -617,6 +669,11 @@ export function HealthScreen() {
           : pairingReady
             ? "Open Pairing and confirm the code screen."
             : "Pairing requires an online registered host.",
+        action: {
+          label: "Open pairing",
+          state: actionStates.openPairing,
+          onClick: handleOpenPairing,
+        },
       },
       {
         label: "Export support diagnostics",
@@ -625,6 +682,11 @@ export function HealthScreen() {
           actionStates.exportDiagnostics.status === "success"
             ? "Diagnostics export flow returned a safe result message."
             : "Click Export Support Diagnostics and choose save or cancel.",
+        action: {
+          label: "Export Support Diagnostics",
+          state: actionStates.exportDiagnostics,
+          onClick: handleExportDiagnostics,
+        },
       },
       {
         label: "Confirm diagnostics success/cancel messages",
@@ -634,7 +696,18 @@ export function HealthScreen() {
           : "Confirm success or cancel copy appears and no local path is shown.",
       },
     ];
-  }, [actionStates, hostState?.hostId, hostState?.status, relayState?.status, session]);
+  }, [
+    actionStates,
+    handleExportDiagnostics,
+    handleOpenPairing,
+    handleReconnectHost,
+    handleRestartRelay,
+    handleSignIn,
+    hostState?.hostId,
+    hostState?.status,
+    relayState?.status,
+    session,
+  ]);
 
   return (
     <div style={{ maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>

@@ -49,6 +49,7 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3o"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3r"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3s"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -172,6 +173,30 @@ requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
 requireContains("docs/orax-desktop-update-recovery.md", "Health Smoke Checklist");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3r");
 requireContains("docs/orax-desktop-update-recovery.md", "Confirm diagnostics success/cancel messages");
+
+// --- Phase 3S: Health Checklist Action Shortcuts ---
+
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "onClick: handleSignIn");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "onClick: handleReconnectHost",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "onClick: handleRestartRelay",
+);
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "onClick: handleOpenPairing");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "onClick: handleExportDiagnostics",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "item.action && item.status !== \"ready\"",
+);
+requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Action Shortcuts");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3s");
+requireContains("docs/orax-desktop-update-recovery.md", "No new IPC APIs");
 
 // --- Ora isolation check (all health files) ---
 
