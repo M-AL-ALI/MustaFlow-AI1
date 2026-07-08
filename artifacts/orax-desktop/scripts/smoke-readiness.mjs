@@ -104,6 +104,12 @@ requireNotContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx"
 requireContains("artifacts/orax-desktop/src/renderer/pages/HomeScreen.tsx", "Relay");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health Check");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Relay polling");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Sign in again");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Reconnect host");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Restart relay");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "redactForDisplay");
+requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "relay:restart");
+requireContains("artifacts/orax-desktop/src/preload/index.ts", "relay:restart");
 requireContains("artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx", "Cloud Projects");
 requireContains("artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx", ".orax/project.json");
 requireContains("artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx", "PERMISSION_MODE_LABELS");

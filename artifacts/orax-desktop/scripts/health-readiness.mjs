@@ -32,6 +32,8 @@ function requireContains(relPath, token) {
   else pass(`${relPath} contains ${token}`);
 }
 
+// --- Phase 3M: Health Check Panel ---
+
 requireFile("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx");
 
 requireContains("artifacts/orax-desktop/package.json", '"health:readiness"');
@@ -53,10 +55,38 @@ requireContains("docs/orax-desktop-update-recovery.md", "Health Check Panel");
 requireContains("docs/orax-desktop-update-recovery.md", "Sign-in status");
 requireContains("docs/orax-desktop-update-recovery.md", "Relay polling");
 
+// --- Phase 3N: Health Recovery Actions ---
+
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3n"');
+
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Sign in again");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Reconnect host");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Restart relay");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Open pairing");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Check release status");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "redactForDisplay");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "lastAttempted");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "registerHost");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "relay.restart");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", 'setPage("pairing")');
+
+requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "relay:restart");
+requireContains("artifacts/orax-desktop/src/preload/index.ts", "relay:restart");
+requireContains("artifacts/orax-desktop/src/renderer/lib/ipc.ts", "restart");
+requireContains("artifacts/orax-desktop/src/renderer/electron-api.d.ts", "restart");
+
+requireContains("docs/orax-desktop-update-recovery.md", "Health Recovery Actions");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3n");
+
+// --- Ora isolation check (all health files) ---
+
 for (const relPath of [
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "artifacts/orax-desktop/src/renderer/App.tsx",
   "artifacts/orax-desktop/src/renderer/components/Sidebar.tsx",
+  "artifacts/orax-desktop/src/main/ipc-handlers.ts",
+  "artifacts/orax-desktop/src/preload/index.ts",
+  "artifacts/orax-desktop/src/renderer/lib/ipc.ts",
   "docs/orax-desktop-update-recovery.md",
 ]) {
   const content = read(relPath);

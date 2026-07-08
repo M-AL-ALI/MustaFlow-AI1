@@ -38,7 +38,18 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
   .agents/memory/MEMORY.md \
+  .agents/memory/api-server-vitest-oom.md \
+  artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts \
   artifacts/ora-mobile/app.json \
+  artifacts/orax-desktop/package.json \
+  artifacts/orax-desktop/scripts/health-readiness.mjs \
+  artifacts/orax-desktop/scripts/smoke-readiness.mjs \
+  artifacts/orax-desktop/src/main/ipc-handlers.ts \
+  artifacts/orax-desktop/src/preload/index.ts \
+  artifacts/orax-desktop/src/renderer/electron-api.d.ts \
+  artifacts/orax-desktop/src/renderer/lib/ipc.ts \
+  artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx \
+  docs/orax-desktop-update-recovery.md \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

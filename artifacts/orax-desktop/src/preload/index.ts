@@ -53,6 +53,7 @@ const electronAPI = {
   },
   relay: {
     getStatus: (): Promise<RelayState> => ipcRenderer.invoke("relay:getStatus"),
+    restart: (): Promise<RelayState> => ipcRenderer.invoke("relay:restart"),
   },
   support: {
     exportDiagnostics: (): Promise<SupportDiagnosticsExport | null> =>

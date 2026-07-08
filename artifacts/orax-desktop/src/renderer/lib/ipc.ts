@@ -41,6 +41,11 @@ export const appInfo = {
   getVersion: () => api().app.getVersion(),
 };
 
+export const relay = {
+  getStatus: () => api().relay.getStatus(),
+  restart: () => api().relay.restart(),
+};
+
 export const support = {
   exportDiagnostics: () => api().support.exportDiagnostics(),
 };

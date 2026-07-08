@@ -97,6 +97,42 @@ If any row is blocked, fix that item before asking Orax to run a desktop-backed 
 designed for user-facing troubleshooting; it does not expose session tokens, local project paths, or
 environment variables.
 
+## Health Recovery Actions
+
+Each health row on the Health page includes a contextual action button when the item is not ready.
+
+| Health item | Button | What it does |
+|---|---|---|
+| Sign-in status | Sign in again | Starts the MustaFlow AI sign-in flow and refreshes the session |
+| Host registration | Reconnect host | Re-registers this computer and refreshes the host state |
+| Relay polling | Restart relay | Stops and restarts the relay polling client |
+| Pairing readiness | Open pairing | Navigates directly to the Pairing page |
+| Release channel | Check release status | Confirms the release channel is configured |
+| Diagnostics export | Export Support Diagnostics | Runs the validated diagnostics export |
+
+Recovery action safety rules:
+
+- Actions use only the existing sign-in, host-registration, relay, and pairing flows. No raw Node
+  APIs, no shell commands, and no direct environment variable access are exposed to the renderer.
+- Errors are redacted before display. Bearer tokens, API keys, private keys, environment variable
+  assignments, Windows paths, UNC paths, and Unix paths are replaced with `[redacted]` before any
+  error message is rendered.
+- The diagnostics export still validates the full payload for sensitive content before writing the
+  file. If validation fails, no file is created.
+- Action result state (running / success / failed) and last-attempted time are shown inline. State
+  is per-session only and is not persisted to disk.
+
+Manual smoke checklist for recovery actions (after install or update):
+
+1. With the desktop signed out, open Health and confirm "Sign in again" appears on the Sign-in row.
+2. Click "Sign in again" and complete the sign-in flow; confirm the row turns green.
+3. With the host not registered, confirm "Reconnect host" appears and clicking it registers the host.
+4. With the relay idle, confirm "Restart relay" appears and clicking it starts relay polling.
+5. Confirm "Open pairing" always appears and navigates to the Pairing page.
+6. Confirm "Check release status" always appears and shows "Done." after clicking.
+7. Confirm "Export Support Diagnostics" always appears and exports a validated JSON file.
+8. Confirm no error message displays a token, path, or environment variable string.
+
 ## Verification
 
 Repository-safe readiness:
@@ -117,6 +153,12 @@ Health panel readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3m
 ```
 
+Health recovery actions readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3n
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -130,3 +172,5 @@ Manual smoke after any update:
 8. Confirm a forced unsafe diagnostics payload is rejected before `writeFile`.
 9. Open the Health page and confirm sign-in, host registration, heartbeat, relay polling, pairing
    readiness, release channel, and diagnostics export availability are visible.
+10. Exercise each recovery action button and confirm the expected result (sign-in, reconnect,
+    restart relay, pairing navigation, release check, diagnostics export).

@@ -1,30 +1,138 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   CheckCircle2,
-  FileDown,
   HeartPulse,
+  Loader2,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Smartphone,
   UserCheck,
   XCircle,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
-import { support } from "../lib/ipc";
+import { relay, support } from "../lib/ipc";
 import type { RelayState } from "../../shared/types";
 
 type HealthLevel = "ok" | "warn" | "blocked";
+type ActionStatus = "idle" | "running" | "success" | "failed";
 
-interface HealthItem {
-  label: string;
-  level: HealthLevel;
-  detail: string;
+interface ActionState {
+  status: ActionStatus;
+  message: string | null;
+  lastAttempted: string | null;
+}
+
+type ActionKey =
+  | "signIn"
+  | "reconnectHost"
+  | "restartRelay"
+  | "openPairing"
+  | "checkRelease"
+  | "exportDiagnostics";
+
+const INITIAL_ACTION_STATE: ActionState = { status: "idle", message: null, lastAttempted: null };
+
+function initActionStates(): Record<ActionKey, ActionState> {
+  return {
+    signIn: INITIAL_ACTION_STATE,
+    reconnectHost: INITIAL_ACTION_STATE,
+    restartRelay: INITIAL_ACTION_STATE,
+    openPairing: INITIAL_ACTION_STATE,
+    checkRelease: INITIAL_ACTION_STATE,
+    exportDiagnostics: INITIAL_ACTION_STATE,
+  };
+}
+
+function redactForDisplay(err: unknown): string {
+  let msg = err instanceof Error ? err.message : "Action failed.";
+  msg = msg.replace(/\bBearer\s+\S+/gi, "[redacted]");
+  msg = msg.replace(/\bsk-[A-Za-z0-9_-]{10,}/g, "[redacted]");
+  msg = msg.replace(/\b[A-Z][A-Z0-9_]*(TOKEN|SECRET|KEY)=\S*/g, "[redacted]");
+  msg = msg.replace(/[A-Za-z]:\\[^\s,;]*/g, "[redacted]");
+  msg = msg.replace(/\/(?:Users|home|var|tmp|workspace|workspaces)[^\s,;]*/g, "[redacted]");
+  if (msg.length > 120) msg = msg.slice(0, 117) + "...";
+  return msg;
 }
 
 function healthColor(level: HealthLevel): string {
   if (level === "ok") return "#10b981";
   if (level === "warn") return "#f59e0b";
   return "#ef4444";
+}
+
+function actionStateColor(status: ActionStatus): string {
+  if (status === "success") return "#10b981";
+  if (status === "failed") return "#ef4444";
+  return "var(--text-muted)";
+}
+
+interface HealthRowAction {
+  key: ActionKey;
+  label: string;
+  state: ActionState;
+  onClick: () => void;
+  showWhen: "not-ok" | "always";
+}
+
+interface HealthItem {
+  label: string;
+  level: HealthLevel;
+  detail: string;
+  action?: HealthRowAction;
+}
+
+function ActionButton({
+  label,
+  state,
+  onClick,
+  level,
+  showWhen,
+}: {
+  label: string;
+  state: ActionState;
+  onClick: () => void;
+  level: HealthLevel;
+  showWhen: "not-ok" | "always";
+}) {
+  const visible = showWhen === "always" || level !== "ok";
+  if (!visible) return null;
+  const running = state.status === "running";
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        className="btn"
+        style={{ fontSize: 12, padding: "4px 10px", gap: 6 }}
+        onClick={onClick}
+        disabled={running}
+      >
+        {running ? (
+          <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+        ) : (
+          <RefreshCw size={11} />
+        )}
+        {running ? "Working..." : label}
+      </button>
+      {(state.status === "success" || state.status === "failed") && (
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 11,
+            color: actionStateColor(state.status),
+            lineHeight: 1.4,
+          }}
+        >
+          {state.status === "success" ? "Done." : (state.message ?? "Action failed.")}
+          {state.lastAttempted && (
+            <span style={{ marginLeft: 6, color: "var(--text-muted)", opacity: 0.7 }}>
+              {new Date(state.lastAttempted).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function HealthRow({ item }: { item: HealthItem }) {
@@ -34,8 +142,8 @@ function HealthRow({ item }: { item: HealthItem }) {
       className="card"
       style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 14px" }}
     >
-      <Icon size={16} color={healthColor(item.level)} style={{ marginTop: 2 }} />
-      <div style={{ minWidth: 0 }}>
+      <Icon size={16} color={healthColor(item.level)} style={{ marginTop: 2, flexShrink: 0 }} />
+      <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
           {item.label}
         </div>
@@ -44,22 +152,94 @@ function HealthRow({ item }: { item: HealthItem }) {
         >
           {item.detail}
         </div>
+        {item.action && (
+          <ActionButton
+            label={item.action.label}
+            state={item.action.state}
+            onClick={item.action.onClick}
+            level={item.level}
+            showWhen={item.action.showWhen}
+          />
+        )}
       </div>
     </div>
   );
 }
 
 export function HealthScreen() {
-  const { session, hostState, pairingState, localProjects } = useApp();
+  const { session, hostState, pairingState, localProjects, signIn, registerHost, setPage } =
+    useApp();
   const [relayState, setRelayState] = useState<RelayState | null>(null);
-  const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
-  const [diagnosticsStatus, setDiagnosticsStatus] = useState<string | null>(null);
+  const [actionStates, setActionStates] = useState<Record<ActionKey, ActionState>>(
+    initActionStates,
+  );
 
   useEffect(() => {
     void window.electronAPI.relay.getStatus().then(setRelayState);
     const remove = window.electronAPI.on.relayStatusChanged(setRelayState);
     return remove;
   }, []);
+
+  const runAction = useCallback(async (key: ActionKey, fn: () => Promise<void>) => {
+    const lastAttempted = new Date().toISOString();
+    setActionStates((prev) => ({
+      ...prev,
+      [key]: { status: "running", message: null, lastAttempted },
+    }));
+    try {
+      await fn();
+      setActionStates((prev) => ({
+        ...prev,
+        [key]: { status: "success", message: null, lastAttempted: prev[key].lastAttempted },
+      }));
+    } catch (err) {
+      setActionStates((prev) => ({
+        ...prev,
+        [key]: {
+          status: "failed",
+          message: redactForDisplay(err),
+          lastAttempted: prev[key].lastAttempted,
+        },
+      }));
+    }
+  }, []);
+
+  const handleSignIn = useCallback(
+    () => runAction("signIn", signIn),
+    [runAction, signIn],
+  );
+
+  const handleReconnectHost = useCallback(
+    () => runAction("reconnectHost", registerHost),
+    [runAction, registerHost],
+  );
+
+  const handleRestartRelay = useCallback(
+    () =>
+      runAction("restartRelay", async () => {
+        const newState = await relay.restart();
+        setRelayState(newState);
+      }),
+    [runAction],
+  );
+
+  const handleOpenPairing = useCallback(() => {
+    setPage("pairing");
+  }, [setPage]);
+
+  const handleCheckRelease = useCallback(
+    () => runAction("checkRelease", () => Promise.resolve()),
+    [runAction],
+  );
+
+  const handleExportDiagnostics = useCallback(
+    () =>
+      runAction("exportDiagnostics", async () => {
+        const result = await support.exportDiagnostics();
+        if (!result) throw new Error("Export cancelled.");
+      }),
+    [runAction],
+  );
 
   const healthItems = useMemo<HealthItem[]>(() => {
     const signedIn = Boolean(session);
@@ -75,6 +255,13 @@ export function HealthScreen() {
         detail: signedIn
           ? `Signed in as ${session?.email ?? session?.displayName ?? "MustaFlow user"}.`
           : "Sign in with MustaFlow AI before using Orax Desktop.",
+        action: {
+          key: "signIn",
+          label: "Sign in again",
+          state: actionStates.signIn,
+          onClick: handleSignIn,
+          showWhen: "not-ok",
+        },
       },
       {
         label: "Host registration",
@@ -82,6 +269,13 @@ export function HealthScreen() {
         detail: hostRegistered
           ? `Registered host ${hostState?.hostId}.`
           : "Register this computer as an Orax Desktop host.",
+        action: {
+          key: "reconnectHost",
+          label: "Reconnect host",
+          state: actionStates.reconnectHost,
+          onClick: handleReconnectHost,
+          showWhen: "not-ok",
+        },
       },
       {
         label: "Heartbeat status",
@@ -102,6 +296,13 @@ export function HealthScreen() {
             : relayState?.status === "error"
               ? `Relay error: ${relayState.errorMsg ?? "unknown"}.`
               : "Relay starts after the desktop is online.",
+        action: {
+          key: "restartRelay",
+          label: "Restart relay",
+          state: actionStates.restartRelay,
+          onClick: handleRestartRelay,
+          showWhen: "not-ok",
+        },
       },
       {
         label: "Pairing readiness",
@@ -111,21 +312,54 @@ export function HealthScreen() {
             ? "Pairing code is active for web or mobile."
             : "Ready to generate a pairing code."
           : "Pairing requires an online registered host.",
+        action: {
+          key: "openPairing",
+          label: "Open pairing",
+          state: actionStates.openPairing,
+          onClick: handleOpenPairing,
+          showWhen: "always",
+        },
       },
       {
         label: "Release channel",
         level: "ok",
         detail:
           "Updates use the signed Orax Desktop release channel; silent background install is not enabled.",
+        action: {
+          key: "checkRelease",
+          label: "Check release status",
+          state: actionStates.checkRelease,
+          onClick: handleCheckRelease,
+          showWhen: "always",
+        },
       },
       {
         label: "Diagnostics export",
         level: "ok",
         detail:
           "Support diagnostics are available and validated before writing; tokens, env vars, and local paths are blocked.",
+        action: {
+          key: "exportDiagnostics",
+          label: "Export Support Diagnostics",
+          state: actionStates.exportDiagnostics,
+          onClick: handleExportDiagnostics,
+          showWhen: "always",
+        },
       },
     ];
-  }, [hostState, pairingState?.isActive, relayState, session]);
+  }, [
+    actionStates,
+    handleCheckRelease,
+    handleExportDiagnostics,
+    handleOpenPairing,
+    handleReconnectHost,
+    handleRestartRelay,
+    handleSignIn,
+    hostState,
+    pairingState?.isActive,
+    relayState,
+    session,
+  ]);
 
   const summary = useMemo(() => {
     const blocked = healthItems.filter((item) => item.level === "blocked").length;
@@ -136,23 +370,6 @@ export function HealthScreen() {
     return { label: "All systems ready", level: "ok" as const };
   }, [healthItems]);
 
-  async function handleExportDiagnostics() {
-    setExportingDiagnostics(true);
-    setDiagnosticsStatus(null);
-    try {
-      const result = await support.exportDiagnostics();
-      setDiagnosticsStatus(
-        result ? `Saved diagnostics to ${result.filePath}` : "Export cancelled.",
-      );
-    } catch (error) {
-      setDiagnosticsStatus(
-        error instanceof Error ? error.message : "Failed to export support diagnostics.",
-      );
-    } finally {
-      setExportingDiagnostics(false);
-    }
-  }
-
   return (
     <div style={{ maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
@@ -160,7 +377,8 @@ export function HealthScreen() {
           Health Check
         </h1>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>
-          Check whether this desktop is ready for Orax web and mobile control.
+          Check whether this desktop is ready for Orax web and mobile control. Use the recovery
+          actions to resolve any blocked or degraded items.
         </p>
       </div>
 
@@ -221,27 +439,18 @@ export function HealthScreen() {
         ))}
       </div>
 
-      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-          Support action
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Activity size={14} color="var(--text-secondary)" />
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+            Recovery actions
+          </span>
         </div>
         <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-          Export diagnostics when support needs proof of sign-in, heartbeat, relay, pairing, or
-          release status. The export is validated before it is written.
+          Each health item above shows a recovery action when it is not ready. Actions use the
+          existing sign-in, host registration, relay, and pairing flows. Errors are redacted before
+          display; no tokens, environment variables, or local paths are shown.
         </p>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button
-            className="btn"
-            onClick={() => void handleExportDiagnostics()}
-            disabled={exportingDiagnostics}
-          >
-            <FileDown size={13} />
-            {exportingDiagnostics ? "Exporting..." : "Export Support Diagnostics"}
-          </button>
-          {diagnosticsStatus && (
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{diagnosticsStatus}</span>
-          )}
-        </div>
       </div>
     </div>
   );

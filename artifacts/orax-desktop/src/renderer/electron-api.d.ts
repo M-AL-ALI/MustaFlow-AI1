@@ -46,6 +46,7 @@ declare global {
       };
       relay: {
         getStatus(): Promise<RelayState>;
+        restart(): Promise<RelayState>;
       };
       support: {
         exportDiagnostics(): Promise<SupportDiagnosticsExport | null>;

@@ -162,6 +162,15 @@ export function registerIpcHandlers(deps: Deps): void {
     return relayClient.getState();
   });
 
+  ipcMain.handle("relay:restart", () => {
+    relayClient.stop();
+    const hostState = hostManager.getState();
+    if (hostState.status === "online" && hostState.hostId) {
+      relayClient.start();
+    }
+    return relayClient.getState();
+  });
+
   /**
    * project:runProjectThread
    *

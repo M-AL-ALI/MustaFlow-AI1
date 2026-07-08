@@ -3315,4 +3315,83 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3N: Desktop Health Recovery Actions
+
+  it("Phase 3N: package exposes verify:phase3n script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3n"');
+  });
+
+  it("Phase 3N: HealthScreen includes recovery action buttons for all failing areas", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    for (const token of [
+      "Sign in again",
+      "Reconnect host",
+      "Restart relay",
+      "Open pairing",
+      "Check release status",
+      "Export Support Diagnostics",
+    ]) {
+      expect(src).toContain(token);
+    }
+  });
+
+  it("Phase 3N: HealthScreen recovery actions use AppContext and IPC, not raw Node", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("signIn");
+    expect(src).toContain("registerHost");
+    expect(src).toContain("relay.restart");
+    expect(src).toContain('setPage("pairing")');
+    expect(src).not.toContain("require(");
+    expect(src).not.toContain("child_process");
+  });
+
+  it("Phase 3N: relay.restart IPC is wired through preload, renderer lib, type declarations, and main handler", () => {
+    const preload = read("../../../../orax-desktop/src/preload/index.ts");
+    const ipcLib = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
+    const apiDef = read("../../../../orax-desktop/src/renderer/electron-api.d.ts");
+    const handlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    expect(preload).toContain("relay:restart");
+    expect(ipcLib).toContain("restart");
+    expect(apiDef).toContain("restart");
+    expect(handlers).toContain("relay:restart");
+  });
+
+  it("Phase 3N: HealthScreen recovery errors are redacted before rendering", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("redactForDisplay");
+  });
+
+  it("Phase 3N: health recovery action states have running/success/failed lifecycle with lastAttempted", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain('"running"');
+    expect(src).toContain('"success"');
+    expect(src).toContain('"failed"');
+    expect(src).toContain("lastAttempted");
+  });
+
+  it("Phase 3N: docs cover health recovery actions and verify:phase3n", () => {
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(doc).toContain("Health Recovery Actions");
+    expect(doc).toContain("verify:phase3n");
+    expect(doc).toContain("Sign in again");
+    expect(doc).toContain("Restart relay");
+    expect(doc).toContain("Open pairing");
+  });
+
+  it("Phase 3N: health recovery files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/src/main/ipc-handlers.ts"),
+      read("../../../../orax-desktop/src/preload/index.ts"),
+      read("../../../../orax-desktop/src/renderer/lib/ipc.ts"),
+      read("../../../../orax-desktop/src/renderer/electron-api.d.ts"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });
