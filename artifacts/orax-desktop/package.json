@@ -26,7 +26,8 @@
     "verify:phase3k": "pnpm run verify:phase3j && pnpm run update:recovery-readiness",
     "verify:phase3l": "pnpm run verify:phase3k && pnpm run update:recovery-readiness",
     "verify:phase3m": "pnpm run verify:phase3l && pnpm run health:readiness",
-    "verify:phase3n": "pnpm run verify:phase3m && pnpm run health:readiness"
+    "verify:phase3n": "pnpm run verify:phase3m && pnpm run health:readiness",
+    "verify:phase3o": "pnpm run verify:phase3n && pnpm run health:readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",

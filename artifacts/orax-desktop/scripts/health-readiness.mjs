@@ -38,6 +38,8 @@ requireFile("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx");
 
 requireContains("artifacts/orax-desktop/package.json", '"health:readiness"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3m"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3n"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3o"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -69,6 +71,10 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "l
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "registerHost");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "relay.restart");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", 'setPage("pairing")');
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Action timeline");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "actionHistory");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "recordActionEvent");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "updateActionEvent");
 
 requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "relay:restart");
 requireContains("artifacts/orax-desktop/src/preload/index.ts", "relay:restart");
@@ -76,7 +82,9 @@ requireContains("artifacts/orax-desktop/src/renderer/lib/ipc.ts", "restart");
 requireContains("artifacts/orax-desktop/src/renderer/electron-api.d.ts", "restart");
 
 requireContains("docs/orax-desktop-update-recovery.md", "Health Recovery Actions");
+requireContains("docs/orax-desktop-update-recovery.md", "Health Action Timeline");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3n");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3o");
 
 // --- Ora isolation check (all health files) ---
 

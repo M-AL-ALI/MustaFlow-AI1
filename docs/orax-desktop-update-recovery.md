@@ -101,14 +101,14 @@ environment variables.
 
 Each health row on the Health page includes a contextual action button when the item is not ready.
 
-| Health item | Button | What it does |
-|---|---|---|
-| Sign-in status | Sign in again | Starts the MustaFlow AI sign-in flow and refreshes the session |
-| Host registration | Reconnect host | Re-registers this computer and refreshes the host state |
-| Relay polling | Restart relay | Stops and restarts the relay polling client |
-| Pairing readiness | Open pairing | Navigates directly to the Pairing page |
-| Release channel | Check release status | Confirms the release channel is configured |
-| Diagnostics export | Export Support Diagnostics | Runs the validated diagnostics export |
+| Health item        | Button                     | What it does                                                   |
+| ------------------ | -------------------------- | -------------------------------------------------------------- |
+| Sign-in status     | Sign in again              | Starts the MustaFlow AI sign-in flow and refreshes the session |
+| Host registration  | Reconnect host             | Re-registers this computer and refreshes the host state        |
+| Relay polling      | Restart relay              | Stops and restarts the relay polling client                    |
+| Pairing readiness  | Open pairing               | Navigates directly to the Pairing page                         |
+| Release channel    | Check release status       | Confirms the release channel is configured                     |
+| Diagnostics export | Export Support Diagnostics | Runs the validated diagnostics export                          |
 
 Recovery action safety rules:
 
@@ -132,6 +132,21 @@ Manual smoke checklist for recovery actions (after install or update):
 6. Confirm "Check release status" always appears and shows "Done." after clicking.
 7. Confirm "Export Support Diagnostics" always appears and exports a validated JSON file.
 8. Confirm no error message displays a token, path, or environment variable string.
+
+## Health Action Timeline
+
+The Health page includes an `Action timeline` below the health rows. It records the latest local
+recovery attempts in the current desktop session:
+
+- action label
+- running, success, or failed status
+- redacted result text
+- local timestamp
+
+The timeline is intentionally local UI state. It is not a command log, does not include terminal
+output, does not persist across app restarts, and does not include tokens, environment variables, or
+local project paths. Use it to quickly confirm what the user already tried before asking for a
+support diagnostics export.
 
 ## Verification
 
@@ -159,6 +174,12 @@ Health recovery actions readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3n
 ```
 
+Health action timeline readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3o
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -174,3 +195,4 @@ Manual smoke after any update:
    readiness, release channel, and diagnostics export availability are visible.
 10. Exercise each recovery action button and confirm the expected result (sign-in, reconnect,
     restart relay, pairing navigation, release check, diagnostics export).
+11. Confirm each recovery action adds a redacted entry to the Action timeline.

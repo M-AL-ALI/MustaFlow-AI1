@@ -104,6 +104,7 @@ requireNotContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx"
 requireContains("artifacts/orax-desktop/src/renderer/pages/HomeScreen.tsx", "Relay");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health Check");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Relay polling");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Action timeline");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Sign in again");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Reconnect host");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Restart relay");

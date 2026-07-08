@@ -24,6 +24,15 @@ interface ActionState {
   lastAttempted: string | null;
 }
 
+interface ActionHistoryEntry {
+  id: string;
+  key: ActionKey;
+  label: string;
+  status: Exclude<ActionStatus, "idle">;
+  message: string;
+  createdAt: string;
+}
+
 type ActionKey =
   | "signIn"
   | "reconnectHost"
@@ -33,6 +42,15 @@ type ActionKey =
   | "exportDiagnostics";
 
 const INITIAL_ACTION_STATE: ActionState = { status: "idle", message: null, lastAttempted: null };
+
+const ACTION_LABELS: Record<ActionKey, string> = {
+  signIn: "Sign in again",
+  reconnectHost: "Reconnect host",
+  restartRelay: "Restart relay",
+  openPairing: "Open pairing",
+  checkRelease: "Check release status",
+  exportDiagnostics: "Export Support Diagnostics",
+};
 
 function initActionStates(): Record<ActionKey, ActionState> {
   return {
@@ -166,13 +184,67 @@ function HealthRow({ item }: { item: HealthItem }) {
   );
 }
 
+function ActionTimeline({ entries }: { entries: ActionHistoryEntry[] }) {
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Activity size={14} color="var(--text-secondary)" />
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+          Action timeline
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+          No recovery actions recorded yet. Use a health recovery button to record the attempt here.
+        </p>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {entries.map((entry) => (
+            <div
+              key={entry.id}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "8px 10px",
+                background: "rgba(255,255,255,0.55)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                  {entry.label}
+                </span>
+                <span style={{ fontSize: 11, color: actionStateColor(entry.status) }}>
+                  {entry.status}
+                </span>
+              </div>
+              <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-secondary)" }}>
+                {entry.message}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 10, color: "var(--text-muted)" }}>
+                {new Date(entry.createdAt).toLocaleTimeString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function HealthScreen() {
   const { session, hostState, pairingState, localProjects, signIn, registerHost, setPage } =
     useApp();
   const [relayState, setRelayState] = useState<RelayState | null>(null);
-  const [actionStates, setActionStates] = useState<Record<ActionKey, ActionState>>(
-    initActionStates,
-  );
+  const [actionStates, setActionStates] =
+    useState<Record<ActionKey, ActionState>>(initActionStates);
+  const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
 
   useEffect(() => {
     void window.electronAPI.relay.getStatus().then(setRelayState);
@@ -180,34 +252,59 @@ export function HealthScreen() {
     return remove;
   }, []);
 
-  const runAction = useCallback(async (key: ActionKey, fn: () => Promise<void>) => {
-    const lastAttempted = new Date().toISOString();
-    setActionStates((prev) => ({
-      ...prev,
-      [key]: { status: "running", message: null, lastAttempted },
-    }));
-    try {
-      await fn();
-      setActionStates((prev) => ({
-        ...prev,
-        [key]: { status: "success", message: null, lastAttempted: prev[key].lastAttempted },
-      }));
-    } catch (err) {
-      setActionStates((prev) => ({
-        ...prev,
-        [key]: {
-          status: "failed",
-          message: redactForDisplay(err),
-          lastAttempted: prev[key].lastAttempted,
-        },
-      }));
-    }
+  const recordActionEvent = useCallback((entry: ActionHistoryEntry) => {
+    setActionHistory((prev) => [entry, ...prev].slice(0, 8));
   }, []);
 
-  const handleSignIn = useCallback(
-    () => runAction("signIn", signIn),
-    [runAction, signIn],
+  const updateActionEvent = useCallback(
+    (id: string, patch: Pick<ActionHistoryEntry, "status" | "message">) => {
+      setActionHistory((prev) =>
+        prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
+      );
+    },
+    [],
   );
+
+  const runAction = useCallback(
+    async (key: ActionKey, fn: () => Promise<void>) => {
+      const lastAttempted = new Date().toISOString();
+      const eventId = `${key}-${lastAttempted}`;
+      recordActionEvent({
+        id: eventId,
+        key,
+        label: ACTION_LABELS[key],
+        status: "running",
+        message: "Started.",
+        createdAt: lastAttempted,
+      });
+      setActionStates((prev) => ({
+        ...prev,
+        [key]: { status: "running", message: null, lastAttempted },
+      }));
+      try {
+        await fn();
+        setActionStates((prev) => ({
+          ...prev,
+          [key]: { status: "success", message: null, lastAttempted: prev[key].lastAttempted },
+        }));
+        updateActionEvent(eventId, { status: "success", message: "Completed." });
+      } catch (err) {
+        const message = redactForDisplay(err);
+        setActionStates((prev) => ({
+          ...prev,
+          [key]: {
+            status: "failed",
+            message,
+            lastAttempted: prev[key].lastAttempted,
+          },
+        }));
+        updateActionEvent(eventId, { status: "failed", message });
+      }
+    },
+    [recordActionEvent, updateActionEvent],
+  );
+
+  const handleSignIn = useCallback(() => runAction("signIn", signIn), [runAction, signIn]);
 
   const handleReconnectHost = useCallback(
     () => runAction("reconnectHost", registerHost),
@@ -223,9 +320,13 @@ export function HealthScreen() {
     [runAction],
   );
 
-  const handleOpenPairing = useCallback(() => {
-    setPage("pairing");
-  }, [setPage]);
+  const handleOpenPairing = useCallback(
+    () =>
+      runAction("openPairing", async () => {
+        setPage("pairing");
+      }),
+    [runAction, setPage],
+  );
 
   const handleCheckRelease = useCallback(
     () => runAction("checkRelease", () => Promise.resolve()),
@@ -438,6 +539,8 @@ export function HealthScreen() {
           <HealthRow key={item.label} item={item} />
         ))}
       </div>
+
+      <ActionTimeline entries={actionHistory} />
 
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -3394,4 +3394,55 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3O: Desktop Health Action Timeline
+
+  it("Phase 3O: package exposes verify:phase3o script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3o"');
+    expect(pkg).toContain("health:readiness");
+  });
+
+  it("Phase 3O: HealthScreen records recovery attempts in a local action timeline", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("Action timeline");
+    expect(src).toContain("ActionHistoryEntry");
+    expect(src).toContain("actionHistory");
+    expect(src).toContain("recordActionEvent");
+    expect(src).toContain("updateActionEvent");
+    expect(src).toContain("No recovery actions recorded yet");
+  });
+
+  it("Phase 3O: HealthScreen timeline stores only redacted UI status, not command output", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("redactForDisplay(err)");
+    expect(src).toContain("message");
+    expect(src).not.toContain("stdout");
+    expect(src).not.toContain("stderr");
+    expect(src).not.toContain("process.env");
+  });
+
+  it("Phase 3O: health readiness, smoke readiness, and docs cover the action timeline", () => {
+    const readiness = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const smoke = read("../../../../orax-desktop/scripts/smoke-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(readiness).toContain("Action timeline");
+    expect(readiness).toContain("recordActionEvent");
+    expect(smoke).toContain("Action timeline");
+    expect(doc).toContain("Health Action Timeline");
+    expect(doc).toContain("verify:phase3o");
+  });
+
+  it("Phase 3O: health timeline files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../orax-desktop/scripts/smoke-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });
