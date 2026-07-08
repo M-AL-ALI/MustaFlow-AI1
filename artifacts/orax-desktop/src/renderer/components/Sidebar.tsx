@@ -1,8 +1,17 @@
-import { Monitor, FolderOpen, Settings, HelpCircle, Unplug, LogOut } from "lucide-react";
+import {
+  Monitor,
+  FolderOpen,
+  Settings,
+  HelpCircle,
+  Unplug,
+  LogOut,
+  HeartPulse,
+} from "lucide-react";
 import { useApp, type Page } from "../context/AppContext";
 
 const NAV_ITEMS: { page: Page; label: string; icon: React.FC<{ size: number }> }[] = [
   { page: "home", label: "Status", icon: Monitor },
+  { page: "health", label: "Health", icon: HeartPulse },
   { page: "pairing", label: "Pairing", icon: Unplug },
   { page: "projects", label: "Projects", icon: FolderOpen },
   { page: "settings", label: "Settings", icon: Settings },
@@ -25,7 +34,14 @@ export function Sidebar() {
       }}
     >
       <div style={{ padding: "20px 16px 12px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 16,
+            color: "var(--text-primary)",
+            letterSpacing: "-0.02em",
+          }}
+        >
           Orax Desktop
         </div>
         {hostState && (
@@ -35,8 +51,8 @@ export function Sidebar() {
               {hostState.status === "online"
                 ? "Online"
                 : hostState.status === "reconnecting"
-                ? "Reconnecting…"
-                : "Offline"}
+                  ? "Reconnecting…"
+                  : "Offline"}
             </span>
           </div>
         )}
@@ -44,10 +60,27 @@ export function Sidebar() {
 
       {session && (
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {session.displayName}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {session.email}
           </div>
         </div>

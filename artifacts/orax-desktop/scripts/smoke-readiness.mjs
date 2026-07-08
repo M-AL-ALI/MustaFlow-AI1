@@ -78,6 +78,7 @@ const requiredFiles = [
   "artifacts/orax-desktop/src/renderer/pages/SetupScreen.tsx",
   "artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx",
   "artifacts/orax-desktop/src/renderer/pages/HomeScreen.tsx",
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx",
   "artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx",
   "docs/orax-desktop-e2e-smoke-test.md",
@@ -101,6 +102,8 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/SetupScreen.tsx", "af
 requireContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx", "Generate Pairing Code");
 requireNotContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx", "Phase 2D");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HomeScreen.tsx", "Relay");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health Check");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Relay polling");
 requireContains("artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx", "Cloud Projects");
 requireContains("artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx", ".orax/project.json");
 requireContains("artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx", "PERMISSION_MODE_LABELS");

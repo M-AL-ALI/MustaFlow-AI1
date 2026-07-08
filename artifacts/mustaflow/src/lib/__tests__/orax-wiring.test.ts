@@ -3242,4 +3242,77 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3M: Desktop Health Check Panel
+
+  it("Phase 3M: package exposes health readiness and verification scripts", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"health:readiness"');
+    expect(pkg).toContain('"verify:phase3m"');
+    expect(pkg).toContain("scripts/health-readiness.mjs");
+  });
+
+  it("Phase 3M: desktop app mounts HealthScreen as a first-class page", () => {
+    const app = read("../../../../orax-desktop/src/renderer/App.tsx");
+    const ctx = read("../../../../orax-desktop/src/renderer/context/AppContext.tsx");
+    const sidebar = read("../../../../orax-desktop/src/renderer/components/Sidebar.tsx");
+    expect(app).toContain("HealthScreen");
+    expect(app).toContain("health: HealthScreen");
+    expect(ctx).toContain('"health"');
+    expect(sidebar).toContain('label: "Health"');
+    expect(sidebar).toContain("HeartPulse");
+  });
+
+  it("Phase 3M: HealthScreen shows all required desktop health categories", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    for (const token of [
+      "Health Check",
+      "Sign-in status",
+      "Host registration",
+      "Heartbeat status",
+      "Relay polling",
+      "Pairing readiness",
+      "Release channel",
+      "Diagnostics export",
+      "Export Support Diagnostics",
+    ]) {
+      expect(src).toContain(token);
+    }
+    expect(src).toContain("support.exportDiagnostics");
+    expect(src).toContain("window.electronAPI.relay.getStatus");
+  });
+
+  it("Phase 3M: health readiness script guards page wiring, docs, and Ora isolation", () => {
+    const src = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    expect(src).toContain("HealthScreen.tsx");
+    expect(src).toContain("Sign-in status");
+    expect(src).toContain("Relay polling");
+    expect(src).toContain("Export Support Diagnostics");
+    expect(src).toContain("Health Check Panel");
+    expect(src).toContain("leaks Ora/public-ai references");
+  });
+
+  it("Phase 3M: smoke readiness and docs cover the health panel", () => {
+    const smoke = read("../../../../orax-desktop/scripts/smoke-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(smoke).toContain("HealthScreen.tsx");
+    expect(smoke).toContain("Health Check");
+    expect(doc).toContain("Health Check Panel");
+    expect(doc).toContain("verify:phase3m");
+    expect(doc).toContain("sign-in, host registration, heartbeat, relay polling");
+  });
+
+  it("Phase 3M: health panel files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/src/renderer/App.tsx"),
+      read("../../../../orax-desktop/src/renderer/components/Sidebar.tsx"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

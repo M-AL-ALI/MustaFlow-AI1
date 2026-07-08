@@ -78,6 +78,25 @@ The exported JSON intentionally excludes:
 Users can attach this JSON to a MustaFlow support request when installer, sign-in, relay, pairing, or
 update issues occur.
 
+## Health Check Panel
+
+Orax Desktop includes a `Health` page in the sidebar. Use it before exporting diagnostics or
+escalating a support issue.
+
+The Health Check Panel shows:
+
+- Sign-in status
+- Host registration
+- Heartbeat status
+- Relay polling
+- Pairing readiness
+- Release channel
+- Diagnostics export availability
+
+If any row is blocked, fix that item before asking Orax to run a desktop-backed task. The panel is
+designed for user-facing troubleshooting; it does not expose session tokens, local project paths, or
+environment variables.
+
 ## Verification
 
 Repository-safe readiness:
@@ -92,6 +111,12 @@ Stricter diagnostics validation readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3l
 ```
 
+Health panel readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3m
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -103,3 +128,5 @@ Manual smoke after any update:
 7. Export Support Diagnostics and confirm the file contains no token, password, environment variable,
    or local path.
 8. Confirm a forced unsafe diagnostics payload is rejected before `writeFile`.
+9. Open the Health page and confirm sign-in, host registration, heartbeat, relay polling, pairing
+   readiness, release channel, and diagnostics export availability are visible.

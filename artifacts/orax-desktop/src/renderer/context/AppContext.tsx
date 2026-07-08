@@ -1,12 +1,11 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  type ReactNode,
-} from "react";
-import type { AuthSession, HostState, PairingState, LocalProject, PermissionMode } from "../../shared/types";
+import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
+import type {
+  AuthSession,
+  HostState,
+  PairingState,
+  LocalProject,
+  PermissionMode,
+} from "../../shared/types";
 import { auth, host, project, events } from "../lib/ipc";
 
 interface AppContextValue {
@@ -24,7 +23,7 @@ interface AppContextValue {
   refreshProjects: () => Promise<void>;
 }
 
-export type Page = "home" | "pairing" | "projects" | "settings";
+export type Page = "home" | "health" | "pairing" | "projects" | "settings";
 
 const AppCtx = createContext<AppContextValue | null>(null);
 
@@ -52,7 +51,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const offHost = events.onHostStateChanged(setHostState);
     const offPairing = events.onPairingStateChanged(setPairingState);
-    return () => { offHost(); offPairing(); };
+    return () => {
+      offHost();
+      offPairing();
+    };
   }, []);
 
   const signIn = useCallback(async () => {
