@@ -5,6 +5,8 @@ import type {
   LocalProject,
   RelayState,
   SupportDiagnostics,
+  SupportDiagnosticsHealthTimelineEntry,
+  SupportDiagnosticsHealthTimelineStatus,
 } from "../shared/types";
 
 const ALLOWED_SAFETY_KEYS = new Set([
@@ -38,11 +40,54 @@ const SENSITIVE_VALUE_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   },
 ];
 
+const MAX_HEALTH_TIMELINE_ENTRIES = 8;
+const MAX_HEALTH_TIMELINE_TEXT_LENGTH = 160;
+const HEALTH_TIMELINE_STATUSES = new Set<SupportDiagnosticsHealthTimelineStatus>([
+  "running",
+  "success",
+  "failed",
+]);
+
 interface BuildSupportDiagnosticsParams {
   session: AuthSession | null;
   hostState: HostState | null;
   relayState: RelayState;
   localProjects: LocalProject[];
+  healthTimeline?: unknown;
+}
+
+function redactDiagnosticsText(value: unknown): string {
+  let text = typeof value === "string" ? value : String(value ?? "");
+  for (const { pattern } of SENSITIVE_VALUE_PATTERNS) {
+    text = text.replace(pattern, "[redacted]");
+  }
+  if (text.length > MAX_HEALTH_TIMELINE_TEXT_LENGTH) {
+    text = `${text.slice(0, MAX_HEALTH_TIMELINE_TEXT_LENGTH - 3)}...`;
+  }
+  return text;
+}
+
+export function sanitizeHealthTimeline(input: unknown): SupportDiagnosticsHealthTimelineEntry[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(0, MAX_HEALTH_TIMELINE_ENTRIES).map((entry, index) => {
+    const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    const rawStatus = record.status;
+    const status = HEALTH_TIMELINE_STATUSES.has(rawStatus as SupportDiagnosticsHealthTimelineStatus)
+      ? (rawStatus as SupportDiagnosticsHealthTimelineStatus)
+      : "failed";
+    const createdAt =
+      typeof record.createdAt === "string" && !Number.isNaN(Date.parse(record.createdAt))
+        ? record.createdAt
+        : new Date(0).toISOString();
+    return {
+      id: redactDiagnosticsText(record.id ?? `timeline-${index}`),
+      actionKey: redactDiagnosticsText(record.actionKey ?? record.key ?? "unknown"),
+      label: redactDiagnosticsText(record.label ?? "Unknown action"),
+      status,
+      message: redactDiagnosticsText(record.message ?? ""),
+      createdAt,
+    };
+  });
 }
 
 export function buildSupportDiagnostics({
@@ -50,6 +95,7 @@ export function buildSupportDiagnostics({
   hostState,
   relayState,
   localProjects,
+  healthTimeline,
 }: BuildSupportDiagnosticsParams): SupportDiagnostics {
   return {
     generatedAt: new Date().toISOString(),
@@ -71,6 +117,7 @@ export function buildSupportDiagnostics({
       count: localProjects.length,
       displayNames: localProjects.map((project) => project.displayName),
     },
+    healthTimeline: sanitizeHealthTimeline(healthTimeline),
     safety: {
       includesSessionToken: false,
       includesPasswords: false,

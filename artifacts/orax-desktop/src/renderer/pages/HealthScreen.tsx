@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { relay, support } from "../lib/ipc";
-import type { RelayState } from "../../shared/types";
+import type { RelayState, SupportDiagnosticsHealthTimelineEntry } from "../../shared/types";
 
 type HealthLevel = "ok" | "warn" | "blocked";
 type ActionStatus = "idle" | "running" | "success" | "failed";
@@ -336,10 +336,20 @@ export function HealthScreen() {
   const handleExportDiagnostics = useCallback(
     () =>
       runAction("exportDiagnostics", async () => {
-        const result = await support.exportDiagnostics();
+        const healthTimeline: SupportDiagnosticsHealthTimelineEntry[] = actionHistory.map(
+          (entry) => ({
+            id: entry.id,
+            actionKey: entry.key,
+            label: entry.label,
+            status: entry.status,
+            message: entry.message,
+            createdAt: entry.createdAt,
+          }),
+        );
+        const result = await support.exportDiagnostics({ healthTimeline });
         if (!result) throw new Error("Export cancelled.");
       }),
-    [runAction],
+    [actionHistory, runAction],
   );
 
   const healthItems = useMemo<HealthItem[]>(() => {

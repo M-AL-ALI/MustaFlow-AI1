@@ -6,6 +6,7 @@ import type {
   LocalProject,
   PermissionMode,
   RelayState,
+  SupportDiagnosticsExportOptions,
   SupportDiagnosticsExport,
 } from "../shared/types";
 
@@ -56,8 +57,10 @@ const electronAPI = {
     restart: (): Promise<RelayState> => ipcRenderer.invoke("relay:restart"),
   },
   support: {
-    exportDiagnostics: (): Promise<SupportDiagnosticsExport | null> =>
-      ipcRenderer.invoke("support:exportDiagnostics"),
+    exportDiagnostics: (
+      options?: SupportDiagnosticsExportOptions,
+    ): Promise<SupportDiagnosticsExport | null> =>
+      ipcRenderer.invoke("support:exportDiagnostics", options),
   },
   on: {
     hostStateChanged: (cb: (state: HostState) => void): RemoveFn => {

@@ -5,7 +5,7 @@ import type { HostManager } from "./host-manager";
 import type { PairingManager } from "./pairing-manager";
 import type { LocalProjectsManager } from "./local-projects";
 import type { RelayClient } from "./relay-client";
-import type { PermissionMode } from "../shared/types";
+import type { PermissionMode, SupportDiagnosticsExportOptions } from "../shared/types";
 import {
   buildSupportDiagnostics,
   serializeValidatedSupportDiagnostics,
@@ -134,29 +134,33 @@ export function registerIpcHandlers(deps: Deps): void {
     return app.getVersion();
   });
 
-  ipcMain.handle("support:exportDiagnostics", async () => {
-    const session = await auth.getSession();
-    const diagnostics = buildSupportDiagnostics({
-      session,
-      hostState: hostManager.getState(),
-      relayState: relayClient.getState(),
-      localProjects: localProjects.list(),
-    });
-    const diagnosticsJson = serializeValidatedSupportDiagnostics(diagnostics);
-    const defaultPath = `orax-desktop-diagnostics-${new Date()
-      .toISOString()
-      .replace(/[:.]/g, "-")}.json`;
-    const result = await dialog.showSaveDialog(win, {
-      title: "Export Orax Support Diagnostics",
-      defaultPath,
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-    if (result.canceled || !result.filePath) {
-      return null;
-    }
-    await writeFile(result.filePath, diagnosticsJson, "utf8");
-    return { filePath: result.filePath, diagnostics };
-  });
+  ipcMain.handle(
+    "support:exportDiagnostics",
+    async (_event, options?: SupportDiagnosticsExportOptions) => {
+      const session = await auth.getSession();
+      const diagnostics = buildSupportDiagnostics({
+        session,
+        hostState: hostManager.getState(),
+        relayState: relayClient.getState(),
+        localProjects: localProjects.list(),
+        healthTimeline: options?.healthTimeline,
+      });
+      const diagnosticsJson = serializeValidatedSupportDiagnostics(diagnostics);
+      const defaultPath = `orax-desktop-diagnostics-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")}.json`;
+      const result = await dialog.showSaveDialog(win, {
+        title: "Export Orax Support Diagnostics",
+        defaultPath,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+      await writeFile(result.filePath, diagnosticsJson, "utf8");
+      return { filePath: result.filePath, diagnostics };
+    },
+  );
 
   ipcMain.handle("relay:getStatus", () => {
     return relayClient.getState();

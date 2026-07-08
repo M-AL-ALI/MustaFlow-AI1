@@ -65,6 +65,7 @@ The exported JSON includes:
 - host state
 - relay state
 - local project count and display names
+- recent Health Action Timeline entries, when exported from the Health page
 
 The exported JSON intentionally excludes:
 
@@ -73,6 +74,8 @@ The exported JSON intentionally excludes:
 - environment variables
 - local project paths
 - project file contents
+- stdout/stderr
+- command output
 - secrets
 
 Users can attach this JSON to a MustaFlow support request when installer, sign-in, relay, pairing, or
@@ -148,6 +151,12 @@ output, does not persist across app restarts, and does not include tokens, envir
 local project paths. Use it to quickly confirm what the user already tried before asking for a
 support diagnostics export.
 
+When diagnostics are exported from the Health page, the diagnostics payload may include the latest
+redacted Health Action Timeline entries. The main process sanitizes and truncates the timeline again
+before building the diagnostics JSON. Only action key, action label, running/success/failed status,
+redacted message, and timestamp are included. Renderer input is never trusted directly, and the full
+diagnostics validator still runs before `writeFile`.
+
 ## Verification
 
 Repository-safe readiness:
@@ -180,6 +189,12 @@ Health action timeline readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3o
 ```
 
+Health timeline diagnostics readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3p
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -196,3 +211,4 @@ Manual smoke after any update:
 10. Exercise each recovery action button and confirm the expected result (sign-in, reconnect,
     restart relay, pairing navigation, release check, diagnostics export).
 11. Confirm each recovery action adds a redacted entry to the Action timeline.
+12. Export diagnostics from Health and confirm the JSON includes only redacted timeline entries.

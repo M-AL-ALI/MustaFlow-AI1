@@ -5,6 +5,7 @@ import type {
   LocalProject,
   PermissionMode,
   RelayState,
+  SupportDiagnosticsExportOptions,
   SupportDiagnosticsExport,
 } from "../shared/types";
 
@@ -49,7 +50,9 @@ declare global {
         restart(): Promise<RelayState>;
       };
       support: {
-        exportDiagnostics(): Promise<SupportDiagnosticsExport | null>;
+        exportDiagnostics(
+          options?: SupportDiagnosticsExportOptions,
+        ): Promise<SupportDiagnosticsExport | null>;
       };
       on: {
         hostStateChanged(cb: (state: HostState) => void): RemoveFn;

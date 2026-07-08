@@ -1,4 +1,4 @@
-import type { PermissionMode } from "../../shared/types";
+import type { PermissionMode, SupportDiagnosticsExportOptions } from "../../shared/types";
 
 function api() {
   return window.electronAPI;
@@ -47,7 +47,8 @@ export const relay = {
 };
 
 export const support = {
-  exportDiagnostics: () => api().support.exportDiagnostics(),
+  exportDiagnostics: (options?: SupportDiagnosticsExportOptions) =>
+    api().support.exportDiagnostics(options),
 };
 
 export const events = {

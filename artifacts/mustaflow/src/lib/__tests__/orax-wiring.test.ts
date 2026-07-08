@@ -3445,4 +3445,86 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3P: Health Timeline in Support Diagnostics
+
+  it("Phase 3P: package exposes verify:phase3p script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3p"');
+    expect(pkg).toContain("update:recovery-readiness");
+    expect(pkg).toContain("health:readiness");
+  });
+
+  it("Phase 3P: shared diagnostics types include a safe Health timeline shape", () => {
+    const types = read("../../../../orax-desktop/src/shared/types.ts");
+    expect(types).toContain("SupportDiagnosticsHealthTimelineEntry");
+    expect(types).toContain("SupportDiagnosticsExportOptions");
+    expect(types).toContain("healthTimeline: SupportDiagnosticsHealthTimelineEntry[]");
+    expect(types).not.toContain("stdout");
+    expect(types).not.toContain("stderr");
+  });
+
+  it("Phase 3P: HealthScreen passes the local action timeline to diagnostics export", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("SupportDiagnosticsHealthTimelineEntry");
+    expect(src).toContain("const healthTimeline");
+    expect(src).toContain("actionHistory.map");
+    expect(src).toContain("support.exportDiagnostics({ healthTimeline })");
+  });
+
+  it("Phase 3P: main process sanitizes and truncates health timeline before building diagnostics", () => {
+    const src = read("../../../../orax-desktop/src/main/support-diagnostics.ts");
+    expect(src).toContain("sanitizeHealthTimeline");
+    expect(src).toContain("MAX_HEALTH_TIMELINE_ENTRIES");
+    expect(src).toContain("MAX_HEALTH_TIMELINE_TEXT_LENGTH");
+    expect(src).toContain("healthTimeline: sanitizeHealthTimeline");
+    expect(src).toContain("redactDiagnosticsText");
+    expect(src).not.toContain("session.token");
+    expect(src).not.toContain("process.env");
+  });
+
+  it("Phase 3P: diagnostics IPC accepts optional timeline but still validates before writing", () => {
+    const handlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    const preload = read("../../../../orax-desktop/src/preload/index.ts");
+    const ipc = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
+    const apiDef = read("../../../../orax-desktop/src/renderer/electron-api.d.ts");
+    expect(handlers).toContain("SupportDiagnosticsExportOptions");
+    expect(handlers).toContain("options?.healthTimeline");
+    expect(preload).toContain("SupportDiagnosticsExportOptions");
+    expect(ipc).toContain("SupportDiagnosticsExportOptions");
+    expect(apiDef).toContain("SupportDiagnosticsExportOptions");
+    const validateIndex = handlers.indexOf("serializeValidatedSupportDiagnostics(diagnostics)");
+    const writeIndex = handlers.indexOf("writeFile(result.filePath");
+    expect(validateIndex).toBeGreaterThan(-1);
+    expect(writeIndex).toBeGreaterThan(-1);
+    expect(validateIndex).toBeLessThan(writeIndex);
+  });
+
+  it("Phase 3P: readiness scripts and docs cover timeline diagnostics safety", () => {
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(health).toContain("sanitizeHealthTimeline");
+    expect(recovery).toContain("sanitizeHealthTimeline");
+    expect(doc).toContain("diagnostics payload may include");
+    expect(doc).toContain("verify:phase3p");
+    expect(doc).toContain("stdout/stderr");
+    expect(doc).toContain("command output");
+  });
+
+  it("Phase 3P: diagnostics timeline files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/shared/types.ts"),
+      read("../../../../orax-desktop/src/main/support-diagnostics.ts"),
+      read("../../../../orax-desktop/src/main/ipc-handlers.ts"),
+      read("../../../../orax-desktop/src/preload/index.ts"),
+      read("../../../../orax-desktop/src/renderer/lib/ipc.ts"),
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

@@ -58,6 +58,21 @@ export interface RelayState {
   errorMsg: string | null;
 }
 
+export type SupportDiagnosticsHealthTimelineStatus = "running" | "success" | "failed";
+
+export interface SupportDiagnosticsHealthTimelineEntry {
+  id: string;
+  actionKey: string;
+  label: string;
+  status: SupportDiagnosticsHealthTimelineStatus;
+  message: string;
+  createdAt: string;
+}
+
+export interface SupportDiagnosticsExportOptions {
+  healthTimeline?: SupportDiagnosticsHealthTimelineEntry[];
+}
+
 export interface SupportDiagnostics {
   generatedAt: string;
   app: {
@@ -78,6 +93,7 @@ export interface SupportDiagnostics {
     count: number;
     displayNames: string[];
   };
+  healthTimeline: SupportDiagnosticsHealthTimelineEntry[];
   safety: {
     includesSessionToken: false;
     includesPasswords: false;

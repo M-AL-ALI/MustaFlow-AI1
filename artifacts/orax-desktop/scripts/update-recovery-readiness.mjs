@@ -56,6 +56,7 @@ requireFile("docs/orax-desktop-update-recovery.md");
 
 requireContains("artifacts/orax-desktop/package.json", '"update:recovery-readiness"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3k"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "buildSupportDiagnostics");
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
@@ -69,6 +70,12 @@ requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "Beare
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "PRIVATE KEY");
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "Windows local path");
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "includesSessionToken: false");
+requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "sanitizeHealthTimeline");
+requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "MAX_HEALTH_TIMELINE_ENTRIES");
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "healthTimeline: sanitizeHealthTimeline",
+);
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "includesPasswords: false");
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
@@ -81,6 +88,7 @@ requireContains(
 requireNotContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "session.token");
 requireNotContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "process.env");
 requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "support:exportDiagnostics");
+requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "options?.healthTimeline");
 requireContains(
   "artifacts/orax-desktop/src/main/ipc-handlers.ts",
   "serializeValidatedSupportDiagnostics(diagnostics)",
@@ -97,6 +105,8 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx", 
 requireContains("docs/orax-desktop-update-recovery.md", "Update and Recovery");
 requireContains("docs/orax-desktop-update-recovery.md", "Rollback");
 requireContains("docs/orax-desktop-update-recovery.md", "Support Diagnostics");
+requireContains("docs/orax-desktop-update-recovery.md", "diagnostics payload may include");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3p");
 requireContains("docs/orax-desktop-update-recovery.md", "validated before it is written");
 requireContains("docs/orax-desktop-update-recovery.md", "Do not include Ora/public-ai chat");
 

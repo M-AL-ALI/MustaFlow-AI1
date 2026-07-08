@@ -40,6 +40,7 @@ requireContains("artifacts/orax-desktop/package.json", '"health:readiness"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3m"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3n"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3o"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -86,12 +87,38 @@ requireContains("docs/orax-desktop-update-recovery.md", "Health Action Timeline"
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3n");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3o");
 
+// --- Phase 3P: Health Timeline in Support Diagnostics ---
+
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "healthTimeline");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "SupportDiagnosticsHealthTimelineEntry",
+);
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "sanitizeHealthTimeline",
+);
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "MAX_HEALTH_TIMELINE_ENTRIES",
+);
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "healthTimeline: sanitizeHealthTimeline",
+);
+requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "options?.healthTimeline");
+requireContains("artifacts/orax-desktop/src/preload/index.ts", "SupportDiagnosticsExportOptions");
+requireContains("artifacts/orax-desktop/src/renderer/lib/ipc.ts", "SupportDiagnosticsExportOptions");
+requireContains("docs/orax-desktop-update-recovery.md", "diagnostics payload may include");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3p");
+
 // --- Ora isolation check (all health files) ---
 
 for (const relPath of [
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "artifacts/orax-desktop/src/renderer/App.tsx",
   "artifacts/orax-desktop/src/renderer/components/Sidebar.tsx",
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
   "artifacts/orax-desktop/src/main/ipc-handlers.ts",
   "artifacts/orax-desktop/src/preload/index.ts",
   "artifacts/orax-desktop/src/renderer/lib/ipc.ts",
