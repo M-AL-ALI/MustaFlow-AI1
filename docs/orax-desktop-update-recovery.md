@@ -157,6 +157,20 @@ before building the diagnostics JSON. Only action key, action label, running/suc
 redacted message, and timestamp are included. Renderer input is never trusted directly, and the full
 diagnostics validator still runs before `writeFile`.
 
+The Health export result shown in the UI must stay high-level:
+
+- Successful export shows `Diagnostics exported. Health timeline included.`
+- Cancelled export shows `Diagnostics export cancelled.`
+- The Health page must not render the saved local file path, raw diagnostics JSON, or any filesystem
+  path returned by the save dialog.
+- The Health Action Timeline card shows `Included in diagnostics export from Health.` when timeline
+  entries exist and `No timeline entries to include yet.` when it is empty.
+
+Health timeline entries are included only when diagnostics are exported from the Health page.
+Settings export may have an empty `healthTimeline` because Settings does not own the Health action history.
+Both entry points still build diagnostics in the main process and validate the JSON before it is
+written.
+
 ## Verification
 
 Repository-safe readiness:
@@ -195,6 +209,12 @@ Health timeline diagnostics readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3p
 ```
 
+Health diagnostics export result readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3q
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -212,3 +232,6 @@ Manual smoke after any update:
     restart relay, pairing navigation, release check, diagnostics export).
 11. Confirm each recovery action adds a redacted entry to the Action timeline.
 12. Export diagnostics from Health and confirm the JSON includes only redacted timeline entries.
+13. Confirm the Health page shows `Diagnostics exported. Health timeline included.` after a
+    successful export and never displays the saved file path.
+14. Cancel the save dialog and confirm the Health page shows `Diagnostics export cancelled.`

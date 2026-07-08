@@ -3527,4 +3527,66 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3Q: Health Diagnostics Export Result UX
+
+  it("Phase 3Q: package exposes verify:phase3q script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3q"');
+    expect(pkg).toContain("verify:phase3p");
+    expect(pkg).toContain("health:readiness");
+    expect(pkg).toContain("update:recovery-readiness");
+  });
+
+  it("Phase 3Q: Health export result copy is safe and specific", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("Diagnostics exported. Health timeline included.");
+    expect(src).toContain("Diagnostics export cancelled.");
+    expect(src).toContain("Included in diagnostics export from Health.");
+    expect(src).toContain("No timeline entries to include yet.");
+    expect(src).toContain('state.message ?? "Done."');
+    expect(src).not.toContain("result.filePath");
+    expect(src).not.toContain("result.diagnostics");
+    expect(src).not.toContain("JSON.stringify");
+  });
+
+  it("Phase 3Q: main process still validates diagnostics before choosing the save result path", () => {
+    const handlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    const validateIndex = handlers.indexOf("serializeValidatedSupportDiagnostics(diagnostics)");
+    const saveIndex = handlers.indexOf("showSaveDialog");
+    const writeIndex = handlers.indexOf("writeFile(result.filePath");
+    expect(validateIndex).toBeGreaterThan(-1);
+    expect(saveIndex).toBeGreaterThan(-1);
+    expect(writeIndex).toBeGreaterThan(-1);
+    expect(validateIndex).toBeLessThan(saveIndex);
+    expect(validateIndex).toBeLessThan(writeIndex);
+  });
+
+  it("Phase 3Q: readiness scripts and docs cover Health export result UX", () => {
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(health).toContain("Diagnostics exported. Health timeline included.");
+    expect(health).toContain("Diagnostics export cancelled.");
+    expect(health).toContain("result.filePath");
+    expect(recovery).toContain('"verify:phase3q"');
+    expect(doc).toContain("Diagnostics exported. Health timeline included.");
+    expect(doc).toContain("Diagnostics export cancelled.");
+    expect(doc).toContain("Settings export may have an empty");
+    expect(doc).toContain("verify:phase3q");
+  });
+
+  it("Phase 3Q: Health export result files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/src/main/ipc-handlers.ts"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

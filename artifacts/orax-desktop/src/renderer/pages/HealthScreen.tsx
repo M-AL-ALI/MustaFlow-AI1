@@ -17,6 +17,7 @@ import type { RelayState, SupportDiagnosticsHealthTimelineEntry } from "../../sh
 
 type HealthLevel = "ok" | "warn" | "blocked";
 type ActionStatus = "idle" | "running" | "success" | "failed";
+type ActionResultMessage = string | void;
 
 interface ActionState {
   status: ActionStatus;
@@ -141,7 +142,9 @@ function ActionButton({
             lineHeight: 1.4,
           }}
         >
-          {state.status === "success" ? "Done." : (state.message ?? "Action failed.")}
+          {state.status === "success"
+            ? (state.message ?? "Done.")
+            : (state.message ?? "Action failed.")}
           {state.lastAttempted && (
             <span style={{ marginLeft: 6, color: "var(--text-muted)", opacity: 0.7 }}>
               {new Date(state.lastAttempted).toLocaleTimeString()}
@@ -196,9 +199,13 @@ function ActionTimeline({ entries }: { entries: ActionHistoryEntry[] }) {
       {entries.length === 0 ? (
         <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
           No recovery actions recorded yet. Use a health recovery button to record the attempt here.
+          No timeline entries to include yet.
         </p>
       ) : (
         <div style={{ display: "grid", gap: 8 }}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+            Included in diagnostics export from Health.
+          </p>
           {entries.map((entry) => (
             <div
               key={entry.id}
@@ -266,7 +273,7 @@ export function HealthScreen() {
   );
 
   const runAction = useCallback(
-    async (key: ActionKey, fn: () => Promise<void>) => {
+    async (key: ActionKey, fn: () => Promise<ActionResultMessage>) => {
       const lastAttempted = new Date().toISOString();
       const eventId = `${key}-${lastAttempted}`;
       recordActionEvent({
@@ -282,12 +289,16 @@ export function HealthScreen() {
         [key]: { status: "running", message: null, lastAttempted },
       }));
       try {
-        await fn();
+        const resultMessage = (await fn()) ?? "Done.";
         setActionStates((prev) => ({
           ...prev,
-          [key]: { status: "success", message: null, lastAttempted: prev[key].lastAttempted },
+          [key]: {
+            status: "success",
+            message: resultMessage,
+            lastAttempted: prev[key].lastAttempted,
+          },
         }));
-        updateActionEvent(eventId, { status: "success", message: "Completed." });
+        updateActionEvent(eventId, { status: "success", message: resultMessage });
       } catch (err) {
         const message = redactForDisplay(err);
         setActionStates((prev) => ({
@@ -347,7 +358,8 @@ export function HealthScreen() {
           }),
         );
         const result = await support.exportDiagnostics({ healthTimeline });
-        if (!result) throw new Error("Export cancelled.");
+        if (!result) return "Diagnostics export cancelled.";
+        return "Diagnostics exported. Health timeline included.";
       }),
     [actionHistory, runAction],
   );

@@ -32,6 +32,12 @@ function requireContains(relPath, token) {
   else pass(`${relPath} contains ${token}`);
 }
 
+function requireNotContains(relPath, token) {
+  const content = read(relPath);
+  if (content.includes(token)) fail(`${relPath} must not contain ${token}`);
+  else pass(`${relPath} does not contain ${token}`);
+}
+
 // --- Phase 3M: Health Check Panel ---
 
 requireFile("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx");
@@ -41,6 +47,7 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3m"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3n"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3o"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3p"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -111,6 +118,36 @@ requireContains("artifacts/orax-desktop/src/preload/index.ts", "SupportDiagnosti
 requireContains("artifacts/orax-desktop/src/renderer/lib/ipc.ts", "SupportDiagnosticsExportOptions");
 requireContains("docs/orax-desktop-update-recovery.md", "diagnostics payload may include");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3p");
+
+// --- Phase 3Q: Health Diagnostics Export Result UX ---
+
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Diagnostics exported. Health timeline included.",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Diagnostics export cancelled.",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Included in diagnostics export from Health.",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "No timeline entries to include yet.",
+);
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "result.filePath");
+requireNotContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "result.diagnostics",
+);
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3q");
+requireContains(
+  "docs/orax-desktop-update-recovery.md",
+  "Diagnostics exported. Health timeline included.",
+);
+requireContains("docs/orax-desktop-update-recovery.md", "Settings export may have an empty");
 
 // --- Ora isolation check (all health files) ---
 
