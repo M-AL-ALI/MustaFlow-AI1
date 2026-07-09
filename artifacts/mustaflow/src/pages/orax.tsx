@@ -651,8 +651,7 @@ function getOraxActiveThreadState(
   const plan = selectedTask?.plan;
   const goalObjective =
     typeof activeGoal?.objective === "string" ? activeGoal.objective.trim() : "";
-  const planObjective =
-    typeof plan?.objective === "string" ? plan.objective.trim() : "";
+  const planObjective = typeof plan?.objective === "string" ? plan.objective.trim() : "";
   if (!goalObjective && !planObjective) return null;
   return {
     label: goalObjective ? "Goal" : "Plan mode",
@@ -1951,6 +1950,32 @@ export default function OraxPage() {
               {index + 1}. {step}
             </div>
           ))}
+        </div>
+        <div className="rounded-2xl border border-dashed border-border bg-background p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Desktop connection status
+          </div>
+          <p className="mt-1 text-sm leading-5 text-foreground">
+            <span className="font-semibold">Desktop required for local execution.</span> Install
+            Orax Desktop, sign in with MustaFlow AI, then pair this browser or your phone before
+            asking Orax to read files, run commands, or apply patches. Keep Orax Desktop open to
+            stay connected while you work remotely.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link
+              href="/orax-product"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-full bg-foreground px-3 text-xs font-semibold text-background hover:opacity-90"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Install Orax Desktop
+            </Link>
+            <Link
+              href="/orax/devices"
+              className="inline-flex h-9 items-center justify-center rounded-full border border-border px-3 text-xs font-semibold hover:bg-muted"
+            >
+              Open device manager
+            </Link>
+          </div>
         </div>
         <Link
           href="/orax-product"

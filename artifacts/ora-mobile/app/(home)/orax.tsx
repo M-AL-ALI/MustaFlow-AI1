@@ -381,8 +381,7 @@ function getOraxActiveThreadState(
   const plan = selectedTask?.plan;
   const goalObjective =
     typeof activeGoal?.objective === "string" ? activeGoal.objective.trim() : "";
-  const planObjective =
-    typeof plan?.objective === "string" ? plan.objective.trim() : "";
+  const planObjective = typeof plan?.objective === "string" ? plan.objective.trim() : "";
   if (!goalObjective && !planObjective) return null;
   return {
     label: goalObjective ? "Goal" : "Plan mode",
@@ -459,9 +458,9 @@ export default function OraxScreen() {
     blockReason: string | null;
     host: { deviceName: string } | null;
   } | null>(null);
-  const [projectThreadMessages, setProjectThreadMessages] = useState<
-    OraxProjectThreadMessage[]
-  >([]);
+  const [projectThreadMessages, setProjectThreadMessages] = useState<OraxProjectThreadMessage[]>(
+    [],
+  );
 
   const reloadHosts = useCallback(async () => {
     setOraxHostsLoading(true);
@@ -1213,7 +1212,13 @@ export default function OraxScreen() {
                     }}
                   >
                     <Monitor size={14} color={c.mutedForeground} />
-                    <Text style={{ fontSize: 13, color: c.mutedForeground, fontFamily: "Inter_500Medium" }}>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        color: c.mutedForeground,
+                        fontFamily: "Inter_500Medium",
+                      }}
+                    >
                       Desktop offline
                     </Text>
                   </View>
@@ -2256,13 +2261,7 @@ function isDesktopHostOnline(host: OraxHostSummary): boolean {
   return Date.now() - new Date(host.lastSeenAt).getTime() < 90_000;
 }
 
-const DIAG_COMMANDS = [
-  "node --version",
-  "npm --version",
-  "pnpm --version",
-  "git --version",
-  "pwd",
-];
+const DIAG_COMMANDS = ["node --version", "npm --version", "pnpm --version", "git --version", "pwd"];
 
 type DiagApprovalState =
   | "idle"
@@ -2416,8 +2415,8 @@ function DiagnosticsSection({
                         backgroundColor: pressed
                           ? c.muted
                           : selectedCmd === cmd
-                          ? c.foreground + "15"
-                          : "transparent",
+                            ? c.foreground + "15"
+                            : "transparent",
                       })}
                     >
                       <Text
@@ -2531,7 +2530,9 @@ function DiagnosticsSection({
                     padding: 8,
                   }}
                 >
-                  <Text style={{ color: c.foreground, fontFamily: "Inter_400Regular", fontSize: 12 }}>
+                  <Text
+                    style={{ color: c.foreground, fontFamily: "Inter_400Regular", fontSize: 12 }}
+                  >
                     {result.stdout}
                   </Text>
                 </ScrollView>
@@ -2545,7 +2546,9 @@ function DiagnosticsSection({
                     padding: 8,
                   }}
                 >
-                  <Text style={{ color: c.destructive, fontFamily: "Inter_400Regular", fontSize: 12 }}>
+                  <Text
+                    style={{ color: c.destructive, fontFamily: "Inter_400Regular", fontSize: 12 }}
+                  >
                     {result.stderr}
                   </Text>
                 </ScrollView>
@@ -2661,6 +2664,39 @@ function DesktopConnectionCard({
         )}
       </View>
 
+      <View
+        style={{
+          borderWidth: 1,
+          borderColor: c.border,
+          borderRadius: 14,
+          padding: 12,
+          backgroundColor: c.background,
+          gap: 6,
+        }}
+      >
+        <Text
+          style={{
+            color: c.mutedForeground,
+            fontFamily: "Inter_600SemiBold",
+            fontSize: 11,
+            letterSpacing: 0.5,
+            textTransform: "uppercase",
+          }}
+        >
+          Desktop connection status
+        </Text>
+        <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+          Desktop required for local execution
+        </Text>
+        <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+          {activeHosts.length === 0
+            ? "Install Orax Desktop, sign in, then pair this phone before asking Orax to work on local files."
+            : isOnline
+              ? "Desktop online. Keep Orax Desktop open to stay connected."
+              : "Desktop offline. Open Orax Desktop on your computer to resume local execution."}
+        </Text>
+      </View>
+
       {!hostsLoading && activeHosts.length === 0 && (
         <View style={{ gap: 6 }}>
           <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
@@ -2756,13 +2792,7 @@ function DesktopConnectionCard({
         </View>
       )}
 
-      <Button
-        label="Scan QR Code"
-        icon={Scan}
-        onPress={() => {}}
-        disabled
-        full
-      />
+      <Button label="Scan QR Code" icon={Scan} onPress={() => {}} disabled full />
 
       <View
         style={{
@@ -2805,9 +2835,7 @@ function DesktopConnectionCard({
             disabled={pairingCodeInput.trim().length < 6 || redeeming}
             style={({ pressed }) => ({
               backgroundColor:
-                pairingCodeInput.trim().length >= 6 && !redeeming
-                  ? "#10b981"
-                  : c.muted,
+                pairingCodeInput.trim().length >= 6 && !redeeming ? "#10b981" : c.muted,
               borderRadius: 8,
               paddingHorizontal: 14,
               paddingVertical: 10,
@@ -2819,8 +2847,7 @@ function DesktopConnectionCard({
             ) : (
               <Text
                 style={{
-                  color:
-                    pairingCodeInput.trim().length >= 6 ? "#fff" : c.mutedForeground,
+                  color: pairingCodeInput.trim().length >= 6 ? "#fff" : c.mutedForeground,
                   fontFamily: "Inter_600SemiBold",
                   fontSize: 14,
                 }}
@@ -2963,10 +2990,7 @@ function ActiveThreadStateStrip({
           {state.label}
         </Text>
       </View>
-      <Text
-        style={{ color: c.foreground, fontSize: 13, flex: 1 }}
-        numberOfLines={1}
-      >
+      <Text style={{ color: c.foreground, fontSize: 13, flex: 1 }} numberOfLines={1}>
         {state.objective}
       </Text>
       <Pressable
@@ -3679,7 +3703,11 @@ function ProjectPatchDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
               }}
             >
               <Text
-                style={{ color: c.mutedForeground, fontSize: 10, fontFamily: "SpaceMono_400Regular" }}
+                style={{
+                  color: c.mutedForeground,
+                  fontSize: 10,
+                  fontFamily: "SpaceMono_400Regular",
+                }}
                 numberOfLines={1}
               >
                 {f.relativePath}
@@ -3727,20 +3755,14 @@ function ProjectPatchDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
       {/* Risks */}
       {draft.risks.length > 0 &&
         draft.risks.slice(0, 2).map((r, i) => (
-          <Text
-            key={i}
-            style={{ color: "#f59e0b", fontSize: 11, lineHeight: 16 }}
-          >
+          <Text key={i} style={{ color: "#f59e0b", fontSize: 11, lineHeight: 16 }}>
             {"\u26A0\uFE0F"} {r}
           </Text>
         ))}
       {/* Verification plan */}
       {draft.verificationPlan.length > 0 &&
         draft.verificationPlan.slice(0, 2).map((v, i) => (
-          <Text
-            key={i}
-            style={{ color: c.mutedForeground, fontSize: 11, lineHeight: 16 }}
-          >
+          <Text key={i} style={{ color: c.mutedForeground, fontSize: 11, lineHeight: 16 }}>
             {"\u2714\uFE0F"} {v}
           </Text>
         ))}
@@ -3831,10 +3853,7 @@ function ProjectPatchVerifiedCard({ msg }: { msg: OraxProjectThreadMessage }) {
       {checks.length > 0 ? (
         <View style={{ marginTop: 8, gap: 4 }}>
           {checks.map((c2) => (
-            <Text
-              key={c2.name}
-              style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}
-            >
+            <Text key={c2.name} style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
               {`\u2713 ${c2.name} (${c2.durationMs}ms)`}
             </Text>
           ))}
@@ -3950,7 +3969,11 @@ function ProjectFixDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
               }}
             >
               <Text
-                style={{ color: c.mutedForeground, fontSize: 10, fontFamily: "SpaceMono_400Regular" }}
+                style={{
+                  color: c.mutedForeground,
+                  fontSize: 10,
+                  fontFamily: "SpaceMono_400Regular",
+                }}
                 numberOfLines={1}
               >
                 {f.relativePath}
@@ -3972,10 +3995,7 @@ function ProjectFixDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
       {/* Risks */}
       {draft.risks.length > 0 &&
         draft.risks.slice(0, 2).map((r, i) => (
-          <Text
-            key={i}
-            style={{ color: "#f59e0b", fontSize: 11, lineHeight: 16 }}
-          >
+          <Text key={i} style={{ color: "#f59e0b", fontSize: 11, lineHeight: 16 }}>
             {"\u26A0\uFE0F"} {r}
           </Text>
         ))}

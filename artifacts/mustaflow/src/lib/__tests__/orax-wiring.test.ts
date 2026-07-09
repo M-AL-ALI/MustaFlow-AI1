@@ -4041,4 +4041,47 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3Y: Desktop Connection Onboarding
+
+  it("Phase 3Y: package exposes desktop onboarding readiness and verification script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"desktop:onboarding-readiness"');
+    expect(pkg).toContain('"verify:phase3y"');
+    expect(pkg).toContain("scripts/desktop-onboarding-readiness.mjs");
+    expect(pkg).toContain("verify:phase3x");
+  });
+
+  it("Phase 3Y: web Orax explains the desktop connection before local execution", () => {
+    const page = read("../../pages/orax.tsx");
+    expect(page).toContain("Desktop connection status");
+    expect(page).toContain("Desktop required for local execution");
+    expect(page).toContain("Install Orax Desktop");
+    expect(page).toContain("Open device manager");
+    expect(page).toContain("/orax/devices");
+    expect(page).toContain("read files, run commands, or apply patches");
+  });
+
+  it("Phase 3Y: mobile Orax mirrors desktop connection guidance", () => {
+    const mobile = read("../../../../../artifacts/ora-mobile/app/(home)/orax.tsx");
+    expect(mobile).toContain("DesktopConnectionCard");
+    expect(mobile).toContain("Desktop connection status");
+    expect(mobile).toContain("Desktop required for local execution");
+    expect(mobile).toContain("Desktop online");
+    expect(mobile).toContain("Desktop offline");
+    expect(mobile).toContain("before asking Orax to work on local files");
+    expect(mobile).toContain("Keep Orax Desktop open");
+  });
+
+  it("Phase 3Y: onboarding readiness guards both surfaces and Ora isolation", () => {
+    const script = read("../../../../orax-desktop/scripts/desktop-onboarding-readiness.mjs");
+    expect(script).toContain("artifacts/mustaflow/src/pages/orax.tsx");
+    expect(script).toContain("artifacts/ora-mobile/app/(home)/orax.tsx");
+    expect(script).toContain("Desktop connection status");
+    expect(script).toContain("Desktop required for local execution");
+    expect(script).toContain("Open device manager");
+    expect(script).toContain('["/api", "public-ai"].join("/")');
+    expect(script).toContain('["ora", "Chat"].join("")');
+    expect(script).toContain('["use", "Ora", "Chat"].join("")');
+  });
 });
