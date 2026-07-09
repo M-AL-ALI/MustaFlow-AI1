@@ -3769,4 +3769,66 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3U: Health Checklist Manual Confirmations
+
+  it("Phase 3U: package exposes verify:phase3u script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"verify:phase3u"');
+    expect(pkg).toContain("verify:phase3t");
+    expect(pkg).toContain("health:readiness");
+    expect(pkg).toContain("update:recovery-readiness");
+  });
+
+  it("Phase 3U: Health checklist supports session-only manual confirmations", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("ManualChecklistConfirmationKey");
+    expect(src).toContain("INITIAL_MANUAL_CHECKLIST_CONFIRMATIONS");
+    expect(src).toContain("manualChecklistConfirmations");
+    expect(src).toContain("markManualChecklistConfirmation");
+    expect(src).toContain("manualConfirmation");
+    expect(src).toContain("Mark pairing checked");
+    expect(src).toContain("Mark diagnostics checked");
+    expect(src).toContain("Mark result copy checked");
+    expect(src).toContain('item.status === "manual"');
+    expect(src).toContain('markManualChecklistConfirmation("pairing")');
+    expect(src).toContain('markManualChecklistConfirmation("diagnosticsExport")');
+    expect(src).toContain('markManualChecklistConfirmation("diagnosticsResultCopy")');
+    expect(src).not.toContain("localStorage");
+    expect(src).not.toContain("sessionStorage");
+    expect(src).not.toContain("ipcRenderer.invoke");
+    expect(src).not.toContain("fetch(");
+    expect(src).not.toContain("/api/orax/");
+    expect(src).not.toContain("diagnosticsJson");
+    expect(src).not.toContain("result.filePath");
+    expect(src).not.toContain("stdout");
+    expect(src).not.toContain("stderr");
+  });
+
+  it("Phase 3U: readiness scripts and docs cover manual checklist confirmations", () => {
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(health).toContain("Mark pairing checked");
+    expect(health).toContain('markManualChecklistConfirmation("diagnosticsResultCopy")');
+    expect(recovery).toContain('"verify:phase3u"');
+    expect(recovery).toContain("Health Checklist Manual Confirmations");
+    expect(doc).toContain("Health Checklist Manual Confirmations");
+    expect(doc).toContain("session-only confirmation buttons");
+    expect(doc).toContain("Mark result copy checked");
+    expect(doc).toContain("verify:phase3u");
+  });
+
+  it("Phase 3U: Health manual confirmation files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/scripts/health-readiness.mjs"),
+      read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

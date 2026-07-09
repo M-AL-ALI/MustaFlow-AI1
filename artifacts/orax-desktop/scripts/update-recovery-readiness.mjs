@@ -61,6 +61,7 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3r"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3s"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3t"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3u"');
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "buildSupportDiagnostics");
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
@@ -126,6 +127,9 @@ requireContains("docs/orax-desktop-update-recovery.md", "No new IPC APIs");
 requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Completion Summary");
 requireContains("docs/orax-desktop-update-recovery.md", "Windows smoke checklist complete");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3t");
+requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Manual Confirmations");
+requireContains("docs/orax-desktop-update-recovery.md", "Mark result copy checked");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3u");
 requireContains("docs/orax-desktop-update-recovery.md", "validated before it is written");
 requireContains("docs/orax-desktop-update-recovery.md", "Do not include Ora/public-ai chat");
 

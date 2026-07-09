@@ -19,6 +19,7 @@ type HealthLevel = "ok" | "warn" | "blocked";
 type ActionStatus = "idle" | "running" | "success" | "failed";
 type ActionResultMessage = string | void;
 type SmokeChecklistStatus = "ready" | "needs-action" | "manual";
+type ManualChecklistConfirmationKey = "pairing" | "diagnosticsExport" | "diagnosticsResultCopy";
 
 interface ActionState {
   status: ActionStatus;
@@ -44,6 +45,11 @@ type ActionKey =
   | "exportDiagnostics";
 
 const INITIAL_ACTION_STATE: ActionState = { status: "idle", message: null, lastAttempted: null };
+const INITIAL_MANUAL_CHECKLIST_CONFIRMATIONS: Record<ManualChecklistConfirmationKey, boolean> = {
+  pairing: false,
+  diagnosticsExport: false,
+  diagnosticsResultCopy: false,
+};
 
 const ACTION_LABELS: Record<ActionKey, string> = {
   signIn: "Sign in again",
@@ -122,6 +128,11 @@ interface SmokeChecklistItem {
   action?: {
     label: string;
     state: ActionState;
+    onClick: () => void;
+  };
+  manualConfirmation?: {
+    label: string;
+    confirmed: boolean;
     onClick: () => void;
   };
 }
@@ -422,6 +433,20 @@ function HealthSmokeChecklist({ items }: { items: SmokeChecklistItem[] }) {
                     )}
                   </div>
                 )}
+                {item.manualConfirmation &&
+                  !item.manualConfirmation.confirmed &&
+                  item.status === "manual" && (
+                    <div style={{ marginTop: 8 }}>
+                      <button
+                        className="btn"
+                        style={{ fontSize: 12, padding: "4px 10px", gap: 6 }}
+                        onClick={item.manualConfirmation.onClick}
+                      >
+                        <CheckCircle2 size={11} />
+                        {item.manualConfirmation.label}
+                      </button>
+                    </div>
+                  )}
               </div>
             </div>
           );
@@ -438,6 +463,9 @@ export function HealthScreen() {
   const [actionStates, setActionStates] =
     useState<Record<ActionKey, ActionState>>(initActionStates);
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
+  const [manualChecklistConfirmations, setManualChecklistConfirmations] = useState(
+    INITIAL_MANUAL_CHECKLIST_CONFIRMATIONS,
+  );
 
   useEffect(() => {
     void window.electronAPI.relay.getStatus().then(setRelayState);
@@ -457,6 +485,10 @@ export function HealthScreen() {
     },
     [],
   );
+
+  const markManualChecklistConfirmation = useCallback((key: ManualChecklistConfirmationKey) => {
+    setManualChecklistConfirmations((prev) => ({ ...prev, [key]: true }));
+  }, []);
 
   const runAction = useCallback(
     async (key: ActionKey, fn: () => Promise<ActionResultMessage>) => {
@@ -685,12 +717,17 @@ export function HealthScreen() {
     const hostOnline = hostState?.status === "online";
     const relayPolling = relayState?.status === "polling";
     const pairingReady = hostRegistered && hostOnline;
-    const pairingOpened = actionStates.openPairing.status === "success";
+    const pairingOpened =
+      actionStates.openPairing.status === "success" || manualChecklistConfirmations.pairing;
     const diagnosticsMessage = actionStates.exportDiagnostics.message ?? "";
     const diagnosticsResultConfirmed =
-      actionStates.exportDiagnostics.status === "success" &&
-      (diagnosticsMessage.includes("Diagnostics exported. Health timeline included.") ||
-        diagnosticsMessage.includes("Diagnostics export cancelled."));
+      manualChecklistConfirmations.diagnosticsResultCopy ||
+      (actionStates.exportDiagnostics.status === "success" &&
+        (diagnosticsMessage.includes("Diagnostics exported. Health timeline included.") ||
+          diagnosticsMessage.includes("Diagnostics export cancelled.")));
+    const diagnosticsExportConfirmed =
+      actionStates.exportDiagnostics.status === "success" ||
+      manualChecklistConfirmations.diagnosticsExport;
 
     return [
       {
@@ -741,18 +778,29 @@ export function HealthScreen() {
           state: actionStates.openPairing,
           onClick: handleOpenPairing,
         },
+        manualConfirmation: pairingReady
+          ? {
+              label: "Mark pairing checked",
+              confirmed: pairingOpened,
+              onClick: () => markManualChecklistConfirmation("pairing"),
+            }
+          : undefined,
       },
       {
         label: "Export support diagnostics",
-        status: actionStates.exportDiagnostics.status === "success" ? "ready" : "manual",
-        detail:
-          actionStates.exportDiagnostics.status === "success"
-            ? "Diagnostics export flow returned a safe result message."
-            : "Click Export Support Diagnostics and choose save or cancel.",
+        status: diagnosticsExportConfirmed ? "ready" : "manual",
+        detail: diagnosticsExportConfirmed
+          ? "Diagnostics export flow returned a safe result message."
+          : "Click Export Support Diagnostics and choose save or cancel.",
         action: {
           label: "Export Support Diagnostics",
           state: actionStates.exportDiagnostics,
           onClick: handleExportDiagnostics,
+        },
+        manualConfirmation: {
+          label: "Mark diagnostics checked",
+          confirmed: diagnosticsExportConfirmed,
+          onClick: () => markManualChecklistConfirmation("diagnosticsExport"),
         },
       },
       {
@@ -761,6 +809,11 @@ export function HealthScreen() {
         detail: diagnosticsResultConfirmed
           ? "Health shows a safe result message without the saved file path."
           : "Confirm success or cancel copy appears and no local path is shown.",
+        manualConfirmation: {
+          label: "Mark result copy checked",
+          confirmed: diagnosticsResultConfirmed,
+          onClick: () => markManualChecklistConfirmation("diagnosticsResultCopy"),
+        },
       },
     ];
   }, [
@@ -772,6 +825,8 @@ export function HealthScreen() {
     handleSignIn,
     hostState?.hostId,
     hostState?.status,
+    manualChecklistConfirmations,
+    markManualChecklistConfirmation,
     relayState?.status,
     session,
   ]);

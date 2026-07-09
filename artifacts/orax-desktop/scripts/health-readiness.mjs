@@ -51,6 +51,7 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3q"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3r"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3s"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3t"');
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3u"');
 requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
@@ -214,6 +215,51 @@ requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
 requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Completion Summary");
 requireContains("docs/orax-desktop-update-recovery.md", "Windows smoke checklist complete");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3t");
+
+// --- Phase 3U: Health Checklist Manual Confirmations ---
+
+requireContains("artifacts/orax-desktop/package.json", '"verify:phase3u"');
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "ManualChecklistConfirmationKey",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "INITIAL_MANUAL_CHECKLIST_CONFIRMATIONS",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "manualChecklistConfirmations",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "markManualChecklistConfirmation",
+);
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "manualConfirmation");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Mark pairing checked");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Mark diagnostics checked");
+requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Mark result copy checked");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  'item.status === "manual"',
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  'markManualChecklistConfirmation("pairing")',
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  'markManualChecklistConfirmation("diagnosticsExport")',
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  'markManualChecklistConfirmation("diagnosticsResultCopy")',
+);
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "diagnosticsJson");
+requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "result.filePath");
+requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Manual Confirmations");
+requireContains("docs/orax-desktop-update-recovery.md", "Mark pairing checked");
+requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3u");
 
 // --- Ora isolation check (all health files) ---
 

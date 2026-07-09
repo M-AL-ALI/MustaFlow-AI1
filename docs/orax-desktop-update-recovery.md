@@ -226,6 +226,25 @@ summary only.
 The summary must not render local file paths, raw diagnostics JSON, tokens, environment variables,
 stdout/stderr, or command output.
 
+## Health Checklist Manual Confirmations
+
+Some Health Smoke Checklist rows require a user to visually confirm the result. These rows expose
+session-only confirmation buttons when the row is in the `Manual` state:
+
+- `Mark pairing checked`
+- `Mark diagnostics checked`
+- `Mark result copy checked`
+
+Clicking one of these buttons marks that checklist row as `Ready` for the current desktop session and
+updates the Health Checklist Completion Summary immediately. The confirmation state is not written to
+disk, does not call new IPC APIs, and does not create backend routes.
+
+Manual confirmations do not replace the existing recovery actions. They only record that the user
+completed the manual visual check after using the existing Health page controls.
+
+The buttons must not render local file paths, raw diagnostics JSON, tokens, environment variables,
+stdout/stderr, or command output.
+
 ## Verification
 
 Repository-safe readiness:
@@ -288,6 +307,12 @@ Health checklist completion summary readiness:
 pnpm --filter @workspace/orax-desktop run verify:phase3t
 ```
 
+Health checklist manual confirmation readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3u
+```
+
 Manual smoke after any update:
 
 1. Install the signed build on a clean Windows machine.
@@ -314,3 +339,5 @@ Manual smoke after any update:
     raw diagnostics JSON, token, environment variable, stdout/stderr, or command output.
 17. Confirm the Health Smoke Checklist summary shows `X of 7 checks ready`, `Y need action`, and
     `Z manual`, then shows `Windows smoke checklist complete` when all checklist rows are ready.
+18. Confirm manual checklist buttons (`Mark pairing checked`, `Mark diagnostics checked`, and
+    `Mark result copy checked`) mark their rows ready for the current session and update the summary.
