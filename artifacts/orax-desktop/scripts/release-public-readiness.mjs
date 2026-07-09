@@ -57,6 +57,10 @@ requireContains("artifacts/mustaflow/src/lib/orax-desktop-release.ts", "isValidO
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Public download disabled");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Release manifest unavailable");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Download for Windows");
+requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Check installer status");
+requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Installer not available yet");
+requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "PowerShell");
+requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Node.js");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Request early access");
 requireContains("docs/orax-desktop-release-channel.md", "Public download switch");
 requireContains(
@@ -68,6 +72,7 @@ requireContains(
   "VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL",
 );
 requireNotContains("artifacts/mustaflow/src/pages/orax-product.tsx", 'href="/downloads/');
+requireNotContains("artifacts/mustaflow/src/pages/orax-product.tsx", 'href="/support/tickets"');
 
 for (const relPath of [
   "artifacts/mustaflow/src/lib/orax-desktop-release.ts",

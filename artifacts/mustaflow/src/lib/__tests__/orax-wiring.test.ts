@@ -3068,10 +3068,16 @@ describe("ORAX product-surface wiring", () => {
     expect(page).toContain("isValidOraxDesktopManifest");
     expect(page).toContain("Release manifest unavailable");
     expect(page).toContain("Public download disabled");
+    expect(page).toContain("Check installer status");
+    expect(page).toContain("Installer not available yet");
+    expect(page).toContain("After installation");
+    expect(page).toContain("PowerShell");
+    expect(page).toContain("Node.js");
     expect(page).toContain("Request early access");
     expect(page).toContain("Download for Windows");
-    expect(page).toContain("releaseManifest.downloadUrl");
+    expect(page).toContain("directRelease.downloadUrl");
     expect(page).not.toContain('href="/downloads/');
+    expect(page).not.toContain('href="/support/tickets"');
   });
 
   it("Phase 3J: release public readiness script checks product page, helper, docs, and Ora isolation", () => {
@@ -3090,7 +3096,7 @@ describe("ORAX product-surface wiring", () => {
     expect(doc).toContain("VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED=true");
     expect(doc).toContain("VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL");
     expect(doc).toContain("downloadUrl");
-    expect(doc).toContain("Do not hard-code an");
+    expect(doc).toContain("must not route the download path to support tickets");
     expect(doc).toContain("verify:phase3j");
   });
 

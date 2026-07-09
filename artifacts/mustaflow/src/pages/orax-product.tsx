@@ -157,6 +157,7 @@ export default function OraxProductPage() {
 
   const publicDownloadReady =
     releaseStatus.publicDownloadEnabled && Boolean(releaseManifest?.downloadUrl);
+  const directRelease = publicDownloadReady ? releaseManifest : null;
   const releaseCards = [
     ["Installer", "Windows NSIS build is ready for internal testing"],
     ["Signed release channel", "Download channel is staged for internal release review"],
@@ -211,13 +212,23 @@ export default function OraxProductPage() {
             </p>
           </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <a
-              href="#download"
-              className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
-            >
-              <Download className="h-4 w-4" />
-              Download for Windows
-            </a>
+            {directRelease ? (
+              <a
+                href={directRelease.downloadUrl}
+                className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
+              >
+                <Download className="h-4 w-4" />
+                Download for Windows
+              </a>
+            ) : (
+              <a
+                href="#download"
+                className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
+              >
+                <ArrowRight className="h-4 w-4" />
+                Check installer status
+              </a>
+            )}
             <a
               href="#how-it-works"
               className="inline-flex h-12 items-center gap-2 rounded-full border border-border bg-background px-8 text-sm font-medium hover:bg-muted"
@@ -346,23 +357,33 @@ export default function OraxProductPage() {
               </div>
             ) : null}
           </div>
+          <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-background p-4 text-left">
+            <p className="text-sm font-semibold">After installation</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The installer installs Orax Desktop. On first run, Orax checks PowerShell, Git,
+              Node.js, npm, and pnpm on the computer and guides any approved setup needed for local
+              coding work.
+            </p>
+          </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-            {publicDownloadReady && releaseManifest ? (
+            {directRelease ? (
               <a
-                href={releaseManifest.downloadUrl}
+                href={directRelease.downloadUrl}
                 className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
               >
                 <Download className="h-4 w-4" />
                 Download for Windows
               </a>
             ) : (
-              <Link
-                href="/support/tickets"
-                className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background hover:opacity-90"
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full bg-muted px-8 text-sm font-semibold text-muted-foreground"
               >
-                <Download className="h-4 w-4" />
-                Request early access
-              </Link>
+                <Lock className="h-4 w-4" />
+                Installer not available yet
+              </button>
             )}
             <Link
               href="/orax"
@@ -376,6 +397,7 @@ export default function OraxProductPage() {
             Installer build pending public release. Public download remains off unless
             VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED is true and
             VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL points to a valid signed release manifest.
+            Request early access through the MustaFlow team if you need the internal installer.
           </p>
         </section>
       </main>

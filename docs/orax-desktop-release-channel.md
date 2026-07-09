@@ -171,7 +171,7 @@ Rollback requirements:
 
 Until public signing is complete, the Orax product page should show:
 
-- early-access request flow
+- installer status flow with no fake download link
 - signed release channel status
 - internal release review copy
 
@@ -197,9 +197,10 @@ The product page fetches the manifest at runtime and validates:
 - `downloadUrl` points to the controlled Orax Desktop Windows release channel
 
 If the switch is off, the manifest URL is missing, the manifest request fails, or the manifest does
-not validate, the product page must keep showing the early-access request flow. Do not hard-code an
-installer URL into the website. The public download link must always come from the signed release
-manifest.
+not validate, the product page must keep showing installer status and a disabled installer CTA. It
+must not route the download path to support tickets or any other non-installer destination. Do not
+hard-code an installer URL into the website. The public download link must always come from the
+signed release manifest.
 
 Readiness check:
 
