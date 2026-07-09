@@ -3913,4 +3913,72 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3W: Public Go-Live Gate
+
+  it("Phase 3W: package exposes go-live readiness and verification script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"release:go-live-readiness"');
+    expect(pkg).toContain('"verify:phase3w"');
+    expect(pkg).toContain("scripts/release-go-live-readiness.mjs");
+    expect(pkg).toContain("verify:phase3v");
+    expect(pkg).toContain("release:public-readiness");
+  });
+
+  it("Phase 3W: public go-live runbook defines the final release gate", () => {
+    const doc = read("../../../../../docs/orax-desktop-public-go-live.md");
+    expect(doc).toContain("Orax Desktop Public Go-Live Checklist");
+    expect(doc).toContain("Public go-live gate");
+    expect(doc).toContain("Never publish unsigned installer");
+    expect(doc).toContain("Signed internal smoke");
+    expect(doc).toContain("Certificate configured");
+    expect(doc).toContain("Manifest uploaded");
+    expect(doc).toContain("Website env switch");
+    expect(doc).toContain("Rollback plan");
+    expect(doc).toContain("Support diagnostics export");
+    expect(doc).toContain("Health smoke checklist");
+    expect(doc).toContain("verify:phase3w");
+  });
+
+  it("Phase 3W: go-live readiness script guards docs, workflow, product page, and artifacts", () => {
+    const script = read("../../../../orax-desktop/scripts/release-go-live-readiness.mjs");
+    expect(script).toContain("docs/orax-desktop-public-go-live.md");
+    expect(script).toContain("docs/orax-desktop-signing-setup.md");
+    expect(script).toContain("docs/orax-desktop-release-channel.md");
+    expect(script).toContain(".github/workflows/orax-desktop-release.yml");
+    expect(script).toContain("artifacts/mustaflow/src/pages/orax-product.tsx");
+    expect(script).toContain("ORAX_WINDOWS_CSC_LINK");
+    expect(script).toContain("ORAX_DESKTOP_RELEASE_S3_URI");
+    expect(script).toContain("requireNotTracked");
+    expect(script).toContain('href="/downloads/');
+    expect(script).toContain('href="/support/tickets"');
+  });
+
+  it("Phase 3W: release docs and product page expose go-live status without enabling downloads", () => {
+    const signing = read("../../../../../docs/orax-desktop-signing-setup.md");
+    const release = read("../../../../../docs/orax-desktop-release-channel.md");
+    const page = read("../../pages/orax-product.tsx");
+    expect(signing).toContain("Orax Desktop Public Go-Live Checklist");
+    expect(release).toContain("Public go-live checklist");
+    expect(release).toContain("verify:phase3w");
+    expect(page).toContain("Go-live checklist");
+    expect(page).toContain("Public download waits for signed smoke and go-live review");
+    expect(page).toContain("Public download disabled");
+    expect(page).not.toContain('href="/downloads/');
+    expect(page).not.toContain('href="/support/tickets"');
+  });
+
+  it("Phase 3W: go-live files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/scripts/release-go-live-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-public-go-live.md"),
+      read("../../../../../docs/orax-desktop-signing-setup.md"),
+      read("../../../../../docs/orax-desktop-release-channel.md"),
+      read("../../pages/orax-product.tsx"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

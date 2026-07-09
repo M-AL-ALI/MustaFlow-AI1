@@ -107,6 +107,20 @@ High-level setup:
 The current GitHub workflow is already ready for the PFX route. The Azure Artifact Signing route is a
 future workflow integration task, not something users need.
 
+## Orax Desktop Public Go-Live Checklist
+
+After signing is configured, use the public go-live checklist before enabling the website download
+switch:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3w
+```
+
+The go-live checklist keeps signing, upload, manifest validation, signed internal smoke testing,
+rollback, Health smoke checklist, and Support Diagnostics export in one release gate. It does not
+replace the real Windows smoke test; it prevents the repository from drifting away from the required
+release controls while that operational test is pending.
+
 ## Public download gate
 
 Keep the website disabled until the signed internal smoke test passes:

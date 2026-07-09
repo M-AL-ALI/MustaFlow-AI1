@@ -162,6 +162,7 @@ export default function OraxProductPage() {
     ["Installer", "Windows NSIS build is ready for internal testing"],
     ["Signed release channel", "Download channel is staged for internal release review"],
     ["Release automation", "Manual release workflow is ready for signed upload"],
+    ["Go-live checklist", "Public download waits for signed smoke and go-live review"],
     [
       "Public access",
       publicDownloadReady
@@ -321,7 +322,7 @@ export default function OraxProductPage() {
               both verified.
             </p>
           </div>
-          <div className="mx-auto grid max-w-3xl grid-cols-1 gap-3 text-left sm:grid-cols-4">
+          <div className="mx-auto grid max-w-3xl grid-cols-1 gap-3 text-left sm:grid-cols-5">
             {releaseCards.map(([label, detail]) => (
               <div key={label} className="rounded-2xl border border-border bg-background p-4">
                 <p className="text-sm font-semibold">{label}</p>

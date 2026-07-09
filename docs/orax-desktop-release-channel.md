@@ -208,6 +208,19 @@ Readiness check:
 pnpm --filter @workspace/orax-desktop run verify:phase3j
 ```
 
+## Public go-live checklist
+
+Before changing the website environment variables, run the full public go-live gate:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3w
+```
+
+This gate confirms the repository still contains the signing setup guide, release workflow guards,
+public-download fail-closed checks, Health smoke checklist guidance, Support Diagnostics export
+requirements, and rollback plan. It is a repository gate only. The real signed Windows installer
+still needs to pass manual smoke testing before public download is enabled.
+
 Before enabling public download:
 
 1. Confirm `verify:phase3j` passes.
