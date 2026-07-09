@@ -3837,4 +3837,80 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("useOraChat");
     }
   });
+
+  // Phase 3V: Signing Setup Guidance + Health Next Best Action
+
+  it("Phase 3V: package exposes signing readiness and verification script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"signing:readiness"');
+    expect(pkg).toContain('"verify:phase3v"');
+    expect(pkg).toContain("scripts/signing-readiness.mjs");
+    expect(pkg).toContain("verify:phase3u");
+  });
+
+  it("Phase 3V: signing setup runbook explains internal testing, PFX secrets, and Azure path", () => {
+    const doc = read("../../../../../docs/orax-desktop-signing-setup.md");
+    expect(doc).toContain("Orax Desktop Signing Setup");
+    expect(doc).toContain("Internal unsigned installer");
+    expect(doc).toContain("users do not sign Orax");
+    expect(doc).toContain("ORAX_WINDOWS_CSC_LINK");
+    expect(doc).toContain("ORAX_WINDOWS_CSC_KEY_PASSWORD");
+    expect(doc).toContain("ORAX_RELEASE_AWS_ACCESS_KEY_ID");
+    expect(doc).toContain("ORAX_DESKTOP_RELEASE_S3_URI");
+    expect(doc).toContain("Azure Artifact Signing");
+    expect(doc).toContain("Do not enable public download");
+  });
+
+  it("Phase 3V: first-run setup screen makes internal smoke and public release order explicit", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/SetupScreen.tsx");
+    expect(src).toContain("Register this computer before pairing web or mobile");
+    expect(src).toContain(
+      "Internal smoke first; public download comes after signed release validation",
+    );
+    expect(src).toContain("Pair your phone or browser to control Orax remotely");
+    expect(src).not.toContain("â€”");
+    expect(src).not.toContain("Registeringâ€¦");
+  });
+
+  it("Phase 3V: Health page shows a safe next-best-action panel", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx");
+    expect(src).toContain("NextBestActionPanel");
+    expect(src).toContain("getNextHealthAction");
+    expect(src).toContain("Next best action");
+    expect(src).toContain("Everything looks ready");
+    expect(collapse(src)).toContain(
+      "keep public download disabled until a signed installer passes",
+    );
+    expect(src).not.toContain("ipcRenderer.invoke");
+    expect(src).not.toContain("fetch(");
+    expect(src).not.toContain("/api/orax/");
+  });
+
+  it("Phase 3V: readiness scripts cover signing setup and Health next action", () => {
+    const signing = read("../../../../orax-desktop/scripts/signing-readiness.mjs");
+    const health = read("../../../../orax-desktop/scripts/health-readiness.mjs");
+    const recovery = read("../../../../orax-desktop/scripts/update-recovery-readiness.mjs");
+    const doc = read("../../../../../docs/orax-desktop-update-recovery.md");
+    expect(signing).toContain("docs/orax-desktop-signing-setup.md");
+    expect(signing).toContain("ORAX_WINDOWS_CSC_LINK");
+    expect(health).toContain("NextBestActionPanel");
+    expect(health).toContain("getNextHealthAction");
+    expect(recovery).toContain('"verify:phase3v"');
+    expect(doc).toContain("Health Next Best Action");
+    expect(doc).toContain("verify:phase3v");
+  });
+
+  it("Phase 3V: signing and next-action files stay Orax-only", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/renderer/pages/SetupScreen.tsx"),
+      read("../../../../orax-desktop/src/renderer/pages/HealthScreen.tsx"),
+      read("../../../../orax-desktop/scripts/signing-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-signing-setup.md"),
+      read("../../../../../docs/orax-desktop-update-recovery.md"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
 });

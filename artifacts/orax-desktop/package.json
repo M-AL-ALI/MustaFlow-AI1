@@ -14,6 +14,7 @@
     "release:upload": "node scripts/release-upload.mjs",
     "release:upload-readiness": "node scripts/release-upload-readiness.mjs",
     "release:public-readiness": "node scripts/release-public-readiness.mjs",
+    "signing:readiness": "node scripts/signing-readiness.mjs",
     "update:recovery-readiness": "node scripts/update-recovery-readiness.mjs",
     "health:readiness": "node scripts/health-readiness.mjs",
     "smoke:readiness": "node scripts/smoke-readiness.mjs",
@@ -33,7 +34,8 @@
     "verify:phase3r": "pnpm run verify:phase3q && pnpm run update:recovery-readiness && pnpm run health:readiness",
     "verify:phase3s": "pnpm run verify:phase3r && pnpm run update:recovery-readiness && pnpm run health:readiness",
     "verify:phase3t": "pnpm run verify:phase3s && pnpm run update:recovery-readiness && pnpm run health:readiness",
-    "verify:phase3u": "pnpm run verify:phase3t && pnpm run update:recovery-readiness && pnpm run health:readiness"
+    "verify:phase3u": "pnpm run verify:phase3t && pnpm run update:recovery-readiness && pnpm run health:readiness",
+    "verify:phase3v": "pnpm run verify:phase3u && pnpm run signing:readiness && pnpm run health:readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",

@@ -245,6 +245,18 @@ completed the manual visual check after using the existing Health page controls.
 The buttons must not render local file paths, raw diagnostics JSON, tokens, environment variables,
 stdout/stderr, or command output.
 
+## Health Next Best Action
+
+The Health page includes a `Next best action` panel above the detailed status grid. It chooses the
+first blocked Health item, then the first warning item, and shows the matching recovery action when
+one exists.
+
+If every Health item is ready, the panel reminds the user to run the smoke checklist before release
+and keep public download disabled until a signed installer passes.
+
+This panel is guidance only. It reuses existing Health actions and does not create new IPC APIs,
+backend routes, command execution, or project access.
+
 ## Verification
 
 Repository-safe readiness:
@@ -311,6 +323,12 @@ Health checklist manual confirmation readiness:
 
 ```powershell
 pnpm --filter @workspace/orax-desktop run verify:phase3u
+```
+
+Signing and next-action readiness:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3v
 ```
 
 Manual smoke after any update:

@@ -238,6 +238,51 @@ function HealthRow({ item }: { item: HealthItem }) {
   );
 }
 
+function getNextHealthAction(items: HealthItem[]): HealthItem | null {
+  return (
+    items.find((item) => item.level === "blocked") ??
+    items.find((item) => item.level === "warn") ??
+    null
+  );
+}
+
+function NextBestActionPanel({ item }: { item: HealthItem | null }) {
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Activity size={14} color="var(--text-secondary)" />
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+          Next best action
+        </span>
+      </div>
+      {item ? (
+        <>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+            Fix {item.label}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+            {item.detail}
+          </p>
+          {item.action ? (
+            <ActionButton
+              label={item.action.label}
+              state={item.action.state}
+              onClick={item.action.onClick}
+              level={item.level}
+              showWhen="always"
+            />
+          ) : null}
+        </>
+      ) : (
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+          Everything looks ready. Run the smoke checklist before release and keep public download
+          disabled until a signed installer passes.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ActionTimeline({ entries }: { entries: ActionHistoryEntry[] }) {
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -711,6 +756,8 @@ export function HealthScreen() {
     return { label: "All systems ready", level: "ok" as const };
   }, [healthItems]);
 
+  const nextHealthAction = useMemo(() => getNextHealthAction(healthItems), [healthItems]);
+
   const smokeChecklistItems = useMemo<SmokeChecklistItem[]>(() => {
     const signedIn = Boolean(session);
     const hostRegistered = Boolean(hostState?.hostId);
@@ -854,6 +901,8 @@ export function HealthScreen() {
           </div>
         </div>
       </div>
+
+      <NextBestActionPanel item={nextHealthAction} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div className="card">
