@@ -69,6 +69,28 @@ Then redeploy the website and verify:
 - the manifest checksum matches the uploaded installer
 - the fallback state still shows installer status if the manifest is unavailable
 
+## Product download experience
+
+The Orax product page must make the installer state understandable before the public release switch
+is enabled.
+
+Required copy and behavior:
+
+- show `Why download is gated`
+- explain `No support-ticket detour`
+- explain that Users do not configure GitHub, release secrets, certificates, or manifests
+- explain that the installer requires a signed release manifest
+- explain that the public button appears only after signed internal smoke passes
+- show `What happens after install`
+- mention that Orax checks PowerShell, Git, Node.js, npm, and pnpm before local coding work starts
+- keep the disabled installer button when the manifest is unavailable
+
+Readiness check:
+
+```powershell
+pnpm --filter @workspace/orax-desktop run verify:phase3x
+```
+
 ## Rollback plan
 
 Before public download:

@@ -63,7 +63,7 @@ const STEPS = [
   {
     label: "Ask Orax to build or fix",
     detail:
-      "Describe what you want in plain language — fix a bug, review code, run tests, or create a pull request.",
+      "Describe what you want in plain language - fix a bug, review code, run tests, or create a pull request.",
   },
   {
     label: "Approve sensitive actions",
@@ -102,6 +102,37 @@ const SECURITY = [
     detail:
       "Revoke any paired desktop or mobile device instantly from the website, the desktop app, or your phone.",
   },
+];
+
+const DOWNLOAD_GATES = [
+  {
+    label: "Signed installer required",
+    detail:
+      "The public button stays disabled until the Windows installer is signed by MustaFlow AI and passes internal validation.",
+  },
+  {
+    label: "Manifest controls the link",
+    detail:
+      "The website never hard-codes an installer URL. The download link must come from the signed release manifest.",
+  },
+  {
+    label: "Windows smoke test required",
+    detail:
+      "A clean Windows install must prove sign-in, heartbeat, pairing, relay polling, diagnostics, and one desktop-backed Orax task.",
+  },
+  {
+    label: "No support-ticket detour",
+    detail:
+      "If the installer is not public yet, the page explains status here instead of sending users to support tickets.",
+  },
+];
+
+const AFTER_INSTALL = [
+  "Sign in with the same MustaFlow AI account used on the website.",
+  "Register this computer as an Orax Desktop host.",
+  "Let Orax check PowerShell, Git, Node.js, npm, and pnpm before local coding work starts.",
+  "Add an approved project folder and keep secrets local unless explicitly approved.",
+  "Pair web or mobile so those surfaces can monitor and approve desktop work remotely.",
 ];
 
 export default function OraxProductPage() {
@@ -331,6 +362,22 @@ export default function OraxProductPage() {
             ))}
           </div>
           <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-background p-4 text-left">
+            <p className="text-sm font-semibold">Why download is gated</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Users do not configure GitHub, release secrets, certificates, or installer manifests.
+              MustaFlow AI owns those release controls so the public button only appears when the
+              signed Windows installer is actually ready.
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {DOWNLOAD_GATES.map((gate) => (
+                <div key={gate.label} className="rounded-xl border border-border bg-card p-3">
+                  <p className="text-xs font-semibold">{gate.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{gate.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-background p-4 text-left">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm font-semibold">Release status</p>
@@ -359,12 +406,17 @@ export default function OraxProductPage() {
             ) : null}
           </div>
           <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-background p-4 text-left">
-            <p className="text-sm font-semibold">After installation</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              The installer installs Orax Desktop. On first run, Orax checks PowerShell, Git,
-              Node.js, npm, and pnpm on the computer and guides any approved setup needed for local
-              coding work.
-            </p>
+            <p className="text-sm font-semibold">What happens after install</p>
+            <ol className="mt-3 space-y-2">
+              {AFTER_INSTALL.map((item, index) => (
+                <li key={item} className="flex gap-3 text-xs text-muted-foreground">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                    {index + 1}
+                  </span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ol>
           </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             {directRelease ? (

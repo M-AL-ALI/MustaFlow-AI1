@@ -3070,7 +3070,7 @@ describe("ORAX product-surface wiring", () => {
     expect(page).toContain("Public download disabled");
     expect(page).toContain("Check installer status");
     expect(page).toContain("Installer not available yet");
-    expect(page).toContain("After installation");
+    expect(page).toContain("What happens after install");
     expect(page).toContain("PowerShell");
     expect(page).toContain("Node.js");
     expect(page).toContain("Request early access");
@@ -3975,6 +3975,66 @@ describe("ORAX product-surface wiring", () => {
       read("../../../../../docs/orax-desktop-signing-setup.md"),
       read("../../../../../docs/orax-desktop-release-channel.md"),
       read("../../pages/orax-product.tsx"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("useOraChat");
+    }
+  });
+
+  // Phase 3X: Product Download Experience
+
+  it("Phase 3X: package exposes product download readiness and verification script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"product:download-readiness"');
+    expect(pkg).toContain('"verify:phase3x"');
+    expect(pkg).toContain("scripts/product-download-readiness.mjs");
+    expect(pkg).toContain("verify:phase3w");
+  });
+
+  it("Phase 3X: product page explains why the installer is gated", () => {
+    const page = read("../../pages/orax-product.tsx");
+    expect(page).toContain("Why download is gated");
+    expect(page).toContain("Signed installer required");
+    expect(page).toContain("Manifest controls the link");
+    expect(page).toContain("Windows smoke test required");
+    expect(page).toContain("No support-ticket detour");
+    expect(page).toContain("Users do not configure GitHub");
+    expect(page).toContain("What happens after install");
+    expect(page).toContain("PowerShell, Git, Node.js, npm, and pnpm");
+    expect(page).toContain("Installer not available yet");
+    expect(page).not.toContain('href="/downloads/');
+    expect(page).not.toContain('href="/support/tickets"');
+  });
+
+  it("Phase 3X: product download readiness script guards the user-facing installer copy", () => {
+    const script = read("../../../../orax-desktop/scripts/product-download-readiness.mjs");
+    expect(script).toContain("Why download is gated");
+    expect(script).toContain("No support-ticket detour");
+    expect(script).toContain("Users do not configure GitHub");
+    expect(script).toContain("What happens after install");
+    expect(script).toContain("Signed installer required");
+    expect(script).toContain("Manifest controls the link");
+    expect(script).toContain("Windows smoke test required");
+    expect(script).toContain('href="/downloads/');
+    expect(script).toContain('href="/support/tickets"');
+  });
+
+  it("Phase 3X: go-live docs cover the product download experience", () => {
+    const doc = read("../../../../../docs/orax-desktop-public-go-live.md");
+    expect(doc).toContain("Product download experience");
+    expect(doc).toContain("Why download is gated");
+    expect(doc).toContain("No support-ticket detour");
+    expect(doc).toContain("Users do not configure GitHub");
+    expect(doc).toContain("What happens after install");
+    expect(doc).toContain("verify:phase3x");
+  });
+
+  it("Phase 3X: product download files stay Orax-only", () => {
+    for (const src of [
+      read("../../pages/orax-product.tsx"),
+      read("../../../../orax-desktop/scripts/product-download-readiness.mjs"),
+      read("../../../../../docs/orax-desktop-public-go-live.md"),
     ]) {
       expect(src).not.toContain("/api/public-ai/");
       expect(src).not.toContain("oraChat");
