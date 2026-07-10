@@ -18,6 +18,7 @@
       "bundleIdentifier": "com.mustaflow.app",
       "buildNumber": "42",
       "deploymentTarget": "16.0",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -48,6 +49,7 @@
       "expo-font",
       "expo-web-browser",
       "expo-secure-store",
+      "expo-apple-authentication",
       [
         "expo-audio",
         {

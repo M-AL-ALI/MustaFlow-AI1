@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppleSignInButton } from "@/components/AppleSignInButton";
 import { LegalPrivacyModal } from "@/components/LegalPrivacyModal";
 import { OraAtom } from "@/components/ora/OraAtom";
 import { Button, TextField } from "@/components/ui";
@@ -354,6 +355,8 @@ export default function SignInScreen() {
                   Sign in to continue to Ora
                 </Text>
               </View>
+
+              <AppleSignInButton label="Continue with Apple" onError={setFormError} />
 
               <Button
                 label="Continue with Google"
