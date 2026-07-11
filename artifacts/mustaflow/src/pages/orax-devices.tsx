@@ -89,9 +89,7 @@ function PairingCodeDisplay({
 }) {
   const { toast } = useToast();
   const [secondsLeft, setSecondsLeft] = useState(() => {
-    const diff = Math.floor(
-      (new Date(pairingCode.expiresAt).getTime() - Date.now()) / 1000,
-    );
+    const diff = Math.floor((new Date(pairingCode.expiresAt).getTime() - Date.now()) / 1000);
     return Math.max(0, diff);
   });
 
@@ -403,9 +401,7 @@ function HostCard({
           <p className="text-xs text-muted-foreground mb-1.5">Permission mode</p>
           <Select
             value={host.permissionMode}
-            onValueChange={(v) =>
-              onPermissionModeChange(host, v as OraxHostPermissionMode)
-            }
+            onValueChange={(v) => onPermissionModeChange(host, v as OraxHostPermissionMode)}
           >
             <SelectTrigger className="h-8 text-sm">
               <SelectValue />
@@ -442,9 +438,7 @@ function HostCard({
               onClick={() => void handleTestConnection()}
               disabled={testState === "pending"}
             >
-              {testState === "pending" ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : null}
+              {testState === "pending" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Test connection
             </Button>
             {testState !== "idle" && testState !== "pending" && testResult && (
@@ -526,7 +520,13 @@ function HostCard({
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">
                     Exit code:{" "}
-                    <span className={cmdResult.exitCode === 0 ? "text-emerald-500 font-medium" : "text-destructive font-medium"}>
+                    <span
+                      className={
+                        cmdResult.exitCode === 0
+                          ? "text-emerald-500 font-medium"
+                          : "text-destructive font-medium"
+                      }
+                    >
                       {cmdResult.exitCode ?? "null"}
                     </span>
                     {cmdResult.durationMs ? ` · ${cmdResult.durationMs}ms` : ""}
@@ -554,7 +554,10 @@ function HostCard({
             {cmdApprovalState === "denied" && (
               <div className="flex items-center justify-between">
                 <p className="text-xs text-destructive">Command denied.</p>
-                <button className="text-xs text-muted-foreground hover:text-foreground" onClick={resetSafeCmd}>
+                <button
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={resetSafeCmd}
+                >
                   Try again
                 </button>
               </div>
@@ -562,8 +565,13 @@ function HostCard({
 
             {cmdApprovalState === "error" && (
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-destructive truncate">{cmdError ?? "An error occurred"}</p>
-                <button className="text-xs text-muted-foreground hover:text-foreground shrink-0" onClick={resetSafeCmd}>
+                <p className="text-xs text-destructive truncate">
+                  {cmdError ?? "An error occurred"}
+                </p>
+                <button
+                  className="text-xs text-muted-foreground hover:text-foreground shrink-0"
+                  onClick={resetSafeCmd}
+                >
                   Reset
                 </button>
               </div>
@@ -586,9 +594,7 @@ function HostCard({
                 onClick={() => onCreatePairingCode(host)}
                 disabled={pairingLoading}
               >
-                {pairingLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
+                {pairingLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Create pairing code
               </Button>
             )}
@@ -639,10 +645,7 @@ export default function OraxDevicesPage() {
     void loadHosts();
   }, []);
 
-  async function handlePermissionModeChange(
-    host: OraxHostSummary,
-    mode: OraxHostPermissionMode,
-  ) {
+  async function handlePermissionModeChange(host: OraxHostSummary, mode: OraxHostPermissionMode) {
     try {
       const res = await authFetch(`/api/orax/hosts/${host.id}`, {
         method: "PATCH",
@@ -650,12 +653,14 @@ export default function OraxDevicesPage() {
         body: JSON.stringify({ permissionMode: mode }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      setHosts((prev) =>
-        prev.map((h) => (h.id === host.id ? { ...h, permissionMode: mode } : h)),
-      );
+      setHosts((prev) => prev.map((h) => (h.id === host.id ? { ...h, permissionMode: mode } : h)));
       toast({ title: "Permission mode updated" });
     } catch {
-      toast({ title: "Update failed", description: "Could not update permission mode.", variant: "destructive" });
+      toast({
+        title: "Update failed",
+        description: "Could not update permission mode.",
+        variant: "destructive",
+      });
     }
   }
 
@@ -671,10 +676,17 @@ export default function OraxDevicesPage() {
         delete next[revokeTarget.id];
         return next;
       });
-      toast({ title: "Desktop revoked", description: `${revokeTarget.deviceName} has been removed.` });
+      toast({
+        title: "Desktop revoked",
+        description: `${revokeTarget.deviceName} has been removed.`,
+      });
       setRevokeTarget(null);
     } catch {
-      toast({ title: "Revoke failed", description: "Could not revoke this desktop.", variant: "destructive" });
+      toast({
+        title: "Revoke failed",
+        description: "Could not revoke this desktop.",
+        variant: "destructive",
+      });
     } finally {
       setRevoking(false);
     }
@@ -695,7 +707,11 @@ export default function OraxDevicesPage() {
         [host.id]: { hostId: host.id, ...data },
       }));
     } catch {
-      toast({ title: "Failed", description: "Could not create pairing code.", variant: "destructive" });
+      toast({
+        title: "Failed",
+        description: "Could not create pairing code.",
+        variant: "destructive",
+      });
     } finally {
       setPairingLoading((prev) => ({ ...prev, [host.id]: false }));
     }
@@ -710,7 +726,11 @@ export default function OraxDevicesPage() {
         return next;
       });
     } catch {
-      toast({ title: "Failed", description: "Could not cancel pairing code.", variant: "destructive" });
+      toast({
+        title: "Failed",
+        description: "Could not cancel pairing code.",
+        variant: "destructive",
+      });
     }
   }
 
@@ -756,10 +776,24 @@ export default function OraxDevicesPage() {
             <div>
               <h2 className="font-semibold text-foreground mb-1">No desktop connected</h2>
               <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                Install Orax Desktop on your computer to start coding with Orax remotely.
+                This page will show your paired desktops after Orax Desktop is installed, signed in,
+                and connected to this MustaFlow AI account.
               </p>
             </div>
-            <Button onClick={() => setLocation("/orax-product")}>Download Orax Desktop</Button>
+            <div className="rounded-xl border border-border bg-background p-4 text-left text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">What to do next</p>
+              <p className="mt-1">
+                If the installer is not available yet, return to the product page and wait for the
+                signed release. Once installed, open Orax Desktop on Windows, sign in, then return
+                here to confirm the desktop is online.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button onClick={() => setLocation("/orax-product")}>Check installer status</Button>
+              <Button variant="outline" onClick={() => setLocation("/orax")}>
+                Back to Orax
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">

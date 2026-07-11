@@ -4084,4 +4084,57 @@ describe("ORAX product-surface wiring", () => {
     expect(script).toContain('["ora", "Chat"].join("")');
     expect(script).toContain('["use", "Ora", "Chat"].join("")');
   });
+
+  // Phase 3Z: Release-Blocked UX Polish
+
+  it("Phase 3Z: package exposes release-blocked readiness and verification script", () => {
+    const pkg = read("../../../../orax-desktop/package.json");
+    expect(pkg).toContain('"release:blocked-readiness"');
+    expect(pkg).toContain('"verify:phase3z"');
+    expect(pkg).toContain("scripts/release-blocked-readiness.mjs");
+    expect(pkg).toContain("verify:phase3y");
+  });
+
+  it("Phase 3Z: product page explains the blocked public release state", () => {
+    const page = read("../../pages/orax-product.tsx");
+    expect(page).toContain("Release not public yet");
+    expect(page).toContain("Nothing is wrong with your account");
+    expect(page).toContain("The installer appears here only after signing");
+    expect(page).toContain("Windows smoke testing");
+    expect(page).toContain("manifest validation");
+    expect(page).not.toContain('href="/downloads/');
+    expect(page).not.toContain('href="/support/tickets"');
+  });
+
+  it("Phase 3Z: devices page gives a next step when no desktop is connected", () => {
+    const page = read("../../pages/orax-devices.tsx");
+    expect(page).toContain("No desktop connected");
+    expect(page).toContain("This page will show your paired desktops");
+    expect(page).toContain("What to do next");
+    expect(page).toContain("Check installer status");
+    expect(page).toContain("signed release");
+    expect(page).toContain("confirm the desktop is online");
+  });
+
+  it("Phase 3Z: mobile states that it is a remote controller, not the executor", () => {
+    const mobile = read("../../../../../artifacts/ora-mobile/app/(home)/orax.tsx");
+    expect(mobile).toContain("Orax Mobile is a remote controller");
+    expect(mobile).toContain("not the execution machine");
+    expect(mobile).toContain("monitors and approves desktop work");
+    expect(mobile).toContain("resume local execution from this phone");
+  });
+
+  it("Phase 3Z: release-blocked readiness guards product, devices, mobile, and Ora isolation", () => {
+    const script = read("../../../../orax-desktop/scripts/release-blocked-readiness.mjs");
+    expect(script).toContain("artifacts/mustaflow/src/pages/orax-product.tsx");
+    expect(script).toContain("artifacts/mustaflow/src/pages/orax-devices.tsx");
+    expect(script).toContain("artifacts/ora-mobile/app/(home)/orax.tsx");
+    expect(script).toContain("Release not public yet");
+    expect(script).toContain("Orax Mobile is a remote controller");
+    expect(script).toContain('href="/downloads/');
+    expect(script).toContain('href="/support/tickets"');
+    expect(script).toContain('["/api", "public-ai"].join("/")');
+    expect(script).toContain('["ora", "Chat"].join("")');
+    expect(script).toContain('["use", "Ora", "Chat"].join("")');
+  });
 });

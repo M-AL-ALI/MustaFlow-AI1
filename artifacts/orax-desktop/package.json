@@ -17,6 +17,7 @@
     "release:go-live-readiness": "node scripts/release-go-live-readiness.mjs",
     "product:download-readiness": "node scripts/product-download-readiness.mjs",
     "desktop:onboarding-readiness": "node scripts/desktop-onboarding-readiness.mjs",
+    "release:blocked-readiness": "node scripts/release-blocked-readiness.mjs",
     "signing:readiness": "node scripts/signing-readiness.mjs",
     "update:recovery-readiness": "node scripts/update-recovery-readiness.mjs",
     "health:readiness": "node scripts/health-readiness.mjs",
@@ -41,7 +42,8 @@
     "verify:phase3v": "pnpm run verify:phase3u && pnpm run signing:readiness && pnpm run health:readiness",
     "verify:phase3w": "pnpm run verify:phase3v && pnpm run release:go-live-readiness && pnpm run release:public-readiness",
     "verify:phase3x": "pnpm run verify:phase3w && pnpm run product:download-readiness",
-    "verify:phase3y": "pnpm run verify:phase3x && pnpm run desktop:onboarding-readiness"
+    "verify:phase3y": "pnpm run verify:phase3x && pnpm run desktop:onboarding-readiness",
+    "verify:phase3z": "pnpm run verify:phase3y && pnpm run release:blocked-readiness"
   },
   "dependencies": {
     "lucide-react": "catalog:",

@@ -135,6 +135,12 @@ const AFTER_INSTALL = [
   "Pair web or mobile so those surfaces can monitor and approve desktop work remotely.",
 ];
 
+const RELEASE_BLOCKED_NEXT_STEPS = [
+  "Wait for MustaFlow AI to publish the signed Windows installer.",
+  "After the installer is public, download it here and sign in on your computer.",
+  "Open the device manager to confirm the desktop is online before starting local execution.",
+];
+
 export default function OraxProductPage() {
   const { data: prefs } = useGetMyPreferences();
   const releaseStatus = useMemo(() => getOraxDesktopReleaseStatus(), []);
@@ -405,6 +411,25 @@ export default function OraxProductPage() {
               </div>
             ) : null}
           </div>
+          {!publicDownloadReady ? (
+            <div className="mx-auto max-w-3xl rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4 text-left">
+              <p className="text-sm font-semibold">Release not public yet</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Nothing is wrong with your account. The installer appears here only after signing,
+                upload, Windows smoke testing, and manifest validation are complete.
+              </p>
+              <ol className="mt-3 space-y-2">
+                {RELEASE_BLOCKED_NEXT_STEPS.map((item, index) => (
+                  <li key={item} className="flex gap-3 text-xs text-muted-foreground">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-background text-[10px] font-semibold text-foreground">
+                      {index + 1}
+                    </span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
           <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-background p-4 text-left">
             <p className="text-sm font-semibold">What happens after install</p>
             <ol className="mt-3 space-y-2">

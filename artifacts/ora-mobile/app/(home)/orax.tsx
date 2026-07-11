@@ -2690,10 +2690,10 @@ function DesktopConnectionCard({
         </Text>
         <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
           {activeHosts.length === 0
-            ? "Install Orax Desktop, sign in, then pair this phone before asking Orax to work on local files."
+            ? "Orax Mobile is a remote controller, not the execution machine. Install Orax Desktop, sign in, then pair this phone before asking Orax to work on local files."
             : isOnline
-              ? "Desktop online. Keep Orax Desktop open to stay connected."
-              : "Desktop offline. Open Orax Desktop on your computer to resume local execution."}
+              ? "Desktop online. Keep Orax Desktop open while this phone monitors and approves desktop work."
+              : "Desktop offline. Open Orax Desktop on your computer to resume local execution from this phone."}
         </Text>
       </View>
 
