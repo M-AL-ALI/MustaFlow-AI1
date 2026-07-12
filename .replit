@@ -32,6 +32,10 @@ args = "pull-from-github"
 task = "workflow.run"
 args = "lint"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "eas-ios-build"
+
 [[workflows.workflow]]
 name = "codegen-drift"
 author = "agent"
@@ -75,6 +79,14 @@ args = "pnpm run lint"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "eas-ios-build"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash /tmp/eas-build3.sh"
 
 [agent]
 stack = "PNPM_WORKSPACE"
