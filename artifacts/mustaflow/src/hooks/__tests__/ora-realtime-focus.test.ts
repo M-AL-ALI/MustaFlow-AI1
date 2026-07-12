@@ -27,7 +27,7 @@ function score(
   text: string,
   focusMode: FocusMode,
   msSinceLastAcceptedTurn: number,
-  overrides: Partial<typeof CLEAN> = {},
+  overrides: Partial<typeof CLEAN & { assistantActive: boolean }> = {},
   acceptedTurnCount = 1,
 ) {
   return scoreTranscriptFocus(text, {
@@ -88,25 +88,33 @@ describe("scoreTranscriptFocus — focused mode, inside the focus window", () =>
     expect(score("keep going please", "focused", 12_000, {}, 0).accepted).toBe(true);
   });
 
-  it("rejects undirected background speech after the shorter follow-up window", () => {
-    const v = score("yeah i think we should grab lunch later", "focused", 8_000);
+  it("rejects undirected background speech while Ora is responding (no barge-in)", () => {
+    // Outside the follow-up window AND Ora is mid-response: the established-speaker
+    // rule is suspended so nearby chatter cannot chop her off. Only addressed or
+    // directed speech may interrupt.
+    const v = score("yeah i think we should grab lunch later", "focused", 8_000, {
+      assistantActive: true,
+    });
     expect(v.accepted).toBe(false);
     expect(v.reason).toBe("not_addressed_or_outside_focus");
   });
 });
 
-describe("scoreTranscriptFocus — focused mode, outside the focus window", () => {
+describe("scoreTranscriptFocus — focused mode, barge-in while Ora is responding", () => {
   it("rejects nearby background speech that is not addressed or directed", () => {
-    const v = score("yeah i think we should grab lunch later", "focused", 30_000);
+    const v = score("yeah i think we should grab lunch later", "focused", 30_000, {
+      assistantActive: true,
+    });
     expect(v.accepted).toBe(false);
     expect(v.reason).toBe("not_addressed_or_outside_focus");
   });
 
-  it("rejects a long unaddressed sentence on word-count alone", () => {
+  it("rejects a long unaddressed sentence mid-response (never on word count)", () => {
     const v = score(
       "so anyway the meeting ran really long and everyone was pretty tired by the end",
       "focused",
       45_000,
+      { assistantActive: true },
     );
     expect(v.accepted).toBe(false);
     expect(v.reason).toBe("not_addressed_or_outside_focus");
@@ -132,8 +140,11 @@ describe("scoreTranscriptFocus — focused mode, outside the focus window", () =
     expect(score("stop", "focused", 99_999).accepted).toBe(true);
   });
 
-  it("does NOT accept via the focus window when idle (no viaWindow flag)", () => {
-    const v = score("ora hello", "focused", 60_000);
+  it("accepts an addressed turn via the address path (no viaWindow flag) mid-response", () => {
+    // While Ora is responding the established-speaker rule is suspended, so an
+    // addressed turn is accepted via the address path — not the focus window — and
+    // therefore carries no viaWindow flag.
+    const v = score("ora hello", "focused", 60_000, { assistantActive: true });
     expect(v.accepted).toBe(true);
     expect(v.viaWindow).toBeUndefined();
   });
@@ -228,8 +239,8 @@ describe("scoreTranscriptFocus — multilingual directed / addressed speech (out
     expect(score("मुझे यह समझाओ", "focused", 60_000).accepted).toBe(true);
   });
 
-  it("still rejects non-directed non-English background speech outside the window", () => {
-    const v = score("vamos a comer algo luego", "focused", 60_000);
+  it("still rejects non-directed non-English background speech mid-response", () => {
+    const v = score("vamos a comer algo luego", "focused", 60_000, { assistantActive: true });
     expect(v.accepted).toBe(false);
     expect(v.reason).toBe("not_addressed_or_outside_focus");
   });

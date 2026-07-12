@@ -190,6 +190,7 @@ function pathRequiresAuth(path: string): boolean {
     path === "/api/public-ai/chat" ||
     path === "/api/public-ai/usage" ||
     path.startsWith("/api/public-ai/realtime/session") ||
+    path === "/api/public-ai/realtime/client-diag" ||
     // File create/read/analysis routes: a signed-in user must attach a bearer so
     // the request is metered + persisted under their account, never silently as
     // anonymous. requireAuthToken() still returns null for truly signed-out
@@ -294,6 +295,24 @@ export function endRealtimeSession(
   return jsonRequest<void>("/api/public-ai/realtime/end", {
     method: "POST",
     body: JSON.stringify({ realtimeSessionId, durationSeconds }),
+  });
+}
+
+/**
+ * Report a single privacy-safe live-voice lifecycle SIGNAL (connection drop,
+ * reconnect success, or legacy fallback) so support can see when a "Talk to Ora"
+ * session got stuck or gave up — previously invisible server-side. Only a bounded
+ * reason + counts are sent; never audio or transcript. Best-effort and non-charging.
+ */
+export function reportRealtimeClientDiag(payload: {
+  reason: "connection_drop" | "reconnect_succeeded" | "legacy_fallback";
+  realtimeSessionId?: string;
+  drops?: number;
+  networkQuality?: "good" | "degraded" | "reconnecting" | "legacy";
+}): Promise<void> {
+  return jsonRequest<void>("/api/public-ai/realtime/client-diag", {
+    method: "POST",
+    body: JSON.stringify({ surface: "mobile", ...payload }),
   });
 }
 

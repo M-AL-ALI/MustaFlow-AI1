@@ -755,6 +755,76 @@ router.post("/public-ai/realtime/end", oraRealtimeSessionTickLimiter, async (req
   }
 });
 
+// Privacy-safe client diagnostics payload. `.strict()` + a closed reason enum +
+// bounded numbers guarantee no transcript, audio, or free-form text can ever be
+// logged here — only high-signal lifecycle reasons and small counts.
+const clientDiagBodySchema = z
+  .object({
+    reason: z.enum([
+      "connection_drop",
+      "reconnect_scheduled",
+      "reconnect_succeeded",
+      "reconnect_exhausted",
+      "legacy_fallback",
+      "stuck_thinking",
+      "stuck_speaking",
+      "silent_audio",
+    ]),
+    surface: z.enum(["web", "mobile"]),
+    realtimeSessionId: z.string().uuid().optional(),
+    attempt: z.number().int().nonnegative().max(1_000).optional(),
+    drops: z.number().int().nonnegative().max(100_000).optional(),
+    networkQuality: z.enum(["good", "degraded", "reconnecting", "legacy"]).optional(),
+  })
+  .strict();
+
+/**
+ * POST /api/public-ai/realtime/client-diag
+ *
+ * Best-effort, non-charging sink for a handful of privacy-safe live-voice
+ * lifecycle SIGNALS (connection drops, reconnect-ladder progress, watchdog
+ * escalations, legacy fallback) so support/on-call can SEE when a "Talk to Ora"
+ * session got stuck or gave up — previously invisible server-side because the
+ * client kept its diagnostics ring in memory only. The strict enum + bounded
+ * numeric schema makes it impossible to smuggle transcript/audio/PII. Rate-limited
+ * like the other per-session tick endpoints; always 204 on accept.
+ */
+router.post("/public-ai/realtime/client-diag", oraRealtimeSessionTickLimiter, async (req, res) => {
+  const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+  if (!sessionToken || !validateSession(sessionToken)) {
+    res.status(401).json({ error: "No active session." });
+    return;
+  }
+  const parsed = clientDiagBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid diagnostics report." });
+    return;
+  }
+  let tier = "anonymous";
+  try {
+    const authed = await resolveAuthedOraUser(req);
+    tier = authed?.tier ?? "anonymous";
+  } catch {
+    // Best-effort — diagnostics must never block on auth resolution.
+  }
+  logger.info(
+    {
+      component: "ora-realtime",
+      event: "client_diag",
+      reason: parsed.data.reason,
+      surface: parsed.data.surface,
+      tier,
+      realtimeSessionId: parsed.data.realtimeSessionId ?? null,
+      attempt: parsed.data.attempt ?? null,
+      drops: parsed.data.drops ?? null,
+      networkQuality: parsed.data.networkQuality ?? null,
+    },
+    "Ora realtime client diagnostic",
+  );
+  res.setHeader("Cache-Control", "no-store");
+  res.status(204).end();
+});
+
 /**
  * GET /api/public-ai/realtime/diagnostics
  *

@@ -49,6 +49,7 @@ import {
   createRealtimeSession,
   endRealtimeSession,
   heartbeatRealtimeSession,
+  reportRealtimeClientDiag,
   ApiRequestError,
 } from "@/lib/api";
 import type {
@@ -131,7 +132,9 @@ export interface UseOraRealtimeVoiceNativeReturn {
   toggleMute: () => void;
   /**
    * Coarse connection-health signal for the UI quality dot. Derived from the
-   * diagnostics ring buffer; never sent to any server.
+   * in-memory diagnostics ring buffer, which is itself never uploaded. (A handful
+   * of bounded, privacy-safe lifecycle reasons/counts are POSTed separately via
+   * reportServerDiag — never audio or transcript.)
    */
   networkQuality: NetworkQuality;
   /**
@@ -215,19 +218,31 @@ const AUDIO_STALL_MAX_STALE_POLLS = 2;
 // Consecutive silent-audio incidents (per response) before escalating past the
 // single in-place resume attempt to the reconnect -> legacy fallback ladder.
 const MAX_SILENT_AUDIO_FAILURES = 2;
+// Consecutive thinking/speaking watchdog fires (lost response-lifecycle events)
+// before escalating from local recover-to-listening to a full reconnect. A single
+// lost data-channel event is common on a flaky link and must NOT tear the session
+// down; only a sustained run of missed responses indicates a dead channel. Kept
+// high so a healthy session survives the entire per-plan time budget.
+const WATCHDOG_ESCALATION_FIRES = 4;
 
 // ─── Poor-network resilience tuning (mirrored in the website hook) ───────────
-// On the first connection drop the app waits this long before the single
-// automatic reconnect attempt, giving a flaky link a moment to settle. A NetInfo
-// reachability-restored event cancels the wait and fires the reconnect at once.
-const RECONNECT_DELAY_MS = 2_000;
+// Successive automatic reconnect attempts wait these delays (ms) before firing,
+// capped at the last value; a NetInfo reachability-restored event can fire the
+// pending attempt early. The ladder resets to the first step after ANY successful
+// (re)connect, so a long call survives many independent drops across the full
+// per-plan time budget.
+const RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000];
+// Maximum consecutive reconnect attempts (with no intervening success) before
+// giving up on realtime and dropping to the legacy voice loop.
+const RECONNECT_MAX_ATTEMPTS = 6;
 // Sliding window + threshold for the "Connection issues?" instability chip: this
 // many `output_audio_buffer.stopped` events (without a matching `started`) inside
 // the window flags a degraded connection.
 const AUDIO_STOP_WINDOW_MS = 30_000;
 const AUDIO_STOP_THRESHOLD = 2;
-// The diagnostics ring buffer keeps only the most recent events; it is used only
-// to derive UI state and optional debug logs and is NEVER sent to any server.
+// The diagnostics ring buffer keeps only the most recent events; the ring itself
+// is used only to derive UI state / debug logs and is never uploaded. (A few
+// bounded, privacy-safe lifecycle reasons/counts are POSTed via reportServerDiag.)
 const DIAG_RING_SIZE = 20;
 
 // ─── Transcript validity filter (mirrored in the website hook) ───────────────
@@ -699,6 +714,10 @@ export function scoreTranscriptFocus(
     recentAssistantText: string;
     msSinceLastAcceptedTurn: number;
     acceptedTurnCount: number;
+    // True while Ora has a response in flight or is speaking. Only meaningful in
+    // focused mode: an established primary speaker is accepted freely while Ora is
+    // idle, but must be addressed/directed to interrupt while she is responding.
+    assistantActive?: boolean;
   },
 ): FocusVerdict {
   const base = validateUserTranscript(text, {
@@ -712,13 +731,23 @@ export function scoreTranscriptFocus(
   // Clear single-word commands (stop/yes/no/...) are always addressed.
   if (words.length === 1 && VOICE_COMMANDS.has(words[0])) return { accepted: true };
   // Opening Talk to Ora is an explicit address, so the FIRST utterance gets a
-  // longer multilingual cold-start window. After that, keep ambient-room exposure
-  // short: natural follow-ups still work, but nearby conversations no longer get
-  // a fresh 12s open mic after every accepted turn.
+  // longer multilingual cold-start window. Inside it, natural follow-ups work
+  // without a wake word.
   if (opts.msSinceLastAcceptedTurn <= focusWindowMsForTurnCount(opts.acceptedTurnCount)) {
     return { accepted: true, viaWindow: true };
   }
-  // Idle / post-background: require an explicit address or a directed request.
+  // Established primary speaker: once at least one turn has been accepted AND Ora
+  // is not currently responding, accept any real (echo/filler-filtered) turn for
+  // the rest of the session — no matter how long the user paused between replies.
+  // This is what keeps a live session solid for the FULL per-plan time budget: a
+  // natural think-pause must never drop the primary user. While Ora IS responding,
+  // fall through to the stricter addressed/directed gate below so nearby noise
+  // cannot chop her off mid-sentence.
+  if (opts.acceptedTurnCount > 0 && !opts.assistantActive) {
+    return { accepted: true, viaWindow: true };
+  }
+  // Cold start (turn 0) outside the window, or an interruption while Ora is
+  // responding: require an explicit address or a directed request.
   if (isAddressedToOra(words) || looksDirected(words, text)) return { accepted: true };
   return { accepted: false, reason: "not_addressed_or_outside_focus" };
 }
@@ -822,6 +851,11 @@ export function _resetWebRTCCacheForTest(): void {
 // narrow interfaces keep the hook strict without leaking `any`.
 interface RTCTrackLike {
   enabled: boolean;
+  // Present on react-native-webrtc MediaStreamTrack at runtime; optional so the
+  // narrow interface stays honest. Used by the stall poll to tell a genuinely
+  // dead transport (muted/ended) apart from a merely silent sink.
+  muted?: boolean;
+  readyState?: string;
   stop: () => void;
 }
 interface MediaStreamLike {
@@ -911,13 +945,15 @@ export function useOraRealtimeVoiceNative(
   const mutedRef = useRef(false);
 
   // ── Poor-network resilience (diagnostics + single-retry reconnect) ──────────
-  // diagRef: bounded ring buffer of the most recent lifecycle events. Used only
-  // to derive UI state / debug logs; NEVER sent to any server.
+  // diagRef: bounded ring buffer of the most recent lifecycle events. The ring is
+  // used only to derive UI state / debug logs and is never uploaded; only a few
+  // bounded, privacy-safe reasons/counts are POSTed via reportServerDiag.
   const diagRef = useRef<{ at: number; event: string; detail?: Record<string, unknown> }[]>([]);
-  // reconnectAttemptedRef: guards the "only ONE automatic reconnect" rule — once
-  // true, the next drop goes straight to legacy fallback. Reset on a fresh
-  // (non-reconnect) start() and on a manual retry().
-  const reconnectAttemptedRef = useRef(false);
+  // reconnectAttemptsRef: counts consecutive automatic recovery attempts since the
+  // last successful (re)connect. Reset to 0 on any successful connect, a fresh
+  // (non-reconnect) start(), or a manual retry(); at RECONNECT_MAX_ATTEMPTS the
+  // ladder gives up and drops to legacy.
+  const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // reconnectConsumedRef: one-shot latch so the backoff timer and a NetInfo
   // reachability-restored event can never both fire the same reconnect.
@@ -925,6 +961,9 @@ export function useOraRealtimeVoiceNative(
   // pendingReconnectFireRef: set while waiting out RECONNECT_DELAY_MS so a
   // NetInfo reachability-restored event can trigger the reconnect immediately.
   const pendingReconnectFireRef = useRef<(() => void) | null>(null);
+  // scheduleReconnectRef: forward ref so a failed attempt can re-enter the ladder
+  // without a circular useCallback dependency on itself.
+  const scheduleReconnectRef = useRef<((reason: string) => void) | null>(null);
   // lastCtxRef: the most recent start context, replayed when reconnecting/retrying.
   const lastCtxRef = useRef<RealtimeStartContext | null>(null);
   // audioStopTimestampsRef: timestamps of recent unmatched output_audio stops,
@@ -1038,13 +1077,35 @@ export function useOraRealtimeVoiceNative(
 
   // ── Diagnostics ring buffer + derived connection-quality helpers ────────────
   // recordDiag appends to a bounded in-memory ring (last DIAG_RING_SIZE events).
-  // It is used ONLY to derive UI state and optional debug logs — never sent to a
-  // server. Kept privacy-safe: callers pass counts/reasons, never audio/transcript.
+  // The ring is used ONLY to derive UI state / debug logs and is never uploaded;
+  // server visibility comes from reportServerDiag, which POSTs only a few bounded,
+  // privacy-safe reasons/counts. Either way: never audio, never transcript.
   const recordDiag = useCallback((event: string, detail?: Record<string, unknown>) => {
     const buf = diagRef.current;
     buf.push({ at: Date.now(), event, detail });
     if (buf.length > DIAG_RING_SIZE) buf.splice(0, buf.length - DIAG_RING_SIZE);
   }, []);
+
+  // Best-effort: POST a single privacy-safe lifecycle SIGNAL to the server so
+  // support can see when live voice dropped, recovered, or gave up — previously
+  // invisible server-side. Only a bounded reason + counts are sent; the in-memory
+  // diagnostics ring itself is never uploaded and no transcript/audio ever leaves
+  // the device. Failures are swallowed so diagnostics can never disrupt the call.
+  const reportServerDiag = useCallback(
+    (reason: "connection_drop" | "reconnect_succeeded" | "legacy_fallback") => {
+      try {
+        void reportRealtimeClientDiag({
+          reason,
+          realtimeSessionId: realtimeSessionIdRef.current ?? undefined,
+          drops: reconnectAttemptsRef.current,
+          networkQuality: networkQualityRef.current,
+        }).catch(() => {});
+      } catch {
+        // best-effort — diagnostics must never disrupt the voice session.
+      }
+    },
+    [],
+  );
 
   const applyNetworkQuality = useCallback((q: NetworkQuality) => {
     networkQualityRef.current = q;
@@ -1169,6 +1230,7 @@ export function useOraRealtimeVoiceNative(
   const enterLegacyFallback = useCallback(
     (reason: string) => {
       recordDiag("legacy_fallback", { reason });
+      reportServerDiag("legacy_fallback");
       fullTeardown();
       setState("idle");
       setFallbackReason(reason);
@@ -1176,12 +1238,15 @@ export function useOraRealtimeVoiceNative(
       applyNetworkQuality("legacy");
       onFallbackRef.current?.(reason);
     },
-    [fullTeardown, recordDiag, applyNetworkQuality],
+    [fullTeardown, recordDiag, reportServerDiag, applyNetworkQuality],
   );
 
-  // The single automatic recovery attempt: fully tear down the dropped session,
-  // wait out the backoff (cancellable by NetInfo), then re-mint + rebuild from
-  // scratch. Only ONE attempt — a second drop routes straight to legacy.
+  // Schedule the next automatic recovery attempt after a mid-call drop: fully tear
+  // down the dropped session, wait out the backoff (cancellable early by NetInfo),
+  // then re-mint + rebuild from scratch. Each drop or failed attempt advances one
+  // backoff step; a successful reconnect resets the ladder. Only once
+  // RECONNECT_MAX_ATTEMPTS consecutive attempts fail with no success in between do
+  // we drop to legacy, so a flaky link recovers again and again for the full budget.
   const scheduleReconnect = useCallback(
     (reason: string) => {
       const ctx = lastCtxRef.current;
@@ -1189,9 +1254,20 @@ export function useOraRealtimeVoiceNative(
         enterLegacyFallback(reason);
         return;
       }
-      reconnectAttemptedRef.current = true;
+      if (reconnectAttemptsRef.current >= RECONNECT_MAX_ATTEMPTS) {
+        enterLegacyFallback(reason);
+        return;
+      }
+      const attempt = reconnectAttemptsRef.current;
+      reconnectAttemptsRef.current = attempt + 1;
       reconnectConsumedRef.current = false;
-      recordDiag("reconnect_scheduled", { reason, delay_ms: RECONNECT_DELAY_MS });
+      const delayMs = RECONNECT_BACKOFF_MS[Math.min(attempt, RECONNECT_BACKOFF_MS.length - 1)];
+      recordDiag("reconnect_scheduled", {
+        reason,
+        attempt: attempt + 1,
+        max: RECONNECT_MAX_ATTEMPTS,
+        delay_ms: delayMs,
+      });
       // fullTeardown clears the old pc/dc/mic + fires the /end beacon for the old
       // token, so the reconnect mints a genuinely fresh session.
       fullTeardown();
@@ -1206,39 +1282,47 @@ export function useOraRealtimeVoiceNative(
           clearTimeout(reconnectTimerRef.current);
           reconnectTimerRef.current = null;
         }
-        recordDiag("reconnect_firing");
+        recordDiag("reconnect_firing", { attempt: attempt + 1 });
         void startRef.current?.(ctx, { isReconnect: true }).then((result) => {
           if (result?.started) {
             recordDiag("reconnect_succeeded");
+            reconnectAttemptsRef.current = 0;
             applyNetworkQuality("good");
+            reportServerDiag("reconnect_succeeded");
           } else if (!result?.overLimit) {
-            // A genuine reconnect failure (not an out-of-minutes stop) drops to
-            // legacy. overLimit already surfaced its own graceful state.
-            enterLegacyFallback(reason);
+            // Not connected and not an out-of-minutes stop: advance to the next
+            // backoff step until the budget is exhausted (then legacy). overLimit
+            // already surfaced its own graceful state.
+            scheduleReconnectRef.current?.(reason);
           }
         });
       };
 
       pendingReconnectFireRef.current = fire;
-      reconnectTimerRef.current = setTimeout(fire, RECONNECT_DELAY_MS);
+      reconnectTimerRef.current = setTimeout(fire, delayMs);
     },
-    [enterLegacyFallback, fullTeardown, recordDiag, applyNetworkQuality],
+    [enterLegacyFallback, fullTeardown, recordDiag, applyNetworkQuality, reportServerDiag],
   );
 
+  // Keep the forward ref current so a failed attempt re-enters the latest ladder.
+  useEffect(() => {
+    scheduleReconnectRef.current = scheduleReconnect;
+  }, [scheduleReconnect]);
+
   // A mid-call connection drop (ICE failed/disconnected, data-channel close/error,
-  // or an unrecoverable connection-state change). First drop -> one auto-reconnect;
-  // any subsequent drop -> legacy fallback.
+  // or an unrecoverable connection-state change). Hands off to the backoff ladder,
+  // which retries (resetting on each success) until the attempt budget is exhausted
+  // and only then drops to legacy.
   const handleConnectionDrop = useCallback(
     (reason: string) => {
       if (!activeRef.current) return;
-      recordDiag("connection_drop", { reason, reconnect_attempted: reconnectAttemptedRef.current });
-      if (reconnectAttemptedRef.current) {
-        enterLegacyFallback(reason);
-      } else {
-        scheduleReconnect(reason);
-      }
+      recordDiag("connection_drop", { reason, attempts: reconnectAttemptsRef.current });
+      reportServerDiag("connection_drop");
+      // Let the ladder decide: it advances the backoff and only drops to legacy
+      // once the consecutive-attempt budget (reset on each success) is exhausted.
+      scheduleReconnect(reason);
     },
-    [enterLegacyFallback, scheduleReconnect, recordDiag],
+    [scheduleReconnect, recordDiag, reportServerDiag],
   );
 
   const stop = useCallback(() => {
@@ -1368,9 +1452,11 @@ export function useOraRealtimeVoiceNative(
 
   // Recovery ladder for a "responding but silent" response. Rung 1: a single
   // in-place resume (re-enable the remote audio track, respecting mute) — covers
-  // a sink left silenced/blocked. Rung 2 (>= MAX_SILENT_AUDIO_FAILURES
-  // incidents): escalate to the shared connection-drop ladder (one reconnect,
-  // then legacy voice fallback).
+  // a sink left silenced/blocked. Rung 2 (resume didn't help): end the stuck
+  // response locally and return to listening — a single silent reply is NOT a
+  // connection failure and must never tear the session down. Only a genuinely
+  // dead audio track (detected by the stall poll) escalates to the reconnect
+  // ladder.
   const recoverSilentAudio = useCallback(
     (source: string) => {
       if (!activeRef.current) return;
@@ -1386,11 +1472,19 @@ export function useOraRealtimeVoiceNative(
         if (track) track.enabled = !mutedRef.current;
         return;
       }
-      // Escalate: reset the incident counter and hand to the reconnect ladder.
+      // Resume did not help, but a single silent reply is NOT a connection failure
+      // and must never tear the session down (only a genuinely dead audio track
+      // does — the stall poll routes that straight to the reconnect ladder). End
+      // this stuck response locally and return to listening so the primary speaker
+      // keeps the session for the full time budget.
       consecutiveSilentAudioRef.current = 0;
-      handleConnectionDrop(source);
+      logVoiceDiag("silent_audio_recovered_local", { source });
+      sendEvent({ type: "response.cancel" });
+      assistantResponseActiveRef.current = false;
+      assistantSpeakingRef.current = false;
+      if (activeRef.current) setState("listening");
     },
-    [stopAudioLivenessTracking, handleConnectionDrop],
+    [stopAudioLivenessTracking, sendEvent],
   );
 
   // Arm the silent-start watchdog: called when assistant transcript deltas prove
@@ -1468,24 +1562,32 @@ export function useOraRealtimeVoiceNative(
       }
       void readInboundAudioPackets().then((packets) => {
         if (!activeRef.current || activeResponseIdRef.current !== armedResponseId) return;
-        if (packets == null) {
+        const track = remoteTrackRef.current;
+        const trackDead = !!track && (track.muted === true || track.readyState === "ended");
+        if (packets == null && !trackDead) {
           // No stats available: cannot judge progress, so don't accrue a stall.
           audioStallStaleCountRef.current = 0;
           return;
         }
         const prev = lastAudioProgressRef.current.value;
-        if (packets > prev) {
+        if (packets != null && packets > prev && !trackDead) {
           lastAudioProgressRef.current = { value: packets, at: Date.now() };
           audioStallStaleCountRef.current = 0;
           return;
         }
         const stale = (audioStallStaleCountRef.current += 1);
         if (stale >= AUDIO_STALL_MAX_STALE_POLLS) {
-          recoverSilentAudio("audio_stall");
+          if (trackDead) {
+            // A muted/ended remote track is a genuine transport failure — go
+            // straight to the reconnect ladder rather than local recovery.
+            handleConnectionDrop("audio_track_dead");
+          } else {
+            recoverSilentAudio("audio_stall");
+          }
         }
       });
     }, AUDIO_STALL_POLL_MS);
-  }, [readInboundAudioPackets, recoverSilentAudio]);
+  }, [readInboundAudioPackets, recoverSilentAudio, handleConnectionDrop]);
 
   // Called on output_audio_buffer.started: audible audio has begun for this
   // response. Cancel the silent-start watchdog and begin stall polling.
@@ -1664,7 +1766,7 @@ export function useOraRealtimeVoiceNative(
                 assistantResponseActiveRef.current = false;
                 sendEvent({ type: "response.cancel" });
                 const fires = (consecutiveWatchdogFiresRef.current += 1);
-                if (fires >= 2) {
+                if (fires >= WATCHDOG_ESCALATION_FIRES) {
                   consecutiveWatchdogFiresRef.current = 0;
                   handleConnectionDrop("consecutive_thinking_watchdog");
                 } else {
@@ -1721,6 +1823,10 @@ export function useOraRealtimeVoiceNative(
             recentAssistantText: recentAssistantSpeechRef.current,
             msSinceLastAcceptedTurn,
             acceptedTurnCount,
+            // While Ora is thinking or speaking, an established speaker must still
+            // address/direct her to interrupt; when she is idle they are accepted
+            // freely (see scoreTranscriptFocus).
+            assistantActive: assistantResponseActiveRef.current || assistantSpeakingRef.current,
           });
           if (verdict.accepted) {
             // Accepted turns keep the user engaged, but after the first utterance
@@ -1771,6 +1877,18 @@ export function useOraRealtimeVoiceNative(
             if (focusMode === "focused" && typeof evt.item_id === "string" && evt.item_id) {
               sendEvent({ type: "conversation.item.delete", item_id: evt.item_id });
             }
+            // A rejected turn sends no response.create, so no reply is coming and
+            // nothing is wrong. The UI may have flipped to "thinking" on
+            // speech_stopped — recover it to "listening" now instead of hanging
+            // until the watchdog, but only while Ora is idle (never interrupt an
+            // in-flight reply). A rejected turn must never count toward escalation.
+            if (!assistantResponseActiveRef.current && !assistantSpeakingRef.current) {
+              if (thinkingWatchdogRef.current) {
+                clearTimeout(thinkingWatchdogRef.current);
+                thinkingWatchdogRef.current = null;
+              }
+              if (activeRef.current) setState("listening");
+            }
           }
           break;
         }
@@ -1781,6 +1899,16 @@ export function useOraRealtimeVoiceNative(
           logVoiceDiag("transcript_failed", { focus_mode: focusModeRef.current });
           userTextRef.current = "";
           setInterimUserTranscript("");
+          // No usable transcript means no response.create and no reply. Recover the
+          // "thinking" UI immediately (only while Ora is idle) rather than hanging
+          // until the watchdog; a failed transcription must not count as a fault.
+          if (!assistantResponseActiveRef.current && !assistantSpeakingRef.current) {
+            if (thinkingWatchdogRef.current) {
+              clearTimeout(thinkingWatchdogRef.current);
+              thinkingWatchdogRef.current = null;
+            }
+            if (activeRef.current) setState("listening");
+          }
           break;
 
         case "response.created": {
@@ -1827,7 +1955,7 @@ export function useOraRealtimeVoiceNative(
                 assistantResponseActiveRef.current = false;
                 sendEvent({ type: "response.cancel" });
                 const fires = (consecutiveWatchdogFiresRef.current += 1);
-                if (fires >= 2) {
+                if (fires >= WATCHDOG_ESCALATION_FIRES) {
                   consecutiveWatchdogFiresRef.current = 0;
                   handleConnectionDrop("consecutive_thinking_watchdog");
                 } else {
@@ -1912,7 +2040,7 @@ export function useOraRealtimeVoiceNative(
               assistantSpeakingRef.current = false;
               sendEvent({ type: "response.cancel" });
               const fires = (consecutiveWatchdogFiresRef.current += 1);
-              if (fires >= 2) {
+              if (fires >= WATCHDOG_ESCALATION_FIRES) {
                 consecutiveWatchdogFiresRef.current = 0;
                 handleConnectionDrop("consecutive_speaking_watchdog");
               } else {
@@ -2152,11 +2280,11 @@ export function useOraRealtimeVoiceNative(
       // Remember the last context so an auto-reconnect or the Retry button can
       // rebuild the session without the caller re-supplying it.
       lastCtxRef.current = ctx;
-      // A fresh, user-initiated start resets the single-attempt reconnect budget
-      // and clears any prior instability/quality state. A reconnect keeps the
-      // budget consumed so a second drop routes straight to legacy.
+      // A fresh, user-initiated start resets the reconnect-attempt budget and
+      // clears any prior instability/quality state. A reconnect keeps the running
+      // attempt count so the backoff ladder can advance toward its cap.
       if (!isReconnect) {
-        reconnectAttemptedRef.current = false;
+        reconnectAttemptsRef.current = 0;
         reconnectConsumedRef.current = false;
         setConnectionIssue(false);
         applyNetworkQuality("good");
@@ -2615,7 +2743,7 @@ export function useOraRealtimeVoiceNative(
     const ctx = lastCtxRef.current;
     if (!ctx) return;
     recordDiag("manual_retry");
-    reconnectAttemptedRef.current = false;
+    reconnectAttemptsRef.current = 0;
     reconnectConsumedRef.current = false;
     setConnectionIssue(false);
     void start(ctx);

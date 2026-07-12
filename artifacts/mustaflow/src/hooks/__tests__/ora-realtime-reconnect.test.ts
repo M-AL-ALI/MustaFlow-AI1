@@ -1,14 +1,17 @@
 /**
  * Talk to Ora realtime voice — reconnect state machine tests (web).
  *
- * Verifies the single-attempt auto-reconnect contract for dropped connections:
- *   - An ICE/data-channel drop triggers exactly ONE automatic recovery attempt.
- *   - A failed reconnect OR a second drop routes straight to legacy fallback.
- *   - The legacy state sets `fallbackReason`, `networkQuality` = "legacy", and
- *     calls `onFallback` exactly once.
- *   - `retry()` resets the one-attempt budget so the user can request a fresh
- *     session after landing in legacy mode.
- *   - The `window.online` event cancels the pending 2 s timer and fires the
+ * Verifies the backoff-ladder auto-reconnect contract for dropped connections:
+ *   - An ICE/data-channel drop starts the reconnect ladder (backoff steps
+ *     [2 s, 5 s, 10 s...], up to RECONNECT_MAX_ATTEMPTS consecutive attempts).
+ *   - A successful reconnect RESETS the ladder, so a later drop reconnects
+ *     again — a flaky link keeps recovering for the full session time budget.
+ *   - Legacy fallback is entered ONLY after the whole attempt budget is spent
+ *     with no success in between; it then sets `fallbackReason`,
+ *     `networkQuality` = "legacy", and calls `onFallback` exactly once.
+ *   - `retry()` resets the ladder so the user can request a fresh session after
+ *     landing in legacy mode.
+ *   - The `window.online` event cancels the pending backoff timer and fires the
  *     reconnect immediately.
  *   - A data-channel close/error is treated identically to an ICE failure.
  *
@@ -130,6 +133,12 @@ function fakeStream(): MediaStream {
   } as unknown as MediaStream;
 }
 
+// Total virtual time to exhaust the whole reconnect ladder. The backoff steps are
+// [2 s, 5 s, 10 s, 10 s, 10 s, 10 s] for RECONNECT_MAX_ATTEMPTS = 6 (~47 s of
+// consecutive failures). Advance a little past that so the final attempt fails and
+// the legacy fallback is entered.
+const FULL_LADDER_MS = 50_000;
+
 // ─── Suite ────────────────────────────────────────────────────────────────────
 
 describe("useOraRealtimeVoice — reconnect state machine", () => {
@@ -179,7 +188,10 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     });
 
     // global fetch: SDP exchange with OpenAI → ok.
-    vi.stubGlobal("fetch", vi.fn(async () => sdpResponse()));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => sdpResponse()),
+    );
   });
 
   afterEach(() => {
@@ -195,9 +207,7 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
    * Returns true when start() succeeded (an RTCPeerConnection was created).
    */
   async function connectHook(
-    hook: ReturnType<
-      typeof renderHook<ReturnType<typeof useOraRealtimeVoice>, unknown>
-    >,
+    hook: ReturnType<typeof renderHook<ReturnType<typeof useOraRealtimeVoice>, unknown>>,
   ): Promise<boolean> {
     let started = false;
     await act(async () => {
@@ -252,27 +262,27 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     expect(hook.result.current.fallbackReason).toBeNull();
   });
 
-  it("fires exactly ONE mint for the auto-reconnect after RECONNECT_DELAY_MS elapses", async () => {
+  it("fires exactly ONE mint for the auto-reconnect after the first backoff step (2 s) elapses", async () => {
     const hook = renderHook(() =>
       useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn() }),
     );
     await connectHook(hook);
 
-    const mintsAfterConnect = vi.mocked(authFetch).mock.calls.filter((a) =>
-      String(a[0]).includes("/session"),
-    ).length;
+    const mintsAfterConnect = vi
+      .mocked(authFetch)
+      .mock.calls.filter((a) => String(a[0]).includes("/session")).length;
     expect(mintsAfterConnect).toBe(1);
 
     act(() => {
       pcInstances[0].simulateIceFailed();
     });
 
-    // Advance past RECONNECT_DELAY_MS (2000 ms constant in the hook).
+    // Advance past the first backoff step (RECONNECT_BACKOFF_MS[0] = 2000 ms).
     await advanceMs(2500);
 
-    const mintsAfterReconnect = vi.mocked(authFetch).mock.calls.filter((a) =>
-      String(a[0]).includes("/session"),
-    ).length;
+    const mintsAfterReconnect = vi
+      .mocked(authFetch)
+      .mock.calls.filter((a) => String(a[0]).includes("/session")).length;
     // Exactly one more mint for the auto-reconnect.
     expect(mintsAfterReconnect).toBe(2);
     // Quality should be "good" once the reconnect succeeded.
@@ -282,87 +292,119 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
 
   // ─── Legacy fallback when the reconnect itself fails ─────────────────────
 
-  it("enters legacy fallback when the auto-reconnect mint returns an error", async () => {
+  it("enters legacy fallback only after the whole reconnect ladder is exhausted", async () => {
     const onFallback = vi.fn();
     const hook = renderHook(() =>
-      useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn(), onFallback }),
+      useOraRealtimeVoice({
+        onUserTranscript: vi.fn(),
+        onAssistantTranscript: vi.fn(),
+        onFallback,
+      }),
     );
     await connectHook(hook);
 
-    // After the initial connect succeeds, make all subsequent session calls fail.
+    // After the initial connect succeeds, make every subsequent mint fail so no
+    // reconnect attempt can ever land.
     vi.mocked(authFetch).mockImplementation(async (url: string) => {
       if (String(url).includes("/session")) return mintErrorResponse();
       return okResponse();
     });
 
-    act(() => { pcInstances[0].simulateIceFailed(); });
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
+
+    // A single failed attempt must NOT drop to legacy — the ladder keeps retrying
+    // so a flaky link can recover for the full session time budget.
     await advanceMs(2500);
+    expect(hook.result.current.networkQuality).toBe("reconnecting");
+    expect(onFallback).not.toHaveBeenCalled();
+
+    // Advance past the full backoff ladder so every consecutive attempt fails and
+    // the budget (RECONNECT_MAX_ATTEMPTS) is finally spent.
+    await advanceMs(FULL_LADDER_MS);
 
     expect(hook.result.current.networkQuality).toBe("legacy");
     expect(hook.result.current.fallbackReason).toMatch(/reconnect failed|basic voice/i);
     expect(onFallback).toHaveBeenCalledTimes(1);
   });
 
-  // ─── No double auto-reconnect ─────────────────────────────────────────────
+  // ─── Ladder resets on a successful reconnect ──────────────────────────────
 
-  it("does NOT schedule a second auto-reconnect — second drop goes straight to legacy", async () => {
+  it("a second drop after a successful reconnect schedules another reconnect (ladder resets on success)", async () => {
     const onFallback = vi.fn();
     const hook = renderHook(() =>
-      useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn(), onFallback }),
+      useOraRealtimeVoice({
+        onUserTranscript: vi.fn(),
+        onAssistantTranscript: vi.fn(),
+        onFallback,
+      }),
     );
     await connectHook(hook);
 
-    // First drop → auto-reconnect is scheduled.
-    act(() => { pcInstances[0].simulateIceFailed(); });
+    // First drop → the ladder schedules a reconnect.
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
     expect(hook.result.current.networkQuality).toBe("reconnecting");
 
-    // Fire the reconnect timer — the reconnect session starts and succeeds.
+    // Fire the first backoff step (2 s) — the reconnect session starts and
+    // succeeds, which RESETS the ladder.
     await advanceMs(2500);
-
-    // A second RTCPeerConnection was created for the reconnected session.
     expect(pcInstances).toHaveLength(2);
     expect(hook.result.current.networkQuality).toBe("good");
 
     // Open the data channel on the reconnected session.
-    await act(async () => { pcInstances[1].dc?.onopen?.(); });
+    await act(async () => {
+      pcInstances[1].dc?.onopen?.();
+    });
 
-    // Second drop on the reconnected session.
-    act(() => { pcInstances[1].simulateIceFailed(); });
+    // Second drop on the reconnected session must schedule ANOTHER reconnect —
+    // NOT drop to legacy — because the successful reconnect reset the budget.
+    act(() => {
+      pcInstances[1].simulateIceFailed();
+    });
+    expect(hook.result.current.networkQuality).toBe("reconnecting");
+    expect(hook.result.current.fallbackReason).toBeNull();
+    expect(onFallback).not.toHaveBeenCalled();
 
-    // Must jump straight to legacy — no second auto-reconnect timer.
-    expect(hook.result.current.networkQuality).toBe("legacy");
-    expect(hook.result.current.fallbackReason).toBeTruthy();
-    // onFallback must be called exactly once (not twice — second drop is not
-    // a separate "fallback" event; the reconnect budget is simply exhausted).
-    expect(onFallback).toHaveBeenCalledTimes(1);
+    // And it, too, recovers on the first backoff step.
+    await advanceMs(2500);
+    expect(pcInstances).toHaveLength(3);
+    expect(hook.result.current.networkQuality).toBe("good");
   });
 
-  it("no extra mint calls after second drop — confirms no third reconnect attempt fires", async () => {
+  it("each drop after a successful reconnect fires another mint (ladder resets on success)", async () => {
     const hook = renderHook(() =>
       useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn() }),
     );
     await connectHook(hook);
 
-    // First drop + auto-reconnect succeeds.
-    act(() => { pcInstances[0].simulateIceFailed(); });
+    // First drop + auto-reconnect succeeds → 2 mints total.
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
     await advanceMs(2500);
 
-    const mintsAfterFirstReconnect = vi.mocked(authFetch).mock.calls.filter(
-      (a) => String(a[0]).includes("/session"),
-    ).length;
+    const mintsAfterFirstReconnect = vi
+      .mocked(authFetch)
+      .mock.calls.filter((a) => String(a[0]).includes("/session")).length;
     expect(mintsAfterFirstReconnect).toBe(2);
 
-    // Second drop on the reconnected session → goes straight to legacy.
-    act(() => { pcInstances[1].simulateIceFailed(); });
+    // Open the reconnected data channel, then drop again.
+    await act(async () => {
+      pcInstances[1].dc?.onopen?.();
+    });
+    act(() => {
+      pcInstances[1].simulateIceFailed();
+    });
+    await advanceMs(2500);
 
-    // Advance well past RECONNECT_DELAY_MS to confirm no timer was scheduled.
-    await advanceMs(3000);
-
-    const mintsAfterSecondDrop = vi.mocked(authFetch).mock.calls.filter(
-      (a) => String(a[0]).includes("/session"),
-    ).length;
-    // Unchanged — the second drop went to legacy, NOT to a third mint.
-    expect(mintsAfterSecondDrop).toBe(2);
+    const mintsAfterSecondReconnect = vi
+      .mocked(authFetch)
+      .mock.calls.filter((a) => String(a[0]).includes("/session")).length;
+    // The reset ladder fired a third mint for the second recovery.
+    expect(mintsAfterSecondReconnect).toBe(3);
   });
 
   // ─── Alternative drop sources ─────────────────────────────────────────────
@@ -373,7 +415,9 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     );
     await connectHook(hook);
 
-    act(() => { pcInstances[0].simulatePcFailed(); });
+    act(() => {
+      pcInstances[0].simulatePcFailed();
+    });
 
     // Should schedule a reconnect on the first pc_failed event.
     expect(hook.result.current.networkQuality).toBe("reconnecting");
@@ -388,7 +432,9 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     );
     await connectHook(hook);
 
-    act(() => { pcInstances[0].simulateDcClose(); });
+    act(() => {
+      pcInstances[0].simulateDcClose();
+    });
 
     expect(hook.result.current.networkQuality).toBe("reconnecting");
   });
@@ -399,7 +445,9 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     );
     await connectHook(hook);
 
-    act(() => { pcInstances[0].simulateDcError(); });
+    act(() => {
+      pcInstances[0].simulateDcError();
+    });
 
     expect(hook.result.current.networkQuality).toBe("reconnecting");
   });
@@ -412,14 +460,17 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     );
     await connectHook(hook);
 
-    // Drive the hook into legacy fallback via a failed reconnect.
+    // Drive the hook into legacy fallback by exhausting the reconnect ladder
+    // (every mint fails, so no attempt can land).
     vi.mocked(authFetch).mockImplementation(async (url: string) => {
       if (String(url).includes("/session")) return mintErrorResponse();
       return okResponse();
     });
 
-    act(() => { pcInstances[0].simulateIceFailed(); });
-    await advanceMs(2500);
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
+    await advanceMs(FULL_LADDER_MS);
 
     expect(hook.result.current.networkQuality).toBe("legacy");
     expect(hook.result.current.fallbackReason).toBeTruthy();
@@ -448,13 +499,15 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     );
     await connectHook(hook);
 
-    // Reach legacy via a failed reconnect.
+    // Reach legacy by exhausting the reconnect ladder (every mint fails).
     vi.mocked(authFetch).mockImplementation(async (url: string) => {
       if (String(url).includes("/session")) return mintErrorResponse();
       return okResponse();
     });
-    act(() => { pcInstances[0].simulateIceFailed(); });
-    await advanceMs(2500);
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
+    await advanceMs(FULL_LADDER_MS);
     expect(hook.result.current.networkQuality).toBe("legacy");
 
     // Retry with a working mint — reconnect budget is reset by retry().
@@ -470,7 +523,9 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
 
     // A drop on the retried session should again schedule ONE auto-reconnect.
     const lastPc = pcInstances[pcInstances.length - 1];
-    act(() => { lastPc.simulateIceFailed(); });
+    act(() => {
+      lastPc.simulateIceFailed();
+    });
 
     expect(hook.result.current.networkQuality).toBe("reconnecting");
   });
@@ -483,12 +538,14 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     );
     await connectHook(hook);
 
-    const mintsBeforeDrop = vi.mocked(authFetch).mock.calls.filter((a) =>
-      String(a[0]).includes("/session"),
-    ).length;
+    const mintsBeforeDrop = vi
+      .mocked(authFetch)
+      .mock.calls.filter((a) => String(a[0]).includes("/session")).length;
 
     // Drop the connection — the 2 s reconnect timer starts.
-    act(() => { pcInstances[0].simulateIceFailed(); });
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
     expect(hook.result.current.networkQuality).toBe("reconnecting");
 
     // Fire the browser online event BEFORE the 2 s timer expires.
@@ -498,9 +555,9 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
 
-    const mintsAfterOnline = vi.mocked(authFetch).mock.calls.filter((a) =>
-      String(a[0]).includes("/session"),
-    ).length;
+    const mintsAfterOnline = vi
+      .mocked(authFetch)
+      .mock.calls.filter((a) => String(a[0]).includes("/session")).length;
     // A second mint should have fired (reconnect triggered immediately by online).
     expect(mintsAfterOnline).toBeGreaterThan(mintsBeforeDrop);
   });

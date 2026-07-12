@@ -270,13 +270,30 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       expect(trackIdx).toBeLessThan(stoppedIdx);
     });
 
-    it("escalates to handleConnectionDrop after MAX_SILENT_AUDIO_FAILURES incidents", () => {
+    it("recovers a silent response locally and never tears the session down", () => {
+      // New contract: a "responding but silent" turn is recovered in place. Rung 1
+      // resumes the sink; after MAX_SILENT_AUDIO_FAILURES the stuck response is
+      // ended locally (return to listening). recoverSilentAudio must NOT call the
+      // reconnect ladder, so a single silent reply can never end the session before
+      // its per-plan time budget is spent.
       const recStart = src.indexOf("const recoverSilentAudio = useCallback");
       expect(recStart).toBeGreaterThan(-1);
       const recEnd = src.indexOf("= useCallback", recStart + 50);
-      const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 900);
+      const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 1200);
       expect(recBody).toContain("MAX_SILENT_AUDIO_FAILURES");
-      expect(recBody).toContain("handleConnectionDrop");
+      expect(recBody).toContain("silent_audio_recovered_local");
+      expect(recBody).not.toContain("handleConnectionDrop");
+    });
+
+    it("routes a genuinely dead audio track to the reconnect ladder from the stall poll", () => {
+      // A muted/ended remote track is a real transport failure (not a benign
+      // silence), so the stall poll — not recoverSilentAudio — escalates it.
+      const pollStart = src.indexOf("const startAudioStallPoll = useCallback");
+      expect(pollStart).toBeGreaterThan(-1);
+      const pollEnd = src.indexOf("= useCallback", pollStart + 50);
+      const pollBody = src.slice(pollStart, pollEnd > pollStart ? pollEnd : pollStart + 1600);
+      expect(pollBody).toContain('handleConnectionDrop("audio_track_dead")');
+      expect(pollBody).toContain('recoverSilentAudio("audio_stall")');
     });
 
     it("resets audio-liveness state in the response.done handler", () => {
@@ -417,13 +434,23 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       }
     });
 
-    it("both hooks escalate silent-audio recovery to the reconnect ladder", () => {
+    it("both hooks recover silent audio locally and escalate only a dead track", () => {
       for (const [_label, src] of hooks) {
         const recStart = src.indexOf("const recoverSilentAudio = useCallback");
+        expect(recStart).toBeGreaterThan(-1);
         const recEnd = src.indexOf("= useCallback", recStart + 50);
-        const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 900);
+        const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 1200);
+        // Local recovery, never a teardown.
         expect(recBody).toContain("MAX_SILENT_AUDIO_FAILURES");
-        expect(recBody).toContain("handleConnectionDrop");
+        expect(recBody).toContain("silent_audio_recovered_local");
+        expect(recBody).not.toContain("handleConnectionDrop");
+        // The dead-track escalation lives in the stall poll on both surfaces.
+        const pollStart = src.indexOf("const startAudioStallPoll = useCallback");
+        expect(pollStart).toBeGreaterThan(-1);
+        const pollEnd = src.indexOf("= useCallback", pollStart + 50);
+        const pollBody = src.slice(pollStart, pollEnd > pollStart ? pollEnd : pollStart + 1600);
+        expect(pollBody).toContain('handleConnectionDrop("audio_track_dead")');
+        expect(pollBody).toContain('recoverSilentAudio("audio_stall")');
       }
     });
 
