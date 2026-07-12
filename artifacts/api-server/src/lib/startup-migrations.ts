@@ -3907,6 +3907,269 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-orax-desktop (Phase 2B base tables: hosts, threads, etc.) ────────
+  // Must run BEFORE desktop-actions/command-approvals/projects, which reference
+  // these tables (e.g. migrate-orax-projects ALTERs orax_threads). Mirrors
+  // scripts/src/migrate-orax-desktop.ts. Every statement is IF NOT EXISTS, so
+  // this is a no-op on DBs already provisioned by the standalone script.
+  {
+    name: "migrate-orax-desktop",
+    async run(client) {
+      await client.query("BEGIN");
+
+      // orax_hosts
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_hosts (
+          id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          user_id         TEXT NOT NULL,
+          device_name     TEXT NOT NULL,
+          platform        TEXT NOT NULL DEFAULT 'windows',
+          os_version      TEXT,
+          app_version     TEXT NOT NULL DEFAULT '0.0.0',
+          install_id      TEXT NOT NULL,
+          public_key      TEXT NOT NULL DEFAULT '',
+          status          TEXT NOT NULL DEFAULT 'offline',
+          last_seen_at    TIMESTAMPTZ,
+          paired_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          revoked_at      TIMESTAMPTZ,
+          capabilities    JSONB NOT NULL DEFAULT '{}',
+          permission_mode TEXT NOT NULL DEFAULT 'ask_risky',
+          trusted_project_ids JSONB NOT NULL DEFAULT '[]',
+          metadata        JSONB NOT NULL DEFAULT '{}',
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS orax_hosts_install_id_uidx ON orax_hosts (install_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_hosts_user_id_idx ON orax_hosts (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_hosts_status_idx ON orax_hosts (user_id, status)`,
+      );
+
+      // orax_pairing_codes
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_pairing_codes (
+          id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          host_id     TEXT NOT NULL REFERENCES orax_hosts(id),
+          user_id     TEXT NOT NULL,
+          code        TEXT NOT NULL,
+          qr_payload  TEXT NOT NULL,
+          expires_at  TIMESTAMPTZ NOT NULL,
+          redeemed_at TIMESTAMPTZ,
+          redeemed_by TEXT,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS orax_pairing_codes_code_uidx ON orax_pairing_codes (code)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_pairing_codes_host_id_idx ON orax_pairing_codes (host_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_pairing_codes_user_id_idx ON orax_pairing_codes (user_id)`,
+      );
+
+      // orax_paired_devices
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_paired_devices (
+          id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          host_id          TEXT NOT NULL REFERENCES orax_hosts(id),
+          user_id          TEXT NOT NULL,
+          mobile_device_id TEXT NOT NULL,
+          display_name     TEXT,
+          platform         TEXT,
+          paired_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at     TIMESTAMPTZ,
+          revoked_at       TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS orax_paired_devices_host_mobile_uidx ON orax_paired_devices (host_id, mobile_device_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_paired_devices_user_id_idx ON orax_paired_devices (user_id)`,
+      );
+
+      // orax_projects (host-local folder concept; renamed to
+      // orax_desktop_local_folders by migrate-orax-projects on the next step)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_projects (
+          id                       TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          host_id                  TEXT NOT NULL REFERENCES orax_hosts(id),
+          user_id                  TEXT NOT NULL,
+          local_path               TEXT NOT NULL,
+          display_name             TEXT NOT NULL,
+          git_remote_url           TEXT,
+          current_branch           TEXT,
+          last_opened_at           TIMESTAMPTZ,
+          permission_mode_override TEXT,
+          setup_scripts            JSONB,
+          status                   TEXT NOT NULL DEFAULT 'active',
+          created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      // These indexes target the OLD host-local orax_projects schema (host_id
+      // only exists there). On DBs where the cloud orax_projects already exists
+      // (e.g. provisioned via drizzle push), host_id is absent, so guard on the
+      // local_path column to avoid a failing CREATE INDEX that would roll back
+      // this entire step on every boot.
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'orax_projects'
+              AND column_name = 'local_path'
+          ) THEN
+            CREATE INDEX IF NOT EXISTS orax_projects_host_id_idx ON orax_projects (host_id);
+            CREATE INDEX IF NOT EXISTS orax_projects_user_id_idx ON orax_projects (user_id);
+          END IF;
+        END $$
+      `);
+
+      // orax_threads
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_threads (
+          id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          user_id    TEXT NOT NULL,
+          host_id    TEXT,
+          project_id TEXT REFERENCES orax_projects(id),
+          title      TEXT,
+          status     TEXT NOT NULL DEFAULT 'idle',
+          last_event JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_threads_user_id_idx ON orax_threads (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_threads_host_id_idx ON orax_threads (host_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_threads_project_id_idx ON orax_threads (project_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_threads_status_idx ON orax_threads (user_id, status)`,
+      );
+
+      // orax_thread_messages
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_thread_messages (
+          id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          thread_id  TEXT NOT NULL REFERENCES orax_threads(id),
+          role       TEXT NOT NULL,
+          content    TEXT NOT NULL,
+          event_type TEXT,
+          payload    JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_thread_messages_thread_id_idx ON orax_thread_messages (thread_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_thread_messages_created_at_idx ON orax_thread_messages (thread_id, created_at)`,
+      );
+
+      // orax_pending_approvals
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_pending_approvals (
+          id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          thread_id   TEXT NOT NULL REFERENCES orax_threads(id),
+          host_id     TEXT NOT NULL,
+          description TEXT NOT NULL,
+          command     TEXT,
+          file_path   TEXT,
+          diff        TEXT,
+          status      TEXT NOT NULL DEFAULT 'pending',
+          resolved_at TIMESTAMPTZ,
+          resolved_by TEXT,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_pending_approvals_thread_id_idx ON orax_pending_approvals (thread_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_pending_approvals_host_id_idx ON orax_pending_approvals (host_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_pending_approvals_status_idx ON orax_pending_approvals (host_id, status)`,
+      );
+
+      // orax_usage_events
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_usage_events (
+          id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          user_id       TEXT NOT NULL,
+          host_id       TEXT NOT NULL REFERENCES orax_hosts(id),
+          project_id    TEXT REFERENCES orax_projects(id),
+          thread_id     TEXT REFERENCES orax_threads(id),
+          action_type   TEXT NOT NULL,
+          model_used    TEXT,
+          input_tokens  INTEGER,
+          output_tokens INTEGER,
+          compute_ms    INTEGER,
+          status        TEXT NOT NULL DEFAULT 'success',
+          metadata      JSONB NOT NULL DEFAULT '{}',
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_usage_events_user_id_idx ON orax_usage_events (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_usage_events_host_id_idx ON orax_usage_events (host_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_usage_events_thread_id_idx ON orax_usage_events (thread_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_usage_events_created_at_idx ON orax_usage_events (user_id, created_at)`,
+      );
+
+      // orax_audit_log (denormalized, no FK so it survives host/thread deletion)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_audit_log (
+          id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          user_id    TEXT NOT NULL,
+          host_id    TEXT NOT NULL,
+          project_id TEXT,
+          thread_id  TEXT,
+          action     TEXT NOT NULL,
+          command    TEXT,
+          file_path  TEXT,
+          outcome    TEXT NOT NULL,
+          error_msg  TEXT,
+          metadata   JSONB NOT NULL DEFAULT '{}',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_audit_log_user_id_idx ON orax_audit_log (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_audit_log_host_id_idx ON orax_audit_log (host_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_audit_log_thread_id_idx ON orax_audit_log (thread_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_audit_log_created_at_idx ON orax_audit_log (user_id, created_at)`,
+      );
+
+      await client.query("COMMIT");
+    },
+  },
+
   // ── migrate-orax-desktop-actions (Phase 2E relay action table) ───────────────
   {
     name: "migrate-orax-desktop-actions",
