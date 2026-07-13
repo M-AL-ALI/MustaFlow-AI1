@@ -245,6 +245,18 @@ const AUDIO_STOP_THRESHOLD = 2;
 // bounded, privacy-safe lifecycle reasons/counts are POSTed via reportServerDiag.)
 const DIAG_RING_SIZE = 20;
 
+// ─── End-of-turn settle window (turn coalescing; mirrored in the website hook) ─
+// After the user seems to stop talking, wait this long before asking Ora to
+// reply. If the user resumes within the window, the fragments merge into ONE
+// reply instead of Ora answering the first fragment and treating the rest as a
+// new turn (the "answers half my sentence, then the rest next time" bug). The
+// built-in turn detector (semantic_vad, eagerness "low") is already as patient
+// as it gets; this beat covers the mid-thought pauses it still ends early on.
+// Client-side timing only — it never caps how long or how many turns the user
+// takes (the per-plan time budget is the only limit). The server can tune this
+// via the mint's settleMs; this is the fallback for older servers. 0 disables.
+const SETTLE_WINDOW_MS = 800;
+
 // ─── Transcript validity filter (mirrored in the website hook) ───────────────
 // Pure + surface-agnostic. Keep BYTE-FOR-BYTE identical to the copy in
 // artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts so both surfaces accept
@@ -1008,6 +1020,17 @@ export function useOraRealtimeVoiceNative(
   // Two consecutive watchdog fires escalate to the auto-reconnect path so the
   // user is not left stuck in a silently degraded session.
   const consecutiveWatchdogFiresRef = useRef(0);
+  // ── End-of-turn settle window (turn coalescing) ───────────────────────────
+  // settleTimerRef: the pending "wait for the user to finish" timer; while it is
+  // set, an accepted turn is awaiting a coalesced reply. pendingCoalescedResponseRef:
+  // whether a reply is owed once the user settles. speechActiveRef: true between
+  // speech_started and speech_stopped, so the self-healing timer re-arms rather
+  // than replying over the user. settleWindowMsRef: the active window length (from
+  // the mint's settleMs, else SETTLE_WINDOW_MS).
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCoalescedResponseRef = useRef(false);
+  const speechActiveRef = useRef(false);
+  const settleWindowMsRef = useRef<number>(SETTLE_WINDOW_MS);
   // ── Audio-liveness tracking (per response) ────────────────────────────────
   // The id of the response currently in flight (response.created.response.id),
   // captured so a silent-audio watchdog/poll only acts for the response it was
@@ -1157,6 +1180,12 @@ export function useOraRealtimeVoiceNative(
       clearTimeout(thinkingWatchdogRef.current);
       thinkingWatchdogRef.current = null;
     }
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+    pendingCoalescedResponseRef.current = false;
+    speechActiveRef.current = false;
     if (speakingWatchdogRef.current) {
       clearTimeout(speakingWatchdogRef.current);
       speakingWatchdogRef.current = null;
@@ -1661,6 +1690,69 @@ export function useOraRealtimeVoiceNative(
     logVoiceDiag("assistant_cancel_ignored_as_noise", { reason });
   }, []);
 
+  // End-of-turn settle window (turn coalescing). Instead of asking Ora to reply
+  // the instant an accepted turn is transcribed, wait a short beat. If the user
+  // resumes speaking (speechActiveRef) or Ora is already mid-reply when the beat
+  // elapses, the timer re-arms itself rather than replying over the user; only
+  // once the user has truly settled does it send ONE response.create, which the
+  // model answers from the full conversation — so several fragments spoken with
+  // mid-thought pauses coalesce into a single reply. Self-healing by design: a
+  // rejected background-speaker turn or a lost/failed transcript never strands
+  // the pending reply, because the running timer re-checks liveness at fire time.
+  // Pure client-side timing — it never caps how long or how many turns the user
+  // takes; the per-plan time budget remains the only limit.
+  const scheduleSettledResponse = useCallback(() => {
+    pendingCoalescedResponseRef.current = true;
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    const fire = () => {
+      settleTimerRef.current = null;
+      if (!activeRef.current) {
+        pendingCoalescedResponseRef.current = false;
+        return;
+      }
+      // Not settled yet: the user is mid-utterance again, or Ora is already
+      // replying. Wait another beat instead of talking over them.
+      if (
+        speechActiveRef.current ||
+        assistantResponseActiveRef.current ||
+        assistantSpeakingRef.current
+      ) {
+        settleTimerRef.current = setTimeout(fire, settleWindowMsRef.current);
+        return;
+      }
+      pendingCoalescedResponseRef.current = false;
+      turnTimingRef.current.responseCreateSentAt = Date.now();
+      sendEvent({ type: "response.create" });
+      logVoiceDiag("response_create_sent", {
+        transcript_completed_to_response_create_sent_ms: deltaMs(
+          turnTimingRef.current.transcriptCompletedAt,
+          turnTimingRef.current.responseCreateSentAt,
+        ),
+        settled: true,
+      });
+      // Arm the thinking watchdog HERE, not only on response.created: the reply
+      // was just requested, so a lost response.created must still recover the UI.
+      setState("thinking");
+      if (thinkingWatchdogRef.current) clearTimeout(thinkingWatchdogRef.current);
+      thinkingWatchdogRef.current = setTimeout(() => {
+        thinkingWatchdogRef.current = null;
+        if (activeRef.current) {
+          logVoiceDiag("thinking_watchdog_timeout");
+          assistantResponseActiveRef.current = false;
+          sendEvent({ type: "response.cancel" });
+          const fires = (consecutiveWatchdogFiresRef.current += 1);
+          if (fires >= WATCHDOG_ESCALATION_FIRES) {
+            consecutiveWatchdogFiresRef.current = 0;
+            handleConnectionDrop("consecutive_thinking_watchdog");
+          } else {
+            setState("listening");
+          }
+        }
+      }, THINKING_WATCHDOG_MS);
+    };
+    settleTimerRef.current = setTimeout(fire, settleWindowMsRef.current);
+  }, [sendEvent, handleConnectionDrop]);
+
   const interrupt = useCallback(() => {
     // Manual interrupt (the user tapped the control). This is always honored —
     // there is no confirmation gate here, unlike the automatic barge-in path.
@@ -1695,6 +1787,7 @@ export function useOraRealtimeVoiceNative(
 
       switch (type) {
         case "input_audio_buffer.speech_started":
+          speechActiveRef.current = true;
           turnTimingRef.current = newTurnTiming();
           turnTimingRef.current.speechStartedAt = Date.now();
           logVoiceDiag("speech_started", {
@@ -1738,6 +1831,7 @@ export function useOraRealtimeVoiceNative(
           }
           break;
         case "input_audio_buffer.speech_stopped":
+          speechActiveRef.current = false;
           turnTimingRef.current.speechStoppedAt = Date.now();
           logVoiceDiag("speech_stopped", {
             pendingBargeIn: pendingBargeInRef.current,
@@ -1849,14 +1943,17 @@ export function useOraRealtimeVoiceNative(
             // an accepted, addressed/engaged turn. Rejected background speech never
             // reaches this line, so Ora stays silent for other speakers.
             if (focusMode === "focused") {
-              turnTimingRef.current.responseCreateSentAt = Date.now();
-              sendEvent({ type: "response.create" });
-              logVoiceDiag("response_create_sent", {
-                transcript_completed_to_response_create_sent_ms: deltaMs(
-                  turnTimingRef.current.transcriptCompletedAt,
-                  turnTimingRef.current.responseCreateSentAt,
-                ),
-              });
+              // Do not reply yet: open the settle window so a mid-thought pause
+              // does not split this sentence into two turns. speech_stopped just
+              // flipped the UI to "thinking" and armed its watchdog — undo both
+              // while we wait for the user, since no reply is pending until the
+              // settle timer fires (which re-arms the watchdog itself).
+              if (thinkingWatchdogRef.current) {
+                clearTimeout(thinkingWatchdogRef.current);
+                thinkingWatchdogRef.current = null;
+              }
+              if (activeRef.current) setState("listening");
+              scheduleSettledResponse();
             }
           } else {
             logVoiceDiag("transcript_rejected", {
@@ -2654,6 +2751,12 @@ export function useOraRealtimeVoiceNative(
         // seconds and the /end beacon finalizes the charge. The server clock is
         // authoritative; these client marks only drive the local countdown.
         realtimeSessionIdRef.current = mint.realtimeSessionId ?? null;
+        // End-of-turn settle window from the server (falls back to the local
+        // default for older servers or an out-of-range value).
+        settleWindowMsRef.current =
+          typeof mint.settleMs === "number" && mint.settleMs >= 0
+            ? mint.settleMs
+            : SETTLE_WINDOW_MS;
         sessionStartedAtRef.current = Date.now();
         logVoiceDiag("session_started", {
           max_duration_seconds: Math.max(0, Math.floor(mint.maxDurationSeconds || 0)),

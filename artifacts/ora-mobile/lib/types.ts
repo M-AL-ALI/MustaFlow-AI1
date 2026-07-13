@@ -215,6 +215,9 @@ export interface RealtimeSessionResult {
   limitSeconds?: number | null;
   resetsAt?: string | null;
   heartbeatIntervalSeconds?: number | null;
+  // End-of-turn settle window (ms) for turn coalescing; see SETTLE_WINDOW_MS in
+  // useOraRealtimeVoiceNative. Optional for back-compat with older servers.
+  settleMs?: number | null;
 }
 
 /** Response from POST /public-ai/realtime/heartbeat (charges elapsed seconds). */

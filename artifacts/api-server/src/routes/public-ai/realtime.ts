@@ -46,6 +46,24 @@ const DEFAULT_REALTIME_VAD_THRESHOLD = 0.5;
 const DEFAULT_REALTIME_VAD_PREFIX_PADDING_MS = 300;
 const DEFAULT_REALTIME_VAD_SILENCE_DURATION_MS = 900;
 
+// End-of-turn settle window (ms). After the built-in turn detector ends a turn,
+// the CLIENT waits this long before asking Ora to reply, coalescing mid-thought
+// pauses into a single reply instead of answering half a sentence and treating
+// the rest as a new turn. Client-side timing only — it never caps turn count or
+// length (the per-plan time budget is the only limit). Tunable via
+// ORA_REALTIME_SETTLE_MS; clamped to a sane range. 0 disables the wait (Ora
+// replies immediately, the pre-settle behavior).
+const DEFAULT_REALTIME_SETTLE_MS = 800;
+const MAX_REALTIME_SETTLE_MS = 5_000;
+
+function resolveSettleMs(): number {
+  const raw = process.env.ORA_REALTIME_SETTLE_MS?.trim();
+  if (!raw) return DEFAULT_REALTIME_SETTLE_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_REALTIME_SETTLE_MS;
+  return Math.min(Math.floor(parsed), MAX_REALTIME_SETTLE_MS);
+}
+
 // Realtime voices accepted by the GA Realtime API. Kept as an allowlist so a bad
 // client value or stale env override can never be forwarded verbatim to OpenAI.
 const REALTIME_VOICES = [
@@ -646,6 +664,8 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
       limitSeconds: reservation.limitSeconds,
       resetsAt: reservation.resetsAt,
       heartbeatIntervalSeconds: REALTIME_HEARTBEAT_INTERVAL_SECONDS,
+      // End-of-turn settle window the client waits before requesting a reply.
+      settleMs: resolveSettleMs(),
     });
   } catch (err) {
     logger.warn({ component: "ora-realtime", err }, "Ora realtime mint threw");
