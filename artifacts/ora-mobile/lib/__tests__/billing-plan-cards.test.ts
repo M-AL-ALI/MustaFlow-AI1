@@ -16,66 +16,70 @@ const BUILDER_WORDS: RegExp[] = [
   /\bConnectors\b/i,
 ];
 
-describe("Ora Mobile — plan/billing parity", () => {
+describe("Ora Mobile — plan/billing display (Apple 3.1.1 compliant)", () => {
   const settings = read("../../app/(home)/settings.tsx");
   const types = read("../types.ts");
+  const api = read("../api.ts");
 
   it("types.ts defines the Ora-only OraTierMeta type", () => {
     expect(types).toContain("export interface OraTierMeta");
   });
 
-  it("renders BigUsageCard for message and image quotas (website-parity plan display)", () => {
+  it("still renders read-only current plan + usage cards", () => {
     expect(settings).toContain("function BigUsageCard(");
     expect(settings).toContain('label="Messages"');
     expect(settings).toContain('label="Images"');
     expect(settings).toContain("function renewalLabel(");
     expect(settings).toContain("renewalLabel(subscription");
-    expect(settings).toContain("getPaymentMethod");
-    expect(settings).toContain("paymentMethod.hasPaymentMethod");
-    expect(settings).toContain("paymentMethod.last4");
   });
 
-  it("uses Ora-only usage copy (messages/images) and routes billing to website via WebBrowser", () => {
-    expect(settings).toContain('"Messages"');
-    expect(settings).toContain('"Images"');
-    expect(settings).toContain("WebBrowser");
-    expect(settings).toContain("openBrowserAsync");
-    // WEBSITE_SETTINGS_URL is still used for account (email/password) buttons
+  it("shows an informational About plans section (no prices, no purchase actions)", () => {
+    expect(settings).toContain("About plans");
+    expect(settings).toContain("Core Pack");
+    expect(settings).toContain("Deep Wave");
+    expect(settings).toContain("Plan changes are managed on the MustaFlow website.");
+  });
+
+  it("exposes NO in-app purchase / upgrade / billing UI (Apple 3.1.1)", () => {
+    // No purchase or plan-management deep-link constants
+    expect(settings).not.toContain("ORA_PRICING_CORE_URL");
+    expect(settings).not.toContain("ORA_PRICING_WAVE_URL");
+    expect(settings).not.toContain("ORA_PLAN_MANAGE_URL");
+    expect(settings).not.toContain("ORA_PAYMENT_METHOD_URL");
+    expect(settings).not.toContain("ORA_BILLING_URL");
+    // No purchase call-to-action copy or pricing links
+    expect(settings).not.toMatch(/Upgrade to/i);
+    expect(settings).not.toContain("/pricing?");
+    expect(settings).not.toMatch(/Manage billing/i);
+    expect(settings).not.toMatch(/Add payment method/i);
+    // No payment-method state or UI remains
+    expect(settings).not.toContain("paymentMethod");
+    expect(settings).not.toContain("getPaymentMethod");
+    expect(settings).not.toContain("PaymentMethodInfo");
+    expect(settings).not.toMatch(/payment method/i);
+  });
+
+  it("keeps account (email/password) website links but no Builder concepts", () => {
+    // WEBSITE_SETTINGS_URL is still used for account email/password buttons only
     expect(settings).toContain("WEBSITE_SETTINGS_URL");
     for (const re of BUILDER_WORDS) {
       expect(settings).not.toMatch(re);
     }
   });
 
-  it("defines all 5 deep-link URL constants for specific billing destinations", () => {
-    expect(settings).toContain("ORA_PRICING_CORE_URL");
-    expect(settings).toContain("ORA_PRICING_WAVE_URL");
-    expect(settings).toContain("ORA_PLAN_MANAGE_URL");
-    expect(settings).toContain("ORA_PAYMENT_METHOD_URL");
-    expect(settings).toContain("ORA_BILLING_URL");
+  it("provides an in-app account deletion path (Apple 5.1.1(v))", () => {
+    expect(settings).toContain("deleteAccount");
+    expect(settings).toContain("Delete account");
+    // api.ts wires DELETE /api/me and requires auth
+    expect(api).toContain("export function deleteAccount(");
+    expect(api).toContain('jsonRequest<DeleteAccountResult>("/api/me", { method: "DELETE" })');
+    expect(api).toContain('path === "/api/me"');
   });
 
-  it("deep-link constants point to the correct website paths with source=mobile", () => {
-    expect(settings).toContain("/pricing?tier=core&source=mobile");
-    expect(settings).toContain("/pricing?tier=wave&source=mobile");
-    expect(settings).toContain("/ora/settings?section=plan&source=mobile");
-    expect(settings).toContain("/ora/settings?section=payment-method&source=mobile");
-    expect(settings).toContain("/ora/settings?section=billing&source=mobile");
-  });
-
-  it("each billing button uses the correct deep-link constant (not generic WEBSITE_SETTINGS_URL)", () => {
-    expect(settings).toContain("openBrowserAsync(ORA_PRICING_CORE_URL)");
-    expect(settings).toContain("openBrowserAsync(ORA_PRICING_WAVE_URL)");
-    expect(settings).toContain("openBrowserAsync(ORA_PLAN_MANAGE_URL)");
-    expect(settings).toContain("openBrowserAsync(ORA_PAYMENT_METHOD_URL)");
-    expect(settings).toContain("openBrowserAsync(ORA_BILLING_URL)");
-  });
-
-  it("contains no Stripe checkout / portal / inline billing wiring (billing is website-only)", () => {
+  it("contains no Stripe checkout / portal / inline billing wiring", () => {
     expect(settings).not.toMatch(/checkout/i);
     expect(settings).not.toContain("/portal");
     expect(settings).not.toMatch(/stripe/i);
-    // No direct API call for payment-method setup (that's website-only)
     expect(settings).not.toContain("/api/billing/payment-method");
   });
 });

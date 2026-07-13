@@ -31,7 +31,7 @@ import {
 import { logger } from "../lib/logger";
 import { enqueueGdprErasure, isDurableQueueReady } from "../lib/durable-queue";
 import { sendGdprDeletionConfirmation } from "../lib/emailClient";
-import { getClerkUserById } from "../lib/clerk-users";
+import { getClerkUserById, deleteClerkUser } from "../lib/clerk-users";
 import { ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
@@ -527,11 +527,24 @@ router.delete("/me", async (req, res): Promise<void> => {
       logger.warn({ emailErr, userId }, "GDPR deletion confirmation email failed (non-fatal)");
     }
 
+    // ── Delete the Clerk sign-in identity (Apple 5.1.1(v) / GDPR Art. 17) ──
+    // Removes credentials so the account can no longer authenticate. The
+    // soft-deleted DB rows are hard-erased by the durable 30-day job above.
+    // Must run after the email lookup, which needs the Clerk address.
+    const clerkDeleted = await deleteClerkUser(userId);
+    if (!clerkDeleted) {
+      logger.error(
+        { userId },
+        "GDPR: Clerk account deletion did not complete — sign-in credentials may still be active",
+      );
+    }
+
     res.json({
       deleted: true,
+      credentialsDeleted: clerkDeleted,
       erasureScheduledFor: erasureDate.toISOString(),
       erasureJobId: jobId,
-      note: "Your data has been soft-deleted and is scheduled for permanent erasure in 30 days. To cancel this request, contact privacy@mustaflow.app. To delete your account credentials, use 'Delete Account' in your account settings.",
+      note: "Your account credentials have been deleted and your data is scheduled for permanent erasure within 30 days. Contact privacy@mustaflow.app with any questions.",
     });
   } catch (err) {
     logger.error({ err, userId }, "GDPR account deletion failed");

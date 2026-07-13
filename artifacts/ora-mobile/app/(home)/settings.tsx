@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Shield,
   Sun,
+  Trash2,
   User as UserIcon,
   Volume2,
   Wifi,
@@ -38,10 +39,10 @@ import { isRealtimeVoiceNativeAvailable } from "@/hooks/useOraRealtimeVoiceNativ
 import {
   API_BASE,
   DOMAIN,
+  deleteAccount,
   getAccountConsistency,
   getLastStreamDiagnostics,
   getOraUsage,
-  getPaymentMethod,
   getPreferences,
   getRealtimeDiagnostics,
   getSubscription,
@@ -68,7 +69,6 @@ import type {
   BillingSubscription,
   OraAccountConsistency,
   OraUsage,
-  PaymentMethodInfo,
   RealtimeDiagnostics,
   VoicePreset,
 } from "@/lib/types";
@@ -85,12 +85,6 @@ const APP_VERSION_LABEL = APP_BUILD
 
 const STREAMING_ENABLED = process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "false";
 const WEBSITE_SETTINGS_URL = `https://${DOMAIN}/settings`;
-
-const ORA_PRICING_CORE_URL = `https://${DOMAIN}/pricing?tier=core&source=mobile`;
-const ORA_PRICING_WAVE_URL = `https://${DOMAIN}/pricing?tier=wave&source=mobile`;
-const ORA_PLAN_MANAGE_URL = `https://${DOMAIN}/ora/settings?section=plan&source=mobile`;
-const ORA_PAYMENT_METHOD_URL = `https://${DOMAIN}/ora/settings?section=payment-method&source=mobile`;
-const ORA_BILLING_URL = `https://${DOMAIN}/ora/settings?section=billing&source=mobile`;
 
 const VOICE_LANGS: { code: string; label: string }[] = [
   { code: "en", label: "English" },
@@ -483,6 +477,7 @@ function AccountSection() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (!isLoaded || !isSignedIn || !user) {
     return (
@@ -783,6 +778,64 @@ function AccountSection() {
         }}
         full
       />
+
+      {/* Delete account */}
+      <Button
+        label={deleting ? "Deleting…" : "Delete account"}
+        variant="destructive"
+        icon={Trash2}
+        loading={deleting}
+        onPress={() => {
+          Alert.alert(
+            "Delete account?",
+            "This permanently deletes your MustaFlow account and all associated data. This cannot be undone.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete account",
+                style: "destructive",
+                onPress: () => {
+                  Alert.alert(
+                    "Confirm deletion",
+                    "Are you absolutely sure? Your account and all its data will be permanently erased.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Delete permanently",
+                        style: "destructive",
+                        onPress: async () => {
+                          setDeleting(true);
+                          try {
+                            await deleteAccount();
+                          } catch (err) {
+                            setDeleting(false);
+                            Alert.alert(
+                              "Could not delete account",
+                              err instanceof Error
+                                ? err.message
+                                : "Please try again, or email support@mustaflow.app.",
+                            );
+                            return;
+                          }
+                          // Account is deleted — sign out and leave. The remote
+                          // session is already invalidated, so ignore signOut errors.
+                          try {
+                            await signOut();
+                          } catch {
+                            // Session already gone; nothing to recover.
+                          }
+                          router.replace("/sign-in");
+                        },
+                      },
+                    ],
+                  );
+                },
+              },
+            ],
+          );
+        }}
+        full
+      />
     </SectionCard>
   );
 }
@@ -867,7 +920,6 @@ export default function SettingsScreen() {
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodInfo | null>(null);
   const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
   const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
 
@@ -903,9 +955,6 @@ export default function SettingsScreen() {
       getOraUsage()
         .then(setUsage)
         .catch(() => {});
-      getPaymentMethod()
-        .then(setPaymentMethod)
-        .catch(() => {});
     }
   }, [isSignedIn]);
 
@@ -939,9 +988,7 @@ export default function SettingsScreen() {
 
   /* ── About sub-view ─────────────────────────────────────────────────────── */
 
-  const [aboutView, setAboutView] = useState<null | "diagnostics" | "account-sync" | "legal">(
-    null,
-  );
+  const [aboutView, setAboutView] = useState<null | "diagnostics" | "account-sync" | "legal">(null);
 
   /* ── Diagnostics ───────────────────────────────────────────────────────── */
 
@@ -1037,8 +1084,7 @@ export default function SettingsScreen() {
     const rtNative = isRealtimeVoiceNativeAvailable();
     try {
       const rtDiagResult = await getRealtimeDiagnostics();
-      const serverOk =
-        rtDiagResult.enabled && rtDiagResult.configured && !rtDiagResult.killSwitch;
+      const serverOk = rtDiagResult.enabled && rtDiagResult.configured && !rtDiagResult.killSwitch;
       let rtDetail: string;
       if (!rtNative) {
         rtDetail = "WebRTC module not in this build — Talk to Ora uses basic voice mode";
@@ -1245,7 +1291,6 @@ export default function SettingsScreen() {
   const allOk = diagSteps.length > 0 && diagSteps.every((s) => s.status === "ok");
   const anyFail = diagSteps.some((s) => s.status === "fail");
   const currentTier = subscription?.tier ?? "free";
-  const isPaid = currentTier === "core" || currentTier === "wave";
   const signedInEmail =
     typeof isSignedIn === "boolean" && isSignedIn
       ? diagPlanSync.tokenStatus !== "unchecked"
@@ -1317,15 +1362,6 @@ export default function SettingsScreen() {
   const msgRemaining = usage ? Math.max(0, usage.messageLimit - usage.messageCount) : null;
   const imgRemaining = usage ? Math.max(0, usage.imageLimit - usage.imageCount) : null;
   const windowStarted = usage ? usage.messageCount > 0 || usage.imageCount > 0 : false;
-
-  const pmBrand = paymentMethod?.brand
-    ? paymentMethod.brand.slice(0, 1).toUpperCase() + paymentMethod.brand.slice(1)
-    : "Card";
-  const pmExpiry =
-    paymentMethod?.expMonth && paymentMethod?.expYear
-      ? `${paymentMethod.expMonth}/${String(paymentMethod.expYear).slice(-2)}`
-      : null;
-  const pmExpired = paymentMethod?.status === "expired";
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -1669,117 +1705,55 @@ export default function SettingsScreen() {
                     </>
                   )}
 
-                  {/* Upgrade buttons */}
-                  {!isPaid && (
-                    <Button
-                      label="Upgrade to Core Pack"
-                      onPress={() => void WebBrowser.openBrowserAsync(ORA_PRICING_CORE_URL)}
-                      full
-                    />
-                  )}
-                  {currentTier !== "wave" && (
-                    <Button
-                      label="Upgrade to Deep Wave"
-                      variant="secondary"
-                      onPress={() => void WebBrowser.openBrowserAsync(ORA_PRICING_WAVE_URL)}
-                      full
-                    />
-                  )}
-                  {isPaid && (
-                    <Button
-                      label="Manage Ora plan"
-                      variant="secondary"
-                      onPress={() => void WebBrowser.openBrowserAsync(ORA_PLAN_MANAGE_URL)}
-                      full
-                    />
-                  )}
-
-                  {/* Payment method */}
-                  {paymentMethod && (
-                    <View
-                      style={{
-                        backgroundColor: c.muted,
-                        borderRadius: c.radius,
-                        paddingHorizontal: 14,
-                        paddingVertical: 12,
-                        gap: 8,
-                      }}
+                  {/* About plans — informational only (no in-app purchase) */}
+                  <View
+                    style={{
+                      backgroundColor: c.muted,
+                      borderRadius: c.radius,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      gap: 10,
+                    }}
+                  >
+                    <Text
+                      style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 15 }}
                     >
-                      {paymentMethod.hasPaymentMethod ? (
-                        <>
-                          <View style={{ gap: 3 }}>
-                            <View
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  color: c.foreground,
-                                  fontFamily: "Inter_500Medium",
-                                  fontSize: 14,
-                                }}
-                              >
-                                {pmBrand} ending {paymentMethod.last4}
-                              </Text>
-                              {pmExpired && (
-                                <View
-                                  style={{
-                                    backgroundColor: "rgba(239,67,67,0.15)",
-                                    borderRadius: 4,
-                                    paddingHorizontal: 6,
-                                    paddingVertical: 2,
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: "#f87171",
-                                      fontSize: 11,
-                                      fontFamily: "Inter_500Medium",
-                                    }}
-                                  >
-                                    Expired
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                            {pmExpiry && (
-                              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                                Expires {pmExpiry}
-                              </Text>
-                            )}
-                          </View>
-                          <View style={{ gap: 6 }}>
-                            <Button
-                              label="Change payment method"
-                              variant="secondary"
-                              onPress={() => void WebBrowser.openBrowserAsync(ORA_PAYMENT_METHOD_URL)}
-                              full
-                            />
-                            <Button
-                              label="Manage billing"
-                              variant="ghost"
-                              onPress={() => void WebBrowser.openBrowserAsync(ORA_BILLING_URL)}
-                              full
-                            />
-                          </View>
-                        </>
-                      ) : (
-                        <>
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                            No payment method on file.
-                          </Text>
-                          <Button
-                            label="Add payment method"
-                            onPress={() => void WebBrowser.openBrowserAsync(ORA_PAYMENT_METHOD_URL)}
-                            full
-                          />
-                        </>
-                      )}
+                      About plans
+                    </Text>
+                    <View style={{ gap: 3 }}>
+                      <Text
+                        style={{
+                          color: c.foreground,
+                          fontFamily: "Inter_500Medium",
+                          fontSize: 14,
+                        }}
+                      >
+                        Core Pack
+                      </Text>
+                      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                        Higher daily message and image limits, Deep Thinking mode, and longer live
+                        voice sessions.
+                      </Text>
                     </View>
-                  )}
+                    <View style={{ gap: 3 }}>
+                      <Text
+                        style={{
+                          color: c.foreground,
+                          fontFamily: "Inter_500Medium",
+                          fontSize: 14,
+                        }}
+                      >
+                        Deep Wave
+                      </Text>
+                      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                        The highest message and image limits, extended Deep Thinking, and the
+                        longest live voice sessions.
+                      </Text>
+                    </View>
+                    <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
+                      Plan changes are managed on the MustaFlow website.
+                    </Text>
+                  </View>
                 </>
               )}
             </View>
@@ -1998,10 +1972,7 @@ export default function SettingsScreen() {
                             <InfoRow label="Route tier" value={sd.serverRouteTier} />
                           )}
                           {sd.serverFastLane != null && (
-                            <InfoRow
-                              label="Fast lane"
-                              value={sd.serverFastLane ? "yes" : "no"}
-                            />
+                            <InfoRow label="Fast lane" value={sd.serverFastLane ? "yes" : "no"} />
                           )}
                         </>
                       )}

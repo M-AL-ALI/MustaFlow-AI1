@@ -106,6 +106,28 @@ export async function findClerkUserByUsername(username: string): Promise<ClerkUs
 }
 
 /**
+ * Permanently delete a Clerk user (sign-in identity, credentials, email).
+ * Used by the GDPR / account-deletion flow so a deleted account can no longer
+ * authenticate. Returns true when the user was deleted (or already absent).
+ * Degrades gracefully: returns false and never throws when Clerk is not
+ * configured or the call fails.
+ */
+export async function deleteClerkUser(userId: string): Promise<boolean> {
+  if (!userId) return false;
+  if (!clerkConfigured()) return false;
+  try {
+    await clerkClient.users.deleteUser(userId);
+    return true;
+  } catch (err) {
+    // A 404 means the user is already gone — treat that as success.
+    const status = (err as { status?: number } | null)?.status;
+    if (status === 404) return true;
+    logger.warn({ err, userId }, "Clerk user deletion failed");
+    return false;
+  }
+}
+
+/**
  * Batch-resolve Clerk user IDs to display summaries. Returns a Map keyed by
  * userId. IDs that fail to resolve (deleted users, Clerk down, etc.) are
  * simply omitted from the map.

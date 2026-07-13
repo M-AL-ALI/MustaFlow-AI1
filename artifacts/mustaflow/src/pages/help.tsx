@@ -526,17 +526,27 @@ function SupportChat() {
     return (
       <div className="rounded-xl border border-border bg-card p-6 text-center space-y-3">
         <LifeBuoy className="mx-auto h-7 w-7 text-primary" />
-        <h2 className="font-semibold">Ask Ora or contact support</h2>
+        <h2 className="font-semibold">Contact support</h2>
         <p className="text-sm text-muted-foreground">
-          Sign in to chat with Ora Support and open a support ticket with our team.
+          Browse the help articles above for answers, or email our support team and we&apos;ll help
+          you out — no account needed. Sign in to chat with Ora Support and open a tracked support
+          ticket.
         </p>
-        <button
-          type="button"
-          onClick={() => setLocation("/sign-in")}
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        <a
+          href="mailto:support@mustaflow.app"
+          className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
-          Sign in to continue
-        </button>
+          Email support@mustaflow.app
+        </a>
+        <div>
+          <button
+            type="button"
+            onClick={() => setLocation("/sign-in")}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Sign in to continue
+          </button>
+        </div>
       </div>
     );
   }

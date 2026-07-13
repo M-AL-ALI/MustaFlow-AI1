@@ -23,3 +23,6 @@ v1" was the chosen path; native IAP via RevenueCat is a deferred follow-up, not 
 API wrappers may remain as unused exports in `ora-mobile/lib/api.ts`, but nothing in
 the Expo UI may import/call them to open checkout/portal/payment setup. If you add
 RevenueCat later, that becomes the only sanctioned mobile purchase path.
+
+Related Apple compliance: in-app account deletion has its own hard requirement — see
+`apple-account-deletion-5111v.md` (must delete the Clerk identity, not just data).

@@ -182,6 +182,7 @@ async function parseError(res: Response): Promise<never> {
 function pathRequiresAuth(path: string): boolean {
   return (
     path.startsWith("/api/ora/") ||
+    path === "/api/me" ||
     path.startsWith("/api/me/") ||
     path.startsWith("/api/orax/") ||
     path.startsWith("/api/billing/subscription") ||
@@ -337,6 +338,22 @@ export function getRealtimeDiagnostics(): Promise<RealtimeDiagnostics> {
  */
 export function getAccountConsistency(): Promise<OraAccountConsistency> {
   return jsonRequest<OraAccountConsistency>("/api/ora/account-consistency");
+}
+
+export interface DeleteAccountResult {
+  ok?: boolean;
+  deleted?: boolean;
+  credentialsDeleted?: boolean;
+  note?: string;
+}
+
+/**
+ * Permanently delete the signed-in user's account and all associated data.
+ * Calls DELETE /api/me (GDPR erasure). Requires a bearer token — the exact
+ * "/api/me" path (no trailing slash) is registered in pathRequiresAuth().
+ */
+export function deleteAccount(): Promise<DeleteAccountResult> {
+  return jsonRequest<DeleteAccountResult>("/api/me", { method: "DELETE" });
 }
 
 export interface ExportFileRequest {
