@@ -50,3 +50,18 @@ beforeEach(() => {
 ```
 
 `pcInstances[0]` = original session, `pcInstances[1]` = reconnect session.
+
+## Rule 6 — FakeDataChannel.readyState must be set to "open" before any test that asserts a real send
+
+**Why:** `sendEvent` guards on `dc.readyState === "open"` before calling `dc.send`. A `FakeDataChannel` defaults to `"connecting"`, so every test that asserts an outbound event (e.g. `response.create` sent count) silently records 0 sends even though the hook's send-path executed and logged its diagnostic. This masquerades as a logic failure (diag says "sent", assertion says 0) when the harness is the real cause.
+
+**How to apply:** In the connect helper, set `pc.dc.readyState = "open"` before invoking `pc.dc.onopen?.()`:
+
+```typescript
+await act(async () => {
+  if (pc.dc) pc.dc.readyState = "open";
+  pc.dc?.onopen?.();
+});
+```
+
+Tests that only assert *absence* of a send (e.g. `response.cancel` count === 0) pass without this, which is why the gap hides until you write the first positive-send assertion.

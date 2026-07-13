@@ -1183,6 +1183,7 @@ export function useOraRealtimeVoiceNative(
     if (settleTimerRef.current) {
       clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
+      logVoiceDiag("settle_window_cancelled", { reason: "teardown" });
     }
     pendingCoalescedResponseRef.current = false;
     speechActiveRef.current = false;
@@ -1702,6 +1703,9 @@ export function useOraRealtimeVoiceNative(
   // Pure client-side timing — it never caps how long or how many turns the user
   // takes; the per-plan time budget remains the only limit.
   const scheduleSettledResponse = useCallback(() => {
+    // A pending timer means the user spoke another accepted fragment before the
+    // last one settled: re-arm (coalesce) rather than open a fresh window.
+    const rearming = settleTimerRef.current !== null;
     pendingCoalescedResponseRef.current = true;
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     const fire = () => {
@@ -1717,12 +1721,17 @@ export function useOraRealtimeVoiceNative(
         assistantResponseActiveRef.current ||
         assistantSpeakingRef.current
       ) {
+        logVoiceDiag("settle_window_rearmed", {
+          reason: speechActiveRef.current ? "speech_resumed" : "assistant_busy",
+          settle_window_ms: settleWindowMsRef.current,
+        });
         settleTimerRef.current = setTimeout(fire, settleWindowMsRef.current);
         return;
       }
       pendingCoalescedResponseRef.current = false;
       turnTimingRef.current.responseCreateSentAt = Date.now();
       sendEvent({ type: "response.create" });
+      logVoiceDiag("settle_window_fired", { settle_window_ms: settleWindowMsRef.current });
       logVoiceDiag("response_create_sent", {
         transcript_completed_to_response_create_sent_ms: deltaMs(
           turnTimingRef.current.transcriptCompletedAt,
@@ -1750,6 +1759,10 @@ export function useOraRealtimeVoiceNative(
         }
       }, THINKING_WATCHDOG_MS);
     };
+    logVoiceDiag(rearming ? "settle_window_rearmed" : "settle_window_scheduled", {
+      reason: rearming ? "transcript_continued" : "transcript_accepted",
+      settle_window_ms: settleWindowMsRef.current,
+    });
     settleTimerRef.current = setTimeout(fire, settleWindowMsRef.current);
   }, [sendEvent, handleConnectionDrop]);
 
@@ -1757,6 +1770,14 @@ export function useOraRealtimeVoiceNative(
     // Manual interrupt (the user tapped the control). This is always honored —
     // there is no confirmation gate here, unlike the automatic barge-in path.
     clearBargeInTimer();
+    // Tapping stop abandons any pending settle window so a queued auto-reply
+    // never fires after the user has taken over.
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+      pendingCoalescedResponseRef.current = false;
+      logVoiceDiag("settle_window_cancelled", { reason: "manual_interrupt" });
+    }
     stopAssistantOutput();
     if (activeRef.current) setState("listening");
   }, [stopAssistantOutput, clearBargeInTimer]);
