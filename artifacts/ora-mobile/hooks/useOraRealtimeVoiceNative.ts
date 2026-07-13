@@ -2385,6 +2385,7 @@ export function useOraRealtimeVoiceNative(
       armSilentAudioWatchdog,
       startAudioLivenessTracking,
       stopAudioLivenessTracking,
+      scheduleSettledResponse,
     ],
   );
 
