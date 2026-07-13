@@ -1,0 +1,58 @@
+The Apple-review compliance fixes look correct. Please do not add anything else or refactor unrelated areas.
+
+Before we resubmit, complete the final release checklist:
+
+1. Confirm final commit
+- Provide the final commit SHA.
+- Confirm it is pushed to main.
+- Confirm changed files are limited to:
+  - iOS/mobile settings/auth/payment UI compliance
+  - account deletion flow
+  - backend DELETE /api/me / Clerk deletion
+  - public support page
+  - app name/config
+  - related tests/docs
+- Confirm no Ora chat, Talk to Ora, billing logic, search, images, files, history, ORAX, or unrelated website behavior was changed.
+
+2. Publish website/API
+- Publish the current main so the backend account-deletion route and public support page are live.
+- Confirm production API boots successfully.
+- Confirm public support page is reachable without sign-in and shows a support contact path/email.
+
+3. Cut new TestFlight build
+- Build number must be higher than the rejected build.
+- App display name must show “MustaFlow”.
+- Include all Apple-review compliance changes.
+
+4. Physical-device QA on TestFlight
+On a real iPhone:
+- App icon/name shows MustaFlow.
+- Sign in works.
+- Google sign-in still works.
+- Sign in with Apple still works.
+- Email/password demo account works.
+- Ora opens normally after login.
+- Settings does NOT show external checkout links:
+  - no Upgrade button to website checkout
+  - no Manage payment method link
+  - no Manage billing link to website checkout
+  - no pricing/payment URL opened from iOS
+- Settings may show read-only plan status and plan benefits only.
+- Delete Account is visible in Settings.
+- Delete Account requires confirmation.
+- After deleting a disposable account, user is signed out.
+- Deleted account cannot sign back in.
+- Public Support URL works without login.
+
+5. App Store Connect
+- Age Rating: Parental Controls / In-App Controls must be set to None unless actually present.
+- Demo account must be production-ready:
+  - email/password works
+  - no email verification code needed
+  - no 2FA
+  - no inbox access required
+- Update Review Notes:
+  “Use the provided email/password. No email verification code is required. The app does not sell digital subscriptions outside In-App Purchase. Plan status is read-only in iOS. Account deletion is available in Settings. Support is available publicly at the Support URL.”
+
+6. Only after all above pass
+- Submit the new build to Apple review.

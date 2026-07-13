@@ -10,6 +10,9 @@ To ship an already-FINISHED EAS build, run a standalone `eas submit --platform i
 
 **How to apply:** reuse the exact ASC setup from `artifacts/ora-mobile/scripts/build-testflight.sh` — reconstruct the space-flattened `EXPO_ASC_KEY_P8` into a temp PEM (strip markers, `'\n'.join(raw.split())`, re-wrap, validate with `openssl pkey -noout`), then export `EXPO_ASC_API_KEY_PATH` + `EXPO_ASC_KEY_ID` + `EXPO_ASC_ISSUER_ID` (+ `EXPO_APPLE_TEAM_TYPE=INDIVIDUAL`). The ASC key is already registered on EAS servers, so eas finds it automatically ("App Store Connect API Key already set up").
 
+## GraphQL poll query shapes
+Poll a specific build with `builds{byId(buildId:$id){status appBuildVersion}}` (cleanest). The list form `app{byId(appId){builds(limit:N,offset:0,filter:{platform:IOS}){...}}}` REQUIRES an `offset:Int!` arg — omitting it fails with `GRAPHQL_VALIDATION_FAILED "argument offset ... is required"`. Running the submit as a supervised console *workflow* (ending in `sleep infinity`) is a reliable alternative to `setsid` and flushes the full log.
+
 ## Authoritative status + setsid cleanup gotcha
 Submit takes minutes, so run it backgrounded via `setsid`. The authoritative status is GraphQL `submissions{byId(submissionId){status}}` (FINISHED = Apple accepted). The setsid-detached eas-cli process exits when the parent shell ends WITHOUT flushing its final success line and WITHOUT running its trailing `rm -f` cleanup — so the temp `.p8` private key is left in /tmp. Always `rm -f /tmp/AuthKey_*.p8` yourself after confirming FINISHED via GraphQL.
 
