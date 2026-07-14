@@ -36,6 +36,20 @@ const x = 1;
 \`\`\`
 `;
 
+const ANALYST_WORKFLOW = `# Ora Dataset Report
+
+Sales improved in the West region.
+
+## Suggested Charts
+- **Revenue by Region** (bar) - X: region, Y: revenue. Compare regional performance.
+
+## Repeatable Calculations
+- **Total Revenue**: \`SUM(revenue)\` - Calculate total sales.
+
+## Downloadable Reports
+- **PDF**: Executive Summary - Board-ready summary.
+`;
+
 function isZip(buf: Buffer): boolean {
   return buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04;
 }
@@ -94,6 +108,17 @@ describe("markdownToDocumentData", () => {
     expect(data.sections).toHaveLength(1);
     expect(data.sections[0].content).toBeTruthy();
   });
+
+  it("preserves analyst workflow sections for report exports", () => {
+    const data = markdownToDocumentData(ANALYST_WORKFLOW, "Dataset");
+    const headings = data.sections.map((s) => s.heading).filter(Boolean);
+    expect(headings).toContain("Suggested Charts");
+    expect(headings).toContain("Repeatable Calculations");
+    expect(headings).toContain("Downloadable Reports");
+    expect(data.sections.find((s) => s.heading === "Repeatable Calculations")?.bullets).toContain(
+      "Total Revenue: SUM(revenue) - Calculate total sales.",
+    );
+  });
 });
 
 describe("markdownToPresentationData", () => {
@@ -108,6 +133,17 @@ describe("markdownToPresentationData", () => {
   it("always yields at least one slide", () => {
     const data = markdownToPresentationData("", "Deck");
     expect(data.slides.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("turns analyst workflow headings into dedicated slides", () => {
+    const data = markdownToPresentationData(ANALYST_WORKFLOW, "Deck");
+    expect(data.slides.map((slide) => slide.heading)).toEqual(
+      expect.arrayContaining([
+        "Suggested Charts",
+        "Repeatable Calculations",
+        "Downloadable Reports",
+      ]),
+    );
   });
 });
 
@@ -128,6 +164,19 @@ describe("markdownToTabularData", () => {
     const data = markdownToTabularData("Just some prose with no headings.", "Data");
     expect(data.headers).toEqual(["Content"]);
     expect(data.rows.length).toBeGreaterThan(0);
+  });
+
+  it("keeps analyst workflow rows in Section/Content spreadsheet fallback", () => {
+    const data = markdownToTabularData(ANALYST_WORKFLOW, "Data");
+    expect(data.headers).toEqual(["Section", "Content"]);
+    expect(data.rows).toContainEqual([
+      "Suggested Charts",
+      "Revenue by Region (bar) - X: region, Y: revenue. Compare regional performance.",
+    ]);
+    expect(data.rows).toContainEqual([
+      "Repeatable Calculations",
+      "Total Revenue: SUM(revenue) - Calculate total sales.",
+    ]);
   });
 });
 

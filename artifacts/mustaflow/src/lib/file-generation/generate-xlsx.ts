@@ -1,6 +1,12 @@
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "./report-metadata";
 import type { ReportTemplateId } from "./report-templates";
+import {
+  calculationSuggestionRows,
+  chartSuggestionRows,
+  hasAnalystWorkflow,
+  reportSuggestionRows,
+} from "./analyst-workflow-export";
 import { deriveKpiStatus, buildRoadmap } from "./report-metadata";
 import { sanitizeForExport } from "./sanitizer";
 import { LIMITS } from "./size-limits";
@@ -416,6 +422,40 @@ export async function downloadXlsx(
       { wch: 14 },
       { wch: 50 },
     ]);
+  }
+
+  if (hasAnalystWorkflow(data) && data.analystWorkflow) {
+    const workflow = data.analystWorkflow;
+    const chartRows = chartSuggestionRows(workflow);
+    const calcRows = calculationSuggestionRows(workflow);
+    const reportRows = reportSuggestionRows(workflow);
+
+    if (chartRows.length) {
+      addSheet(
+        wb,
+        "Suggested Charts",
+        [["Title", "Type", "X Column", "Y Column", "Group By", "Reason"], ...chartRows],
+        [{ wch: 32 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 60 }],
+      );
+    }
+
+    if (calcRows.length) {
+      addSheet(
+        wb,
+        "Repeatable Calculations",
+        [["Label", "Expression", "Description", "Columns"], ...calcRows],
+        [{ wch: 28 }, { wch: 32 }, { wch: 64 }, { wch: 32 }],
+      );
+    }
+
+    if (reportRows.length) {
+      addSheet(
+        wb,
+        "Report Outputs",
+        [["Format", "Title", "Description"], ...reportRows],
+        [{ wch: 14 }, { wch: 34 }, { wch: 70 }],
+      );
+    }
   }
 
   const buf = await wb.xlsx.writeBuffer();

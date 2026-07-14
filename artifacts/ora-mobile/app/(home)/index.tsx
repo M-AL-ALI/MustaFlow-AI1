@@ -213,7 +213,52 @@ function messageTitle(message: OraMessage): string {
   return message.role === "assistant" ? "Ora Response" : "Ora Message";
 }
 
-function messageMarkdown(message: OraMessage): string {
+function datasetWorkflowMarkdown(result: NonNullable<OraMessage["datasetResult"]>): string[] {
+  const workflow = result.analystWorkflow;
+  if (!workflow) return [];
+  const lines: string[] = [];
+  const charts = workflow.chartSuggestions ?? [];
+  const calculations = workflow.calculationSuggestions ?? [];
+  const reports = workflow.reportSuggestions ?? [];
+
+  if (charts.length) {
+    lines.push("", "## Suggested Charts");
+    charts.forEach((chart) => {
+      const columns = [
+        chart.xColumn ? `X: ${chart.xColumn}` : "",
+        chart.yColumn ? `Y: ${chart.yColumn}` : "",
+        chart.groupByColumn ? `Group: ${chart.groupByColumn}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      lines.push(
+        `- **${chart.title}** (${chart.chartType})${columns ? ` - ${columns}` : ""}. ${chart.reason}`,
+      );
+    });
+  }
+
+  if (calculations.length) {
+    lines.push("", "## Repeatable Calculations");
+    calculations.forEach((calc) => {
+      const columns = calc.columns?.length ? ` Columns: ${calc.columns.join(", ")}.` : "";
+      lines.push(`- **${calc.label}**: \`${calc.expression}\` - ${calc.description}.${columns}`);
+    });
+  }
+
+  if (reports.length) {
+    lines.push("", "## Downloadable Reports");
+    reports.forEach((report) => {
+      lines.push(`- **${report.format.toUpperCase()}**: ${report.title} - ${report.description}`);
+    });
+  }
+
+  return lines;
+}
+
+function messageMarkdown(
+  message: OraMessage,
+  options: { includeDatasetJson?: boolean } = {},
+): string {
   const lines = [`# ${messageTitle(message)}`, "", message.content.trim()];
   if (message.sources?.length) {
     lines.push("", "## Sources");
@@ -223,6 +268,9 @@ function messageMarkdown(message: OraMessage): string {
     });
   }
   if (message.datasetResult) {
+    lines.push(...datasetWorkflowMarkdown(message.datasetResult));
+  }
+  if (message.datasetResult && options.includeDatasetJson !== false) {
     lines.push(
       "",
       "## Dataset JSON",
@@ -1424,7 +1472,7 @@ export default function OraChatScreen() {
       const file = await exportFile({
         format: "docx",
         title: messageTitle(message),
-        content: message.content,
+        content: messageMarkdown(message, { includeDatasetJson: false }),
         filename: "ora-report",
       });
       await saveGeneratedFile(file);
@@ -1438,7 +1486,7 @@ export default function OraChatScreen() {
       const file = await exportFile({
         format: "xlsx",
         title: messageTitle(message),
-        content: message.content,
+        content: messageMarkdown(message, { includeDatasetJson: false }),
         filename: "ora-data",
       });
       await saveGeneratedFile(file);
@@ -1452,7 +1500,7 @@ export default function OraChatScreen() {
       const file = await exportFile({
         format: "pptx",
         title: messageTitle(message),
-        content: message.content,
+        content: messageMarkdown(message, { includeDatasetJson: false }),
         filename: "ora-presentation",
       });
       await saveGeneratedFile(file);
@@ -1465,6 +1513,16 @@ export default function OraChatScreen() {
     async (message: OraMessage) => {
       const title = messageTitle(message);
       try {
+        if (message.datasetResult) {
+          const file = await exportFile({
+            format: "pdf",
+            title,
+            content: messageMarkdown(message, { includeDatasetJson: false }),
+            filename: "ora-report",
+          });
+          await saveGeneratedFile(file);
+          return;
+        }
         await saveHtmlAsPdf(
           reportPdfHtml(
             messages.filter((m) => m.content.trim()),

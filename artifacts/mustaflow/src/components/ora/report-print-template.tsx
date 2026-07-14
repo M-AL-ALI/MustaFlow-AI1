@@ -9,6 +9,12 @@ import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "@/lib/file-generation/report-metadata";
 import type { ReportTemplateId, ReportSectionId } from "@/lib/file-generation/report-templates";
 import {
+  calculationSuggestionRows,
+  chartSuggestionRows,
+  hasAnalystWorkflow,
+  reportSuggestionRows,
+} from "@/lib/file-generation/analyst-workflow-export";
+import {
   deriveKpiStatus,
   deriveRiskLevel,
   buildRoadmap,
@@ -475,6 +481,30 @@ function buildDatasetHtml(
           simpleTable(["Risk", "Score", "Level", "Probability", "Impact", "Mitigation"], eriskRows),
       ),
     );
+  }
+
+  if (hasAnalystWorkflow(data) && data.analystWorkflow) {
+    const workflow = data.analystWorkflow;
+    const chartRows = chartSuggestionRows(workflow);
+    const calcRows = calculationSuggestionRows(workflow);
+    const reportRows = reportSuggestionRows(workflow);
+    let content = h2("Analyst Workflow");
+
+    if (chartRows.length) {
+      content +=
+        h3("Suggested Charts") +
+        simpleTable(["Title", "Type", "X", "Y", "Group", "Reason"], chartRows);
+    }
+    if (calcRows.length) {
+      content +=
+        h3("Repeatable Calculations") +
+        simpleTable(["Label", "Expression", "Description", "Columns"], calcRows);
+    }
+    if (reportRows.length) {
+      content +=
+        h3("Downloadable Reports") + simpleTable(["Format", "Title", "Description"], reportRows);
+    }
+    parts.push(sec(content));
   }
 
   parts.push("</div>");
