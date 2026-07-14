@@ -45,6 +45,31 @@ describe("Ora image quality profiles", () => {
     expect(freeLogo.prompt).toContain("simple brandable mark");
   });
 
+  it("adds medium-specific control guidance for higher-fidelity generation", () => {
+    const vectorLogo = buildOraImageGenerationProfile({
+      prompt: "minimal vector logo for a bakery",
+      subscriptionTier: "core",
+    });
+    expect(vectorLogo.prompt).toContain("crisp and brandable");
+    expect(vectorLogo.prompt).toContain("no mock storefronts");
+    expect(vectorLogo.prompt).toContain("Control fidelity");
+
+    const productPhoto = buildOraImageGenerationProfile({
+      prompt: "photorealistic product shot of a white sneaker",
+      subscriptionTier: "wave",
+    });
+    expect(productPhoto.kind).toBe("product");
+    expect(productPhoto.prompt).toContain("commercial photography finish");
+    expect(productPhoto.prompt).toContain("Do not turn the subject into a cartoon");
+
+    const watercolor = buildOraImageGenerationProfile({
+      prompt: "watercolor painting of a quiet mountain lake",
+      subscriptionTier: "free",
+    });
+    expect(watercolor.prompt).toContain("preserve the named medium");
+    expect(watercolor.prompt).toContain("paper/canvas feel");
+  });
+
   it("builds Ora-only edit instructions while preserving the original text", () => {
     const profile = buildOraImageEditProfile({
       instruction: "make the sky sunset orange",

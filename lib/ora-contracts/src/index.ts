@@ -145,6 +145,14 @@ export const oraMessageSchema = z.object({
   imageUrl: z.string().max(4000).optional(),
   imageId: z.number().int().optional(),
   editInstruction: z.string().max(2000).optional(),
+  imageMeta: z
+    .object({
+      kind: z.string().max(80),
+      aspectRatio: z.string().max(20),
+      style: z.string().max(40),
+      quality: z.string().max(40),
+    })
+    .optional(),
   memorySaveCandidate: z.string().max(400).optional(),
   memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
   memorySaveCandidateSensitive: z.boolean().optional(),
@@ -248,6 +256,7 @@ export interface OraMessageData {
   imageUrl?: string;
   imageId?: number;
   editInstruction?: string;
+  imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;

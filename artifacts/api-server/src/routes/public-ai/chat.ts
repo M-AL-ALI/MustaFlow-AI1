@@ -1502,6 +1502,12 @@ router.post("/public-ai/chat", async (req, res) => {
         reply: "Here's the image you asked for. Tap Edit to refine it with an instruction.",
         imageUrl: result.openaiUrl,
         ...(editableImageId ? { imageId: editableImageId } : {}),
+        imageMeta: {
+          kind: imageProfile.kind,
+          aspectRatio: imageProfile.aspectRatio,
+          style: imageProfile.style,
+          quality: imageProfile.quality,
+        },
         ...usage,
       });
       // Persist to the durable asset library (best-effort, after the response so

@@ -82,6 +82,8 @@ export interface OraMessage {
   imageId?: number;
   /** Edit instruction that produced this derived image (lineage display). */
   editInstruction?: string;
+  /** Generation profile surfaced for UI chips and persisted history. */
+  imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   /** True when the candidate looks like PII/credentials — never auto-saved. */
@@ -541,6 +543,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   imageUrl?: string;
   imageId?: number;
   editInstruction?: string;
+  imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;
@@ -572,6 +575,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}),
     ...(m.imageId != null ? { imageId: m.imageId } : {}),
     ...(m.editInstruction ? { editInstruction: m.editInstruction } : {}),
+    ...(m.imageMeta ? { imageMeta: m.imageMeta } : {}),
     ...(m.memorySaveCandidate ? { memorySaveCandidate: m.memorySaveCandidate } : {}),
     ...(m.memorySaveCandidateConfidence
       ? { memorySaveCandidateConfidence: m.memorySaveCandidateConfidence }
@@ -1637,6 +1641,7 @@ export function useOraChat(): UseOraChatReturn {
             assetId?: number;
             imageUrl?: string;
             imageId?: number;
+            imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
             memorySaveCandidate?: string;
             memorySaveCandidateConfidence?: "high" | "low";
             memorySaveCandidateSensitive?: boolean;
@@ -1661,6 +1666,7 @@ export function useOraChat(): UseOraChatReturn {
             suggestions: d.suggestions ?? [],
             ...(d.imageUrl ? { imageUrl: d.imageUrl } : {}),
             ...(d.imageId != null ? { imageId: d.imageId } : {}),
+            ...(d.imageMeta ? { imageMeta: d.imageMeta } : {}),
             ...(d.sources && d.sources.length > 0 ? { sources: d.sources } : {}),
             ...(d.images && d.images.length > 0 ? { images: d.images } : {}),
             ...(d.videos && d.videos.length > 0 ? { videos: d.videos } : {}),

@@ -6,7 +6,8 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Normalize CRLF so source-string assertions pass on Windows checkouts too
 // (the canonical Linux/Replit checkout is LF, but contributors edit on Windows).
-const read = (rel: string) => readFileSync(path.join(__dirname, rel), "utf8").replace(/\r\n/g, "\n");
+const read = (rel: string) =>
+  readFileSync(path.join(__dirname, rel), "utf8").replace(/\r\n/g, "\n");
 
 describe("Mobile Ora — Create file (generate-file) parity", () => {
   const api = read("../api.ts");
@@ -66,6 +67,12 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(fnBody).toContain("...buildChatExtras(res)");
     // Errors must surface on the bubble, not silently drop the turn.
     expect(fnBody).toContain("error: true");
+  });
+
+  it("carries Ora image profile metadata from chat responses into message rendering", () => {
+    expect(index).toContain("imageMeta: res.imageMeta");
+    expect(index).toContain("function formatOraImageMeta(");
+    expect(index).toContain("formatOraImageMeta(message.imageMeta)");
   });
 
   it("tracks uploaded document/dataset refs and clears them on every context switch", () => {

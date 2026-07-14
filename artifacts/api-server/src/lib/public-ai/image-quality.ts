@@ -188,6 +188,49 @@ function resolveOraImageStyle(prompt: string, kind: OraImagePromptKind): ImageSt
   return "vivid";
 }
 
+function styleControlGuidance(prompt: string, kind: OraImagePromptKind): string {
+  const text = prompt.toLowerCase();
+
+  if (
+    kind === "logo" ||
+    kind === "icon" ||
+    /\b(vector|flat|minimal|minimalist|geometric|line\s+art|outline|brand\s+mark)\b/.test(text)
+  ) {
+    return "For logo, icon, vector, and flat-graphic requests, keep the result crisp and brandable: clean shapes, intentional negative space, limited palette, strong silhouette, and no mock storefronts or random signage unless the user explicitly asks for that scene.";
+  }
+
+  if (
+    kind === "product" ||
+    /\b(product\s+shot|studio\s+shot|commercial\s+photo|packshot|photoreal|photorealistic|realistic|dslr|macro|lens)\b/.test(
+      text,
+    )
+  ) {
+    return "For product-photo or photoreal requests, prioritize believable materials, accurate perspective, realistic shadows/reflections, clean studio lighting, and a commercial photography finish. Do not turn the subject into a cartoon or generic illustration.";
+  }
+
+  if (/\b(3d|isometric|clay|render|blender|cinema\s*4d)\b/.test(text)) {
+    return "For 3D or isometric requests, use consistent geometry, coherent depth, clean edges, realistic lighting, and a deliberate render style without mixing unrelated 2D illustration cues.";
+  }
+
+  if (/\b(watercolor|oil\s+painting|acrylic|gouache|painterly|ink\s+wash)\b/.test(text)) {
+    return "For painterly medium requests, preserve the named medium clearly through brush texture, pigment behavior, edges, and paper/canvas feel while still following the exact subject and composition.";
+  }
+
+  if (/\b(anime|manga|comic|cartoon|cel\s+shaded)\b/.test(text)) {
+    return "For anime, manga, comic, or cartoon requests, keep one consistent stylized art direction, clean anatomy/proportions for that style, readable expressions, and intentional line/color treatment.";
+  }
+
+  if (
+    kind === "diagram" ||
+    kind === "infographic" ||
+    /\b(diagram|flowchart|infographic)\b/.test(text)
+  ) {
+    return "For diagrams and infographics, prioritize clarity over decoration: readable labels, simple shapes, logical spacing, and no dense tiny text.";
+  }
+
+  return "Match the visual medium implied by the user's wording and keep one coherent style throughout the image.";
+}
+
 function interiorAnalysisGuidance(planTier: OraPlanTier): string {
   switch (planTier) {
     case "wave":
@@ -381,6 +424,8 @@ export function buildOraImageGenerationProfile(input: {
     promptExpansion,
     planGuidance(planTier, "generation"),
     kindGuidance(kind, planTier),
+    styleControlGuidance(originalPrompt, kind),
+    "Control fidelity: before rendering, align the subject, count, composition, medium, camera, lighting, colors, text, aspect ratio, and exclusions with the user's exact request.",
     "Preserve the user's requested subject, mood, colors, brands, and constraints exactly.",
     "Render exactly what the user asked for: do not omit, replace, or substitute the stated subject with something easier to draw, and do not drop any explicitly requested element.",
     "Avoid artifacts: no extra, missing, or distorted limbs, hands, fingers, or faces; no duplicated, merged, or malformed subjects; no unrelated or nonsensical background objects.",

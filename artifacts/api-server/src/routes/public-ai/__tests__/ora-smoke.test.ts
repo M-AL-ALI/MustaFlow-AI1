@@ -501,6 +501,12 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.imageUrl).toBeTruthy();
+    expect(res.body.imageMeta).toEqual({
+      kind: "logo",
+      aspectRatio: "1:1",
+      style: "natural",
+      quality: "high",
+    });
     expect(res.body.fileName).toBeUndefined();
     expect(imageMock.generateImage).toHaveBeenCalledTimes(1);
     expect(usageMock.consumeOraQuota).toHaveBeenCalledWith("smoke-user-1", "core", "image");

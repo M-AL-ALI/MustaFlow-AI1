@@ -57,6 +57,12 @@ describe("Ora conversation message persistence round-trip", () => {
         imageUrl: "https://cdn.example.com/generated/mars.png",
         imageId: 12345,
         editInstruction: "make the sky redder",
+        imageMeta: {
+          kind: "illustration",
+          aspectRatio: "16:9",
+          style: "vivid",
+          quality: "high",
+        },
       },
       {
         role: "assistant",
@@ -104,6 +110,12 @@ describe("Ora conversation message persistence round-trip", () => {
     expect(stored[2].imageUrl).toBe("https://cdn.example.com/generated/mars.png");
     expect(stored[2].imageId).toBe(12345);
     expect(stored[2].editInstruction).toBe("make the sky redder");
+    expect(stored[2].imageMeta).toEqual({
+      kind: "illustration",
+      aspectRatio: "16:9",
+      style: "vivid",
+      quality: "high",
+    });
 
     // Memory-save chip fields survive.
     expect(stored[3].memorySaveCandidate).toBe("I live at 742 Evergreen Terrace");

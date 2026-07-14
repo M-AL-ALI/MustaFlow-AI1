@@ -19,6 +19,7 @@ describe("Ora chat UX response wiring", () => {
       "mimeType?: string;",
       "imageUrl?: string;",
       "imageId?: number;",
+      "imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };",
       'memorySaveCandidateConfidence?: "high" | "low";',
       "memorySaveCandidateSensitive?: boolean;",
       "memoriesUsed?: OraMemoryUsed[];",
@@ -32,6 +33,7 @@ describe("Ora chat UX response wiring", () => {
     expect(hookSource).toMatch(/suggestions:\s*d\.suggestions\s*\?\?\s*\[\]/);
     expect(hookSource).toContain("...(d.imageUrl ? { imageUrl: d.imageUrl } : {})");
     expect(hookSource).toContain("...(d.imageId != null ? { imageId: d.imageId } : {})");
+    expect(hookSource).toContain("...(d.imageMeta ? { imageMeta: d.imageMeta } : {})");
     expect(hookSource).toMatch(
       /d\.memoriesUsed\s*&&\s*d\.memoriesUsed\.length\s*>\s*0[\s\S]*memoriesUsed:\s*d\.memoriesUsed/,
     );
@@ -55,6 +57,7 @@ describe("Ora chat UX response wiring", () => {
     );
 
     expect(panelSource).toMatch(/msg\.imageUrl\s*&&[\s\S]*<img[\s\S]*src=\{msg\.imageUrl\}/);
+    expect(panelSource).toContain("formatOraImageMeta(msg.imageMeta)");
     expect(panelSource).toMatch(
       /msg\.imageId\s*!=\s*null\s*&&\s*isSignedIn[\s\S]*submitImageEdit\(msg\.imageId!\)/,
     );
@@ -76,6 +79,7 @@ describe("Ora chat UX response wiring", () => {
 
   it("keeps the public home bubble usable for generated images, files, and suggestions", () => {
     expect(bubbleSource).toMatch(/msg\.imageUrl\s*&&[\s\S]*<img[\s\S]*src=\{msg\.imageUrl\}/);
+    expect(bubbleSource).toContain("formatOraImageMeta(msg.imageMeta)");
     expect(bubbleSource).toMatch(
       /msg\.generatedFile\s*&&[\s\S]*msg\.generatedFile\.fileData\s*\?[\s\S]*downloadOraFile\(msg\.generatedFile!\)[\s\S]*Regenerate to download/,
     );

@@ -446,6 +446,12 @@ What should I tell Replit?`;
     expect(res.body.reply).toContain("Here's the image you asked for");
     expect(res.body.reply).not.toMatch(/sign in|sign up|create an account/i);
     expect(res.body.imageUrl).toBe("data:image/png;base64,aW1hZ2U=");
+    expect(res.body.imageMeta).toEqual({
+      kind: "logo",
+      aspectRatio: "1:1",
+      style: "natural",
+      quality: "high",
+    });
     expect(res.body.fileName).toBeUndefined();
     expect(imageMock.generateImage).toHaveBeenCalledWith(
       expect.objectContaining({

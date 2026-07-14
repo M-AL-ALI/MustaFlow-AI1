@@ -76,6 +76,7 @@ import {
   Pressable,
   ScrollView,
   Share,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -374,6 +375,7 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     suggestions: res.suggestions,
     imageUrl: res.imageUrl,
     imageId: res.imageId,
+    imageMeta: res.imageMeta,
     memorySaveCandidate: res.memorySaveCandidate,
     memorySaveCandidateConfidence: res.memorySaveCandidateConfidence,
     memorySaveCandidateSensitive: res.memorySaveCandidateSensitive,
@@ -382,6 +384,20 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     ...(res.searchFallback ? { searchFallback: true } : {}),
     ...(res.searchRetryable ? { searchRetryable: true } : {}),
   };
+}
+
+function formatOraImageMeta(meta?: {
+  kind: string;
+  aspectRatio: string;
+  style: string;
+  quality: string;
+}): string[] {
+  if (!meta) return [];
+  const quality =
+    meta.quality === "high" ? "High quality" : meta.quality === "draft" ? "Draft" : "Standard";
+  const style = meta.style ? `${meta.style} style` : "";
+  const kind = meta.kind ? meta.kind.replace(/_/g, " ") : "";
+  return [quality, meta.aspectRatio, style, kind].filter(Boolean);
 }
 
 export default function OraChatScreen() {
@@ -3815,6 +3831,33 @@ function MessageBubbleBase({
                       transition={200}
                     />
                   </Pressable>
+                  {!!message.imageMeta && (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                      {formatOraImageMeta(message.imageMeta).map((label) => (
+                        <View
+                          key={label}
+                          style={{
+                            borderWidth: StyleSheet.hairlineWidth,
+                            borderColor: c.border,
+                            backgroundColor: c.muted + "66",
+                            borderRadius: 999,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: c.mutedForeground,
+                              fontSize: 11,
+                              fontFamily: "Inter_500Medium",
+                            }}
+                          >
+                            {label}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                   {/* Save button — top-right */}
                   <Pressable
                     onPress={handleSaveImage}

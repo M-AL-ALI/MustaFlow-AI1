@@ -301,6 +301,7 @@ export interface ChatResponse {
   assetId?: number;
   imageUrl?: string;
   imageId?: number;
+  imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;

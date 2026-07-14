@@ -120,6 +120,20 @@ async function downloadOraAssetById(assetId: number, fileName: string) {
   }, 2000);
 }
 
+function formatOraImageMeta(meta?: {
+  kind: string;
+  aspectRatio: string;
+  style: string;
+  quality: string;
+}): string[] {
+  if (!meta) return [];
+  const quality =
+    meta.quality === "high" ? "High quality" : meta.quality === "draft" ? "Draft" : "Standard";
+  const style = meta.style ? `${meta.style} style` : "";
+  const kind = meta.kind ? meta.kind.replace(/_/g, " ") : "";
+  return [quality, meta.aspectRatio, style, kind].filter(Boolean);
+}
+
 const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] = [
   { value: "csv", label: "CSV Spreadsheet", ext: ".csv" },
   { value: "xlsx", label: "Excel (.xlsx)", ext: ".xlsx" },
@@ -1484,6 +1498,18 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         className="w-full rounded-xl border border-border/60"
                         loading="lazy"
                       />
+                      {msg.imageMeta && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {formatOraImageMeta(msg.imageMeta).map((label) => (
+                            <span
+                              key={label}
+                              className="rounded-full border border-border/60 bg-muted/45 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {msg.editInstruction && (
                         <p className="mt-1 flex items-start gap-1 text-[11px] text-muted-foreground break-words">
                           <GitBranch className="h-3 w-3 shrink-0 mt-px" />
