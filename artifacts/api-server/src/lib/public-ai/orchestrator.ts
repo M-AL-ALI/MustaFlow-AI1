@@ -325,6 +325,23 @@ export const ORA_SEARCH_PATTERNS: RegExp[] = [
 // word, so ordinary app-building talk ("what games can I build today", "make a
 // soccer game") is NOT hijacked. A build/create verb near a buildable noun
 // additionally vetoes the match as a guard for "build a football game today".
+// Research-style requests are not always explicitly "latest" or "search the
+// web", but users expect grounded sources when they ask Ora to research,
+// investigate, compare vendors/products, or cite references. Keep this narrower
+// than the search-profile's research classifier: the router should only pull a
+// message into live web search when the phrasing implies external evidence, not
+// for every evergreen "compare X vs Y" explanation.
+export const ORA_RESEARCH_SEARCH_PATTERNS: RegExp[] = [
+  /\b(?:research|investigate|look\s+into|do\s+(?:a\s+)?deep\s+dive|market\s+research|competitive\s+analysis|due\s+diligence)\b/i,
+  /\b(?:with|include|using|cite|show|provide|give\s+me)\b[^.?!]{0,40}\b(?:sources?|citations?|links?)\b/i,
+  /\b(?:best|top|recommend(?:ed|ations?)?|ranking|ranked|alternatives?)\b[^.?!]{0,80}\b(?:tools?|platforms?|providers?|services?|products?|software|apps?|models?|phones?|laptops?|vendors?|companies|plans?|pricing)\b/i,
+  /\bcompare\b[^.?!]{0,80}\b(?:tools?|platforms?|providers?|services?|products?|software|apps?|models?|phones?|laptops?|vendors?|companies|plans?|pricing)\b/i,
+];
+
+export function isResearchSearchRequest(message: string): boolean {
+  return ORA_RESEARCH_SEARCH_PATTERNS.some((p) => p.test(message));
+}
+
 const SPORT_NOUNS =
   "soccer|football|basketball|baseball|hockey|tennis|cricket|rugby|golf|boxing|f1|formula\\s*1|nascar|nba|wnba|nfl|nhl|mlb|mls|ncaa|ufc|world\\s+cup|champions\\s+league|premier\\s+league|la\\s+liga|bundesliga|serie\\s+a|ligue\\s+1|europa\\s+league|euros?|olympics?|super\\s+bowl|world\\s+series|grand\\s+prix|wimbledon|ipl|the\\s+ashes";
 const SPORT_EVENT_WORDS =
@@ -379,7 +396,11 @@ export function isSportsScheduleRequest(message: string): boolean {
 }
 
 export function isWebSearchRequest(message: string): boolean {
-  return ORA_SEARCH_PATTERNS.some((p) => p.test(message)) || isSportsScheduleRequest(message);
+  return (
+    ORA_SEARCH_PATTERNS.some((p) => p.test(message)) ||
+    isSportsScheduleRequest(message) ||
+    isResearchSearchRequest(message)
+  );
 }
 
 // ── Video-request intent detection ──────────────────────────────────────────

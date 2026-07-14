@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isWebSearchRequest,
+  isResearchSearchRequest,
   isSportsScheduleRequest,
   isVideoRequest,
   routeOraMessage,
@@ -82,6 +83,33 @@ describe("isWebSearchRequest", () => {
     expect(isWebSearchRequest("look up this value in my uploaded file")).toBe(false);
     expect(isWebSearchRequest("search for duplicates in this CSV")).toBe(false);
     expect(isWebSearchRequest("look up this function in the docs I pasted")).toBe(false);
+  });
+});
+
+// ─── isResearchSearchRequest ─────────────────────────────────────────────────
+
+describe("isResearchSearchRequest", () => {
+  it("matches research-style questions that need grounded external sources", () => {
+    expect(isResearchSearchRequest("research the best CRM platforms for small businesses")).toBe(
+      true,
+    );
+    expect(isResearchSearchRequest("do a competitive analysis of AI video tools")).toBe(true);
+    expect(isResearchSearchRequest("compare project management software pricing")).toBe(true);
+    expect(isResearchSearchRequest("give me sources for EV battery recycling")).toBe(true);
+  });
+
+  it("does NOT hijack ordinary evergreen explanations or creative tasks", () => {
+    expect(isResearchSearchRequest("compare apples and oranges")).toBe(false);
+    expect(isResearchSearchRequest("explain PostgreSQL vs MongoDB conceptually")).toBe(false);
+    expect(isResearchSearchRequest("write a story with references to the ocean")).toBe(false);
+    expect(isResearchSearchRequest("show me how recursion works")).toBe(false);
+  });
+
+  it("feeds isWebSearchRequest so research questions route to live search", () => {
+    expect(isWebSearchRequest("research the best CRM platforms for small businesses")).toBe(true);
+    expect(isWebSearchRequest("do a competitive analysis of AI video tools")).toBe(true);
+    expect(isWebSearchRequest("give me sources for EV battery recycling")).toBe(true);
+    expect(isWebSearchRequest("compare apples and oranges")).toBe(false);
   });
 });
 
@@ -225,6 +253,14 @@ describe("routeOraMessage picks the search tool for live-info questions", () => 
     });
     // Search beats the instant/deep classifier — a grounded answer always wins.
     expect(deep.tool).toBe("search");
+  });
+
+  it("routes research-style source requests to `search`", async () => {
+    const decision = await routeOraMessage({
+      message: "research the best CRM platforms for small businesses",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("search");
   });
 
   it("prefers an image-generation request over search when both could match", async () => {
