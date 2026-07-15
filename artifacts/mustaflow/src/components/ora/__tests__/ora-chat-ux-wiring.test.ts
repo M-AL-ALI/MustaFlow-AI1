@@ -68,9 +68,12 @@ describe("Ora chat UX response wiring", () => {
     expect(panelSource).toMatch(
       /msg\.imageId\s*!=\s*null\s*&&\s*isSignedIn[\s\S]*submitImageEdit\(msg\.imageId!\)/,
     );
-    expect(panelSource).toMatch(
-      /msg\.generatedFile\s*&&[\s\S]*msg\.generatedFile\.fileData\s*\?[\s\S]*downloadOraFile\(msg\.generatedFile!\)[\s\S]*Regenerate to download/,
-    );
+    expect(panelSource).toContain("function GeneratedFileCard(");
+    expect(panelSource).toContain('file.format === "pdf" ? "application/octet-stream"');
+    expect(panelSource).toContain("View or download");
+    expect(panelSource).toContain("viewOraFile(file)");
+    expect(panelSource).toContain("downloadOraFile(file)");
+    expect(panelSource).toMatch(/msg\.generatedFile\s*&&\s*<GeneratedFileCard/);
     expect(panelSource).toMatch(
       /msg\.memorySaveCandidate\s*\|\|\s*msg\.memorySaved[\s\S]*<OraMemorySaveChip[\s\S]*onSave=\{\(\) => handleSaveMemory/,
     );
@@ -87,9 +90,12 @@ describe("Ora chat UX response wiring", () => {
   it("keeps the public home bubble usable for generated images, files, and suggestions", () => {
     expect(bubbleSource).toMatch(/msg\.imageUrl\s*&&[\s\S]*<img[\s\S]*src=\{msg\.imageUrl\}/);
     expect(bubbleSource).toContain("formatOraImageMeta(msg.imageMeta)");
-    expect(bubbleSource).toMatch(
-      /msg\.generatedFile\s*&&[\s\S]*msg\.generatedFile\.fileData\s*\?[\s\S]*downloadOraFile\(msg\.generatedFile!\)[\s\S]*Regenerate to download/,
-    );
+    expect(bubbleSource).toContain("function GeneratedFileCard(");
+    expect(bubbleSource).toContain('file.format === "pdf" ? "application/octet-stream"');
+    expect(bubbleSource).toContain("View or download");
+    expect(bubbleSource).toContain("viewOraFile(file)");
+    expect(bubbleSource).toContain("downloadOraFile(file)");
+    expect(bubbleSource).toMatch(/msg\.generatedFile\s*&&\s*<GeneratedFileCard/);
     expect(bubbleSource).toMatch(
       /const showSuggestions =[\s\S]*Array\.isArray\(msg\.suggestions\)[\s\S]*msg\.suggestions\.length > 0/,
     );

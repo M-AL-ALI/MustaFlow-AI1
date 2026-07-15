@@ -19,6 +19,7 @@ import {
   MoreHorizontal,
   FileSpreadsheet,
   Download,
+  ExternalLink,
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
@@ -53,7 +54,9 @@ function downloadOraFile(file: GeneratedFile) {
   const byteChars = atob(file.fileData);
   const byteNums = new Uint8Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
-  const blob = new Blob([byteNums], { type: file.mimeType });
+  const blob = new Blob([byteNums], {
+    type: file.format === "pdf" ? "application/octet-stream" : file.mimeType,
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -66,6 +69,26 @@ function downloadOraFile(file: GeneratedFile) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, 2000);
+}
+
+function viewOraFile(file: GeneratedFile) {
+  if (!file.fileData) return;
+  const byteChars = atob(file.fileData);
+  const byteNums = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteNums], { type: file.mimeType });
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 120_000);
 }
 
 // Download a durable library asset by id (reloaded messages drop the inline
@@ -86,6 +109,117 @@ async function downloadOraAssetById(assetId: number, fileName: string) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, 2000);
+}
+
+async function viewOraAssetById(assetId: number) {
+  const res = await authFetch(`/api/ora/assets/${assetId}/download`);
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 120_000);
+}
+
+function GeneratedFileCard({ file, compact = false }: { file: GeneratedFile; compact?: boolean }) {
+  const isPdf = file.format === "pdf";
+  const iconBox = compact ? "h-8 w-8" : "h-9 w-9";
+  const iconSize = compact ? "h-4 w-4" : "h-4.5 w-4.5";
+  const cardPad = compact ? "px-3 py-2.5" : "px-3.5 py-3";
+  const fileText = compact ? "text-[11px]" : "text-xs";
+
+  if (isPdf && (file.fileData || file.assetId != null)) {
+    return (
+      <div
+        className={`mt-2 w-full flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] ${cardPad}`}
+      >
+        <div
+          className={`shrink-0 flex ${iconBox} items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]`}
+        >
+          <FileText className={`${iconSize} text-[hsl(265_85%_65%)]`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`${fileText} font-semibold truncate text-foreground`}>{file.fileName}</p>
+          <p className="text-[10px] text-muted-foreground/70 mt-0.5">PDF · View or download</p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => (file.fileData ? viewOraFile(file) : viewOraAssetById(file.assetId!))}
+            className="inline-flex items-center gap-1 rounded-lg border border-[hsl(265_85%_65%/0.25)] bg-background/70 px-2 py-1.5 text-[10px] font-medium text-foreground hover:bg-[hsl(265_85%_65%/0.1)]"
+          >
+            <ExternalLink className="h-3 w-3" />
+            View
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              file.fileData
+                ? downloadOraFile(file)
+                : downloadOraAssetById(file.assetId!, file.fileName)
+            }
+            className="inline-flex items-center gap-1 rounded-lg bg-[hsl(265_85%_65%)] px-2 py-1.5 text-[10px] font-semibold text-white hover:opacity-90"
+          >
+            <Download className="h-3 w-3" />
+            Download
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (file.fileData || file.assetId != null) {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          file.fileData ? downloadOraFile(file) : downloadOraAssetById(file.assetId!, file.fileName)
+        }
+        className={`mt-2 w-full text-left group flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] ${cardPad} transition-all cursor-pointer`}
+      >
+        <div
+          className={`shrink-0 flex ${iconBox} items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]`}
+        >
+          <FileSpreadsheet className={`${iconSize} text-[hsl(265_85%_65%)]`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`${fileText} font-semibold truncate text-foreground`}>{file.fileName}</p>
+          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+            {file.format.toUpperCase()} · Click to download
+          </p>
+        </div>
+        <Download className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className={`mt-2 w-full flex items-center gap-2.5 rounded-xl border border-border/60 bg-muted/20 ${cardPad}`}
+    >
+      <div
+        className={`shrink-0 flex ${iconBox} items-center justify-center rounded-lg bg-muted/40`}
+      >
+        <FileSpreadsheet className={`${iconSize} text-muted-foreground`} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className={`${fileText} font-semibold truncate text-muted-foreground`}>
+          {file.fileName}
+        </p>
+        <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+          {file.format.toUpperCase()} · Regenerate to download
+        </p>
+      </div>
+    </div>
+  );
 }
 
 const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] = [
@@ -1351,71 +1485,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       </div>
                     )}
 
-                    {msg.generatedFile &&
-                      (msg.generatedFile.fileData ? (
-                        <button
-                          type="button"
-                          onClick={() => downloadOraFile(msg.generatedFile!)}
-                          className="mt-2 w-full text-left group flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3 py-2.5 transition-all cursor-pointer"
-                        >
-                          <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
-                            <FileSpreadsheet className="h-4 w-4 text-[hsl(265_85%_65%)]" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-semibold truncate text-foreground">
-                              {msg.generatedFile.fileName}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                              {msg.generatedFile.format.toUpperCase()} · Click to download
-                            </p>
-                          </div>
-                          <Download className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
-                        </button>
-                      ) : msg.generatedFile.assetId != null ? (
-                        // Reloaded message with a durable library asset: the inline
-                        // bytes are gone, but the file is still downloadable via its
-                        // asset id.
-                        <button
-                          type="button"
-                          onClick={() =>
-                            downloadOraAssetById(
-                              msg.generatedFile!.assetId!,
-                              msg.generatedFile!.fileName,
-                            )
-                          }
-                          className="mt-2 w-full text-left group flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3 py-2.5 transition-all cursor-pointer"
-                        >
-                          <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
-                            <FileSpreadsheet className="h-4 w-4 text-[hsl(265_85%_65%)]" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-semibold truncate text-foreground">
-                              {msg.generatedFile.fileName}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                              {msg.generatedFile.format.toUpperCase()} · Click to download
-                            </p>
-                          </div>
-                          <Download className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
-                        </button>
-                      ) : (
-                        // Reloaded message: base64 bytes aren't stored, so the file
-                        // is no longer downloadable — render a static card, not a
-                        // dead download button.
-                        <div className="mt-2 w-full flex items-center gap-2.5 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5">
-                          <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40">
-                            <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-semibold truncate text-muted-foreground">
-                              {msg.generatedFile.fileName}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                              {msg.generatedFile.format.toUpperCase()} · Regenerate to download
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                    {msg.generatedFile && <GeneratedFileCard file={msg.generatedFile} compact />}
 
                     {msg.editedFrom && (
                       <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
