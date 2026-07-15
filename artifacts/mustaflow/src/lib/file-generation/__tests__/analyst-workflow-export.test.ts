@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import {
+  buildAnalystChartSeries,
   calculationSuggestionBullets,
   calculationSuggestionRows,
   chartSuggestionBullets,
@@ -17,6 +18,38 @@ const DATA: DatasetAnalysisResult = {
   usedFallback: false,
   sanitizedCellCount: 12,
   truncated: false,
+  paretoFindings: [
+    { label: "West", value: 120, cumPct: 60 },
+    { label: "East", value: 80, cumPct: 100 },
+  ],
+  actionPlan: [
+    { action: "Fix pricing", priority: "high" },
+    { action: "Improve onboarding", priority: "medium" },
+    { action: "Monitor churn", priority: "medium" },
+  ],
+  healthScore: {
+    score: 72,
+    category: "Needs Attention",
+    explanation: "Several risks need follow-up.",
+  },
+  enhancedRisks: [
+    {
+      risk: "Revenue concentration",
+      riskScore: 88,
+      riskLevel: "High",
+      probability: "High",
+      impact: "High",
+      mitigation: "Diversify customer mix.",
+    },
+    {
+      risk: "Delayed reporting",
+      riskScore: 52,
+      riskLevel: "Medium",
+      probability: "Medium",
+      impact: "Medium",
+      mitigation: "Automate reporting.",
+    },
+  ],
   analystWorkflow: {
     chartSuggestions: [
       {
@@ -83,5 +116,28 @@ describe("analyst workflow export helpers", () => {
     expect(reportSuggestionBullets(workflow)).toEqual([
       "PDF: Executive Summary - Board-ready summary.",
     ]);
+  });
+
+  it("builds deterministic generated chart series from analysis data", () => {
+    const series = buildAnalystChartSeries(DATA);
+    expect(series.map((s) => s.title)).toEqual([
+      "Pareto Contribution",
+      "Risk Score by Issue",
+      "Action Plan by Priority",
+      "Overall Health Score",
+    ]);
+    expect(series[0]).toMatchObject({
+      labels: ["West", "East"],
+      values: [120, 80],
+    });
+    expect(series[2]).toMatchObject({
+      labels: ["High", "Medium"],
+      values: [1, 2],
+    });
+    expect(series[3]).toMatchObject({
+      labels: ["Needs Attention"],
+      values: [72],
+      valueSuffix: "/100",
+    });
   });
 });

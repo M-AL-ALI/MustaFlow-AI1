@@ -3,6 +3,7 @@ import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "./report-metadata";
 import type { ReportTemplateId } from "./report-templates";
 import {
+  buildAnalystChartSeries,
   calculationSuggestionBullets,
   chartSuggestionBullets,
   hasAnalystWorkflow,
@@ -179,6 +180,30 @@ export async function downloadPptx(
       );
     }
 
+    addFooter(s);
+  };
+
+  const addChartSlide = (title: string, labels: string[], values: number[]) => {
+    const s = nextSlide();
+    if (!s) return;
+    addHeading(s, title);
+    s.addChart(pptx.ChartType.bar, [{ name: title, labels, values }], {
+      x: 0.7,
+      y: 1.35,
+      w: 11.95,
+      h: 4.85,
+      showLegend: false,
+      showTitle: false,
+      showValue: true,
+      valAxisHidden: false,
+      catAxisHidden: false,
+      valAxisMinVal: 0,
+      catAxisLabelFontFace: "Aptos",
+      catAxisLabelFontSize: 9,
+      valAxisLabelFontFace: "Aptos",
+      valAxisLabelFontSize: 9,
+      chartColors: [C.accent],
+    });
     addFooter(s);
   };
 
@@ -364,6 +389,10 @@ export async function downloadPptx(
       ]);
       addTableSection("Action Plan", hdrs, rows, [5.83, 2.0, 2.0, 2.5]);
     }
+
+    buildAnalystChartSeries(data).forEach((series) =>
+      addChartSlide(series.title, series.labels, series.values),
+    );
 
     if (hasAnalystWorkflow(data) && data.analystWorkflow) {
       const workflow = data.analystWorkflow;

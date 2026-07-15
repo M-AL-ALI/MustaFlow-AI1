@@ -3,6 +3,7 @@ import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "./report-metadata";
 import type { ReportTemplateId, ReportSectionId } from "./report-templates";
 import {
+  buildAnalystChartSeries,
   calculationSuggestionRows,
   chartSuggestionRows,
   hasAnalystWorkflow,
@@ -386,6 +387,26 @@ export async function downloadDocx(
         ),
       );
       children.push(spacer());
+    }
+
+    const generatedCharts = buildAnalystChartSeries(data);
+    if (generatedCharts.length) {
+      children.push(h2("Generated Charts"));
+      generatedCharts.forEach((series) => {
+        children.push(h3(series.title));
+        children.push(
+          makeTable(
+            ["Label", "Value"],
+            series.labels.map((label, index) => [
+              label,
+              `${series.values[index] ?? 0}${series.valueSuffix ?? ""}`,
+            ]),
+            [6000, 3000],
+            true,
+          ),
+        );
+        children.push(spacer());
+      });
     }
 
     // Priority Matrix

@@ -215,21 +215,21 @@ export function ReportExportDialog({
         }
       } else if (exportType === "pdf") {
         if (hasDataset && message?.datasetResult) {
-          downloadPdf(
+          await downloadPdf(
             { kind: "dataset", data: message.datasetResult, title: reportTitle },
             basename,
             meta,
             selectedTemplate,
           );
         } else if (message) {
-          downloadPdf(
+          await downloadPdf(
             { kind: "message", message, title: reportTitle },
             basename,
             meta,
             selectedTemplate,
           );
         } else if (messages) {
-          downloadPdf(
+          await downloadPdf(
             { kind: "conversation", messages, title: reportTitle },
             basename,
             meta,

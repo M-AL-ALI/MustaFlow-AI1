@@ -9,6 +9,7 @@ import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "@/lib/file-generation/report-metadata";
 import type { ReportTemplateId, ReportSectionId } from "@/lib/file-generation/report-templates";
 import {
+  buildAnalystChartSeries,
   calculationSuggestionRows,
   chartSuggestionRows,
   hasAnalystWorkflow,
@@ -64,6 +65,22 @@ function simpleTable(headers: string[], rows: string[][]): string {
     .map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`)
     .join("\n");
   return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+function barChart(title: string, labels: string[], values: number[], valueSuffix = ""): string {
+  const max = Math.max(...values, 1);
+  const rows = labels
+    .map((label, index) => {
+      const value = values[index] ?? 0;
+      const width = Math.max(4, Math.round((value / max) * 100));
+      return `<div class="chart-row">
+  <div class="chart-label">${esc(label)}</div>
+  <div class="chart-track"><div class="chart-bar" style="width:${width}%"></div></div>
+  <div class="chart-value">${esc(`${value}${valueSuffix}`)}</div>
+</div>`;
+    })
+    .join("");
+  return `<div class="chart-card"><h3>${esc(title)}</h3>${rows}</div>`;
 }
 
 // ── Cover page ──────────────────────────────────────────────────────────────
@@ -273,6 +290,20 @@ function buildDatasetHtml(
     ]);
     parts.push(
       sec(h2("Action Plan") + simpleTable(["Action", "Priority", "Owner", "Timeline"], rows)),
+    );
+  }
+
+  const chartSeries = buildAnalystChartSeries(data);
+  if (chartSeries.length) {
+    parts.push(
+      sec(
+        h2("Generated Charts") +
+          chartSeries
+            .map((series) =>
+              barChart(series.title, series.labels, series.values, series.valueSuffix),
+            )
+            .join(""),
+      ),
     );
   }
 

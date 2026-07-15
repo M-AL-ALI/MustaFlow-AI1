@@ -255,6 +255,68 @@ function datasetWorkflowMarkdown(result: NonNullable<OraMessage["datasetResult"]
   return lines;
 }
 
+function parseChartNumber(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number.parseFloat(String(value ?? "").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function textBar(value: number, max: number): string {
+  const width = Math.max(1, Math.round((value / Math.max(max, 1)) * 18));
+  return "#".repeat(width);
+}
+
+function datasetGeneratedChartsMarkdown(
+  result: NonNullable<OraMessage["datasetResult"]>,
+): string[] {
+  const chartBlocks: Array<{ title: string; rows: Array<{ label: string; value: number }> }> = [];
+  const paretoRows = (Array.isArray(result.paretoFindings) ? result.paretoFindings : [])
+    .map((row) => ({
+      label: String(row.label ?? ""),
+      value: parseChartNumber(row.value),
+    }))
+    .filter((row): row is { label: string; value: number } => !!row.label && row.value !== null)
+    .slice(0, 8);
+  if (paretoRows.length >= 2) chartBlocks.push({ title: "Pareto Contribution", rows: paretoRows });
+
+  const riskRows = (Array.isArray(result.enhancedRisks) ? result.enhancedRisks : [])
+    .map((risk) => ({
+      label: String(risk.risk ?? ""),
+      value: parseChartNumber(risk.riskScore),
+    }))
+    .filter((row): row is { label: string; value: number } => !!row.label && row.value !== null)
+    .slice(0, 8);
+  if (riskRows.length >= 2) chartBlocks.push({ title: "Risk Score by Issue", rows: riskRows });
+
+  const priorityCounts = new Map<string, number>();
+  for (const action of Array.isArray(result.actionPlan) ? result.actionPlan : []) {
+    priorityCounts.set(action.priority, (priorityCounts.get(action.priority) ?? 0) + 1);
+  }
+  const priorityRows = ["high", "medium", "low"]
+    .map((priority) => ({
+      label: priority[0].toUpperCase() + priority.slice(1),
+      value: priorityCounts.get(priority) ?? 0,
+    }))
+    .filter((row) => row.value > 0);
+  if (priorityRows.length >= 2) {
+    chartBlocks.push({ title: "Action Plan by Priority", rows: priorityRows });
+  }
+
+  if (chartBlocks.length === 0) return [];
+
+  const lines = ["", "## Generated Charts"];
+  chartBlocks.forEach((block) => {
+    const max = Math.max(...block.rows.map((row) => row.value), 1);
+    lines.push("", `### ${block.title}`);
+    block.rows.forEach((row) => {
+      lines.push(`- ${row.label}: ${textBar(row.value, max)} ${row.value}`);
+    });
+  });
+  return lines;
+}
+
 function messageMarkdown(
   message: OraMessage,
   options: { includeDatasetJson?: boolean } = {},
@@ -268,6 +330,7 @@ function messageMarkdown(
     });
   }
   if (message.datasetResult) {
+    lines.push(...datasetGeneratedChartsMarkdown(message.datasetResult));
     lines.push(...datasetWorkflowMarkdown(message.datasetResult));
   }
   if (message.datasetResult && options.includeDatasetJson !== false) {

@@ -2,6 +2,7 @@ import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "./report-metadata";
 import type { ReportTemplateId } from "./report-templates";
 import {
+  buildAnalystChartSeries,
   calculationSuggestionRows,
   chartSuggestionRows,
   hasAnalystWorkflow,
@@ -201,6 +202,17 @@ export async function downloadXlsx(
       ]);
     }
     addSheet(wb, "Action Plan", apRows, [{ wch: 50 }, { wch: 12 }, { wch: 20 }, { wch: 20 }]);
+  }
+
+  const generatedCharts = buildAnalystChartSeries(data);
+  if (generatedCharts.length) {
+    const chartRows: Row[] = [["Chart", "Label", "Value"]];
+    generatedCharts.forEach((series) => {
+      series.labels.forEach((label, index) => {
+        chartRows.push([series.title, label, series.values[index] ?? 0]);
+      });
+    });
+    addSheet(wb, "Generated Charts", chartRows, [{ wch: 30 }, { wch: 34 }, { wch: 16 }]);
   }
 
   if (data.actionPlan?.length) {

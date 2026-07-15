@@ -936,35 +936,63 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
         const { headers: tHeaders, rows: tRows } = section.table;
         const cols = tHeaders.length;
         const colW = CONTENT_W / cols;
-        const ROW_H = 18;
+        const MIN_ROW_H = 18;
+        const MAX_ROW_H = 78;
+        const CELL_PAD_X = 3;
+        const CELL_PAD_Y = 5;
+
+        const fitCellText = (value: string): string => {
+          const text = String(value ?? "")
+            .replace(/\s+/g, " ")
+            .trim();
+          return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+        };
+
+        const rowHeight = (cells: string[], bold: boolean): number => {
+          const fontSize = cols > 5 ? 7 : 8;
+          doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
+          const heights = cells.slice(0, cols).map((cell) =>
+            doc.heightOfString(fitCellText(cell), {
+              width: colW - CELL_PAD_X * 2,
+              lineGap: 1,
+            }),
+          );
+          return Math.min(
+            MAX_ROW_H,
+            Math.max(MIN_ROW_H, Math.ceil(Math.max(...heights, 0) + CELL_PAD_Y * 2)),
+          );
+        };
 
         const renderPdfTableRow = (cells: string[], bold: boolean, shade: boolean) => {
-          if (doc.y > doc.page.height - MARGIN - ROW_H - 10) {
+          const height = rowHeight(cells, bold);
+          if (doc.y > doc.page.height - MARGIN - height - 10) {
             doc.addPage();
             doc.y = MARGIN + 20;
           }
           const rowY = doc.y;
           if (shade) {
-            doc.save().rect(MARGIN, rowY, CONTENT_W, ROW_H).fillColor("#E8E7F7").fill().restore();
+            doc.save().rect(MARGIN, rowY, CONTENT_W, height).fillColor("#E8E7F7").fill().restore();
           } else if (!bold) {
-            doc.save().rect(MARGIN, rowY, CONTENT_W, ROW_H).fillColor("#F9FAFB").fill().restore();
+            doc.save().rect(MARGIN, rowY, CONTENT_W, height).fillColor("#F9FAFB").fill().restore();
           }
           for (let i = 0; i < cols; i++) {
-            const cell = cells[i] ?? "";
+            const cell = fitCellText(cells[i] ?? "");
+            const fontSize = bold ? (cols > 5 ? 7 : 8) : cols > 5 ? 7 : 8;
             doc
               .font(bold ? "Helvetica-Bold" : "Helvetica")
-              .fontSize(9)
+              .fontSize(fontSize)
               .fillColor(bold ? "#1E1B4B" : "#374151")
-              .text(cell, MARGIN + colW * i + 3, rowY + 5, {
-                width: colW - 6,
-                lineBreak: false,
+              .text(cell, MARGIN + colW * i + CELL_PAD_X, rowY + CELL_PAD_Y, {
+                width: colW - CELL_PAD_X * 2,
+                height: height - CELL_PAD_Y * 2,
+                lineGap: 1,
                 ellipsis: true,
               });
           }
-          doc.y = rowY + ROW_H;
+          doc.y = rowY + height;
         };
 
-        if (doc.y > doc.page.height - MARGIN - ROW_H * 3) {
+        if (doc.y > doc.page.height - MARGIN - MIN_ROW_H * 3) {
           doc.addPage();
           doc.y = MARGIN + 20;
         }

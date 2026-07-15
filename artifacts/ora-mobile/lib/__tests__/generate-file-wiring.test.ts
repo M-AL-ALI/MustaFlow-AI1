@@ -124,6 +124,12 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("exports analyst workflow sections into mobile Office/PDF report payloads", () => {
+    expect(index).toContain("function datasetGeneratedChartsMarkdown(");
+    expect(index).toContain('"## Generated Charts"');
+    expect(index).toContain('"Pareto Contribution"');
+    expect(index).toContain('"Risk Score by Issue"');
+    expect(index).toContain("`### ${block.title}`");
+    expect(index).toContain("function textBar(");
     expect(index).toContain("function datasetWorkflowMarkdown(");
     expect(index).toContain('"## Suggested Charts"');
     expect(index).toContain('"## Repeatable Calculations"');
@@ -131,6 +137,7 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
 
     const markdownStart = index.indexOf("function messageMarkdown(");
     const markdownBody = index.slice(markdownStart, markdownStart + 1800);
+    expect(markdownBody).toContain("datasetGeneratedChartsMarkdown(message.datasetResult)");
     expect(markdownBody).toContain("datasetWorkflowMarkdown(message.datasetResult)");
     expect(markdownBody).toContain("includeDatasetJson !== false");
 
@@ -140,5 +147,13 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
       const block = index.slice(formatIdx, formatIdx + 360);
       expect(block).toContain("messageMarkdown(message, { includeDatasetJson: false })");
     }
+  });
+
+  it("passes the PDF UTI to native share/save so iOS treats server PDFs as files", () => {
+    const files = read("../files.ts");
+    expect(files).toContain("function fileUtiForMime(");
+    expect(files).toContain('"application/pdf"');
+    expect(files).toContain('"com.adobe.pdf"');
+    expect(files).toContain("shareFile(fileUri, file.mimeType, fileUtiForMime(file.mimeType))");
   });
 });

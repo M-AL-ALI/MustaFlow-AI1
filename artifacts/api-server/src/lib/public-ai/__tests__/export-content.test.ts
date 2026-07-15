@@ -40,6 +40,13 @@ const ANALYST_WORKFLOW = `# Ora Dataset Report
 
 Sales improved in the West region.
 
+## Generated Charts
+
+### Pareto Contribution
+
+- West: ######################## 120
+- East: ################ 80
+
 ## Suggested Charts
 - **Revenue by Region** (bar) - X: region, Y: revenue. Compare regional performance.
 
@@ -112,9 +119,13 @@ describe("markdownToDocumentData", () => {
   it("preserves analyst workflow sections for report exports", () => {
     const data = markdownToDocumentData(ANALYST_WORKFLOW, "Dataset");
     const headings = data.sections.map((s) => s.heading).filter(Boolean);
+    expect(headings).toContain("Pareto Contribution");
     expect(headings).toContain("Suggested Charts");
     expect(headings).toContain("Repeatable Calculations");
     expect(headings).toContain("Downloadable Reports");
+    expect(data.sections.find((s) => s.heading === "Pareto Contribution")?.bullets).toContain(
+      "West: ######################## 120",
+    );
     expect(data.sections.find((s) => s.heading === "Repeatable Calculations")?.bullets).toContain(
       "Total Revenue: SUM(revenue) - Calculate total sales.",
     );
@@ -139,6 +150,7 @@ describe("markdownToPresentationData", () => {
     const data = markdownToPresentationData(ANALYST_WORKFLOW, "Deck");
     expect(data.slides.map((slide) => slide.heading)).toEqual(
       expect.arrayContaining([
+        "Pareto Contribution",
         "Suggested Charts",
         "Repeatable Calculations",
         "Downloadable Reports",
@@ -169,6 +181,7 @@ describe("markdownToTabularData", () => {
   it("keeps analyst workflow rows in Section/Content spreadsheet fallback", () => {
     const data = markdownToTabularData(ANALYST_WORKFLOW, "Data");
     expect(data.headers).toEqual(["Section", "Content"]);
+    expect(data.rows).toContainEqual(["Pareto Contribution", "West: ######################## 120"]);
     expect(data.rows).toContainEqual([
       "Suggested Charts",
       "Revenue by Region (bar) - X: region, Y: revenue. Compare regional performance.",
@@ -198,6 +211,18 @@ describe("end-to-end builder output", () => {
 
   it("produces a valid .pdf", async () => {
     const buf = await buildPdf(markdownToDocumentData(RICH, "Doc"));
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("produces a valid .pdf with long wrapped table cells", async () => {
+    const longTable = `# Risk Register
+
+| Risk ID | Description | Mitigation | Owner |
+| --- | --- | --- | --- |
+| R-01 | This is a very long risk description that should wrap inside the table cell instead of overlapping the following section or adjacent columns in the generated PDF. | Assign executive owner, create a weekly control review, monitor leading indicators, and escalate unresolved blockers. | CFO |
+| R-02 | Another extended description with enough words to force multi-line wrapping in the deterministic PDF builder. | Track remediation milestones and update the risk register after each review cycle. | COO |
+`;
+    const buf = await buildPdf(markdownToDocumentData(longTable, "Risk Register"));
     expect(isPdf(buf)).toBe(true);
   });
 });

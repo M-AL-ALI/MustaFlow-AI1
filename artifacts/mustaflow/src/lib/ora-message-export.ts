@@ -1,5 +1,6 @@
 import type { OraMessage } from "@/hooks/use-ora-chat";
 import type { DatasetAnalysisResult, ActionItem } from "@/types/dataset-analysis";
+import { buildAnalystChartSeries } from "./file-generation/analyst-workflow-export";
 
 export function sanitizeFilename(name: string): string {
   return (
@@ -74,7 +75,12 @@ export function downloadMessageAsMarkdown(message: OraMessage, filename?: string
   triggerDownload(blob, sanitizeFilename(name) + ".md");
 }
 
-export function downloadDatasetReport(result: DatasetAnalysisResult, basename?: string): void {
+function textBar(value: number, max: number): string {
+  const width = Math.max(1, Math.round((value / Math.max(max, 1)) * 24));
+  return "#".repeat(width);
+}
+
+export function formatDatasetReportMarkdown(result: DatasetAnalysisResult): string {
   const lines: string[] = [];
   lines.push(`# Dataset Analysis Report\n`);
   lines.push(`**Analysis Type:** ${result.analysisType}\n`);
@@ -118,6 +124,18 @@ export function downloadDatasetReport(result: DatasetAnalysisResult, basename?: 
       ),
     );
   }
+  const chartSeries = buildAnalystChartSeries(result);
+  if (chartSeries.length > 0) {
+    lines.push(`\n\n## Generated Charts\n`);
+    chartSeries.forEach((series) => {
+      lines.push(`\n\n### ${series.title}\n`);
+      const max = Math.max(...series.values, 1);
+      series.labels.forEach((label, index) => {
+        const value = series.values[index] ?? 0;
+        lines.push(`\n- ${label}: ${textBar(value, max)} ${value}${series.valueSuffix ?? ""}`);
+      });
+    });
+  }
   if (result.risksAndLimitations && result.risksAndLimitations.length > 0) {
     lines.push(`\n\n## Risks & Limitations\n`);
     result.risksAndLimitations.forEach((r) => lines.push(`\n- ${r}`));
@@ -148,7 +166,11 @@ export function downloadDatasetReport(result: DatasetAnalysisResult, basename?: 
     );
   }
 
-  const md = lines.join("");
+  return lines.join("");
+}
+
+export function downloadDatasetReport(result: DatasetAnalysisResult, basename?: string): void {
+  const md = formatDatasetReportMarkdown(result);
   const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
   const name = basename ?? "ora-dataset-report";
   triggerDownload(blob, sanitizeFilename(name) + ".md");

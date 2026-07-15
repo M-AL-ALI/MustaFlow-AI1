@@ -9,7 +9,7 @@ export const PRINT_CSS = `
 /* ── Base ───────────────────────────────────────────────────────────────── */
 body {
   font-family: -apple-system, 'Segoe UI', Arial, Helvetica, sans-serif;
-  font-size: 11pt;
+  font-size: 10.5pt;
   line-height: 1.5;
   color: #1a1a1a;
   background: #ffffff;
@@ -128,8 +128,11 @@ p {
 table {
   width: 100%;
   border-collapse: collapse;
-  margin: 6pt 0 14pt;
-  font-size: 10pt;
+  table-layout: fixed;
+  margin: 8pt 0 16pt;
+  font-size: 8.5pt;
+  page-break-inside: auto;
+  break-inside: auto;
 }
 thead {
   display: table-header-group;
@@ -138,21 +141,71 @@ thead th {
   background: #1e3a5f;
   color: #ffffff;
   font-weight: 600;
-  padding: 6pt 8pt;
+  padding: 5pt 5pt;
   text-align: left;
-  font-size: 9.5pt;
+  font-size: 8pt;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 tbody td {
-  padding: 5pt 8pt;
+  padding: 5pt 5pt;
   border-bottom: 0.5pt solid #d4d9e0;
   vertical-align: top;
-  line-height: 1.45;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 tbody tr:nth-child(even) td {
   background: #f5f7fa;
 }
 tbody tr {
   page-break-inside: avoid;
+  break-inside: avoid;
+  page-break-after: auto;
+}
+
+/* ── Generated chart cards ───────────────────────────────────────────────── */
+.chart-card {
+  margin: 8pt 0 14pt;
+  padding: 9pt 10pt;
+  border: 0.75pt solid #d7dce8;
+  border-radius: 4pt;
+  background: #fbfcff;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.chart-card h3 {
+  margin-top: 0;
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: 92pt 1fr 44pt;
+  gap: 7pt;
+  align-items: center;
+  margin: 5pt 0;
+  font-size: 8.5pt;
+}
+.chart-label {
+  color: #334155;
+  overflow-wrap: anywhere;
+}
+.chart-track {
+  height: 9pt;
+  border-radius: 999pt;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+.chart-bar {
+  height: 100%;
+  border-radius: 999pt;
+  background: #2563eb;
+}
+.chart-value {
+  text-align: right;
+  font-weight: 600;
+  color: #1e3a5f;
 }
 
 /* ── KPI status text ────────────────────────────────────────────────────── */
@@ -178,6 +231,7 @@ li {
 /* ── Sections ───────────────────────────────────────────────────────────── */
 section {
   margin-bottom: 14pt;
+  break-inside: auto;
 }
 
 /* ── Print enforcement ──────────────────────────────────────────────────── */

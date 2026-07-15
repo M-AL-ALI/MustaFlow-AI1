@@ -48,6 +48,12 @@ function isImageMime(mimeType?: string): boolean {
   return !!mimeType && mimeType.toLowerCase().startsWith("image/");
 }
 
+function fileUtiForMime(mimeType?: string): string | undefined {
+  if (!mimeType) return undefined;
+  if (mimeType.toLowerCase() === "application/pdf") return "com.adobe.pdf";
+  return undefined;
+}
+
 function cacheUri(fileName: string): string {
   const dir = FileSystem.cacheDirectory ?? "";
   return `${dir}${sanitizeFileName(fileName)}`;
@@ -106,7 +112,7 @@ export async function saveGeneratedFile(file: GeneratedFile): Promise<SaveOutcom
     await saveImageToLibrary(fileUri);
     return "image-saved";
   }
-  await shareFile(fileUri, file.mimeType);
+  await shareFile(fileUri, file.mimeType, fileUtiForMime(file.mimeType));
   return "shared";
 }
 
@@ -243,7 +249,7 @@ async function downloadAssetById(
     await saveImageToLibrary(result.uri);
     return "image-saved";
   }
-  await shareFile(result.uri, mimeType);
+  await shareFile(result.uri, mimeType, fileUtiForMime(mimeType));
   return "shared";
 }
 
