@@ -16,7 +16,13 @@ import {
   buildProfessionalDocSectionGuidance,
   type ProfessionalDocType,
 } from "../professional-doc.js";
-import { normalizeDocumentFileData, resolveOraFileQualityProfile } from "../file-builder.js";
+import {
+  buildDocumentSystemPrompt,
+  buildPresentationSystemPrompt,
+  buildTabularSystemPrompt,
+  normalizeDocumentFileData,
+  resolveOraFileQualityProfile,
+} from "../file-builder.js";
 
 // Access the (unexported) buildDocumentSystemPrompt via the public API surface:
 // generateFileFromPrompt uses it internally, so we test the system prompt content
@@ -470,6 +476,36 @@ describe("no fake export format claims", () => {
       if (result !== null) {
         expect(["csv", "xlsx", "docx", "pdf", "pptx"]).not.toContain(result);
       }
+    }
+  });
+});
+
+describe("generated-file revision and polish contract", () => {
+  it("injects complete-replacement revision rules into document prompts", () => {
+    const prompt = buildDocumentSystemPrompt(
+      "pdf",
+      undefined,
+      false,
+      resolveOraFileQualityProfile({ format: "pdf", planTier: "core" }),
+      "dataset-report",
+    );
+
+    expect(prompt).toContain("FILE REVISION WORKFLOW");
+    expect(prompt).toContain("NEW complete replacement JSON object");
+    expect(prompt).toContain("Apply the requested change visibly");
+    expect(prompt).toContain("executive-ready quality");
+  });
+
+  it("keeps professional export polish guidance across all file prompt families", () => {
+    const tabular = buildTabularSystemPrompt("xlsx");
+    const presentation = buildPresentationSystemPrompt();
+    const document = buildDocumentSystemPrompt("docx");
+
+    for (const prompt of [tabular, presentation, document]) {
+      expect(prompt).toContain("FILE QUALITY AND EXPORT POLISH");
+      expect(prompt).toContain("client-ready professional deliverable");
+      expect(prompt).toContain("structured tables for comparisons");
+      expect(prompt).toContain("FILE REVISION WORKFLOW");
     }
   });
 });

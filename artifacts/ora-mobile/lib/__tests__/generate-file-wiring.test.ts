@@ -84,6 +84,36 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(fnBody).toContain("error: true");
   });
 
+  it("supports revising a generated file through the same generate-file sheet", () => {
+    expect(index).toContain("const [generateFileDraft, setGenerateFileDraft]");
+    expect(index).toContain("const handleReviseGeneratedFile = useCallback((file: GeneratedFile)");
+    expect(index).toContain(
+      'prompt: `Revise the ${file.format.toUpperCase()} file "${file.fileName}": `',
+    );
+    expect(index).toContain("format: file.format");
+    expect(index).toContain("onReviseFile={handleReviseGeneratedFile}");
+    expect(index).toContain('initialPrompt={generateFileDraft?.prompt ?? ""}');
+    expect(index).toContain('initialFormat={generateFileDraft?.format ?? "docx"}');
+  });
+
+  it("renders separate save/share and Revise actions on generated-file cards", () => {
+    expect(index).toContain("onReviseFile?: (file: GeneratedFile) => void;");
+    expect(index).toContain('accessibilityLabel="Save generated file"');
+    expect(index).toContain('accessibilityLabel="Revise generated file"');
+    expect(index).toContain("<Pencil size={15} color={c.accentForeground} />");
+    expect(index).toContain("<Text");
+    expect(index).toContain("Revise");
+  });
+
+  it("opens normal Create-file requests with an empty draft", () => {
+    const plusStart = index.indexOf("<PlusMenu");
+    expect(plusStart).toBeGreaterThan(-1);
+    const sheetStart = index.indexOf("<GenerateFileSheet", plusStart);
+    const between = index.slice(plusStart, sheetStart);
+    expect(between).toContain("setGenerateFileDraft(null)");
+    expect(between).toContain("setShowGenerateFile(true)");
+  });
+
   it("carries Ora image profile metadata from chat responses into message rendering", () => {
     expect(index).toContain("imageMeta: res.imageMeta");
     expect(index).toContain("function formatOraImageMeta(");

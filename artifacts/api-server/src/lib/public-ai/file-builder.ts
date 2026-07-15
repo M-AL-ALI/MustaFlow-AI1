@@ -178,6 +178,24 @@ const SOURCE_DATA_DIRECTIVE =
   `- Do not remove sections the user did not ask to remove.\n` +
   `- Do not invent new content beyond what the requested edit requires.`;
 
+const FILE_EXPORT_POLISH_DIRECTIVE =
+  `\n\nFILE QUALITY AND EXPORT POLISH:\n` +
+  `- Treat the output as a client-ready professional deliverable, not a draft.\n` +
+  `- Use clear hierarchy, concise labels, specific recommendations, and practical details.\n` +
+  `- Prefer structured tables for comparisons, calculations, action items, risks, KPIs, audit findings, and repeatable workflows.\n` +
+  `- Include enough context that the file is useful after download without requiring the chat transcript.\n` +
+  `- Avoid generic filler, repeated text, orphan headings, cramped sections, and unsupported claims.\n` +
+  `- For analyst/reporting requests, include summaries, calculations, suggested charts or chart-ready tables, and repeatable methodology where the requested format supports them.`;
+
+const FILE_REVISION_DIRECTIVE =
+  `\n\nFILE REVISION WORKFLOW:\n` +
+  `When the user asks to revise, edit, improve, polish, fix, update, regenerate, or make changes to a previous generated file:\n` +
+  `- Return a NEW complete replacement JSON object for the same file type; do not return patch notes or a description of changes.\n` +
+  `- Apply the requested change visibly in the generated content.\n` +
+  `- Preserve useful prior structure and content from the recent conversation unless the user asks to remove it.\n` +
+  `- Improve clarity, formatting, completeness, and executive-ready quality while respecting the user's exact instruction.\n` +
+  `- If the requested revision is ambiguous, make the smallest reasonable professional improvement and reflect it in the file content.`;
+
 export function buildTabularSystemPrompt(
   format: "csv" | "xlsx",
   language?: string,
@@ -221,6 +239,8 @@ export function buildTabularSystemPrompt(
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
     `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}` +
     quality.instruction +
+    FILE_EXPORT_POLISH_DIRECTIVE +
+    FILE_REVISION_DIRECTIVE +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
     ORA_FILE_COMPLETENESS_ADDENDUM +
     "\n\n" +
@@ -266,6 +286,8 @@ export function buildPresentationSystemPrompt(
     `6. Match the presentation topic and purpose to exactly what the user asked for.\n` +
     `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}` +
     quality.instruction +
+    FILE_EXPORT_POLISH_DIRECTIVE +
+    FILE_REVISION_DIRECTIVE +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
     ORA_FILE_COMPLETENESS_ADDENDUM +
     "\n\n" +
@@ -329,6 +351,8 @@ export function buildDocumentSystemPrompt(
     `9. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table). No other top-level keys.${langNote}` +
     profGuidance +
     quality.instruction +
+    FILE_EXPORT_POLISH_DIRECTIVE +
+    FILE_REVISION_DIRECTIVE +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
     ORA_FILE_COMPLETENESS_ADDENDUM +
     "\n\n" +

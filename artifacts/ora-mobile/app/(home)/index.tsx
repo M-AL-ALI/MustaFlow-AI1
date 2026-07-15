@@ -561,6 +561,10 @@ export default function OraChatScreen() {
   const speakGenRef = useRef(0);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [showGenerateFile, setShowGenerateFile] = useState(false);
+  const [generateFileDraft, setGenerateFileDraft] = useState<{
+    prompt: string;
+    format: FileFormat;
+  } | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   // UUID refs of documents/datasets uploaded this conversation. The server
   // re-hydrates their real content during file creation so a generated file is
@@ -1319,6 +1323,7 @@ export default function OraChatScreen() {
       const text = prompt.trim();
       if (!text || sending) return;
       setShowGenerateFile(false);
+      setGenerateFileDraft(null);
 
       const turnIsTemporary = temporary;
       const userMsg: OraMessage = { id: uid(), role: "user", content: text };
@@ -1374,6 +1379,14 @@ export default function OraChatScreen() {
     },
     [sending, messages, temporary, language, scrollToEnd, persist],
   );
+
+  const handleReviseGeneratedFile = useCallback((file: GeneratedFile) => {
+    setGenerateFileDraft({
+      prompt: `Revise the ${file.format.toUpperCase()} file "${file.fileName}": `,
+      format: file.format,
+    });
+    setShowGenerateFile(true);
+  }, []);
 
   // Tapping a follow-up suggestion chip sends it as the next message.
   const handleSuggestion = useCallback((text: string) => {
@@ -2854,6 +2867,7 @@ export default function OraChatScreen() {
               }}
               onImagePreview={openImagePreview}
               onRetrySearch={handleRetrySearch}
+              onReviseFile={handleReviseGeneratedFile}
               isLatest={item.id === messages.at(-1)?.id}
             />
           )}
@@ -3500,6 +3514,7 @@ export default function OraChatScreen() {
         }}
         onGenerateFile={() => {
           setShowPlusMenu(false);
+          setGenerateFileDraft(null);
           setShowGenerateFile(true);
         }}
       />
@@ -3508,7 +3523,12 @@ export default function OraChatScreen() {
         visible={showGenerateFile}
         accentColor={tierAccent}
         sending={sending}
-        onClose={() => setShowGenerateFile(false)}
+        initialPrompt={generateFileDraft?.prompt ?? ""}
+        initialFormat={generateFileDraft?.format ?? "docx"}
+        onClose={() => {
+          setShowGenerateFile(false);
+          setGenerateFileDraft(null);
+        }}
         onGenerate={handleGenerateFile}
       />
 
@@ -3748,6 +3768,7 @@ function MessageBubbleBase({
   onEditImage,
   onImagePreview,
   onRetrySearch,
+  onReviseFile,
   isLatest,
 }: {
   message: OraMessage;
@@ -3760,6 +3781,7 @@ function MessageBubbleBase({
   onEditImage?: (imageId: number) => void;
   onImagePreview?: (source: string) => void;
   onRetrySearch?: (message: OraMessage) => void;
+  onReviseFile?: (file: GeneratedFile) => void;
   isLatest?: boolean;
 }) {
   const c = useColors();
@@ -4025,31 +4047,92 @@ function MessageBubbleBase({
               )}
 
               {message.generatedFile && (
-                <Pressable
-                  onPress={handleSaveFile}
-                  disabled={savingFile}
+                <View
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
                     marginTop: 10,
                     padding: 10,
                     borderRadius: 10,
                     backgroundColor: c.muted,
                   }}
                 >
-                  <FileText size={18} color={c.accentForeground} />
-                  <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
-                    {message.generatedFile.fileName}
-                  </Text>
-                  {savingFile ? (
-                    <ActivityIndicator size="small" color={c.mutedForeground} />
-                  ) : isImageFile(message.generatedFile.mimeType) ? (
-                    <Download size={16} color={c.accentForeground} />
-                  ) : (
-                    <Share2 size={16} color={c.accentForeground} />
-                  )}
-                </Pressable>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <FileText size={18} color={c.accentForeground} />
+                    <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
+                      {message.generatedFile.fileName}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                    <Pressable
+                      onPress={handleSaveFile}
+                      disabled={savingFile}
+                      accessibilityRole="button"
+                      accessibilityLabel="Save generated file"
+                      style={{
+                        flex: 1,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        borderRadius: 9,
+                        paddingVertical: 8,
+                        backgroundColor: c.card,
+                      }}
+                    >
+                      {savingFile ? (
+                        <ActivityIndicator size="small" color={c.mutedForeground} />
+                      ) : isImageFile(message.generatedFile.mimeType) ? (
+                        <Download size={15} color={c.accentForeground} />
+                      ) : (
+                        <Share2 size={15} color={c.accentForeground} />
+                      )}
+                      <Text
+                        style={{
+                          color: c.foreground,
+                          fontSize: 12,
+                          fontFamily: "Inter_600SemiBold",
+                        }}
+                      >
+                        {isImageFile(message.generatedFile.mimeType) ? "Save" : "Share"}
+                      </Text>
+                    </Pressable>
+                    {onReviseFile ? (
+                      <Pressable
+                        onPress={() => onReviseFile(message.generatedFile!)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Revise generated file"
+                        style={{
+                          flex: 1,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          borderRadius: 9,
+                          paddingVertical: 8,
+                          borderWidth: 1,
+                          borderColor: c.border,
+                          backgroundColor: "transparent",
+                        }}
+                      >
+                        <Pencil size={15} color={c.accentForeground} />
+                        <Text
+                          style={{
+                            color: c.foreground,
+                            fontSize: 12,
+                            fontFamily: "Inter_600SemiBold",
+                          }}
+                        >
+                          Revise
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
               )}
 
               {safeSources.length > 0 && (
@@ -4805,12 +4888,16 @@ function GenerateFileSheet({
   visible,
   accentColor,
   sending,
+  initialPrompt = "",
+  initialFormat = "docx",
   onClose,
   onGenerate,
 }: {
   visible: boolean;
   accentColor: string;
   sending: boolean;
+  initialPrompt?: string;
+  initialFormat?: FileFormat;
   onClose: () => void;
   onGenerate: (prompt: string, format: FileFormat) => void;
 }) {
@@ -4821,10 +4908,10 @@ function GenerateFileSheet({
 
   useEffect(() => {
     if (visible) {
-      setPrompt("");
-      setFormat("docx");
+      setPrompt(initialPrompt);
+      setFormat(initialFormat);
     }
-  }, [visible]);
+  }, [visible, initialPrompt, initialFormat]);
 
   const canGenerate = prompt.trim().length > 0 && !sending;
 

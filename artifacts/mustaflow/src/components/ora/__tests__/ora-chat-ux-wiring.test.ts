@@ -73,7 +73,13 @@ describe("Ora chat UX response wiring", () => {
     expect(panelSource).toContain("View or download");
     expect(panelSource).toContain("viewOraFile(file)");
     expect(panelSource).toContain("downloadOraFile(file)");
-    expect(panelSource).toMatch(/msg\.generatedFile\s*&&\s*<GeneratedFileCard/);
+    expect(panelSource).toContain("handleReviseGeneratedFile");
+    expect(panelSource).toContain(
+      'Revise the ${file.format.toUpperCase()} file "${file.fileName}": ',
+    );
+    expect(panelSource).toContain("setSelectedFormat(file.format)");
+    expect(panelSource).toContain("onRevise={handleReviseGeneratedFile}");
+    expect(panelSource).toMatch(/msg\.generatedFile\s*&&\s*\([\s\S]*<GeneratedFileCard/);
     expect(panelSource).toMatch(
       /msg\.memorySaveCandidate\s*\|\|\s*msg\.memorySaved[\s\S]*<OraMemorySaveChip[\s\S]*onSave=\{\(\) => handleSaveMemory/,
     );
@@ -95,7 +101,13 @@ describe("Ora chat UX response wiring", () => {
     expect(bubbleSource).toContain("View or download");
     expect(bubbleSource).toContain("viewOraFile(file)");
     expect(bubbleSource).toContain("downloadOraFile(file)");
-    expect(bubbleSource).toMatch(/msg\.generatedFile\s*&&\s*<GeneratedFileCard/);
+    expect(bubbleSource).toContain("handleReviseGeneratedFile");
+    expect(bubbleSource).toContain(
+      'Revise the ${file.format.toUpperCase()} file "${file.fileName}": ',
+    );
+    expect(bubbleSource).toContain("setSelectedFormat(file.format)");
+    expect(bubbleSource).toContain("onRevise={handleReviseGeneratedFile}");
+    expect(bubbleSource).toMatch(/msg\.generatedFile\s*&&\s*\([\s\S]*<GeneratedFileCard/);
     expect(bubbleSource).toMatch(
       /const showSuggestions =[\s\S]*Array\.isArray\(msg\.suggestions\)[\s\S]*msg\.suggestions\.length > 0/,
     );

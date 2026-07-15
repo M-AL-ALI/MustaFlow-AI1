@@ -161,7 +161,13 @@ async function viewOraAssetById(assetId: number) {
   setTimeout(() => URL.revokeObjectURL(url), 120_000);
 }
 
-function GeneratedFileCard({ file }: { file: GeneratedFile }) {
+function GeneratedFileCard({
+  file,
+  onRevise,
+}: {
+  file: GeneratedFile;
+  onRevise?: (file: GeneratedFile) => void;
+}) {
   const isPdf = file.format === "pdf";
 
   if (isPdf && (file.fileData || file.assetId != null)) {
@@ -195,6 +201,16 @@ function GeneratedFileCard({ file }: { file: GeneratedFile }) {
             <Download className="h-3.5 w-3.5" />
             Download
           </button>
+          {onRevise && (
+            <button
+              type="button"
+              onClick={() => onRevise(file)}
+              className="inline-flex items-center gap-1 rounded-lg border border-[hsl(var(--ora-accent-hsl)/0.25)] bg-background/70 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-[hsl(var(--ora-accent-hsl)/0.1)]"
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+              Revise
+            </button>
+          )}
         </div>
       </div>
     );
@@ -202,13 +218,7 @@ function GeneratedFileCard({ file }: { file: GeneratedFile }) {
 
   if (file.fileData || file.assetId != null) {
     return (
-      <button
-        type="button"
-        onClick={() =>
-          file.fileData ? downloadOraFile(file) : downloadOraAssetById(file.assetId!, file.fileName)
-        }
-        className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.06)] hover:bg-[hsl(var(--ora-accent-hsl)/0.12)] hover:border-[hsl(var(--ora-accent-hsl)/0.55)] px-3.5 py-3 transition-all cursor-pointer"
-      >
+      <div className="mt-2 w-full flex items-center gap-3 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.06)] px-3.5 py-3">
         <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--ora-accent-hsl)/0.15)]">
           <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(var(--ora-accent-hsl))]" />
         </div>
@@ -218,8 +228,31 @@ function GeneratedFileCard({ file }: { file: GeneratedFile }) {
             {file.format.toUpperCase()} · Click to download
           </p>
         </div>
-        <Download className="h-4 w-4 text-[hsl(var(--ora-accent-hsl))] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
-      </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() =>
+              file.fileData
+                ? downloadOraFile(file)
+                : downloadOraAssetById(file.assetId!, file.fileName)
+            }
+            className="inline-flex items-center gap-1 rounded-lg bg-[hsl(var(--ora-accent-hsl))] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:opacity-90"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </button>
+          {onRevise && (
+            <button
+              type="button"
+              onClick={() => onRevise(file)}
+              className="inline-flex items-center gap-1 rounded-lg border border-[hsl(var(--ora-accent-hsl)/0.25)] bg-background/70 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-[hsl(var(--ora-accent-hsl)/0.1)]"
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+              Revise
+            </button>
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -234,6 +267,16 @@ function GeneratedFileCard({ file }: { file: GeneratedFile }) {
           {file.format.toUpperCase()} · Regenerate to download
         </p>
       </div>
+      {onRevise && (
+        <button
+          type="button"
+          onClick={() => onRevise(file)}
+          className="inline-flex items-center gap-1 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted/60"
+        >
+          <Wand2 className="h-3.5 w-3.5" />
+          Revise
+        </button>
+      )}
     </div>
   );
 }
@@ -1062,6 +1105,16 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     }, 40);
   }, []);
 
+  const handleReviseGeneratedFile = useCallback((file: GeneratedFile) => {
+    const revisionPrompt = `Revise the ${file.format.toUpperCase()} file "${file.fileName}": `;
+    setSelectedFormat(file.format);
+    setInput(revisionPrompt);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(revisionPrompt.length, revisionPrompt.length);
+    }, 40);
+  }, []);
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -1706,7 +1759,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     </div>
                   )}
 
-                  {msg.generatedFile && <GeneratedFileCard file={msg.generatedFile} />}
+                  {msg.generatedFile && (
+                    <GeneratedFileCard
+                      file={msg.generatedFile}
+                      onRevise={handleReviseGeneratedFile}
+                    />
+                  )}
 
                   {msg.role === "assistant" && msg.viaFallback && !msg.isStreaming && (
                     <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/50 select-none">
