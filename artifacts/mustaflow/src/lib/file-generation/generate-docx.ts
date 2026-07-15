@@ -2,6 +2,12 @@ import type { OraMessage } from "@/hooks/use-ora-chat";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "./report-metadata";
 import type { ReportTemplateId, ReportSectionId } from "./report-templates";
+import {
+  calculationSuggestionRows,
+  chartSuggestionRows,
+  hasAnalystWorkflow,
+  reportSuggestionRows,
+} from "./analyst-workflow-export";
 import { deriveKpiStatus, deriveRiskLevel, buildRoadmap } from "./report-metadata";
 import { getTemplate } from "./report-templates";
 import { sanitizeForExport, sanitizeTitle, sanitizeSummary, truncateArray } from "./sanitizer";
@@ -619,6 +625,49 @@ export async function downloadDocx(
         ),
       );
       children.push(spacer());
+    }
+
+    if (hasAnalystWorkflow(data) && data.analystWorkflow) {
+      const workflow = data.analystWorkflow;
+      const chartRows = chartSuggestionRows(workflow);
+      const calcRows = calculationSuggestionRows(workflow);
+      const reportRows = reportSuggestionRows(workflow);
+
+      children.push(h2("Analyst Workflow"));
+
+      if (chartRows.length) {
+        children.push(h3("Suggested Charts"));
+        children.push(
+          makeTable(
+            ["Title", "Type", "X", "Y", "Group", "Reason"],
+            chartRows,
+            [1800, 950, 1100, 1100, 1100, 2950],
+            true,
+          ),
+        );
+        children.push(spacer());
+      }
+
+      if (calcRows.length) {
+        children.push(h3("Repeatable Calculations"));
+        children.push(
+          makeTable(
+            ["Label", "Expression", "Description", "Columns"],
+            calcRows,
+            [1800, 2200, 3500, 1500],
+            true,
+          ),
+        );
+        children.push(spacer());
+      }
+
+      if (reportRows.length) {
+        children.push(h3("Downloadable Reports"));
+        children.push(
+          makeTable(["Format", "Title", "Description"], reportRows, [1100, 2600, 5300], true),
+        );
+        children.push(spacer());
+      }
     }
   } else if (source.kind === "message") {
     const msg = sanitizeForExport(source.message);

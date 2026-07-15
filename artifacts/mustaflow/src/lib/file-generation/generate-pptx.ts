@@ -2,6 +2,12 @@ import type { OraMessage } from "@/hooks/use-ora-chat";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import type { ReportMetadata } from "./report-metadata";
 import type { ReportTemplateId } from "./report-templates";
+import {
+  calculationSuggestionBullets,
+  chartSuggestionBullets,
+  hasAnalystWorkflow,
+  reportSuggestionBullets,
+} from "./analyst-workflow-export";
 import { sanitizeForExport, sanitizeSummary, sanitizeTitle, truncateArray } from "./sanitizer";
 import { LIMITS } from "./size-limits";
 import { triggerDownload, sanitizeFilenameLocal } from "./utils";
@@ -357,6 +363,17 @@ export async function downloadPptx(
         a.timeline ?? "\u2014",
       ]);
       addTableSection("Action Plan", hdrs, rows, [5.83, 2.0, 2.0, 2.5]);
+    }
+
+    if (hasAnalystWorkflow(data) && data.analystWorkflow) {
+      const workflow = data.analystWorkflow;
+      const chartBullets = chartSuggestionBullets(workflow);
+      const calcBullets = calculationSuggestionBullets(workflow);
+      const reportBullets = reportSuggestionBullets(workflow);
+
+      if (chartBullets.length) addSection("Suggested Charts", chartBullets);
+      if (calcBullets.length) addSection("Repeatable Calculations", calcBullets);
+      if (reportBullets.length) addSection("Downloadable Reports", reportBullets);
     }
 
     // 10. Next Steps / Timeline

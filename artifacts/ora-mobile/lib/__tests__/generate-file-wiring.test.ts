@@ -122,4 +122,23 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(extras).toContain("workflow.reportSuggestions");
     expect(extras).toContain("Reports ready:");
   });
+
+  it("exports analyst workflow sections into mobile Office/PDF report payloads", () => {
+    expect(index).toContain("function datasetWorkflowMarkdown(");
+    expect(index).toContain('"## Suggested Charts"');
+    expect(index).toContain('"## Repeatable Calculations"');
+    expect(index).toContain('"## Downloadable Reports"');
+
+    const markdownStart = index.indexOf("function messageMarkdown(");
+    const markdownBody = index.slice(markdownStart, markdownStart + 1800);
+    expect(markdownBody).toContain("datasetWorkflowMarkdown(message.datasetResult)");
+    expect(markdownBody).toContain("includeDatasetJson !== false");
+
+    for (const format of ["docx", "xlsx", "pptx", "pdf"]) {
+      const formatIdx = index.indexOf(`format: "${format}"`);
+      expect(formatIdx).toBeGreaterThan(-1);
+      const block = index.slice(formatIdx, formatIdx + 360);
+      expect(block).toContain("messageMarkdown(message, { includeDatasetJson: false })");
+    }
+  });
 });
