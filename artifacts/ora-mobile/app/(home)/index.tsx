@@ -44,7 +44,6 @@ import {
   History,
   Image as ImageIcon,
   Images,
-  Lock,
   MessageSquare,
   Mic,
   MoreHorizontal,
@@ -3250,7 +3249,7 @@ export default function OraChatScreen() {
                   <Pressable
                     onPress={() => setShowPlusMenu(true)}
                     disabled={uploading}
-                    accessibilityLabel="Add attachment or choose tools"
+                    accessibilityLabel="Add attachment or create file"
                     style={{ padding: 6, opacity: uploading ? 0.5 : 1 }}
                   >
                     {uploading ? (
@@ -3364,9 +3363,6 @@ export default function OraChatScreen() {
 
       <PlusMenu
         visible={showPlusMenu}
-        mode={mode}
-        deepAllowed={deepAllowed}
-        accentColor={tierAccent}
         onClose={() => setShowPlusMenu(false)}
         onTakePhoto={() => {
           setShowPlusMenu(false);
@@ -3383,10 +3379,6 @@ export default function OraChatScreen() {
         onGenerateFile={() => {
           setShowPlusMenu(false);
           setShowGenerateFile(true);
-        }}
-        onSelectMode={(m) => {
-          setMode(m);
-          setShowPlusMenu(false);
         }}
       />
 
@@ -4837,26 +4829,18 @@ function GenerateFileSheet({
 
 function PlusMenu({
   visible,
-  mode,
-  deepAllowed,
-  accentColor,
   onClose,
   onTakePhoto,
   onPickPhoto,
   onBrowseFiles,
   onGenerateFile,
-  onSelectMode,
 }: {
   visible: boolean;
-  mode: OraMode;
-  deepAllowed: boolean;
-  accentColor: string;
   onClose: () => void;
   onTakePhoto: () => void;
   onPickPhoto: () => void;
   onBrowseFiles: () => void;
   onGenerateFile: () => void;
-  onSelectMode: (mode: OraMode) => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -4891,35 +4875,6 @@ function PlusMenu({
 
           <SheetSectionLabel label="Create" />
           <ActionRow icon={FilePlus2} label="Create file" onPress={onGenerateFile} />
-
-          <SheetSectionLabel label="Tools" />
-          <ToolRow
-            icon={Zap}
-            label="Instant"
-            active={mode === "instant"}
-            accentColor={accentColor}
-            onPress={() => onSelectMode("instant")}
-          />
-          <ToolRow
-            icon={deepAllowed ? Gauge : Lock}
-            label="Deep Thinking"
-            sublabel={deepAllowed ? "Step-by-step" : "Locked"}
-            active={mode === "deep" && deepAllowed}
-            disabled={!deepAllowed}
-            accentColor={accentColor}
-            onPress={() => {
-              if (deepAllowed) {
-                onSelectMode("deep");
-              } else {
-                onClose();
-                Alert.alert(
-                  "Deep Thinking",
-                  "Deep Thinking is available with Core Pack or Deep Wave. Manage your plan on the MustaFlow website.",
-                  [{ text: "OK" }],
-                );
-              }
-            }}
-          />
         </View>
       </View>
     </Modal>

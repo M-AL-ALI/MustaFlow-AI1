@@ -47,6 +47,21 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(index).toContain("setShowGenerateFile(true)");
   });
 
+  it("keeps PlusMenu scoped to attachment and file creation, not response mode", () => {
+    const menuStart = index.indexOf("function PlusMenu({");
+    expect(menuStart).toBeGreaterThan(-1);
+    const menuEnd = index.indexOf("\nfunction OraHeaderMenu", menuStart);
+    const menuBody = index.slice(menuStart, menuEnd);
+
+    expect(index).toContain('accessibilityLabel="Add attachment or create file"');
+    expect(menuBody).toContain('SheetSectionLabel label="Attach"');
+    expect(menuBody).toContain('SheetSectionLabel label="Create"');
+    expect(menuBody).not.toContain('SheetSectionLabel label="Tools"');
+    expect(menuBody).not.toContain('label="Instant"');
+    expect(menuBody).not.toContain('label="Deep Thinking"');
+    expect(menuBody).not.toContain("onSelectMode");
+  });
+
   it("GenerateFileSheet offers all five server formats", () => {
     expect(index).toContain("function GenerateFileSheet(");
     expect(index).toContain("GENERATE_FILE_FORMATS");
