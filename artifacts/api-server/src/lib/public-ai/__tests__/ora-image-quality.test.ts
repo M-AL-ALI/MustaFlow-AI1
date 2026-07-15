@@ -83,6 +83,23 @@ describe("Ora image quality profiles", () => {
     expect(profile.instruction).toContain("Preserve the original image identity");
     expect(profile.instruction).toContain("matching lighting");
     expect(profile.instruction).toContain("Apply color changes consistently");
+    expect(profile.instruction).toContain("apply only the requested change");
+    expect(profile.instruction).toContain("hard constraints");
+    expect(profile.instruction).toContain("Never reimagine or regenerate");
+  });
+
+  it("treats explicit edit preservation wording as hard constraints", () => {
+    const profile = buildOraImageEditProfile({
+      instruction:
+        "Keep the same logo, but add dark navy as the text color and keep the sun/bread mark warm yellow. Do not change the words.",
+      subscriptionTier: "core",
+    });
+
+    expect(profile.instruction).toContain("Edit instruction: Keep the same logo");
+    expect(profile.instruction).toContain('"keep the same"');
+    expect(profile.instruction).toContain('"do not change the words"');
+    expect(profile.instruction).toContain("hard constraints");
+    expect(profile.instruction).toContain("readable text unless the user explicitly changes them");
   });
 
   it("builds task-aware high-detail image analysis profiles", () => {

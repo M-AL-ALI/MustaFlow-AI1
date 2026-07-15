@@ -2156,6 +2156,9 @@ export function useOraChat(): UseOraChatReturn {
         return;
       }
 
+      const sourceImageMeta = messagesRef.current.find(
+        (m) => m.imageId === sourceImageId,
+      )?.imageMeta;
       const userMsg: OraMessage = { role: "user", content: `Edit image: ${trimmed}` };
       setMessages((prev) => {
         const next = [...prev, userMsg];
@@ -2234,6 +2237,7 @@ export function useOraChat(): UseOraChatReturn {
               imageUrl: displayUrl,
               imageId: newImageId,
               editInstruction: trimmed,
+              ...(sourceImageMeta ? { imageMeta: sourceImageMeta } : {}),
             } satisfies OraMessage,
           ];
           storeTranscript(next);

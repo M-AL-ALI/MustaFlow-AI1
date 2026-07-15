@@ -1484,6 +1484,7 @@ export default function OraChatScreen() {
     const id = editingImageId;
     const instr = editInstruction.trim();
     if (!id || !instr || editingImage || sending) return;
+    const sourceImageMeta = messagesRef.current.find((m) => m.imageId === id)?.imageMeta;
     setEditingImage(true);
     setEditInstruction("");
     setEditingImageId(null);
@@ -1512,6 +1513,7 @@ export default function OraChatScreen() {
           imageUrl: displayUrl,
           imageId: newImageId,
           editInstruction: instr,
+          ...(sourceImageMeta ? { imageMeta: sourceImageMeta } : {}),
         } satisfies OraMessage,
       ]);
     } catch (err) {

@@ -75,6 +75,13 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(index).toContain("formatOraImageMeta(message.imageMeta)");
   });
 
+  it("preserves Ora image profile metadata when an inline edit creates a new image", () => {
+    expect(index).toContain(
+      "const sourceImageMeta = messagesRef.current.find((m) => m.imageId === id)?.imageMeta;",
+    );
+    expect(index).toContain("...(sourceImageMeta ? { imageMeta: sourceImageMeta } : {})");
+  });
+
   it("tracks uploaded document/dataset refs and clears them on every context switch", () => {
     // Refs are accumulated on upload so a later Create-file builds from real data.
     expect(index).toContain("documentRefsRef");

@@ -45,6 +45,13 @@ describe("Ora chat UX response wiring", () => {
     );
   });
 
+  it("keeps image profile metadata when inline edits create a new image", () => {
+    expect(hookSource).toMatch(
+      /const sourceImageMeta = messagesRef\.current\.find\([\s\S]*m\.imageId === sourceImageId[\s\S]*\)\?\.imageMeta/,
+    );
+    expect(hookSource).toContain("...(sourceImageMeta ? { imageMeta: sourceImageMeta } : {})");
+  });
+
   it("renders generated media, files, suggestions, and memory signals in the main Ora panel", () => {
     expect(panelSource).toContain(
       'import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";',
