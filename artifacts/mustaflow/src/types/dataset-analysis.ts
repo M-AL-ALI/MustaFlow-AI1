@@ -128,6 +128,34 @@ export interface EnhancedRisk {
   mitigation: string;
 }
 
+export interface DatasetChartSuggestion {
+  title: string;
+  chartType: "bar" | "line" | "scatter" | "pareto" | "histogram" | string;
+  xColumn?: string;
+  yColumn?: string;
+  groupByColumn?: string;
+  reason: string;
+}
+
+export interface DatasetCalculationSuggestion {
+  label: string;
+  expression: string;
+  description: string;
+  columns: string[];
+}
+
+export interface DatasetReportSuggestion {
+  title: string;
+  format: "xlsx" | "pdf" | "docx" | "pptx" | "csv" | string;
+  description: string;
+}
+
+export interface DatasetAnalystWorkflow {
+  chartSuggestions?: DatasetChartSuggestion[];
+  calculationSuggestions?: DatasetCalculationSuggestion[];
+  reportSuggestions?: DatasetReportSuggestion[];
+}
+
 // ── Main result type ──────────────────────────────────────────────────────────
 
 export interface DatasetAnalysisResult {
@@ -156,4 +184,5 @@ export interface DatasetAnalysisResult {
   enhancedRecommendations?: EnhancedRecommendation[];
   strategicRoadmap?: StrategicRoadmap;
   enhancedRisks?: EnhancedRisk[];
+  analystWorkflow?: DatasetAnalystWorkflow;
 }

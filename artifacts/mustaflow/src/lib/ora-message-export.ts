@@ -126,6 +126,27 @@ export function downloadDatasetReport(result: DatasetAnalysisResult, basename?: 
     lines.push(`\n\n## Next Steps\n`);
     result.nextSteps.forEach((s) => lines.push(`\n- ${s}`));
   }
+  const workflow = result.analystWorkflow;
+  if (workflow?.chartSuggestions && workflow.chartSuggestions.length > 0) {
+    lines.push(`\n\n## Suggested Charts\n`);
+    workflow.chartSuggestions.forEach((chart) =>
+      lines.push(
+        `\n- **${chart.title}** (${chart.chartType})${chart.xColumn ? ` — X: ${chart.xColumn}` : ""}${chart.yColumn ? `, Y: ${chart.yColumn}` : ""}. ${chart.reason}`,
+      ),
+    );
+  }
+  if (workflow?.calculationSuggestions && workflow.calculationSuggestions.length > 0) {
+    lines.push(`\n\n## Repeatable Calculations\n`);
+    workflow.calculationSuggestions.forEach((calc) =>
+      lines.push(`\n- **${calc.label}**: \`${calc.expression}\` — ${calc.description}`),
+    );
+  }
+  if (workflow?.reportSuggestions && workflow.reportSuggestions.length > 0) {
+    lines.push(`\n\n## Downloadable Reports\n`);
+    workflow.reportSuggestions.forEach((report) =>
+      lines.push(`\n- **${report.format.toUpperCase()}**: ${report.title} — ${report.description}`),
+    );
+  }
 
   const md = lines.join("");
   const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
@@ -146,6 +167,7 @@ export function downloadDatasetJson(result: DatasetAnalysisResult, basename?: st
     actionPlan: result.actionPlan,
     risksAndLimitations: result.risksAndLimitations,
     nextSteps: result.nextSteps,
+    analystWorkflow: result.analystWorkflow,
     truncated: result.truncated,
     usedFallback: result.usedFallback,
   };
@@ -198,6 +220,7 @@ function sanitizeMessageForJson(msg: OraMessage): object {
       actionPlan: r.actionPlan,
       risksAndLimitations: r.risksAndLimitations,
       nextSteps: r.nextSteps,
+      analystWorkflow: r.analystWorkflow,
     };
   }
   // Intentionally omit: editedFrom, hadAttachment, suggestions

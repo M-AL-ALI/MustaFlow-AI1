@@ -106,4 +106,20 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     const clears = index.match(/documentRefsRef\.current = \[\]/g) ?? [];
     expect(clears.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("preserves full dataset-analysis results and renders analyst workflow cues", () => {
+    const datasetBranchStart = index.indexOf('} else if (attch.kind === "dataset")');
+    expect(datasetBranchStart).toBeGreaterThan(-1);
+    const datasetBranch = index.slice(datasetBranchStart, datasetBranchStart + 1600);
+
+    expect(datasetBranch).toContain("...result");
+    expect(datasetBranch).toContain("datasetResult:");
+
+    const extras = read("../../components/ora/MessageExtras.tsx");
+    expect(extras).toContain("<OraDatasetWorkflow result={message.datasetResult} c={c} />");
+    expect(extras).toContain("workflow.chartSuggestions");
+    expect(extras).toContain("workflow.calculationSuggestions");
+    expect(extras).toContain("workflow.reportSuggestions");
+    expect(extras).toContain("Reports ready:");
+  });
 });

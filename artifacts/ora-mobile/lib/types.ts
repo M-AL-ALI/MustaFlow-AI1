@@ -379,7 +379,41 @@ export interface DatasetAnalysisResult {
     truncated?: boolean;
     sheetName?: string;
   };
+  rowCount?: number;
+  columnCount?: number;
   truncated?: boolean;
+  analysisType?: string;
+  keyFindings?: string[];
+  recommendations?: string[];
+  actionPlan?: Array<{
+    action: string;
+    priority: string;
+    owner?: string;
+    timeline?: string;
+  }>;
+  nextSteps?: string[];
+  risksAndLimitations?: string[];
+  analystWorkflow?: {
+    chartSuggestions?: Array<{
+      title: string;
+      chartType: string;
+      xColumn?: string;
+      yColumn?: string;
+      groupByColumn?: string;
+      reason: string;
+    }>;
+    calculationSuggestions?: Array<{
+      label: string;
+      expression: string;
+      description: string;
+      columns: string[];
+    }>;
+    reportSuggestions?: Array<{
+      title: string;
+      format: string;
+      description: string;
+    }>;
+  };
   [key: string]: unknown;
 }
 

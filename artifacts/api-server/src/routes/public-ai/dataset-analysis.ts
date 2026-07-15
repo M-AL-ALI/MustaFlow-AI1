@@ -19,6 +19,7 @@ import {
   detectOraExpertiseDomain,
   oraDomainExpertiseGuidance,
 } from "../../lib/public-ai/expertise";
+import { buildDatasetAnalystWorkflow } from "../../lib/public-ai/dataset-workflow";
 import { logger } from "../../lib/logger";
 import type { Provider } from "../../lib/ai-providers";
 import {
@@ -222,6 +223,7 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
   }
 
   const summary = fileEntry.datasetSummary;
+  const analystWorkflow = buildDatasetAnalystWorkflow(summary);
 
   // Detect the subject-matter domain from the question plus the dataset's
   // filename and column headers (untrusted content is only regex-matched here,
@@ -369,6 +371,7 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
   res.json({
     result: {
       ...aiOutput,
+      analystWorkflow,
       datasetProfile: {
         rowCount: summary.rowCount,
         colCount: summary.colCount,

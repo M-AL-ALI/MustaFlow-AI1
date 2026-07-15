@@ -982,6 +982,7 @@ export default function OraChatScreen() {
               role: "assistant",
               content: summary,
               datasetResult: {
+                ...result,
                 summary,
                 rowCount: profile?.rowCount,
                 columnCount: profile?.colCount,

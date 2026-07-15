@@ -86,14 +86,99 @@ export const oraDatasetResultSchema = z
     columnCount: z.number().optional(),
     rowCount: z.number().optional(),
     truncated: z.boolean().optional(),
+    analysisType: z.string().optional(),
+    datasetProfile: z
+      .object({
+        rowCount: z.number().optional(),
+        colCount: z.number().optional(),
+        truncated: z.boolean().optional(),
+        sheetName: z.string().max(200).optional(),
+      })
+      .optional(),
+    keyFindings: z.array(z.string().max(500)).max(10).optional(),
+    recommendations: z.array(z.string().max(500)).max(10).optional(),
+    actionPlan: z
+      .array(
+        z.object({
+          action: z.string().max(500),
+          priority: z.string().max(40),
+          owner: z.string().max(200).optional(),
+          timeline: z.string().max(200).optional(),
+        }),
+      )
+      .max(10)
+      .optional(),
+    nextSteps: z.array(z.string().max(500)).max(8).optional(),
+    risksAndLimitations: z.array(z.string().max(500)).max(8).optional(),
+    analystWorkflow: z
+      .object({
+        chartSuggestions: z
+          .array(
+            z.object({
+              title: z.string().max(200),
+              chartType: z.string().max(40),
+              xColumn: z.string().max(200).optional(),
+              yColumn: z.string().max(200).optional(),
+              groupByColumn: z.string().max(200).optional(),
+              reason: z.string().max(500),
+            }),
+          )
+          .max(5)
+          .optional(),
+        calculationSuggestions: z
+          .array(
+            z.object({
+              label: z.string().max(200),
+              expression: z.string().max(300),
+              description: z.string().max(500),
+              columns: z.array(z.string().max(200)).max(10),
+            }),
+          )
+          .max(6)
+          .optional(),
+        reportSuggestions: z
+          .array(
+            z.object({
+              title: z.string().max(200),
+              format: z.string().max(20),
+              description: z.string().max(500),
+            }),
+          )
+          .max(6)
+          .optional(),
+      })
+      .optional(),
   })
   .catchall(z.unknown())
-  .transform(({ summary, columnCount, rowCount, truncated }) => ({
-    summary,
-    columnCount,
-    rowCount,
-    truncated,
-  }));
+  .transform(
+    ({
+      summary,
+      columnCount,
+      rowCount,
+      truncated,
+      analysisType,
+      datasetProfile,
+      keyFindings,
+      recommendations,
+      actionPlan,
+      nextSteps,
+      risksAndLimitations,
+      analystWorkflow,
+    }) => ({
+      summary,
+      columnCount,
+      rowCount,
+      truncated,
+      analysisType,
+      datasetProfile,
+      keyFindings,
+      recommendations,
+      actionPlan,
+      nextSteps,
+      risksAndLimitations,
+      analystWorkflow,
+    }),
+  );
 
 export const oraSourceSchema = z.object({
   title: z.string().max(500),
@@ -208,11 +293,57 @@ export interface OraAttachmentMeta {
 }
 
 /** Lightweight dataset-analysis summary surfaced inline with a reply. */
+export interface OraDatasetChartSuggestion {
+  title: string;
+  chartType: string;
+  xColumn?: string;
+  yColumn?: string;
+  groupByColumn?: string;
+  reason: string;
+}
+
+export interface OraDatasetCalculationSuggestion {
+  label: string;
+  expression: string;
+  description: string;
+  columns: string[];
+}
+
+export interface OraDatasetReportSuggestion {
+  title: string;
+  format: string;
+  description: string;
+}
+
+export interface OraDatasetAnalystWorkflow {
+  chartSuggestions?: OraDatasetChartSuggestion[];
+  calculationSuggestions?: OraDatasetCalculationSuggestion[];
+  reportSuggestions?: OraDatasetReportSuggestion[];
+}
+
 export interface OraDatasetResult {
   summary?: string;
   columnCount?: number;
   rowCount?: number;
   truncated?: boolean;
+  analysisType?: string;
+  datasetProfile?: {
+    rowCount?: number;
+    colCount?: number;
+    truncated?: boolean;
+    sheetName?: string;
+  };
+  keyFindings?: string[];
+  recommendations?: string[];
+  actionPlan?: Array<{
+    action: string;
+    priority: string;
+    owner?: string;
+    timeline?: string;
+  }>;
+  nextSteps?: string[];
+  risksAndLimitations?: string[];
+  analystWorkflow?: OraDatasetAnalystWorkflow;
   [key: string]: unknown;
 }
 

@@ -1,7 +1,9 @@
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
 import {
+  BarChart3,
   BrainCircuit,
+  Calculator,
   Check,
   Download,
   ExternalLink,
@@ -55,6 +57,7 @@ export function OraAssistantExtras({
       <OraImageGrid images={message.images} c={c} />
       <OraVideoCards videos={message.videos} c={c} />
       <OraDatasetCard result={message.datasetResult} c={c} />
+      <OraDatasetWorkflow result={message.datasetResult} c={c} />
       <OraImageLineage editInstruction={message.editInstruction} c={c} />
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
       <OraMemoryIndicators message={message} c={c} />
@@ -239,24 +242,24 @@ function OraVideoCards({ videos, c }: { videos?: OraVideo[]; c: Colors }) {
 
 function OraDatasetCard({ result, c }: { result?: OraMessage["datasetResult"]; c: Colors }) {
   if (!result) return null;
-  const hasShape = result.rowCount != null || result.columnCount != null;
-  if (!hasShape && !result.truncated) return null;
+  const rowCount = result.rowCount ?? result.datasetProfile?.rowCount;
+  const columnCount = result.columnCount ?? result.datasetProfile?.colCount;
+  const truncated = result.truncated ?? result.datasetProfile?.truncated;
+  const hasShape = rowCount != null || columnCount != null;
+  if (!hasShape && !truncated) return null;
   const parts: string[] = [];
-  if (result.rowCount != null) parts.push(`${result.rowCount.toLocaleString()} rows`);
-  if (result.columnCount != null) parts.push(`${result.columnCount.toLocaleString()} columns`);
+  if (rowCount != null) parts.push(`${rowCount.toLocaleString()} rows`);
+  if (columnCount != null) parts.push(`${columnCount.toLocaleString()} columns`);
   return (
     <View
       style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
         marginTop: 10,
-        paddingVertical: 8,
-        paddingHorizontal: 10,
+        padding: 10,
         borderRadius: 10,
         borderWidth: 1,
         borderColor: c.cardBorder,
         backgroundColor: c.muted,
+        gap: 8,
       }}
     >
       <Table2 size={15} color={c.accentForeground} />
@@ -269,6 +272,57 @@ function OraDatasetCard({ result, c }: { result?: OraMessage["datasetResult"]; c
 }
 
 /* ── Inline image edit lineage ───────────────────────────────────────────── */
+
+function OraDatasetWorkflow({ result, c }: { result?: OraMessage["datasetResult"]; c: Colors }) {
+  const workflow = result?.analystWorkflow;
+  if (!workflow) return null;
+  const firstChart = workflow.chartSuggestions?.[0];
+  const firstCalc = workflow.calculationSuggestions?.[0];
+  const reportFormats = (workflow.reportSuggestions ?? [])
+    .slice(0, 4)
+    .map((r) => r.format.toUpperCase())
+    .join(", ");
+  if (!firstChart && !firstCalc && !reportFormats) return null;
+
+  return (
+    <View
+      style={{
+        marginTop: 8,
+        padding: 10,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: c.cardBorder,
+        backgroundColor: c.background,
+        gap: 8,
+      }}
+    >
+      {firstChart && (
+        <View style={{ flexDirection: "row", gap: 7 }}>
+          <BarChart3 size={13} color={c.mutedForeground} />
+          <Text style={{ color: c.mutedForeground, fontSize: 11, flex: 1 }}>
+            Chart: {firstChart.title}
+          </Text>
+        </View>
+      )}
+      {firstCalc && (
+        <View style={{ flexDirection: "row", gap: 7 }}>
+          <Calculator size={13} color={c.mutedForeground} />
+          <Text style={{ color: c.mutedForeground, fontSize: 11, flex: 1 }}>
+            Calculation: {firstCalc.expression}
+          </Text>
+        </View>
+      )}
+      {reportFormats.length > 0 && (
+        <View style={{ flexDirection: "row", gap: 7 }}>
+          <Download size={13} color={c.mutedForeground} />
+          <Text style={{ color: c.mutedForeground, fontSize: 11, flex: 1 }}>
+            Reports ready: {reportFormats}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
 function OraImageLineage({ editInstruction, c }: { editInstruction?: string; c: Colors }) {
   if (!editInstruction) return null;

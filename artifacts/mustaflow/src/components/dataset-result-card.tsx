@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen } from "lucide-react";
+import { BarChart3, BookOpen, Calculator, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VaultSaveDialog } from "@/components/vault-save-dialog";
 import { cn } from "@/lib/utils";
@@ -154,6 +154,90 @@ function HealthScoreSection({ hs }: { hs: HealthScore }) {
           <p className="text-xs font-semibold">{hs.category}</p>
           <p className="text-[10px] mt-0.5 opacity-80 leading-relaxed">{hs.explanation}</p>
         </div>
+      </div>
+    </Section>
+  );
+}
+
+function AnalystWorkflowSection({
+  workflow,
+}: {
+  workflow: DatasetAnalysisResult["analystWorkflow"];
+}) {
+  if (!workflow) return null;
+  const charts = workflow.chartSuggestions ?? [];
+  const calculations = workflow.calculationSuggestions ?? [];
+  const reports = workflow.reportSuggestions ?? [];
+  if (charts.length === 0 && calculations.length === 0 && reports.length === 0) return null;
+
+  return (
+    <Section title="Analyst Workflow">
+      <div className="space-y-2">
+        {charts.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
+              <BarChart3 className="h-3 w-3" />
+              Charts to create
+            </div>
+            <div className="space-y-1.5">
+              {charts.slice(0, 3).map((chart, i) => (
+                <div
+                  key={`${chart.title}-${i}`}
+                  className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5"
+                >
+                  <p className="text-xs font-medium text-foreground">{chart.title}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {chart.chartType.toUpperCase()}
+                    {chart.xColumn ? ` · X: ${chart.xColumn}` : ""}
+                    {chart.yColumn ? ` · Y: ${chart.yColumn}` : ""}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground/80">{chart.reason}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {calculations.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
+              <Calculator className="h-3 w-3" />
+              Repeatable calculations
+            </div>
+            <div className="space-y-1.5">
+              {calculations.slice(0, 3).map((calc, i) => (
+                <div
+                  key={`${calc.label}-${i}`}
+                  className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5"
+                >
+                  <p className="text-xs font-medium text-foreground">{calc.label}</p>
+                  <p className="font-mono text-[10px] text-[hsl(265_85%_65%)]">{calc.expression}</p>
+                  <p className="text-[10px] text-muted-foreground/80">{calc.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {reports.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
+              <FileDown className="h-3 w-3" />
+              Downloadable reports
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {reports.slice(0, 4).map((report, i) => (
+                <span
+                  key={`${report.title}-${i}`}
+                  className="rounded-full border border-border/50 bg-background/60 px-2 py-1 text-[10px] text-foreground/80"
+                  title={report.description}
+                >
+                  {report.format.toUpperCase()} · {report.title}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Section>
   );
@@ -456,6 +540,20 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
     result.nextSteps && result.nextSteps.length > 0
       ? `## Next Steps\n${result.nextSteps.map((s) => `- ${s}`).join("\n")}`
       : "",
+    result.analystWorkflow?.chartSuggestions && result.analystWorkflow.chartSuggestions.length > 0
+      ? `## Suggested Charts\n${result.analystWorkflow.chartSuggestions
+          .map(
+            (c) =>
+              `- ${c.title} (${c.chartType})${c.xColumn ? ` — X: ${c.xColumn}` : ""}${c.yColumn ? `, Y: ${c.yColumn}` : ""}`,
+          )
+          .join("\n")}`
+      : "",
+    result.analystWorkflow?.calculationSuggestions &&
+    result.analystWorkflow.calculationSuggestions.length > 0
+      ? `## Repeatable Calculations\n${result.analystWorkflow.calculationSuggestions
+          .map((c) => `- ${c.label}: \`${c.expression}\` — ${c.description}`)
+          .join("\n")}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -489,6 +587,8 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
 
       {/* Health Score — prominent position */}
       {result.healthScore && <HealthScoreSection hs={result.healthScore} />}
+
+      <AnalystWorkflowSection workflow={result.analystWorkflow} />
 
       {/* Key Findings */}
       {result.keyFindings && result.keyFindings.length > 0 && (
