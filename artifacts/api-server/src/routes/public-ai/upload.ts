@@ -42,11 +42,11 @@ function persistOraAssetBestEffort(input: PersistOraAssetInput): void {
   })();
 }
 
-// Multer limit kept at 50 MB to accommodate large documents.
+// Multer limit kept at 100 MB to accommodate large documents.
 // Image-specific 4 MB cap is enforced in validateImage() using the buffer.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
 });
 
 router.post(
@@ -90,7 +90,7 @@ router.post(
     upload.single("file")(req, res, (err) => {
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
         res.status(413).json({
-          error: "File exceeds the 50 MB limit. Please upload a smaller file.",
+          error: "File exceeds the 100 MB limit. Please upload a smaller file.",
         });
         return;
       }

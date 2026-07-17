@@ -123,8 +123,8 @@ describe("validateFile — type detection", () => {
     if (!result.ok) expect(result.statusCode).toBe(415);
   });
 
-  it("rejects file exceeding 50 MB", () => {
-    const bigBuf = Buffer.alloc(50 * 1024 * 1024 + 1);
+  it("rejects file exceeding 100 MB", () => {
+    const bigBuf = Buffer.alloc(100 * 1024 * 1024 + 1);
     const result = validateFile(bigBuf, "big.pdf", "application/pdf");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.statusCode).toBe(413);

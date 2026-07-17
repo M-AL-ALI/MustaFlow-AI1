@@ -20,7 +20,7 @@ export function oraR2OffloadEnabled(): boolean {
  * standard-quality images comfortably fit; anything larger is skipped (the
  * in-chat copy still works) rather than bloating the table.
  */
-const MAX_ASSET_BYTES = 50 * 1024 * 1024; // 50 MB of decoded bytes (matches the upload cap)
+const MAX_ASSET_BYTES = 100 * 1024 * 1024; // 100 MB of decoded bytes (matches the upload cap)
 
 /**
  * Per-user total storage cap for the durable Ora library. The base64 `data`

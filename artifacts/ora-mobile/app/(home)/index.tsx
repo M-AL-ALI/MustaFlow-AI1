@@ -1856,7 +1856,7 @@ export default function OraChatScreen() {
           setAttachment(null);
           Alert.alert(
             "File too large",
-            "Files must be 50 MB or smaller. Please choose a smaller file.",
+            "Files must be 100 MB or smaller. Please choose a smaller file.",
           );
           return;
         }
