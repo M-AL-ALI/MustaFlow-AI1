@@ -41,6 +41,15 @@ Cross-conv runs inline in Promise.all and costs ~18ms in practice (already paral
 | Instant fast-lane | 150ms |
 | Instant standard | 300ms (was 600ms) |
 
+## Never hard-cap fast-lane maxTokens
+
+A hard `Math.min(expertiseProfile.maxTokens, 75)` cap on fast-lane replies truncated
+responses MID-SENTENCE in production (greeting lists cut off; user-visible "Ora not
+completing responses"). Models don't know the cap exists, so any tight ceiling chops
+output instead of shortening it. Brevity must come from the "concise" depth guidance;
+keep the standard concise budget (450) as the ceiling. maxTokens does NOT affect
+time-to-first-token, so capping it buys no perceived latency on a streaming surface.
+
 ## What is NOT fast-laned
 
 - Deep mode prompts

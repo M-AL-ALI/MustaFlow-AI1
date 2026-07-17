@@ -1795,12 +1795,11 @@ router.post("/public-ai/chat", async (req, res) => {
     confidence: classifierResult.confidence,
     hasDocumentContext: carriedDocs.trim().length > 0,
   });
-  // Fast-lane: cap at 75 tokens so short prompts finish quickly end-to-end.
-  // The 75-token ceiling complements the already-existing "concise" depth
-  // guidance and forces the model to be brief rather than pad the response.
-  const maxTokens = isInstantFastLane
-    ? Math.min(expertiseProfile.maxTokens, 75)
-    : expertiseProfile.maxTokens;
+  // Fast-lane keeps the standard "concise" token budget (450). A previous
+  // hard 75-token cap truncated replies mid-sentence (e.g. greeting lists);
+  // brevity is enforced by the concise depth guidance, not a hard cutoff,
+  // and streaming means a larger ceiling does not delay the first token.
+  const maxTokens = expertiseProfile.maxTokens;
   const isMultilingual =
     isNonEnglishLanguage(language) ||
     ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
@@ -2465,10 +2464,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     confidence: classifierResult.confidence,
     hasDocumentContext: carriedDocs.trim().length > 0,
   });
-  // Fast-lane: cap at 75 tokens so short prompts finish quickly end-to-end.
-  const maxTokens = isInstantFastLane
-    ? Math.min(expertiseProfile.maxTokens, 75)
-    : expertiseProfile.maxTokens;
+  // Fast-lane keeps the standard "concise" token budget (450). A previous
+  // hard 75-token cap truncated replies mid-sentence; brevity comes from the
+  // concise depth guidance, not a hard cutoff.
+  const maxTokens = expertiseProfile.maxTokens;
   const isMultilingual =
     isNonEnglishLanguage(language) ||
     ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
