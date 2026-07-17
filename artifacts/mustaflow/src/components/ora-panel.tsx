@@ -311,6 +311,7 @@ const ACCEPTED_EXTENSIONS = new Set([
   ".csv",
   ".xlsx",
   ".pptx",
+  ".zip",
   ".png",
   ".jpg",
   ".jpeg",
@@ -1256,7 +1257,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
             <Upload className="h-8 w-8" />
             <span className="text-sm font-medium">Drop image or file to upload</span>
             <span className="text-xs text-muted-foreground">
-              PNG, JPG, WEBP · PDF, DOCX, TXT · CSV, XLSX
+              PNG, JPG, WEBP · PDF, DOCX, TXT · CSV, XLSX · ZIP
             </span>
           </div>
         </div>
@@ -2438,7 +2439,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                               : "Upload files · typing only"}
                           </span>
                           <span className="hidden sm:inline">
-                            Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
+                            Upload or drag images, PDF, DOCX, CSV, XLSX, ZIP ·{" "}
                             {voice.isSupported || whisperConv.isSupported
                               ? "Voice or type in any language"
                               : "Voice unavailable on this browser — typing still works"}

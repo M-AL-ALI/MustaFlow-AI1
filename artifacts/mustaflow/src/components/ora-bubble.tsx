@@ -286,6 +286,7 @@ const ACCEPTED_EXTENSIONS = new Set([
   ".csv",
   ".xlsx",
   ".pptx",
+  ".zip",
   ".png",
   ".jpg",
   ".jpeg",
@@ -1221,7 +1222,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               <Upload className="h-7 w-7" />
               <span className="text-sm font-medium">Drop image or file to upload</span>
               <span className="text-xs text-muted-foreground">
-                PNG, JPG, WEBP · PDF, DOCX, PPTX, TXT · CSV, XLSX
+                PNG, JPG, WEBP · PDF, DOCX, PPTX, TXT · CSV, XLSX · ZIP
               </span>
             </div>
           </div>
@@ -1475,7 +1476,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 <p className="text-sm font-medium mb-1">Hi, I&apos;m Ora</p>
                 <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed">
                   Your free AI consultant. Ask me anything about app planning, strategy, or
-                  MustaFlow. Upload a PDF, DOCX, PPTX, TXT, CSV, or XLSX for analysis.
+                  MustaFlow. Upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, or ZIP for analysis.
                 </p>
               </div>
             )}
@@ -1830,7 +1831,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       title={
                         atAllLimits
                           ? "Upload limit reached for this session"
-                          : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX)"
+                          : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX, ZIP)"
                       }
                       aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
                       className={cn(
@@ -1954,7 +1955,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                             : "Upload files · typing only"}
                         </span>
                         <span className="hidden sm:inline">
-                          Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
+                          Upload or drag images, PDF, DOCX, CSV, XLSX, ZIP ·{" "}
                           {voice.isSupported || whisperConv.isSupported
                             ? "Voice or type in any language"
                             : "Voice unavailable on this browser — typing still works"}
