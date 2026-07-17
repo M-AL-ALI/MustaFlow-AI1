@@ -50,7 +50,9 @@ async function extractPptx(buffer: Buffer): Promise<string> {
     const officeparser = (await import("officeparser")).default;
     // officeparser v7 returns a structured AST (not a string). Call toText() to
     // get plain text. Older versions returned a string directly, so guard both.
-    const parsed: unknown = await officeparser.parseOffice(buffer);
+    // The explicit fileType hint is required: buffer auto-detection fails in
+    // the bundled server build (esbuild), even though it works unbundled.
+    const parsed: unknown = await officeparser.parseOffice(buffer, { fileType: "pptx" });
     let text = "";
     if (typeof parsed === "string") {
       text = parsed;
@@ -65,6 +67,11 @@ async function extractPptx(buffer: Buffer): Promise<string> {
     return truncateWithNote(trimmed);
   } catch (err) {
     if (err instanceof ExtractionError) throw err;
+    const { logger } = await import("../logger");
+    logger.error(
+      { component: "ora-upload", err: err instanceof Error ? err.message : String(err) },
+      "PPTX extraction failed",
+    );
     throw new ExtractionError(
       "This PowerPoint file could not be read. It may be corrupted or use an unsupported format.",
     );
