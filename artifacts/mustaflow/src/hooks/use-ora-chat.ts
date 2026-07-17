@@ -337,7 +337,7 @@ const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".pptx
 const IMAGE_ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
 const ALLOWED_EXTENSIONS = [...DOC_ALLOWED_EXTENSIONS, ...IMAGE_ALLOWED_EXTENSIONS];
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB for documents
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB for documents
 const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4 MB hard cap (after compression)
 
 function isImageExt(ext: string): boolean {
@@ -1255,7 +1255,7 @@ export function useOraChat(): UseOraChatReturn {
         if (file.size > MAX_FILE_SIZE) {
           setUploadState("error");
           setUploadError(
-            `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`,
+            `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 50 MB.`,
           );
           return;
         }

@@ -17,11 +17,11 @@ export class FileSaveError extends Error {
 }
 
 /**
- * Mirrors the server's multer upload cap (10 MB). This is a client-side UX
+ * Mirrors the server's multer upload cap (50 MB). This is a client-side UX
  * precheck only; `/api/public-ai/upload` remains the authoritative limit and
  * still returns 413 if a larger file slips through.
  */
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 /**
  * Best-effort byte size for a local file URI. Prefers a picker-provided size

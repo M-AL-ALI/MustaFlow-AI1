@@ -8,7 +8,7 @@
  * Blocked legacy/macro spreadsheet formats: .xls, .xlsm, .xlsb, .ods
  */
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 const BLOCKED_EXTENSIONS = new Set([
   ".exe",
@@ -152,7 +152,7 @@ export function validateFile(
     return {
       ok: false,
       statusCode: 413,
-      error: `File exceeds the 10 MB limit (${(buffer.length / 1024 / 1024).toFixed(1)} MB). Please upload a smaller file.`,
+      error: `File exceeds the 50 MB limit (${(buffer.length / 1024 / 1024).toFixed(1)} MB). Please upload a smaller file.`,
     };
   }
 
