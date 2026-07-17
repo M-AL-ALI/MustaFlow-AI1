@@ -1965,6 +1965,8 @@ export default function OraChatScreen() {
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "text/csv",
           "text/plain",
+          "application/zip",
+          "application/x-zip-compressed",
         ],
         copyToCacheDirectory: true,
       });

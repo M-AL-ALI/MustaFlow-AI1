@@ -333,7 +333,7 @@ function mergeUsage(prev: OraSession | null, data: OraUsagePayload): OraSession 
   };
 }
 
-const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".pptx"];
+const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".pptx", ".zip"];
 const IMAGE_ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
 const ALLOWED_EXTENSIONS = [...DOC_ALLOWED_EXTENSIONS, ...IMAGE_ALLOWED_EXTENSIONS];
 
@@ -1228,7 +1228,7 @@ export function useOraChat(): UseOraChatReturn {
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
         setUploadState("error");
         setUploadError(
-          `Unsupported file type "${ext}". Please upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, PNG, JPG, or WEBP file.`,
+          `Unsupported file type "${ext}". Please upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, ZIP, PNG, JPG, or WEBP file.`,
         );
         return;
       }

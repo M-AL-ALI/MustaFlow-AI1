@@ -1817,7 +1817,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
+                      accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.zip,.png,.jpg,.jpeg,.webp"
                       className="sr-only"
                       aria-hidden
                       onChange={handleFileChange}

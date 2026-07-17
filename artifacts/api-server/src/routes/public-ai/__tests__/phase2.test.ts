@@ -123,6 +123,26 @@ describe("validateFile — type detection", () => {
     if (!result.ok) expect(result.statusCode).toBe(415);
   });
 
+  it("accepts a valid ZIP archive by magic bytes and extension", () => {
+    const buf = Buffer.concat([ZIP_MAGIC, Buffer.alloc(100)]);
+    const result = validateFile(buf, "repo.zip", "application/zip");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.type).toBe("zip");
+  });
+
+  it("rejects a .zip file without ZIP magic bytes", () => {
+    const result = validateFile(Buffer.from("not a zip archive at all"), "fake.zip", "application/zip");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.statusCode).toBe(415);
+  });
+
+  it("rejects PDF bytes renamed as .zip", () => {
+    const buf = Buffer.concat([PDF_MAGIC, Buffer.alloc(100)]);
+    const result = validateFile(buf, "fake.zip", "application/zip");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.statusCode).toBe(415);
+  });
+
   it("rejects file exceeding 100 MB", () => {
     const bigBuf = Buffer.alloc(100 * 1024 * 1024 + 1);
     const result = validateFile(bigBuf, "big.pdf", "application/pdf");

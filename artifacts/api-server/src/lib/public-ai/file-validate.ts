@@ -30,7 +30,6 @@ const BLOCKED_EXTENSIONS = new Set([
   ".go",
   ".rs",
   ".java",
-  ".zip",
   ".tar",
   ".gz",
   ".bz2",
@@ -71,7 +70,7 @@ const BLOCKED_EXTENSIONS = new Set([
   ".sql",
 ]);
 
-export type AllowedFileType = "pdf" | "docx" | "txt" | "csv" | "xlsx" | "pptx";
+export type AllowedFileType = "pdf" | "docx" | "txt" | "csv" | "xlsx" | "pptx" | "zip";
 
 export type ValidationResult =
   | { ok: true; type: AllowedFileType; sanitizedName: string }
@@ -170,7 +169,7 @@ export function validateFile(
     return {
       ok: false,
       statusCode: 415,
-      error: `File type "${ext}" is not supported. Ora accepts PDF, DOCX, PPTX, TXT, CSV, and XLSX files.`,
+      error: `File type "${ext}" is not supported. Ora accepts PDF, DOCX, PPTX, TXT, CSV, XLSX, and ZIP files.`,
     };
   }
 
@@ -248,6 +247,18 @@ export function validateFile(
     return { ok: true, type: "pptx", sanitizedName };
   }
 
+  if (ext === ".zip") {
+    if (magic !== "zip") {
+      return {
+        ok: false,
+        statusCode: 415,
+        error:
+          "This file does not appear to be a valid ZIP archive. Please upload a genuine .zip file.",
+      };
+    }
+    return { ok: true, type: "zip", sanitizedName };
+  }
+
   if (ext === ".csv") {
     if (magic === "pdf" || magic === "zip") {
       return {
@@ -291,6 +302,6 @@ export function validateFile(
   return {
     ok: false,
     statusCode: 415,
-    error: `Unsupported file type "${ext || "(none)"}". Ora accepts PDF, DOCX, PPTX, TXT, CSV, and XLSX files.`,
+    error: `Unsupported file type "${ext || "(none)"}". Ora accepts PDF, DOCX, PPTX, TXT, CSV, XLSX, and ZIP files.`,
   };
 }

@@ -60,3 +60,24 @@ export function scanContent(text: string): SafetyResult {
 
   return { safe: true };
 }
+
+/**
+ * Safety scan variant for CODE archives (ZIP uploads of source projects).
+ *
+ * Ordinary source code legitimately contains strings the MALWARE_PATTERNS list
+ * flags (e.g. `os.system(` in Python, `rm -rf` in CI scripts), so applying the
+ * full document scan would reject most real repositories. Reading such code is
+ * not dangerous — it is never executed — so for code digests we keep only the
+ * prompt-injection layer, which is the one protecting the model's context.
+ */
+export function scanCodeContent(text: string): SafetyResult {
+  const sample = text.slice(0, 50_000);
+
+  for (const pattern of INJECTION_PATTERNS) {
+    if (pattern.test(sample)) {
+      return { safe: false, reason: "prompt-injection" };
+    }
+  }
+
+  return { safe: true };
+}

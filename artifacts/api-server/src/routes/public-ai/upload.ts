@@ -13,7 +13,7 @@ import { validateImage, processImage, isImageExtension } from "../../lib/public-
 import { storeImage } from "../../lib/public-ai/image-store";
 import { extractText, ExtractionError } from "../../lib/public-ai/file-extract";
 import { extractDataset, DatasetExtractionError } from "../../lib/public-ai/dataset-extract";
-import { scanContent } from "../../lib/public-ai/content-safety";
+import { scanContent, scanCodeContent } from "../../lib/public-ai/content-safety";
 import {
   storeFile,
   getTotalCharsForSession,
@@ -349,13 +349,17 @@ router.post(
         });
       } else {
         res.status(422).json({
-          error: "This file could not be read. Please try another PDF, DOCX, PPTX, or TXT file.",
+          error:
+            "This file could not be read. Please try another PDF, DOCX, PPTX, TXT, or ZIP file.",
         });
       }
       return;
     }
 
-    const safety = scanContent(extractedText);
+    // ZIP digests are source code; the document malware-signature scan would
+    // false-positive on ordinary code, so they get the injection-only scan.
+    const safety =
+      validation.type === "zip" ? scanCodeContent(extractedText) : scanContent(extractedText);
     if (!safety.safe) {
       res.status(422).json({
         error: "This document cannot be analyzed. Please upload a different file.",

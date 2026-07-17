@@ -86,6 +86,18 @@ async function extractDocx(buffer: Buffer): Promise<string> {
   }
 }
 
+async function extractZip(buffer: Buffer): Promise<string> {
+  const { extractZipDigest, ZipExtractionError } = await import("./zip-extract");
+  try {
+    return truncateWithNote(extractZipDigest(buffer));
+  } catch (err) {
+    if (err instanceof ZipExtractionError) throw new ExtractionError(err.message);
+    throw new ExtractionError(
+      "This ZIP archive could not be read. It may be corrupted, encrypted, or use an unsupported compression format.",
+    );
+  }
+}
+
 function extractTxt(buffer: Buffer): string {
   try {
     const text = buffer.toString("utf8").trim();
@@ -112,5 +124,7 @@ export async function extractText(
       return extractTxt(buffer);
     case "pptx":
       return extractPptx(buffer);
+    case "zip":
+      return extractZip(buffer);
   }
 }
