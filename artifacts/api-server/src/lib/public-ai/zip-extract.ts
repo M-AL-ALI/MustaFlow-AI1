@@ -223,7 +223,7 @@ export function extractZipDigest(buffer: Buffer): string {
   for (const [path, bytes] of Object.entries(files)) {
     if (bytes.length > MAX_PER_FILE_BYTES * 1.5) continue; // lying header
     if (looksLikeBinaryContent(bytes)) continue;
-    const content = Buffer.from(bytes).toString("utf8").replace(/\u0000/g, "").trim();
+    const content = Buffer.from(bytes).toString("utf8").replaceAll("\u0000", "").trim();
     if (!content) continue;
     readable.push({ path, content, score: priorityScore(path, rootPrefix) });
   }
