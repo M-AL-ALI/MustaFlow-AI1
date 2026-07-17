@@ -285,6 +285,40 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const SESSION_STORAGE_KEY = "ora_session_id";
 const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 
+// Raw browser network failures ("Failed to fetch", "Load failed") are cryptic
+// and alarming when shown verbatim in the error banner. Normalize them into
+// one friendly, retryable message. Publishing restarts the server for a short
+// window, so this is the error visitors are most likely to hit right after a
+// deploy.
+const NETWORK_ERROR_MESSAGE =
+  "Could not reach Ora — please check your connection and try again in a moment.";
+
+function isNetworkFetchError(err: unknown): boolean {
+  // Caller-initiated aborts (navigation, unmount) are not network failures.
+  if (err instanceof DOMException && err.name === "AbortError") return false;
+  return (
+    err instanceof TypeError ||
+    (err instanceof Error &&
+      /failed to fetch|load failed|networkerror|network request failed/i.test(err.message))
+  );
+}
+
+/**
+ * authFetch wrapper that converts low-level network rejections into a single
+ * friendly error carrying `network: true`, so callers can distinguish "the
+ * server never received this" (retryable) from an HTTP-level error.
+ */
+async function safeAuthFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  try {
+    return await authFetch(input, init);
+  } catch (err: unknown) {
+    if (isNetworkFetchError(err)) {
+      throw Object.assign(new Error(NETWORK_ERROR_MESSAGE), { network: true });
+    }
+    throw err;
+  }
+}
+
 const FILE_LIMIT = 3;
 const IMAGE_LIMIT = 2;
 
@@ -456,7 +490,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   // dev-mode JWT cookie expires ~60s and is unreliable in the preview iframe,
   // and /public-ai/chat resolves auth from getAuth(req). A cookie-only call
   // makes a signed-in user look anonymous, so Ora wrongly hedges "sign in first".
-  const res = await authFetch(`${BASE}${path}`, {
+  const res = await safeAuthFetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -477,7 +511,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await authFetch(`${BASE}${path}`, {
+  const res = await safeAuthFetch(`${BASE}${path}`, {
     method: "GET",
   });
   if (!res.ok) {
@@ -488,7 +522,7 @@ async function apiGet<T>(path: string): Promise<T> {
 }
 
 async function apiDelete(path: string): Promise<void> {
-  const res = await authFetch(`${BASE}${path}`, {
+  const res = await safeAuthFetch(`${BASE}${path}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -735,7 +769,7 @@ async function consumeOraStream(
   onToken: (delta: string) => void,
   signal: AbortSignal,
 ): Promise<StreamDonePayload> {
-  const res = await authFetch(`${base}/api/public-ai/chat/stream`, {
+  const res = await safeAuthFetch(`${base}/api/public-ai/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -785,7 +819,23 @@ async function consumeOraStream(
   let firstSentenceMs: number | null = null;
 
   while (true) {
-    const { value, done } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (err: unknown) {
+      // A mid-stream connection drop rejects reader.read() with a raw browser
+      // error that bypasses safeAuthFetch (which only wraps the initial
+      // fetch). Normalize it here too, preserving any tokens already shown so
+      // the caller keeps the partial reply instead of discarding it.
+      if (isNetworkFetchError(err)) {
+        throw Object.assign(new Error(NETWORK_ERROR_MESSAGE), {
+          network: true,
+          ...(firstTokenReceived ? { partialContent: accumulated } : {}),
+        });
+      }
+      throw err;
+    }
+    const { value, done } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
@@ -992,7 +1042,7 @@ export function useOraChat(): UseOraChatReturn {
     // Skip the load effect re-fetching the conversation we are actively writing.
     loadedConvRef.current = id;
     try {
-      const res = await authFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
+      const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: serializeForStorage(msgs) }),
@@ -1092,39 +1142,55 @@ export function useOraChat(): UseOraChatReturn {
       // Also restore any prior transcript: it may exist because the session
       // JWT expired (inactivity) while the conversation history is still in
       // sessionStorage and completely valid.
-      try {
-        const data = await apiPost<{
-          sessionId: string;
-          msgCount: number;
-          msgLimit: number;
-          fileCount?: number;
-          fileLimit?: number;
-          imageCount?: number;
-          imageLimit?: number;
-          resetsAt?: string | null;
-          windowHours?: number;
-        }>("/api/public-ai/session", {});
-        storeSessionId(data.sessionId);
-        setSession({
-          sessionId: data.sessionId,
-          msgCount: data.msgCount,
-          msgLimit: data.msgLimit,
-          fileCount: data.fileCount ?? 0,
-          fileLimit: data.fileLimit ?? FILE_LIMIT,
-          imageCount: data.imageCount ?? 0,
-          imageLimit: data.imageLimit ?? IMAGE_LIMIT,
-          resetsAt: data.resetsAt ?? null,
-          windowHours: data.windowHours,
-        });
-        if (!convRef.current) {
-          const stored = getStoredTranscript();
-          if (stored.length > 0) {
-            setMessages(stored);
+      //
+      // Network failures retry quietly with backoff before surfacing an error:
+      // publishing restarts the server for a short window, and this first
+      // session call is the request most likely to land inside it. Without the
+      // retry, visitors see a scary banner even though the site recovers on
+      // its own seconds later.
+      const retryDelaysMs = [1500, 4000];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const data = await apiPost<{
+            sessionId: string;
+            msgCount: number;
+            msgLimit: number;
+            fileCount?: number;
+            fileLimit?: number;
+            imageCount?: number;
+            imageLimit?: number;
+            resetsAt?: string | null;
+            windowHours?: number;
+          }>("/api/public-ai/session", {});
+          storeSessionId(data.sessionId);
+          setSession({
+            sessionId: data.sessionId,
+            msgCount: data.msgCount,
+            msgLimit: data.msgLimit,
+            fileCount: data.fileCount ?? 0,
+            fileLimit: data.fileLimit ?? FILE_LIMIT,
+            imageCount: data.imageCount ?? 0,
+            imageLimit: data.imageLimit ?? IMAGE_LIMIT,
+            resetsAt: data.resetsAt ?? null,
+            windowHours: data.windowHours,
+          });
+          if (!convRef.current) {
+            const stored = getStoredTranscript();
+            if (stored.length > 0) {
+              setMessages(stored);
+            }
           }
+          return;
+        } catch (err: unknown) {
+          const isNetwork = (err as { network?: boolean }).network === true;
+          if (isNetwork && attempt < retryDelaysMs.length) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+            continue;
+          }
+          const msg = (err as Error).message ?? "Could not start Ora session.";
+          setError(msg);
+          return;
         }
-      } catch (err: unknown) {
-        const msg = (err as Error).message ?? "Could not start Ora session.";
-        setError(msg);
       }
     };
 
@@ -1212,7 +1278,7 @@ export function useOraChat(): UseOraChatReturn {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await authFetch(`${BASE}/api/ora/conversations/${id}`);
+        const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}`);
         if (!res.ok) return;
         const data = (await res.json()) as { conversation: { messages: OraMessage[] } };
         if (!cancelled && loadedConvRef.current === id && editGenRef.current === genAtStart) {
@@ -1306,7 +1372,7 @@ export function useOraChat(): UseOraChatReturn {
         const formData = new FormData();
         formData.append("file", uploadBlob, uploadName);
 
-        const res = await authFetch(`${BASE}/api/public-ai/upload`, {
+        const res = await safeAuthFetch(`${BASE}/api/public-ai/upload`, {
           method: "POST",
           body: formData,
         });
@@ -2176,7 +2242,7 @@ export function useOraChat(): UseOraChatReturn {
       setError(null);
 
       try {
-        const enqueueRes = await authFetch(`${BASE}/api/images/${sourceImageId}/edit`, {
+        const enqueueRes = await safeAuthFetch(`${BASE}/api/images/${sourceImageId}/edit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ instruction: trimmed, quality: "standard", origin: "ora" }),
@@ -2196,7 +2262,7 @@ export function useOraChat(): UseOraChatReturn {
         let fileUrl: string | null = null;
         for (let attempt = 0; attempt < 60; attempt++) {
           await new Promise((r) => setTimeout(r, 1500));
-          const statusRes = await authFetch(`${BASE}/api/images/status/${jobId}`);
+          const statusRes = await safeAuthFetch(`${BASE}/api/images/status/${jobId}`);
           if (!statusRes.ok) continue;
           const s = (await statusRes.json()) as {
             status: string;
@@ -2219,7 +2285,7 @@ export function useOraChat(): UseOraChatReturn {
         // URL) which an <img src> cannot fetch — that produced a "completed" edit
         // that rendered as a broken image. The /file route resolves the bytes
         // from whichever backend holds them (dev tmpdir or authenticated R2).
-        const imgRes = await authFetch(`${BASE}/api/images/${newImageId}/file`);
+        const imgRes = await safeAuthFetch(`${BASE}/api/images/${newImageId}/file`);
         if (!imgRes.ok) throw new Error("Could not load the edited image.");
         const blob = await imgRes.blob();
         if (blob.size === 0) throw new Error("The edited image was empty. Please try again.");
