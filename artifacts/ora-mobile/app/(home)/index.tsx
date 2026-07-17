@@ -463,7 +463,9 @@ function detectFileFormat(fileName: string, mimeType: string): FileFormat {
 }
 
 /** Build a downloadable generated-file payload only when bytes are present. */
-function buildGeneratedFile(res: ChatResponse): GeneratedFile | undefined {
+function buildGeneratedFile(
+  res: Pick<ChatResponse, "fileName" | "fileData" | "mimeType" | "assetId">,
+): GeneratedFile | undefined {
   if (!res.fileName || !res.fileData || !res.mimeType) return undefined;
   return {
     fileName: res.fileName,
@@ -1186,8 +1188,9 @@ export default function OraChatScreen() {
               }
             } else if (streamResult.ok) {
               // Streaming succeeded — apply final metadata from the done payload.
-              // The conversational stream carries suggestions/videos/memory only
-              // (never sources/images/files — those come from the /chat path).
+              // The conversational stream carries suggestions/videos/memory, plus
+              // a generated file when the server's false-delivery safety net
+              // built one for real (sources/images still come from /chat).
               assistant = {
                 id: pendingId,
                 role: "assistant",
@@ -1199,6 +1202,7 @@ export default function OraChatScreen() {
                 memorySaveCandidateConfidence: streamResult.memorySaveCandidateConfidence,
                 memorySaveCandidateSensitive: streamResult.memorySaveCandidateSensitive,
                 memoriesUsed: streamResult.memoriesUsed,
+                generatedFile: buildGeneratedFile(streamResult),
                 ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
               };
               if (streamResult.msgCount != null && streamResult.msgLimit != null) {

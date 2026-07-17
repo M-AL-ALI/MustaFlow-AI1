@@ -105,6 +105,14 @@ export interface StreamDonePayload {
   windowHours?: number;
   isRealStreaming?: boolean;
   streamingFallback?: boolean;
+  /**
+   * Present only when the server's false-delivery safety net generated a real
+   * file after the streamed reply claimed one was attached.
+   */
+  fileName?: string;
+  fileData?: string;
+  mimeType?: string;
+  assetId?: number;
   /** Server-measured timing/routing metadata — privacy-safe, no user content. */
   serverDiag?: {
     ttftMs: number | null;

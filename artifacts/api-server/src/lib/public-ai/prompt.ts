@@ -198,6 +198,18 @@ const FILE_GENERATION_PATTERNS: RegExp[] = [
   /\b(generate|create|make|build|export|produce|design|draft|prepare|put\s+together)\s+(?:me\s+|us\s+)?(?:a\s+|an\s+|the\s+|some\s+|my\s+)*(power[\s-]?point|powerpoint|pptx?|ppt|presentation|slide[\s-]?deck|pitch[\s-]?deck|slide[\s-]?show|slideshow|slides)\b/i,
   /\b(generate|create|make|build|export|produce)\s+(a\s+)?(file|document|report|table|sheet|spreadsheet|doc)\b/i,
   /\b(download|export)\s+(a\s+)?(file|report|spreadsheet|document|csv|excel|pdf|word)\b/i,
+  // Format-switch / "I need it as X" phrasings. Intent-gated on need/want/prefer
+  // followed by an object pronoun so "do you know PowerPoint?" can't trigger,
+  // but "no i need it power point format" / "I want this as a PDF" does. The
+  // two-word "power point" spelling is included here (verb-gated) because the
+  // bare-noun gate above only matches the one-word form.
+  /\b(need|want|prefer)\s+(?:it|this|that|them|these|one)\b[^.?!\n]{0,30}?\b(?:in\s+|as\s+)?(?:a\s+|an\s+|the\s+)?(power[\s-]?point|pptx?|ppt|presentation|slide[\s-]?deck|slide[\s-]?show|slideshow|word|docx|excel|xlsx|spreadsheet|csv|pdf)\b/i,
+  // "in/as <format> format|file|version" — an explicit output-format request
+  // ("can I have it in powerpoint format?", "as a word file please").
+  /\b(?:in|as|into)\s+(?:a\s+|an\s+|the\s+)?(power[\s-]?point|pptx?|ppt|presentation|slide[\s-]?deck|word|docx|excel|xlsx|spreadsheet|csv|pdf)\s+(?:format|file|version|doc(?:ument)?)\b/i,
+  // Conversion/revision verbs targeting a format ("convert it to pptx",
+  // "change this into a powerpoint", "redo it as slides").
+  /\b(convert|change|switch|turn|redo|remake|regenerate|resend)\b[^.?!\n]{0,40}?\b(?:in)?to\s+(?:a\s+|an\s+|the\s+)?(power[\s-]?point|pptx?|ppt|presentation|slide[\s-]?deck|slide[\s-]?show|slideshow|word|docx|excel|xlsx|spreadsheet|csv|pdf)\b/i,
 ];
 
 const BUILDER_PATTERNS: RegExp[] = [
@@ -402,6 +414,41 @@ export function detectFileRequest(text: string): FileFormat | null {
   if (/\b(report|document|doc)\b/i.test(text)) return "pdf";
   if (/\b(table|sheet|data)\b/i.test(text)) return "csv";
   return null;
+}
+
+// ── False file-delivery claim detection ─────────────────────────────────────
+// The conversational path can NEVER attach a file, yet the model occasionally
+// imitates the file-builder's delivery template it sees in history from an
+// earlier REAL delivery ("Here's your PPTX file — … Click the card below to
+// download it.") while no file exists. Both halves must match: a present-tense
+// delivery phrase AND a download affordance — a mere mention of a past file
+// ("the DOCX I made earlier") does not trigger.
+const FILE_DELIVERY_CLAIM_PATTERN =
+  /\b(here(?:'|\u2019)?s\s+(?:your|the)|here\s+is\s+(?:your|the)|i(?:'|\u2019)?ve\s+(?:created|generated|prepared|made|put\s+together)|i\s+have\s+(?:created|generated|prepared|made|put\s+together))\b[^.?!\n]{0,80}?\b(csv|xlsx|excel|docx|word|pdf|pptx|power[\s-]?point|presentation|spreadsheet|slide[\s-]?deck|file|document|report)\b/i;
+
+// NOTE: "attached" is deliberately gated to delivery forms ("is attached",
+// "attached below", "I've attached") — a bare \battached\b also matches prose
+// ABOUT a user upload ("here's a summary of the attached document") and would
+// generate a spurious file card.
+const FILE_DOWNLOAD_AFFORDANCE_PATTERN =
+  /\b(?:click|tap)\s+(?:on\s+)?(?:the\s+)?card\b|\bcard\s+below\b|\bdownload\s+(?:it|the\s+file|button|link)\b|\bready\s+(?:for\s+you\s+)?to\s+download\b|\bto\s+download\s+it\b|\b(?:is|are)\s+attached\b|\battached\s+below\b|\bi(?:'|\u2019)?ve\s+attached\b/i;
+
+/**
+ * Detect a reply that CLAIMS a downloadable file was delivered ("Here's your
+ * PPTX file … Click the card below to download it") and resolve the claimed
+ * format. Used two ways:
+ *  - by the chat routes as a safety net: a conversational reply that claims a
+ *    delivery gets the file actually generated (or the claim replaced), and
+ *  - by the router so "where is it?" after a delivery-style message routes to
+ *    real file generation instead of a conversational apology.
+ */
+export function detectClaimedFileDelivery(reply: string): FileFormat | null {
+  if (!FILE_DELIVERY_CLAIM_PATTERN.test(reply)) return null;
+  if (!FILE_DOWNLOAD_AFFORDANCE_PATTERN.test(reply)) return null;
+  for (const { pattern, format } of FILE_FORMAT_DETECT) {
+    if (pattern.test(reply)) return format;
+  }
+  return "pdf";
 }
 
 export function isBuilderRequest(text: string): boolean {

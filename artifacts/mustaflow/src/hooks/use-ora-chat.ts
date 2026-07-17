@@ -623,6 +623,12 @@ interface StreamDonePayload {
   resetsAt?: string | null;
   windowHours?: number;
   isRealStreaming?: boolean;
+  // Present only when the server's false-delivery safety net generated a real
+  // file after the streamed reply claimed one was attached.
+  fileName?: string;
+  fileData?: string;
+  mimeType?: string;
+  assetId?: number;
   // Server-reported timing (mirrors backend OraStreamDonePayload.serverDiag).
   serverDiag?: {
     ttftMs?: number | null;

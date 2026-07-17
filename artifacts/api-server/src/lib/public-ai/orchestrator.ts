@@ -19,7 +19,12 @@ import {
   runCandidateChain,
   selectOraMemoryModelRoute,
 } from "./model-router";
-import { detectFileRequest, isPastedReferenceAnalysisRequest, type FileFormat } from "./prompt";
+import {
+  detectClaimedFileDelivery,
+  detectFileRequest,
+  isPastedReferenceAnalysisRequest,
+  type FileFormat,
+} from "./prompt";
 
 // ── Tool taxonomy ───────────────────────────────────────────────────────────
 
@@ -463,10 +468,18 @@ export interface OraRouteInput {
 // Short affirmations / nudges that, on their own, carry no file request but are
 // almost always a "yes, do the thing you just offered" reply. Kept deliberately
 // tight (whole-message match, length-capped) to avoid hijacking real questions.
+// A complaint that a promised/claimed file never arrived ("where is it?",
+// "still waiting", "I don't see it"). Split out from the affirmations because
+// it is the ONLY continuation cue allowed to fire after a delivery-STYLE
+// assistant message (see detectFileContinuation): a plain "ok"/"perfect" after
+// a real delivery is acceptance, not a request to regenerate.
+const FILE_MISSING_COMPLAINT_PATTERN =
+  /\b(still\s+waiting|i'?m\s+waiting|where\s+is\s+it|where(?:'?s|\s+is)\s+(?:the|my)\s+(?:file|download|document|presentation|slides|spreadsheet|deck|pdf|pptx?|docx?)|i\s+don'?t\s+see\s+(?:it|any(?:thing)?|a\s+card|the\s+(?:file|card|download))|nothing\s+(?:showed|appeared|downloaded)|didn'?t\s+(?:get|see|receive)\s+(?:it|any(?:thing)?|the\s+file)|no\s+(?:file|card|download)\s+(?:appeared|showed|here))\b/i;
+
 const FILE_CONTINUATION_PATTERNS: RegExp[] = [
   /^(yes|yeah|yep|yup|sure|ok|okay|please|please\s+do|do\s+it|go\s+ahead|go\s+for\s+it|proceed|continue|sounds\s+good|that\s+works|perfect|great)\b/i,
   /\b(make|create|generate|build|produce|send|give)\s+(it|me\s+one|that|one)\b/i,
-  /\b(still\s+waiting|i'?m\s+waiting|where\s+is\s+it|i\s+don'?t\s+see\s+it|nothing\s+(showed|appeared)|didn'?t\s+(get|see)\s+it)\b/i,
+  FILE_MISSING_COMPLAINT_PATTERN,
 ];
 
 // ── Image-continuation vocabulary ────────────────────────────────────────────
@@ -656,6 +669,7 @@ function detectFileContinuation(
   const trimmed = message.trim();
   if (trimmed.length === 0 || trimmed.length > 80) return null;
   if (!FILE_CONTINUATION_PATTERNS.some((p) => p.test(trimmed))) return null;
+  const isMissingComplaint = FILE_MISSING_COMPLAINT_PATTERN.test(trimmed);
 
   // Only the single latest assistant turn (the one being replied to) counts.
   for (let i = recentMessages.length - 1; i >= 0; i--) {
@@ -666,8 +680,20 @@ function detectFileContinuation(
     // "word" (a bare file-format token) or the prose mentions a format. Defer to
     // the image continuation path so "yes" generates the image, not a Word doc.
     if (ASSISTANT_IMAGE_OFFER_PATTERN.test(m.content)) return null;
-    if (!ASSISTANT_FILE_OFFER_PATTERN.test(m.content)) return null;
-    return detectFileRequest(m.content);
+    if (ASSISTANT_FILE_OFFER_PATTERN.test(m.content)) {
+      return detectFileRequest(m.content);
+    }
+    // The last assistant turn CLAIMED a delivery ("Here's your PPTX file —
+    // click the card below…"). If the user is complaining the file never
+    // arrived (hallucinated delivery, or real delivery whose bytes were lost),
+    // regenerate it for real. Restricted to missing-file complaints so a plain
+    // "ok"/"perfect" acceptance after a REAL delivery never re-generates and
+    // double-charges. detectClaimedFileDelivery requires a file noun + download
+    // affordance, so hallucinated IMAGE deliveries never route here.
+    if (isMissingComplaint) {
+      return detectClaimedFileDelivery(m.content);
+    }
+    return null;
   }
   return null;
 }

@@ -18,6 +18,7 @@ import {
   buildCurrentDateTimeBlock,
   isPastedReferenceAnalysisRequest,
   summarizePastedReferenceSignals,
+  detectClaimedFileDelivery,
 } from "../../lib/public-ai/prompt";
 
 import { classifyIntent, CLASSIFIER_FALLBACK, type OraTopic } from "../../lib/public-ai/classifier";
@@ -1072,6 +1073,91 @@ function topicSuggestionGuidance(topic: OraTopic): string {
   return guidance[topic] ?? guidance.general;
 }
 
+// ── False file-delivery rescue ───────────────────────────────────────────────
+// The conversational path can never attach files, yet the model occasionally
+// imitates the file-builder's delivery template from an earlier REAL delivery
+// in the history ("Here's your PPTX file — … Click the card below to download
+// it.") without any file existing. When a conversational reply makes such a
+// claim, generate the promised file for REAL so the delivery card actually
+// appears. On generation failure the hallucinated claim is replaced with an
+// honest correction — Ora must never claim a delivery that did not happen.
+// No extra quota is charged: the turn was already metered as a message.
+type RescuedFileDelivery = {
+  reply: string;
+  fileName?: string;
+  fileData?: string;
+  mimeType?: string;
+  assetId?: number | null;
+};
+
+async function rescueClaimedFileDelivery(params: {
+  reply: string;
+  message: string;
+  carriedDocs: string;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  language: string | undefined;
+  authed: AuthedOraUser | null;
+  logComponent: string;
+}): Promise<RescuedFileDelivery | null> {
+  const claimedFormat = detectClaimedFileDelivery(params.reply);
+  if (!claimedFormat) return null;
+  logger.warn(
+    { component: params.logComponent, claimedFormat },
+    "Conversational reply claimed a file delivery with no file attached — generating it for real",
+  );
+  try {
+    const { generateFileFromPrompt } = await import("../../lib/public-ai/file-builder");
+    const filePrompt = params.carriedDocs
+      ? `${params.message}\n\n${params.carriedDocs}`
+      : params.message;
+    const result = await generateFileFromPrompt(
+      filePrompt,
+      claimedFormat,
+      params.history.slice(-10),
+      params.language,
+      params.carriedDocs.length > 0,
+      params.authed?.tier ?? null,
+    );
+    let assetId: number | null = null;
+    if (params.authed && result.fileData) {
+      try {
+        const { persistOraAsset } = await import("../../lib/ora-assets");
+        assetId = await persistOraAsset({
+          userId: params.authed.userId,
+          kind: "file",
+          fileName: result.fileName,
+          mimeType: result.mimeType,
+          format: claimedFormat,
+          prompt: params.message,
+          base64: result.fileData,
+        });
+      } catch (persistErr) {
+        logger.error(
+          { component: params.logComponent, err: persistErr },
+          "Failed to persist rescued file to asset library",
+        );
+      }
+    }
+    return {
+      reply: result.reply,
+      fileName: result.fileName,
+      fileData: result.fileData,
+      mimeType: result.mimeType,
+      assetId,
+    };
+  } catch (err) {
+    logger.error(
+      { component: params.logComponent, claimedFormat, err },
+      "False-delivery rescue generation failed — replacing claim with honest correction",
+    );
+    return {
+      reply:
+        "I wasn't able to attach that file — my earlier message was wrong to say it was ready. " +
+        `Please ask me again (for example, "create it as a ${claimedFormat.toUpperCase()}") and I'll generate it for you.`,
+    };
+  }
+}
+
 router.post("/public-ai/chat", async (req, res) => {
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -2053,6 +2139,22 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
+  // Safety net: if the conversational reply CLAIMED a file was attached (it
+  // never is on this path), generate the promised file for real — or replace
+  // the claim with an honest correction if generation fails.
+  const rescuedDelivery = await rescueClaimedFileDelivery({
+    reply,
+    message,
+    carriedDocs,
+    history: historyMessages,
+    language,
+    authed,
+    logComponent: "ora-chat",
+  });
+  if (rescuedDelivery) {
+    reply = rescuedDelivery.reply;
+  }
+
   // Video links in conversational replies: the model occasionally volunteers a
   // YouTube/Vimeo URL inline in its prose. Lift those out and render them as
   // verified play cards (same pipeline as the search branch) instead of plain,
@@ -2168,6 +2270,14 @@ router.post("/public-ai/chat", async (req, res) => {
     // the client can show an unobtrusive "based on your saved memories"
     // indicator that deep-links to the Memory Center.
     ...(memory.used.length > 0 ? { memoriesUsed: memory.used } : {}),
+    ...(rescuedDelivery?.fileName && rescuedDelivery.fileData && rescuedDelivery.mimeType
+      ? {
+          fileName: rescuedDelivery.fileName,
+          fileData: rescuedDelivery.fileData,
+          mimeType: rescuedDelivery.mimeType,
+          ...(rescuedDelivery.assetId != null ? { assetId: rescuedDelivery.assetId } : {}),
+        }
+      : {}),
     mode: deepAllowed ? "deep" : "instant",
     ...usage,
   });
@@ -2822,6 +2932,23 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   let reply = streamedReply.trim();
 
+  // Safety net: if the streamed conversational reply CLAIMED a file was
+  // attached (it never is on this path), generate the promised file for real
+  // before the done payload — the client replaces the streamed text with the
+  // done payload's reply, so the hallucinated claim never persists.
+  const rescuedDelivery = await rescueClaimedFileDelivery({
+    reply,
+    message,
+    carriedDocs,
+    history: historyMessages,
+    language,
+    authed,
+    logComponent: "ora-chat-stream",
+  });
+  if (rescuedDelivery) {
+    reply = rescuedDelivery.reply;
+  }
+
   let videos: OraVideo[] = [];
   {
     const { extractProseVideos, verifyVideos } = await import("../../lib/public-ai/web-search");
@@ -2880,6 +3007,14 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         : {}),
       ...(referenceChatHistory && !temporary ? { conversationSummary } : {}),
       ...(memory.used.length > 0 ? { memoriesUsed: memory.used } : {}),
+      ...(rescuedDelivery?.fileName && rescuedDelivery.fileData && rescuedDelivery.mimeType
+        ? {
+            fileName: rescuedDelivery.fileName,
+            fileData: rescuedDelivery.fileData,
+            mimeType: rescuedDelivery.mimeType,
+            ...(rescuedDelivery.assetId != null ? { assetId: rescuedDelivery.assetId } : {}),
+          }
+        : {}),
       mode: deepAllowed ? ("deep" as const) : ("instant" as const),
       msgCount: Number(usage.msgCount ?? 0),
       msgLimit: Number(usage.msgLimit ?? 0),

@@ -46,6 +46,14 @@ export interface OraStreamDonePayload {
   resetsAt?: string | null;
   windowHours?: number;
   /**
+   * Present only when the false-delivery safety net generated a real file
+   * after the streamed conversational reply claimed one was attached.
+   */
+  fileName?: string;
+  fileData?: string;
+  mimeType?: string;
+  assetId?: number;
+  /**
    * True when the upstream AI provider delivered the reply as real incremental
    * token fragments via its streaming API. False would indicate a simulated
    * chunk approach. Included in every done event so callers can benchmark /

@@ -609,6 +609,12 @@ export type StreamChatNativeResult =
       memorySaveCandidateSensitive?: boolean;
       memoriesUsed?: OraMemoryUsed[];
       conversationSummary?: string;
+      // Present only when the server's false-delivery safety net generated a
+      // real file after the streamed reply claimed one was attached.
+      fileName?: string;
+      fileData?: string;
+      mimeType?: string;
+      assetId?: number;
     }
   | { ok: false; firstToken: false; fallbackToken?: string }
   | { ok: false; firstToken: true; reply: string };
@@ -816,6 +822,10 @@ export async function streamChatNative(
       memorySaveCandidateSensitive: resolvedDone.memorySaveCandidateSensitive,
       memoriesUsed: resolvedDone.memoriesUsed,
       conversationSummary: resolvedDone.conversationSummary,
+      fileName: resolvedDone.fileName,
+      fileData: resolvedDone.fileData,
+      mimeType: resolvedDone.mimeType,
+      assetId: resolvedDone.assetId,
     };
   } catch {
     finish("exception");
