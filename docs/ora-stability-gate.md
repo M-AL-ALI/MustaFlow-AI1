@@ -60,6 +60,30 @@ The release profile adds:
 - Website production build
 - Workspace lint
 
+## Automatic Feature Registry
+
+The gate owns a feature registry in `scripts/src/ora-stability-gate.ts`.
+
+Every new Ora feature must be added to that registry in the same commit that adds the feature. This is not optional and should not wait for the user to remind Replit or Codex.
+
+The registry entry must include:
+
+- The feature name.
+- Which surfaces own it: API, website, mobile.
+- File hints that let the gate detect future changes.
+- Website validation notes.
+- Mobile validation notes.
+
+When the gate runs, it automatically prints:
+
+- The full registered Ora feature list.
+- Which feature areas were touched by the current commit or dirty changes.
+- Any changed Ora files that do not match a registered feature.
+
+Release profile rule:
+
+> If an Ora file changed but does not map to a registered feature area, do not publish or submit TestFlight until the registry and the related web/mobile validation notes are updated.
+
 Live provider tests and physical-device checks are intentionally not automated because they depend on external services, real Apple/TestFlight state, or real microphones.
 
 ## Manual Checks Required Before Publish/TestFlight
@@ -235,8 +259,9 @@ For every Ora task:
 1. Pull latest `main`.
 2. Make the fix.
 3. Add or update regression tests for the fixed bug.
-4. Run `pnpm run ora:stability-gate`.
-5. If preparing publish/TestFlight, run `pnpm run ora:stability-gate:release`.
-6. Complete the manual checklist for changed surfaces.
-7. Paste the report with the exact commit SHA.
-8. Only publish or submit TestFlight if the automated gate and required manual checks pass.
+4. If the work adds or changes an Ora feature, update the feature registry in `scripts/src/ora-stability-gate.ts` with both website and mobile validation notes.
+5. Run `pnpm run ora:stability-gate`.
+6. If preparing publish/TestFlight, run `pnpm run ora:stability-gate:release`.
+7. Complete the manual checklist for changed surfaces.
+8. Paste the report with the exact commit SHA.
+9. Only publish or submit TestFlight if the automated gate and required manual checks pass.

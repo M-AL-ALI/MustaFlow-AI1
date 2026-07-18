@@ -29,6 +29,22 @@ interface CheckResult {
   why: string;
 }
 
+interface OraFeature {
+  id: string;
+  title: string;
+  ownerSurfaces: string[];
+  fileHints: RegExp[];
+  manualWebsite: string;
+  manualMobile: string;
+}
+
+interface FeatureImpact {
+  changedFiles: string[];
+  changedOraFiles: string[];
+  matchedFeatures: OraFeature[];
+  unmatchedOraFiles: string[];
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 
@@ -41,6 +57,154 @@ const PROFILE_GROUPS: Record<Profile, Set<GateCheck["profiles"][number]>> = {
 
 const DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096";
 const DEFAULT_TIMEOUT_MS = 180_000;
+
+const ORA_FILE_HINTS = [
+  /^artifacts\/api-server\/src\/(lib|routes)\/public-ai\//,
+  /^artifacts\/api-server\/src\/routes\/ora/i,
+  /^artifacts\/api-server\/src\/routes\/__tests__\/ora/i,
+  /^artifacts\/api-server\/src\/routes\/__tests__\/billing/i,
+  /^artifacts\/api-server\/src\/routes\/__tests__\/.*subscription/i,
+  /^artifacts\/mustaflow\/src\/components\/ora\//,
+  /^artifacts\/mustaflow\/src\/hooks\/.*ora/i,
+  /^artifacts\/mustaflow\/src\/lib\/.*ora/i,
+  /^artifacts\/mustaflow\/src\/pages\/.*ora/i,
+  /^artifacts\/mustaflow\/src\/pages\/.*billing/i,
+  /^artifacts\/mustaflow\/src\/pages\/.*pricing/i,
+  /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*ora/i,
+  /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*billing/i,
+  /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*pricing/i,
+  /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*voice/i,
+  /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*file/i,
+  /^packages\/ora-contracts\//,
+  /^docs\/ora-stability-gate\.md$/,
+  /^scripts\/src\/ora-stability-gate\.ts$/,
+];
+
+const ORA_FEATURE_REGISTRY: OraFeature[] = [
+  {
+    id: "stability-gate-release-process",
+    title: "Ora stability gate, release checklist, and website/mobile parity process",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/docs\/ora-stability-gate\.md$/i, /scripts\/src\/ora-stability-gate\.ts$/i],
+    manualWebsite:
+      "Confirm the gate report names changed website surfaces and required manual website checks.",
+    manualMobile:
+      "Confirm the gate report names changed mobile surfaces and whether TestFlight is required.",
+  },
+  {
+    id: "core-chat-routing",
+    title: "Core Ora chat, model routing, identity, and date/time",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/public-ai\/(chat|orchestrator|prompt|expertise|model-router)/i, /use-ora-chat/i],
+    manualWebsite: "Ask Instant + Deep prompts, identity prompts, and today's date/time.",
+    manualMobile:
+      "Ask the same Instant + Deep/date prompts on the current TestFlight build when mobile code changed.",
+  },
+  {
+    id: "live-search-current-info",
+    title: "Live search, current info, sources, Retry live search, and sports schedules",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/search/i, /web-search/i, /source-card/i, /sports/i, /current-info/i],
+    manualWebsite:
+      "Ask news/current/sports prompts and verify sources or honest retryable search failure.",
+    manualMobile:
+      "Ask the same current-info prompts and verify Retry live search behavior if mobile UI changed.",
+  },
+  {
+    id: "talk-to-ora",
+    title: "Talk to Ora realtime voice, settle window, focus, reconnect, and tier time budget",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /realtime/i,
+      /voice/i,
+      /webrtc/i,
+      /use-ora-realtime/i,
+      /useOraRealtimeVoiceNative/i,
+    ],
+    manualWebsite:
+      "Run 10+ voice turns, pause mid-sentence, interrupt mid-answer, and verify tier-time behavior.",
+    manualMobile:
+      "Run the same 10+ turn voice test on TestFlight after any native hook/API change.",
+  },
+  {
+    id: "image-generation-editing",
+    title: "Image generation, image editing, inline image cards, and image/search routing",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/image/i, /generated-image/i, /imageMeta/i],
+    manualWebsite:
+      "Generate, edit, and search for images; verify the right route and inline card controls.",
+    manualMobile:
+      "Repeat image generation/edit/search after mobile image UI changes or after a TestFlight build.",
+  },
+  {
+    id: "advanced-files-reports",
+    title: "Advanced files, uploads, charts, exports, reports, and revisions",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /file/i,
+      /upload/i,
+      /export/i,
+      /document/i,
+      /spreadsheet/i,
+      /presentation/i,
+      /dataset/i,
+      /chart/i,
+      /pdf/i,
+      /pptx/i,
+      /xlsx/i,
+      /csv/i,
+      /zip/i,
+    ],
+    manualWebsite:
+      "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions.",
+    manualMobile:
+      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed.",
+  },
+  {
+    id: "conversation-history",
+    title: "Conversation history, pin/archive/search, badges, and last-active sync",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/conversation/i, /history/i, /ChatsDrawer/i, /oraUserSettings/i],
+    manualWebsite: "Create, rename, pin, archive, restore, search, and resume history.",
+    manualMobile: "Verify history parity, pinned/archive items, badges, and last-active restore.",
+  },
+  {
+    id: "account-billing-plans",
+    title: "Account sync, billing tiers, quotas, iOS-safe plan display, and pricing links",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/billing/i, /pricing/i, /subscription/i, /plan/i, /tier/i, /quota/i, /settings/i],
+    manualWebsite: "Verify tier/usage/paywall/deep links and paid-user quota behavior.",
+    manualMobile:
+      "Verify plan sync and iOS compliance: no external checkout links, clear read-only plan info.",
+  },
+  {
+    id: "auth-compliance-support",
+    title: "Auth, Sign in with Apple, delete account, support, and App Store compliance",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /auth/i,
+      /clerk/i,
+      /AppleSignIn/i,
+      /sign-in/i,
+      /sign-up/i,
+      /delete.*account/i,
+      /support/i,
+      /privacy/i,
+    ],
+    manualWebsite: "Verify public support/contact, sign-in state, and account endpoints.",
+    manualMobile:
+      "Verify Sign in with Apple, demo account login, delete account, and App Store metadata-sensitive flows.",
+  },
+  {
+    id: "memory-personalization",
+    title: "Ora memory, personalization, project scope, and privacy-safe persistence",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [/memory/i, /personal/i, /project-scope/i],
+    manualWebsite: "Verify saved memory, memory manager, project scope, and privacy behavior.",
+    manualMobile:
+      "Verify memory/project behavior only when exposed on mobile or touched through shared API.",
+  },
+];
 
 const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/current-datetime-block.test.ts",
@@ -533,11 +697,86 @@ function gitInfo(requireClean: boolean): CheckResult[] {
   ];
 }
 
+function changedFiles(): string[] {
+  const candidates = [
+    runShell("git diff --name-only HEAD~1..HEAD", 20_000).output,
+    runShell("git diff --name-only --cached", 20_000).output,
+    runShell("git diff --name-only", 20_000).output,
+    runShell("git ls-files --others --exclude-standard", 20_000).output,
+  ];
+  return Array.from(
+    new Set(
+      candidates
+        .flatMap((chunk) => chunk.split(/\r?\n/))
+        .map((file) => normalizeGitPath(file.trim()))
+        .filter(Boolean),
+    ),
+  ).sort();
+}
+
+function normalizeGitPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+function isOraFile(file: string): boolean {
+  return ORA_FILE_HINTS.some((hint) => hint.test(file));
+}
+
+function featureImpact(): FeatureImpact {
+  const files = changedFiles();
+  const changedOraFiles = files.filter(isOraFile);
+  const matchedFeatures = ORA_FEATURE_REGISTRY.filter((feature) =>
+    changedOraFiles.some((file) => feature.fileHints.some((hint) => hint.test(file))),
+  );
+  const unmatchedOraFiles = changedOraFiles.filter(
+    (file) => !matchedFeatures.some((feature) => feature.fileHints.some((hint) => hint.test(file))),
+  );
+  return {
+    changedFiles: files,
+    changedOraFiles,
+    matchedFeatures,
+    unmatchedOraFiles,
+  };
+}
+
+function featureRegistryResult(impact: FeatureImpact, profile: Profile): CheckResult {
+  const hasChangedOraFiles = impact.changedOraFiles.length > 0;
+  const hasUnmatchedOraFiles = impact.unmatchedOraFiles.length > 0;
+  const status: GateStatus = !hasChangedOraFiles
+    ? "pass"
+    : hasUnmatchedOraFiles && profile === "release"
+      ? "fail"
+      : hasUnmatchedOraFiles
+        ? "warn"
+        : "pass";
+  const matched = impact.matchedFeatures.map((feature) => `${feature.id}: ${feature.title}`);
+  const output = [
+    `Changed files: ${impact.changedFiles.length}`,
+    `Changed Ora files: ${impact.changedOraFiles.length}`,
+    `Matched features: ${matched.length ? matched.join("; ") : "none"}`,
+    impact.unmatchedOraFiles.length
+      ? `Unmatched Ora files:\n${impact.unmatchedOraFiles.map((file) => `- ${file}`).join("\n")}`
+      : "Unmatched Ora files: none",
+  ].join("\n");
+  return {
+    id: "feature-registry",
+    title: "Changed Ora feature registry coverage",
+    area: "preflight",
+    status,
+    durationMs: 0,
+    command: "git diff/status changed-file scan",
+    exitCode: status === "fail" ? 1 : 0,
+    output,
+    why: "Every Ora feature added or touched must be automatically listed in the stability report for website and mobile parity review.",
+  };
+}
+
 function renderReport(input: {
   profile: Profile;
   results: CheckResult[];
   startedAt: Date;
   finishedAt: Date;
+  featureImpact: FeatureImpact;
 }): string {
   const failed = input.results.filter((r) => r.status === "fail");
   const warned = input.results.filter((r) => r.status === "warn");
@@ -569,6 +808,47 @@ function renderReport(input: {
     lines.push(
       `| ${result.status.toUpperCase()} | ${result.area} | ${result.id} - ${escapePipe(result.title)} | ${Math.round(result.durationMs / 1000)}s |`,
     );
+  }
+  lines.push("");
+  lines.push("## Automatic Feature Coverage");
+  lines.push("");
+  lines.push(
+    "This section is generated by the gate. New Ora features must be registered here in the same commit that adds the feature, with both website and mobile validation notes.",
+  );
+  lines.push("");
+  lines.push("### Registered Ora Features");
+  lines.push("");
+  lines.push("| Feature | Surfaces | Website validation | Mobile validation |");
+  lines.push("| --- | --- | --- | --- |");
+  for (const feature of ORA_FEATURE_REGISTRY) {
+    lines.push(
+      `| ${feature.id} - ${escapePipe(feature.title)} | ${feature.ownerSurfaces.join(", ")} | ${escapePipe(feature.manualWebsite)} | ${escapePipe(feature.manualMobile)} |`,
+    );
+  }
+  lines.push("");
+  lines.push("### Changed Feature Impact");
+  lines.push("");
+  if (input.featureImpact.changedOraFiles.length === 0) {
+    lines.push("No Ora-specific files were detected in the changed-file scan.");
+  } else {
+    lines.push("Changed Ora files:");
+    for (const file of input.featureImpact.changedOraFiles) lines.push(`- ${file}`);
+    lines.push("");
+    lines.push("Matched feature areas:");
+    if (input.featureImpact.matchedFeatures.length === 0) {
+      lines.push("- None matched. Update `ORA_FEATURE_REGISTRY` before release.");
+    } else {
+      for (const feature of input.featureImpact.matchedFeatures) {
+        lines.push(`- ${feature.id}: ${feature.title}`);
+        lines.push(`  Website: ${feature.manualWebsite}`);
+        lines.push(`  Mobile: ${feature.manualMobile}`);
+      }
+    }
+    if (input.featureImpact.unmatchedOraFiles.length > 0) {
+      lines.push("");
+      lines.push("Unmatched Ora files that need registry/test review:");
+      for (const file of input.featureImpact.unmatchedOraFiles) lines.push(`- ${file}`);
+    }
   }
   lines.push("");
   lines.push("## Details");
@@ -617,6 +897,11 @@ function listChecks(profile: Profile) {
   for (const check of relevantChecks(profile)) {
     console.log(`- ${check.id} [${check.area}] ${check.title}`);
   }
+  console.log("");
+  console.log("Registered Ora feature areas:");
+  for (const feature of ORA_FEATURE_REGISTRY) {
+    console.log(`- ${feature.id}: ${feature.title} (${feature.ownerSurfaces.join(", ")})`);
+  }
 }
 
 async function main() {
@@ -630,7 +915,8 @@ async function main() {
   console.log(`[ora-gate] Starting Ora Stability Gate profile=${profile}`);
   console.log(`[ora-gate] Repo: ${repoRoot}`);
 
-  const results: CheckResult[] = [...gitInfo(requireClean)];
+  const impact = featureImpact();
+  const results: CheckResult[] = [...gitInfo(requireClean), featureRegistryResult(impact, profile)];
   for (const result of results) {
     console.log(`[ora-gate] ${result.status.toUpperCase()} ${result.id}`);
     if (result.status !== "pass" && result.output) console.log(result.output);
@@ -643,7 +929,7 @@ async function main() {
   }
 
   const finishedAt = new Date();
-  const report = renderReport({ profile, results, startedAt, finishedAt });
+  const report = renderReport({ profile, results, startedAt, finishedAt, featureImpact: impact });
   if (reportPath) {
     const absolute = path.resolve(repoRoot, reportPath);
     mkdirSync(path.dirname(absolute), { recursive: true });
