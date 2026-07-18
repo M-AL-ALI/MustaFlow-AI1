@@ -9,6 +9,9 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "lint": "pnpm -r --if-present run lint",
+    "ora:stability-gate": "pnpm --filter @workspace/scripts run ora-stability-gate",
+    "ora:stability-gate:release": "pnpm --filter @workspace/scripts run ora-stability-gate:release",
+    "ora:stability-gate:mobile": "pnpm --filter @workspace/scripts run ora-stability-gate:mobile",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"

@@ -30,7 +30,7 @@ describe("pricing and ora-settings deep-link wiring", () => {
   it("pricing sign-in redirect preserves tier param through the flow", () => {
     const pricing = readPage("pricing.tsx");
     // When unauthenticated, the redirect URL encodes the tier param
-    expect(pricing).toContain("params.set(\"tier\", tier)");
+    expect(pricing).toContain('params.set("tier", tier)');
     expect(pricing).toContain("/sign-up?redirect=");
     expect(pricing).toContain("encodeURIComponent");
   });
@@ -40,7 +40,9 @@ describe("pricing and ora-settings deep-link wiring", () => {
     expect(pricing).toContain(
       "successUrl: `${window.location.origin}/ora/settings?section=plan&subscribed=1`",
     );
-    expect(pricing).not.toContain("successUrl: `${window.location.origin}/ora/settings?subscribed=1`");
+    expect(pricing).not.toContain(
+      "successUrl: `${window.location.origin}/ora/settings?subscribed=1`",
+    );
   });
 
   it("ora-settings reads section param and passes targetSection to PlanLimitsSection", () => {
@@ -65,7 +67,7 @@ describe("pricing and ora-settings deep-link wiring", () => {
     expect(settings).toContain("scrollIntoView");
     // Staged-scroll retries use "smooth" for long-distance jumps and "auto"
     // for short corrective re-scrolls.
-    expect(settings).toContain('"smooth"');
+    expect(settings).toContain('behavior: d >= 1000 ? "smooth" : "auto"');
   });
 
   it("checkout successUrl from ora-settings routes to section=plan", () => {
@@ -123,7 +125,7 @@ describe("source=mobile banner wiring", () => {
   it("MobileAppBanner returns null when source param is absent", () => {
     const banner = readBanner();
     // Guards: source !== "mobile" || dismissed → early return null
-    expect(banner).toContain("source !== \"mobile\"");
+    expect(banner).toContain('source !== "mobile"');
     expect(banner).toContain("return null");
   });
 });
