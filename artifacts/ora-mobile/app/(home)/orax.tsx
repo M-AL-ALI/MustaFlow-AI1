@@ -31,6 +31,7 @@ import {
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -408,6 +409,7 @@ function mergeOraxTaskMessages(
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY });
   const [threadOpen, setThreadOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
@@ -1163,6 +1165,27 @@ export default function OraxScreen() {
             </Text>
           ) : null}
         </View>
+        <Pressable
+          onPress={() => router.replace("/(home)")}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Ora"
+          style={{
+            height: 40,
+            borderRadius: 20,
+            paddingHorizontal: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 5,
+            backgroundColor: c.muted,
+          }}
+        >
+          <ArrowLeft size={15} color={c.foreground} />
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>
+            Ora
+          </Text>
+        </Pressable>
         <Pressable
           onPress={() => setWorkspaceMenuOpen(true)}
           hitSlop={10}

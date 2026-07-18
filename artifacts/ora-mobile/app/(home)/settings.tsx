@@ -1365,7 +1365,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader title="Settings" subtitle="Preferences & account" />
+      <ScreenHeader title="Settings" subtitle="Preferences & account" showBackToOra />
       <ScrollView
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}
       >

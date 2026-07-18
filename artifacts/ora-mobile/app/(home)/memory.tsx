@@ -110,6 +110,7 @@ export default function MemoryScreen() {
         <ScreenHeader
           title="Memory"
           subtitle="Manage what Ora knows about you and your conversation history."
+          showBackToOra
         />
         <SignInWall
           title="Sign in for Memory"
@@ -124,6 +125,7 @@ export default function MemoryScreen() {
       <ScreenHeader
         title="Memory"
         subtitle="Manage what Ora knows about you and your conversation history."
+        showBackToOra
       />
       <View
         style={{

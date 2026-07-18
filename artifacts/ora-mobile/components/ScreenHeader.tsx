@@ -1,5 +1,5 @@
-import { useNavigation } from "expo-router";
-import { Menu, type LucideIcon } from "lucide-react-native";
+import { useNavigation, useRouter } from "expo-router";
+import { ArrowLeft, Menu, type LucideIcon } from "lucide-react-native";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,6 +14,8 @@ export function ScreenHeader({
   rightIcon: RightIcon,
   onRightPress,
   leftNode,
+  showBackToOra,
+  onBackToOra,
 }: {
   title: string;
   titleNode?: React.ReactNode;
@@ -21,6 +23,8 @@ export function ScreenHeader({
   right?: React.ReactNode;
   rightIcon?: LucideIcon;
   onRightPress?: () => void;
+  showBackToOra?: boolean;
+  onBackToOra?: () => void;
   /**
    * Custom content for the drawer-open button (left of the title). When omitted
    * the default hamburger icon is used. The Ora screen passes the MustaFlow
@@ -31,6 +35,7 @@ export function ScreenHeader({
   const c = useColors();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const router = useRouter();
 
   return (
     <View
@@ -74,6 +79,28 @@ export function ScreenHeader({
           </Text>
         )}
       </View>
+      {showBackToOra && (
+        <Pressable
+          onPress={onBackToOra ?? (() => router.replace("/(home)"))}
+          hitSlop={10}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingHorizontal: 10,
+            paddingVertical: 7,
+            borderRadius: c.radius,
+            backgroundColor: c.muted,
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Ora"
+        >
+          <ArrowLeft size={14} color={c.foreground} />
+          <Text style={{ color: c.foreground, fontSize: 13, fontFamily: "Inter_600SemiBold" }}>
+            Ora
+          </Text>
+        </Pressable>
+      )}
       {right}
       {RightIcon && onRightPress && (
         <Pressable onPress={onRightPress} hitSlop={10} style={{ padding: 4 }}>

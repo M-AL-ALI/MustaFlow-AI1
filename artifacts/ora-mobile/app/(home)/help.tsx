@@ -694,7 +694,11 @@ export default function HelpScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader title="Help Center" subtitle="Articles, support chat, and tickets" />
+      <ScreenHeader
+        title="Help Center"
+        subtitle="Articles, support chat, and tickets"
+        showBackToOra
+      />
       <ScrollView
         contentContainerStyle={{
           padding: 16,

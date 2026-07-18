@@ -48,7 +48,7 @@ export default function LibraryScreen() {
   if (!isSignedIn) {
     return (
       <View style={{ flex: 1, backgroundColor: c.background }}>
-        <ScreenHeader title="Library" subtitle="Files & images Ora created" />
+        <ScreenHeader title="Library" subtitle="Files & images Ora created" showBackToOra />
         <SignInWall
           title="Sign in for Library"
           description="Your generated files and images are stored with your account."
@@ -59,7 +59,7 @@ export default function LibraryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader title="Library" subtitle="Files & images Ora created" />
+      <ScreenHeader title="Library" subtitle="Files & images Ora created" showBackToOra />
       {loading ? (
         <Loading label="Loading library…" />
       ) : (

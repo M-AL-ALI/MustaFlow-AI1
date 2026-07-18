@@ -465,3 +465,33 @@ describe("Ora mobile parity — conversation history v2 completion", () => {
     expect(memory).not.toContain("Permanently delete all your Ora conversations and messages");
   });
 });
+
+describe("Ora mobile parity - explicit Back to Ora escape paths", () => {
+  const screenHeader = read("../../components/ScreenHeader.tsx");
+  const settings = read("../../app/(home)/settings.tsx");
+  const memory = read("../../app/(home)/memory.tsx");
+  const library = read("../../app/(home)/library.tsx");
+  const help = read("../../app/(home)/help.tsx");
+  const orax = read("../../app/(home)/orax.tsx");
+
+  it("shared secondary-screen header keeps the menu and adds a direct Back to Ora action", () => {
+    expect(screenHeader).toContain("showBackToOra?: boolean;");
+    expect(screenHeader).toContain('accessibilityLabel="Open Ora menu"');
+    expect(screenHeader).toContain('accessibilityLabel="Back to Ora"');
+    expect(screenHeader).toContain('router.replace("/(home)")');
+  });
+
+  it("Settings, Memory, Library, and Help opt into the Back to Ora action", () => {
+    for (const source of [settings, memory, library, help]) {
+      expect(source).toContain("showBackToOra");
+    }
+  });
+
+  it("mobile Orax always exposes Back to Ora separately from its thread/menu button", () => {
+    expect(orax).toContain("const router = useRouter();");
+    expect(orax).toContain('accessibilityLabel="Back to Ora"');
+    expect(orax).toContain('router.replace("/(home)")');
+    expect(orax).toContain("setWorkspaceMenuOpen(true)");
+    expect(orax).toContain("setThreadOpen(false)");
+  });
+});

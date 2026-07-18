@@ -101,6 +101,22 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Ask the same Instant + Deep/date prompts on the current TestFlight build when mobile code changed.",
   },
   {
+    id: "ora-navigation-escape",
+    title: "Ora navigation escape paths, mobile secondary screens, and Orax return-to-Ora",
+    ownerSurfaces: ["website", "mobile"],
+    fileHints: [
+      /ScreenHeader/i,
+      /ora-navigation/i,
+      /ora-mobile-parity\.test\.ts$/i,
+      /app\/\(home\)\/(orax|settings|memory|library|help)\.tsx$/i,
+      /pages\/ora-(settings|memory|library|new-project)\.tsx$/i,
+    ],
+    manualWebsite:
+      "Open Ora Settings, Memory, Library, and New project, then verify Back to Ora returns to /ora.",
+    manualMobile:
+      "Open Settings, Memory, Library, Help, and Orax, then verify the visible Back to Ora action returns to Ora without restarting the app.",
+  },
+  {
     id: "live-search-current-info",
     title: "Live search, current info, sources, Retry live search, and sports schedules",
     ownerSurfaces: ["api", "website", "mobile"],
