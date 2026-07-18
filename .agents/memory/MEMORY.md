@@ -3,7 +3,7 @@
 - [Ora benchmark prompt constraints](ora-benchmark-prompt-constraints.md) / [response-quality lever](ora-response-quality-runtime-lever.md) — QA tests require exact prompt strings; quality = system prompt + addendum; evaluateOraResponseQuality is TEST-ONLY.
 - [Expertise domain short-circuit](expertise-domain-topic-shortcircuit.md) — topic "technical"/"mobile" forces software_engineering; pass "general" for upload/dataset framing.
 - [Ora file-detection coupling](ora-file-detection-promise-coupling.md) / [upload re-hydration](ora-upload-rehydration.md) — verb-gate ambiguous cues, never the bare-noun gate; documentRefs re-sent each turn; "yes" needs explicit offer+format.
-- [Ora claimed-delivery rescue](ora-claimed-delivery-rescue.md) — fake "here's your PPTX" gets the file really generated (claim+affordance both required); complaint-only regen after delivery-style msgs; "where is" vs "where's" trap.
+- [Ora claimed-delivery rescue](ora-claimed-delivery-rescue.md) — fake "here's your PPTX" gets the file really generated (affordance OR strong claim w/o past-ref); complaint-only regen after delivery-style msgs.
 - [Ora ZIP guards](ora-zip-upload-guards.md) / [officeparser v7](officeparser-v7-breaking-api.md) — cap compressed size per entry (CPU DoS); parseOffice returns AST, use .toText().
 - [Ora chat/upload API contract](ora-api-contract.md) — chat needs `message` + `messages`; response field is `reply`; uploads need a UUID ref first; session-create 10/day.
 - [Ora image-intent routing is pattern-only](ora-image-intent-routing.md) — "can't produce the image" = ORA_IMAGE_PATTERNS missed; broaden patterns, don't touch provider.
