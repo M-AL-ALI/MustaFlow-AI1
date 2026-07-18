@@ -147,6 +147,36 @@ describe("buildCarriedDocumentContext — text file carryover", () => {
     expect(result).toContain("[END OF ATTACHED FILES]");
   });
 
+  it("adds an editable PowerPoint blueprint so deck edits return a revised deck", async () => {
+    const session = makeSession();
+    const ref = storeFile({
+      sessionId: session,
+      filename: "board-review.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      extractedText: ["Slide 1:", "- Executive Summary", "Slide 2:", "- Old Pricing"].join("\n"),
+      charCount: 64,
+    });
+
+    const result = await buildCarriedDocumentContext([ref], session);
+
+    expect(result).toContain("[EDITABLE SOURCE BLUEPRINT]");
+    expect(result).toContain("Type: PowerPoint / slide deck.");
+    expect(result).toContain("Detected slide markers: 2.");
+    expect(result).toContain("Return one complete revised PPTX-ready deck");
+    expect(result).toContain("Follow any EDITABLE SOURCE BLUEPRINT");
+  });
+
+  it("adds an editable workbook blueprint for spreadsheet chart and calculation edits", async () => {
+    const session = makeSession();
+    const ref = storeText(session, "sales-workbook.xlsx", "Region,Revenue\nNorth,120\nSouth,80");
+
+    const result = await buildCarriedDocumentContext([ref], session);
+
+    expect(result).toContain("Type: spreadsheet / workbook.");
+    expect(result).toContain("Derive formulas, totals, charts, histograms, and dashboards");
+    expect(result).toContain("Return one complete revised CSV/XLSX-ready table or workbook");
+  });
+
   it("neutralises triple-quote delimiters in file content", async () => {
     const session = makeSession();
     const ref = storeText(session, "sneaky.txt", 'say """ and escape');

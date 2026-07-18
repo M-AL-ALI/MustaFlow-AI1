@@ -242,10 +242,13 @@ const FILE_FORMAT_DETECT: Array<{ pattern: RegExp; format: FileFormat }> = [
 ];
 
 const UPLOADED_FILE_EDIT_VERB_PATTERN =
-  /\b(edit|revise|modify|update|change|replace|delete|remove|add|insert|rewrite|polish|fix|clean\s+up|redesign|reformat|convert|turn|make\s+changes?\s+to)\b/i;
+  /\b(edit|revise|modify|update|change|replace|delete|remove|add|insert|rewrite|reword|rename|shorten|condense|expand|move|reorder|swap|polish|proofread|translate|fix|clean\s+up|redesign|restyle|reformat|convert|turn|make\s+changes?\s+to)\b/i;
 
 const UPLOADED_FILE_TARGET_PATTERN =
-  /\b(it|this|that|file|document|report|deck|presentation|slides?|power[\s-]?point|pptx?|spreadsheet|workbook|worksheet|sheet|excel|xlsx|csv|pdf|docx|word|uploaded|attached)\b/i;
+  /\b(it|this|that|file|document|report|deck|presentation|slides?|power[\s-]?point|pptx?|spreadsheet|workbook|worksheet|sheet|excel|xlsx|csv|pdf|docx|word|uploaded|attached|layout|style|format|title|heading|section|conclusion|paragraph|row|column|table|chart|graph|histogram)\b/i;
+
+const UPLOADED_FILE_MAKE_CHANGE_PATTERN =
+  /\bmake\b[^.?!\n]{0,60}\b(it|this|that|file|document|report|deck|presentation|slides?|spreadsheet|workbook|worksheet|sheet|layout|style|format|title|heading|section|conclusion|paragraph|row|column|table|chart|graph|histogram)\b[^.?!\n]{0,80}\b(shorter|longer|clearer|cleaner|better|more\s+(?:concise|professional|visual|polished|readable|detailed)|less\s+(?:wordy|cluttered|dense))\b/i;
 
 const TOOL_ACTOR_PATTERN =
   /\b(replit|codex|chatgpt|github|git|pull-from-github|quality-gate|typecheck|vitest|eslint|prettier|origin\/main|github\/main|task\s*#\d+)\b/i;
@@ -432,7 +435,10 @@ export function detectFileRequest(text: string): FileFormat | null {
  */
 export function isUploadedFileModificationRequest(text: string): boolean {
   if (isPastedReferenceAnalysisRequest(text)) return false;
-  return UPLOADED_FILE_EDIT_VERB_PATTERN.test(text) && UPLOADED_FILE_TARGET_PATTERN.test(text);
+  return (
+    (UPLOADED_FILE_EDIT_VERB_PATTERN.test(text) && UPLOADED_FILE_TARGET_PATTERN.test(text)) ||
+    UPLOADED_FILE_MAKE_CHANGE_PATTERN.test(text)
+  );
 }
 
 /**

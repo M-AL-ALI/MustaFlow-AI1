@@ -158,6 +158,8 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /file/i,
+      /carried-docs/i,
+      /ora-context-quality/i,
       /upload/i,
       /export/i,
       /document/i,

@@ -496,6 +496,8 @@ describe("generated-file revision and polish contract", () => {
     expect(prompt).toContain("REAL FILE EDIT request");
     expect(prompt).toContain("complete revised document");
     expect(prompt).toContain("executive-ready quality");
+    expect(prompt).toContain("Final edit verification before JSON");
+    expect(prompt).toContain("complete replacement");
   });
 
   it("keeps professional export polish guidance across all file prompt families", () => {

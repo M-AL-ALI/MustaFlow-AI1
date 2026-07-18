@@ -228,6 +228,10 @@ describe("Ora real-user behavior QA", () => {
       "Replace the pricing section in this deck",
       "Add a margin column to the spreadsheet",
       "Rewrite the conclusion in the attached document",
+      "Make slide 2 shorter and return it back",
+      "Reorder the slides so roadmap comes before pricing",
+      "Use the same layout but replace the old pricing section",
+      "Add a histogram chart to this workbook and send it back",
     ]) {
       expect(isUploadedFileModificationRequest(message), message).toBe(true);
     }

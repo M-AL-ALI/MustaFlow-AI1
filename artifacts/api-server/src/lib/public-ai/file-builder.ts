@@ -214,7 +214,8 @@ const FILE_REVISION_DIRECTIVE =
   `- Never answer only with "I changed it" or a summary. The route will build a downloadable file from your JSON, so the JSON must contain the complete revised file.\n` +
   `- Preserve useful prior structure and content from the recent conversation unless the user asks to remove it.\n` +
   `- Improve clarity, formatting, completeness, and executive-ready quality while respecting the user's exact instruction.\n` +
-  `- If the requested revision is ambiguous, make the smallest reasonable professional improvement and reflect it in the file content.`;
+  `- If the requested revision is ambiguous, make the smallest reasonable professional improvement and reflect it in the file content.\n` +
+  `- Final edit verification before JSON: confirm the requested change is visible, unaffected source content remains present, charts/tables are real structured objects when requested, and the file can be downloaded as a complete replacement.`;
 
 export function buildTabularSystemPrompt(
   format: "csv" | "xlsx",
