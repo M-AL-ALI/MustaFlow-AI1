@@ -42,7 +42,11 @@ vi.mock("@workspace/db", () => ({
   orgMembersTable: {},
 }));
 
-import { resolveAuthedOraUser, PAID_TIERS } from "../../../lib/public-ai/authed-user";
+import {
+  resolveAuthedOraUser,
+  evictTierCache,
+  PAID_TIERS,
+} from "../../../lib/public-ai/authed-user";
 
 function makeReq(headers: Record<string, string> = {}): Request {
   return { headers } as unknown as Request;
@@ -54,6 +58,12 @@ describe("resolveAuthedOraUser — test-only authenticated path", () => {
     isSuperuserMock.mockReset();
     isSuperuserMock.mockResolvedValue(false);
     setSubscriptionRows([]);
+    // The 60s in-memory tier cache in authed-user.ts survives across tests in
+    // the same file; evict the user IDs this suite exercises so each test
+    // resolves the tier fresh from the mocked subscription rows.
+    evictTierCache("e2e-test-user");
+    evictTierCache("clerk-user");
+    evictTierCache("owner-user");
     // Default: getAuth throws as it would without clerkMiddleware mounted.
     getAuthMock.mockImplementation(() => {
       throw new Error("clerkMiddleware not mounted");

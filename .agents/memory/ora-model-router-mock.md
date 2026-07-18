@@ -25,3 +25,7 @@ vi.mock("../../../lib/ai-providers", () => ({
 **Why:** Express 5 async error handling propagates any synchronous import-time TypeError as a 500. With a partial mock (only `createChatCompletion`), `isDeepSeekAvailable()` inside `getOraProviderRoutingSnapshot()` fires before the handler body and converts every valid request into a 500, masking all test assertions.
 
 **How to apply:** Check this whenever phase2/phase3/ora-chat tests start returning unexpected 500s — the first thing to verify is whether the `ai-providers` mock is complete.
+
+## SSE variant: bare "Error: aborted" from supertest
+
+The same incomplete-mock failure class has a nastier signature on the streaming route. `stream-adapter.ts` calls `classifyProviderError` (a model-router export) **inside its candidate catch block**. If a test mocks `model-router` without that export, vitest's mock proxy throws inside the catch, the error escapes the route *after SSE headers were flushed*, and Express destroys the socket — supertest reports only `Error: aborted` with no stack pointing at the mock. Diagnose by temporarily adding a `catch` to the route's stream loop and printing the error; fix by adding the missing export (`classifyProviderError: vi.fn().mockReturnValue("unknown")`).

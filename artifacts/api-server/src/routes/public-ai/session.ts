@@ -27,7 +27,15 @@ function sessionRateLimiter(req: Request, res: Response, next: NextFunction): vo
   // Authenticated users are metered by per-user rolling-window quotas in the
   // database — not the anonymous IP session-creation count. Skip the 10/day IP
   // cap so signed-in users (e.g. Core Pack) are never blocked by it.
-  if (getAuth(req).userId) {
+  // getAuth throws when clerkMiddleware is not mounted (e.g. minimal test
+  // apps); treat that as anonymous instead of letting the route 500.
+  let clerkUserId: string | null = null;
+  try {
+    clerkUserId = getAuth(req).userId;
+  } catch {
+    clerkUserId = null;
+  }
+  if (clerkUserId) {
     next();
     return;
   }

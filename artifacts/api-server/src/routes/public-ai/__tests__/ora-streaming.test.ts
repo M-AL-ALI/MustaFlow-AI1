@@ -115,6 +115,7 @@ vi.mock("../../../lib/public-ai/model-router", () => ({
   }),
   MODEL_DEFAULTS: {},
   isDeepSeekAvailable: vi.fn().mockReturnValue(false),
+  classifyProviderError: vi.fn().mockReturnValue("unknown"),
 }));
 
 vi.mock("../../../lib/public-ai/memory", () => ({

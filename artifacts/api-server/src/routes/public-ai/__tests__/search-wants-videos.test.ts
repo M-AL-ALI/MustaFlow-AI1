@@ -120,7 +120,9 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
     expect(arg.max_output_tokens).toBe(900);
     expect(arg.instructions).toContain("Search depth: quick");
     expect(arg.instructions).toContain("Search plan:");
-    expect(arg.instructions).toContain("volatile facts need exact dates");
+    expect(arg.instructions).toContain(
+      "for volatile facts cite the source's publication date",
+    );
   });
 
   it("raises media limits for Wave video searches", () => {

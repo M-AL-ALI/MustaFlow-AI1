@@ -63,7 +63,9 @@ describe("pricing and ora-settings deep-link wiring", () => {
     expect(settings).toContain('"ora-section-plan"');
     expect(settings).toContain('"ora-section-payment-method"');
     expect(settings).toContain("scrollIntoView");
-    expect(settings).toContain("behavior: \"smooth\"");
+    // Staged-scroll retries use "smooth" for long-distance jumps and "auto"
+    // for short corrective re-scrolls.
+    expect(settings).toContain('"smooth"');
   });
 
   it("checkout successUrl from ora-settings routes to section=plan", () => {
