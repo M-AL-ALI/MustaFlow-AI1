@@ -84,12 +84,12 @@ isValidation = true
 name = "ora-stability-gate"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run ora:stability-gate"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean --report=tmp/ora-stability-gate-report.md"
 
 [agent]
 stack = "PNPM_WORKSPACE"
