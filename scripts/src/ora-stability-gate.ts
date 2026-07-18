@@ -568,6 +568,11 @@ function parseArgs() {
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i]!;
+    if (arg === "--") {
+      // pnpm forwards the "--" separator literally on some versions; ignore it
+      // so the documented "pnpm run ... -- --profile=release" command works everywhere.
+      continue;
+    }
     if (arg === "--require-clean") {
       requireClean = true;
     } else if (arg === "--list") {
