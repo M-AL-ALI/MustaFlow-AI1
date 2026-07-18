@@ -3,6 +3,7 @@ import { routeOraMessage } from "../orchestrator";
 import { buildOraRoutingDiagnostic } from "../routing-diagnostics";
 import {
   collectPastedReferenceSignals,
+  detectClaimedFileDelivery,
   detectFileRequest,
   isPastedReferenceAnalysisRequest,
   ORA_SYSTEM_PROMPT,
@@ -326,6 +327,23 @@ describe("Ora real-user behavior QA", () => {
       const decision = await routeOraMessage({ message, mode: "instant" });
       expect(decision.tool, message).toBe("file_generation");
     }
+  });
+
+  it("detects strong fake file-delivery claims even without a card/download phrase", () => {
+    expect(detectClaimedFileDelivery("I have created the PowerPoint presentation for you.")).toBe(
+      "pptx",
+    );
+    expect(detectClaimedFileDelivery("I've prepared the Excel spreadsheet for you.")).toBe("xlsx");
+    expect(detectClaimedFileDelivery("I made the spreadsheet. Download the file.")).toBe("xlsx");
+    expect(detectClaimedFileDelivery("Here's your PDF report.")).toBe("pdf");
+
+    // Do not rescue ordinary discussion of past files or generic summaries.
+    expect(
+      detectClaimedFileDelivery("As I mentioned earlier, I created the PowerPoint outline."),
+    ).toBeNull();
+    expect(
+      detectClaimedFileDelivery("Here is the PDF report summary from your uploaded document."),
+    ).toBeNull();
   });
 
   it("answers definitional questions about image generation instead of generating", async () => {

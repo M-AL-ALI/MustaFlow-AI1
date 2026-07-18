@@ -420,11 +420,18 @@ export function detectFileRequest(text: string): FileFormat | null {
 // The conversational path can NEVER attach a file, yet the model occasionally
 // imitates the file-builder's delivery template it sees in history from an
 // earlier REAL delivery ("Here's your PPTX file — … Click the card below to
-// download it.") while no file exists. Both halves must match: a present-tense
-// delivery phrase AND a download affordance — a mere mention of a past file
-// ("the DOCX I made earlier") does not trigger.
+// download it.") while no file exists. A download/card affordance is the
+// strongest signal, but strong current-turn delivery claims ("I've created the
+// PowerPoint for you") must also count — that was the unresolved production
+// case. Mere mentions of past files ("the DOCX I made earlier") do not trigger.
 const FILE_DELIVERY_CLAIM_PATTERN =
-  /\b(here(?:'|\u2019)?s\s+(?:your|the)|here\s+is\s+(?:your|the)|i(?:'|\u2019)?ve\s+(?:created|generated|prepared|made|put\s+together)|i\s+have\s+(?:created|generated|prepared|made|put\s+together))\b[^.?!\n]{0,80}?\b(csv|xlsx|excel|docx|word|pdf|pptx|power[\s-]?point|presentation|spreadsheet|slide[\s-]?deck|file|document|report)\b/i;
+  /\b(here(?:'|\u2019)?s\s+(?:your|the)|here\s+is\s+(?:your|the)|i(?:'|\u2019)?ve\s+(?:created|generated|prepared|made|put\s+together)|i\s+have\s+(?:created|generated|prepared|made|put\s+together)|i\s+(?:created|generated|prepared|made|put\s+together))\b[^.?!\n]{0,80}?\b(csv|xlsx|excel|docx|word|pdf|pptx|power[\s-]?point|presentation|spreadsheet|slide[\s-]?deck|file|document|report)\b/i;
+
+const FILE_STRONG_DELIVERY_CLAIM_PATTERN =
+  /\b(?:here(?:'|\u2019)?s\s+your|here\s+is\s+your|i(?:'|\u2019)?ve\s+(?:created|generated|prepared|made|put\s+together)|i\s+have\s+(?:created|generated|prepared|made|put\s+together)|i\s+(?:created|generated|prepared|made|put\s+together))\b[^.?!\n]{0,80}?\b(csv|xlsx|excel|docx|word|pdf|pptx|power[\s-]?point|presentation|spreadsheet|slide[\s-]?deck|file|document|report)\b/i;
+
+const FILE_PAST_REFERENCE_PATTERN =
+  /\b(?:earlier|previously|before|last\s+(?:time|turn|message)|already\s+(?:made|created|generated|prepared))\b/i;
 
 // NOTE: "attached" is deliberately gated to delivery forms ("is attached",
 // "attached below", "I've attached") — a bare \battached\b also matches prose
@@ -444,7 +451,12 @@ const FILE_DOWNLOAD_AFFORDANCE_PATTERN =
  */
 export function detectClaimedFileDelivery(reply: string): FileFormat | null {
   if (!FILE_DELIVERY_CLAIM_PATTERN.test(reply)) return null;
-  if (!FILE_DOWNLOAD_AFFORDANCE_PATTERN.test(reply)) return null;
+  if (
+    !FILE_DOWNLOAD_AFFORDANCE_PATTERN.test(reply) &&
+    !(FILE_STRONG_DELIVERY_CLAIM_PATTERN.test(reply) && !FILE_PAST_REFERENCE_PATTERN.test(reply))
+  ) {
+    return null;
+  }
   for (const { pattern, format } of FILE_FORMAT_DETECT) {
     if (pattern.test(reply)) return format;
   }
