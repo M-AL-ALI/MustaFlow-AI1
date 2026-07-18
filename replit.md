@@ -22,6 +22,8 @@ Full historical implementation notes belong in `docs/changelog.md`. Keep this fi
 - After the automated gate passes, complete the manual checklist in `docs/ora-stability-gate.md` (multi-turn voice web+mobile, search/current info, image gen/edit, file upload/analysis/chart/export, billing/account sync, conversation history, App Store compliance areas, website/mobile parity).
 - Every fix report must include: (1) commit SHA, (2) gate command used, (3) pass/fail counts, (4) manual checklist result, (5) known warnings or skipped checks.
 - Gate implementation: `scripts/src/ora-stability-gate.ts`; mobile-only changes use `pnpm run ora:stability-gate:mobile`.
+- **Ora feature registry:** every new Ora feature must update `ORA_FEATURE_REGISTRY` in `scripts/src/ora-stability-gate.ts` in the same commit. Each entry needs: feature name (`id`/`title`), API/website/mobile surfaces (`ownerSurfaces`), changed-file detection hints (`fileHints`), website validation notes (`manualWebsite`), and mobile validation notes (`manualMobile`).
+- If the gate reports changed Ora files that do not map to a registered feature (`feature-registry` check: warn on fast profile, FAIL on release profile), do not publish or submit TestFlight until the registry and tests/checklist are updated.
 
 ## Run And Verify
 
