@@ -32,6 +32,10 @@ args = "pull-from-github"
 task = "workflow.run"
 args = "lint"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "ora-stability-gate"
+
 [[workflows.workflow]]
 name = "codegen-drift"
 author = "agent"
@@ -75,6 +79,17 @@ args = "pnpm run lint"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "ora-stability-gate"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run ora:stability-gate"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"

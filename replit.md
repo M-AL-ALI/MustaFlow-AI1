@@ -14,6 +14,15 @@ Full historical implementation notes belong in `docs/changelog.md`. Keep this fi
 - Ora response quality has been hardened: direct answers first, cleaner ChatGPT-style formatting, fewer raw Markdown symbols, QA checks for formatting clutter, and frontend rendering for headings/bold/lists/tables.
 - Support Center wiring and protected routes are covered by automated tests; signed-in browser validation should be repeated when Clerk test auth is available.
 
+## Ora Stability Gate (required process)
+
+- Before every Ora fix: `pnpm run ora:stability-gate` (fast profile).
+- Before every website publish or TestFlight build: `pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean --report=tmp/ora-stability-gate-report.md`
+- Never publish or submit TestFlight if any automated gate check fails.
+- After the automated gate passes, complete the manual checklist in `docs/ora-stability-gate.md` (multi-turn voice web+mobile, search/current info, image gen/edit, file upload/analysis/chart/export, billing/account sync, conversation history, App Store compliance areas, website/mobile parity).
+- Every fix report must include: (1) commit SHA, (2) gate command used, (3) pass/fail counts, (4) manual checklist result, (5) known warnings or skipped checks.
+- Gate implementation: `scripts/src/ora-stability-gate.ts`; mobile-only changes use `pnpm run ora:stability-gate:mobile`.
+
 ## Run And Verify
 
 - API server: `pnpm --filter @workspace/api-server run dev` (port 8080, proxied at `/api`)
