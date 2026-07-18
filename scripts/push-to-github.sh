@@ -37,12 +37,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
-  artifacts/api-server/src/routes/public-ai/session.ts \
-  artifacts/api-server/src/routes/public-ai/__tests__/auth-test-path.test.ts \
-  artifacts/api-server/src/routes/public-ai/__tests__/ora-streaming.test.ts \
-  artifacts/api-server/src/routes/public-ai/__tests__/search-wants-videos.test.ts \
-  artifacts/mustaflow/src/pages/__tests__/pricing-deeplink.test.ts \
-  .agents/memory/ora-model-router-mock.md \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
