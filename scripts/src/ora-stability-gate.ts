@@ -154,6 +154,10 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /xlsx/i,
       /csv/i,
       /zip/i,
+      /ora-behavior-qa/i,
+      /professional-doc/i,
+      /ora-chat-response-qa/i,
+      /phase2/i,
     ],
     manualWebsite:
       "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions.",

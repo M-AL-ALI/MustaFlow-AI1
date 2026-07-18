@@ -19,6 +19,9 @@ import {
   isPastedReferenceAnalysisRequest,
   summarizePastedReferenceSignals,
   detectClaimedFileDelivery,
+  detectFileRequest,
+  inferFileFormatFromUploadedContext,
+  isUploadedFileModificationRequest,
 } from "../../lib/public-ai/prompt";
 
 import { classifyIntent, CLASSIFIER_FALLBACK, type OraTopic } from "../../lib/public-ai/classifier";
@@ -1326,9 +1329,6 @@ router.post("/public-ai/chat", async (req, res) => {
   if (forceSearch) {
     decision = { ...decision, tool: "search" };
   }
-  const deepAllowed = decision.tool === "deep_thinking";
-  const routedTool = decision.tool;
-  const searchUsed = decision.tool === "search";
 
   // Re-hydrate any documents the user uploaded earlier this conversation so
   // follow-up questions ("what did that file say?") and "make a summary of it"
@@ -1339,6 +1339,27 @@ router.post("/public-ai/chat", async (req, res) => {
     message,
     authed?.userId ?? null,
   );
+
+  if (
+    (decision.tool === "answer" || decision.tool === "deep_thinking") &&
+    carriedDocs &&
+    isUploadedFileModificationRequest(message)
+  ) {
+    const inferredFormat =
+      detectFileRequest(message) ?? inferFileFormatFromUploadedContext(carriedDocs);
+    if (inferredFormat) {
+      decision = {
+        ...decision,
+        tool: "file_generation",
+        fileFormat: inferredFormat,
+        reason: `${decision.reason}; uploaded file modification routed to ${inferredFormat}`,
+      };
+    }
+  }
+
+  const deepAllowed = decision.tool === "deep_thinking";
+  const routedTool = decision.tool;
+  const searchUsed = decision.tool === "search";
 
   // Plan gating is derived entirely from the selected tool's required access
   // level. Denied requests return a CTA without charging or counting them.
@@ -2464,22 +2485,39 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
 
-  const decision = await routeOraMessage({
+  let decision = await routeOraMessage({
     message,
     mode,
     recentMessages: messages.slice(-8),
     classifier: classifierResult, // pre-computed above — skips the internal AI call
   });
-  const deepAllowed = decision.tool === "deep_thinking";
-  const routedTool = decision.tool;
-  const searchUsed = decision.tool === "search";
-
   const carriedDocs = await buildCarriedDocumentContext(
     documentRefs,
     session.sessionId,
     message,
     authed?.userId ?? null,
   );
+
+  if (
+    (decision.tool === "answer" || decision.tool === "deep_thinking") &&
+    carriedDocs &&
+    isUploadedFileModificationRequest(message)
+  ) {
+    const inferredFormat =
+      detectFileRequest(message) ?? inferFileFormatFromUploadedContext(carriedDocs);
+    if (inferredFormat) {
+      decision = {
+        ...decision,
+        tool: "file_generation",
+        fileFormat: inferredFormat,
+        reason: `${decision.reason}; uploaded file modification routed to ${inferredFormat}`,
+      };
+    }
+  }
+
+  const deepAllowed = decision.tool === "deep_thinking";
+  const routedTool = decision.tool;
+  const searchUsed = decision.tool === "search";
 
   const access = checkToolAccess(decision.tool, {
     authed: !!authed,

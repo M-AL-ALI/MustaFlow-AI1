@@ -241,6 +241,12 @@ const FILE_FORMAT_DETECT: Array<{ pattern: RegExp; format: FileFormat }> = [
   },
 ];
 
+const UPLOADED_FILE_EDIT_VERB_PATTERN =
+  /\b(edit|revise|modify|update|change|replace|delete|remove|add|insert|rewrite|polish|fix|clean\s+up|redesign|reformat|convert|turn|make\s+changes?\s+to)\b/i;
+
+const UPLOADED_FILE_TARGET_PATTERN =
+  /\b(it|this|that|file|document|report|deck|presentation|slides?|power[\s-]?point|pptx?|spreadsheet|workbook|worksheet|sheet|excel|xlsx|csv|pdf|docx|word|uploaded|attached)\b/i;
+
 const TOOL_ACTOR_PATTERN =
   /\b(replit|codex|chatgpt|github|git|pull-from-github|quality-gate|typecheck|vitest|eslint|prettier|origin\/main|github\/main|task\s*#\d+)\b/i;
 
@@ -415,6 +421,35 @@ export function detectFileRequest(text: string): FileFormat | null {
   if (/\b(chart|graph|histogram|dashboard|visuali[sz]ation|plot)\b/i.test(text)) return "xlsx";
   if (/\b(report|document|doc)\b/i.test(text)) return "pdf";
   if (/\b(table|sheet|data)\b/i.test(text)) return "csv";
+  return null;
+}
+
+/**
+ * Detect follow-up requests that mean "modify the uploaded/generated file and
+ * return a new file" even when the user does not restate the output format.
+ * This is deliberately used only when documentRefs/carried source content exist
+ * in the route; without a file in context, these phrases should remain chat.
+ */
+export function isUploadedFileModificationRequest(text: string): boolean {
+  if (isPastedReferenceAnalysisRequest(text)) return false;
+  return UPLOADED_FILE_EDIT_VERB_PATTERN.test(text) && UPLOADED_FILE_TARGET_PATTERN.test(text);
+}
+
+/**
+ * Infer the output format from the carried uploaded-file context. The carried
+ * block lists newest files first, so the first matching filename is the safest
+ * default for terse edits like "delete slide 3 and send it back".
+ */
+export function inferFileFormatFromUploadedContext(carriedDocs: string): FileFormat | null {
+  const fileLines = carriedDocs
+    .split(/\r?\n/)
+    .map((line) => line.match(/^File:\s*(.+)$/i)?.[1]?.trim() ?? "")
+    .filter(Boolean);
+  for (const file of fileLines) {
+    for (const { pattern, format } of FILE_FORMAT_DETECT) {
+      if (pattern.test(file)) return format;
+    }
+  }
   return null;
 }
 

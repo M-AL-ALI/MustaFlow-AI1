@@ -131,7 +131,11 @@ describe("validateFile — type detection", () => {
   });
 
   it("rejects a .zip file without ZIP magic bytes", () => {
-    const result = validateFile(Buffer.from("not a zip archive at all"), "fake.zip", "application/zip");
+    const result = validateFile(
+      Buffer.from("not a zip archive at all"),
+      "fake.zip",
+      "application/zip",
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.statusCode).toBe(415);
   });
@@ -249,6 +253,9 @@ describe("extractText — PPTX", () => {
     const buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
 
     const text = await extractText(buffer, "pptx");
+    expect(text).toContain("[POWERPOINT STRUCTURE");
+    expect(text).toContain("Slide 1:");
+    expect(text).toContain("Slide 2:");
     expect(text).toContain("Hello MustaFlow Quarterly Review");
     expect(text).toContain("Revenue up 42% YoY");
     expect(text).toContain("Roadmap: ship PPTX parsing fix");

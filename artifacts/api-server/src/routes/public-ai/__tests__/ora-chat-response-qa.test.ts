@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { evaluateOraResponseQuality } from "../../../lib/public-ai/response-quality";
+import { storeFile } from "../../../lib/public-ai/file-store";
 
 const TEST_SECRET = "ora-chat-response-qa-secret";
 
@@ -432,6 +433,43 @@ What should I tell Replit?`;
         mimeType: res.body.mimeType,
       }).passed,
     ).toBe(true);
+  });
+
+  it("routes terse uploaded-file edits to real file generation instead of a text answer", async () => {
+    const sessionId = "ora-chat-uploaded-edit-session";
+    const fileRef = storeFile({
+      sessionId,
+      filename: "quarterly-board-deck.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      extractedText: [
+        "[POWERPOINT STRUCTURE — slide text extracted from the uploaded deck]",
+        "Slide 1:",
+        "- Executive Summary",
+        "Slide 2:",
+        "- Pricing plan",
+        "Slide 3:",
+        "- Legacy roadmap",
+      ].join("\n"),
+      charCount: 160,
+    });
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession({ sessionId })}`)
+      .send({
+        message: "Delete slide 3 and send it back",
+        messages: [],
+        documentRefs: [fileRef],
+      });
+
+    expect(res.status).toBe(200);
+    expect(fileBuilderMock.generateFileFromPrompt).toHaveBeenCalledTimes(1);
+    const [filePrompt, fileFormat] = fileBuilderMock.generateFileFromPrompt.mock
+      .calls[0] as unknown as [string, string];
+    expect(fileFormat).toBe("pptx");
+    expect(filePrompt).toContain("Slide 3");
+    expect(mainCompletionCalls()).toEqual([]);
+    expect(res.body.fileName).toBe("service-packages.csv");
   });
 
   it("returns inline image fields for signed-in image generation without sign-in hedging", async () => {

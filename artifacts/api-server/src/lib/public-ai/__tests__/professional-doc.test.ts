@@ -485,14 +485,16 @@ describe("generated-file revision and polish contract", () => {
     const prompt = buildDocumentSystemPrompt(
       "pdf",
       undefined,
-      false,
-      resolveOraFileQualityProfile({ format: "pdf", planTier: "core" }),
+      true,
+      resolveOraFileQualityProfile({ format: "pdf", planTier: "core", hasSourceData: true }),
       "dataset-report",
     );
 
     expect(prompt).toContain("FILE REVISION WORKFLOW");
     expect(prompt).toContain("NEW complete replacement JSON object");
     expect(prompt).toContain("Apply the requested change visibly");
+    expect(prompt).toContain("REAL FILE EDIT request");
+    expect(prompt).toContain("complete revised document");
     expect(prompt).toContain("executive-ready quality");
   });
 
@@ -521,6 +523,8 @@ describe("generated-file revision and polish contract", () => {
     expect(presentation).toContain('"layout"');
     expect(presentation).toContain('"chart"');
     expect(presentation).toContain('Supported slide layouts: "bullets", "chart", "split"');
+    expect(presentation).toContain("layout variety");
+    expect(presentation).toContain("slide-number markers");
 
     expect(document).toContain('"chart"');
     expect(document).toContain('Always use the structured "table" field');

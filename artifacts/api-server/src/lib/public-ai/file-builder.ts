@@ -186,8 +186,12 @@ const SOURCE_DATA_DIRECTIVE =
   `- If the user asks for a subset (e.g. specific columns, a filter, a total), derive it from the real data only.\n` +
   `- If the attached data is empty or does not contain what the user asked for, return your best structure from what IS present rather than making up values.\n\n` +
   `FILE MODIFICATION RULES (when the user asks to edit, revise, rewrite, update, improve, or correct the uploaded content):\n` +
-  `- Preserve the original meaning, purpose, and structure of the document.\n` +
+  `- This is a REAL FILE EDIT request, not a report-about-the-file request. Return the revised file content in the required JSON shape.\n` +
+  `- Preserve the original meaning, purpose, and structure of the document unless the user explicitly asks to change it.\n` +
   `- Make only the specific changes the user requested; leave the rest unchanged.\n` +
+  `- For uploaded PowerPoint decks, preserve slide order and slide-by-slide intent from the source markers. If the user asks to delete/remove a slide, omit that slide from the returned deck and renumber the remaining flow naturally. If the user asks to rewrite a slide, keep that slide position and update its heading/bullets visibly.\n` +
+  `- For uploaded spreadsheets, preserve real headers and rows unless the user asks to add/remove/filter/change them. When asked for charts, dashboards, or histograms, derive visuals from the actual rows and include chart objects.\n` +
+  `- For uploaded Word/PDF documents, preserve the original sections that are still relevant, apply the requested edits, and return the full revised document rather than notes about the edit.\n` +
   `- If you made an assumption where the source was ambiguous, note it briefly in the relevant section's content.\n` +
   `- Do not remove sections the user did not ask to remove.\n` +
   `- Do not invent new content beyond what the requested edit requires.`;
@@ -206,6 +210,8 @@ const FILE_REVISION_DIRECTIVE =
   `When the user asks to revise, edit, improve, polish, fix, update, regenerate, or make changes to a previous generated file:\n` +
   `- Return a NEW complete replacement JSON object for the same file type; do not return patch notes or a description of changes.\n` +
   `- Apply the requested change visibly in the generated content.\n` +
+  `- If the request references an uploaded file/deck/workbook/document, treat the uploaded content as the current version and output the revised version.\n` +
+  `- Never answer only with "I changed it" or a summary. The route will build a downloadable file from your JSON, so the JSON must contain the complete revised file.\n` +
   `- Preserve useful prior structure and content from the recent conversation unless the user asks to remove it.\n` +
   `- Improve clarity, formatting, completeness, and executive-ready quality while respecting the user's exact instruction.\n` +
   `- If the requested revision is ambiguous, make the smallest reasonable professional improvement and reflect it in the file content.`;
@@ -255,6 +261,7 @@ export function buildTabularSystemPrompt(
     rowRule +
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
     `6. For XLSX chart/dashboard requests, include 1-4 "charts" with real labels and numeric values derived from the rows. Use chartType "bar", "line", "histogram", "scatter", or "pareto". CSV cannot embed images, but still include chart-ready rows when asked for charts.\n` +
+    `6a. If the user asks to edit an uploaded workbook, keep the original headers/rows that still apply, then add/remove/update only what was requested. Return the complete revised table.\n` +
     `7. Only these keys are allowed: title, sheetName, headers, columnTypes, rows, charts.${langNote}` +
     quality.instruction +
     FILE_EXPORT_POLISH_DIRECTIVE +
@@ -309,6 +316,8 @@ export function buildPresentationSystemPrompt(
     `6. Match the presentation topic and purpose to exactly what the user asked for.\n` +
     `7. When the user asks for charts, dashboards, histograms, analyst visuals, or a report from data, include chart objects on the most relevant slides. Use real labels and numeric values from the source; never invent figures.\n` +
     `8. Supported slide layouts: "bullets", "chart", "split". Use "chart" for chart-focused slides and "split" when bullets and a chart both matter.\n` +
+    `8a. Use layout variety across the deck. Do not make every slide identical unless the user requested a strict template.\n` +
+    `8b. If the user asks to edit an uploaded deck, preserve the source slide flow from the slide-number markers, apply deletes/additions/rewrites visibly, and return the full revised deck.\n` +
     `9. Only these keys are allowed: title, subtitle, slides (each with heading, bullets, layout, chart), charts.${langNote}` +
     quality.instruction +
     FILE_EXPORT_POLISH_DIRECTIVE +
@@ -378,6 +387,7 @@ export function buildDocumentSystemPrompt(
     `7. Match the document type and purpose to what the user asked for exactly.\n` +
     `8. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
     `9. When the user asks for charts, dashboards, histograms, analyst visuals, or a report from data, include chart objects in relevant sections. Use real labels and numeric values from the source; never invent figures.\n` +
+    `9a. If the user asks to edit an uploaded document, return the complete revised document, not a change summary. Preserve unaffected sections and apply the requested edits visibly.\n` +
     `10. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table, chart), charts. No other top-level keys.${langNote}` +
     profGuidance +
     quality.instruction +

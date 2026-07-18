@@ -13,6 +13,7 @@
 
 import { MAX_TEXT_CHARS_PER_FILE } from "./file-store";
 import type { AllowedFileType } from "./file-validate";
+import { strFromU8, unzipSync } from "fflate";
 
 export class ExtractionError extends Error {
   constructor(message: string) {
@@ -45,8 +46,61 @@ async function extractPdf(buffer: Buffer): Promise<string> {
   }
 }
 
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractStructuredPptxText(buffer: Buffer): string | null {
+  let files: Record<string, Uint8Array>;
+  try {
+    files = unzipSync(new Uint8Array(buffer), {
+      filter: (info) => /^ppt\/slides\/slide\d+\.xml$/i.test(info.name),
+    });
+  } catch {
+    return null;
+  }
+
+  const slides = Object.entries(files)
+    .map(([name, bytes]) => {
+      const match = name.match(/slide(\d+)\.xml$/i);
+      return {
+        name,
+        index: match ? Number.parseInt(match[1]!, 10) : Number.MAX_SAFE_INTEGER,
+        xml: strFromU8(bytes),
+      };
+    })
+    .sort((a, b) => a.index - b.index || a.name.localeCompare(b.name));
+
+  const blocks: string[] = [];
+  for (const slide of slides) {
+    const textRuns = [...slide.xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)]
+      .map((match) => decodeXmlText(match[1] ?? ""))
+      .filter(Boolean);
+    if (textRuns.length === 0) continue;
+    blocks.push(`Slide ${blocks.length + 1}:\n${textRuns.map((text) => `- ${text}`).join("\n")}`);
+  }
+
+  if (blocks.length === 0) return null;
+  return [
+    "[POWERPOINT STRUCTURE — slide text extracted from the uploaded deck]",
+    "Use these slide numbers when the user asks to delete, rewrite, add, or reorder slides.",
+    "",
+    ...blocks,
+  ].join("\n");
+}
+
 async function extractPptx(buffer: Buffer): Promise<string> {
   try {
+    const structured = extractStructuredPptxText(buffer);
+    if (structured) return truncateWithNote(structured);
+
     const officeparser = (await import("officeparser")).default;
     // officeparser v7 returns a structured AST (not a string). Call toText() to
     // get plain text. Older versions returned a string directly, so guard both.
@@ -56,10 +110,7 @@ async function extractPptx(buffer: Buffer): Promise<string> {
     let text = "";
     if (typeof parsed === "string") {
       text = parsed;
-    } else if (
-      parsed &&
-      typeof (parsed as { toText?: unknown }).toText === "function"
-    ) {
+    } else if (parsed && typeof (parsed as { toText?: unknown }).toText === "function") {
       text = (parsed as { toText: () => string }).toText();
     }
     const trimmed = text.trim();
