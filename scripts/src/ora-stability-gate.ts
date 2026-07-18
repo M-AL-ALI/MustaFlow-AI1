@@ -629,6 +629,10 @@ function runShell(
         process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ?? "https://example.invalid/v1",
       AI_INTEGRATIONS_OPENAI_API_KEY:
         process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? "sk-ora-stability-gate-test",
+      // vite.config.ts requires PORT/BASE_PATH; outside the dev workflow they are
+      // unset, so provide harmless defaults for the production build checks.
+      PORT: process.env.PORT ?? "5000",
+      BASE_PATH: process.env.BASE_PATH ?? "/",
     },
   });
   const durationMs = Date.now() - start;
