@@ -508,4 +508,22 @@ describe("generated-file revision and polish contract", () => {
       expect(prompt).toContain("FILE REVISION WORKFLOW");
     }
   });
+
+  it("teaches file specialists to return structured chart objects for analyst visuals", () => {
+    const tabular = buildTabularSystemPrompt("xlsx");
+    const presentation = buildPresentationSystemPrompt();
+    const document = buildDocumentSystemPrompt("pdf");
+
+    expect(tabular).toContain('"charts"');
+    expect(tabular).toContain('"histogram"');
+    expect(tabular).toContain("real labels and numeric values");
+
+    expect(presentation).toContain('"layout"');
+    expect(presentation).toContain('"chart"');
+    expect(presentation).toContain('Supported slide layouts: "bullets", "chart", "split"');
+
+    expect(document).toContain('"chart"');
+    expect(document).toContain('Always use the structured "table" field');
+    expect(document).toContain("include chart objects in relevant sections");
+  });
 });

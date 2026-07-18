@@ -197,6 +197,7 @@ const FILE_GENERATION_PATTERNS: RegExp[] = [
   // creation/export verb triggers them.
   /\b(generate|create|make|build|export|produce|design|draft|prepare|put\s+together)\s+(?:me\s+|us\s+)?(?:a\s+|an\s+|the\s+|some\s+|my\s+)*(power[\s-]?point|powerpoint|pptx?|ppt|presentation|slide[\s-]?deck|pitch[\s-]?deck|slide[\s-]?show|slideshow|slides)\b/i,
   /\b(generate|create|make|build|export|produce)\s+(a\s+)?(file|document|report|table|sheet|spreadsheet|doc)\b/i,
+  /\b(generate|create|make|build|export|produce|visuali[sz]e)\b[^.?!\n]{0,50}?\b(charts?|graphs?|histograms?|dashboard|visuali[sz]ation|plot)\b/i,
   /\b(download|export)\s+(a\s+)?(file|report|spreadsheet|document|csv|excel|pdf|word)\b/i,
   // Format-switch / "I need it as X" phrasings. Intent-gated on need/want/prefer
   // followed by an object pronoun so "do you know PowerPoint?" can't trigger,
@@ -411,6 +412,7 @@ export function detectFileRequest(text: string): FileFormat | null {
     if (pattern.test(text)) return format;
   }
   // Generic "create a file/report/document" with no specific format → default to PDF
+  if (/\b(chart|graph|histogram|dashboard|visuali[sz]ation|plot)\b/i.test(text)) return "xlsx";
   if (/\b(report|document|doc)\b/i.test(text)) return "pdf";
   if (/\b(table|sheet|data)\b/i.test(text)) return "csv";
   return null;

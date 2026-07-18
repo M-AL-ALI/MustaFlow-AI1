@@ -18,6 +18,7 @@ import {
   TableCell,
   WidthType,
   ShadingType,
+  ImageRun,
 } from "docx";
 import {
   detectProfessionalDocType,
@@ -27,6 +28,13 @@ import {
 import { PassThrough } from "stream";
 import { logger } from "../logger";
 import { ORA_FILE_COMPLETENESS_ADDENDUM, ORA_IDENTITY_BLOCK, type FileFormat } from "./prompt";
+import {
+  inferChartsFromTabularData,
+  normalizeFileChartSpec,
+  normalizeFileChartSpecs,
+  renderChartPng,
+  type FileChartSpec,
+} from "./file-charts.js";
 // NOTE: AI provider + model-router VALUES are intentionally NOT statically imported.
 // `../ai-providers` constructs an OpenAI client at module load (reading AI env), so a
 // static import would make every importer of this module — including the deliberately
@@ -58,6 +66,7 @@ export interface TabularData {
   headers: string[];
   columnTypes?: ColumnType[];
   rows: string[][];
+  charts?: FileChartSpec[];
 }
 
 export interface DocumentSection {
@@ -65,23 +74,28 @@ export interface DocumentSection {
   content: string;
   bullets?: string[];
   table?: { headers: string[]; rows: string[][] };
+  chart?: FileChartSpec;
 }
 
 export interface DocumentData {
   title: string;
   subtitle?: string;
   sections: DocumentSection[];
+  charts?: FileChartSpec[];
 }
 
 export interface PresentationSlide {
   heading: string;
   bullets: string[];
+  chart?: FileChartSpec;
+  layout?: "bullets" | "chart" | "split";
 }
 
 export interface PresentationData {
   title: string;
   subtitle?: string;
   slides: PresentationSlide[];
+  charts?: FileChartSpec[];
 }
 
 export interface GeneratedFileResult {
@@ -225,6 +239,9 @@ export function buildTabularSystemPrompt(
     `  "rows": [\n` +
     `    ["Alice Johnson", "42", "1500.00"],\n` +
     `    ["Bob Smith",     "37", "2200.50"]\n` +
+    `  ],\n` +
+    `  "charts": [\n` +
+    `    {"title":"Revenue by Region","chartType":"bar","labels":["North","South"],"values":[120,80],"xLabel":"Region","yLabel":"Revenue"}\n` +
     `  ]\n` +
     `}\n\n` +
     `columnTypes values: "text" | "number" | "currency" | "date" | "percent"\n` +
@@ -237,7 +254,8 @@ export function buildTabularSystemPrompt(
     `3. Header names: short, clean, title-case (1–3 words). No duplicates.\n` +
     rowRule +
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
-    `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}` +
+    `6. For XLSX chart/dashboard requests, include 1-4 "charts" with real labels and numeric values derived from the rows. Use chartType "bar", "line", "histogram", "scatter", or "pareto". CSV cannot embed images, but still include chart-ready rows when asked for charts.\n` +
+    `7. Only these keys are allowed: title, sheetName, headers, columnTypes, rows, charts.${langNote}` +
     quality.instruction +
     FILE_EXPORT_POLISH_DIRECTIVE +
     FILE_REVISION_DIRECTIVE +
@@ -271,8 +289,13 @@ export function buildPresentationSystemPrompt(
     `  "slides": [\n` +
     `    {\n` +
     `      "heading": "Slide Heading",\n` +
-    `      "bullets": ["First key point", "Second key point", "Third key point"]\n` +
+    `      "bullets": ["First key point", "Second key point", "Third key point"],\n` +
+    `      "layout": "split",\n` +
+    `      "chart": {"title":"Revenue by Region","chartType":"bar","labels":["North","South"],"values":[120,80],"xLabel":"Region","yLabel":"Revenue"}\n` +
     `    }\n` +
+    `  ],\n` +
+    `  "charts": [\n` +
+    `    {"title":"Executive Metric Summary","chartType":"bar","labels":["A","B"],"values":[10,20]}\n` +
     `  ]\n` +
     `}\n\n` +
     `RULES:\n` +
@@ -284,7 +307,9 @@ export function buildPresentationSystemPrompt(
     `4. Headings must be short (3-7 words max) and clearly titled.\n` +
     `5. The subtitle is optional -- use it for a tagline, date, or author.\n` +
     `6. Match the presentation topic and purpose to exactly what the user asked for.\n` +
-    `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}` +
+    `7. When the user asks for charts, dashboards, histograms, analyst visuals, or a report from data, include chart objects on the most relevant slides. Use real labels and numeric values from the source; never invent figures.\n` +
+    `8. Supported slide layouts: "bullets", "chart", "split". Use "chart" for chart-focused slides and "split" when bullets and a chart both matter.\n` +
+    `9. Only these keys are allowed: title, subtitle, slides (each with heading, bullets, layout, chart), charts.${langNote}` +
     quality.instruction +
     FILE_EXPORT_POLISH_DIRECTIVE +
     FILE_REVISION_DIRECTIVE +
@@ -331,8 +356,12 @@ export function buildDocumentSystemPrompt(
     `      "table": {\n` +
     `        "headers": ["Column A", "Column B", "Column C"],\n` +
     `        "rows": [["Row 1 A", "Row 1 B", "Row 1 C"], ["Row 2 A", "Row 2 B", "Row 2 C"]]\n` +
-    `      }\n` +
+    `      },\n` +
+    `      "chart": {"title":"Revenue by Region","chartType":"bar","labels":["North","South"],"values":[120,80],"xLabel":"Region","yLabel":"Revenue"}\n` +
     `    }\n` +
+    `  ],\n` +
+    `  "charts": [\n` +
+    `    {"title":"Executive Metric Summary","chartType":"bar","labels":["A","B"],"values":[10,20]}\n` +
     `  ]\n` +
     `}\n\n` +
     `RULES:\n` +
@@ -348,7 +377,8 @@ export function buildDocumentSystemPrompt(
     `6. CRITICAL: NEVER write a table as pipe-separated text like "Col A | Col B\\nRow 1 | Row 2" inside "content". That is WRONG. Always use the structured "table" field with "headers" and "rows" arrays.\n` +
     `7. Match the document type and purpose to what the user asked for exactly.\n` +
     `8. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
-    `9. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table). No other top-level keys.${langNote}` +
+    `9. When the user asks for charts, dashboards, histograms, analyst visuals, or a report from data, include chart objects in relevant sections. Use real labels and numeric values from the source; never invent figures.\n` +
+    `10. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table, chart), charts. No other top-level keys.${langNote}` +
     profGuidance +
     quality.instruction +
     FILE_EXPORT_POLISH_DIRECTIVE +
@@ -429,6 +459,18 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
     });
   };
 
+  const addChartImage = async (
+    slide: ReturnType<typeof pptx.addSlide>,
+    chart: FileChartSpec,
+    opts: { x: number; y: number; w: number; h: number },
+  ) => {
+    const png = await renderChartPng(chart, 900, 420);
+    slide.addImage({
+      data: `data:image/png;base64,${png.toString("base64")}`,
+      ...opts,
+    });
+  };
+
   // Content slides
   for (const slide of slides) {
     const heading = String(slide?.heading ?? "").trim() || "Slide";
@@ -475,7 +517,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       s.addText(textItems, {
         x: 0.5,
         y: 1.25,
-        w: 12.33,
+        w: slide.chart && slide.layout === "split" ? 5.75 : 12.33,
         h: 5.65,
         fontSize: 15,
         color: PPTX_COLORS.body,
@@ -483,6 +525,39 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       });
     }
 
+    if (slide.chart) {
+      await addChartImage(s, slide.chart, {
+        x: slide.layout === "split" && bullets.length > 0 ? 6.45 : 0.8,
+        y: 1.38,
+        w: slide.layout === "split" && bullets.length > 0 ? 5.9 : 11.75,
+        h: 4.95,
+      });
+    }
+
+    addFooter(s);
+  }
+
+  for (const chart of data.charts ?? []) {
+    const s = pptx.addSlide();
+    s.addText(chart.title, {
+      x: 0.5,
+      y: 0.25,
+      w: 12.33,
+      h: 0.8,
+      fontSize: 26,
+      bold: true,
+      color: PPTX_COLORS.heading,
+    });
+    s.addText(" ", {
+      x: 0.5,
+      y: 1.1,
+      w: 12.33,
+      h: 0.06,
+      fill: { color: PPTX_COLORS.accent },
+      fontSize: 1,
+      color: PPTX_COLORS.accent,
+    });
+    await addChartImage(s, chart, { x: 0.8, y: 1.38, w: 11.75, h: 4.95 });
     addFooter(s);
   }
 
@@ -616,6 +691,39 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
     from: { row: 1, column: 1 },
     to: { row: 1, column: data.headers.length },
   };
+
+  const charts =
+    data.charts && data.charts.length > 0 ? data.charts : inferChartsFromTabularData(data);
+  if (charts.length > 0) {
+    const chartWs = wb.addWorksheet("Charts");
+    chartWs.properties.defaultRowHeight = 18;
+    chartWs.getColumn(1).width = 34;
+    chartWs.getColumn(2).width = 18;
+    let rowCursor = 1;
+    for (const chart of charts) {
+      chartWs.getCell(rowCursor, 1).value = chart.title;
+      chartWs.getCell(rowCursor, 1).font = {
+        bold: true,
+        size: 14,
+        color: { argb: "FF1E1B4B" },
+      };
+      const png = await renderChartPng(chart, 900, 420);
+      const imageId = wb.addImage({ base64: png.toString("base64"), extension: "png" });
+      chartWs.addImage(imageId, {
+        tl: { col: 0, row: rowCursor },
+        ext: { width: 720, height: 336 },
+      });
+      const dataStart = rowCursor + 21;
+      chartWs.getCell(dataStart, 1).value = chart.xLabel ?? "Label";
+      chartWs.getCell(dataStart, 2).value = chart.yLabel ?? "Value";
+      chartWs.getRow(dataStart).font = { bold: true };
+      chart.labels.forEach((label, index) => {
+        chartWs.getCell(dataStart + index + 1, 1).value = label;
+        chartWs.getCell(dataStart + index + 1, 2).value = chart.values[index] ?? 0;
+      });
+      rowCursor = dataStart + chart.labels.length + 3;
+    }
+  }
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
@@ -777,6 +885,73 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
       );
       children.push(new Paragraph({ children: [], spacing: { after: 200 } }));
     }
+
+    if (section.chart) {
+      const chartPng = await renderChartPng(section.chart, 900, 420);
+      children.push(
+        new Paragraph({
+          children: [
+            new ImageRun({
+              type: "png",
+              data: chartPng,
+              transformation: { width: 560, height: 262 },
+              altText: {
+                title: section.chart.title,
+                description: `${section.chart.chartType} chart generated from Ora file data`,
+                name: section.chart.title,
+              },
+            }),
+          ],
+          spacing: { before: 120, after: 180 },
+        }),
+      );
+    }
+  }
+
+  const topLevelCharts = data.charts ?? [];
+  if (topLevelCharts.length > 0) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "Generated Charts",
+            bold: true,
+            size: 28,
+            color: DARK,
+            font: "Calibri",
+          }),
+        ],
+        spacing: { before: 400, after: 120 },
+        border: { left: { color: ACCENT, space: 8, style: BorderStyle.SINGLE, size: 20 } },
+        indent: { left: convertInchesToTwip(0.15) },
+      }),
+    );
+    for (const chart of topLevelCharts) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: chart.title, bold: true, size: 22, font: "Calibri" })],
+          spacing: { before: 160, after: 80 },
+        }),
+      );
+      const chartPng = await renderChartPng(chart, 900, 420);
+      children.push(
+        new Paragraph({
+          children: [
+            new ImageRun({
+              type: "png",
+              data: chartPng,
+              transformation: { width: 560, height: 262 },
+              altText: {
+                title: chart.title,
+                description: `${chart.chartType} chart generated from Ora file data`,
+                name: chart.title,
+              },
+            }),
+          ],
+          spacing: { after: 180 },
+        }),
+      );
+    }
   }
 
   const doc = new Document({
@@ -827,6 +1002,15 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
 
 export async function buildPdf(data: DocumentData): Promise<Buffer> {
   const PDFDocument = (await import("pdfkit")).default;
+  const sectionChartImages = await Promise.all(
+    data.sections.map((section) =>
+      section.chart ? renderChartPng(section.chart, 900, 420) : null,
+    ),
+  );
+  const topLevelCharts = data.charts ?? [];
+  const topLevelChartImages = await Promise.all(
+    topLevelCharts.map((chart) => renderChartPng(chart, 900, 420)),
+  );
 
   return new Promise((resolve, reject) => {
     const MARGIN = 60;
@@ -848,6 +1032,18 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
 
     const PAGE_W = doc.page.width;
     const CONTENT_W = PAGE_W - MARGIN * 2;
+    const renderPdfChart = (png: Buffer) => {
+      const chartH = 225;
+      if (doc.y > doc.page.height - MARGIN - chartH - 20) {
+        doc.addPage();
+        doc.y = MARGIN + 20;
+      }
+      doc.image(png, MARGIN, doc.y, {
+        fit: [CONTENT_W, chartH],
+        align: "center",
+      });
+      doc.y += chartH + 18;
+    };
 
     // Title block
     doc
@@ -877,7 +1073,8 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
     doc.moveDown(1.2);
 
     // Sections
-    for (const section of data.sections) {
+    for (let sectionIndex = 0; sectionIndex < data.sections.length; sectionIndex++) {
+      const section = data.sections[sectionIndex]!;
       // Check space — add page if less than 80pt remaining
       if (doc.y > doc.page.height - MARGIN - 80) {
         doc.addPage();
@@ -1025,7 +1222,36 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
         doc.moveDown(0.5);
       }
 
+      const sectionChart = sectionChartImages[sectionIndex];
+      if (sectionChart) {
+        renderPdfChart(sectionChart);
+      }
+
       doc.moveDown(0.4);
+    }
+
+    if (topLevelCharts.length > 0) {
+      if (doc.y > doc.page.height - MARGIN - 120) {
+        doc.addPage();
+        doc.y = MARGIN + 20;
+      }
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(13)
+        .fillColor("#1E1B4B")
+        .text("Generated Charts", MARGIN, doc.y, { width: CONTENT_W });
+      doc.moveDown(0.6);
+
+      topLevelCharts.forEach((chart, index) => {
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(11)
+          .fillColor("#1E1B4B")
+          .text(chart.title, MARGIN, doc.y, { width: CONTENT_W });
+        doc.moveDown(0.3);
+        const image = topLevelChartImages[index];
+        if (image) renderPdfChart(image);
+      });
     }
 
     // Stamp page numbers on every page now that all content is buffered
@@ -1230,6 +1456,7 @@ export function normalizeTabularFileData(
     headers,
     columnTypes,
     rows,
+    charts: normalizeFileChartSpecs(parsed.charts),
   };
 }
 
@@ -1261,10 +1488,14 @@ export function normalizePresentationFileData(parsed: Record<string, unknown>): 
     const contentLines = content.split(/\n+/).map(stripLeadingBullet).filter(isMeaningfulText);
     const bullets = normalizeBulletArray(slide.bullets ?? contentLines).slice(0, 6);
     const explicitHeading = cleanText(slide.heading) || cleanText(slide.title);
-    if (!isMeaningfulText(explicitHeading) && bullets.length === 0) return;
+    const chart = normalizeFileChartSpec(slide.chart);
+    const layout = cleanText(slide.layout).toLowerCase();
+    if (!isMeaningfulText(explicitHeading) && bullets.length === 0 && !chart) return;
     slides.push({
       heading: isMeaningfulText(explicitHeading) ? explicitHeading : `Slide ${index + 1}`,
       bullets,
+      ...(chart ? { chart } : {}),
+      ...(layout === "chart" || layout === "split" ? { layout } : {}),
     });
   });
 
@@ -1272,6 +1503,7 @@ export function normalizePresentationFileData(parsed: Record<string, unknown>): 
     title: cleanText(parsed.title) || "Presentation",
     subtitle: cleanText(parsed.subtitle) || undefined,
     slides,
+    charts: normalizeFileChartSpecs(parsed.charts),
   };
 }
 
@@ -1357,6 +1589,8 @@ export function normalizeDocumentFileData(parsed: Record<string, unknown>): Docu
       }
     }
 
+    const chart = normalizeFileChartSpec(section.chart);
+
     // Fallback: if no structured table, try to rescue a pipe-delimited Markdown
     // table that the model embedded in the "content" string.
     if (!table && content) {
@@ -1367,12 +1601,13 @@ export function normalizeDocumentFileData(parsed: Record<string, unknown>): Docu
       }
     }
 
-    if (!isMeaningfulText(content) && bullets.length === 0 && !table) return;
+    if (!isMeaningfulText(content) && bullets.length === 0 && !table && !chart) return;
     sections.push({
       heading: isMeaningfulText(heading) ? heading : undefined,
       content,
       bullets: bullets.length > 0 ? bullets : undefined,
       table,
+      chart: chart ?? undefined,
     });
   });
 
@@ -1388,6 +1623,7 @@ export function normalizeDocumentFileData(parsed: Record<string, unknown>): Docu
     title: cleanText(parsed.title) || "Document",
     subtitle: cleanText(parsed.subtitle) || undefined,
     sections,
+    charts: normalizeFileChartSpecs(parsed.charts),
   };
 }
 

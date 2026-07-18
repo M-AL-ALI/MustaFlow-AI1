@@ -206,6 +206,20 @@ describe("Ora real-user behavior QA", () => {
     expect(datasetAnalysis.providerOrder).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
   });
 
+  it("routes chart, histogram, and dashboard file requests to generated spreadsheets", async () => {
+    for (const message of [
+      "Create a histogram from this sales data",
+      "Visualize this dataset as a chart",
+      "Build a dashboard with graphs for my KPI table",
+    ]) {
+      expect(detectFileRequest(message), message).toBe("xlsx");
+
+      const decision = await routeOraMessage({ message, mode: "instant" });
+      expect(decision.tool, message).toBe("file_generation");
+      expect(decision.fileFormat, message).toBe("xlsx");
+    }
+  });
+
   it("keeps image generation, image lookup, and video search on distinct paths", async () => {
     const imageGeneration = await buildOraRoutingDiagnostic({
       message: "Create a clean logo for my mobile mechanic app.",

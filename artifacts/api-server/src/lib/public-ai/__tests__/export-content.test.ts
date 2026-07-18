@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { unzipSync } from "fflate";
 import {
   markdownToDocumentData,
   markdownToPresentationData,
@@ -13,6 +14,8 @@ import {
   tokenizeMarkdown,
 } from "../export-content";
 import { buildDocx, buildPdf, buildPptx, buildXlsx } from "../file-builder";
+import { inferChartsFromTabularData, normalizeFileChartSpec } from "../file-charts";
+import type { TabularData } from "../file-builder";
 
 const RICH = `# Quarterly Update
 
@@ -64,6 +67,19 @@ function isZip(buf: Buffer): boolean {
 function isPdf(buf: Buffer): boolean {
   return buf.length > 4 && buf.subarray(0, 5).toString("latin1") === "%PDF-";
 }
+
+function zipEntries(buf: Buffer): string[] {
+  return Object.keys(unzipSync(new Uint8Array(buf)));
+}
+
+const REVENUE_CHART = {
+  title: "Revenue by Region",
+  chartType: "bar" as const,
+  labels: ["North", "South", "East"],
+  values: [120, 80, 60],
+  xLabel: "Region",
+  yLabel: "Revenue",
+};
 
 describe("stripInlineMarkdown", () => {
   it("removes bold, italic, code, links, and images", () => {
@@ -199,9 +215,44 @@ describe("end-to-end builder output", () => {
     expect(isZip(buf)).toBe(true);
   });
 
+  it("embeds chart images in .docx deliverables", async () => {
+    const buf = await buildDocx({
+      title: "Revenue Report",
+      sections: [
+        {
+          heading: "Regional Revenue",
+          content: "North leads the current period.",
+          chart: REVENUE_CHART,
+        },
+      ],
+      charts: [REVENUE_CHART],
+    });
+
+    expect(zipEntries(buf).some((entry) => entry.startsWith("word/media/"))).toBe(true);
+  });
+
   it("produces a valid .xlsx (ZIP)", async () => {
     const buf = await buildXlsx(markdownToTabularData(RICH, "Data"));
     expect(isZip(buf)).toBe(true);
+  });
+
+  it("embeds chart images and chart data in .xlsx deliverables", async () => {
+    const buf = await buildXlsx({
+      title: "Revenue Data",
+      sheetName: "Revenue",
+      headers: ["Region", "Revenue"],
+      columnTypes: ["text", "number"],
+      rows: [
+        ["North", "120"],
+        ["South", "80"],
+        ["East", "60"],
+      ],
+      charts: [REVENUE_CHART],
+    });
+    const entries = zipEntries(buf);
+
+    expect(entries.some((entry) => entry.startsWith("xl/media/"))).toBe(true);
+    expect(entries.some((entry) => entry.includes("worksheets/sheet2.xml"))).toBe(true);
   });
 
   it("produces a valid .pptx (ZIP)", async () => {
@@ -209,9 +260,43 @@ describe("end-to-end builder output", () => {
     expect(isZip(buf)).toBe(true);
   });
 
+  it("embeds chart images in .pptx deliverables", async () => {
+    const buf = await buildPptx({
+      title: "Revenue Deck",
+      slides: [
+        {
+          heading: "Regional Revenue",
+          bullets: ["North leads the current period.", "South remains stable."],
+          layout: "split",
+          chart: REVENUE_CHART,
+        },
+      ],
+      charts: [REVENUE_CHART],
+    });
+
+    expect(zipEntries(buf).some((entry) => entry.startsWith("ppt/media/"))).toBe(true);
+  });
+
   it("produces a valid .pdf", async () => {
     const buf = await buildPdf(markdownToDocumentData(RICH, "Doc"));
     expect(isPdf(buf)).toBe(true);
+  });
+
+  it("produces a valid .pdf with embedded chart sections", async () => {
+    const buf = await buildPdf({
+      title: "Revenue PDF",
+      sections: [
+        {
+          heading: "Regional Revenue",
+          content: "North leads the current period.",
+          chart: REVENUE_CHART,
+        },
+      ],
+      charts: [REVENUE_CHART],
+    });
+
+    expect(isPdf(buf)).toBe(true);
+    expect(buf.length).toBeGreaterThan(5000);
   });
 
   it("produces a valid .pdf with long wrapped table cells", async () => {
@@ -224,5 +309,32 @@ describe("end-to-end builder output", () => {
 `;
     const buf = await buildPdf(markdownToDocumentData(longTable, "Risk Register"));
     expect(isPdf(buf)).toBe(true);
+  });
+});
+
+describe("chart inference for analyst file workflows", () => {
+  it("infers bar and histogram charts from tabular data", () => {
+    const data: TabularData = {
+      title: "Revenue Data",
+      headers: ["Region", "Revenue"],
+      columnTypes: ["text", "number"],
+      rows: [
+        ["North", "120"],
+        ["South", "80"],
+        ["East", "60"],
+        ["West", "40"],
+      ],
+    };
+
+    const charts = inferChartsFromTabularData(data, "create a histogram and a chart");
+
+    expect(charts.map((chart) => chart.chartType)).toEqual(
+      expect.arrayContaining(["histogram", "bar"]),
+    );
+    expect(charts[0]?.labels.length).toBeGreaterThan(1);
+  });
+
+  it("rejects unusable chart specs instead of embedding empty visuals", () => {
+    expect(normalizeFileChartSpec({ title: "Bad", labels: ["Only"], values: [1] })).toBeNull();
   });
 });
