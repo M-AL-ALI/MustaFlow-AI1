@@ -33,7 +33,7 @@ function sessionRateLimiter(req: Request, res: Response, next: NextFunction): vo
   try {
     clerkUserId = getAuth(req).userId;
   } catch {
-    clerkUserId = null;
+    // clerkMiddleware not mounted (e.g. minimal test apps) — treat as anonymous.
   }
   if (clerkUserId) {
     next();
