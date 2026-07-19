@@ -749,3 +749,13 @@ Rebuilt the Expo (SDK 54) Ora mobile app into a ChatGPT-style native mirror of t
 ### Verification
 
 All gates green: `pnpm run typecheck` (incl. ora-mobile), `pnpm run format:check`, `pnpm run lint` (only pre-existing api-server warnings, 0 errors), `ora-mobile` safe-url Vitest 12/12, and the full api-server Vitest suite (1522 passed, 2 skipped) confirming no T001 server-import regression. Architect review: PASS, no blockers — confirmed true parity, no Ora-isolation or backend-duplication violations, and adequate security coverage.
+
+## Ora Mobile — silent expired-session recovery (TestFlight build 51)
+
+ChatGPT-like resume after idle: Ora sessions are 30-minute cookies and iOS drops them, so the first send after a long idle failed with a raw "No active session" red bubble. The mobile API layer now detects that failure class (401/403 + session-expired phrasing), silently mints a fresh session, and retries the same request exactly once with the body preserved byte-for-byte (documentRefs, mode, oraProjectId, history).
+
+- `lib/api.ts`: `isOraSessionExpiredError`, `withOraSessionRecovery` wrapper on `sendChat`/`generateFile`/`exportFile`/`uploadFile`/`analyzeImage`/`analyzeDataset`/`analyzeDocument`; `friendlyOraSendErrorMessage` so raw server phrasing never renders; `TokenUnavailableError`/`NetworkError` pass through untouched (dedicated UX); `setOnOraSessionRecovered` listener. Streaming covered via the existing null-response fallback into the wrapped `sendChat`.
+- `index.tsx`: recovery listener mirrors the fresh session into UI state (tier accent, counters) with unmount cleanup; chat catch sites use the friendly-message guard.
+- 13 regression tests (`ora-session-recovery.test.ts`): retry-once cap, byte-identical retry body, both server phrasings, mint failure, NetworkError/429 passthrough. Added to the gate's `MOBILE_LIB_CRITICAL` check; `lib/api.ts` registered as an Ora file with feature-registry coverage + idle-recovery manual mobile note.
+
+Verification: ora-mobile + scripts typechecks clean; 155/155 ora-mobile tests; release gate 20 pass / 0 warn / 0 fail on code SHA `26f6a0c0`; architect review PASS. EAS build `098017d5-0a5f-4ad9-9da0-e7df738dff05` queued with auto-submit (submission `f32694ce`). Note: the testflight profile auto-increments the local buildNumber at build time, so the manual pre-bump to 50 shipped as Apple build number 51 (50 skipped, cosmetic only) — never pre-bump `app.json` for TestFlight builds.
