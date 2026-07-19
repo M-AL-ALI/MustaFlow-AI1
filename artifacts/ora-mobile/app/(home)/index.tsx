@@ -2003,6 +2003,28 @@ export default function OraChatScreen() {
     );
   }, [doUpload]);
 
+  // iOS cannot present a native picker (Files, camera, photo library) while the
+  // attach menu <Modal> is still animating its dismissal: the presentation
+  // silently fails and expo-document-picker's native picking context leaks, so
+  // every later attempt instantly rejects with "Could not open the file picker"
+  // until the app restarts. Defer the chosen action until the Modal's onDismiss
+  // fires (iOS-only callback); Android tears its dialog down synchronously, so
+  // the action runs immediately there.
+  const pendingPlusMenuActionRef = useRef<(() => void) | null>(null);
+  const closePlusMenuThen = useCallback((action: () => void) => {
+    setShowPlusMenu(false);
+    if (Platform.OS === "ios") {
+      pendingPlusMenuActionRef.current = action;
+    } else {
+      action();
+    }
+  }, []);
+  const handlePlusMenuDismissed = useCallback(() => {
+    const action = pendingPlusMenuActionRef.current;
+    pendingPlusMenuActionRef.current = null;
+    action?.();
+  }, []);
+
   const newChat = useCallback(() => {
     // A live realtime session is bound to the current conversation; switching
     // threads underneath it would mis-persist its transcripts to the new thread,
@@ -3516,23 +3538,16 @@ export default function OraChatScreen() {
       <PlusMenu
         visible={showPlusMenu}
         onClose={() => setShowPlusMenu(false)}
-        onTakePhoto={() => {
-          setShowPlusMenu(false);
-          void handleCameraCapture();
-        }}
-        onPickPhoto={() => {
-          setShowPlusMenu(false);
-          void handleGalleryPick();
-        }}
-        onBrowseFiles={() => {
-          setShowPlusMenu(false);
-          void handleBrowseFiles();
-        }}
-        onGenerateFile={() => {
-          setShowPlusMenu(false);
-          setGenerateFileDraft(null);
-          setShowGenerateFile(true);
-        }}
+        onDismissed={handlePlusMenuDismissed}
+        onTakePhoto={() => closePlusMenuThen(() => void handleCameraCapture())}
+        onPickPhoto={() => closePlusMenuThen(() => void handleGalleryPick())}
+        onBrowseFiles={() => closePlusMenuThen(() => void handleBrowseFiles())}
+        onGenerateFile={() =>
+          closePlusMenuThen(() => {
+            setGenerateFileDraft(null);
+            setShowGenerateFile(true);
+          })
+        }
       />
 
       <GenerateFileSheet
@@ -5059,6 +5074,7 @@ function PlusMenu({
   onPickPhoto,
   onBrowseFiles,
   onGenerateFile,
+  onDismissed,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -5066,12 +5082,19 @@ function PlusMenu({
   onPickPhoto: () => void;
   onBrowseFiles: () => void;
   onGenerateFile: () => void;
+  onDismissed: () => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+      onDismiss={onDismissed}
+    >
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
         <Pressable style={{ flex: 1 }} onPress={onClose} />
         <View
