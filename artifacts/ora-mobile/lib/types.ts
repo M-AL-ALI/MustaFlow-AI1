@@ -295,6 +295,14 @@ export interface ChatRequest {
    * client keeps the user's message and the Retry affordance.
    */
   forceSearch?: boolean;
+  /**
+   * UUID refs of documents/datasets uploaded earlier this conversation. Must be
+   * sent on EVERY chat turn while refs are active (normal send, stream fallback,
+   * retry/regenerate) so the server can route uploaded-file edit requests to the
+   * layout-preserving file editor instead of answering with plain text. Server
+   * caps at 5. Mirrors the website hook's `body.documentRefs`.
+   */
+  documentRefs?: string[];
 }
 
 export interface ChatResponse {

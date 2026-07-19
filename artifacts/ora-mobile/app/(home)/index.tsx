@@ -1130,6 +1130,16 @@ export default function OraChatScreen() {
             temporary,
             oraProjectId: activeProjectIdRef.current,
             ...(opts?.forceSearch ? { forceSearch: true } : {}),
+            // Carry uploaded document/dataset refs on every chat turn so the
+            // server can route uploaded-file edit requests ("make it
+            // professional", "add a section…") to the layout-preserving file
+            // editor. Without this the backend never learns a file is attached
+            // and replies with plain text. Every send path reuses this chatReq
+            // (streaming, stream fallback, forceSearch retry, regenerate), so
+            // the refs survive all of them. Mirrors the website hook.
+            ...(documentRefsRef.current.length > 0
+              ? { documentRefs: documentRefsRef.current }
+              : {}),
           };
 
           if (opts?.forceSearch) {

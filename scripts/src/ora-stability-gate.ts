@@ -75,6 +75,7 @@ const ORA_FILE_HINTS = [
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*pricing/i,
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*voice/i,
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*file/i,
+  /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*document/i,
   /^packages\/ora-contracts\//,
   /^docs\/ora-stability-gate\.md$/,
   /^scripts\/src\/ora-stability-gate\.ts$/,
@@ -191,7 +192,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualWebsite:
       "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions.",
     manualMobile:
-      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed.",
+      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed. Also upload a DOCX and send an edit request in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
   },
   {
     id: "conversation-history",
@@ -348,6 +349,7 @@ const WEB_RELEASE_EXTENDED = [
 const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/account-sync-wiring.test.ts",
   "lib/__tests__/billing-plan-cards.test.ts",
+  "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
   "lib/__tests__/ora-mobile-parity.test.ts",

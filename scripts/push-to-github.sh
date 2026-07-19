@@ -37,6 +37,10 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  artifacts/ora-mobile/lib/types.ts \
+  artifacts/ora-mobile/lib/__tests__/document-refs-chat-wiring.test.ts \
+  scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
