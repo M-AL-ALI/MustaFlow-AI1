@@ -167,6 +167,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /presentation/i,
       /dataset/i,
       /chart/i,
+      /office-layout-edit/i,
       /pdf/i,
       /pptx/i,
       /xlsx/i,
@@ -241,6 +242,7 @@ const API_PUBLIC_AI_CORE = [
 const API_FILE_IMAGE = [
   "src/lib/public-ai/__tests__/dataset-workflow.test.ts",
   "src/lib/public-ai/__tests__/export-content.test.ts",
+  "src/lib/public-ai/__tests__/office-layout-edit.test.ts",
   "src/lib/public-ai/__tests__/ora-image-quality.test.ts",
   "src/lib/public-ai/__tests__/professional-doc.test.ts",
   "src/routes/public-ai/__tests__/export-file.test.ts",

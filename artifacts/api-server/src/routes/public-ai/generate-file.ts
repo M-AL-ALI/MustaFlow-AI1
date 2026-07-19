@@ -135,15 +135,25 @@ router.post("/public-ai/generate-file", async (req, res) => {
     | null = null;
   try {
     const fileBuilder = await import("../../lib/public-ai/file-builder");
+    const { tryApplyLayoutPreservingFileEdit } =
+      await import("../../lib/public-ai/office-layout-edit");
     FileGenerationErrorCtor = fileBuilder.FileGenerationError;
-    const result = await fileBuilder.generateFileFromPrompt(
-      filePrompt,
-      format,
-      history,
-      language,
-      hasSourceData,
-      authed?.tier ?? null,
-    );
+    const result =
+      (await tryApplyLayoutPreservingFileEdit({
+        message,
+        format,
+        documentRefs,
+        sessionId: session.sessionId,
+        userId: authed?.userId ?? null,
+      })) ??
+      (await fileBuilder.generateFileFromPrompt(
+        filePrompt,
+        format,
+        history,
+        language,
+        hasSourceData,
+        authed?.tier ?? null,
+      ));
 
     // Persist to the durable asset library for signed-in users so the file
     // survives chat resets, reloads, and other devices. Best-effort — a library

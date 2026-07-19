@@ -10,6 +10,7 @@ import {
   getFile,
   FILE_LIMIT_PER_SESSION,
   MAX_TEXT_CHARS_PER_FILE,
+  MAX_RAW_BYTES_PER_FILE,
 } from "../../../lib/public-ai/file-store";
 
 vi.mock("../../../lib/ai-providers", () => ({
@@ -234,6 +235,27 @@ describe("File store", () => {
 
   it("MAX_TEXT_CHARS_PER_FILE is 25000", () => {
     expect(MAX_TEXT_CHARS_PER_FILE).toBe(25_000);
+  });
+
+  it("allows capped raw Office bytes for live layout-preserving edits", () => {
+    const sessionId = crypto.randomUUID();
+    const raw = Buffer.from("small pptx bytes");
+    const ref = storeFile({
+      sessionId,
+      filename: "deck.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      extractedText: "Slide 1: Hello",
+      charCount: 14,
+      rawBase64: raw.toString("base64"),
+      rawSizeBytes: raw.length,
+      rawFileType: "pptx",
+    });
+
+    const entry = getFile(ref, sessionId);
+    expect(MAX_RAW_BYTES_PER_FILE).toBe(20 * 1024 * 1024);
+    expect(entry?.rawFileType).toBe("pptx");
+    expect(entry?.rawSizeBytes).toBe(raw.length);
+    expect(Buffer.from(entry?.rawBase64 ?? "", "base64").toString()).toBe("small pptx bytes");
   });
 });
 

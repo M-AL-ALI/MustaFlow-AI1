@@ -19,6 +19,7 @@ import {
   getTotalCharsForSession,
   MAX_TEXT_CHARS_PER_FILE,
   MAX_TOTAL_CHARS_PER_SESSION,
+  MAX_RAW_BYTES_PER_FILE,
 } from "../../lib/public-ai/file-store";
 import { persistFileContextBestEffort } from "../../lib/public-ai/file-context-store";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
@@ -26,6 +27,22 @@ import { logger } from "../../lib/logger";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 
 const router = Router();
+
+type OfficeRawMemory = {
+  rawBase64: string;
+  rawSizeBytes: number;
+  rawFileType: "docx" | "pptx" | "xlsx";
+};
+
+function officeRawMemoryFor(fileType: string, buffer: Buffer): Partial<OfficeRawMemory> {
+  if (fileType !== "docx" && fileType !== "pptx" && fileType !== "xlsx") return {};
+  if (buffer.length > MAX_RAW_BYTES_PER_FILE) return {};
+  return {
+    rawBase64: buffer.toString("base64"),
+    rawSizeBytes: buffer.length,
+    rawFileType: fileType,
+  };
+}
 
 type PersistOraAssetInput = Parameters<
   (typeof import("../../lib/ora-assets"))["persistOraAsset"]
@@ -277,6 +294,7 @@ router.post(
         extractedText: "",
         charCount: 0,
         datasetSummary: summary,
+        ...officeRawMemoryFor(validation.type, file.buffer),
       });
 
       const { token, payload } = incrementFileCount(session);
@@ -383,6 +401,7 @@ router.post(
       mimeType: file.mimetype,
       extractedText: extractedText.slice(0, charCount),
       charCount,
+      ...officeRawMemoryFor(validation.type, file.buffer),
     });
 
     const { token, payload } = incrementFileCount(session);

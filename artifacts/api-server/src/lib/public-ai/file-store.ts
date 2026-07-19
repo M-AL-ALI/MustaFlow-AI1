@@ -1,9 +1,10 @@
 /**
  * In-memory ephemeral file store for Ora Phase 2 (documents) + Phase 3 (datasets).
  *
- * Only extracted plain text (documents) or DatasetSummary (CSV/XLSX) is stored
- * — raw file bytes are discarded immediately after extraction. Nothing is written
- * to the database or to disk.
+ * Extracted plain text (documents) or DatasetSummary (CSV/XLSX) is always stored.
+ * Small Office files may also keep raw bytes in memory only, so Ora can perform
+ * layout-preserving edits during the same live session. Nothing is written to
+ * the database or to disk.
  *
  * Entries expire after 2 hours and are evicted by a cleanup interval and on
  * every access attempt. The window is intentionally longer than the 30-minute
@@ -17,6 +18,7 @@ import type { DatasetSummary } from "./dataset-extract.js";
 export const MAX_TEXT_CHARS_PER_FILE = 25_000;
 export const MAX_TOTAL_CHARS_PER_SESSION = 75_000;
 export const FILE_LIMIT_PER_SESSION = 3;
+export const MAX_RAW_BYTES_PER_FILE = 20 * 1024 * 1024;
 
 const TTL_MS = 2 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -30,6 +32,9 @@ export interface FileEntry {
   charCount: number;
   expiresAt: number;
   datasetSummary?: DatasetSummary;
+  rawBase64?: string;
+  rawSizeBytes?: number;
+  rawFileType?: "docx" | "pptx" | "xlsx";
 }
 
 const store = new Map<string, FileEntry>();

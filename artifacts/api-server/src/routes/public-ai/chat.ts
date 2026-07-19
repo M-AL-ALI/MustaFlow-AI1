@@ -1447,14 +1447,24 @@ router.post("/public-ai/chat", async (req, res) => {
     const { generateFileFromPrompt, FileGenerationError } =
       await import("../../lib/public-ai/file-builder");
     try {
-      const result = await generateFileFromPrompt(
-        filePrompt,
-        detectedFormat,
-        history,
-        language,
-        carriedDocs.length > 0,
-        authed?.tier ?? null,
-      );
+      const { tryApplyLayoutPreservingFileEdit } =
+        await import("../../lib/public-ai/office-layout-edit");
+      const result =
+        (await tryApplyLayoutPreservingFileEdit({
+          message,
+          format: detectedFormat,
+          documentRefs,
+          sessionId: session.sessionId,
+          userId: authed?.userId ?? null,
+        })) ??
+        (await generateFileFromPrompt(
+          filePrompt,
+          detectedFormat,
+          history,
+          language,
+          carriedDocs.length > 0,
+          authed?.tier ?? null,
+        ));
       const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
