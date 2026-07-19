@@ -58,6 +58,29 @@ function makePptxBase64(): string {
   });
 }
 
+function makePptxBase64WithSlideText(text: string): string {
+  return zipBase64({
+    "[Content_Types].xml": [
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+      '<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>',
+      "</Types>",
+    ].join(""),
+    "ppt/presentation.xml": [
+      '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+      "<p:sldIdLst>",
+      '<p:sldId id="256" r:id="rId1"/>',
+      "</p:sldIdLst>",
+      "</p:presentation>",
+    ].join(""),
+    "ppt/_rels/presentation.xml.rels": [
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>',
+      "</Relationships>",
+    ].join(""),
+    "ppt/slides/slide1.xml": `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><a:t>${text}</a:t></p:spTree></p:cSld></p:sld>`,
+  });
+}
+
 function storeRawOffice(input: {
   sessionId: string;
   filename: string;
@@ -188,6 +211,30 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(slide1).not.toContain("Old Pricing");
   });
 
+  it("polishes PPTX text for professionalize requests instead of falling back to a report", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "messy-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64WithSlideText("really messy   pricing overview"),
+      extractedText: "Slide 1:\n- really messy pricing overview",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Make this deck more professional and return the PowerPoint",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const slide1 = strFromU8(entries["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Messy Pricing Overview");
+    expect(slide1).not.toContain("really messy");
+  });
+
   it("replaces text inside a DOCX while preserving the original package", async () => {
     const sessionId = crypto.randomUUID();
     const base64 = zipBase64({
@@ -216,6 +263,39 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     const docXml = strFromU8(entries["word/document.xml"]!);
     expect(docXml).toContain("The quarter closed ahead of plan");
     expect(docXml).not.toContain("Old conclusion");
+  });
+
+  it("polishes DOCX text for professionalize requests while returning the original package type", async () => {
+    const sessionId = crypto.randomUUID();
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      "word/document.xml":
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>basically this is very very important  .</w:t></w:r></w:p></w:body></w:document>',
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "messy-report.docx",
+      rawFileType: "docx",
+      base64,
+      extractedText: "basically this is very very important.",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Make this document more professional and send it back",
+      format: "docx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const docXml = strFromU8(entries["word/document.xml"]!);
+    expect(docXml).toContain("This Is Very Important.");
+    expect(docXml).not.toContain("basically");
+    expect(result?.mimeType).toBe(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
   });
 
   it("removes requested DOCX sections using natural remove wording", async () => {
@@ -409,5 +489,39 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(edited?.getCell("A1").value).toBe("Region");
     expect(edited?.getCell("B1").value).toBe("Revenue");
     expect(edited?.getCell("C1").value).toBeNull();
+  });
+
+  it("cleans and formats uploaded XLSX workbooks for natural cleanup requests", async () => {
+    const sessionId = crypto.randomUUID();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Pipeline");
+    sheet.addRow([" Region ", " Revenue "]);
+    sheet.addRow([" North  ", "120"]);
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pipeline.xlsx",
+      rawFileType: "xlsx",
+      base64: raw.toString("base64"),
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Clean this spreadsheet and make it professional",
+      format: "xlsx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(
+      Buffer.from(result!.fileData, "base64") as unknown as Parameters<typeof out.xlsx.load>[0],
+    );
+    const edited = out.getWorksheet("Pipeline");
+    expect(edited?.getCell("A1").value).toBe("Region");
+    expect(edited?.getCell("A2").value).toBe("North");
+    expect(edited?.views[0]?.state).toBe("frozen");
+    expect(edited?.autoFilter).toBeTruthy();
+    expect(edited?.getCell("A1").font?.bold).toBe(true);
   });
 });

@@ -70,6 +70,18 @@ function hasChartIntent(message: string): boolean {
   return /\b(chart|charts|histogram|dashboard|graph|visuali[sz]e|plot|trend)\b/i.test(message);
 }
 
+function hasProfessionalizeIntent(message: string): boolean {
+  return /\b(professional|polish|board[-\s]?ready|executive[-\s]?ready|clean(?:er)?|improve|redesign|restyle|reformat|formatting|format|presentation[-\s]?ready)\b/i.test(
+    message,
+  );
+}
+
+function hasSpreadsheetCleanIntent(message: string): boolean {
+  return /\b(clean|cleanup|clean\s+up|format|formatting|professional|polish|normalize|tidy|dedupe|deduplicate)\b/i.test(
+    message,
+  );
+}
+
 function targetSlideNumber(message: string): number | null {
   const match = /\bslide\s+(?:number\s*)?(\d{1,3})\b/i.exec(message);
   if (!match) return null;
@@ -228,6 +240,26 @@ function shortenText(value: string): string | null {
   return shortened.length < clean.length ? `${shortened}...` : null;
 }
 
+function professionalizeText(value: string): string | null {
+  const clean = normalizePhrase(value)
+    .replace(/\bvery\s+very\b/gi, "very")
+    .replace(/\b(?:basically|really|kind of|sort of)\b/gi, "")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return null;
+
+  const shortened = shortenText(clean) ?? clean;
+  const isLikelyHeading = shortened.length <= 80 && shortened.split(/\s+/).length <= 9;
+  const polished = isLikelyHeading
+    ? shortened.replace(/\b\w+/g, (word) =>
+        /^[A-Z0-9]{2,}$/.test(word) ? word : word[0]!.toUpperCase() + word.slice(1).toLowerCase(),
+      )
+    : shortened.replace(/\s+([,.;:!?])/g, "$1");
+
+  return polished !== value ? polished : null;
+}
+
 function replaceTextNodes(
   xml: string,
   nodeName: "a:t" | "w:t",
@@ -259,6 +291,22 @@ function replaceTextNodes(
       return `${open}${xmlEscape(replacement.newText)}${close}`;
     }
     return full;
+  });
+  return { xml: nextXml, count };
+}
+
+function professionalizeTextNodes(
+  xml: string,
+  nodeName: "a:t" | "w:t",
+): { xml: string; count: number } {
+  let count = 0;
+  const tag = escapeRegExp(nodeName);
+  const re = new RegExp(`(<${tag}\\b[^>]*>)([\\s\\S]*?)(</${tag}>)`, "g");
+  const nextXml = xml.replace(re, (full, open: string, inner: string, close: string) => {
+    const next = professionalizeText(xmlUnescape(inner));
+    if (!next) return full;
+    count += 1;
+    return `${open}${xmlEscape(next)}${close}`;
   });
   return { xml: nextXml, count };
 }
@@ -427,6 +475,20 @@ function shortenPptxSlide(entries: ZipEntries, slideNumber: number): number {
   return updated.count;
 }
 
+function professionalizePptx(entries: ZipEntries): number {
+  let count = 0;
+  for (const slide of slideOrder(entries)) {
+    const xml = getXml(entries, slide.path);
+    if (!xml) continue;
+    const updated = professionalizeTextNodes(xml, "a:t");
+    if (updated.count > 0) {
+      count += updated.count;
+      setXml(entries, slide.path, updated.xml);
+    }
+  }
+  return count;
+}
+
 function base64Raw(entry: FileEntry): Buffer | null {
   if (!entry.rawBase64 || !entry.rawFileType) return null;
   try {
@@ -504,23 +566,53 @@ async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFil
     }
   }
 
+  if (hasProfessionalizeIntent(message)) {
+    const changed = professionalizePptx(entries);
+    if (changed > 0) {
+      return buildOfficeResult(
+        entry,
+        "pptx",
+        zipBuffer(entries),
+        `polished ${changed} text item${changed === 1 ? "" : "s"}`,
+      );
+    }
+  }
+
   return null;
 }
 
 async function editDocx(entry: FileEntry, message: string): Promise<GeneratedFileResult | null> {
   const raw = base64Raw(entry);
   const replacement = parseTextReplacement(message) ?? parseTextDeletion(message);
-  if (!raw || !replacement) return null;
+  if (!raw) return null;
   const entries = unzipSync(new Uint8Array(raw));
   const docXml = getXml(entries, "word/document.xml");
   if (!docXml) return null;
-  const updated = replaceTextNodes(docXml, "w:t", replacement);
-  if (updated.count === 0) return null;
-  setXml(entries, "word/document.xml", updated.xml);
-  const action = replacement.newText
-    ? `replaced "${replacement.oldText}"`
-    : `removed "${replacement.oldText}"`;
-  return buildOfficeResult(entry, "docx", zipBuffer(entries), action);
+  if (replacement) {
+    const updated = replaceTextNodes(docXml, "w:t", replacement);
+    if (updated.count > 0) {
+      setXml(entries, "word/document.xml", updated.xml);
+      const action = replacement.newText
+        ? `replaced "${replacement.oldText}"`
+        : `removed "${replacement.oldText}"`;
+      return buildOfficeResult(entry, "docx", zipBuffer(entries), action);
+    }
+  }
+
+  if (hasProfessionalizeIntent(message)) {
+    const updated = professionalizeTextNodes(docXml, "w:t");
+    if (updated.count > 0) {
+      setXml(entries, "word/document.xml", updated.xml);
+      return buildOfficeResult(
+        entry,
+        "docx",
+        zipBuffer(entries),
+        `polished ${updated.count} text item${updated.count === 1 ? "" : "s"}`,
+      );
+    }
+  }
+
+  return null;
 }
 
 function tabularDataFromSummary(entry: FileEntry, summary: DatasetSummary): TabularData {
@@ -627,6 +719,52 @@ function deleteXlsxColumn(workbook: ExcelJS.Workbook, target: string): number {
       sheet.spliceColumns(targetCol, 1);
       changed += 1;
     }
+  });
+  return changed;
+}
+
+function cleanXlsxWorkbook(workbook: ExcelJS.Workbook): number {
+  let changed = 0;
+  workbook.eachSheet((sheet) => {
+    const maxCol = Math.max(1, sheet.actualColumnCount || sheet.columnCount || 1);
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        if (typeof cell.value === "string") {
+          const next = normalizePhrase(cell.value);
+          if (next !== cell.value) {
+            cell.value = next;
+            changed += 1;
+          }
+        }
+        if (rowNumber === 1) {
+          cell.font = { ...(cell.font ?? {}), bold: true, color: { argb: "FF111827" } };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFEFF6FF" },
+          };
+          cell.alignment = { ...(cell.alignment ?? {}), vertical: "middle", wrapText: true };
+        }
+      });
+      if (rowNumber === 1) row.height = Math.max(row.height || 0, 22);
+    });
+
+    sheet.views = [{ state: "frozen", ySplit: 1, topLeftCell: "A2" }];
+    if (sheet.actualRowCount > 1 && maxCol > 0) {
+      sheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: maxCol },
+      };
+    }
+    for (let colIdx = 1; colIdx <= maxCol; colIdx++) {
+      const column = sheet.getColumn(colIdx);
+      let maxLen = 10;
+      column.eachCell({ includeEmpty: false }, (cell) => {
+        maxLen = Math.max(maxLen, cellText(cell.value).length);
+      });
+      column.width = Math.min(Math.max(maxLen + 2, 12), 42);
+    }
+    changed += 1;
   });
   return changed;
 }
@@ -759,6 +897,11 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   if (entry.datasetSummary && hasChartIntent(message)) {
     const charts = await addChartsWorksheet(workbook, entry, message);
     if (charts > 0) actions.push(`added ${charts} generated chart${charts === 1 ? "" : "s"}`);
+  }
+
+  if (hasSpreadsheetCleanIntent(message) || hasProfessionalizeIntent(message)) {
+    const changed = cleanXlsxWorkbook(workbook);
+    if (changed > 0) actions.push("cleaned and formatted the workbook");
   }
 
   if (actions.length === 0) return null;
