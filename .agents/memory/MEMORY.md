@@ -101,3 +101,4 @@
 - [Post-merge migrations](post-merge-migrations.md) — after task-agent merges, db push fails non-interactively; run the individual migration scripts.
 - [Scripts pg pattern](scripts-pg-pattern.md) — migration scripts must use pool from @workspace/db, not pg directly.
 - [Vitest cold-import timeout](vitest-cold-import-timeout.md) — first test importing a heavy router tree can blow the 5s default; fix with a per-test timeout.
+- [RN Modal picker race](rn-modal-native-picker-race.md) — defer native pickers to Modal onDismiss on iOS; failed present leaks expo-document-picker context; Files picker needs NO iCloud entitlement.
