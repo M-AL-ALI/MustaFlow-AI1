@@ -235,11 +235,12 @@ function parseSlideTitleChange(message: string): SlideTitleChange | null {
 }
 
 function cleanGeneratedText(value: string): string {
-  return normalizePhrase(
+  const cleaned = normalizePhrase(
     value
       .replace(/\b(?:and\s+)?(?:return|send|give)\s+(?:it|the file|the deck|the document).*$/i, "")
-      .replace(/^["'â€œâ€]+|["'â€œâ€.,;:]+$/g, ""),
+      .replace(/^["'\u201c\u201d]+|["'\u201c\u201d.,;:]+$/g, ""),
   );
+  return cleaned.replace(/^(?:called|named|titled|content|text)\s+/i, "");
 }
 
 function parseSlideInsertion(message: string): SlideInsertion | null {
@@ -683,15 +684,31 @@ function replaceSlideTextForInsertedSlide(xml: string, insertion: SlideInsertion
   let index = 0;
   const bodyLines =
     insertion.bodyLines.length > 0 ? insertion.bodyLines : ["Add supporting details here."];
-  return xml.replace(
+  const bodyText = bodyLines.join("\n");
+  const updated = xml.replace(
     /(<a:t\b[^>]*>)([\s\S]*?)(<\/a:t>)/g,
     (full, open: string, _inner: string, close: string) => {
       const next =
-        index === 0 ? insertion.title : bodyLines[Math.min(index - 1, bodyLines.length - 1)];
+        index === 0
+          ? insertion.title
+          : index === 1
+            ? bodyText
+            : (bodyLines[Math.min(index - 1, bodyLines.length - 1)] ?? bodyText);
       index += 1;
-      return `${open}${xmlEscape(next)}${close}`;
+      return open + xmlEscape(next) + close;
     },
   );
+  if (index > 1 || !bodyText) return updated;
+  const bodyParagraphs = bodyLines
+    .map((line) => `<a:p><a:r><a:t>${xmlEscape(line)}</a:t></a:r></a:p>`)
+    .join("");
+  const bodyShape =
+    '<p:sp><p:nvSpPr><p:cNvPr id="1000" name="Ora Generated Body"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>' +
+    bodyParagraphs +
+    "</p:txBody></p:sp>";
+  return updated.includes("</p:spTree>")
+    ? updated.replace("</p:spTree>", `${bodyShape}</p:spTree>`)
+    : updated;
 }
 
 function insertPptxSlide(entries: ZipEntries, insertion: SlideInsertion): number {
@@ -840,6 +857,20 @@ function parseDocxAddition(message: string): { heading?: string; content: string
     !/\b(section|paragraph|note|text|summary|recommendation|conclusion|appendix)\b/i.test(message)
   ) {
     return null;
+  }
+  const sectionWithContent =
+    /\b(?:add|insert|append|include|create)\s+(?:a\s+|the\s+)?(?:new\s+)?(?:section|paragraph|note|summary|recommendation|conclusion|appendix)\s+(?:called|named|titled)\s+["\u201c]?(.{2,120}?)(?:["\u201d]|\s+\b(?:with|content|text)\b)\s+(?:with\s+)?(?:content|text|saying|that\s+says)?\s*["\u201c]?(.{2,260}?)(?:["\u201d]|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  if (sectionWithContent) {
+    const heading = cleanGeneratedText(sectionWithContent[1] ?? "");
+    const content = cleanGeneratedText(sectionWithContent[2] ?? "");
+    if (heading || content) {
+      return {
+        ...(heading ? { heading } : {}),
+        content: content || heading || "Additional notes",
+      };
+    }
   }
   const headingMatch =
     /\b(?:section|heading|title)\s+["â€œ]?(.{2,120}?)(?:["â€]|\s+\b(?:with|and|then|return|send|give)\b|$)/i.exec(
@@ -1170,26 +1201,24 @@ function deleteXlsxColumn(workbook: ExcelJS.Workbook, target: string): number {
 }
 
 function addXlsxColumn(workbook: ExcelJS.Workbook, header: string): number {
-  let changed = 0;
-  workbook.eachSheet((sheet) => {
-    const maxCol = Math.max(1, sheet.actualColumnCount || sheet.columnCount || 1);
-    const headerRow = sheet.getRow(1);
-    let exists = false;
-    headerRow.eachCell({ includeEmpty: false }, (cell) => {
-      if (normalizePhrase(cellText(cell.value)).toLowerCase() === header.toLowerCase()) {
-        exists = true;
-      }
-    });
-    if (exists) return;
-    const nextCol = maxCol + 1;
-    sheet.getCell(1, nextCol).value = header;
-    sheet.getCell(1, nextCol).font = { ...(sheet.getCell(1, nextCol).font ?? {}), bold: true };
-    for (let rowNumber = 2; rowNumber <= Math.max(sheet.actualRowCount, 2); rowNumber++) {
-      sheet.getCell(rowNumber, nextCol).value = "";
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return 0;
+  const maxCol = Math.max(1, sheet.actualColumnCount || sheet.columnCount || 1);
+  const headerRow = sheet.getRow(1);
+  let exists = false;
+  headerRow.eachCell({ includeEmpty: false }, (cell) => {
+    if (normalizePhrase(cellText(cell.value)).toLowerCase() === header.toLowerCase()) {
+      exists = true;
     }
-    changed += 1;
   });
-  return changed;
+  if (exists) return 0;
+  const nextCol = maxCol + 1;
+  sheet.getCell(1, nextCol).value = header;
+  sheet.getCell(1, nextCol).font = { ...(sheet.getCell(1, nextCol).font ?? {}), bold: true };
+  for (let rowNumber = 2; rowNumber <= Math.max(sheet.actualRowCount, 2); rowNumber++) {
+    sheet.getCell(rowNumber, nextCol).value = "";
+  }
+  return 1;
 }
 
 function addXlsxRow(workbook: ExcelJS.Workbook, values: string[]): number {

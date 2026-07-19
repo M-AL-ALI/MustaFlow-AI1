@@ -247,7 +247,8 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     });
 
     const result = await tryApplyLayoutPreservingFileEdit({
-      message: "Add a slide after slide 1 titled Product Roadmap with bullets Launch; Measure",
+      message:
+        "Add a slide after slide 1 titled Product Roadmap with bullets Launch; Measure; Improve",
       format: "pptx",
       documentRefs: [ref],
       sessionId,
@@ -256,7 +257,11 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(result).not.toBeNull();
     const entries = unzipBase64(result!.fileData);
     expect(entries["ppt/slides/slide3.xml"]).toBeDefined();
-    expect(strFromU8(entries["ppt/slides/slide3.xml"]!)).toContain("Product Roadmap");
+    const slide3 = strFromU8(entries["ppt/slides/slide3.xml"]!);
+    expect(slide3).toContain("Product Roadmap");
+    expect(slide3).toContain("Launch");
+    expect(slide3).toContain("Measure");
+    expect(slide3).toContain("Improve");
     expect(strFromU8(entries["ppt/presentation.xml"]).match(/<p:sldId\b/g)?.length).toBe(3);
   });
 
@@ -429,6 +434,8 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(docXml).toContain("Executive summary");
     expect(docXml).toContain("Risk Notes");
     expect(docXml).toContain("Track renewal risk");
+    expect(docXml).not.toContain("called Risk Notes");
+    expect(docXml).not.toContain("content Track renewal risk");
   });
 
   it("adds an Ora Charts worksheet to an uploaded XLSX workbook", async () => {
@@ -656,6 +663,7 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
       Buffer.from(result!.fileData, "base64") as unknown as Parameters<typeof out.xlsx.load>[0],
     );
     expect(out.getWorksheet("Summary")).toBeDefined();
+    expect(out.getWorksheet("Summary")?.getCell("C1").value).toBeNull();
     const edited = out.getWorksheet("Pipeline");
     expect(edited?.getCell("C1").value).toBe("Status");
     expect(edited?.getCell("A3").value).toBe("West");
