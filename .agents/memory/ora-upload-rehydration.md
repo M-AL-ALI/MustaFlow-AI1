@@ -23,6 +23,22 @@ resolves.
 **How to apply:**
 - Reset `documentRefsRef` on conversation change AND both clearConversation
   branches, or refs leak across transcripts.
+- BOTH surfaces must send `documentRefs` on every plain chat turn. Mobile
+  (`ora-mobile` home screen) builds one shared chatReq object reused by all
+  send paths (stream, fallback, retry, forceSearch, regenerate) — keep new
+  send paths flowing through that object. Mobile clear sites: newChat,
+  toggleTemporary, loadConversation only. Guarded by the mobile
+  document-refs wiring tests in the stability gate.
+- Ordering divergence: mobile stores refs newest-first, web appends
+  oldest-first (`slice(-5)`); server office-layout-edit picks the FIRST ref
+  matching the target format, so with 2+ same-format docs mobile edits the
+  newest, web the oldest. Align web to newest-first if this bites.
+- Web residual gap: conversation switch/reload clears the web
+  `documentRefsRef`; after a reload the edit path silently loses refs until
+  a new upload.
+- QA note: the FIRST turn after an upload consumes the attachment via
+  file-analysis; the documentRefs edit path is only exercised on a
+  FOLLOW-UP turn. Test edits as turn 2+, never turn 1.
 - `getFile(ref, sessionId)` enforces exact session match → no cross-user leak.
   Keep that boundary; never look up a ref without the sessionId.
 - Re-injected upload text is UNTRUSTED. Wrap in a delimited "data only" block
