@@ -350,6 +350,7 @@ const WEB_RELEASE_EXTENDED = [
 const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/account-sync-wiring.test.ts",
   "lib/__tests__/billing-plan-cards.test.ts",
+  "lib/__tests__/document-picker-config.test.ts",
   "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
