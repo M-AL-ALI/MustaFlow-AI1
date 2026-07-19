@@ -140,6 +140,54 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(entries["ppt/slides/slide2.xml"]).toBeDefined();
   });
 
+  it("handles natural PPTX section replacement requests without requiring quoted exact text", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Replace the pricing section with Core vs Wave comparison and send it back",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const slide1 = strFromU8(entries["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Core vs Wave comparison");
+    expect(slide1).not.toContain("Old Pricing");
+  });
+
+  it("renames a PPTX slide title from natural slide-title wording", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Change slide 1 title to Executive Pricing Overview",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const slide1 = strFromU8(entries["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Executive Pricing Overview");
+    expect(slide1).not.toContain("Old Pricing");
+  });
+
   it("replaces text inside a DOCX while preserving the original package", async () => {
     const sessionId = crypto.randomUUID();
     const base64 = zipBase64({
@@ -167,6 +215,36 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     const entries = unzipBase64(result!.fileData);
     const docXml = strFromU8(entries["word/document.xml"]!);
     expect(docXml).toContain("The quarter closed ahead of plan");
+    expect(docXml).not.toContain("Old conclusion");
+  });
+
+  it("removes requested DOCX sections using natural remove wording", async () => {
+    const sessionId = crypto.randomUUID();
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      "word/document.xml":
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Executive summary</w:t></w:r></w:p><w:p><w:r><w:t>Old conclusion</w:t></w:r></w:p></w:body></w:document>',
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "quarterly-report.docx",
+      rawFileType: "docx",
+      base64,
+      extractedText: "Executive summary\nOld conclusion",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Remove the conclusion section and return the document",
+      format: "docx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const docXml = strFromU8(entries["word/document.xml"]!);
+    expect(docXml).toContain("Executive summary");
     expect(docXml).not.toContain("Old conclusion");
   });
 
@@ -231,5 +309,105 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(charts).toBeDefined();
     expect(charts?.getCell("A1").value).toBe("Ora generated charts");
     expect(charts?.getImages().length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("adds real formula cells to an uploaded XLSX workbook", async () => {
+    const sessionId = crypto.randomUUID();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Revenue");
+    sheet.addRow(["Region", "Revenue"]);
+    sheet.addRow(["North", 120]);
+    sheet.addRow(["South", 80]);
+    sheet.addRow(["West", 150]);
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const datasetSummary: DatasetSummary = {
+      rowCount: 3,
+      colCount: 2,
+      headers: ["Region", "Revenue"],
+      sampleRows: [
+        ["North", "120"],
+        ["South", "80"],
+        ["West", "150"],
+      ],
+      columnProfiles: [
+        { index: 0, type: "string", nullCount: 0, uniqueCount: 3 },
+        {
+          index: 1,
+          type: "numeric",
+          nullCount: 0,
+          uniqueCount: 3,
+          min: 80,
+          max: 150,
+          mean: 116.67,
+        },
+      ],
+      paretoSets: [],
+      sanitizedCellCount: 0,
+      hiddenSheetsSkipped: 0,
+      truncated: false,
+      sheetName: "Revenue",
+    };
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "revenue.xlsx",
+      rawFileType: "xlsx",
+      base64: raw.toString("base64"),
+      datasetSummary,
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Add formulas for total revenue, average revenue, and count",
+      format: "xlsx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(
+      Buffer.from(result!.fileData, "base64") as unknown as Parameters<typeof out.xlsx.load>[0],
+    );
+    const calculations = out.getWorksheet("Ora Calculations");
+    expect(calculations).toBeDefined();
+    expect(calculations?.getCell("A2").value).toBe("Revenue total");
+    expect((calculations?.getCell("C2").value as { formula?: string }).formula).toBe(
+      "SUM('Revenue'!B2:B4)",
+    );
+    expect((calculations?.getCell("C3").value as { formula?: string }).formula).toBe(
+      "AVERAGE('Revenue'!B2:B4)",
+    );
+  });
+
+  it("deletes requested columns from an uploaded XLSX workbook", async () => {
+    const sessionId = crypto.randomUUID();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Pipeline");
+    sheet.addRow(["Region", "Revenue", "Owner"]);
+    sheet.addRow(["North", 120, "Alex"]);
+    sheet.addRow(["South", 80, "Sam"]);
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pipeline.xlsx",
+      rawFileType: "xlsx",
+      base64: raw.toString("base64"),
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Delete the Owner column and return the Excel file",
+      format: "xlsx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(
+      Buffer.from(result!.fileData, "base64") as unknown as Parameters<typeof out.xlsx.load>[0],
+    );
+    const edited = out.getWorksheet("Pipeline");
+    expect(edited?.getCell("A1").value).toBe("Region");
+    expect(edited?.getCell("B1").value).toBe("Revenue");
+    expect(edited?.getCell("C1").value).toBeNull();
   });
 });

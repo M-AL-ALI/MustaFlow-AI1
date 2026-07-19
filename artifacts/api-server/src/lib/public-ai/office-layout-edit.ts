@@ -95,6 +95,11 @@ interface TextReplacement {
   slideNumber?: number | null;
 }
 
+interface SlideTitleChange {
+  slideNumber: number;
+  newText: string;
+}
+
 function cleanReplacementSide(value: string): string {
   return normalizePhrase(
     value
@@ -141,6 +146,80 @@ function parseTextReplacement(message: string): TextReplacement | null {
   return null;
 }
 
+const GENERIC_EDIT_TARGET_WORDS = new Set([
+  "area",
+  "block",
+  "column",
+  "content",
+  "deck",
+  "document",
+  "field",
+  "file",
+  "heading",
+  "paragraph",
+  "powerpoint",
+  "section",
+  "sheet",
+  "slide",
+  "spreadsheet",
+  "table",
+  "text",
+  "title",
+  "workbook",
+]);
+
+function meaningfulTargetKeywords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4 && !GENERIC_EDIT_TARGET_WORDS.has(word));
+}
+
+function parseTextDeletion(message: string): TextReplacement | null {
+  if (!/\b(delete|remove|drop|clear)\b/i.test(message)) return null;
+  const slideNumber = targetSlideNumber(message);
+  const match = message.match(
+    /\b(?:delete|remove|drop|clear)\s+(?:the\s+)?(.{2,180}?)(?:\s+(?:from|in|on)\s+(?:slide\s+\d+|the\s+slide|the\s+deck|the\s+document|the\s+file|this|it)\b|\s+\b(?:and|then|return|send|give)\b|[.?!]|$)/i,
+  );
+  const oldText = cleanReplacementSide(match?.[1] ?? "");
+  if (!oldText || /^slide\s+\d+\b/i.test(oldText)) return null;
+  if (meaningfulTargetKeywords(oldText).length === 0 && oldText.length < 6) return null;
+  return { oldText, newText: "", slideNumber };
+}
+
+function parseSlideTitleChange(message: string): SlideTitleChange | null {
+  const patterns = [
+    /\b(?:change|replace|rename|update|set)\s+(?:the\s+)?(?:title|heading)\s+(?:of|on|for|in)\s+slide\s+(\d{1,3})\s+(?:to|as|with)\s+(.{2,240}?)(?:$|\s+\b(?:and|then|return|send|give)\b)/i,
+    /\b(?:change|replace|rename|update|set)\s+slide\s+(\d{1,3})\s+(?:title|heading)\s+(?:to|as|with)\s+(.{2,240}?)(?:$|\s+\b(?:and|then|return|send|give)\b)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const slideNumber = Number.parseInt(match[1] ?? "", 10);
+    const newText = cleanReplacementSide(match[2] ?? "");
+    if (Number.isFinite(slideNumber) && slideNumber > 0 && newText.length >= 2) {
+      return { slideNumber, newText };
+    }
+  }
+  return null;
+}
+
+function parseDeleteColumn(message: string): string | null {
+  if (!/\b(delete|remove|drop)\b/i.test(message) || !/\b(column|field)\b/i.test(message)) {
+    return null;
+  }
+  const patterns = [
+    /\b(?:delete|remove|drop)\s+(?:the\s+)?(?:column|field)\s+["“]?([^"”.,;!?]{2,100})["”]?/i,
+    /\b(?:delete|remove|drop)\s+["“]?([^"”.,;!?]{2,100})["”]?\s+(?:column|field)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    const target = cleanReplacementSide(match?.[1] ?? "");
+    if (target && meaningfulTargetKeywords(target).length > 0) return target;
+  }
+  return null;
+}
+
 function shortenText(value: string): string | null {
   const clean = normalizePhrase(value);
   const words = clean.split(/\s+/).filter(Boolean);
@@ -156,10 +235,7 @@ function replaceTextNodes(
 ): { xml: string; count: number } {
   const oldNorm = normalizePhrase(replacement.oldText);
   const oldRegex = new RegExp(escapeRegExp(oldNorm), "i");
-  const keywords = oldNorm
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length >= 4);
+  const keywords = meaningfulTargetKeywords(oldNorm);
   let count = 0;
   const tag = escapeRegExp(nodeName);
   const re = new RegExp(`(<${tag}\\b[^>]*>)([\\s\\S]*?)(</${tag}>)`, "g");
@@ -322,6 +398,25 @@ function replacePptxText(entries: ZipEntries, replacement: TextReplacement): num
   return count;
 }
 
+function replacePptxSlideTitle(entries: ZipEntries, change: SlideTitleChange): number {
+  const slide = slideOrder(entries)[change.slideNumber - 1];
+  if (!slide) return 0;
+  const xml = getXml(entries, slide.path);
+  if (!xml) return 0;
+  let changed = false;
+  const updatedXml = xml.replace(
+    /(<a:t\b[^>]*>)([\s\S]*?)(<\/a:t>)/,
+    (full, open: string, _inner: string, close: string) => {
+      if (changed) return full;
+      changed = true;
+      return `${open}${xmlEscape(change.newText)}${close}`;
+    },
+  );
+  if (!changed) return 0;
+  setXml(entries, slide.path, updatedXml);
+  return 1;
+}
+
 function shortenPptxSlide(entries: ZipEntries, slideNumber: number): number {
   const slide = slideOrder(entries)[slideNumber - 1];
   if (!slide) return 0;
@@ -372,16 +467,27 @@ async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFil
     }
   }
 
-  const replacement = parseTextReplacement(message);
-  if (replacement) {
-    const changed = replacePptxText(entries, replacement);
+  const titleChange = parseSlideTitleChange(message);
+  if (titleChange) {
+    const changed = replacePptxSlideTitle(entries, titleChange);
     if (changed > 0) {
       return buildOfficeResult(
         entry,
         "pptx",
         zipBuffer(entries),
-        `replaced "${replacement.oldText}"`,
+        `renamed slide ${titleChange.slideNumber}`,
       );
+    }
+  }
+
+  const replacement = parseTextReplacement(message) ?? parseTextDeletion(message);
+  if (replacement) {
+    const changed = replacePptxText(entries, replacement);
+    if (changed > 0) {
+      const action = replacement.newText
+        ? `replaced "${replacement.oldText}"`
+        : `removed "${replacement.oldText}"`;
+      return buildOfficeResult(entry, "pptx", zipBuffer(entries), action);
     }
   }
 
@@ -403,7 +509,7 @@ async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFil
 
 async function editDocx(entry: FileEntry, message: string): Promise<GeneratedFileResult | null> {
   const raw = base64Raw(entry);
-  const replacement = parseTextReplacement(message);
+  const replacement = parseTextReplacement(message) ?? parseTextDeletion(message);
   if (!raw || !replacement) return null;
   const entries = unzipSync(new Uint8Array(raw));
   const docXml = getXml(entries, "word/document.xml");
@@ -411,7 +517,10 @@ async function editDocx(entry: FileEntry, message: string): Promise<GeneratedFil
   const updated = replaceTextNodes(docXml, "w:t", replacement);
   if (updated.count === 0) return null;
   setXml(entries, "word/document.xml", updated.xml);
-  return buildOfficeResult(entry, "docx", zipBuffer(entries), `replaced "${replacement.oldText}"`);
+  const action = replacement.newText
+    ? `replaced "${replacement.oldText}"`
+    : `removed "${replacement.oldText}"`;
+  return buildOfficeResult(entry, "docx", zipBuffer(entries), action);
 }
 
 function tabularDataFromSummary(entry: FileEntry, summary: DatasetSummary): TabularData {
@@ -426,16 +535,161 @@ function tabularDataFromSummary(entry: FileEntry, summary: DatasetSummary): Tabu
   };
 }
 
-async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFileResult | null> {
-  if (!hasChartIntent(message) || !entry.datasetSummary) return null;
-  const raw = base64Raw(entry);
-  if (!raw) return null;
+function hasCalculationIntent(message: string): boolean {
+  return /\b(formulas?|calculations?|calculate|computed?|totals?|sum|average|avg|minimum|maximum|min|max|count|commission|quota|margin|rate|kpi|metrics?|model|dashboard)\b/i.test(
+    message,
+  );
+}
+
+function excelColumnName(index: number): string {
+  let n = index;
+  let out = "";
+  while (n > 0) {
+    const mod = (n - 1) % 26;
+    out = String.fromCharCode(65 + mod) + out;
+    n = Math.floor((n - mod) / 26);
+  }
+  return out || "A";
+}
+
+function quoteSheetNameForFormula(name: string): string {
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+function cellText(value: ExcelJS.CellValue): string {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    const maybe = value as {
+      text?: unknown;
+      result?: unknown;
+      richText?: Array<{ text?: unknown }>;
+    };
+    if (typeof maybe.text === "string") return maybe.text;
+    if (maybe.result != null) return String(maybe.result);
+    if (Array.isArray(maybe.richText)) {
+      return maybe.richText.map((part) => String(part.text ?? "")).join("");
+    }
+  }
+  return "";
+}
+
+function replaceXlsxText(workbook: ExcelJS.Workbook, replacement: TextReplacement): number {
+  const oldNorm = normalizePhrase(replacement.oldText);
+  const oldRegex = new RegExp(escapeRegExp(oldNorm), "i");
+  const keywords = meaningfulTargetKeywords(oldNorm);
+  let count = 0;
+  workbook.eachSheet((sheet) => {
+    sheet.eachRow((row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const text = normalizePhrase(cellText(cell.value));
+        if (!text) return;
+        if (oldRegex.test(text)) {
+          const next = String(cellText(cell.value)).replace(
+            new RegExp(escapeRegExp(replacement.oldText), "gi"),
+            replacement.newText,
+          );
+          cell.value = next === cellText(cell.value) ? replacement.newText : next;
+          count += 1;
+          return;
+        }
+        if (keywords.length > 0 && keywords.every((word) => text.toLowerCase().includes(word))) {
+          cell.value = replacement.newText;
+          count += 1;
+        }
+      });
+    });
+  });
+  return count;
+}
+
+function deleteXlsxColumn(workbook: ExcelJS.Workbook, target: string): number {
+  const targetNorm = normalizePhrase(target).toLowerCase();
+  const keywords = meaningfulTargetKeywords(target);
+  let changed = 0;
+  workbook.eachSheet((sheet) => {
+    const headerRow = sheet.getRow(1);
+    let targetCol = 0;
+    headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      if (targetCol > 0) return;
+      const header = normalizePhrase(cellText(cell.value)).toLowerCase();
+      if (
+        header === targetNorm ||
+        (keywords.length > 0 && keywords.every((word) => header.includes(word)))
+      ) {
+        targetCol = colNumber;
+      }
+    });
+    if (targetCol > 0) {
+      sheet.spliceColumns(targetCol, 1);
+      changed += 1;
+    }
+  });
+  return changed;
+}
+
+function sourceSheetForDataset(
+  workbook: ExcelJS.Workbook,
+  summary: DatasetSummary,
+): ExcelJS.Worksheet | null {
+  if (summary.sheetName) {
+    const named = workbook.getWorksheet(summary.sheetName);
+    if (named) return named;
+  }
+  return workbook.worksheets[0] ?? null;
+}
+
+function addCalculationWorksheet(workbook: ExcelJS.Workbook, summary: DatasetSummary): number {
+  const sourceSheet = sourceSheetForDataset(workbook, summary);
+  if (!sourceSheet) return 0;
+  const numericProfiles = summary.columnProfiles.filter((profile) => profile.type === "numeric");
+  if (numericProfiles.length === 0) return 0;
+
+  const existing = workbook.getWorksheet("Ora Calculations");
+  if (existing) workbook.removeWorksheet(existing.id);
+  const sheet = workbook.addWorksheet("Ora Calculations");
+  sheet.columns = [
+    { header: "Metric", key: "metric", width: 34 },
+    { header: "Formula", key: "formula", width: 42 },
+    { header: "Value", key: "value", width: 18 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  const sourceName = quoteSheetNameForFormula(sourceSheet.name);
+  const lastRow = Math.max(2, (summary.rowCount || sourceSheet.actualRowCount || 1) + 1);
+  let row = 2;
+
+  for (const profile of numericProfiles.slice(0, 8)) {
+    const header = summary.headers[profile.index] ?? `Column ${profile.index + 1}`;
+    const col = excelColumnName(profile.index + 1);
+    const range = `${sourceName}!${col}2:${col}${lastRow}`;
+    for (const [label, formula] of [
+      [`${header} total`, `SUM(${range})`],
+      [`${header} average`, `AVERAGE(${range})`],
+      [`${header} count`, `COUNT(${range})`],
+    ] as const) {
+      sheet.getCell(row, 1).value = label;
+      sheet.getCell(row, 2).value = formula;
+      sheet.getCell(row, 3).value = { formula };
+      row += 1;
+    }
+  }
+
+  return row - 2;
+}
+
+async function addChartsWorksheet(
+  workbook: ExcelJS.Workbook,
+  entry: FileEntry,
+  message: string,
+): Promise<number> {
+  if (!entry.datasetSummary) return 0;
   const data = tabularDataFromSummary(entry, entry.datasetSummary);
   const charts = inferChartsFromTabularData(data, message, 3);
-  if (charts.length === 0) return null;
+  if (charts.length === 0) return 0;
 
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(raw as unknown as Parameters<typeof workbook.xlsx.load>[0]);
   const existing = workbook.getWorksheet("Ora Charts");
   if (existing) workbook.removeWorksheet(existing.id);
   const sheet = workbook.addWorksheet("Ora Charts");
@@ -472,14 +726,50 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   }
 
   sheet.columns = [{ width: 32 }, { width: 18 }, { width: 18 }, { width: 18 }];
+  return charts.length;
+}
+
+async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFileResult | null> {
+  const raw = base64Raw(entry);
+  if (!raw) return null;
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(raw as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const actions: string[] = [];
+
+  const deleteColumn = parseDeleteColumn(message);
+  if (deleteColumn) {
+    const changed = deleteXlsxColumn(workbook, deleteColumn);
+    if (changed > 0) actions.push(`removed ${changed} column${changed === 1 ? "" : "s"}`);
+  }
+
+  const replacement = deleteColumn
+    ? null
+    : (parseTextReplacement(message) ?? parseTextDeletion(message));
+  if (replacement) {
+    const changed = replaceXlsxText(workbook, replacement);
+    if (changed > 0) actions.push(`updated ${changed} cell${changed === 1 ? "" : "s"}`);
+  }
+
+  if (entry.datasetSummary && hasCalculationIntent(message)) {
+    const formulas = addCalculationWorksheet(workbook, entry.datasetSummary);
+    if (formulas > 0) actions.push("added an Ora Calculations worksheet with real formulas");
+  }
+
+  if (entry.datasetSummary && hasChartIntent(message)) {
+    const charts = await addChartsWorksheet(workbook, entry, message);
+    if (charts > 0) actions.push(`added ${charts} generated chart${charts === 1 ? "" : "s"}`);
+  }
+
+  if (actions.length === 0) return null;
+
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   return {
     fileName: safeFileName(entry.filename, "xlsx"),
     fileData: buffer.toString("base64"),
     mimeType: MIME_BY_TYPE.xlsx,
-    reply:
-      "I've added an Ora Charts worksheet to your original Excel workbook with generated charts and source values. Click the card below to download it.",
-    rowCount: entry.datasetSummary.rowCount,
+    reply: `I've updated the original XLSX file (${actions.join("; ")}) while preserving the workbook where possible. Click the card below to download it.`,
+    ...(entry.datasetSummary ? { rowCount: entry.datasetSummary.rowCount } : {}),
   };
 }
 

@@ -166,6 +166,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /xlsx/i,
       /spreadsheet/i,
       /workbook/i,
+      /office-layout-edit/i,
       /appsheet/i,
       /carried-docs/i,
       /ora-context-quality/i,
