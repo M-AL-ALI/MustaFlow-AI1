@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.mustaflow.app",
-      "buildNumber": "49",
+      "buildNumber": "50",
       "deploymentTarget": "16.0",
       "usesAppleSignIn": true,
       "infoPlist": {
