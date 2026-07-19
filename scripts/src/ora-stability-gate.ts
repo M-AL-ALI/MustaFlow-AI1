@@ -77,6 +77,9 @@ const ORA_FILE_HINTS = [
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*file/i,
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*document/i,
   /^artifacts\/ora-mobile\/app\/\(home\)\/index\.tsx$/,
+  // The mobile API layer hosts the Ora session/chat transport (incl. silent
+  // expired-session recovery), so any change to it is an Ora change.
+  /^artifacts\/ora-mobile\/lib\/api\.ts$/,
   /^packages\/ora-contracts\//,
   /^docs\/ora-stability-gate\.md$/,
   /^scripts\/src\/ora-stability-gate\.ts$/,
@@ -104,10 +107,14 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       // The mobile home screen hosts the entire Ora chat surface (composer,
       // attach menu, voice entry points), so any change to it is owned here.
       /app\/\(home\)\/index\.tsx$/i,
+      // Mobile API transport: session mint, chat/file sends, streaming XHR,
+      // and the silent expired-session recovery wrapper.
+      /artifacts\/ora-mobile\/lib\/api\.ts$/i,
+      /ora-session-recovery\.test\.ts$/i,
     ],
     manualWebsite: "Ask Instant + Deep prompts, identity prompts, and today's date/time.",
     manualMobile:
-      "Ask the same Instant + Deep/date prompts on the current TestFlight build when mobile code changed.",
+      "Ask the same Instant + Deep/date prompts on the current TestFlight build when mobile code changed. After leaving the app idle 30+ minutes, send another message and verify it goes through silently (no 'No active session' error, no lost message).",
   },
   {
     id: "ora-navigation-escape",
@@ -358,6 +365,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
   "lib/__tests__/ora-mobile-parity.test.ts",
+  "lib/__tests__/ora-session-recovery.test.ts",
   "lib/__tests__/safe-url.test.ts",
 ].join(" ");
 

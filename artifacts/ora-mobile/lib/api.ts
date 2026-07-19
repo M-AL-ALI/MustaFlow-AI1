@@ -1,4 +1,4 @@
-import { getAuthToken, requireAuthToken } from "./auth-client";
+import { getAuthToken, requireAuthToken, TokenUnavailableError } from "./auth-client";
 
 import type {
   AnalysisResponse,
@@ -238,6 +238,96 @@ export function getOraSession(): Promise<OraSession> {
   });
 }
 
+// ─── Silent expired-session recovery ─────────────────────────────────────────
+//
+// Ora sessions are 30-minute cookies that the OS cookie jar deletes on expiry.
+// The app creates one when the chat screen mounts, so a device left idle or
+// backgrounded past the TTL sends its next request with NO session cookie and
+// the server 401s with "No active session. Please start a session first."
+// (or "Session expired. Please start a new session." for a stale-but-present
+// cookie). ChatGPT-like behavior: never surface that raw error — mint a fresh
+// session and transparently retry the EXACT same request once. The retry
+// closure re-sends the identical body, so every field (message, history, mode,
+// language/timeZone, documentRefs, forceSearch, oraProjectId, file refs, and
+// any generation/edit context) is preserved automatically.
+
+/** Friendly copy shown only when automatic recovery itself failed. */
+export const ORA_SESSION_RETRY_FAILED_MESSAGE =
+  "Your session refreshed, but the message could not be sent. Please try again.";
+
+/**
+ * True when `err` is the server rejecting a request for a missing/expired Ora
+ * session (401/403 with the known session phrasing) — the only failure class
+ * that silent session recovery may retry.
+ */
+export function isOraSessionExpiredError(err: unknown): err is ApiRequestError {
+  return (
+    err instanceof ApiRequestError &&
+    (err.status === 401 || err.status === 403) &&
+    /no active session|session (has )?expired|start a (new )?session/i.test(err.message)
+  );
+}
+
+/**
+ * Maps an error from an Ora send path to the message the chat UI may render.
+ * Session-expiry phrasing must never reach the user — by the time an error
+ * escapes withOraSessionRecovery() it has already been rewritten, but this
+ * guard also covers any unwrapped path (e.g. future call sites).
+ */
+export function friendlyOraSendErrorMessage(err: unknown, fallback: string): string {
+  if (isOraSessionExpiredError(err)) return ORA_SESSION_RETRY_FAILED_MESSAGE;
+  return err instanceof Error ? err.message : fallback;
+}
+
+let _onOraSessionRecovered: ((session: OraSession) => void) | null = null;
+
+/**
+ * index.tsx registers a callback so a silently recovered session also updates
+ * the on-screen session state (tier accent, message counters). Pass null to
+ * unregister.
+ */
+export function setOnOraSessionRecovered(cb: ((session: OraSession) => void) | null): void {
+  _onOraSessionRecovered = cb;
+}
+
+/**
+ * Runs `request`; if it fails because the Ora session is missing/expired,
+ * creates a fresh session and retries the same request exactly once.
+ *
+ * Failure handling:
+ * - Non-session errors (quota CTAs, retryable search 503s, validation) pass
+ *   through untouched, first time and on retry.
+ * - TokenUnavailableError / NetworkError from the session mint keep their own
+ *   dedicated UX (re-sync banner, offline copy) and are rethrown as-is.
+ * - Any other recovery failure — session mint failed, or the retry hit the
+ *   session wall again — surfaces ORA_SESSION_RETRY_FAILED_MESSAGE instead of
+ *   the raw server error.
+ */
+async function withOraSessionRecovery<T>(request: () => Promise<T>): Promise<T> {
+  try {
+    return await request();
+  } catch (err) {
+    if (!isOraSessionExpiredError(err)) throw err;
+    try {
+      const fresh = await getOraSession();
+      _onOraSessionRecovered?.(fresh);
+    } catch (mintErr) {
+      if (mintErr instanceof TokenUnavailableError || mintErr instanceof NetworkError) {
+        throw mintErr;
+      }
+      throw new ApiRequestError(err.status, ORA_SESSION_RETRY_FAILED_MESSAGE, err.body);
+    }
+    try {
+      return await request();
+    } catch (retryErr) {
+      if (isOraSessionExpiredError(retryErr)) {
+        throw new ApiRequestError(retryErr.status, ORA_SESSION_RETRY_FAILED_MESSAGE, retryErr.body);
+      }
+      throw retryErr;
+    }
+  }
+}
+
 export function getOraUsage(): Promise<OraUsage> {
   return jsonRequest<OraUsage>("/api/public-ai/usage");
 }
@@ -369,18 +459,22 @@ export interface ExportFileRequest {
  * deterministic builders the website uses. No Ora quota is consumed.
  */
 export async function exportFile(req: ExportFileRequest): Promise<GeneratedFile> {
-  const res = await jsonRequest<{ fileName: string; fileData: string; mimeType: string }>(
-    "/api/public-ai/export-file",
-    { method: "POST", body: JSON.stringify(req) },
+  const res = await withOraSessionRecovery(() =>
+    jsonRequest<{ fileName: string; fileData: string; mimeType: string }>(
+      "/api/public-ai/export-file",
+      { method: "POST", body: JSON.stringify(req) },
+    ),
   );
   return { ...res, format: req.format };
 }
 
 export function sendChat(req: ChatRequest): Promise<ChatResponse> {
-  return jsonRequest<ChatResponse>("/api/public-ai/chat", {
-    method: "POST",
-    body: JSON.stringify(req),
-  });
+  return withOraSessionRecovery(() =>
+    jsonRequest<ChatResponse>("/api/public-ai/chat", {
+      method: "POST",
+      body: JSON.stringify(req),
+    }),
+  );
 }
 
 export interface GenerateFileRequest {
@@ -406,16 +500,18 @@ export interface GenerateFileRequest {
  * the rolling-window message quota (server-enforced).
  */
 export function generateFile(req: GenerateFileRequest): Promise<ChatResponse> {
-  return jsonRequest<ChatResponse>("/api/public-ai/generate-file", {
-    method: "POST",
-    body: JSON.stringify({
-      message: req.message,
-      messages: req.messages,
-      format: req.format,
-      ...(req.language ? { language: req.language } : {}),
-      documentRefs: req.documentRefs ?? [],
+  return withOraSessionRecovery(() =>
+    jsonRequest<ChatResponse>("/api/public-ai/generate-file", {
+      method: "POST",
+      body: JSON.stringify({
+        message: req.message,
+        messages: req.messages,
+        format: req.format,
+        ...(req.language ? { language: req.language } : {}),
+        documentRefs: req.documentRefs ?? [],
+      }),
     }),
-  });
+  );
 }
 
 // ─── Stream diagnostics ──────────────────────────────────────────────────────
@@ -833,30 +929,34 @@ export async function streamChatNative(
   }
 }
 
-export async function uploadFile(file: {
+export function uploadFile(file: {
   uri: string;
   name: string;
   type: string;
 }): Promise<UploadResponse> {
-  const form = new FormData();
-  // React Native FormData accepts { uri, name, type } file objects.
-  form.append("file", {
-    uri: file.uri,
-    name: file.name,
-    type: file.type,
-  } as unknown as Blob);
-  // Multipart upload bypasses jsonRequest(), so it must opt into the same
-  // fail-closed auth as the other file routes in pathRequiresAuth(): a signed-in
-  // user with a temporarily-missing token throws instead of uploading as anon.
-  const headers = await authHeadersRequired();
-  const res = await fetchOrThrow(url("/api/public-ai/upload"), {
-    method: "POST",
-    body: form,
-    headers,
-    credentials: "include",
+  return withOraSessionRecovery(async () => {
+    // Rebuilt inside the retry closure — RN FormData may not be re-sendable
+    // after a failed request.
+    const form = new FormData();
+    // React Native FormData accepts { uri, name, type } file objects.
+    form.append("file", {
+      uri: file.uri,
+      name: file.name,
+      type: file.type,
+    } as unknown as Blob);
+    // Multipart upload bypasses jsonRequest(), so it must opt into the same
+    // fail-closed auth as the other file routes in pathRequiresAuth(): a signed-in
+    // user with a temporarily-missing token throws instead of uploading as anon.
+    const headers = await authHeadersRequired();
+    const res = await fetchOrThrow(url("/api/public-ai/upload"), {
+      method: "POST",
+      body: form,
+      headers,
+      credentials: "include",
+    });
+    if (!res.ok) await parseError(res);
+    return (await res.json()) as UploadResponse;
   });
-  if (!res.ok) await parseError(res);
-  return (await res.json()) as UploadResponse;
 }
 
 export function analyzeImage(
@@ -865,10 +965,12 @@ export function analyzeImage(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   language?: string,
 ): Promise<AnalysisResponse> {
-  return jsonRequest<AnalysisResponse>("/api/public-ai/image-analysis", {
-    method: "POST",
-    body: JSON.stringify({ imageRef, message, messages, language }),
-  });
+  return withOraSessionRecovery(() =>
+    jsonRequest<AnalysisResponse>("/api/public-ai/image-analysis", {
+      method: "POST",
+      body: JSON.stringify({ imageRef, message, messages, language }),
+    }),
+  );
 }
 
 export function analyzeDataset(
@@ -877,10 +979,12 @@ export function analyzeDataset(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   language?: string,
 ): Promise<DatasetAnalysisResponse> {
-  return jsonRequest<DatasetAnalysisResponse>("/api/public-ai/dataset-analysis", {
-    method: "POST",
-    body: JSON.stringify({ fileRef, message, messages, language }),
-  });
+  return withOraSessionRecovery(() =>
+    jsonRequest<DatasetAnalysisResponse>("/api/public-ai/dataset-analysis", {
+      method: "POST",
+      body: JSON.stringify({ fileRef, message, messages, language }),
+    }),
+  );
 }
 
 export function analyzeDocument(
@@ -889,10 +993,12 @@ export function analyzeDocument(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   language?: string,
 ): Promise<AnalysisResponse> {
-  return jsonRequest<AnalysisResponse>("/api/public-ai/file-analysis", {
-    method: "POST",
-    body: JSON.stringify({ fileRef, message, messages, language }),
-  });
+  return withOraSessionRecovery(() =>
+    jsonRequest<AnalysisResponse>("/api/public-ai/file-analysis", {
+      method: "POST",
+      body: JSON.stringify({ fileRef, message, messages, language }),
+    }),
+  );
 }
 
 /** Transcribe raw audio bytes (Whisper). Returns recognized text. */

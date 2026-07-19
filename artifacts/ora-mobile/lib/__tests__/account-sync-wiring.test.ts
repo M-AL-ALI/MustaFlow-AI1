@@ -195,7 +195,9 @@ describe("Mobile auth-stability guard", () => {
   });
 
   it("uploadFile (multipart, bypasses jsonRequest) uses authHeadersRequired", () => {
-    const fnStart = api.indexOf("export async function uploadFile(");
+    // Non-async since the session-recovery wrapper landed: uploadFile returns
+    // withOraSessionRecovery(async () => { ... }) directly.
+    const fnStart = api.indexOf("export function uploadFile(");
     expect(fnStart).toBeGreaterThan(-1);
     const nextExport = api.indexOf("\nexport ", fnStart + 1);
     const fnBody = nextExport > fnStart ? api.slice(fnStart, nextExport) : api.slice(fnStart);

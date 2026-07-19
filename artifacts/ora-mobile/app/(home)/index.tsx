@@ -138,6 +138,8 @@ import {
   saveOraMemory,
   clientTimeZone,
   sendChat,
+  setOnOraSessionRecovered,
+  friendlyOraSendErrorMessage,
   notifyStreamFallbackCalled,
   streamChatNative,
   synthesizeSpeech,
@@ -728,6 +730,13 @@ export default function OraChatScreen() {
           setCurrentSessionTier(null);
         }
       });
+    // When the API layer silently recovers an expired Ora session mid-send
+    // (idle > 30 min), mirror the fresh session into UI state so the tier
+    // accent and message counters stay accurate.
+    setOnOraSessionRecovered((s) => {
+      setSession(s);
+      setCurrentSessionTier(s.tier ?? null, !!s.isPaid);
+    });
     loadPreferences();
     // Preload projects so the active-scope banner can resolve a project's name
     // even before the chats drawer is opened. Skip for anonymous users.
@@ -739,6 +748,11 @@ export default function OraChatScreen() {
         })
         .catch(() => {});
     }
+    return () => {
+      // Drop the recovery listener on unmount so a recovery completing after
+      // teardown never calls setState on an unmounted screen.
+      setOnOraSessionRecovered(null);
+    };
   }, [loadPreferences, isSignedIn, isLoaded]);
 
   // Drop back to standalone if the active project no longer exists (deleted here
@@ -1275,7 +1289,10 @@ export default function OraChatScreen() {
         }
       } catch (err) {
         if (abortController.signal.aborted) return;
-        const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
+        // Session-expiry phrasing is rewritten by the API layer's silent
+        // recovery; this guard ensures the raw server wording can never render
+        // even from an unwrapped path.
+        const msg = friendlyOraSendErrorMessage(err, "Something went wrong. Try again.");
         // A forced "Retry live search" that still failed returns a retryable 503
         // with searchRetryable in the body. Keep the user's message and re-surface
         // the Retry affordance on the error bubble instead of a dead banner.
@@ -1379,7 +1396,7 @@ export default function OraChatScreen() {
         scrollToEnd();
         void persist(finalMsgs, turnIsTemporary);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Couldn't create that file. Try again.";
+        const msg = friendlyOraSendErrorMessage(err, "Couldn't create that file. Try again.");
         setMessages((prev) =>
           prev.map((m) =>
             m.id === pendingId
