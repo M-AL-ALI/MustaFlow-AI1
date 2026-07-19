@@ -101,6 +101,9 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /public-ai\/(chat|orchestrator|prompt|expertise|model-router)/i,
       /ora-smoke\.test\.ts$/i,
       /use-ora-chat/i,
+      // The mobile home screen hosts the entire Ora chat surface (composer,
+      // attach menu, voice entry points), so any change to it is owned here.
+      /app\/\(home\)\/index\.tsx$/i,
     ],
     manualWebsite: "Ask Instant + Deep prompts, identity prompts, and today's date/time.",
     manualMobile:
@@ -193,7 +196,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualWebsite:
       "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions.",
     manualMobile:
-      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
+      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed. From the attach menu, tap Browse files and confirm the iOS Files picker actually opens (regression: picker presented while the menu modal was still dismissing fails silently and poisons all later attempts until app restart); also confirm Take photo and Photo library still open after the menu closes. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
   },
   {
     id: "conversation-history",
