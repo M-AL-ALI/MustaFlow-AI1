@@ -1,3 +1,5 @@
+import { planUploadedFileRequest } from "./file-edit-planner.js";
+
 /**
  * Canonical Ora identity block — the shared source of truth for Ora's brand
  * identity across every surface: chat, support, realtime voice, file/image/
@@ -442,6 +444,8 @@ export function detectFileRequest(text: string): FileFormat | null {
  */
 export function isUploadedFileModificationRequest(text: string): boolean {
   if (isPastedReferenceAnalysisRequest(text)) return false;
+  const plan = planUploadedFileRequest(text);
+  if (plan.requiresFileOutput) return true;
   return (
     (UPLOADED_FILE_EDIT_VERB_PATTERN.test(text) && UPLOADED_FILE_TARGET_PATTERN.test(text)) ||
     UPLOADED_FILE_MAKE_CHANGE_PATTERN.test(text)

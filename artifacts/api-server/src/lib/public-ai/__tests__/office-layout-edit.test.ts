@@ -211,6 +211,77 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(slide1).not.toContain("Old Pricing");
   });
 
+  it("moves PPTX slides from natural reorder wording", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Move slide 2 before slide 1 and return the PowerPoint",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const presentationXml = strFromU8(entries["ppt/presentation.xml"]!);
+    expect(presentationXml.indexOf('r:id="rId2"')).toBeLessThan(
+      presentationXml.indexOf('r:id="rId1"'),
+    );
+  });
+
+  it("adds a new PPTX slide while preserving the original package", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Add a slide after slide 1 titled Product Roadmap with bullets Launch; Measure",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    expect(entries["ppt/slides/slide3.xml"]).toBeDefined();
+    expect(strFromU8(entries["ppt/slides/slide3.xml"]!)).toContain("Product Roadmap");
+    expect(strFromU8(entries["ppt/presentation.xml"]).match(/<p:sldId\b/g)?.length).toBe(3);
+  });
+
+  it("adds text to an existing PPTX slide", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Add bullet Forecast risk to slide 1 and return the deck",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    expect(strFromU8(entries["ppt/slides/slide1.xml"]!)).toContain("Forecast risk");
+  });
+
   it("polishes PPTX text for professionalize requests instead of falling back to a report", async () => {
     const sessionId = crypto.randomUUID();
     const ref = storeRawOffice({
@@ -326,6 +397,38 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     const docXml = strFromU8(entries["word/document.xml"]!);
     expect(docXml).toContain("Executive summary");
     expect(docXml).not.toContain("Old conclusion");
+  });
+
+  it("adds new DOCX sections from natural insert wording", async () => {
+    const sessionId = crypto.randomUUID();
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      "word/document.xml":
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Executive summary</w:t></w:r></w:p></w:body></w:document>',
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "quarterly-report.docx",
+      rawFileType: "docx",
+      base64,
+      extractedText: "Executive summary",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message:
+        "Add a section called Risk Notes with content Track renewal risk and return the document",
+      format: "docx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const entries = unzipBase64(result!.fileData);
+    const docXml = strFromU8(entries["word/document.xml"]!);
+    expect(docXml).toContain("Executive summary");
+    expect(docXml).toContain("Risk Notes");
+    expect(docXml).toContain("Track renewal risk");
   });
 
   it("adds an Ora Charts worksheet to an uploaded XLSX workbook", async () => {
@@ -523,5 +626,74 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(edited?.views[0]?.state).toBe("frozen");
     expect(edited?.autoFilter).toBeTruthy();
     expect(edited?.getCell("A1").font?.bold).toBe(true);
+  });
+
+  it("adds workbook sheets, columns, and rows from natural edit requests", async () => {
+    const sessionId = crypto.randomUUID();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Pipeline");
+    sheet.addRow(["Region", "Revenue"]);
+    sheet.addRow(["North", 120]);
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pipeline.xlsx",
+      rawFileType: "xlsx",
+      base64: raw.toString("base64"),
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message:
+        "Add a sheet named Summary, add a Status column, add row West, 150, Open, and return the Excel file",
+      format: "xlsx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(
+      Buffer.from(result!.fileData, "base64") as unknown as Parameters<typeof out.xlsx.load>[0],
+    );
+    expect(out.getWorksheet("Summary")).toBeDefined();
+    const edited = out.getWorksheet("Pipeline");
+    expect(edited?.getCell("C1").value).toBe("Status");
+    expect(edited?.getCell("A3").value).toBe("West");
+  });
+
+  it("renames, sorts, and deduplicates uploaded XLSX workbooks", async () => {
+    const sessionId = crypto.randomUUID();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Pipeline");
+    sheet.addRow(["Region", "Revenue"]);
+    sheet.addRow(["West", 150]);
+    sheet.addRow(["North", 120]);
+    sheet.addRow(["West", 150]);
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pipeline.xlsx",
+      rawFileType: "xlsx",
+      base64: raw.toString("base64"),
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message:
+        "Rename the sheet to Clean Pipeline, sort by Region, dedupe duplicate rows, and return the Excel file",
+      format: "xlsx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(
+      Buffer.from(result!.fileData, "base64") as unknown as Parameters<typeof out.xlsx.load>[0],
+    );
+    const edited = out.getWorksheet("Clean Pipeline");
+    expect(edited).toBeDefined();
+    expect(edited?.actualRowCount).toBe(3);
+    expect(edited?.getCell("A2").value).toBe("North");
+    expect(edited?.getCell("A3").value).toBe("West");
   });
 });

@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { planUploadedFileRequest } from "./file-edit-planner.js";
 import { inferChartsFromTabularData, renderChartPng } from "./file-charts.js";
 import { resolveFileEntry } from "./file-context-store.js";
 import type { DatasetSummary } from "./dataset-extract.js";
@@ -112,6 +113,23 @@ interface SlideTitleChange {
   newText: string;
 }
 
+interface SlideInsertion {
+  title: string;
+  bodyLines: string[];
+  afterSlideNumber?: number | null;
+}
+
+interface SlideTextAddition {
+  slideNumber: number;
+  text: string;
+}
+
+interface SlideMove {
+  slideNumber: number;
+  targetSlideNumber: number;
+  placement: "before" | "after";
+}
+
 function cleanReplacementSide(value: string): string {
   return normalizePhrase(
     value
@@ -216,6 +234,79 @@ function parseSlideTitleChange(message: string): SlideTitleChange | null {
   return null;
 }
 
+function cleanGeneratedText(value: string): string {
+  return normalizePhrase(
+    value
+      .replace(/\b(?:and\s+)?(?:return|send|give)\s+(?:it|the file|the deck|the document).*$/i, "")
+      .replace(/^["'â€œâ€]+|["'â€œâ€.,;:]+$/g, ""),
+  );
+}
+
+function parseSlideInsertion(message: string): SlideInsertion | null {
+  if (!/\b(add|insert|create|make)\b/i.test(message) || !/\bslide\b/i.test(message)) {
+    return null;
+  }
+  const afterMatch = /\bafter\s+slide\s+(\d{1,3})\b/i.exec(message);
+  const titleMatch =
+    /\b(?:title|titled|called|named|about)\s+["â€œ]?(.{2,180}?)(?:["â€]|\s+\b(?:with|and|then|after|before|return|send|give)\b|$)/i.exec(
+      message,
+    ) ??
+    /\bslide\s+(?:for|about)\s+["â€œ]?(.{2,180}?)(?:["â€]|\s+\b(?:with|and|then|after|before|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const bodyMatch =
+    /\b(?:with|include|add)\s+(?:bullets?|content|text)\s+["â€œ]?(.{2,260}?)(?:["â€]|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const title = cleanGeneratedText(titleMatch?.[1] ?? "New Slide");
+  const body = cleanGeneratedText(bodyMatch?.[1] ?? "");
+  return {
+    title: title || "New Slide",
+    bodyLines: body
+      ? body
+          .split(/\s*(?:;|\n|\u2022|\s+-\s+)\s*/)
+          .map(cleanGeneratedText)
+          .filter(Boolean)
+          .slice(0, 6)
+      : [],
+    afterSlideNumber: afterMatch ? Number.parseInt(afterMatch[1]!, 10) : null,
+  };
+}
+
+function parseSlideTextAddition(message: string): SlideTextAddition | null {
+  if (!/\b(add|append|insert|include|put)\b/i.test(message)) return null;
+  const slideNumber = targetSlideNumber(message);
+  if (!slideNumber) return null;
+  const textMatch =
+    /\b(?:add|append|insert|include|put)\s+(?:a\s+)?(?:bullet|note|text|line|point)\s+["â€œ]?(.{2,240}?)(?:["â€]|\s+\b(?:to|on|in)\s+slide\s+\d+|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    ) ??
+    /\b(?:to|on|in)\s+slide\s+\d+\s+(?:add|append|insert|include|put)\s+["â€œ]?(.{2,240}?)(?:["â€]|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const text = cleanGeneratedText(textMatch?.[1] ?? "");
+  return text ? { slideNumber, text } : null;
+}
+
+function parseSlideMove(message: string): SlideMove | null {
+  if (!/\b(move|reorder|rearrange|shift)\b/i.test(message) || !/\bslide\b/i.test(message)) {
+    return null;
+  }
+  const match =
+    /\b(?:move|reorder|rearrange|shift)\s+slide\s+(\d{1,3})\s+(before|after)\s+slide\s+(\d{1,3})\b/i.exec(
+      message,
+    );
+  if (!match) return null;
+  const slideNumber = Number.parseInt(match[1]!, 10);
+  const targetSlideNumber = Number.parseInt(match[3]!, 10);
+  if (!Number.isFinite(slideNumber) || !Number.isFinite(targetSlideNumber)) return null;
+  return {
+    slideNumber,
+    placement: match[2]!.toLowerCase() === "before" ? "before" : "after",
+    targetSlideNumber,
+  };
+}
+
 function parseDeleteColumn(message: string): string | null {
   if (!/\b(delete|remove|drop)\b/i.test(message) || !/\b(column|field)\b/i.test(message)) {
     return null;
@@ -230,6 +321,90 @@ function parseDeleteColumn(message: string): string | null {
     if (target && meaningfulTargetKeywords(target).length > 0) return target;
   }
   return null;
+}
+
+function parseAddColumn(message: string): string | null {
+  if (!/\b(add|insert|create)\b/i.test(message) || !/\b(column|field)\b/i.test(message)) {
+    return null;
+  }
+  const patterns = [
+    /\b(?:add|insert|create)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?(?:column|field)\s+(?:called|named|for)?\s*["â€œ]?([^"â€.,;!?]{2,80})["â€]?/i,
+    /\b(?:add|insert|create)\s+["â€œ]?([^"â€.,;!?]{2,80})["â€]?\s+(?:column|field)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    const target = cleanReplacementSide(match?.[1] ?? "").replace(/^(?:a|an|the|new)\s+/i, "");
+    if (target && meaningfulTargetKeywords(target).length > 0) return target;
+  }
+  return null;
+}
+
+function parseAddRow(message: string): string[] | null {
+  if (!/\b(add|insert|append)\b/i.test(message) || !/\b(row|record)\b/i.test(message)) return null;
+  const match =
+    /\b(?:add|insert|append)\s+(?:a\s+|the\s+)?(?:new\s+)?(?:row|record)\s+(?:with|for)?\s*["â€œ]?(.{2,240}?)(?:["â€]|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const raw = cleanGeneratedText(match?.[1] ?? "");
+  if (!raw) return null;
+  const values = raw
+    .split(/\s*(?:,|;|\|)\s*/)
+    .map(cleanGeneratedText)
+    .filter(Boolean)
+    .slice(0, 50);
+  return values.length > 0 ? values : null;
+}
+
+function parseAddSheetName(message: string): string | null {
+  if (!/\b(add|insert|create)\b/i.test(message) || !/\b(sheet|worksheet|tab)\b/i.test(message)) {
+    return null;
+  }
+  const match =
+    /\b(?:add|insert|create)\s+(?:a\s+|the\s+)?(?:new\s+)?(?:sheet|worksheet|tab)\s+(?:called|named|for)?\s*["â€œ]?([^"â€.,;!?]{2,80})["â€]?/i.exec(
+      message,
+    ) ??
+    /\b(?:sheet|worksheet|tab)\s+(?:called|named)\s+["â€œ]?([^"â€.,;!?]{2,80})["â€]?/i.exec(
+      message,
+    );
+  const name = cleanReplacementSide(match?.[1] ?? "");
+  return name ? name.slice(0, 31) : null;
+}
+
+function parseRenameSheet(message: string): { oldName?: string; newName: string } | null {
+  if (
+    !/\b(rename|retitle|change)\b/i.test(message) ||
+    !/\b(sheet|worksheet|tab)\b/i.test(message)
+  ) {
+    return null;
+  }
+  const explicit =
+    /\b(?:rename|retitle|change)\s+(?:the\s+)?(?:sheet|worksheet|tab)\s+["â€œ]?([^"â€,]{2,80})["â€]?\s+(?:to|as)\s+["â€œ]?(.{2,80}?)(?:["â€]|,|\s+\b(?:and|then|sort|dedupe|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  if (explicit) {
+    const oldName = cleanReplacementSide(explicit[1] ?? "");
+    const newName = cleanGeneratedText(explicit[2] ?? "").slice(0, 31);
+    return newName ? { oldName, newName } : null;
+  }
+  const simple =
+    /\b(?:rename|retitle|change)\s+(?:the\s+)?(?:sheet|worksheet|tab)\s+(?:to|as)\s+["â€œ]?(.{2,80}?)(?:["â€]|,|\s+\b(?:and|then|sort|dedupe|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const newName = cleanGeneratedText(simple?.[1] ?? "").slice(0, 31);
+  return newName ? { newName } : null;
+}
+
+function parseSortColumn(message: string): string | null {
+  if (!/\b(sort|order)\b/i.test(message)) return null;
+  const match =
+    /\b(?:sort|order)\s+(?:by|on)\s+(?:the\s+)?(?:column\s+)?["â€œ]?([^"â€.,;!?]{2,80})["â€]?/i.exec(
+      message,
+    ) ??
+    /\b(?:sort|order)\s+(?:the\s+)?(?:sheet|workbook|spreadsheet)\s+by\s+["â€œ]?([^"â€.,;!?]{2,80})["â€]?/i.exec(
+      message,
+    );
+  const target = cleanReplacementSide(match?.[1] ?? "");
+  return target && meaningfulTargetKeywords(target).length > 0 ? target : null;
 }
 
 function shortenText(value: string): string | null {
@@ -394,6 +569,46 @@ function removeContentTypeOverride(entries: ZipEntries, partName: string): void 
   );
 }
 
+function addContentTypeOverride(entries: ZipEntries, partName: string, contentType: string): void {
+  const contentTypes = getXml(entries, "[Content_Types].xml");
+  if (!contentTypes) return;
+  const normalized = partName.startsWith("/") ? partName : `/${partName}`;
+  if (contentTypes.includes(`PartName="${normalized}"`)) return;
+  setXml(
+    entries,
+    "[Content_Types].xml",
+    contentTypes.replace(
+      "</Types>",
+      `<Override PartName="${xmlEscape(normalized)}" ContentType="${xmlEscape(contentType)}"/></Types>`,
+    ),
+  );
+}
+
+function nextSlidePartNumber(entries: ZipEntries): number {
+  let max = 0;
+  for (const path of Object.keys(entries)) {
+    const match = /^ppt\/slides\/slide(\d+)\.xml$/i.exec(path);
+    if (match) max = Math.max(max, Number.parseInt(match[1]!, 10));
+  }
+  return max + 1;
+}
+
+function nextPresentationRelationshipId(relsXml: string): string {
+  let max = 0;
+  for (const match of relsXml.matchAll(/\bId="rId(\d+)"/g)) {
+    max = Math.max(max, Number.parseInt(match[1]!, 10));
+  }
+  return `rId${max + 1}`;
+}
+
+function nextPresentationSlideId(presentationXml: string): number {
+  let max = 255;
+  for (const match of presentationXml.matchAll(/<p:sldId\b[^>]*\bid="(\d+)"/g)) {
+    max = Math.max(max, Number.parseInt(match[1]!, 10));
+  }
+  return max + 1;
+}
+
 function deletePptxSlide(entries: ZipEntries, slideNumber: number): number {
   const slides = slideOrder(entries);
   const target = slides[slideNumber - 1];
@@ -424,6 +639,136 @@ function deletePptxSlide(entries: ZipEntries, slideNumber: number): number {
   const relPath = `${pathDir(target.path)}/_rels/${pathBase(target.path)}.rels`;
   delete entries[relPath];
   removeContentTypeOverride(entries, target.path);
+  return 1;
+}
+
+function movePptxSlide(entries: ZipEntries, move: SlideMove): number {
+  const slides = slideOrder(entries);
+  const fromIndex = move.slideNumber - 1;
+  const targetIndex = move.targetSlideNumber - 1;
+  if (
+    fromIndex < 0 ||
+    targetIndex < 0 ||
+    fromIndex >= slides.length ||
+    targetIndex >= slides.length
+  ) {
+    return 0;
+  }
+  if (fromIndex === targetIndex) return 0;
+  const presentationXml = getXml(entries, "ppt/presentation.xml");
+  if (!presentationXml) return 0;
+
+  const slideTags = Array.from(
+    presentationXml.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/?>/g),
+  ).map((match) => ({ rId: match[1]!, tag: match[0] }));
+  const moving = slideTags.splice(fromIndex, 1)[0];
+  if (!moving) return 0;
+  const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  const insertAt = move.placement === "before" ? adjustedTarget : adjustedTarget + 1;
+  slideTags.splice(Math.max(0, Math.min(insertAt, slideTags.length)), 0, moving);
+
+  const nextList = slideTags.map((slide) => slide.tag).join("");
+  setXml(
+    entries,
+    "ppt/presentation.xml",
+    presentationXml.replace(
+      /<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/,
+      `<p:sldIdLst>${nextList}</p:sldIdLst>`,
+    ),
+  );
+  return 1;
+}
+
+function replaceSlideTextForInsertedSlide(xml: string, insertion: SlideInsertion): string {
+  let index = 0;
+  const bodyLines =
+    insertion.bodyLines.length > 0 ? insertion.bodyLines : ["Add supporting details here."];
+  return xml.replace(
+    /(<a:t\b[^>]*>)([\s\S]*?)(<\/a:t>)/g,
+    (full, open: string, _inner: string, close: string) => {
+      const next =
+        index === 0 ? insertion.title : bodyLines[Math.min(index - 1, bodyLines.length - 1)];
+      index += 1;
+      return `${open}${xmlEscape(next)}${close}`;
+    },
+  );
+}
+
+function insertPptxSlide(entries: ZipEntries, insertion: SlideInsertion): number {
+  const slides = slideOrder(entries);
+  const template =
+    slides[
+      Math.max(0, Math.min((insertion.afterSlideNumber ?? slides.length) - 1, slides.length - 1))
+    ];
+  const presentationXml = getXml(entries, "ppt/presentation.xml");
+  const relsXml = getXml(entries, "ppt/_rels/presentation.xml.rels");
+  if (!template || !presentationXml || !relsXml) return 0;
+  const templateXml = getXml(entries, template.path);
+  if (!templateXml) return 0;
+
+  const nextPartNumber = nextSlidePartNumber(entries);
+  const nextPath = `ppt/slides/slide${nextPartNumber}.xml`;
+  const nextRelPath = `ppt/slides/_rels/slide${nextPartNumber}.xml.rels`;
+  const templateRelPath = `${pathDir(template.path)}/_rels/${pathBase(template.path)}.rels`;
+  const nextRId = nextPresentationRelationshipId(relsXml);
+  const nextSlideId = nextPresentationSlideId(presentationXml);
+  const nextSlideXml = replaceSlideTextForInsertedSlide(templateXml, insertion);
+
+  setXml(entries, nextPath, nextSlideXml);
+  if (entries[templateRelPath]) {
+    entries[nextRelPath] = new Uint8Array(entries[templateRelPath]!);
+  }
+  addContentTypeOverride(
+    entries,
+    nextPath,
+    "application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
+  );
+
+  const relTag = `<Relationship Id="${nextRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${nextPartNumber}.xml"/>`;
+  setXml(
+    entries,
+    "ppt/_rels/presentation.xml.rels",
+    relsXml.replace("</Relationships>", `${relTag}</Relationships>`),
+  );
+
+  const insertTag = `<p:sldId id="${nextSlideId}" r:id="${nextRId}"/>`;
+  const slideTags = Array.from(
+    presentationXml.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/?>/g),
+  ).map((match) => ({ rId: match[1]!, tag: match[0] }));
+  const insertIndex = Math.max(
+    0,
+    Math.min(insertion.afterSlideNumber ?? slides.length, slideTags.length),
+  );
+  slideTags.splice(insertIndex, 0, { rId: nextRId, tag: insertTag });
+  const nextList = slideTags.map((slide) => slide.tag).join("");
+  setXml(
+    entries,
+    "ppt/presentation.xml",
+    presentationXml.replace(
+      /<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/,
+      `<p:sldIdLst>${nextList}</p:sldIdLst>`,
+    ),
+  );
+  return 1;
+}
+
+function addPptxTextToSlide(entries: ZipEntries, addition: SlideTextAddition): number {
+  const slide = slideOrder(entries)[addition.slideNumber - 1];
+  if (!slide) return 0;
+  const xml = getXml(entries, slide.path);
+  if (!xml) return 0;
+  let changed = false;
+  const updated = xml.replace(
+    /(<a:t\b[^>]*>)([\s\S]*?)(<\/a:t>)(?![\s\S]*<a:t\b)/,
+    (full, open: string, inner: string, close: string) => {
+      changed = true;
+      const text = xmlUnescape(inner);
+      const next = text ? `${text}\n${addition.text}` : addition.text;
+      return `${open}${xmlEscape(next)}${close}`;
+    },
+  );
+  if (!changed) return 0;
+  setXml(entries, slide.path, updated);
   return 1;
 }
 
@@ -489,6 +834,57 @@ function professionalizePptx(entries: ZipEntries): number {
   return count;
 }
 
+function parseDocxAddition(message: string): { heading?: string; content: string } | null {
+  if (!/\b(add|insert|append|include|create)\b/i.test(message)) return null;
+  if (
+    !/\b(section|paragraph|note|text|summary|recommendation|conclusion|appendix)\b/i.test(message)
+  ) {
+    return null;
+  }
+  const headingMatch =
+    /\b(?:section|heading|title)\s+["â€œ]?(.{2,120}?)(?:["â€]|\s+\b(?:with|and|then|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const contentMatch =
+    /\b(?:with|saying|that\s+says|content|text)\s+["â€œ]?(.{2,260}?)(?:["â€]|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    ) ??
+    /\b(?:add|insert|append|include)\s+(?:a\s+)?(?:section|paragraph|note|text)\s+(?:about|for)?\s*["â€œ]?(.{2,260}?)(?:["â€]|\s+\b(?:and|then|return|send|give)\b|$)/i.exec(
+      message,
+    );
+  const heading = cleanGeneratedText(headingMatch?.[1] ?? "");
+  const content = cleanGeneratedText(contentMatch?.[1] ?? "");
+  if (!content && !heading) return null;
+  return {
+    ...(heading ? { heading } : {}),
+    content: content || heading || "Additional notes",
+  };
+}
+
+function buildDocxParagraphXml(text: string, style?: "heading"): string {
+  const styleXml = style ? '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>' : "";
+  return `<w:p>${styleXml}<w:r><w:t>${xmlEscape(text)}</w:t></w:r></w:p>`;
+}
+
+function appendDocxContent(
+  docXml: string,
+  addition: { heading?: string; content: string },
+): {
+  xml: string;
+  count: number;
+} {
+  const bodyClose = "</w:body>";
+  if (!docXml.includes(bodyClose)) return { xml: docXml, count: 0 };
+  const paragraphs = [
+    ...(addition.heading ? [buildDocxParagraphXml(addition.heading, "heading")] : []),
+    buildDocxParagraphXml(addition.content),
+  ];
+  return {
+    xml: docXml.replace(bodyClose, `${paragraphs.join("")}${bodyClose}`),
+    count: paragraphs.length,
+  };
+}
+
 function base64Raw(entry: FileEntry): Buffer | null {
   if (!entry.rawBase64 || !entry.rawFileType) return null;
   try {
@@ -521,11 +917,25 @@ async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFil
   const raw = base64Raw(entry);
   if (!raw) return null;
   const entries = unzipSync(new Uint8Array(raw));
+  const plan = planUploadedFileRequest(message);
   const deleteSlide = parseDeleteSlide(message);
   if (deleteSlide) {
     const changed = deletePptxSlide(entries, deleteSlide);
     if (changed > 0) {
       return buildOfficeResult(entry, "pptx", zipBuffer(entries), `removed slide ${deleteSlide}`);
+    }
+  }
+
+  const slideMove = parseSlideMove(message);
+  if (slideMove) {
+    const changed = movePptxSlide(entries, slideMove);
+    if (changed > 0) {
+      return buildOfficeResult(
+        entry,
+        "pptx",
+        zipBuffer(entries),
+        `moved slide ${slideMove.slideNumber} ${slideMove.placement} slide ${slideMove.targetSlideNumber}`,
+      );
     }
   }
 
@@ -539,6 +949,27 @@ async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFil
         zipBuffer(entries),
         `renamed slide ${titleChange.slideNumber}`,
       );
+    }
+  }
+
+  const slideTextAddition = parseSlideTextAddition(message);
+  if (slideTextAddition) {
+    const changed = addPptxTextToSlide(entries, slideTextAddition);
+    if (changed > 0) {
+      return buildOfficeResult(
+        entry,
+        "pptx",
+        zipBuffer(entries),
+        `added text to slide ${slideTextAddition.slideNumber}`,
+      );
+    }
+  }
+
+  const slideInsertion = parseSlideInsertion(message);
+  if (slideInsertion && (plan.operations.includes("add") || plan.operations.includes("insert"))) {
+    const changed = insertPptxSlide(entries, slideInsertion);
+    if (changed > 0) {
+      return buildOfficeResult(entry, "pptx", zipBuffer(entries), `added a new slide`);
     }
   }
 
@@ -588,6 +1019,7 @@ async function editDocx(entry: FileEntry, message: string): Promise<GeneratedFil
   const entries = unzipSync(new Uint8Array(raw));
   const docXml = getXml(entries, "word/document.xml");
   if (!docXml) return null;
+  const plan = planUploadedFileRequest(message);
   if (replacement) {
     const updated = replaceTextNodes(docXml, "w:t", replacement);
     if (updated.count > 0) {
@@ -596,6 +1028,20 @@ async function editDocx(entry: FileEntry, message: string): Promise<GeneratedFil
         ? `replaced "${replacement.oldText}"`
         : `removed "${replacement.oldText}"`;
       return buildOfficeResult(entry, "docx", zipBuffer(entries), action);
+    }
+  }
+
+  const addition = parseDocxAddition(message);
+  if (addition && (plan.operations.includes("add") || plan.operations.includes("insert"))) {
+    const updated = appendDocxContent(docXml, addition);
+    if (updated.count > 0) {
+      setXml(entries, "word/document.xml", updated.xml);
+      return buildOfficeResult(
+        entry,
+        "docx",
+        zipBuffer(entries),
+        `added ${updated.count} document item${updated.count === 1 ? "" : "s"}`,
+      );
     }
   }
 
@@ -719,6 +1165,121 @@ function deleteXlsxColumn(workbook: ExcelJS.Workbook, target: string): number {
       sheet.spliceColumns(targetCol, 1);
       changed += 1;
     }
+  });
+  return changed;
+}
+
+function addXlsxColumn(workbook: ExcelJS.Workbook, header: string): number {
+  let changed = 0;
+  workbook.eachSheet((sheet) => {
+    const maxCol = Math.max(1, sheet.actualColumnCount || sheet.columnCount || 1);
+    const headerRow = sheet.getRow(1);
+    let exists = false;
+    headerRow.eachCell({ includeEmpty: false }, (cell) => {
+      if (normalizePhrase(cellText(cell.value)).toLowerCase() === header.toLowerCase()) {
+        exists = true;
+      }
+    });
+    if (exists) return;
+    const nextCol = maxCol + 1;
+    sheet.getCell(1, nextCol).value = header;
+    sheet.getCell(1, nextCol).font = { ...(sheet.getCell(1, nextCol).font ?? {}), bold: true };
+    for (let rowNumber = 2; rowNumber <= Math.max(sheet.actualRowCount, 2); rowNumber++) {
+      sheet.getCell(rowNumber, nextCol).value = "";
+    }
+    changed += 1;
+  });
+  return changed;
+}
+
+function addXlsxRow(workbook: ExcelJS.Workbook, values: string[]): number {
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return 0;
+  const maxCol = Math.max(
+    sheet.actualColumnCount || sheet.columnCount || values.length,
+    values.length,
+  );
+  const rowValues = Array.from({ length: maxCol }, (_, index) => values[index] ?? "");
+  sheet.addRow(rowValues);
+  return 1;
+}
+
+function addXlsxWorksheet(workbook: ExcelJS.Workbook, name: string): number {
+  const safeName = name.slice(0, 31) || "New Sheet";
+  if (workbook.getWorksheet(safeName)) return 0;
+  const sheet = workbook.addWorksheet(safeName);
+  sheet.getCell("A1").value = safeName;
+  sheet.getCell("A1").font = { bold: true, size: 14 };
+  return 1;
+}
+
+function renameXlsxWorksheet(
+  workbook: ExcelJS.Workbook,
+  rename: { oldName?: string; newName: string },
+): number {
+  const sheet = rename.oldName ? workbook.getWorksheet(rename.oldName) : workbook.worksheets[0];
+  if (!sheet || workbook.getWorksheet(rename.newName)) return 0;
+  sheet.name = rename.newName;
+  return 1;
+}
+
+function dedupeXlsxRows(workbook: ExcelJS.Workbook): number {
+  let removed = 0;
+  workbook.eachSheet((sheet) => {
+    const seen = new Set<string>();
+    for (let rowNumber = sheet.actualRowCount; rowNumber >= 2; rowNumber--) {
+      const row = sheet.getRow(rowNumber);
+      const values: string[] = [];
+      for (let colNumber = 1; colNumber <= Math.max(sheet.actualColumnCount, 1); colNumber++) {
+        values.push(normalizePhrase(cellText(row.getCell(colNumber).value)).toLowerCase());
+      }
+      const key = values.join("\u0001");
+      if (!key.trim()) continue;
+      if (seen.has(key)) {
+        sheet.spliceRows(rowNumber, 1);
+        removed += 1;
+      } else {
+        seen.add(key);
+      }
+    }
+  });
+  return removed;
+}
+
+function sortXlsxByColumn(workbook: ExcelJS.Workbook, target: string): number {
+  let changed = 0;
+  const keywords = meaningfulTargetKeywords(target);
+  workbook.eachSheet((sheet) => {
+    const headerRow = sheet.getRow(1);
+    let targetCol = 0;
+    headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      const header = normalizePhrase(cellText(cell.value)).toLowerCase();
+      if (
+        header === target.toLowerCase() ||
+        (keywords.length > 0 && keywords.every((word) => header.includes(word)))
+      ) {
+        targetCol = colNumber;
+      }
+    });
+    if (!targetCol || sheet.actualRowCount <= 2) return;
+    const rows: ExcelJS.CellValue[][] = [];
+    for (let rowNumber = 2; rowNumber <= sheet.actualRowCount; rowNumber++) {
+      const row = sheet.getRow(rowNumber);
+      const values: ExcelJS.CellValue[] = [];
+      for (let colNumber = 1; colNumber <= Math.max(sheet.actualColumnCount, 1); colNumber++) {
+        values.push(row.getCell(colNumber).value);
+      }
+      rows.push(values);
+    }
+    rows.sort((a, b) =>
+      String(a[targetCol - 1] ?? "").localeCompare(String(b[targetCol - 1] ?? ""), undefined, {
+        numeric: true,
+      }),
+    );
+    rows.forEach((values, index) => {
+      sheet.getRow(index + 2).values = values;
+    });
+    changed += 1;
   });
   return changed;
 }
@@ -874,6 +1435,31 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(raw as unknown as Parameters<typeof workbook.xlsx.load>[0]);
   const actions: string[] = [];
+  const plan = planUploadedFileRequest(message);
+
+  const renameSheet = parseRenameSheet(message);
+  if (renameSheet) {
+    const changed = renameXlsxWorksheet(workbook, renameSheet);
+    if (changed > 0) actions.push(`renamed ${changed} worksheet${changed === 1 ? "" : "s"}`);
+  }
+
+  const addSheetName = parseAddSheetName(message);
+  if (addSheetName) {
+    const changed = addXlsxWorksheet(workbook, addSheetName);
+    if (changed > 0) actions.push(`added worksheet "${addSheetName}"`);
+  }
+
+  const addColumn = parseAddColumn(message);
+  if (addColumn) {
+    const changed = addXlsxColumn(workbook, addColumn);
+    if (changed > 0) actions.push(`added ${changed} column${changed === 1 ? "" : "s"}`);
+  }
+
+  const addRow = parseAddRow(message);
+  if (addRow) {
+    const changed = addXlsxRow(workbook, addRow);
+    if (changed > 0) actions.push(`added ${changed} row${changed === 1 ? "" : "s"}`);
+  }
 
   const deleteColumn = parseDeleteColumn(message);
   if (deleteColumn) {
@@ -897,6 +1483,17 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   if (entry.datasetSummary && hasChartIntent(message)) {
     const charts = await addChartsWorksheet(workbook, entry, message);
     if (charts > 0) actions.push(`added ${charts} generated chart${charts === 1 ? "" : "s"}`);
+  }
+
+  const sortColumn = parseSortColumn(message);
+  if (sortColumn) {
+    const changed = sortXlsxByColumn(workbook, sortColumn);
+    if (changed > 0) actions.push(`sorted ${changed} sheet${changed === 1 ? "" : "s"}`);
+  }
+
+  if (plan.operations.includes("format") && /\b(dedupe|deduplicate|duplicates?)\b/i.test(message)) {
+    const changed = dedupeXlsxRows(workbook);
+    if (changed > 0) actions.push(`removed ${changed} duplicate row${changed === 1 ? "" : "s"}`);
   }
 
   if (hasSpreadsheetCleanIntent(message) || hasProfessionalizeIntent(message)) {
