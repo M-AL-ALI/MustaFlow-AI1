@@ -29,6 +29,7 @@ import {
   routeOraMessage,
   checkToolAccess,
   extractMemorySaveCandidate,
+  isImageGenerationRequest,
 } from "../../lib/public-ai/orchestrator";
 import type { AuthedOraUser } from "../../lib/public-ai/authed-user";
 import type { Provider } from "../../lib/ai-provider-config";
@@ -1341,9 +1342,10 @@ router.post("/public-ai/chat", async (req, res) => {
   );
 
   if (
-    (decision.tool === "answer" || decision.tool === "deep_thinking") &&
+    decision.tool !== "search" &&
     carriedDocs &&
-    isUploadedFileModificationRequest(message)
+    isUploadedFileModificationRequest(message) &&
+    !isImageGenerationRequest(message)
   ) {
     const inferredFormat =
       detectFileRequest(message) ?? inferFileFormatFromUploadedContext(carriedDocs);
@@ -2509,9 +2511,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   );
 
   if (
-    (decision.tool === "answer" || decision.tool === "deep_thinking") &&
+    decision.tool !== "search" &&
     carriedDocs &&
-    isUploadedFileModificationRequest(message)
+    isUploadedFileModificationRequest(message) &&
+    !isImageGenerationRequest(message)
   ) {
     const inferredFormat =
       detectFileRequest(message) ?? inferFileFormatFromUploadedContext(carriedDocs);

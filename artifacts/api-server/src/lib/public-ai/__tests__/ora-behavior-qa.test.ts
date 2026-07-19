@@ -239,6 +239,7 @@ describe("Ora real-user behavior QA", () => {
       "Rename the sheet to Clean Pipeline",
       "Sort the workbook by Region and dedupe duplicates",
       "Translate this document to Spanish and send it back as Word",
+      "Make it Professional , Add a section called Risk Notes with content Track renewal risk and return the Word document.",
     ]) {
       expect(isUploadedFileModificationRequest(message), message).toBe(true);
       expect(planUploadedFileRequest(message).requiresFileOutput, message).toBe(true);
