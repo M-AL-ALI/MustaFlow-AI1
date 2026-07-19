@@ -21,6 +21,9 @@ export const ORA_SYSTEM_PROMPT = `You are Ora, an AI assistant by MustaFlow AI. 
 - **Live web search**: You CAN search the live web for current information and to find things like official websites, news, prices, releases, and other up-to-date facts. When a signed-in user asks you to look something up, find a website, or get the latest/current information, a real web search runs automatically and your answer is grounded in cited sources. NEVER flatly say you cannot browse the web or access the internet. (Limits: you cannot log into sites, fill forms, make purchases, or fetch and display an external image/logo file — you can find and cite the page, and you can generate a brand-new logo image on request. Web search requires the user to be signed in; if a visitor is not signed in, let them know it is available once they sign up rather than claiming you cannot search.)
 - **Voice**: You DO support voice. Users can speak to you using the mic button in the chat (their speech is transcribed to text), and in Voice Conversation Mode you can read your replies aloud (spoken text-to-speech). Users activate these from the mic/voice button in the chat interface. NEVER say you have no voice or audio capability or that you communicate through text only. Voice features depend on the user's browser support, so if voice is unavailable in their specific browser or context you can note that limitation — but do not claim the feature does not exist.
 
+### Advanced Excel and AppSheet files
+When a user asks for Excel workbooks, you can generate multiple worksheets, real Excel tables, live formula cells with cached results, chart/dashboard tabs, and AppSheet-ready workbook blueprints. For AppSheet/app sheet requests, create the import-ready workbook and setup/spec sheets; do not claim the app was published inside AppSheet.
+
 ${ORA_IDENTITY_BLOCK}
 
 ## App building scope
@@ -190,6 +193,7 @@ const INJECTION_PATTERNS: RegExp[] = [
 // are handled by the generate-file route and must NOT be flagged as builder requests.
 const FILE_GENERATION_PATTERNS: RegExp[] = [
   /\b(csv|spreadsheet|excel|xlsx|xls|word|docx|pdf|pptx|powerpoint|presentation|slides)\b/i,
+  /\b(generate|create|make|build|design|draft|prepare)\b[^.?!\n]{0,80}?\b(?:appsheet|app\s+sheet)\b/i,
   // Verb-gated presentation phrasings ("create a power point", "make a ppt",
   // "build a slide deck"). These multi-word / abbreviated cues are intentionally
   // NOT in the bare-noun gate above so that a plain question ("what is a pitch
@@ -230,6 +234,7 @@ const BUILDER_PATTERNS: RegExp[] = [
 // File format keywords used to auto-detect the desired output type in chat
 export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 const FILE_FORMAT_DETECT: Array<{ pattern: RegExp; format: FileFormat }> = [
+  { pattern: /\b(?:appsheet|app\s+sheet)\b/i, format: "xlsx" },
   { pattern: /\b(csv|comma.separated)\b/i, format: "csv" },
   { pattern: /\b(excel|xlsx|xls|spreadsheet)\b/i, format: "xlsx" },
   { pattern: /\b(word|docx|doc\b|word\s+doc)/i, format: "docx" },

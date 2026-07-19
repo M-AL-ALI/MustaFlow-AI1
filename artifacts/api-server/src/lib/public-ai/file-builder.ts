@@ -60,6 +60,65 @@ export class FileGenerationError extends Error {
 
 export type ColumnType = "text" | "number" | "currency" | "date" | "percent";
 
+export interface ExcelFormulaSpec {
+  sheetName?: string;
+  cell: string;
+  formula: string;
+  result?: string | number | boolean;
+  numFmt?: string;
+}
+
+export interface ExcelSheetData {
+  sheetName: string;
+  headers: string[];
+  columnTypes?: ColumnType[];
+  rows: string[][];
+  tableName?: string;
+  formulas?: ExcelFormulaSpec[];
+}
+
+export interface AppSheetColumnSpec {
+  name: string;
+  type?: string;
+  required?: boolean;
+  formula?: string;
+}
+
+export interface AppSheetTableSpec {
+  name: string;
+  purpose?: string;
+  keyColumn?: string;
+  columns?: AppSheetColumnSpec[];
+}
+
+export interface AppSheetViewSpec {
+  name: string;
+  table?: string;
+  type?: string;
+  purpose?: string;
+}
+
+export interface AppSheetActionSpec {
+  name: string;
+  table?: string;
+  behavior?: string;
+}
+
+export interface AppSheetAutomationSpec {
+  name: string;
+  trigger?: string;
+  action?: string;
+}
+
+export interface AppSheetBlueprint {
+  appName?: string;
+  summary?: string;
+  tables?: AppSheetTableSpec[];
+  views?: AppSheetViewSpec[];
+  actions?: AppSheetActionSpec[];
+  automations?: AppSheetAutomationSpec[];
+}
+
 export interface TabularData {
   title: string;
   sheetName?: string;
@@ -67,6 +126,10 @@ export interface TabularData {
   columnTypes?: ColumnType[];
   rows: string[][];
   charts?: FileChartSpec[];
+  tableName?: string;
+  formulas?: ExcelFormulaSpec[];
+  sheets?: ExcelSheetData[];
+  appSheet?: AppSheetBlueprint;
 }
 
 export interface DocumentSection {
@@ -247,6 +310,22 @@ export function buildTabularSystemPrompt(
     `    ["Alice Johnson", "42", "1500.00"],\n` +
     `    ["Bob Smith",     "37", "2200.50"]\n` +
     `  ],\n` +
+    `  "tableName": "MainTable",\n` +
+    `  "formulas": [\n` +
+    `    {"cell":"D2","formula":"B2*C2","result":"63000","numFmt":"$#,##0.00"}\n` +
+    `  ],\n` +
+    `  "sheets": [\n` +
+    `    {"sheetName":"Inputs","headers":["Item","Qty","Unit Cost"],"columnTypes":["text","number","currency"],"rows":[["Widget","12","4.50"]],"tableName":"Inputs"},\n` +
+    `    {"sheetName":"Summary","headers":["Metric","Value"],"rows":[["Total Cost",""]],"formulas":[{"cell":"B2","formula":"SUM(Inputs!C2:C20)","result":"54","numFmt":"$#,##0.00"}]}\n` +
+    `  ],\n` +
+    `  "appSheet": {\n` +
+    `    "appName":"Inventory Tracker",\n` +
+    `    "summary":"Starter AppSheet app backed by this workbook.",\n` +
+    `    "tables":[{"name":"Items","purpose":"Track inventory items","keyColumn":"Item ID","columns":[{"name":"Item ID","type":"Text","required":true}]}],\n` +
+    `    "views":[{"name":"Items","table":"Items","type":"Deck","purpose":"Browse inventory"}],\n` +
+    `    "actions":[{"name":"Mark Low Stock","table":"Items","behavior":"Flag items below reorder point"}],\n` +
+    `    "automations":[{"name":"Low Stock Alert","trigger":"Stock below reorder point","action":"Send notification"}]\n` +
+    `  },\n` +
     `  "charts": [\n` +
     `    {"title":"Revenue by Region","chartType":"bar","labels":["North","South"],"values":[120,80],"xLabel":"Region","yLabel":"Revenue"}\n` +
     `  ]\n` +
@@ -262,8 +341,12 @@ export function buildTabularSystemPrompt(
     rowRule +
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
     `6. For XLSX chart/dashboard requests, include 1-4 "charts" with real labels and numeric values derived from the rows. Use chartType "bar", "line", "histogram", "scatter", or "pareto". CSV cannot embed images, but still include chart-ready rows when asked for charts.\n` +
-    `6a. If the user asks to edit an uploaded workbook, keep the original headers/rows that still apply, then add/remove/update only what was requested. Return the complete revised table.\n` +
-    `7. Only these keys are allowed: title, sheetName, headers, columnTypes, rows, charts.${langNote}` +
+    `7. For XLSX formulas, put formulas in the "formulas" array or per-sheet "formulas" array. Use Excel A1 formulas without a leading "=" and include a realistic cached "result"; never write formulas as plain text in rows.\n` +
+    `8. For XLSX workbooks with multiple tabs, use "sheets". Each sheet must include sheetName, headers, rows, optional columnTypes, optional tableName, and optional formulas. Keep sheet names short and unique.\n` +
+    `9. For XLSX tables, provide a clean "tableName" so the builder creates a real Excel table with filters and banded rows. Use one table per worksheet.\n` +
+    `10. For AppSheet/app sheet requests, create an AppSheet-ready XLSX workbook: include normalized data sheets for each app table plus an "appSheet" blueprint with tables, columns, key columns, views, actions, and automations. Be honest: the file is ready to import/configure in AppSheet; do not claim the app was published.\n` +
+    `11. If the user asks to edit an uploaded workbook, keep the original headers/rows/sheets that still apply, then add/remove/update only what was requested. Return the complete revised workbook JSON.\n` +
+    `12. Only these keys are allowed: title, sheetName, headers, columnTypes, rows, tableName, formulas, sheets, appSheet, charts.${langNote}` +
     quality.instruction +
     FILE_EXPORT_POLISH_DIRECTIVE +
     FILE_REVISION_DIRECTIVE +
@@ -581,6 +664,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
 // ---------------------------------------------------------------------------
 
 export async function buildCsv(data: TabularData): Promise<Buffer> {
+  const csvSheet = firstTabularSheet(data);
   const escapeCell = (v: string) => {
     const s = String(v ?? "");
     if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
@@ -590,8 +674,8 @@ export async function buildCsv(data: TabularData): Promise<Buffer> {
   };
   // UTF-8 BOM so Excel on Windows opens without garbled characters
   const BOM = "\uFEFF";
-  const lines = [data.headers.map(escapeCell).join(",")];
-  for (const row of data.rows) {
+  const lines = [csvSheet.headers.map(escapeCell).join(",")];
+  for (const row of csvSheet.rows) {
     lines.push(row.map(escapeCell).join(","));
   }
   return Buffer.from(BOM + lines.join("\r\n"), "utf-8");
@@ -615,11 +699,165 @@ function parseCellValue(raw: string, type: ColumnType | undefined): string | num
   return raw;
 }
 
+function firstTabularSheet(data: TabularData): ExcelSheetData {
+  return data.sheets?.[0]
+    ? data.sheets[0]
+    : {
+        sheetName: data.sheetName ?? "Sheet1",
+        headers: data.headers,
+        columnTypes: data.columnTypes,
+        rows: data.rows,
+        tableName: data.tableName,
+        formulas: data.formulas,
+      };
+}
+
+function tabularRowCount(data: TabularData): number {
+  const sheets = data.sheets?.length ? data.sheets : [firstTabularSheet(data)];
+  return sheets.reduce((total, sheet) => total + sheet.rows.length, 0);
+}
+
+function cleanExcelSheetName(value: unknown, fallback: string): string {
+  const cleaned = cleanText(value)
+    .replace(/[\]:*?/\\[]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (cleaned || fallback).slice(0, 31) || fallback.slice(0, 31);
+}
+
+function uniqueExcelSheetName(value: unknown, fallback: string, usedNames: Set<string>): string {
+  const base = cleanExcelSheetName(value, fallback);
+  let candidate = base;
+  let suffix = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    const marker = ` ${suffix}`;
+    candidate = `${base.slice(0, Math.max(1, 31 - marker.length))}${marker}`;
+    suffix += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function safeExcelTableName(value: unknown, fallback: string, usedNames: Set<string>): string {
+  const cleaned = cleanText(value || fallback).replace(/[^A-Za-z0-9_]/g, "_");
+  const base = (cleaned || fallback || "Table").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  const prefixed = /^[A-Za-z_]/.test(base) ? base : `Table_${base}`;
+  let candidate = prefixed.slice(0, 240) || "Table";
+  let suffix = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    const marker = `_${suffix}`;
+    candidate = `${prefixed.slice(0, Math.max(1, 240 - marker.length))}${marker}`;
+    suffix += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function formulaResultValue(value: unknown): string | number | boolean | undefined {
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  const cleaned = cleanText(value);
+  if (!cleaned) return undefined;
+  const numeric = Number(cleaned.replace(/[$,%\s,]/g, ""));
+  if (Number.isFinite(numeric) && /^[$%0-9,.\-\s]+$/.test(cleaned)) return numeric;
+  return cleaned;
+}
+
+function formulasForSheet(
+  data: TabularData,
+  sheet: ExcelSheetData,
+  sheetIndex: number,
+): ExcelFormulaSpec[] {
+  const sheetName = sheet.sheetName.toLowerCase();
+  const global = (data.formulas ?? []).filter((formula) => {
+    if (!formula.sheetName) return sheetIndex === 0;
+    return formula.sheetName.toLowerCase() === sheetName;
+  });
+  return [...global, ...(sheet.formulas ?? [])];
+}
+
+function buildAppSheetBlueprintSheets(data: TabularData): ExcelSheetData[] {
+  const appSheet = data.appSheet;
+  if (!appSheet) return [];
+  const tableRows =
+    appSheet.tables?.flatMap((table) => {
+      const columns = table.columns?.length ? table.columns : [{ name: table.keyColumn || "ID" }];
+      return columns.map((column) => [
+        table.name,
+        table.purpose ?? "",
+        table.keyColumn ?? "",
+        column.name,
+        column.type ?? "Text",
+        column.required ? "Yes" : "No",
+        column.formula ?? "",
+      ]);
+    }) ?? [];
+  return [
+    {
+      sheetName: "AppSheet Setup",
+      headers: ["Item", "Value"],
+      columnTypes: ["text", "text"],
+      rows: [
+        ["App Name", appSheet.appName ?? data.title],
+        ["Summary", appSheet.summary ?? "AppSheet-ready workbook generated by Ora."],
+        ["Import Step", "Create a new AppSheet app from this workbook."],
+        ["Data Step", "Use each workbook sheet as an AppSheet table."],
+        ["Review Step", "Confirm key columns, required fields, views, actions, and automations."],
+      ],
+      tableName: "AppSheetSetup",
+    },
+    {
+      sheetName: "AppSheet Tables",
+      headers: ["Table", "Purpose", "Key Column", "Column", "Type", "Required", "Formula"],
+      columnTypes: ["text", "text", "text", "text", "text", "text", "text"],
+      rows: tableRows.length
+        ? tableRows
+        : [["Main", "Primary app data table", "ID", "ID", "Text", "Yes", ""]],
+      tableName: "AppSheetTables",
+    },
+    {
+      sheetName: "AppSheet Views",
+      headers: ["View", "Table", "Type", "Purpose"],
+      columnTypes: ["text", "text", "text", "text"],
+      rows:
+        appSheet.views?.map((view) => [
+          view.name,
+          view.table ?? "",
+          view.type ?? "Table",
+          view.purpose ?? "",
+        ]) ?? [],
+      tableName: "AppSheetViews",
+    },
+    {
+      sheetName: "AppSheet Actions",
+      headers: ["Action", "Table", "Behavior"],
+      columnTypes: ["text", "text", "text"],
+      rows:
+        appSheet.actions?.map((action) => [
+          action.name,
+          action.table ?? "",
+          action.behavior ?? "",
+        ]) ?? [],
+      tableName: "AppSheetActions",
+    },
+    {
+      sheetName: "AppSheet Automations",
+      headers: ["Automation", "Trigger", "Action"],
+      columnTypes: ["text", "text", "text"],
+      rows:
+        appSheet.automations?.map((automation) => [
+          automation.name,
+          automation.trigger ?? "",
+          automation.action ?? "",
+        ]) ?? [],
+      tableName: "AppSheetAutomations",
+    },
+  ];
+}
+
 export async function buildXlsx(data: TabularData): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MustaFlow Ora";
   wb.created = new Date();
-  const ws = wb.addWorksheet(data.sheetName ?? "Sheet1");
 
   const HEADER_BG = "FF1E1B4B";
   const HEADER_FG = "FFFFFFFF";
@@ -635,78 +873,149 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
     right: { style: "thin", color: { argb: BORDER_COLOR } },
   };
 
-  // Header row
-  const headerRow = ws.addRow(data.headers);
-  headerRow.height = 22;
-  headerRow.eachCell((cell, colIdx) => {
-    cell.font = { bold: true, color: { argb: HEADER_FG }, size: 11, name: "Calibri" };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
-    cell.border = {
-      top: { style: "medium", color: { argb: ACCENT } },
-      left: { style: "thin", color: { argb: HEADER_BG } },
-      bottom: { style: "medium", color: { argb: ACCENT } },
-      right: { style: "thin", color: { argb: HEADER_BG } },
-    };
-    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
-    const type = data.columnTypes?.[colIdx - 1];
-    if (type === "number" || type === "currency" || type === "percent") {
-      cell.alignment = { vertical: "middle", horizontal: "right" };
-    }
-  });
+  // Column widths — fit content
+  const usedSheetNames = new Set<string>();
+  const usedTableNames = new Set<string>();
 
-  // Data rows
-  data.rows.forEach((row, rowIdx) => {
-    const isOdd = rowIdx % 2 === 0;
-    const excelRow = ws.addRow(
-      row.map((v, colIdx) => parseCellValue(v, data.columnTypes?.[colIdx])),
+  const writeWorksheet = (sheet: ExcelSheetData, sheetIndex: number) => {
+    const worksheetName = uniqueExcelSheetName(
+      sheet.sheetName,
+      sheetIndex === 0 ? "Sheet1" : `Sheet ${sheetIndex + 1}`,
+      usedSheetNames,
     );
-    excelRow.height = 18;
-    excelRow.eachCell((cell, colIdx) => {
-      const type = data.columnTypes?.[colIdx - 1];
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: isOdd ? ROW_ODD : ROW_EVEN },
-      };
-      cell.border = thinBorder;
-      cell.font = { name: "Calibri", size: 10 };
-      cell.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
+    const ws = wb.addWorksheet(worksheetName);
+    const parsedRows = sheet.rows.map((row) =>
+      row.map((value, colIdx) => parseCellValue(value, sheet.columnTypes?.[colIdx])),
+    );
 
-      // Type-specific formatting
-      if (type === "currency") {
-        cell.numFmt = '"$"#,##0.00';
+    if (sheet.headers.length > 0) {
+      const tableName = safeExcelTableName(
+        sheet.tableName ?? worksheetName,
+        "Table",
+        usedTableNames,
+      );
+      try {
+        ws.addTable({
+          name: tableName,
+          ref: "A1",
+          headerRow: true,
+          totalsRow: false,
+          style: {
+            theme: "TableStyleMedium2",
+            showRowStripes: true,
+          },
+          columns: sheet.headers.map((name) => ({ name })),
+          rows: parsedRows,
+        });
+      } catch {
+        ws.addRow(sheet.headers);
+        parsedRows.forEach((row) => ws.addRow(row));
+      }
+    }
+
+    const headerRow = ws.getRow(1);
+    headerRow.height = 22;
+    headerRow.eachCell((cell, colIdx) => {
+      cell.font = { bold: true, color: { argb: HEADER_FG }, size: 11, name: "Calibri" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
+      cell.border = {
+        top: { style: "medium", color: { argb: ACCENT } },
+        left: { style: "thin", color: { argb: HEADER_BG } },
+        bottom: { style: "medium", color: { argb: ACCENT } },
+        right: { style: "thin", color: { argb: HEADER_BG } },
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
+      const type = sheet.columnTypes?.[colIdx - 1];
+      if (type === "number" || type === "currency" || type === "percent") {
         cell.alignment = { vertical: "middle", horizontal: "right" };
-      } else if (type === "number") {
-        cell.numFmt = "#,##0.##";
-        cell.alignment = { vertical: "middle", horizontal: "right" };
-      } else if (type === "percent") {
-        cell.numFmt = "0.00%";
-        cell.alignment = { vertical: "middle", horizontal: "right" };
-      } else if (type === "date" && cell.value instanceof Date) {
-        cell.numFmt = "YYYY-MM-DD";
-        cell.alignment = { vertical: "middle", horizontal: "center" };
       }
     });
-  });
 
-  // Column widths — fit content
-  ws.columns.forEach((col, i) => {
-    const headerLen = (data.headers[i] ?? "").length;
-    const maxDataLen = data.rows.reduce((acc, r) => Math.max(acc, (r[i] ?? "").length), 0);
-    col.width = Math.min(Math.max(headerLen, maxDataLen) + 4, 45);
-  });
+    for (let rowIdx = 0; rowIdx < parsedRows.length; rowIdx++) {
+      const isOdd = rowIdx % 2 === 0;
+      const excelRow = ws.getRow(rowIdx + 2);
+      excelRow.height = 18;
+      excelRow.eachCell({ includeEmpty: true }, (cell, colIdx) => {
+        const type = sheet.columnTypes?.[colIdx - 1];
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: isOdd ? ROW_ODD : ROW_EVEN },
+        };
+        cell.border = thinBorder;
+        cell.font = { name: "Calibri", size: 10 };
+        cell.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
 
-  // Freeze header row + enable auto-filter
-  ws.views = [{ state: "frozen", ySplit: 1, xSplit: 0, topLeftCell: "A2" }];
-  ws.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: 1, column: data.headers.length },
+        if (type === "currency") {
+          cell.numFmt = '"$"#,##0.00';
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        } else if (type === "number") {
+          cell.numFmt = "#,##0.##";
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        } else if (type === "percent") {
+          cell.numFmt = "0.00%";
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        } else if (type === "date" && cell.value instanceof Date) {
+          cell.numFmt = "YYYY-MM-DD";
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+        }
+      });
+    }
+
+    for (const formula of formulasForSheet(data, sheet, sheetIndex)) {
+      const cellRef = cleanText(formula.cell).toUpperCase();
+      const expression = cleanText(formula.formula).replace(/^=/, "").trim();
+      if (!/^\$?[A-Z]{1,3}\$?\d{1,7}$/i.test(cellRef) || !expression) continue;
+      const cell = ws.getCell(cellRef);
+      const result = formulaResultValue(formula.result);
+      cell.value =
+        result === undefined
+          ? ({ formula: expression } as ExcelJS.CellValue)
+          : ({ formula: expression, result } as ExcelJS.CellValue);
+      if (formula.numFmt) cell.numFmt = formula.numFmt;
+      cell.border = thinBorder;
+      cell.font = { name: "Calibri", size: 10, italic: true, color: { argb: "FF111827" } };
+    }
+
+    ws.columns.forEach((col, i) => {
+      const headerLen = (sheet.headers[i] ?? "").length;
+      const maxDataLen = sheet.rows.reduce((acc, r) => Math.max(acc, (r[i] ?? "").length), 0);
+      col.width = Math.min(Math.max(headerLen, maxDataLen) + 4, 48);
+    });
+
+    if (sheet.headers.length > 0) {
+      ws.views = [{ state: "frozen", ySplit: 1, xSplit: 0, topLeftCell: "A2" }];
+      ws.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: sheet.headers.length },
+      };
+    }
+
+    return ws;
   };
 
+  const mainSheets = data.sheets?.length
+    ? data.sheets
+    : [
+        {
+          sheetName: data.sheetName ?? "Sheet1",
+          headers: data.headers,
+          columnTypes: data.columnTypes,
+          rows: data.rows,
+          tableName: data.tableName,
+          formulas: data.formulas,
+        },
+      ];
+  [...mainSheets, ...buildAppSheetBlueprintSheets(data)].forEach((sheet, index) =>
+    writeWorksheet(sheet, index),
+  );
+
   const charts =
-    data.charts && data.charts.length > 0 ? data.charts : inferChartsFromTabularData(data);
+    data.charts && data.charts.length > 0
+      ? data.charts
+      : inferChartsFromTabularData({ ...data, ...firstTabularSheet(data) });
   if (charts.length > 0) {
-    const chartWs = wb.addWorksheet("Charts");
+    const chartWs = wb.addWorksheet(uniqueExcelSheetName("Charts", "Charts", usedSheetNames));
     chartWs.properties.defaultRowHeight = 18;
     chartWs.getColumn(1).width = 34;
     chartWs.getColumn(2).width = 18;
@@ -1421,14 +1730,44 @@ function inferColumnType(values: string[]): ColumnType {
   return "text";
 }
 
-export function normalizeTabularFileData(
+function normalizeFormulaSpecs(value: unknown, defaultSheetName?: string): ExcelFormulaSpec[] {
+  if (!Array.isArray(value)) return [];
+  const formulas: ExcelFormulaSpec[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const raw = item as Record<string, unknown>;
+    const cell = cleanText(raw.cell).toUpperCase();
+    const formula = cleanText(raw.formula).replace(/^=/, "").trim();
+    if (!/^\$?[A-Z]{1,3}\$?\d{1,7}$/i.test(cell) || !formula) continue;
+    const sheetName = cleanText(raw.sheetName) || defaultSheetName;
+    const normalized: ExcelFormulaSpec = {
+      ...(sheetName ? { sheetName } : {}),
+      cell,
+      formula,
+      ...(raw.result !== undefined ? { result: formulaResultValue(raw.result) } : {}),
+      ...(cleanText(raw.numFmt) ? { numFmt: cleanText(raw.numFmt) } : {}),
+    };
+    const key =
+      `${normalized.sheetName ?? ""}:${normalized.cell}:${normalized.formula}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    formulas.push(normalized);
+  }
+  return formulas;
+}
+
+function normalizeExcelSheetData(
   parsed: Record<string, unknown>,
+  fallbackSheetName: string,
   options: { preserveDuplicateRows?: boolean } = {},
-): TabularData {
+): ExcelSheetData | null {
   const rawRows = rowSourceCandidates(parsed);
   const sourceHeaders = headerSourceCandidates(parsed, rawRows);
+  const explicitHeaders = sourceHeaders.length > 0 ? sourceHeaders : [];
+  if (explicitHeaders.length === 0 && rawRows.length === 0) return null;
   const headers = uniqueLabels(
-    (sourceHeaders.length > 0 ? sourceHeaders : ["Column A"]).map((h, i) => cleanHeader(h, i)),
+    (explicitHeaders.length > 0 ? explicitHeaders : ["Column A"]).map((h, i) => cleanHeader(h, i)),
     "Column",
   );
   const colCount = headers.length;
@@ -1460,13 +1799,193 @@ export function normalizeTabularFileData(
   const columnTypes = headers.map((_, index) => {
     return parseColumnType(rawTypes[index]) ?? inferColumnType(rows.map((row) => row[index] ?? ""));
   });
+  const sheetName = cleanExcelSheetName(parsed.sheetName, fallbackSheetName);
 
   return {
-    title: cleanText(parsed.title) || "Data",
-    sheetName: cleanText(parsed.sheetName) || "Sheet1",
+    sheetName,
     headers,
     columnTypes,
     rows,
+    tableName: cleanText(parsed.tableName) || sheetName,
+    formulas: normalizeFormulaSpecs(parsed.formulas, sheetName),
+  };
+}
+
+function normalizeAppSheetBlueprint(value: unknown): AppSheetBlueprint | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const tables = Array.isArray(raw.tables)
+    ? raw.tables
+        .map((table) => {
+          if (!table || typeof table !== "object" || Array.isArray(table)) return null;
+          const t = table as Record<string, unknown>;
+          const name = cleanText(t.name);
+          if (!name) return null;
+          const columns = Array.isArray(t.columns)
+            ? t.columns
+                .map((column) => {
+                  if (!column || typeof column !== "object" || Array.isArray(column)) return null;
+                  const c = column as Record<string, unknown>;
+                  const columnName = cleanText(c.name);
+                  if (!columnName) return null;
+                  return {
+                    name: columnName,
+                    ...(cleanText(c.type) ? { type: cleanText(c.type) } : {}),
+                    ...(typeof c.required === "boolean" ? { required: c.required } : {}),
+                    ...(cleanText(c.formula) ? { formula: cleanText(c.formula) } : {}),
+                  };
+                })
+                .filter((column): column is AppSheetColumnSpec => !!column)
+            : [];
+          return {
+            name,
+            ...(cleanText(t.purpose) ? { purpose: cleanText(t.purpose) } : {}),
+            ...(cleanText(t.keyColumn) ? { keyColumn: cleanText(t.keyColumn) } : {}),
+            ...(columns.length ? { columns } : {}),
+          };
+        })
+        .filter((table): table is AppSheetTableSpec => !!table)
+    : [];
+  const views = Array.isArray(raw.views)
+    ? raw.views
+        .map((view) => {
+          if (!view || typeof view !== "object" || Array.isArray(view)) return null;
+          const v = view as Record<string, unknown>;
+          const name = cleanText(v.name);
+          if (!name) return null;
+          return {
+            name,
+            ...(cleanText(v.table) ? { table: cleanText(v.table) } : {}),
+            ...(cleanText(v.type) ? { type: cleanText(v.type) } : {}),
+            ...(cleanText(v.purpose) ? { purpose: cleanText(v.purpose) } : {}),
+          };
+        })
+        .filter((view): view is AppSheetViewSpec => !!view)
+    : [];
+  const actions = Array.isArray(raw.actions)
+    ? raw.actions
+        .map((action) => {
+          if (!action || typeof action !== "object" || Array.isArray(action)) return null;
+          const a = action as Record<string, unknown>;
+          const name = cleanText(a.name);
+          if (!name) return null;
+          return {
+            name,
+            ...(cleanText(a.table) ? { table: cleanText(a.table) } : {}),
+            ...(cleanText(a.behavior) ? { behavior: cleanText(a.behavior) } : {}),
+          };
+        })
+        .filter((action): action is AppSheetActionSpec => !!action)
+    : [];
+  const automations = Array.isArray(raw.automations)
+    ? raw.automations
+        .map((automation) => {
+          if (!automation || typeof automation !== "object" || Array.isArray(automation)) {
+            return null;
+          }
+          const a = automation as Record<string, unknown>;
+          const name = cleanText(a.name);
+          if (!name) return null;
+          return {
+            name,
+            ...(cleanText(a.trigger) ? { trigger: cleanText(a.trigger) } : {}),
+            ...(cleanText(a.action) ? { action: cleanText(a.action) } : {}),
+          };
+        })
+        .filter((automation): automation is AppSheetAutomationSpec => !!automation)
+    : [];
+  if (
+    tables.length === 0 &&
+    views.length === 0 &&
+    actions.length === 0 &&
+    automations.length === 0
+  ) {
+    return undefined;
+  }
+  return {
+    ...(cleanText(raw.appName) ? { appName: cleanText(raw.appName) } : {}),
+    ...(cleanText(raw.summary) ? { summary: cleanText(raw.summary) } : {}),
+    ...(tables.length ? { tables } : {}),
+    ...(views.length ? { views } : {}),
+    ...(actions.length ? { actions } : {}),
+    ...(automations.length ? { automations } : {}),
+  };
+}
+
+function appSheetDataSheets(appSheet: AppSheetBlueprint | undefined): ExcelSheetData[] {
+  return (
+    appSheet?.tables?.map((table) => {
+      const columns = table.columns?.length
+        ? table.columns
+        : [{ name: table.keyColumn || "ID", type: "Text", required: true }];
+      return {
+        sheetName: cleanExcelSheetName(table.name, "App Data"),
+        headers: uniqueLabels(
+          columns.map((column, index) => cleanHeader(column.name, index)),
+          "Column",
+        ),
+        columnTypes: columns.map((column) => {
+          const raw = column.type?.toLowerCase() ?? "";
+          if (/price|cost|amount|currency|money/.test(raw)) return "currency";
+          if (/percent|rate/.test(raw)) return "percent";
+          if (/number|decimal|integer|quantity|qty|count/.test(raw)) return "number";
+          if (/date|time/.test(raw)) return "date";
+          return "text";
+        }),
+        rows: [],
+        tableName: table.name,
+      };
+    }) ?? []
+  );
+}
+
+export function normalizeTabularFileData(
+  parsed: Record<string, unknown>,
+  options: { preserveDuplicateRows?: boolean } = {},
+): TabularData {
+  const appSheet = normalizeAppSheetBlueprint(
+    parsed.appSheet ?? parsed.appsheet ?? parsed.app_sheet ?? parsed.app,
+  );
+  const normalizedSheets = Array.isArray(parsed.sheets)
+    ? parsed.sheets
+        .map((sheet, index) =>
+          sheet && typeof sheet === "object" && !Array.isArray(sheet)
+            ? normalizeExcelSheetData(
+                sheet as Record<string, unknown>,
+                `Sheet ${index + 1}`,
+                options,
+              )
+            : null,
+        )
+        .filter((sheet): sheet is ExcelSheetData => !!sheet)
+    : [];
+
+  const mainSheet = normalizeExcelSheetData(
+    parsed,
+    cleanText(parsed.sheetName) || "Sheet1",
+    options,
+  ) ??
+    normalizedSheets[0] ?? {
+      sheetName: "Sheet1",
+      headers: ["Column A"],
+      columnTypes: ["text"],
+      rows: [],
+      tableName: "Sheet1",
+      formulas: [],
+    };
+  const sheets = normalizedSheets.length > 0 ? normalizedSheets : appSheetDataSheets(appSheet);
+  const formulas = normalizeFormulaSpecs(parsed.formulas, mainSheet.sheetName);
+
+  return {
+    title: cleanText(parsed.title) || "Data",
+    sheetName: mainSheet.sheetName,
+    headers: mainSheet.headers,
+    columnTypes: mainSheet.columnTypes,
+    rows: mainSheet.rows,
+    tableName: cleanText(parsed.tableName) || mainSheet.tableName,
+    formulas,
+    ...(sheets.length ? { sheets } : {}),
+    ...(appSheet ? { appSheet } : {}),
     charts: normalizeFileChartSpecs(parsed.charts),
   };
 }
@@ -1681,7 +2200,14 @@ export function safeParseFileJson(raw: string): Record<string, unknown> {
 export function hasUsableFileJson(parsed: Record<string, unknown>, format: FileFormat): boolean {
   if (format === "csv" || format === "xlsx") {
     const data = normalizeTabularFileData(parsed);
-    return data.headers.length > 0 && data.rows.length > 0;
+    const hasPrimaryRows = data.headers.length > 0 && data.rows.length > 0;
+    const hasWorkbookSheets =
+      data.sheets?.some((sheet) => sheet.headers.length > 0 && sheet.rows.length > 0) ?? false;
+    const hasAppSheetTemplate =
+      format === "xlsx" &&
+      !!data.appSheet &&
+      (data.sheets?.some((sheet) => sheet.headers.length > 0) ?? false);
+    return hasPrimaryRows || hasWorkbookSheets || hasAppSheetTemplate;
   }
 
   if (format === "pptx") {
@@ -1850,7 +2376,7 @@ export async function generateFileFromPrompt(
   if (isTabular) {
     const data = normalizeTabularFileData(aiData, { preserveDuplicateRows: hasSourceData });
     title = data.title;
-    rowCount = data.rows.length;
+    rowCount = tabularRowCount(data);
     // When the user attached real data, an empty extraction means the model
     // (or a truncated/invalid reply) lost it. Fail loudly rather than handing
     // back an empty/fabricated file — that was the original "wrong data" bug.

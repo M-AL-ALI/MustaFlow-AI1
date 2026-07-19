@@ -158,6 +158,11 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /file/i,
+      /excel/i,
+      /xlsx/i,
+      /spreadsheet/i,
+      /workbook/i,
+      /appsheet/i,
       /carried-docs/i,
       /ora-context-quality/i,
       /upload/i,
@@ -240,6 +245,7 @@ const API_PUBLIC_AI_CORE = [
 ].join(" ");
 
 const API_FILE_IMAGE = [
+  "src/lib/public-ai/__tests__/advanced-excel-workbook.test.ts",
   "src/lib/public-ai/__tests__/dataset-workflow.test.ts",
   "src/lib/public-ai/__tests__/export-content.test.ts",
   "src/lib/public-ai/__tests__/office-layout-edit.test.ts",
