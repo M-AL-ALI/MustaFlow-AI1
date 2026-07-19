@@ -3421,7 +3421,12 @@ export default function OraChatScreen() {
                 {/* Plus — hidden while recording */}
                 {!recording && (
                   <Pressable
-                    onPress={() => setShowPlusMenu(true)}
+                    onPress={() => {
+                      // Drop any action still pending from a not-yet-finished
+                      // dismissal so a later backdrop close can't replay it.
+                      pendingPlusMenuActionRef.current = null;
+                      setShowPlusMenu(true);
+                    }}
                     disabled={uploading}
                     accessibilityLabel="Add attachment or create file"
                     style={{ padding: 6, opacity: uploading ? 0.5 : 1 }}
