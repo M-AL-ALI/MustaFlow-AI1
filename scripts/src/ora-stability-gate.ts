@@ -76,6 +76,7 @@ const ORA_FILE_HINTS = [
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*voice/i,
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*file/i,
   /^artifacts\/ora-mobile\/(app|components|hooks|lib)\/.*document/i,
+  /^artifacts\/ora-mobile\/app\/\(home\)\/index\.tsx$/,
   /^packages\/ora-contracts\//,
   /^docs\/ora-stability-gate\.md$/,
   /^scripts\/src\/ora-stability-gate\.ts$/,
@@ -192,7 +193,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualWebsite:
       "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions.",
     manualMobile:
-      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed. Also upload a DOCX and send an edit request in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
+      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
   },
   {
     id: "conversation-history",
