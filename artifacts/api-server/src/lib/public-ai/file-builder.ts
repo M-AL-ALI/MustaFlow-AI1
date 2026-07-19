@@ -762,6 +762,27 @@ function formulaResultValue(value: unknown): string | number | boolean | undefin
   return cleaned;
 }
 
+const INVALID_EXCEL_FORMULA_TOKEN_PATTERN = /#(?:REF!|VALUE!|NAME\?|DIV\/0!|N\/A|NULL!|NUM!)/i;
+const EXTERNAL_WORKBOOK_FORMULA_PATTERN = /\[[^\]]+\]/;
+const SIMPLE_SHEET_REFERENCE_PATTERN =
+  /(^|[^'])\b([A-Za-z][A-Za-z0-9 _-]{0,30})!(\$?[A-Z]{1,3}\$?\d{1,7}(?::\$?[A-Z]{1,3}\$?\d{1,7})?)/g;
+
+function quoteExcelSheetReferences(expression: string): string {
+  return expression.replace(
+    SIMPLE_SHEET_REFERENCE_PATTERN,
+    (_match, prefix: string, sheetName: string, cellRange: string) =>
+      `${prefix}'${sheetName.replace(/'/g, "''")}'!${cellRange}`,
+  );
+}
+
+function normalizeFormulaExpression(value: unknown): string | null {
+  const expression = cleanText(value).replace(/^=/, "").trim();
+  if (!expression) return null;
+  if (INVALID_EXCEL_FORMULA_TOKEN_PATTERN.test(expression)) return null;
+  if (EXTERNAL_WORKBOOK_FORMULA_PATTERN.test(expression)) return null;
+  return quoteExcelSheetReferences(expression);
+}
+
 function formulasForSheet(
   data: TabularData,
   sheet: ExcelSheetData,
@@ -858,6 +879,14 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MustaFlow Ora";
   wb.created = new Date();
+  const workbookWithCalc = wb as unknown as {
+    calcProperties?: { fullCalcOnLoad?: boolean; forceFullCalc?: boolean };
+  };
+  workbookWithCalc.calcProperties = {
+    ...(workbookWithCalc.calcProperties ?? {}),
+    fullCalcOnLoad: true,
+    forceFullCalc: true,
+  };
 
   const HEADER_BG = "FF1E1B4B";
   const HEADER_FG = "FFFFFFFF";
@@ -964,7 +993,7 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
 
     for (const formula of formulasForSheet(data, sheet, sheetIndex)) {
       const cellRef = cleanText(formula.cell).toUpperCase();
-      const expression = cleanText(formula.formula).replace(/^=/, "").trim();
+      const expression = normalizeFormulaExpression(formula.formula);
       if (!/^\$?[A-Z]{1,3}\$?\d{1,7}$/i.test(cellRef) || !expression) continue;
       const cell = ws.getCell(cellRef);
       const result = formulaResultValue(formula.result);
@@ -1738,7 +1767,7 @@ function normalizeFormulaSpecs(value: unknown, defaultSheetName?: string): Excel
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const raw = item as Record<string, unknown>;
     const cell = cleanText(raw.cell).toUpperCase();
-    const formula = cleanText(raw.formula).replace(/^=/, "").trim();
+    const formula = normalizeFormulaExpression(raw.formula);
     if (!/^\$?[A-Z]{1,3}\$?\d{1,7}$/i.test(cell) || !formula) continue;
     const sheetName = cleanText(raw.sheetName) || defaultSheetName;
     const normalized: ExcelFormulaSpec = {

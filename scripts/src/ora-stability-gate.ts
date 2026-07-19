@@ -95,7 +95,11 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     id: "core-chat-routing",
     title: "Core Ora chat, model routing, identity, and date/time",
     ownerSurfaces: ["api", "website", "mobile"],
-    fileHints: [/public-ai\/(chat|orchestrator|prompt|expertise|model-router)/i, /use-ora-chat/i],
+    fileHints: [
+      /public-ai\/(chat|orchestrator|prompt|expertise|model-router)/i,
+      /ora-smoke\.test\.ts$/i,
+      /use-ora-chat/i,
+    ],
     manualWebsite: "Ask Instant + Deep prompts, identity prompts, and today's date/time.",
     manualMobile:
       "Ask the same Instant + Deep/date prompts on the current TestFlight build when mobile code changed.",

@@ -435,6 +435,33 @@ What should I tell Replit?`;
     ).toBe(true);
   });
 
+  it("routes natural AppSheet workbook requests through the file branch as XLSX", async () => {
+    fileBuilderMock.generateFileFromPrompt.mockResolvedValueOnce({
+      reply: "Created the AppSheet-ready workbook.",
+      fileName: "field-inspection-app.xlsx",
+      fileData: Buffer.from("appsheet workbook").toString("base64"),
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "I need an AppSheet app for field inspections.", messages: [] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("Created the AppSheet-ready workbook.");
+    expect(res.body.fileName).toBe("field-inspection-app.xlsx");
+    expect(res.body.mimeType).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    expect(fileBuilderMock.generateFileFromPrompt).toHaveBeenCalledTimes(1);
+    const [filePrompt, fileFormat] = fileBuilderMock.generateFileFromPrompt.mock
+      .calls[0] as unknown as [string, string];
+    expect(filePrompt).toContain("AppSheet app for field inspections");
+    expect(fileFormat).toBe("xlsx");
+    expect(mainCompletionCalls()).toEqual([]);
+  });
+
   it("routes terse uploaded-file edits to real file generation instead of a text answer", async () => {
     const sessionId = "ora-chat-uploaded-edit-session";
     const fileRef = storeFile({

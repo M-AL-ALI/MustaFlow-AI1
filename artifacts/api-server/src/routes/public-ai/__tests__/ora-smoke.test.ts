@@ -845,6 +845,13 @@ describe("d) File-gen intent — detectFileRequest patterns", () => {
     expect(detectFileRequest("create a presentation for the client")).toBe("pptx");
   });
 
+  it("detects AppSheet workbook requests without hijacking generic app requests", () => {
+    expect(detectFileRequest("I need an AppSheet app for inventory tracking")).toBe("xlsx");
+    expect(detectFileRequest("Can you help me create an app sheet workflow?")).toBe("xlsx");
+    expect(detectFileRequest("Build a mobile app for inventory tracking")).toBeNull();
+    expect(detectFileRequest("What is AppSheet?")).toBeNull();
+  });
+
   it("returns null for plain conversational messages", () => {
     expect(detectFileRequest("explain how closures work")).toBeNull();
     expect(detectFileRequest("what is the capital of France")).toBeNull();

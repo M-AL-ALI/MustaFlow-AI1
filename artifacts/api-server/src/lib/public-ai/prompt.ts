@@ -194,6 +194,8 @@ const INJECTION_PATTERNS: RegExp[] = [
 const FILE_GENERATION_PATTERNS: RegExp[] = [
   /\b(csv|spreadsheet|excel|xlsx|xls|word|docx|pdf|pptx|powerpoint|presentation|slides)\b/i,
   /\b(generate|create|make|build|design|draft|prepare)\b[^.?!\n]{0,80}?\b(?:appsheet|app\s+sheet)\b/i,
+  /\b(?:need|want|would\s+like|can\s+you|please|help\s+me)\b[^.?!\n]{0,100}?\b(?:appsheet|app\s+sheet)\b/i,
+  /\b(?:appsheet|app\s+sheet)\b[^.?!\n]{0,100}?\b(?:app|application|tracker|system|workflow|template|tool|database|inventory|inspection)\b/i,
   // Verb-gated presentation phrasings ("create a power point", "make a ppt",
   // "build a slide deck"). These multi-word / abbreviated cues are intentionally
   // NOT in the bare-noun gate above so that a plain question ("what is a pitch
