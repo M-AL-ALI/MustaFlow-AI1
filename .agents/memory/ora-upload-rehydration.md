@@ -59,3 +59,20 @@ spuriously generate a file. Pairs with the same bare-noun trap in
 **How to apply:** only inspect the single latest assistant message; require the
 offer-verb pattern before resolving the format. Don't widen the affirmation
 patterns without re-checking this gate.
+
+## Production observation (2026-07-20): turn-1 `fileRef` Q&A may claim "no file" — edits unaffected
+During the production QA round trip, an anonymous first-turn chat that carried
+`fileRef` and asked "What is in this file?" replied "you haven't shared a file"
+for PPTX/XLSX uploads, yet the follow-up turns with `documentRefs` located the
+raw bytes and applied real in-place edits flawlessly (byte-identical passthrough
+included).
+
+**Why:** the turn-1 attachment consumption (file-analysis framing) and the
+follow-up `documentRefs` re-hydration are separate paths; the office-edit path
+only depends on the latter, so a turn-1 "no file" answer does NOT mean the
+upload or edit pipeline is broken.
+
+**How to apply:** when QA-ing office edits, judge PASS/FAIL on the
+`documentRefs` follow-up turns only. A "no file" first-turn reply is a separate
+(chat-routing) issue — diagnose it in the fileRef consumption path, not in
+office-layout-edit.
