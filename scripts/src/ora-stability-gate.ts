@@ -181,6 +181,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /office-layout-edit/i,
       /office-ai-edit/i,
       /GeneratedFileViewer/i,
+      /ora-assets/i,
       /appsheet/i,
       /carried-docs/i,
       /ora-context-quality/i,

@@ -47,6 +47,7 @@ git add \
   artifacts/ora-mobile/components/ora/GeneratedFileViewer.tsx \
   artifacts/ora-mobile/lib \
   artifacts/ora-mobile/package.json \
+  attached_assets \
   pnpm-lock.yaml \
   scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
