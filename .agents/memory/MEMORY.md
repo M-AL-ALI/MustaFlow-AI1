@@ -4,7 +4,7 @@
 - [Expertise domain short-circuit](expertise-domain-topic-shortcircuit.md) — topic "technical"/"mobile" forces software_engineering; pass "general" for upload/dataset framing.
 - [Ora file-detection coupling](ora-file-detection-promise-coupling.md) / [upload re-hydration](ora-upload-rehydration.md) — verb-gate ambiguous cues, never the bare-noun gate; documentRefs re-sent each turn; "yes" needs explicit offer+format.
 - [Ora claimed-delivery rescue](ora-claimed-delivery-rescue.md) — fake "here's your PPTX" gets the file really generated (affordance OR strong claim w/o past-ref); complaint-only regen after delivery-style msgs.
-- [Office edit engine phrasing](ora-office-edit-engine-phrasing.md) — regex-gated; "replace the text A with B" silently regenerates instead of editing; quoted phrasing hits the engine; `-edited` filename = real edit.
+- [Office edit engine phrasing](ora-office-edit-engine-phrasing.md) / [in-place edit persistence layers](ora-inplace-edit-persistence-layers.md) — quoted phrasing hits the edit engine; real edits must sync memory entry + asset + durable mirror (relink assetId) or post-restart revisions revert.
 - [Ora ZIP guards](ora-zip-upload-guards.md) / [officeparser v7](officeparser-v7-breaking-api.md) — cap compressed size per entry (CPU DoS); parseOffice returns AST, use .toText().
 - [Ora chat/upload API contract](ora-api-contract.md) — chat needs `message` + `messages`; response field is `reply`; uploads need a UUID ref first; session-create 10/day.
 - [Ora image-intent routing is pattern-only](ora-image-intent-routing.md) — "can't produce the image" = ORA_IMAGE_PATTERNS missed; broaden patterns, don't touch provider.
