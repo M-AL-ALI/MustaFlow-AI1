@@ -2,6 +2,14 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Release: Office in-place edits shipped to production + TestFlight build 52 (2026-07-20)
+
+- Website published to https://www.mustaflow.com at commit `7619dac1` (feature commits `dd7a41d1`/`69b26cfd`/`8c926c3a`; release gate 20/20 PASS, clean tree).
+- Production QA (anonymous session round trip against www.mustaflow.com): 4/4 PASS — DOCX "return the same file" came back byte-identical; DOCX professionalize added a Risk Notes section with original text + styling markers intact; PPTX slide insert added a "Product Roadmap" slide (3 slides total, originals preserved); XLSX gained a Status column with all original rows preserved.
+- TestFlight: EAS iOS build 52 (build id `e5fe00b5-2924-4a8e-8cf3-8aac560d2a45`, profile `testflight`, pk_live Clerk + www domain baked) FINISHED and submitted; submission `a6fe236f-e4e2-4a0d-a5c5-29ff35a61b01` FINISHED (Apple accepted). `app.json` buildNumber committed at 52.
+- Minor observation for follow-up: on production, an anonymous first-turn chat carrying `fileRef` answered "you haven't shared a file" for PPTX/XLSX (the follow-up `documentRefs` edit turns worked perfectly). Does not affect the edit flows; tracked with the mobile diagnostics follow-up tasks.
+- Manual user steps remaining: install build 52 from TestFlight and run the device checklist (in-app View button on generated file cards, Download/share, Office edit round trip on device).
+
 ## Ora in-place Office file edits + mobile file card View/Download parity (2026-07-20)
 
 Fixes two issues: (1) uploaded Office files (DOCX/PPTX/XLSX) were silently REGENERATED — destroying original layout/styling — instead of being edited in place or returned unchanged; (2) the mobile generated-file card lacked the website's View + Download actions.
