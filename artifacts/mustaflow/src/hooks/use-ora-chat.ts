@@ -485,6 +485,73 @@ function clearStoredTranscript(): void {
   }
 }
 
+// Uploaded-document refs are persisted (cache-only) so a page reload doesn't
+// lose track of which files a follow-up "Revise the deck ..." should target —
+// without them the server regenerates from scratch instead of editing the
+// user's original file. Keyed per conversation ("conv:<id>"), with
+// "standalone" for non-conversation chat. Stale refs are harmless: the server
+// skips refs it can't resolve.
+const DOC_REFS_STORAGE_KEY = "ora_doc_refs";
+const DOC_REFS_STANDALONE_KEY = "standalone";
+const DOC_REFS_MAX_KEYS = 20;
+
+function docRefsKey(conversationId: number | null | undefined): string {
+  return typeof conversationId === "number" ? `conv:${conversationId}` : DOC_REFS_STANDALONE_KEY;
+}
+
+function readDocRefsMap(): Record<string, string[]> {
+  try {
+    const raw = sessionStorage.getItem(DOC_REFS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        map[key] = value.filter((v): v is string => typeof v === "string");
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function getStoredDocumentRefs(key: string): string[] {
+  return readDocRefsMap()[key] ?? [];
+}
+
+function storeDocumentRefs(key: string, refs: string[]): void {
+  try {
+    const map = readDocRefsMap();
+    if (refs.length === 0) {
+      delete map[key];
+    } else {
+      map[key] = refs.slice(-5);
+    }
+    // Cap tracked conversations so the map can't grow without bound.
+    const keys = Object.keys(map);
+    if (keys.length > DOC_REFS_MAX_KEYS) {
+      for (const stale of keys.slice(0, keys.length - DOC_REFS_MAX_KEYS)) delete map[stale];
+    }
+    if (Object.keys(map).length === 0) {
+      sessionStorage.removeItem(DOC_REFS_STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(DOC_REFS_STORAGE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearAllStoredDocumentRefs(): void {
+  try {
+    sessionStorage.removeItem(DOC_REFS_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   // authFetch (not raw fetch) so a fresh Clerk bearer token is attached: the
   // dev-mode JWT cookie expires ~60s and is unreliable in the preview iframe,
@@ -988,10 +1055,11 @@ export function useOraChat(): UseOraChatReturn {
   // while the fetch was outstanding — prevents a stale GET clobbering new input.
   const editGenRef = useRef(0);
   // Refs of documents (PDF/DOCX/TXT/etc.) uploaded earlier in THIS conversation.
-  // Their extracted text lives only in the server's ephemeral session-scoped
-  // store, so we re-send the recent refs on each plain chat turn to let Ora
-  // answer follow-up questions about an earlier upload. Reset on new/changed
-  // conversation. In-memory only — not persisted (the store expires in 30 min).
+  // Their extracted text lives in the server's session-scoped store (with a
+  // durable mirror for signed-in users), so we re-send the recent refs on each
+  // chat turn to let Ora answer follow-ups about an earlier upload and edit the
+  // ORIGINAL file in place. Reset on new/changed conversation, and mirrored to
+  // sessionStorage (cache-only) so a reload doesn't break "Revise ..." turns.
   const documentRefsRef = useRef<string[]>([]);
 
   // Rolling conversation summary for THIS conversation. As the chat grows past
@@ -1037,6 +1105,13 @@ export function useOraChat(): UseOraChatReturn {
       if (c.currentConversationId != null) return;
       const firstUser = msgs.find((m) => m.role === "user");
       id = await c.ensureConversation(firstUser?.content ?? "New chat");
+      // Uploads that happened before this conversation existed were cached
+      // under the "standalone" key — move them to the new conversation's key
+      // so a later reload restores them for this conversation.
+      if (id != null && !temporaryRef.current && documentRefsRef.current.length > 0) {
+        storeDocumentRefs(docRefsKey(id), documentRefsRef.current);
+        storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+      }
     }
     if (id == null) return;
     // Skip the load effect re-fetching the conversation we are actively writing.
@@ -1122,6 +1197,9 @@ export function useOraChat(): UseOraChatReturn {
             if (stored.length > 0) {
               setMessages(stored);
             }
+            // Same session as before the reload — its cached upload refs are
+            // still valid, so restore them alongside the transcript.
+            documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);
           }
           return;
         } catch (err: unknown) {
@@ -1179,6 +1257,10 @@ export function useOraChat(): UseOraChatReturn {
             if (stored.length > 0) {
               setMessages(stored);
             }
+            // Restore cached upload refs with the transcript. If the session
+            // rotated, signed-in users still resolve via the durable mirror
+            // and any truly stale refs are skipped server-side.
+            documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);
           }
           return;
         } catch (err: unknown) {
@@ -1266,8 +1348,10 @@ export function useOraChat(): UseOraChatReturn {
     if (id === loadedConvRef.current) return;
     loadedConvRef.current = id;
     // Switching conversations: the prior conversation's upload refs and rolling
-    // summary no longer apply (they belong to a different transcript).
-    documentRefsRef.current = [];
+    // summary no longer apply (they belong to a different transcript). Restore
+    // THIS conversation's cached upload refs so follow-up "Revise ..." turns
+    // still target the original uploaded file after a reload or switch-back.
+    documentRefsRef.current = getStoredDocumentRefs(docRefsKey(id));
     conversationSummaryRef.current = "";
     summarizedUpToRef.current = 0;
     // Snapshot the edit generation before fetching. If the user types/sends a
@@ -1441,10 +1525,15 @@ export function useOraChat(): UseOraChatReturn {
           setUploadState("attached");
           // Remember non-image upload refs (documents AND datasets) so later
           // plain chat turns can re-hydrate them for follow-up questions. Keep
-          // only the most recent few (server caps re-hydration at 5).
+          // only the most recent few (server caps re-hydration at 5). Mirrored
+          // to sessionStorage (skipped in temporary mode) so a reload doesn't
+          // lose the refs and turn an in-place "Revise" into a regeneration.
           if (data.fileRef) {
-            const next = [...documentRefsRef.current, data.fileRef];
-            documentRefsRef.current = next.slice(-5);
+            const next = [...documentRefsRef.current, data.fileRef].slice(-5);
+            documentRefsRef.current = next;
+            if (!temporaryRef.current) {
+              storeDocumentRefs(docRefsKey(convRef.current?.currentConversationId ?? null), next);
+            }
           }
           setSession((prev) =>
             prev
@@ -2358,6 +2447,8 @@ export function useOraChat(): UseOraChatReturn {
     if (convRef.current) {
       loadedConvRef.current = null;
       documentRefsRef.current = [];
+      // A new blank chat must not inherit pre-conversation upload refs.
+      storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
       conversationSummaryRef.current = "";
       summarizedUpToRef.current = 0;
       setMessages([]);
@@ -2372,6 +2463,7 @@ export function useOraChat(): UseOraChatReturn {
 
     clearStoredTranscript();
     clearStoredSessionId();
+    clearAllStoredDocumentRefs();
     documentRefsRef.current = [];
     conversationSummaryRef.current = "";
     summarizedUpToRef.current = 0;

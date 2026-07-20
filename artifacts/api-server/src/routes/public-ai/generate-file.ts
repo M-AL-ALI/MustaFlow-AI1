@@ -173,6 +173,19 @@ router.post("/public-ai/generate-file", async (req, res) => {
           prompt: message,
           base64: result.fileData,
         });
+        // In-place Office edit: repoint the durable file-context mirror at the
+        // edited asset so revisions after a restart/rotated session compound
+        // instead of reverting to the original upload.
+        if (assetId != null && result.editedFileRef) {
+          const { relinkDurableFileContextBestEffort } =
+            await import("../../lib/public-ai/file-context-store");
+          relinkDurableFileContextBestEffort({
+            fileRef: result.editedFileRef,
+            sessionId: session.sessionId,
+            userId: authed.userId,
+            assetId,
+          });
+        }
       } catch (assetErr) {
         // Durable-library persistence is a bonus, not a requirement. A failure
         // here (DB/R2/library outage) must never break file creation: keep

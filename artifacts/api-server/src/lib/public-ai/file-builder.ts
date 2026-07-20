@@ -169,6 +169,14 @@ export interface GeneratedFileResult {
   rowCount?: number;
   sectionCount?: number;
   slideCount?: number;
+  /**
+   * Set when the result is a REAL in-place edit of an uploaded Office file
+   * whose session entry was successfully written back. Routes use it to
+   * repoint the durable file-context mirror at the newly persisted (edited)
+   * library asset so post-restart revisions compound instead of reverting to
+   * the original upload. Never sent to the client.
+   */
+  editedFileRef?: string;
 }
 
 export type OraFileQualityDepth = "standard" | "polished" | "premium";

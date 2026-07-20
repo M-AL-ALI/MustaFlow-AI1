@@ -774,6 +774,38 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(aiPlanner.calls.length).toBe(0);
   });
 
+  it("marks real edits with editedFileRef and leaves passthroughs unmarked", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    // Real in-place edit → the marker lets routes repoint the durable mirror
+    // at the edited asset (post-restart revisions must compound).
+    const edited = await tryApplyLayoutPreservingFileEdit({
+      message: 'Replace the text "Old Pricing" with "New Pricing" in the deck',
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+    expect(edited).not.toBeNull();
+    expect(edited?.editedFileRef).toBe(ref);
+
+    // Unchanged passthrough → no marker (the original asset is still correct).
+    const passthrough = await tryApplyLayoutPreservingFileEdit({
+      message: "Please give me the document back exactly as it is, without any changes",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+    expect(passthrough).not.toBeNull();
+    expect(passthrough?.editedFileRef).toBeUndefined();
+  });
+
   it("applies AI-planned in-place ops when regex engines cannot parse the phrasing", async () => {
     const sessionId = crypto.randomUUID();
     const ref = storeRawOffice({
@@ -837,13 +869,14 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(result?.reply).toContain("returning it unchanged");
   });
 
-  it("falls back to regeneration when the AI planner votes regenerate", async () => {
+  it("returns the file unchanged with a rebuild escape hatch when the AI planner votes regenerate", async () => {
     const sessionId = crypto.randomUUID();
+    const base64 = makePptxBase64();
     const ref = storeRawOffice({
       sessionId,
       filename: "pricing-deck.pptx",
       rawFileType: "pptx",
-      base64: makePptxBase64(),
+      base64,
       extractedText: "Slide 1:\n- Old Pricing",
     });
     aiPlanner.plan = { mode: "regenerate", operations: [] };
@@ -855,8 +888,203 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
       sessionId,
     });
 
-    expect(result).toBeNull();
+    // No silent regeneration even on a regenerate vote: original bytes come
+    // back with an honest note offering an explicit rebuild escape hatch.
+    expect(result).not.toBeNull();
     expect(aiPlanner.calls.length).toBe(1);
+    expect(result?.fileData).toBe(base64);
+    expect(result?.reply).toContain('say "rebuild it from scratch"');
+  });
+
+  it("still allows full regeneration when the user explicitly asks to rebuild from scratch", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing",
+    });
+    aiPlanner.plan = { mode: "regenerate", operations: [] };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Rebuild it from scratch with a completely different story arc",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    // Explicit new-document phrasing opts out of the in-place guard entirely.
+    expect(result).toBeNull();
+  });
+
+  it("applies a paragraph-level edit when the target text is fragmented across pptx runs", async () => {
+    const sessionId = crypto.randomUUID();
+    const slideXml = [
+      '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree>',
+      '<a:p><a:r><a:rPr b="1"/><a:t>Metal</a:t></a:r><a:r><a:t>lic shaving root cause</a:t></a:r></a:p>',
+      "</p:spTree></p:cSld></p:sld>",
+    ].join("");
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>',
+      "ppt/slides/slide1.xml": slideXml,
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "root-cause.pptx",
+      rawFileType: "pptx",
+      base64,
+      extractedText: "Slide 1: Metallic shaving root cause",
+    });
+    // "Metallic shaving root cause" never appears inside a single <a:t> node,
+    // so the node-level pass cannot find it — only the paragraph-level pass can.
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [
+        { find: "Metallic shaving root cause", replace: "Five whys: metallic shavings" },
+      ],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Revise slide 1 so it covers the five whys for the metallic shavings",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const slide1 = strFromU8(unzipBase64(result!.fileData)["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Five whys: metallic shavings");
+    expect(slide1).not.toContain("lic shaving root cause");
+    // Run formatting properties survive the rewrite.
+    expect(slide1).toContain('<a:rPr b="1"/>');
+  });
+
+  it("expands newline replacements into cloned pptx paragraphs (multi-bullet rewrite)", async () => {
+    const sessionId = crypto.randomUUID();
+    const slideXml = [
+      '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree>',
+      "<a:p><a:pPr/><a:r><a:t>Bolt torque failure</a:t></a:r></a:p>",
+      "</p:spTree></p:cSld></p:sld>",
+    ].join("");
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>',
+      "ppt/slides/slide1.xml": slideXml,
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "whys.pptx",
+      rawFileType: "pptx",
+      base64,
+      extractedText: "Slide 1: Bolt torque failure",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [
+        {
+          find: "Bolt torque failure",
+          replace: "Why 1: shavings in housing\nWhy 2: filter bypass\nWhy 3: worn tooling",
+        },
+      ],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Revise slide 1 to list the whys instead of the bolt issue",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const slide1 = strFromU8(unzipBase64(result!.fileData)["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Why 1: shavings in housing");
+    expect(slide1).toContain("Why 2: filter bypass");
+    expect(slide1).toContain("Why 3: worn tooling");
+    expect(slide1).not.toContain("Bolt torque failure");
+    // Each line became its own paragraph, preserving paragraph properties.
+    expect(slide1.match(/<a:p>/g)?.length).toBe(3);
+    expect(slide1.match(/<a:pPr\/>/g)?.length).toBe(3);
+  });
+
+  it("rewrites fragmented docx runs and turns newlines into <w:br/>", async () => {
+    const sessionId = crypto.randomUUID();
+    const docXml = [
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+      '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Quarterly sum</w:t></w:r><w:r><w:t>mary intro</w:t></w:r></w:p>',
+      "</w:body></w:document>",
+    ].join("");
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      "word/document.xml": docXml,
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "report.docx",
+      rawFileType: "docx",
+      base64,
+      extractedText: "Quarterly summary intro",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [{ find: "Quarterly summary intro", replace: "Line one\nLine two" }],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Revise the intro paragraph of the report",
+      format: "docx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    const doc = strFromU8(unzipBase64(result!.fileData)["word/document.xml"]!);
+    expect(doc).toContain("Line one");
+    expect(doc).toContain("Line two");
+    expect(doc).toContain("<w:br/>");
+    expect(doc).not.toContain("mary intro");
+    // Formatting of the first run survives.
+    expect(doc).toContain("<w:b/>");
+  });
+
+  it("never rewrites docx paragraphs containing field codes", async () => {
+    const sessionId = crypto.randomUUID();
+    const docXml = [
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+      '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGE</w:instrText></w:r><w:r><w:t>Page marker text</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>',
+      "</w:body></w:document>",
+    ].join("");
+    const base64 = zipBase64({
+      "[Content_Types].xml":
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      "word/document.xml": docXml,
+    });
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "field.docx",
+      rawFileType: "docx",
+      base64,
+      extractedText: "Page marker text",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [{ find: "Page marker text", replace: "Broken field" }],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Revise the page marker wording",
+      format: "docx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    // Paragraph is skipped (field codes would corrupt), so the file comes back
+    // unchanged with the honest note instead of a mangled document.
+    expect(result).not.toBeNull();
+    expect(result?.fileData).toBe(base64);
+    expect(result?.reply).toContain("returning it unchanged");
   });
 
   it("compounds follow-up edits on the edited file, not the original upload", async () => {

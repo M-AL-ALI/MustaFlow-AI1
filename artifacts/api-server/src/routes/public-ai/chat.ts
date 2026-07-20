@@ -1488,6 +1488,19 @@ router.post("/public-ai/chat", async (req, res) => {
             prompt: message,
             base64: result.fileData,
           });
+          // In-place Office edit: repoint the durable file-context mirror at
+          // the edited asset so revisions after a restart/rotated session
+          // compound instead of reverting to the original upload.
+          if (assetId != null && result.editedFileRef) {
+            const { relinkDurableFileContextBestEffort } =
+              await import("../../lib/public-ai/file-context-store");
+            relinkDurableFileContextBestEffort({
+              fileRef: result.editedFileRef,
+              sessionId: session.sessionId,
+              userId: authed.userId,
+              assetId,
+            });
+          }
         } catch (persistErr) {
           logger.error(
             { component: "ora-chat-file", err: persistErr },

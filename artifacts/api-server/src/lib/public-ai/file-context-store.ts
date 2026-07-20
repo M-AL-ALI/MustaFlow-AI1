@@ -85,6 +85,38 @@ export function persistFileContextBestEffort(input: PersistFileContextInput): vo
 }
 
 /**
+ * After a REAL in-place Office edit, repoint the durable mirror at the newly
+ * persisted (edited) library asset so revisions after a restart or rotated
+ * session compound on the edited bytes instead of silently reverting to the
+ * original upload. Reads the freshly written-back memory entry (which carries
+ * the re-extracted text). Best-effort and fire-and-forget, like the mirror
+ * writes at upload time.
+ */
+export function relinkDurableFileContextBestEffort(opts: {
+  fileRef: string;
+  sessionId: string;
+  userId: string;
+  assetId: number;
+}): void {
+  const entry = getFile(opts.fileRef, opts.sessionId);
+  // Only Office entries with raw bytes participate in durable raw-byte
+  // rehydration; skip anything else rather than corrupt the row's fileType.
+  if (!entry?.rawFileType) return;
+  persistFileContextBestEffort({
+    userId: opts.userId,
+    fileRef: opts.fileRef,
+    sessionId: opts.sessionId,
+    assetId: opts.assetId,
+    filename: entry.filename,
+    mimeType: entry.mimeType,
+    fileType: entry.rawFileType,
+    extractedText: entry.extractedText,
+    charCount: entry.charCount,
+    datasetSummary: entry.datasetSummary,
+  });
+}
+
+/**
  * Read the durable context for a signed-in user's earlier upload, shaped as a
  * `FileEntry` so callers can treat it identically to the memory path. Ownership
  * is enforced by `user_id` (a stronger boundary than the anonymous sessionId

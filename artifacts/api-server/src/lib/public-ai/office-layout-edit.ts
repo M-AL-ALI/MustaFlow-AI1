@@ -506,6 +506,13 @@ function looseFindRegex(find: string): RegExp {
  * in an OOXML part. Matching is per-node (a passage split across runs will not
  * match — callers treat "0 ops applied" honestly instead of regenerating).
  * Returns the indexes of the ops that changed at least one node.
+ *
+ * Runs paragraph-by-paragraph so paragraphs containing field codes are never
+ * touched (rewriting runs inside field boundaries corrupts them). Ops whose
+ * replacement contains "\n" are deliberately left to the paragraph pass, which
+ * knows how to expand newlines (cloned `a:p` bullets for pptx, `<w:br/>`
+ * segments for docx) — applying them here would drop raw newline characters
+ * into a single text node.
  */
 function applyAiOpsToXmlNodes(
   xml: string,
@@ -514,23 +521,125 @@ function applyAiOpsToXmlNodes(
 ): { xml: string; appliedOps: Set<number> } {
   const tag = escapeRegExp(nodeName);
   const re = new RegExp(`(<${tag}\\b[^>]*>)([\\s\\S]*?)(</${tag}>)`, "g");
+  const paraTag = nodeName === "a:t" ? "a:p" : "w:p";
+  const paraRe = new RegExp(`<${paraTag}\\b[\\s\\S]*?</${paraTag}>`, "g");
+  const fieldRe = nodeName === "w:t" ? /<w:fldChar\b|<w:instrText\b/ : /<a:fld\b/;
   const regexes = ops.map((op) => looseFindRegex(op.find));
   const appliedOps = new Set<number>();
-  const nextXml = xml.replace(re, (full, open: string, inner: string, close: string) => {
-    let text = xmlUnescape(inner);
+  const applyToNodes = (chunk: string): string =>
+    chunk.replace(re, (full, open: string, inner: string, close: string) => {
+      let text = xmlUnescape(inner);
+      let changed = false;
+      ops.forEach((op, i) => {
+        if (op.replace.includes("\n")) return;
+        const rx = regexes[i]!;
+        rx.lastIndex = 0;
+        if (!rx.test(text)) return;
+        rx.lastIndex = 0;
+        // Replacer function so `$` sequences in the replacement stay literal.
+        text = text.replace(rx, () => op.replace);
+        appliedOps.add(i);
+        changed = true;
+      });
+      if (!changed) return full;
+      return `${open}${xmlEscape(text)}${close}`;
+    });
+  // Walk paragraphs (field-guarded) and the gaps between them (plain edits),
+  // so text nodes outside any paragraph are still handled.
+  let out = "";
+  let last = 0;
+  for (const m of xml.matchAll(paraRe)) {
+    const paraXml = m[0];
+    out += applyToNodes(xml.slice(last, m.index));
+    out += fieldRe.test(paraXml) ? paraXml : applyToNodes(paraXml);
+    last = m.index + paraXml.length;
+  }
+  out += applyToNodes(xml.slice(last));
+  return { xml: out, appliedOps };
+}
+
+/**
+ * Rewrite a paragraph's text nodes so the FIRST node carries `newText` (keeping
+ * that run's formatting) and every later node is blanked (keeping its run shell
+ * so the XML stays valid). For docx, "\n" inside `newText` becomes `<w:br/>`
+ * segments within the same run.
+ */
+function rewriteParagraphTextNodes(
+  paraXml: string,
+  nodeName: "a:t" | "w:t",
+  newText: string,
+): string {
+  const tag = escapeRegExp(nodeName);
+  const re = new RegExp(`(<${tag}\\b[^>]*>)([\\s\\S]*?)(</${tag}>)`, "g");
+  let first = true;
+  return paraXml.replace(re, (_full, open: string, _inner: string, close: string) => {
+    if (!first) return `${open}${close}`;
+    first = false;
+    if (nodeName === "w:t" && newText.includes("\n")) {
+      const lines = newText.split("\n");
+      const headOpen = open.includes("xml:space")
+        ? open
+        : open.replace(/<w:t\b/, '<w:t xml:space="preserve"');
+      const rest = lines
+        .slice(1)
+        .map((line) => `<w:br/><w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
+        .join("");
+      return `${headOpen}${xmlEscape(lines[0] ?? "")}${close}${rest}`;
+    }
+    return `${open}${xmlEscape(newText)}${close}`;
+  });
+}
+
+/**
+ * Paragraph-level fallback pass: real Office files fragment sentences across
+ * many text runs (spellcheck/formatting splits), so a multi-word "find" that
+ * fails per-node is retried here against each paragraph's JOINED run text.
+ * On a match the replacement is written into the paragraph's first run (the
+ * surrounding unmatched prefix/suffix of the joined text is preserved).
+ * Paragraphs containing field codes are skipped — blanking runs inside field
+ * boundaries corrupts them. For pptx, "\n" in the result clones the matched
+ * `a:p` (with its `a:pPr`) once per extra line, i.e. new bullets.
+ */
+function applyAiOpsToParagraphs(
+  xml: string,
+  nodeName: "a:t" | "w:t",
+  ops: AiOfficeEditOp[],
+  opIndexes: number[],
+): { xml: string; appliedOps: Set<number> } {
+  const paraTag = nodeName === "a:t" ? "a:p" : "w:p";
+  const paraRe = new RegExp(`<${paraTag}\\b[\\s\\S]*?</${paraTag}>`, "g");
+  const fieldRe = nodeName === "w:t" ? /<w:fldChar\b|<w:instrText\b/ : /<a:fld\b/;
+  const textRe = new RegExp(`<${escapeRegExp(nodeName)}\\b[^>]*>([\\s\\S]*?)</${escapeRegExp(nodeName)}>`, "g");
+  const regexes = ops.map((op) => looseFindRegex(op.find));
+  const appliedOps = new Set<number>();
+
+  const nextXml = xml.replace(paraRe, (paraXml) => {
+    if (fieldRe.test(paraXml)) return paraXml;
+    const joined = [...paraXml.matchAll(textRe)].map((m) => xmlUnescape(m[1] ?? "")).join("");
+    if (!joined.trim()) return paraXml;
+    let text = joined;
     let changed = false;
-    ops.forEach((op, i) => {
+    for (const i of opIndexes) {
       const rx = regexes[i]!;
       rx.lastIndex = 0;
-      if (!rx.test(text)) return;
+      if (!rx.test(text)) continue;
       rx.lastIndex = 0;
-      // Replacer function so `$` sequences in the replacement stay literal.
-      text = text.replace(rx, () => op.replace);
+      text = text.replace(rx, () => ops[i]!.replace);
       appliedOps.add(i);
       changed = true;
-    });
-    if (!changed) return full;
-    return `${open}${xmlEscape(text)}${close}`;
+    }
+    if (!changed) return paraXml;
+    if (nodeName === "a:t" && text.includes("\n")) {
+      const lines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      const [firstLine, ...restLines] = lines.length > 0 ? lines : [""];
+      return [firstLine ?? "", ...restLines]
+        .map((line) => rewriteParagraphTextNodes(paraXml, nodeName, line))
+        .join("");
+    }
+    return rewriteParagraphTextNodes(paraXml, nodeName, text);
   });
   return { xml: nextXml, appliedOps };
 }
@@ -583,22 +692,50 @@ async function applyAiOfficeEditOps(
   if (type === "docx") {
     const docXml = getXml(entries, "word/document.xml");
     if (!docXml) return null;
-    const updated = applyAiOpsToXmlNodes(docXml, "w:t", ops);
-    updated.appliedOps.forEach((i) => appliedOps.add(i));
-    if (appliedOps.size > 0) setXml(entries, "word/document.xml", updated.xml);
+    // Pass 1: per-node (preserves per-run formatting when the find sits in one run).
+    const nodePass = applyAiOpsToXmlNodes(docXml, "w:t", ops);
+    nodePass.appliedOps.forEach((i) => appliedOps.add(i));
+    let currentXml = nodePass.xml;
+    // Pass 2: paragraph-level for ops the node pass could not locate.
+    const remaining = ops.map((_, i) => i).filter((i) => !appliedOps.has(i));
+    if (remaining.length > 0) {
+      const paraPass = applyAiOpsToParagraphs(currentXml, "w:t", ops, remaining);
+      paraPass.appliedOps.forEach((i) => appliedOps.add(i));
+      currentXml = paraPass.xml;
+    }
+    if (appliedOps.size > 0) setXml(entries, "word/document.xml", currentXml);
   } else {
     const slidePaths = Object.keys(entries).filter((path) =>
       /^ppt\/slides\/slide\d+\.xml$/.test(path),
     );
+    const slideXmls = new Map<string, string>();
     for (const path of slidePaths) {
       const slideXml = getXml(entries, path);
-      if (!slideXml) continue;
+      if (slideXml) slideXmls.set(path, slideXml);
+    }
+    const changedPaths = new Set<string>();
+    // Pass 1: per-node across all slides.
+    for (const [path, slideXml] of slideXmls) {
       const updated = applyAiOpsToXmlNodes(slideXml, "a:t", ops);
       if (updated.appliedOps.size > 0) {
         updated.appliedOps.forEach((i) => appliedOps.add(i));
-        setXml(entries, path, updated.xml);
+        slideXmls.set(path, updated.xml);
+        changedPaths.add(path);
       }
     }
+    // Pass 2: paragraph-level (joined run text) for ops still unapplied.
+    const remaining = ops.map((_, i) => i).filter((i) => !appliedOps.has(i));
+    if (remaining.length > 0) {
+      for (const [path, slideXml] of slideXmls) {
+        const updated = applyAiOpsToParagraphs(slideXml, "a:t", ops, remaining);
+        if (updated.appliedOps.size > 0) {
+          updated.appliedOps.forEach((i) => appliedOps.add(i));
+          slideXmls.set(path, updated.xml);
+          changedPaths.add(path);
+        }
+      }
+    }
+    for (const path of changedPaths) setXml(entries, path, slideXmls.get(path)!);
   }
   if (appliedOps.size === 0) return null;
   return { buffer: zipBuffer(entries), appliedCount: appliedOps.size };
@@ -1765,18 +1902,20 @@ function buildPassthroughResult(
  * bytes (and re-extracted text for docx/pptx) so follow-up edits in this
  * session compound on the edited version instead of silently reverting to the
  * original upload. Best-effort — failure never blocks returning the result.
- * Known v1 limitation: the durable mirror keeps pointing at the ORIGINAL
- * uploaded asset, so edits after a server restart re-start from the original.
+ * Returns true when the session entry was updated; callers then mark the
+ * result with `editedFileRef` so the route layer can repoint the durable
+ * mirror at the newly persisted (edited) library asset — otherwise edits
+ * after a server restart would re-start from the original upload.
  */
 async function writeBackEditedEntry(
   input: LayoutEditInput,
   fileRef: string,
   entry: FileEntry,
   result: GeneratedFileResult,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const buffer = Buffer.from(result.fileData, "base64");
-    if (buffer.length === 0 || buffer.length > MAX_RAW_BYTES_PER_FILE) return;
+    if (buffer.length === 0 || buffer.length > MAX_RAW_BYTES_PER_FILE) return false;
     let extractedText = entry.extractedText;
     if (entry.rawFileType === "docx" || entry.rawFileType === "pptx") {
       try {
@@ -1799,11 +1938,13 @@ async function writeBackEditedEntry(
       rawBase64: result.fileData,
       rawSizeBytes: buffer.length,
     });
+    return true;
   } catch (err) {
     logger.warn(
       { component: "ora-office-edit", err },
       "Failed to write back edited Office file to the session store",
     );
+    return false;
   }
 }
 
@@ -1831,13 +1972,15 @@ export async function tryApplyLayoutPreservingFileEdit(
   else if (type === "docx") result = await editDocx(entry, input.message);
   else result = await editXlsx(entry, input.message);
   if (result) {
-    await writeBackEditedEntry(input, fileRef, entry, result);
+    const wroteBack = await writeBackEditedEntry(input, fileRef, entry, result);
+    if (wroteBack) result.editedFileRef = fileRef;
     return result;
   }
 
   // 3) AI-planned in-place ops for edit phrasings the regexes don't cover.
   if (!isInPlaceEditIntent(input.message)) return null;
   let appliedCount = 0;
+  let honestNote: string | null = null;
   try {
     const { planAiOfficeEditOps } = await import("./office-ai-edit.js");
     const aiPlan = await planAiOfficeEditOps({
@@ -1847,12 +1990,15 @@ export async function tryApplyLayoutPreservingFileEdit(
       fileType: type,
       subscriptionTier: input.subscriptionTier ?? null,
     });
-    // Planner unavailable/errored → keep legacy behavior (regeneration).
-    if (!aiPlan) return null;
-    // The model judged this a structural request → regeneration is correct.
-    if (aiPlan.mode === "regenerate") return null;
+    // In-place intent is confirmed at this point, so NEITHER a planner
+    // failure NOR a "regenerate" vote may fall through to full regeneration —
+    // that silently rebuilds a lookalike and destroys the user's layout
+    // (confirmed in production). Both paths drop to the honest passthrough.
+    if (aiPlan?.mode === "regenerate") {
+      honestNote = `This change looks like it would mean restructuring "${entry.filename}" as a whole, and I don't rebuild an uploaded file silently — that would lose your original layout, styling, and images. Tell me the specific text to change and I'll edit it in place. If you really do want a full rebuild, say "rebuild it from scratch".`;
+    }
 
-    if (aiPlan.operations.length > 0) {
+    if (aiPlan && aiPlan.mode === "edit" && aiPlan.operations.length > 0) {
       const applied = await applyAiOfficeEditOps(entry, type, aiPlan.operations);
       if (applied && applied.appliedCount > 0) {
         appliedCount = applied.appliedCount;
@@ -1862,7 +2008,8 @@ export async function tryApplyLayoutPreservingFileEdit(
           applied.buffer,
           `applied ${applied.appliedCount} text edit${applied.appliedCount === 1 ? "" : "s"}`,
         );
-        await writeBackEditedEntry(input, fileRef, entry, editResult);
+        const wroteBack = await writeBackEditedEntry(input, fileRef, entry, editResult);
+        if (wroteBack) editResult.editedFileRef = fileRef;
         return editResult;
       }
     }
@@ -1883,6 +2030,7 @@ export async function tryApplyLayoutPreservingFileEdit(
   return buildPassthroughResult(
     entry,
     type,
-    `I couldn't locate the exact text to change in "${entry.filename}", so I'm returning it unchanged rather than rebuilding it from scratch (that would lose your layout and styling). Tell me the exact wording to change — for example: replace "Old heading" with "New heading" — and I'll edit it in place.`,
+    honestNote ??
+      `I couldn't locate the exact text to change in "${entry.filename}", so I'm returning it unchanged rather than rebuilding it from scratch (that would lose your layout and styling). Tell me the exact wording to change — for example: replace "Old heading" with "New heading" — and I'll edit it in place.`,
   );
 }

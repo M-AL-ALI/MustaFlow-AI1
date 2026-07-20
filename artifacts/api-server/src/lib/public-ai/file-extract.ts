@@ -46,15 +46,17 @@ async function extractPdf(buffer: Buffer): Promise<string> {
   }
 }
 
-function decodeXmlText(value: string): string {
+function decodeXmlEntities(value: string): string {
   return value
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&apos;/g, "'");
+}
+
+function decodeXmlText(value: string): string {
+  return decodeXmlEntities(value).replace(/\s+/g, " ").trim();
 }
 
 function extractStructuredPptxText(buffer: Buffer): string | null {
@@ -78,16 +80,34 @@ function extractStructuredPptxText(buffer: Buffer): string | null {
     })
     .sort((a, b) => a.index - b.index || a.name.localeCompare(b.name));
 
+  // One line per PARAGRAPH (a:p), with the paragraph's runs joined, so the
+  // text reads as whole sentences instead of spellcheck-fragmented runs. Text-
+  // free slides are still emitted ("(no text)") so slide numbers always match
+  // the deck's slide order — skipping them used to shift every later number.
   const blocks: string[] = [];
-  for (const slide of slides) {
-    const textRuns = [...slide.xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)]
-      .map((match) => decodeXmlText(match[1] ?? ""))
+  let sawText = false;
+  slides.forEach((slide, position) => {
+    const paragraphs = [...slide.xml.matchAll(/<a:p\b[\s\S]*?<\/a:p>/g)]
+      .map((para) =>
+        // Decode entities per run WITHOUT trimming (a trailing space in one
+        // run is the separator before the next), join the runs, then collapse
+        // whitespace once at the paragraph level.
+        [...para[0].matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)]
+          .map((match) => decodeXmlEntities(match[1] ?? ""))
+          .join("")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
       .filter(Boolean);
-    if (textRuns.length === 0) continue;
-    blocks.push(`Slide ${blocks.length + 1}:\n${textRuns.map((text) => `- ${text}`).join("\n")}`);
-  }
+    if (paragraphs.length === 0) {
+      blocks.push(`Slide ${position + 1}: (no text)`);
+      return;
+    }
+    sawText = true;
+    blocks.push(`Slide ${position + 1}:\n${paragraphs.map((text) => `- ${text}`).join("\n")}`);
+  });
 
-  if (blocks.length === 0) return null;
+  if (!sawText) return null;
   return [
     "[POWERPOINT STRUCTURE — slide text extracted from the uploaded deck]",
     "Use these slide numbers when the user asks to delete, rewrite, add, or reorder slides.",

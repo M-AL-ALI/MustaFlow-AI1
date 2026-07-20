@@ -38,6 +38,11 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  .replit \
+  artifacts/api-server/src/lib/public-ai \
+  artifacts/api-server/src/routes/public-ai \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  scripts/src/ora-stability-gate.ts \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true

@@ -36,9 +36,9 @@ export interface AiOfficeEditPlan {
   operations: AiOfficeEditOp[];
 }
 
-const MAX_OPS = 20;
-const MAX_FIND_CHARS = 300;
-const MAX_REPLACE_CHARS = 1000;
+const MAX_OPS = 40;
+const MAX_FIND_CHARS = 600;
+const MAX_REPLACE_CHARS = 2000;
 
 const PLANNER_SYSTEM_PROMPT = `You are a document edit planner. The user uploaded an Office file (Word/PowerPoint/Excel) and is asking for a change. Your job is to decide whether the request can be satisfied by replacing existing text passages IN PLACE (keeping the file's layout, styling, images, and structure untouched), and if so, to produce the exact operations.
 
@@ -48,12 +48,69 @@ or
 {"mode":"regenerate","operations":[]}
 
 Rules:
-- "mode":"edit" ONLY when every requested change is a textual substitution of content that already exists in the document text below. Each "find" MUST be copied verbatim from the document text (a short contiguous passage, at most ${MAX_FIND_CHARS} characters). Use "" as "replace" to delete a passage.
-- Prefer the SHORTEST unique passage that pinpoints the change (a phrase or sentence, not a whole paragraph).
-- At most ${MAX_OPS} operations.
-- "mode":"regenerate" when the request needs anything structural: adding/removing slides, sheets, sections, rows, columns, charts, images, converting formats, reordering content, restyling, or rewriting most of the document.
+- "mode":"edit" whenever the requested change can be expressed as replacing text that already exists in the document text below. This INCLUDES rewriting the content of a specific slide, section, sheet, or paragraph: emit one operation per affected paragraph/bullet/cell, with "find" copied VERBATIM from the document text and "replace" holding the new content. Use "" as "replace" to delete a passage.
+- Rewriting one slide/section is NOT "regenerate". Example: for "slide 8 should cover X instead of Y", replace each of slide 8's bullets/paragraphs with new text about X, one operation per bullet.
+- Each "find" is a contiguous passage of at most ${MAX_FIND_CHARS} characters. For a very long paragraph, use a distinctive prefix (the first 10+ words) as "find" — the whole matched passage is replaced.
+- A "replace" may contain "\\n" line breaks to turn one bullet/paragraph into several.
+- Prefer the SHORTEST unique passage that pinpoints each change. At most ${MAX_OPS} operations.
+- "mode":"regenerate" ONLY when in-place text replacement genuinely cannot express the request: rewriting or restructuring the ENTIRE document, converting to another format, building a brand-new document, or adding slides/sheets/charts/images/tables that do not exist yet.
 - If the text the user wants to change does not appear in the document text, use "mode":"edit" with an empty operations array — do NOT invent a "find" that is not in the document.
 - Output JSON only. No commentary, no markdown fences.`;
+
+/**
+ * Extract the first balanced top-level JSON object from model output.
+ * Providers (Gemini especially) sometimes append commentary after the JSON or
+ * wrap it in prose despite response_format — both showed up in production as
+ * SyntaxError fallthroughs that silently regenerated the user's file.
+ */
+export function extractPlannerJson(content: string): string | null {
+  const stripped = content
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+  const start = stripped.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      if (inString) escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return stripped.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/** Parse planner JSON, tolerating trailing commas (a common Gemini artifact). */
+export function parsePlannerJson(content: string): unknown | null {
+  const jsonText = extractPlannerJson(content);
+  if (!jsonText) return null;
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    try {
+      return JSON.parse(jsonText.replace(/,\s*([}\]])/g, "$1"));
+    } catch {
+      return null;
+    }
+  }
+}
 
 function sanitizePlan(raw: unknown): AiOfficeEditPlan | null {
   if (typeof raw !== "object" || raw === null) return null;
@@ -147,11 +204,15 @@ export async function planAiOfficeEditOps(input: {
 
     const content = result.result.choices[0]?.message?.content?.trim() ?? "";
     if (!content) return null;
-    const jsonText = content
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
-    const plan = sanitizePlan(JSON.parse(jsonText));
+    const parsed = parsePlannerJson(content);
+    if (parsed === null) {
+      logger.warn(
+        { component: "ora-office-ai-edit", fileType: input.fileType },
+        "Office edit planner output contained no parseable JSON object",
+      );
+      return null;
+    }
+    const plan = sanitizePlan(parsed);
     if (!plan) {
       logger.warn(
         { component: "ora-office-ai-edit", fileType: input.fileType },
