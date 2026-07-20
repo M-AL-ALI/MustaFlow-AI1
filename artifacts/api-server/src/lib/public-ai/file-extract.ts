@@ -55,10 +55,6 @@ function decodeXmlEntities(value: string): string {
     .replace(/&apos;/g, "'");
 }
 
-function decodeXmlText(value: string): string {
-  return decodeXmlEntities(value).replace(/\s+/g, " ").trim();
-}
-
 function extractStructuredPptxText(buffer: Buffer): string | null {
   let files: Record<string, Uint8Array>;
   try {
