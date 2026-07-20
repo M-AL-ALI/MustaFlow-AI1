@@ -1,9 +1,24 @@
 import ExcelJS from "exceljs";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DatasetSummary } from "../dataset-extract.js";
 import type { storeFile as storeFileType } from "../file-store.js";
+import type { AiOfficeEditPlan } from "../office-ai-edit.js";
 import type { tryApplyLayoutPreservingFileEdit as tryApplyLayoutPreservingFileEditType } from "../office-layout-edit.js";
+
+// Controls the mocked AI edit planner. Default null = "planner unavailable",
+// which preserves legacy behavior for all pre-existing tests in this file.
+const aiPlanner = vi.hoisted(() => ({
+  plan: null as AiOfficeEditPlan | null,
+  calls: [] as unknown[],
+}));
+
+vi.mock("../office-ai-edit.js", () => ({
+  planAiOfficeEditOps: vi.fn(async (input: unknown) => {
+    aiPlanner.calls.push(input);
+    return aiPlanner.plan;
+  }),
+}));
 
 let storeFile: typeof storeFileType;
 let tryApplyLayoutPreservingFileEdit: typeof tryApplyLayoutPreservingFileEditType;
@@ -12,6 +27,11 @@ beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://user:pass@localhost:5432/test";
   ({ storeFile } = await import("../file-store.js"));
   ({ tryApplyLayoutPreservingFileEdit } = await import("../office-layout-edit.js"));
+});
+
+afterEach(() => {
+  aiPlanner.plan = null;
+  aiPlanner.calls = [];
 });
 
 function zipBase64(entries: Record<string, string>): string {
@@ -703,5 +723,175 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(edited?.actualRowCount).toBe(3);
     expect(edited?.getCell("A2").value).toBe("North");
     expect(edited?.getCell("A3").value).toBe("West");
+  });
+
+  it("returns the ORIGINAL bytes untouched for send-it-back requests", async () => {
+    const sessionId = crypto.randomUUID();
+    const base64 = makePptxBase64();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64,
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Can you send me back the PowerPoint file?",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.fileData).toBe(base64);
+    expect(result?.fileName).toBe("board-review.pptx");
+    expect(result?.reply).toContain("no changes made");
+    // The passthrough must never consult the AI planner.
+    expect(aiPlanner.calls.length).toBe(0);
+  });
+
+  it("returns the original unchanged for 'same file, no changes' requests", async () => {
+    const sessionId = crypto.randomUUID();
+    const base64 = makePptxBase64();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64,
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Please give me the document back exactly as it is, without any changes",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.fileData).toBe(base64);
+    expect(aiPlanner.calls.length).toBe(0);
+  });
+
+  it("applies AI-planned in-place ops when regex engines cannot parse the phrasing", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [{ find: "Old Pricing", replace: "Refreshed Pricing" }],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Reword the pricing line in the deck so it sounds current",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).not.toBeNull();
+    expect(aiPlanner.calls.length).toBe(1);
+    const entries = unzipBase64(result!.fileData);
+    const slide1 = strFromU8(entries["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Refreshed Pricing");
+    expect(slide1).not.toContain("Old Pricing");
+    // Original package preserved: slide 2 still present.
+    expect(entries["ppt/slides/slide2.xml"]).toBeDefined();
+    expect(result?.mimeType).toBe(
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    );
+  });
+
+  it("returns the file unchanged with an honest note when in-place ops cannot be located", async () => {
+    const sessionId = crypto.randomUUID();
+    const base64 = makePptxBase64();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64,
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [{ find: "Text that does not exist anywhere", replace: "irrelevant" }],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Reword the executive summary paragraph in the deck",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    // No silent regeneration: the ORIGINAL bytes come back with an honest note.
+    expect(result).not.toBeNull();
+    expect(result?.fileData).toBe(base64);
+    expect(result?.fileName).toBe("pricing-deck.pptx");
+    expect(result?.reply).toContain("returning it unchanged");
+  });
+
+  it("falls back to regeneration when the AI planner votes regenerate", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing",
+    });
+    aiPlanner.plan = { mode: "regenerate", operations: [] };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Reword the whole deck into a completely different story arc",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result).toBeNull();
+    expect(aiPlanner.calls.length).toBe(1);
+  });
+
+  it("compounds follow-up edits on the edited file, not the original upload", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const first = await tryApplyLayoutPreservingFileEdit({
+      message: 'Replace "Old Pricing" with "Interim Pricing"',
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+    expect(first).not.toBeNull();
+    expect(strFromU8(unzipBase64(first!.fileData)["ppt/slides/slide1.xml"]!)).toContain(
+      "Interim Pricing",
+    );
+
+    // Second edit targets text that only exists AFTER the first edit. It can
+    // only succeed if the first edit was written back to the session store.
+    const second = await tryApplyLayoutPreservingFileEdit({
+      message: 'Replace "Interim Pricing" with "Final Pricing"',
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+    expect(second).not.toBeNull();
+    const slide1 = strFromU8(unzipBase64(second!.fileData)["ppt/slides/slide1.xml"]!);
+    expect(slide1).toContain("Final Pricing");
+    expect(slide1).not.toContain("Interim Pricing");
+    expect(slide1).not.toContain("Old Pricing");
   });
 });

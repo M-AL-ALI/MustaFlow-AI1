@@ -117,6 +117,51 @@ export async function saveGeneratedFile(file: GeneratedFile): Promise<SaveOutcom
 }
 
 /**
+ * Materialize a generated file's bytes into a real cache file for in-app
+ * preview. Inline base64 bytes are written directly; reloaded messages (whose
+ * inline bytes were dropped) fall back to downloading the durable library
+ * asset by id with the bearer token attached. Native-only — web callers open
+ * the file in a new tab instead.
+ */
+export async function materializeGeneratedFileToCache(
+  file: GeneratedFile,
+): Promise<{ uri: string; mimeType: string }> {
+  if (file.fileData) {
+    const fileUri = cacheUri(file.fileName);
+    await FileSystem.writeAsStringAsync(fileUri, file.fileData, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { uri: fileUri, mimeType: file.mimeType };
+  }
+  if (file.assetId != null) {
+    const downloadUrl = `${API_BASE}/api/ora/assets/${file.assetId}/download`;
+    const token = await getAuthToken();
+    const fileUri = cacheUri(file.fileName);
+    const result = await FileSystem.downloadAsync(downloadUrl, fileUri, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (result.status >= 400) {
+      throw new FileSaveError(`Could not download file (HTTP ${result.status}).`);
+    }
+    return { uri: result.uri, mimeType: file.mimeType };
+  }
+  throw new FileSaveError(
+    "These file contents are no longer available. Regenerate it to view.",
+  );
+}
+
+/**
+ * Hand an already-materialized local cache file to the native share sheet
+ * ("Open with…"). Used as the View fallback on platforms that can't render
+ * the file inline (Android, or older native builds without the WebView
+ * module).
+ */
+export async function shareCachedFile(uri: string, mimeType?: string): Promise<SaveOutcome> {
+  await shareFile(uri, mimeType, fileUtiForMime(mimeType));
+  return "shared";
+}
+
+/**
  * Save an arbitrary text reply (e.g. an assistant message) as a file. The bytes
  * are written as UTF-8 and handed to the native share sheet so the user can save
  * to Files, Notes, etc. On web the text is opened in a new tab as a data URI.

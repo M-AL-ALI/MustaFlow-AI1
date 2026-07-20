@@ -179,6 +179,8 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /spreadsheet/i,
       /workbook/i,
       /office-layout-edit/i,
+      /office-ai-edit/i,
+      /GeneratedFileViewer/i,
       /appsheet/i,
       /carried-docs/i,
       /ora-context-quality/i,
@@ -201,9 +203,9 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /phase2/i,
     ],
     manualWebsite:
-      "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions.",
+      "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions. Uploaded-office-file safeguards: (1) upload a DOCX/PPTX, then ask 'send me back the file' — the ORIGINAL file must come back byte-identical (reply says no changes made), never a regenerated lookalike; (2) ask an in-place edit in natural wording (e.g. 'reword the pricing line') — the edited file must keep the original layout/styling (AI-planned in-place ops), and if the text cannot be located the file must come back UNCHANGED with an honest note, never silently rebuilt; (3) two consecutive edits must compound (second edit applies on top of the first, not the original upload).",
     manualMobile:
-      "Verify upload, generated file cards, save/share/download, and revision actions on TestFlight when mobile code changed. From the attach menu, tap Browse files and confirm the iOS Files picker actually opens (regression: picker presented while the menu modal was still dismissing fails silently and poisons all later attempts until app restart); also confirm Take photo and Photo library still open after the menu closes. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
+      "Verify upload, generated file cards, View + Download parity with website (View opens an in-app preview on iOS via WebView, share sheet on Android/older builds; non-image cards say Download, images say Save), and revision actions on TestFlight when mobile code changed. From the attach menu, tap Browse files and confirm the iOS Files picker actually opens (regression: picker presented while the menu modal was still dismissing fails silently and poisons all later attempts until app restart); also confirm Take photo and Photo library still open after the menu closes. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn).",
   },
   {
     id: "conversation-history",
@@ -725,7 +727,9 @@ function commandResult(check: GateCheck): CheckResult {
 function gitInfo(requireClean: boolean): CheckResult[] {
   const sha = runShell("git rev-parse HEAD", 20_000);
   const branch = runShell("git branch --show-current", 20_000);
-  const status = runShell("git status --short", 20_000);
+  // --no-optional-locks keeps the scan read-only (no .git/index.lock writes),
+  // so the gate can run in sandboxed shells and never trips on a stale lock.
+  const status = runShell("git --no-optional-locks status --short", 20_000);
   const dirty = status.output.trim().length > 0;
   const cleanStatus: GateStatus = dirty && requireClean ? "fail" : dirty ? "warn" : "pass";
   return [
@@ -758,10 +762,10 @@ function gitInfo(requireClean: boolean): CheckResult[] {
 
 function changedFiles(): string[] {
   const candidates = [
-    runShell("git diff --name-only HEAD~1..HEAD", 20_000).output,
-    runShell("git diff --name-only --cached", 20_000).output,
-    runShell("git diff --name-only", 20_000).output,
-    runShell("git ls-files --others --exclude-standard", 20_000).output,
+    runShell("git --no-optional-locks diff --name-only HEAD~1..HEAD", 20_000).output,
+    runShell("git --no-optional-locks diff --name-only --cached", 20_000).output,
+    runShell("git --no-optional-locks diff --name-only", 20_000).output,
+    runShell("git --no-optional-locks ls-files --others --exclude-standard", 20_000).output,
   ];
   return Array.from(
     new Set(

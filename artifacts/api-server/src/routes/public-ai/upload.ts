@@ -21,7 +21,10 @@ import {
   MAX_TOTAL_CHARS_PER_SESSION,
   MAX_RAW_BYTES_PER_FILE,
 } from "../../lib/public-ai/file-store";
-import { persistFileContextBestEffort } from "../../lib/public-ai/file-context-store";
+import {
+  persistFileContextBestEffort,
+  type PersistFileContextInput,
+} from "../../lib/public-ai/file-context-store";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
@@ -56,6 +59,30 @@ function persistOraAssetBestEffort(input: PersistOraAssetInput): void {
     } catch (err) {
       logger.error({ component: "ora-upload", err }, "Failed to persist Ora upload to library");
     }
+  })();
+}
+
+/**
+ * Persist BOTH durable mirrors of a signed-in upload in one chained background
+ * task: library asset first, then the file-context row carrying the returned
+ * asset id. The link is what lets the durable path rehydrate the ORIGINAL
+ * Office bytes later (layout-preserving edits after memory expiry/restart).
+ * Fully best-effort — an asset failure still writes the text-only context row
+ * (assetId null), and nothing here can fail the upload response.
+ */
+function persistUploadMirrorsBestEffort(input: {
+  asset: PersistOraAssetInput;
+  context: Omit<PersistFileContextInput, "assetId">;
+}): void {
+  void (async () => {
+    let assetId: number | null = null;
+    try {
+      const { persistOraAsset } = await import("../../lib/ora-assets");
+      assetId = await persistOraAsset(input.asset);
+    } catch (err) {
+      logger.error({ component: "ora-upload", err }, "Failed to persist Ora upload to library");
+    }
+    persistFileContextBestEffort({ ...input.context, assetId });
   })();
 }
 
@@ -315,25 +342,27 @@ router.post(
       );
 
       if (authed) {
-        persistOraAssetBestEffort({
-          userId: authed.userId,
-          kind: "file",
-          fileName: validation.sanitizedName,
-          mimeType: file.mimetype,
-          base64: file.buffer.toString("base64"),
-        });
-        // Durable text-only mirror so signed-in users can still reference this
-        // dataset after the in-memory entry expires or the session rotates.
-        persistFileContextBestEffort({
-          userId: authed.userId,
-          fileRef,
-          sessionId: session.sessionId,
-          filename: validation.sanitizedName,
-          mimeType: file.mimetype,
-          fileType: validation.type,
-          extractedText: "",
-          charCount: 0,
-          datasetSummary: summary,
+        // Chained: asset first, then the context row linked via assetId so the
+        // original raw bytes stay reachable for later layout-preserving edits.
+        persistUploadMirrorsBestEffort({
+          asset: {
+            userId: authed.userId,
+            kind: "file",
+            fileName: validation.sanitizedName,
+            mimeType: file.mimetype,
+            base64: file.buffer.toString("base64"),
+          },
+          context: {
+            userId: authed.userId,
+            fileRef,
+            sessionId: session.sessionId,
+            filename: validation.sanitizedName,
+            mimeType: file.mimetype,
+            fileType: validation.type,
+            extractedText: "",
+            charCount: 0,
+            datasetSummary: summary,
+          },
         });
       }
 
@@ -418,24 +447,26 @@ router.post(
     );
 
     if (authed) {
-      persistOraAssetBestEffort({
-        userId: authed.userId,
-        kind: "file",
-        fileName: validation.sanitizedName,
-        mimeType: file.mimetype,
-        base64: file.buffer.toString("base64"),
-      });
-      // Durable text-only mirror so signed-in users can still reference this
-      // document after the in-memory entry expires or the session rotates.
-      persistFileContextBestEffort({
-        userId: authed.userId,
-        fileRef,
-        sessionId: session.sessionId,
-        filename: validation.sanitizedName,
-        mimeType: file.mimetype,
-        fileType: validation.type,
-        extractedText: extractedText.slice(0, charCount),
-        charCount,
+      // Chained: asset first, then the context row linked via assetId so the
+      // original raw bytes stay reachable for later layout-preserving edits.
+      persistUploadMirrorsBestEffort({
+        asset: {
+          userId: authed.userId,
+          kind: "file",
+          fileName: validation.sanitizedName,
+          mimeType: file.mimetype,
+          base64: file.buffer.toString("base64"),
+        },
+        context: {
+          userId: authed.userId,
+          fileRef,
+          sessionId: session.sessionId,
+          filename: validation.sanitizedName,
+          mimeType: file.mimetype,
+          fileType: validation.type,
+          extractedText: extractedText.slice(0, charCount),
+          charCount,
+        },
       });
     }
 

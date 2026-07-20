@@ -89,6 +89,10 @@ import {
   OraSuggestions,
 } from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
+import {
+  canViewFileInApp,
+  GeneratedFileViewer,
+} from "@/components/ora/GeneratedFileViewer";
 import { ImagePreviewModal } from "@/components/ora/ImagePreviewModal";
 import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
@@ -100,11 +104,13 @@ import { useColors } from "@/hooks/useColors";
 import { useOraRealtimeVoiceNative } from "@/hooks/useOraRealtimeVoiceNative";
 import {
   getLocalFileSize,
+  materializeGeneratedFileToCache,
   MAX_UPLOAD_BYTES,
   saveGeneratedFile,
   saveHtmlAsPdf,
   saveImageFromUrl,
   saveTextAsFile,
+  shareCachedFile,
 } from "@/lib/files";
 import { logError } from "@/lib/log";
 import { isSafeHttpUrl } from "@/lib/safe-url";
@@ -3843,6 +3849,8 @@ function MessageBubbleBase({
   const safeSources = (message.sources ?? []).filter((s) => isSafeHttpUrl(s.url));
   const [savingFile, setSavingFile] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [viewingFile, setViewingFile] = useState(false);
+  const [fileViewerUri, setFileViewerUri] = useState<string | null>(null);
 
   const copy = () => Clipboard.setStringAsync(message.content);
 
@@ -3870,6 +3878,35 @@ function MessageBubbleBase({
       setSavingFile(false);
     }
   }, [message.generatedFile, savingFile]);
+
+  // Website parity: the file card exposes View alongside Download. On iOS the
+  // file opens in an in-app WebView (WebKit renders docx/pptx/xlsx/pdf
+  // natively); Android and older native builds fall back to the share sheet
+  // ("Open with…"); web opens the file in a new tab.
+  const handleViewFile = useCallback(async () => {
+    const file = message.generatedFile;
+    if (!file || viewingFile) return;
+    setViewingFile(true);
+    try {
+      if (Platform.OS === "web") {
+        await saveGeneratedFile(file);
+        return;
+      }
+      const { uri, mimeType } = await materializeGeneratedFileToCache(file);
+      if (canViewFileInApp()) {
+        setFileViewerUri(uri);
+      } else {
+        await shareCachedFile(uri, mimeType);
+      }
+    } catch (err) {
+      Alert.alert(
+        "Couldn't open file",
+        err instanceof Error ? err.message : "Something went wrong.",
+      );
+    } finally {
+      setViewingFile(false);
+    }
+  }, [message.generatedFile, viewingFile]);
 
   const handleSaveImage = useCallback(async () => {
     if (!message.imageUrl || savingImage) return;
@@ -4121,11 +4158,50 @@ function MessageBubbleBase({
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                    {!isImageFile(message.generatedFile.mimeType) && (
+                      <Pressable
+                        onPress={handleViewFile}
+                        disabled={viewingFile}
+                        accessibilityRole="button"
+                        accessibilityLabel="View generated file"
+                        style={{
+                          flex: 1,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          borderRadius: 9,
+                          paddingVertical: 8,
+                          borderWidth: 1,
+                          borderColor: c.border,
+                          backgroundColor: "transparent",
+                        }}
+                      >
+                        {viewingFile ? (
+                          <ActivityIndicator size="small" color={c.mutedForeground} />
+                        ) : (
+                          <ExternalLink size={15} color={c.accentForeground} />
+                        )}
+                        <Text
+                          style={{
+                            color: c.foreground,
+                            fontSize: 12,
+                            fontFamily: "Inter_600SemiBold",
+                          }}
+                        >
+                          View
+                        </Text>
+                      </Pressable>
+                    )}
                     <Pressable
                       onPress={handleSaveFile}
                       disabled={savingFile}
                       accessibilityRole="button"
-                      accessibilityLabel="Save generated file"
+                      accessibilityLabel={
+                        isImageFile(message.generatedFile.mimeType)
+                          ? "Save generated file"
+                          : "Download generated file"
+                      }
                       style={{
                         flex: 1,
                         flexDirection: "row",
@@ -4139,10 +4215,8 @@ function MessageBubbleBase({
                     >
                       {savingFile ? (
                         <ActivityIndicator size="small" color={c.mutedForeground} />
-                      ) : isImageFile(message.generatedFile.mimeType) ? (
-                        <Download size={15} color={c.accentForeground} />
                       ) : (
-                        <Share2 size={15} color={c.accentForeground} />
+                        <Download size={15} color={c.accentForeground} />
                       )}
                       <Text
                         style={{
@@ -4151,7 +4225,7 @@ function MessageBubbleBase({
                           fontFamily: "Inter_600SemiBold",
                         }}
                       >
-                        {isImageFile(message.generatedFile.mimeType) ? "Save" : "Share"}
+                        {isImageFile(message.generatedFile.mimeType) ? "Save" : "Download"}
                       </Text>
                     </Pressable>
                     {onReviseFile ? (
@@ -4186,6 +4260,14 @@ function MessageBubbleBase({
                     ) : null}
                   </View>
                 </View>
+              )}
+
+              {message.generatedFile && (
+                <GeneratedFileViewer
+                  uri={fileViewerUri}
+                  fileName={message.generatedFile.fileName}
+                  onClose={() => setFileViewerUri(null)}
+                />
               )}
 
               {safeSources.length > 0 && (

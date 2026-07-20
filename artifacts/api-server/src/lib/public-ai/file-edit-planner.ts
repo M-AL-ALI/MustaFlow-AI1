@@ -89,7 +89,7 @@ const OPERATION_PATTERNS: Array<{ operation: UploadedFileOperation; pattern: Reg
   },
 ];
 
-const FILE_OUTPUT_OPERATIONS = new Set<UploadedFileOperation>([
+export const FILE_OUTPUT_OPERATIONS = new Set<UploadedFileOperation>([
   "rewrite",
   "replace",
   "delete",

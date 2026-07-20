@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { db, oraAssetsTable, type OraAssetKind } from "@workspace/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { r2Enabled, r2PutObject } from "./cloudflare";
+import { r2Enabled, r2GetObject, r2PutObject } from "./cloudflare";
 
 /**
  * R2 offload is opt-in via `ORA_ASSETS_R2_ENABLED=true` AND configured R2
@@ -41,6 +41,50 @@ export async function getUserStorageBytes(userId: string): Promise<number> {
     .from(oraAssetsTable)
     .where(and(eq(oraAssetsTable.userId, userId), isNull(oraAssetsTable.deletedAt)));
   return Number(row?.total ?? 0);
+}
+
+/**
+ * Resolve the raw bytes for an already-loaded Ora asset row. R2 is tried first
+ * when a storage key is present; on a miss we fall back to the DB `data` blob
+ * if it exists so a partial migration can never strand an asset. Returns null
+ * when neither source yields bytes.
+ */
+export async function resolveOraAssetRowBytes(row: {
+  storageKey: string | null;
+  data: string | null;
+}): Promise<Buffer | null> {
+  let buf: Buffer | null = null;
+  if (row.storageKey) {
+    const obj = await r2GetObject(row.storageKey);
+    if (obj) buf = obj.body;
+  }
+  if (!buf && row.data) buf = Buffer.from(row.data, "base64");
+  return buf;
+}
+
+/**
+ * Load the raw bytes of one owner-scoped, non-deleted library asset. Used by
+ * the durable file-context rehydration path so layout-preserving Office edits
+ * keep working after the in-memory upload entry expires or the server
+ * restarts. Returns null when the asset is missing, deleted, foreign, or its
+ * bytes are unavailable from both R2 and the DB.
+ */
+export async function getOraAssetBytes(assetId: number, userId: string): Promise<Buffer | null> {
+  try {
+    const [row] = await db
+      .select({
+        storageKey: oraAssetsTable.storageKey,
+        data: oraAssetsTable.data,
+        deletedAt: oraAssetsTable.deletedAt,
+      })
+      .from(oraAssetsTable)
+      .where(and(eq(oraAssetsTable.id, assetId), eq(oraAssetsTable.userId, userId)));
+    if (!row || row.deletedAt) return null;
+    return await resolveOraAssetRowBytes(row);
+  } catch (err) {
+    logger.error({ component: "ora-assets", err, assetId }, "Failed to load Ora asset bytes");
+    return null;
+  }
 }
 
 export interface PersistOraAssetInput {

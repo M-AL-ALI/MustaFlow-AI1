@@ -39,6 +39,16 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
   .agents/memory \
+  artifacts/api-server/src/lib/ora-assets.ts \
+  artifacts/api-server/src/lib/public-ai \
+  artifacts/api-server/src/routes/ora-assets.ts \
+  artifacts/api-server/src/routes/public-ai \
+  'artifacts/ora-mobile/app/(home)/index.tsx' \
+  artifacts/ora-mobile/components/ora/GeneratedFileViewer.tsx \
+  artifacts/ora-mobile/lib \
+  artifacts/ora-mobile/package.json \
+  pnpm-lock.yaml \
+  scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

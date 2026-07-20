@@ -1,11 +1,22 @@
 import ExcelJS from "exceljs";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { planUploadedFileRequest } from "./file-edit-planner.js";
+import {
+  FILE_OUTPUT_OPERATIONS,
+  planUploadedFileRequest,
+  type UploadedFileOperation,
+} from "./file-edit-planner.js";
 import { inferChartsFromTabularData, renderChartPng } from "./file-charts.js";
 import { resolveFileEntry } from "./file-context-store.js";
 import type { DatasetSummary } from "./dataset-extract.js";
 import type { FileFormat, GeneratedFileResult, TabularData } from "./file-builder.js";
-import type { FileEntry } from "./file-store.js";
+import {
+  putFileEntry,
+  MAX_RAW_BYTES_PER_FILE,
+  MAX_TEXT_CHARS_PER_FILE,
+  type FileEntry,
+} from "./file-store.js";
+import type { AiOfficeEditOp } from "./office-ai-edit.js";
+import { logger } from "../logger";
 
 type OfficeRawType = "docx" | "pptx" | "xlsx";
 
@@ -15,6 +26,7 @@ interface LayoutEditInput {
   documentRefs: string[];
   sessionId: string;
   userId?: string | null;
+  subscriptionTier?: string | null;
 }
 
 type ZipEntries = Record<string, Uint8Array>;
@@ -469,6 +481,127 @@ function replaceTextNodes(
     return full;
   });
   return { xml: nextXml, count };
+}
+
+/**
+ * Build a forgiving matcher for an AI-planned "find" passage: whitespace runs
+ * collapse to `\s+` and straight/curly quote variants match each other, since
+ * models routinely normalize the typographic quotes and spacing that Office
+ * documents actually contain. The find text itself is regex-escaped.
+ */
+function looseFindRegex(find: string): RegExp {
+  const parts = normalizePhrase(find)
+    .split(" ")
+    .filter(Boolean)
+    .map((word) =>
+      escapeRegExp(word)
+        .replace(/['\u2018\u2019]/g, "['\u2018\u2019]")
+        .replace(/["\u201C\u201D]/g, '["\u201C\u201D]'),
+    );
+  return new RegExp(parts.join("\\s+"), "gi");
+}
+
+/**
+ * Apply AI-planned find→replace operations to every `<a:t>`/`<w:t>` text node
+ * in an OOXML part. Matching is per-node (a passage split across runs will not
+ * match — callers treat "0 ops applied" honestly instead of regenerating).
+ * Returns the indexes of the ops that changed at least one node.
+ */
+function applyAiOpsToXmlNodes(
+  xml: string,
+  nodeName: "a:t" | "w:t",
+  ops: AiOfficeEditOp[],
+): { xml: string; appliedOps: Set<number> } {
+  const tag = escapeRegExp(nodeName);
+  const re = new RegExp(`(<${tag}\\b[^>]*>)([\\s\\S]*?)(</${tag}>)`, "g");
+  const regexes = ops.map((op) => looseFindRegex(op.find));
+  const appliedOps = new Set<number>();
+  const nextXml = xml.replace(re, (full, open: string, inner: string, close: string) => {
+    let text = xmlUnescape(inner);
+    let changed = false;
+    ops.forEach((op, i) => {
+      const rx = regexes[i]!;
+      rx.lastIndex = 0;
+      if (!rx.test(text)) return;
+      rx.lastIndex = 0;
+      // Replacer function so `$` sequences in the replacement stay literal.
+      text = text.replace(rx, () => op.replace);
+      appliedOps.add(i);
+      changed = true;
+    });
+    if (!changed) return full;
+    return `${open}${xmlEscape(text)}${close}`;
+  });
+  return { xml: nextXml, appliedOps };
+}
+
+/**
+ * Apply AI-planned text operations to the raw Office bytes, preserving all
+ * layout/styling. Returns the edited buffer plus how many DISTINCT ops landed;
+ * null when the file cannot be processed at all.
+ */
+async function applyAiOfficeEditOps(
+  entry: FileEntry,
+  type: OfficeRawType,
+  ops: AiOfficeEditOp[],
+): Promise<{ buffer: Buffer; appliedCount: number } | null> {
+  const raw = base64Raw(entry);
+  if (!raw || ops.length === 0) return null;
+
+  if (type === "xlsx") {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(raw as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const regexes = ops.map((op) => looseFindRegex(op.find));
+    const appliedOps = new Set<number>();
+    workbook.eachSheet((sheet) => {
+      sheet.eachRow({ includeEmpty: false }, (row) => {
+        row.eachCell({ includeEmpty: false }, (cell) => {
+          const value = cell.value;
+          if (typeof value !== "string") return;
+          let text = value;
+          let changed = false;
+          ops.forEach((op, i) => {
+            const rx = regexes[i]!;
+            rx.lastIndex = 0;
+            if (!rx.test(text)) return;
+            rx.lastIndex = 0;
+            text = text.replace(rx, () => op.replace);
+            appliedOps.add(i);
+            changed = true;
+          });
+          if (changed) cell.value = text;
+        });
+      });
+    });
+    if (appliedOps.size === 0) return null;
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    return { buffer, appliedCount: appliedOps.size };
+  }
+
+  const entries = unzipSync(new Uint8Array(raw));
+  const appliedOps = new Set<number>();
+  if (type === "docx") {
+    const docXml = getXml(entries, "word/document.xml");
+    if (!docXml) return null;
+    const updated = applyAiOpsToXmlNodes(docXml, "w:t", ops);
+    updated.appliedOps.forEach((i) => appliedOps.add(i));
+    if (appliedOps.size > 0) setXml(entries, "word/document.xml", updated.xml);
+  } else {
+    const slidePaths = Object.keys(entries).filter((path) =>
+      /^ppt\/slides\/slide\d+\.xml$/.test(path),
+    );
+    for (const path of slidePaths) {
+      const slideXml = getXml(entries, path);
+      if (!slideXml) continue;
+      const updated = applyAiOpsToXmlNodes(slideXml, "a:t", ops);
+      if (updated.appliedOps.size > 0) {
+        updated.appliedOps.forEach((i) => appliedOps.add(i));
+        setXml(entries, path, updated.xml);
+      }
+    }
+  }
+  if (appliedOps.size === 0) return null;
+  return { buffer: zipBuffer(entries), appliedCount: appliedOps.size };
 }
 
 function professionalizeTextNodes(
@@ -1542,23 +1675,214 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   };
 }
 
-async function resolveRawOfficeEntry(input: LayoutEditInput): Promise<FileEntry | null> {
+async function resolveRawOfficeEntry(
+  input: LayoutEditInput,
+): Promise<{ entry: FileEntry; fileRef: string } | null> {
   for (const ref of input.documentRefs) {
     const entry = await resolveFileEntry(ref, { sessionId: input.sessionId, userId: input.userId });
     if (!entry?.rawFileType || !entry.rawBase64) continue;
-    if (entry.rawFileType === input.format) return entry;
+    if (entry.rawFileType === input.format) return { entry, fileRef: ref };
   }
   return null;
+}
+
+/**
+ * "Send it back / give me the file" style requests with no edit operation.
+ * These must return the ORIGINAL bytes untouched — regenerating a lookalike
+ * from extracted text destroys the user's layout, images, and styling.
+ */
+const RETURN_ORIGINAL_PATTERN =
+  /\b(?:return|send|give|share|resend|re-?send|download|provide|attach|upload)\b[^.?!\n]{0,80}\b(?:file|document|doc|deck|presentation|slides?|power[\s-]?point|pptx?|spreadsheet|workbook|excel|xlsx|docx|word|copy|it)\b/i;
+
+const UNCHANGED_PATTERN =
+  /\b(?:same|original|unchanged|as[-\s]is|untouched|without\s+(?:any\s+)?(?:changes?|modifications?|edits?)|exactly\s+as)\b/i;
+
+function isReturnOriginalRequest(message: string): boolean {
+  if (!RETURN_ORIGINAL_PATTERN.test(message)) return false;
+  const plan = planUploadedFileRequest(message);
+  if (plan.operations.length === 0) return true;
+  return (
+    UNCHANGED_PATTERN.test(message) &&
+    !plan.operations.some((op) => FILE_OUTPUT_OPERATIONS.has(op))
+  );
+}
+
+/**
+ * Operations that are textual/in-place by nature — safe to route through the
+ * AI edit planner. Transform-style operations (convert/chart/merge/...) and
+ * explicit "new document" requests keep the full regeneration path.
+ */
+const IN_PLACE_OPS = new Set<UploadedFileOperation>([
+  "replace",
+  "delete",
+  "rewrite",
+  "rename",
+  "translate",
+  "format",
+  "professionalize",
+  "add",
+  "insert",
+  "move",
+  "reorder",
+]);
+
+const TRANSFORM_OPS = new Set<UploadedFileOperation>([
+  "convert",
+  "chart",
+  "dashboard",
+  "formula",
+  "merge",
+  "split",
+]);
+
+const NEW_DOC_PATTERN =
+  /\b(?:(?:a|an)\s+(?:brand[\s-]?)?new\s+(?:deck|presentation|document|doc|file|report|spreadsheet|workbook|version)|from\s+scratch|start\s+over)\b/i;
+
+function isInPlaceEditIntent(message: string): boolean {
+  const plan = planUploadedFileRequest(message);
+  if (!plan.operations.some((op) => IN_PLACE_OPS.has(op))) return false;
+  if (plan.operations.some((op) => TRANSFORM_OPS.has(op))) return false;
+  if (NEW_DOC_PATTERN.test(message)) return false;
+  return true;
+}
+
+/** Return the current bytes under the ORIGINAL filename, explicitly unchanged. */
+function buildPassthroughResult(
+  entry: FileEntry,
+  type: OfficeRawType,
+  reply: string,
+): GeneratedFileResult {
+  return {
+    fileName: entry.filename,
+    fileData: entry.rawBase64!,
+    mimeType: MIME_BY_TYPE[type],
+    reply,
+  };
+}
+
+/**
+ * After a REAL in-place edit, update the in-memory file entry with the new
+ * bytes (and re-extracted text for docx/pptx) so follow-up edits in this
+ * session compound on the edited version instead of silently reverting to the
+ * original upload. Best-effort — failure never blocks returning the result.
+ * Known v1 limitation: the durable mirror keeps pointing at the ORIGINAL
+ * uploaded asset, so edits after a server restart re-start from the original.
+ */
+async function writeBackEditedEntry(
+  input: LayoutEditInput,
+  fileRef: string,
+  entry: FileEntry,
+  result: GeneratedFileResult,
+): Promise<void> {
+  try {
+    const buffer = Buffer.from(result.fileData, "base64");
+    if (buffer.length === 0 || buffer.length > MAX_RAW_BYTES_PER_FILE) return;
+    let extractedText = entry.extractedText;
+    if (entry.rawFileType === "docx" || entry.rawFileType === "pptx") {
+      try {
+        const { extractText } = await import("./file-extract.js");
+        const text = await extractText(buffer, entry.rawFileType);
+        if (text.trim()) extractedText = text.slice(0, MAX_TEXT_CHARS_PER_FILE);
+      } catch (err) {
+        logger.warn(
+          { component: "ora-office-edit", err, fileType: entry.rawFileType },
+          "Failed to re-extract text after in-place edit — keeping prior text",
+        );
+      }
+    }
+    const { expiresAt: _expiresAt, ...rest } = entry;
+    putFileEntry(fileRef, {
+      ...rest,
+      sessionId: input.sessionId,
+      extractedText,
+      charCount: extractedText.length,
+      rawBase64: result.fileData,
+      rawSizeBytes: buffer.length,
+    });
+  } catch (err) {
+    logger.warn(
+      { component: "ora-office-edit", err },
+      "Failed to write back edited Office file to the session store",
+    );
+  }
 }
 
 export async function tryApplyLayoutPreservingFileEdit(
   input: LayoutEditInput,
 ): Promise<GeneratedFileResult | null> {
   if (input.format !== "docx" && input.format !== "pptx" && input.format !== "xlsx") return null;
-  const entry = await resolveRawOfficeEntry(input);
-  if (!entry) return null;
-  if (entry.rawFileType === "pptx") return editPptx(entry, input.message);
-  if (entry.rawFileType === "docx") return editDocx(entry, input.message);
-  if (entry.rawFileType === "xlsx") return editXlsx(entry, input.message);
-  return null;
+  const resolved = await resolveRawOfficeEntry(input);
+  if (!resolved) return null;
+  const { entry, fileRef } = resolved;
+  const type = entry.rawFileType as OfficeRawType;
+
+  // 1) "Send it back" with no edit request → original bytes, untouched.
+  if (isReturnOriginalRequest(input.message)) {
+    return buildPassthroughResult(
+      entry,
+      type,
+      `Here's your file "${entry.filename}" exactly as it is — no changes made. Click the card below to download it.`,
+    );
+  }
+
+  // 2) Deterministic regex edit engines (fast, no model call).
+  let result: GeneratedFileResult | null;
+  if (type === "pptx") result = await editPptx(entry, input.message);
+  else if (type === "docx") result = await editDocx(entry, input.message);
+  else result = await editXlsx(entry, input.message);
+  if (result) {
+    await writeBackEditedEntry(input, fileRef, entry, result);
+    return result;
+  }
+
+  // 3) AI-planned in-place ops for edit phrasings the regexes don't cover.
+  if (!isInPlaceEditIntent(input.message)) return null;
+  let appliedCount = 0;
+  try {
+    const { planAiOfficeEditOps } = await import("./office-ai-edit.js");
+    const aiPlan = await planAiOfficeEditOps({
+      message: input.message,
+      extractedText: entry.extractedText,
+      filename: entry.filename,
+      fileType: type,
+      subscriptionTier: input.subscriptionTier ?? null,
+    });
+    // Planner unavailable/errored → keep legacy behavior (regeneration).
+    if (!aiPlan) return null;
+    // The model judged this a structural request → regeneration is correct.
+    if (aiPlan.mode === "regenerate") return null;
+
+    if (aiPlan.operations.length > 0) {
+      const applied = await applyAiOfficeEditOps(entry, type, aiPlan.operations);
+      if (applied && applied.appliedCount > 0) {
+        appliedCount = applied.appliedCount;
+        const editResult = buildOfficeResult(
+          entry,
+          type,
+          applied.buffer,
+          `applied ${applied.appliedCount} text edit${applied.appliedCount === 1 ? "" : "s"}`,
+        );
+        await writeBackEditedEntry(input, fileRef, entry, editResult);
+        return editResult;
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      { component: "ora-office-edit", err, fileType: type },
+      "AI in-place edit path failed — falling through to no-silent-regeneration guard",
+    );
+  }
+
+  // 4) In-place intent confirmed but nothing could be located/applied →
+  //    return the file unchanged with an honest note instead of silently
+  //    rebuilding a lookalike that loses the user's layout.
+  logger.info(
+    { component: "ora-office-edit", fileType: type, appliedCount },
+    "In-place edit intent with no applicable ops — returning file unchanged",
+  );
+  return buildPassthroughResult(
+    entry,
+    type,
+    `I couldn't locate the exact text to change in "${entry.filename}", so I'm returning it unchanged rather than rebuilding it from scratch (that would lose your layout and styling). Tell me the exact wording to change — for example: replace "Old heading" with "New heading" — and I'll edit it in place.`,
+  );
 }

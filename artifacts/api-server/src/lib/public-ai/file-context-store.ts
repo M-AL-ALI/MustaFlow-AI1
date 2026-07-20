@@ -15,7 +15,12 @@
 import { db, oraFileContextsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { logger } from "../logger";
-import { getFile, type FileEntry } from "./file-store.js";
+import {
+  getFile,
+  putFileEntry,
+  MAX_RAW_BYTES_PER_FILE,
+  type FileEntry,
+} from "./file-store.js";
 import type { DatasetSummary } from "./dataset-extract.js";
 
 // Mirror the in-memory TTL on the FileEntry shape we synthesize from the DB.
@@ -99,7 +104,8 @@ async function getDurableFileContext(fileRef: string, userId: string): Promise<F
       )
       .limit(1);
     if (!row) return null;
-    return {
+
+    const entry: FileEntry = {
       sessionId: row.sessionId,
       filename: row.filename,
       mimeType: row.mimeType,
@@ -108,6 +114,35 @@ async function getDurableFileContext(fileRef: string, userId: string): Promise<F
       expiresAt: Date.now() + REHYDRATE_TTL_MS,
       datasetSummary: (row.datasetSummary as DatasetSummary | null) ?? undefined,
     };
+
+    // Raw-byte rehydration for Office files: the upload also went to the
+    // durable asset library (asset id recorded on this row), so pull the
+    // original bytes back and reattach them. This is what keeps
+    // layout-preserving DOCX/PPTX/XLSX edits working after the in-memory entry
+    // expired, the server restarted, or the session JWT rotated — without it
+    // those requests silently fall through to full regeneration. Best-effort:
+    // on any failure the text-only entry still works for analysis.
+    if (
+      row.assetId != null &&
+      (row.fileType === "docx" || row.fileType === "pptx" || row.fileType === "xlsx")
+    ) {
+      try {
+        const { getOraAssetBytes } = await import("../ora-assets");
+        const bytes = await getOraAssetBytes(row.assetId, userId);
+        if (bytes && bytes.length > 0 && bytes.length <= MAX_RAW_BYTES_PER_FILE) {
+          entry.rawBase64 = bytes.toString("base64");
+          entry.rawSizeBytes = bytes.length;
+          entry.rawFileType = row.fileType;
+        }
+      } catch (err) {
+        logger.warn(
+          { component: "ora-file-context", err, assetId: row.assetId },
+          "Failed to rehydrate raw Office bytes for durable file context",
+        );
+      }
+    }
+
+    return entry;
   } catch (err) {
     logger.error({ component: "ora-file-context", err }, "Failed to read Ora file context");
     return null;
@@ -126,7 +161,16 @@ export async function resolveFileEntry(
   const memEntry = getFile(fileRef, opts.sessionId);
   if (memEntry) return memEntry;
   if (opts.userId) {
-    return getDurableFileContext(fileRef, opts.userId);
+    const durable = await getDurableFileContext(fileRef, opts.userId);
+    if (durable) {
+      // Re-seed the in-memory store under the SAME fileRef but the CURRENT
+      // sessionId so follow-up turns in this session are served from memory
+      // (including any rehydrated raw bytes) and edit write-backs compound.
+      const { expiresAt: _expiresAt, ...rest } = durable;
+      putFileEntry(fileRef, { ...rest, sessionId: opts.sessionId });
+      return { ...durable, sessionId: opts.sessionId };
+    }
+    return null;
   }
   return null;
 }

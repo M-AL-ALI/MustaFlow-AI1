@@ -96,13 +96,37 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(index).toContain('initialFormat={generateFileDraft?.format ?? "docx"}');
   });
 
-  it("renders separate save/share and Revise actions on generated-file cards", () => {
+  it("renders separate save/download and Revise actions on generated-file cards", () => {
     expect(index).toContain("onReviseFile?: (file: GeneratedFile) => void;");
-    expect(index).toContain('accessibilityLabel="Save generated file"');
+    // Images keep "Save"; documents are labeled "Download" for website parity.
+    expect(index).toContain('"Save generated file"');
+    expect(index).toContain('"Download generated file"');
+    expect(index).toContain('{isImageFile(message.generatedFile.mimeType) ? "Save" : "Download"}');
     expect(index).toContain('accessibilityLabel="Revise generated file"');
     expect(index).toContain("<Pencil size={15} color={c.accentForeground} />");
     expect(index).toContain("<Text");
     expect(index).toContain("Revise");
+  });
+
+  it("renders a View action on non-image generated-file cards (website parity)", () => {
+    // View button only for non-image files, wired to handleViewFile.
+    expect(index).toContain('accessibilityLabel="View generated file"');
+    expect(index).toContain("onPress={handleViewFile}");
+    const viewFnStart = index.indexOf("const handleViewFile = useCallback(");
+    expect(viewFnStart).toBeGreaterThan(-1);
+    const viewFnEnd = index.indexOf("\n  );", viewFnStart);
+    const viewFnBody = index.slice(viewFnStart, viewFnEnd);
+    // Web opens the file directly; native materializes to cache first.
+    expect(viewFnBody).toContain('Platform.OS === "web"');
+    expect(viewFnBody).toContain("await materializeGeneratedFileToCache(file)");
+    // iOS in-app WebView preview when available, share sheet otherwise.
+    expect(viewFnBody).toContain("canViewFileInApp()");
+    expect(viewFnBody).toContain("setFileViewerUri(uri)");
+    expect(viewFnBody).toContain("await shareCachedFile(uri, mimeType)");
+    // The viewer modal is rendered for the card.
+    expect(index).toContain("<GeneratedFileViewer");
+    expect(index).toContain("uri={fileViewerUri}");
+    expect(index).toContain("onClose={() => setFileViewerUri(null)}");
   });
 
   it("opens normal Create-file requests with an empty draft", () => {

@@ -145,6 +145,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
         documentRefs,
         sessionId: session.sessionId,
         userId: authed?.userId ?? null,
+        subscriptionTier: authed?.tier ?? null,
       })) ??
       (await fileBuilder.generateFileFromPrompt(
         filePrompt,

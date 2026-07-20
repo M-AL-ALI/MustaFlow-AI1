@@ -1458,6 +1458,7 @@ router.post("/public-ai/chat", async (req, res) => {
           documentRefs,
           sessionId: session.sessionId,
           userId: authed?.userId ?? null,
+          subscriptionTier: authed?.tier ?? null,
         })) ??
         (await generateFileFromPrompt(
           filePrompt,

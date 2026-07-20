@@ -56,6 +56,21 @@ export function storeFile(entry: Omit<FileEntry, "expiresAt">): string {
   return fileRef;
 }
 
+/**
+ * Insert or overwrite an entry under a KNOWN fileRef with a fresh TTL. Used by
+ * (1) the durable rehydration path, so an entry rebuilt from the DB is served
+ * from memory (with raw bytes) on subsequent turns of the current session, and
+ * (2) the layout-preserving edit write-back, so consecutive edits compound on
+ * the latest bytes instead of silently starting over from the original upload.
+ */
+export function putFileEntry(fileRef: string, entry: Omit<FileEntry, "expiresAt">): void {
+  if (!store.has(fileRef) && store.size >= MAX_STORE_ENTRIES) {
+    const oldest = [...store.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
+    if (oldest) store.delete(oldest[0]);
+  }
+  store.set(fileRef, { ...entry, expiresAt: Date.now() + TTL_MS });
+}
+
 export function getFile(fileRef: string, sessionId: string): FileEntry | null {
   const entry = store.get(fileRef);
   if (!entry) return null;
