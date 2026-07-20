@@ -2,6 +2,26 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora in-place Office file edits + mobile file card View/Download parity (2026-07-20)
+
+Fixes two issues: (1) uploaded Office files (DOCX/PPTX/XLSX) were silently REGENERATED — destroying original layout/styling — instead of being edited in place or returned unchanged; (2) the mobile generated-file card lacked the website's View + Download actions.
+
+Server (`artifacts/api-server/src/lib/public-ai/office-layout-edit.ts` orchestration in `tryApplyLayoutPreservingFileEdit`):
+
+- Return-original passthrough: "send me back the file" / "exactly as it is" requests return the ORIGINAL bytes byte-identical with an honest "no changes made" reply. Edit verbs (via `FILE_OUTPUT_OPERATIONS`) block the passthrough unless the unchanged phrasing is explicit.
+- Deterministic regex edit engines (`editPptx`/`editDocx`/`editXlsx`) still run first for quoted replace-style requests.
+- New AI-planned in-place edit fallback (`office-ai-edit.ts`): `isInPlaceEditIntent` gates a small-model planner (`planAiOfficeEditOps`, plan-aware routing via `subscriptionTier`, sanitized ops: max 20 ops / 300 find / 1000 replace chars, fails safe to null) whose exact find→replace ops are applied to `w:t`/`a:t` XML text nodes or XLSX cells with escape-safe replacement (`applyAiOfficeEditOps`).
+- No-silent-regeneration guard: confirmed in-place intent whose ops cannot be located returns the original bytes UNCHANGED with an honest note — never a rebuilt lookalike.
+- `writeBackEditedEntry` re-seeds the session file store after every real edit so consecutive edits compound. Known v1 limitations (documented in code): the durable mirror still points at the original asset (post-restart edits restart from the original), and XLSX `extractedText` is not re-extracted after edits.
+
+Mobile (`artifacts/ora-mobile`):
+
+- New `components/ora/GeneratedFileViewer.tsx`: crash-safe lazy require of `react-native-webview` (pinned 13.15.0, the Expo SDK 54 bundled version); `canViewFileInApp` = iOS + native module present; fullscreen Modal + WebView with `allowingReadAccessToURL` scoped to the cache directory.
+- `lib/files.ts`: `materializeGeneratedFileToCache` (base64 write or authenticated assetId download) + `shareCachedFile`.
+- File card parity: View button on non-image cards (web → open; iOS → in-app viewer; Android/older builds → share sheet); Save/Share is relabeled Download for non-images. Requires a fresh native build for the WebView module; older builds degrade to the share sheet.
+
+Tests/gate: `office-layout-edit.test.ts` extended with a mocked-planner suite (passthrough, AI ops applied, honest-unchanged guard, regenerate vote, compounding edits); mobile `generate-file-wiring.test.ts` extended (View/Download wiring, 17/17); `ORA_FEATURE_REGISTRY` `advanced-files-reports` updated (office-ai-edit, GeneratedFileViewer, ora-assets file hints + manual checklist notes for both fixes). Release stability gate: 20/20 PASS at `69b26cfd` (`pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean`). Server paths additionally verified on Replit via a tsx assertion script (api-server vitest OOMs there). Architect review: PASS, no blockers.
+
 ## Realtime "Talk to Ora" voice — WebRTC (2026-06-26)
 
 Rebuilt "Talk to Ora" as a true low-latency realtime voice conversation using the OpenAI GA Realtime API over WebRTC, on the website and the Expo mobile app. Mic dictation is unchanged and remains a separate feature. The old transcribe -> chat -> tts loop is kept only as a fallback with a visible warning.

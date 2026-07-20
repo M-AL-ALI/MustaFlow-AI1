@@ -103,3 +103,4 @@
 - [Scripts pg pattern](scripts-pg-pattern.md) — migration scripts must use pool from @workspace/db, not pg directly.
 - [Vitest cold-import timeout](vitest-cold-import-timeout.md) — first test importing a heavy router tree can blow the 5s default; fix with a per-test timeout.
 - [RN Modal picker race](rn-modal-native-picker-race.md) — defer native pickers to Modal onDismiss on iOS; failed present leaks expo-document-picker context; Files picker needs NO iCloud entitlement.
+- [Filtered pnpm add prunes root bins](filtered-pnpm-add-prunes-root-bins.md) — pnpm --filter add can strip root .bin links (vitest); fix = full HUSKY=0 pnpm install, not code debugging.
