@@ -1,0 +1,868 @@
+Build the Ora “ChatGPT-level Intelligence & Quality Roadmap” in safe, gated phases.
+
+Goal:
+Make Ora closer to ChatGPT as a full intelligent assistant on both website and mobile: smarter routing, better reasoning, stronger file work, better memory, reliable voice, live search, image quality, project organization, transparent outputs, and strict QA gates.
+
+Important:
+Do NOT build this as one huge risky commit. Build it phase-by-phase. Each phase must pass the Ora QA/release gate before publish/TestFlight or before moving to the next phase.
+
+Do not bypass the QA gate rules already set up.
+
+GLOBAL NON-NEGOTIABLE RULES
+
+1. Website + mobile parity
+Every user-facing Ora feature must work on both website and mobile unless explicitly marked:
+- backend-only
+- website-only
+- TestFlight-required
+
+If mobile needs native code, say “TestFlight required” in the report.
+
+2. Do not regress previous fixes
+Do not break:
+- Talk to Ora stability
+- Talk to Ora tier time-limit behavior
+- mobile documentRefs
+- uploaded-file editing
+- original-file layout preservation
+- mobile file View/Download cards
+- session recovery
+- search/current info
+- image generation/editing
+- billing/account sync
+- App Store compliance
+- conversation history
+- Back to Ora navigation
+- file upload/download/export
+- ZIP upload
+- PowerPoint reading
+- PDF download cards
+- Apple Sign in / delete account compliance
+
+3. Feature registry is mandatory
+Every new Ora feature or changed Ora surface must update:
+
+scripts/src/ora-stability-gate.ts
+ORA_FEATURE_REGISTRY
+
+Each registry entry must include:
+- feature name/id
+- API surfaces
+- website surfaces
+- mobile surfaces
+- changed-file detection hints
+- website manual validation notes
+- mobile manual validation notes
+
+If a changed Ora file is not mapped to a registered feature, do not publish and do not submit TestFlight.
+
+4. QA / release gate is mandatory
+Before every publish or TestFlight build, run:
+
+pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean --report=tmp/ora-stability-gate-report.md
+
+Required result:
+- 0 failed
+- 0 warnings
+- clean tree
+- feature registry passes
+- api-server typecheck passes
+- website typecheck passes
+- mobile typecheck passes
+- Ora routing tests pass
+- file/chart/export tests pass
+- search/current info tests pass
+- Talk to Ora tests pass
+- website/mobile parity tests pass
+- build/lint checks pass
+
+If any automated gate fails:
+- do not publish
+- do not submit TestFlight
+- fix the failure first
+
+5. Manual QA is mandatory after automated gate
+After the automated gate passes, complete the manual checklist in:
+
+docs/ora-stability-gate.md
+
+Manual QA must include any changed surfaces:
+- website
+- mobile/TestFlight
+- backend/API
+- file upload/edit/download
+- voice
+- search
+- image generation
+- billing/account
+- history
+- memory
+- App Store-sensitive flows
+
+6. Report format for every phase
+Every phase report must include:
+- commit SHA
+- changed files
+- backend impact
+- website impact
+- mobile impact
+- tests added
+- release gate command used
+- release gate result
+- manual QA result
+- TestFlight required or not
+- known limitations
+- what users should test
+
+7. Real user failures become regression tests
+Every issue found by users must become an automated regression test and/or manual gate checklist item.
+
+PHASE 1 — Smarter Ora Brain / Router
+
+Build a stronger Ora orchestration layer.
+
+Ora must reliably decide between:
+- normal answer
+- deep answer
+- live search
+- image generation
+- image editing
+- file analysis
+- original-file editing
+- new file creation
+- spreadsheet/chart/report workflow
+- ZIP/code/app analysis
+- memory save/recall
+- voice task
+- clarification question
+
+Requirements:
+- deterministic routing rules for obvious cases
+- model classifier only where needed
+- tool choice logged in diagnostics
+- previous wrong routes added as regression tests
+- if uploaded file refs exist and user asks to edit/return the file, file-editing wins over normal chat/image/search
+- explicit image requests still route to image generation
+- current/live questions still route to search
+- file generation/editing must never be confused with image generation
+
+Tests:
+- uploaded DOCX edit routes to file_generation
+- uploaded PPTX edit routes to file_generation
+- uploaded XLSX edit routes to file_generation
+- image generation still works
+- search/current info still works
+- no image CTA for document edits
+- mobile and website send same routing fields
+
+PHASE 2 — Tool-First Agent Behavior
+
+Ora should not just answer text. It should choose tools.
+
+Before answering, Ora should decide:
+- Do I need current web search?
+- Do I need to inspect files?
+- Do I need to edit an Office file?
+- Do I need to create a chart?
+- Do I need to generate an image?
+- Do I need to ask a clarification?
+- Do I need to return a downloadable artifact?
+
+For complex tasks, Ora should internally plan:
+1. Understand request
+2. Select tool
+3. Execute tool
+4. Verify output
+5. Return answer/file with summary
+
+Rules:
+- no fake success
+- if tool fails, fail honestly
+- preserve user message and context
+- preserve documentRefs
+- preserve conversationId/projectId
+- do not silently switch tools without explanation
+
+Tests:
+- tool-required prompts use tools
+- no text-only response when a file is requested
+- failed tool returns honest error
+- retry preserves context
+
+PHASE 3 — Advanced File Agent Quality
+
+Make Ora’s file agent professional and reliable.
+
+Supported:
+- DOCX
+- PPTX
+- XLSX
+- CSV
+- PDF where possible
+- ZIP
+- multi-file workflows
+
+Capabilities:
+- edit original file in place
+- preserve layout/style/theme
+- return same file type by default
+- add/remove/replace text
+- add sections/slides/sheets/rows/columns
+- create charts/histograms
+- add formulas
+- clean/dedupe/sort data
+- create reports
+- create dashboards
+- export PDF/DOCX/PPTX/XLSX/CSV
+- revise existing generated files
+- fail honestly if original layout cannot be safely edited
+
+Critical rule:
+Never silently regenerate a different layout unless the user explicitly asks:
+- create new version
+- redesign it
+- new layout
+- from scratch
+- make a redesigned version
+
+If user says:
+- same file
+- return the original file after modification
+- edit this file
+- keep same layout
+- preserve style
+
+Then Ora must edit the original file package or fail honestly.
+
+Tests:
+- DOCX original package edited
+- PPTX original package edited
+- XLSX original package edited
+- same-file request does not regenerate
+- no text-only fake file replies
+- no unrelated image CTA
+- failure returns unchanged/or honest note
+- website and mobile both preserve documentRefs
+
+PHASE 4 — File Agent Quality Dashboard / Edit Preview
+
+After Ora edits or returns a file, show a quality card.
+
+File card should show:
+- Edited original file
+- No changes made
+- Created redesigned version
+- Could not safely edit original layout
+- changes made list
+- before/after snippets where possible
+- preserved layout: yes/no
+- file type
+- file name
+- version number
+- View
+- Download
+- Revise
+- Create redesigned version
+
+Example changes:
+- Added section: Risk Notes
+- Added text: Track renewal risk
+- Replaced: Old pricing → Updated pricing
+- Added slide: Product Roadmap
+- Added column: Status
+- Preserved original layout: yes
+
+Backend response metadata:
+- editMode: original_edited | unchanged | redesigned | failed_safe
+- changes[]
+- originalFileName
+- outputFileName
+- sourceFileType
+- preservedLayout
+- versionId
+- canRedesign
+- warning/error if applicable
+
+Website:
+- full quality card under file response
+
+Mobile:
+- compact quality card with View/Download parity
+
+Tests:
+- DOCX metadata renders
+- PPTX metadata renders
+- XLSX metadata renders
+- unchanged metadata renders
+- failed-safe metadata renders
+- website/mobile rendering parity
+
+PHASE 5 — File Revision History
+
+Every uploaded/generated/edited file should have version history.
+
+Example:
+- Version 1: Original upload
+- Version 2: Made professional
+- Version 3: Added Risk Notes
+- Version 4: Added chart
+- Version 5: Redesigned version
+
+Users can:
+- view versions
+- download old versions
+- continue editing from selected version
+- restore previous version
+- compare changes
+
+Backend:
+- store revision chain:
+  - assetId
+  - parentAssetId
+  - projectId
+  - conversationId
+  - versionNumber
+  - changeSummary
+  - editMode
+  - createdAt
+- consecutive edits must apply on top of latest edited file
+- server restart must continue from latest durable version, not original upload
+
+Website:
+- Versions button/dropdown on file card
+
+Mobile:
+- Versions action in file card menu or compact sheet
+
+Tests:
+- consecutive edits compound
+- server restart uses latest version
+- version download works
+- restore version works
+- website/mobile parity
+
+PHASE 6 — Multi-File Intelligence
+
+Ora must understand and work across multiple uploaded files.
+
+Use cases:
+- use Excel data to update PowerPoint
+- compare two contracts
+- merge Word reports
+- summarize multiple PDFs
+- create a dashboard from several spreadsheets
+- create a report from a ZIP
+- compare two versions of a file
+- combine spreadsheets
+- update a presentation using spreadsheet data
+
+Backend:
+- multi-file context planner
+- detect user references to multiple files
+- select correct source files
+- ask clarification if ambiguous
+- return one output file or multiple files depending on request
+
+Website/mobile:
+- show selected source files
+- let user choose file if ambiguous
+- preserve file refs across:
+  - normal send
+  - retry
+  - stream fallback
+  - session recovery
+  - clarification follow-up
+
+Tests:
+- DOCX + XLSX → report
+- XLSX → PPTX update
+- two DOCX compare
+- ZIP analysis
+- ambiguous multi-file clarification
+- mobile documentRefs persistence
+
+PHASE 7 — ZIP / Code / App Analysis Agent
+
+Make Ora strong with uploaded ZIPs and GitHub app files.
+
+Ora should:
+- inspect folder tree
+- detect framework
+- explain what app does
+- identify run/build commands
+- find missing files
+- detect config/security issues
+- explain architecture
+- produce verification report
+- suggest fixes
+- generate README/setup guide
+
+Safety:
+- do not execute unknown code by default
+- analysis first
+- execution only later if sandboxed separately
+
+Website/mobile:
+- ZIP upload supported
+- show file tree summary
+- show findings grouped by severity
+- allow export as report
+
+Tests:
+- GitHub ZIP analysis
+- framework detection
+- README generation
+- no unsafe execution
+- mobile upload parity
+
+PHASE 8 — Better Ora Memory
+
+Improve Ora memory like ChatGPT.
+
+Ora should remember useful user/project preferences:
+- name/company
+- preferred tone
+- preferred language
+- brand colors
+- preferred report style
+- common projects
+- business context
+- saved instructions
+- file style preferences
+- image style preferences
+
+Must include:
+- view memory
+- edit memory
+- delete memory
+- disable memory
+- project-specific memory
+- no memory leakage across projects/users
+- privacy-safe memory summaries
+
+Tests:
+- memory save/recall
+- memory edit/delete
+- memory disabled
+- project-specific memory isolation
+- no cross-user leakage
+- mobile/website parity
+
+PHASE 9 — Project Spaces
+
+Build project spaces.
+
+Each project has:
+- chats
+- uploaded files
+- generated files
+- edited files
+- images
+- memory
+- style profile
+- history
+- revisions
+
+Website/mobile:
+- project selector
+- create project
+- rename/archive project
+- current project visible in Ora
+- assets filtered by project
+- conversations filtered by project
+
+Backend:
+- projectId flows through:
+  - chat
+  - upload
+  - file generation/editing
+  - assets
+  - memory
+  - history
+  - image generation
+- if no project selected, use default personal Ora project
+- no cross-project leakage
+
+Tests:
+- project-scoped conversations
+- project-scoped files/assets
+- project-scoped memory
+- website/mobile project selector parity
+- no cross-project leakage
+
+PHASE 10 — Better Clarifying Questions
+
+Ora should ask one smart question when needed.
+
+Examples:
+User:
+“Make this better.”
+
+Ora:
+“Do you want me to preserve the original layout, or create a redesigned version?”
+
+User uploads multiple files:
+“Update the presentation.”
+
+Ora:
+“Should I use the Excel file as the data source for the PowerPoint?”
+
+User:
+“Change the pricing section.”
+
+Ora:
+“Which pricing text should I replace? You can quote the sentence or tell me the slide/section.”
+
+Rules:
+- ask only when necessary
+- do not over-ask obvious requests
+- preserve documentRefs while waiting
+- clarification answer continues original task
+- do not lose conversation/project/file context
+
+Tests:
+- vague edit triggers clarification
+- clear edit does not ask
+- clarification follow-up resumes file edit
+- documentRefs preserved through clarification
+- mobile/website parity
+
+PHASE 11 — Smart Suggestions / Next Actions
+
+Add contextual next-action chips.
+
+After DOCX upload:
+- Make professional
+- Summarize
+- Add section
+- Return edited file
+
+After XLSX upload:
+- Add chart
+- Clean duplicates
+- Add formulas
+- Create dashboard
+
+After PPTX upload:
+- Add slide
+- Make executive-ready
+- Shorten slide 2
+- Create speaker notes
+
+After generated file:
+- Revise
+- Download
+- View versions
+- Create redesigned version
+
+Website:
+- subtle action chips under relevant responses
+
+Mobile:
+- compact horizontal chips
+
+Tests:
+- suggestions match file type
+- chips send correct prompt/action
+- no clutter on normal chat
+- mobile/website parity
+
+PHASE 12 — Live Search / Research Quality
+
+Make current-info answers stronger.
+
+Ora should:
+- know when web search is needed
+- cite sources clearly
+- show source cards
+- mention dates for current info
+- retry live search safely
+- avoid stale general knowledge for current questions
+- handle sports schedules/news/current facts
+
+Examples:
+- today’s date/time
+- news today
+- sports games today
+- current stock/news/events
+- official-source research
+- latest product/company updates
+
+If search fails:
+- honest fallback only
+- preserve retry
+- no fake current answer
+
+Tests:
+- date/time
+- news today
+- sports today
+- current source research
+- retry live search
+- mobile/website parity
+
+PHASE 13 — Source-Aware Answers
+
+When Ora uses files or web, show sources.
+
+Examples:
+- Uploaded file: Slide 4, Pricing
+- Word doc: Section “Risk Notes”
+- Excel: Sheet Pipeline, Column Revenue
+- PDF: Page 3
+- Web: title, URL, date
+
+Rules:
+- no fake citations
+- cite only sources actually used
+- safe URLs only
+- sources visible on website and mobile
+
+Tests:
+- file answers include file references
+- web answers include source links
+- no fake citations
+- mobile source rendering parity
+
+PHASE 14 — Image Intelligence
+
+Improve image generation/editing quality.
+
+Ora should:
+- understand logos
+- product shots
+- infographics
+- anime
+- watercolor
+- diagrams
+- 3D icons
+- portraits
+- marketing visuals
+
+Capabilities:
+- generate accurate prompt-aligned images
+- edit/refine previous image
+- make variations
+- change background
+- keep same subject/logo while changing style/color
+- ask clarification when visual request is ambiguous
+- avoid file/image routing mixups
+- show image quality metadata
+
+Tests:
+- logo generation
+- product shot
+- infographic
+- image edit
+- variation
+- no file-generation hijack
+- mobile/website parity
+
+PHASE 15 — Talk to Ora Intelligence
+
+Voice should feel conversational and stable.
+
+Requirements:
+- no dropping after several turns
+- tier time limit controls session, not number of replies
+- waits for user to finish speaking
+- better turn-taking
+- recover connection silently
+- preserve context
+- support file tasks by voice:
+  “Open the file I uploaded and make it professional.”
+- support search by voice:
+  “What’s the news today?”
+- support follow-up edits by voice
+
+Tests:
+- 10+ voice turns
+- pause mid-sentence
+- interrupt mid-answer
+- file edit by voice
+- search by voice
+- mobile/website parity
+
+PHASE 16 — Long-Running Task Progress
+
+For big tasks, show progress.
+
+Examples:
+- Reading file
+- Planning edit
+- Applying changes
+- Building chart
+- Creating report
+- Finalizing download
+
+Requirements:
+- progress events
+- recoverable job state
+- user can leave and return
+- retry does not duplicate work
+- friendly failure/retry
+
+Website/mobile:
+- progress UI
+- resume unfinished task
+- final file card when complete
+
+Tests:
+- progress events render
+- refresh/resume works
+- retry does not duplicate
+- mobile parity
+
+PHASE 17 — Better Failure Recovery
+
+Ora should never show raw backend errors.
+
+Handle:
+- expired session
+- failed upload
+- failed search
+- failed image generation
+- failed file edit
+- network blip
+- publish restart
+- mobile background resume
+- missing documentRefs
+- temporary provider failure
+
+Behavior:
+- retry once where safe
+- preserve user message
+- preserve documentRefs
+- preserve conversationId/projectId
+- preserve file edit context
+- friendly error only after recovery fails
+- no raw “No active session”
+- no raw “Failed to fetch”
+
+Tests:
+- expired session recovers
+- retry preserves file refs
+- upload failure friendly error
+- file edit failure friendly error
+- mobile/website parity
+
+PHASE 18 — Admin Quality Monitor
+
+Build internal Ora quality monitor.
+
+Track:
+- route chosen
+- model used
+- fallback reason
+- file edit mode
+- failed file edits
+- image failures
+- search timeouts
+- voice disconnects
+- expired-session recoveries
+- upload failures
+- slow requests
+- mobile vs website issue counts
+- retry rates
+
+Privacy:
+- no raw sensitive file contents in logs
+- no private user text unless already allowed by policy
+- metadata-first diagnostics
+
+Website admin:
+- searchable recent failures
+- filter by feature
+- filter by user/session
+- export diagnostic report
+
+Tests:
+- logs privacy-safe
+- filters work
+- no sensitive leakage
+
+PHASE 19 — Model Strategy / Performance Diagnostics
+
+Use the right model for the right task.
+
+Examples:
+- fast model for simple chat
+- stronger model for deep reasoning
+- specialized model for search
+- structured model for file edit planning
+- image model for visual work
+- fallback model if provider fails
+
+Add diagnostics:
+- model used
+- route
+- fallback reason
+- latency
+- token budget
+- output size
+- success/failure
+- search used
+- file tool used
+
+Tests:
+- correct model by route
+- fallback logging
+- no quality regression
+- no unnecessary slow model for simple tasks
+
+PHASE 20 — Evaluation System
+
+Create a growing Ora eval suite.
+
+Every real user failure becomes a regression test.
+
+Eval categories:
+- routing
+- files
+- images
+- search
+- voice
+- memory
+- project context
+- mobile parity
+- account/billing
+- App Store compliance
+- source citations
+- failure recovery
+
+Release gate must block publish/TestFlight on failures.
+
+Recommended Build Order
+
+1. File Quality Dashboard / Edit Preview
+2. File Revision History
+3. Smarter Router hardening
+4. Clarifying Questions
+5. Multi-File Intelligence
+6. Project Spaces
+7. Memory upgrades
+8. Source-aware answers
+9. ZIP/code/app analysis
+10. Smart Suggestions
+11. Long-running task progress
+12. Image intelligence polish
+13. Voice-to-work tasks
+14. Failure recovery polish
+15. Admin Quality Monitor
+16. Model strategy diagnostics
+17. Expanded eval system
+
+Execution rule:
+Do only one phase at a time. For each phase:
+1. audit what already exists
+2. write a scoped plan
+3. implement backend
+4. implement website
+5. implement mobile
+6. add tests
+7. update feature registry
+8. run release gate
+9. run manual QA
+10. report results
+
+Do not move to the next phase until the current phase is gated and stable.
