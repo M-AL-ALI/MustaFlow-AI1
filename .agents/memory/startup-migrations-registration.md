@@ -20,3 +20,5 @@ The repo has two parallel migration surfaces:
 - When reviewing a PR that touches `scripts/src/migrate-*.ts`: reject it unless the matching entry lands in `startup-migrations.ts`.
 - When debugging a "column does not exist" error on boot: grep `scripts/src/migrate-` for the column name; if a script exists but the column doesn't, the script was never registered for auto-application.
 - Entries must be idempotent (`IF NOT EXISTS`, `DO $$ ... EXCEPTION ... END $$`, etc.) because they re-run every boot.
+
+**Dev-loop corollary:** registration alone does nothing until the API server actually boots. When workflows are stopped during a build phase, a freshly written migration never runs, and DB-backed Vitest suites fail with "Failed query" / column-does-not-exist 500s even though the schema file and startup registry look correct. Before running route tests against the dev DB, run the migration script manually (`npx tsx scripts/src/migrate-<name>.ts`).
