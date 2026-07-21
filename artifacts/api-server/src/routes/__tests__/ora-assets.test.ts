@@ -204,7 +204,12 @@ describe("chat.ts persists generated outputs to the asset library", () => {
   const chatSrc = readFileSync(path.join(__dirname, "../public-ai/chat.ts"), "utf8");
 
   it("the file_generation branch persists generated files", () => {
-    const branch = chatSrc.slice(chatSrc.indexOf('decision.tool === "file_generation"'));
+    // Anchor on the handler branch itself (`&& decision.fileFormat`) — the
+    // bare `decision.tool === "file_generation"` string also appears earlier
+    // in the multi-file toolOverride remap, which is not the branch.
+    const branch = chatSrc.slice(
+      chatSrc.indexOf('decision.tool === "file_generation" && decision.fileFormat'),
+    );
     const next = branch.indexOf('decision.tool === "image_generation"');
     const fileBranch = next > 0 ? branch.slice(0, next) : branch;
     expect(fileBranch).toContain("persistOraAsset");
@@ -312,7 +317,14 @@ describe("getNextVersionLineage", () => {
       assetId: v2,
     });
     const lineage = await getNextVersionLineage(USER_A, fileRef);
-    expect(lineage).toEqual({ parentAssetId: v2, rootAssetId: v1, versionNumber: 3 });
+    // oraProjectId mirrors the chain head's project (null here) so new
+    // versions inherit it and a chain never splits across projects.
+    expect(lineage).toEqual({
+      parentAssetId: v2,
+      rootAssetId: v1,
+      versionNumber: 3,
+      oraProjectId: null,
+    });
     // Another user cannot piggyback on the same fileRef
     expect(await getNextVersionLineage(USER_B, fileRef)).toBeNull();
   });
@@ -415,6 +427,7 @@ describe("POST /ora/assets/:id/restore", () => {
       parentAssetId: res.body.assetId,
       rootAssetId: v1,
       versionNumber: 4,
+      oraProjectId: null,
     });
   });
 

@@ -39,6 +39,13 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
   .agents/memory \
+  .gitignore \
+  artifacts/api-server/src/routes/__tests__/ora-assets.test.ts \
+  artifacts/api-server/src/routes/public-ai/__tests__/ora-smoke.test.ts \
+  artifacts/mustaflow/src/components/ora/__tests__/ora-edit-quality-card.test.tsx \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  artifacts/mustaflow/src/lib/__tests__/ora-project-scope.test.ts \
+  scripts/src/ora-stability-gate.ts \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true
 

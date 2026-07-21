@@ -2,6 +2,16 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Release-gate blockers cleared before Phase 8 (2026-07-21)
+
+Fixed the Phase 1-7 release-gate blockers so the release profile can run green before Phase 8 starts. No publish/TestFlight.
+
+- Lint: `use-ora-chat.ts` — added `currentOraProjectId` to the upload, generate-file-retry, and image-edit `useCallback` dependency arrays (three `react-hooks/exhaustive-deps` errors).
+- Stale tests updated for Phase 6/7 behavior: `ora-project-scope.test.ts` now asserts the archive-project confirm copy (archive/restore replaced hard delete); `ora-smoke.test.ts` mocks the new `getNextVersionLineage` export; `ora-assets.test.ts` anchors the file_generation source assertion on the real handler branch and expects `oraProjectId: null` in the lineage shape (version chains inherit the parent's project).
+- Release-gate DB failures (ECONNREFUSED 127.0.0.1:5432) root-caused: the gate falls back to a dummy localhost DSN only when `DATABASE_URL` is unset — that run was outside Replit. Replit/Linux with the dev DB remains the canonical gate environment.
+- Gate coverage strengthened: new website `ora-edit-quality-card.test.tsx` (10 rendering tests: all four edit modes, layout-claim suppression, warning passthrough, collapse/expand at 4 changes); added web `ora-version-history` + `ora-edit-quality-card` to `WEB_RELEASE_EXTENDED`, mobile `asset-version-history-wiring` + `edit-quality-card-wiring` to `MOBILE_LIB_CRITICAL`, and API `ora-project-spaces` to `API_ACCOUNT_BILLING_HISTORY`.
+- `.gitignore`: `attached_assets/Pasted-*.txt` chat prompt dumps are ignored so `--require-clean` release runs are not blocked by them.
+
 ## Ora Phase 4 — Clarifying Questions for ambiguous uploaded-file edits (2026-07-21)
 
 Ora now asks ONE clarifying question instead of guessing when an uploaded-file edit request is ambiguous, then executes the original task once the user answers. No publish/TestFlight yet (roadmap phases continue).

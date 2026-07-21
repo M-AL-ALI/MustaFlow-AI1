@@ -1686,7 +1686,7 @@ export function useOraChat(): UseOraChatReturn {
         setUploadError(msg);
       }
     },
-    [session, isSignedIn],
+    [session, isSignedIn, currentOraProjectId],
   );
 
   const clearAttachment = useCallback(() => {
@@ -2477,7 +2477,7 @@ export function useOraChat(): UseOraChatReturn {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, language, isSignedIn, saveToServer],
+    [isLoading, messages, language, isSignedIn, saveToServer, currentOraProjectId],
   );
 
   // Inline image editing: refine an Ora-generated image with a text instruction.
@@ -2611,7 +2611,7 @@ export function useOraChat(): UseOraChatReturn {
         setIsLoading(false);
       }
     },
-    [isLoading, isSignedIn, saveToServer],
+    [isLoading, isSignedIn, saveToServer, currentOraProjectId],
   );
 
   const clearConversation = useCallback(async () => {

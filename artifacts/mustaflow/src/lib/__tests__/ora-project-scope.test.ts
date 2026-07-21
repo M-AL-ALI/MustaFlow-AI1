@@ -114,9 +114,11 @@ describe("Ora project flow wiring", () => {
     expect(sidebar).toContain("Move to");
   });
 
-  it("(g) delete-project confirm copy matches exactly", () => {
+  it("(g) archive-project confirm copy matches exactly", () => {
+    // Phase 6 Project Spaces replaced hard delete with archive/restore: archiving
+    // hides the project's chats/files/memories until restored from Archived.
     expect(sidebar).toContain(
-      "Delete this project? Conversations inside this project will be moved to Recent and will not be deleted.",
+      "Archive this project? Its chats, files, and memories stay attached and are hidden until you restore it from Archived.",
     );
   });
 

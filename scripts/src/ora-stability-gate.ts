@@ -453,6 +453,7 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/ora-memory-enhancements.test.ts",
   "src/routes/__tests__/ora-memory-relevance.test.ts",
   "src/routes/__tests__/ora-memory-upgrades.test.ts",
+  "src/routes/__tests__/ora-project-spaces.test.ts",
   "src/routes/__tests__/ora-support-surface-isolation.test.ts",
   "src/routes/__tests__/ora-tiers-meta.test.ts",
 ].join(" ");
@@ -480,10 +481,12 @@ const WEB_ORA_UI = [
 
 const WEB_RELEASE_EXTENDED = [
   "src/components/admin/__tests__/ora-routing-diagnostics-panel.test.ts",
+  "src/components/ora/__tests__/ora-edit-quality-card.test.tsx",
   "src/components/ora/__tests__/ora-memory-manager.test.tsx",
   "src/components/ora/__tests__/ora-message-actions.test.tsx",
   "src/components/ora/__tests__/ora-rich-text.test.tsx",
   "src/components/ora/__tests__/ora-source-cards.test.tsx",
+  "src/components/ora/__tests__/ora-version-history.test.tsx",
   "src/hooks/__tests__/ora-stream-diagnostics.test.ts",
   "src/hooks/__tests__/ora-upload-gating.test.ts",
   "src/lib/file-generation/__tests__/analyst-workflow-export.test.ts",
@@ -492,11 +495,13 @@ const WEB_RELEASE_EXTENDED = [
 
 const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/account-sync-wiring.test.ts",
+  "lib/__tests__/asset-version-history-wiring.test.ts",
   "lib/__tests__/billing-plan-cards.test.ts",
   "lib/__tests__/chat-payload-parity.test.ts",
   "lib/__tests__/clarification-parity.test.ts",
   "lib/__tests__/document-picker-config.test.ts",
   "lib/__tests__/document-refs-chat-wiring.test.ts",
+  "lib/__tests__/edit-quality-card-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
   "lib/__tests__/ora-memory-scope-wiring.test.ts",

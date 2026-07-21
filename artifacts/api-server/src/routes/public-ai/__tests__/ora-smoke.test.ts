@@ -150,6 +150,8 @@ const fileBuilderMock = vi.hoisted(() => ({
 
 const assetsMock = vi.hoisted(() => ({
   persistOraAsset: vi.fn(async (): Promise<number | null> => 1),
+  // Standalone file generation has no prior version chain, so lineage is null.
+  getNextVersionLineage: vi.fn(async (): Promise<null> => null),
 }));
 
 const imageMock = vi.hoisted(() => ({
@@ -229,6 +231,7 @@ vi.mock("../../../lib/image-provider", () => ({
 
 vi.mock("../../../lib/ora-assets", () => ({
   persistOraAsset: assetsMock.persistOraAsset,
+  getNextVersionLineage: assetsMock.getNextVersionLineage,
   parseDataUri: (value: string) => {
     const match = value.match(/^data:([^;]+);base64,(.+)$/);
     return match ? { mimeType: match[1], base64: match[2] } : null;
