@@ -528,6 +528,33 @@ export interface OraAssetsResponse {
   storage: { usedBytes: number; capBytes: number };
 }
 
+export interface OraAssetVersion {
+  id: number;
+  fileName: string;
+  mimeType: string;
+  format: string;
+  sizeBytes: number;
+  versionNumber: number;
+  editSummary: string | null;
+  createdAt: string;
+  isCurrent: boolean;
+}
+
+export interface OraAssetVersionsResponse {
+  rootAssetId: number;
+  currentAssetId: number;
+  versions: OraAssetVersion[];
+}
+
+export interface RestoreAssetVersionResponse {
+  ok: boolean;
+  assetId: number;
+  versionNumber: number;
+  restoredFromVersion: number;
+  fileName: string;
+  relinked: boolean;
+}
+
 export interface OraxCapabilities {
   available: string[];
   lockedUntilApprovalLayer: string[];

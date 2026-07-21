@@ -40,6 +40,33 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
+  artifacts/api-server/src/lib/ora-assets.ts \
+  artifacts/api-server/src/lib/public-ai/file-context-store.ts \
+  artifacts/api-server/src/lib/public-ai/file-store.ts \
+  artifacts/api-server/src/lib/startup-migrations.ts \
+  artifacts/api-server/src/routes/__tests__/ora-assets.test.ts \
+  artifacts/api-server/src/routes/ora-assets.ts \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  artifacts/api-server/src/routes/public-ai/generate-file.ts \
+  artifacts/api-server/src/routes/public-ai/upload.ts \
+  artifacts/mustaflow/src/components/ora-bubble.tsx \
+  artifacts/mustaflow/src/components/ora-panel.tsx \
+  artifacts/mustaflow/src/pages/ora-library.tsx \
+  "artifacts/mustaflow/src/components/ora/__tests__/ora-version-history.test.tsx" \
+  "artifacts/mustaflow/src/components/ora/ora-version-history.tsx" \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  "artifacts/ora-mobile/app/(home)/library.tsx" \
+  artifacts/ora-mobile/components/ora/VersionHistorySheet.tsx \
+  artifacts/ora-mobile/lib/__tests__/asset-version-history-wiring.test.ts \
+  artifacts/ora-mobile/lib/__tests__/generate-file-wiring.test.ts \
+  artifacts/ora-mobile/lib/api.ts \
+  artifacts/ora-mobile/lib/types.ts \
+  lib/db/src/schema/ora-assets.ts \
+  lib/ora-contracts/src/index.ts \
+  scripts/package.json \
+  scripts/src/migrate-all-outstanding.ts \
+  scripts/src/migrate-ora-asset-versions.ts \
+  scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

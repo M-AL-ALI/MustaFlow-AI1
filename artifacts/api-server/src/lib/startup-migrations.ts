@@ -4511,6 +4511,27 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-asset-versions (file revision lineage, Ora Phase 2) ────────
+  {
+    name: "migrate-ora-asset-versions",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS root_asset_id INTEGER`);
+      await client.query(
+        `ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS parent_asset_id INTEGER`,
+      );
+      await client.query(
+        `ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS version_number INTEGER NOT NULL DEFAULT 1`,
+      );
+      await client.query(`ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS source_file_ref TEXT`);
+      await client.query(`ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS edit_summary TEXT`);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_assets_root_asset_id_idx ON ora_assets(root_asset_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

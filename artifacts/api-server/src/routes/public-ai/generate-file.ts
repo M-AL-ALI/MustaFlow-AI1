@@ -177,7 +177,20 @@ router.post("/public-ai/generate-file", async (req, res) => {
     let assetId: number | null = null;
     if (authed) {
       try {
-        const { persistOraAsset } = await import("../../lib/ora-assets");
+        const { persistOraAsset, getNextVersionLineage } = await import("../../lib/ora-assets");
+        // In-place Office edit: chain this save onto the source file's version
+        // lineage (parent = current head asset, root = the chain's v1) so
+        // revision history shows every version in order. Falls back to a
+        // standalone v1 when no prior asset is linked.
+        const lineage = result.editedFileRef
+          ? await getNextVersionLineage(authed.userId, result.editedFileRef)
+          : null;
+        const editSummary = result.editedFileRef
+          ? (result.editQuality?.changes?.length
+              ? result.editQuality.changes.join("; ")
+              : `Edited: ${message}`
+            ).slice(0, 300)
+          : null;
         assetId = await persistOraAsset({
           userId: authed.userId,
           kind: "file",
@@ -186,7 +199,15 @@ router.post("/public-ai/generate-file", async (req, res) => {
           format,
           prompt: message,
           base64: result.fileData,
+          ...(lineage ?? {}),
+          sourceFileRef: result.editedFileRef ?? null,
+          editSummary,
         });
+        // Surface the persisted version on the quality card so clients can
+        // open revision history directly from it.
+        if (assetId != null && result.editQuality) {
+          result.editQuality.versionId = assetId;
+        }
         // In-place Office edit: repoint the durable file-context mirror at the
         // edited asset so revisions after a restart/rotated session compound
         // instead of reverting to the original upload.

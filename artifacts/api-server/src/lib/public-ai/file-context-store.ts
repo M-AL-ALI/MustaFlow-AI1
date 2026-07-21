@@ -18,7 +18,9 @@ import { logger } from "../logger";
 import {
   getFile,
   putFileEntry,
+  overwriteFileEntryBytesByRef,
   MAX_RAW_BYTES_PER_FILE,
+  MAX_TEXT_CHARS_PER_FILE,
   type FileEntry,
 } from "./file-store.js";
 import type { DatasetSummary } from "./dataset-extract.js";
@@ -114,6 +116,100 @@ export function relinkDurableFileContextBestEffort(opts: {
     charCount: entry.charCount,
     datasetSummary: entry.datasetSummary,
   });
+}
+
+/**
+ * AWAITED relink after a version restore. Unlike
+ * `relinkDurableFileContextBestEffort` (fire-and-forget, and a no-op when the
+ * in-memory entry is gone), this must complete before the restore response:
+ *
+ *   1. Repoints `ora_file_contexts.assetId` for (userId, fileRef) at the newly
+ *      persisted restored asset — unconditionally, no memory entry required —
+ *      so post-restart/rotated-session edits compound on the restored bytes.
+ *   2. Re-extracts text from the restored bytes for docx/pptx (best-effort) so
+ *      analysis prompts reflect the restored content, not the pre-restore edit.
+ *   3. Overwrites any LIVE in-memory entry's raw bytes so follow-up edits in
+ *      the current chat session compound on the restored version too.
+ *
+ * Returns true when the durable row was repointed. Never throws — failures are
+ * logged and reported via the return value so the route can surface them.
+ */
+export async function relinkFileContextAfterRestore(opts: {
+  userId: string;
+  fileRef: string;
+  assetId: number;
+  bytes: Buffer;
+}): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select({
+        fileType: oraFileContextsTable.fileType,
+      })
+      .from(oraFileContextsTable)
+      .where(
+        and(
+          eq(oraFileContextsTable.userId, opts.userId),
+          eq(oraFileContextsTable.fileRef, opts.fileRef),
+          isNull(oraFileContextsTable.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!row) return false;
+
+    // Re-extract text from the restored bytes (docx/pptx only — xlsx context
+    // lives in datasetSummary and text extraction does not apply).
+    let extractedText: string | undefined;
+    if (row.fileType === "docx" || row.fileType === "pptx") {
+      try {
+        const { extractText } = await import("./file-extract.js");
+        const text = await extractText(opts.bytes, row.fileType);
+        if (text.trim()) extractedText = text.slice(0, MAX_TEXT_CHARS_PER_FILE);
+      } catch (err) {
+        logger.warn(
+          { component: "ora-file-context", err, fileType: row.fileType },
+          "Failed to re-extract text after restore — keeping prior text",
+        );
+      }
+    }
+
+    await db
+      .update(oraFileContextsTable)
+      .set({
+        assetId: opts.assetId,
+        updatedAt: new Date(),
+        ...(extractedText !== undefined
+          ? { extractedText, charCount: extractedText.length }
+          : {}),
+      })
+      .where(
+        and(
+          eq(oraFileContextsTable.userId, opts.userId),
+          eq(oraFileContextsTable.fileRef, opts.fileRef),
+          isNull(oraFileContextsTable.deletedAt),
+        ),
+      );
+
+    // Live-session write-back so in-flight conversations compound on the
+    // restored bytes. Ownership was proven against the durable row above.
+    if (
+      (row.fileType === "docx" || row.fileType === "pptx" || row.fileType === "xlsx") &&
+      opts.bytes.length > 0 &&
+      opts.bytes.length <= MAX_RAW_BYTES_PER_FILE
+    ) {
+      overwriteFileEntryBytesByRef(opts.fileRef, {
+        rawBase64: opts.bytes.toString("base64"),
+        rawSizeBytes: opts.bytes.length,
+        ...(extractedText !== undefined ? { extractedText } : {}),
+      });
+    }
+    return true;
+  } catch (err) {
+    logger.error(
+      { component: "ora-file-context", err, fileRef: opts.fileRef },
+      "Failed to relink durable file context after restore",
+    );
+    return false;
+  }
 }
 
 /**

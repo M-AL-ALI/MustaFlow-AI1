@@ -34,10 +34,30 @@ export const oraAssetsTable = pgTable(
     // R2 object key when bytes are offloaded to object storage; null in DB mode.
     storageKey: text("storage_key"),
     sizeBytes: integer("size_bytes").notNull().default(0),
+    // ── File revision lineage (append-only) ─────────────────────────────────
+    // A "version chain" groups every revision of one logical file. The chain is
+    // identified by rootAssetId: null on legacy rows and v1 roots (treat as
+    // COALESCE(root_asset_id, id)); later versions point at the v1 row's id.
+    // parentAssetId is the immediately-previous version (null for v1).
+    // versionNumber is 1-based within the chain. Restores are append-only: a
+    // restore inserts a NEW head row copying the old version's bytes, never
+    // mutating history.
+    rootAssetId: integer("root_asset_id"),
+    parentAssetId: integer("parent_asset_id"),
+    versionNumber: integer("version_number").notNull().default(1),
+    // The upload fileRef this chain originated from, when applicable (edited
+    // uploads); null for purely generated files.
+    sourceFileRef: text("source_file_ref"),
+    // Short human-readable description of what this version changed (e.g.
+    // "Edited: replaced pricing line", "Restored version 2"). Null for v1.
+    editSummary: text("edit_summary"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("ora_assets_user_id_idx").on(t.userId)],
+  (t) => [
+    index("ora_assets_user_id_idx").on(t.userId),
+    index("ora_assets_root_asset_id_idx").on(t.rootAssetId),
+  ],
 );
 
 export type OraAsset = typeof oraAssetsTable.$inferSelect;

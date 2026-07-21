@@ -10,7 +10,9 @@ import {
   Loader2,
   Library as LibraryIcon,
   ArrowLeft,
+  History,
 } from "lucide-react";
+import { OraVersionHistoryDialog } from "@/components/ora/ora-version-history";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
 import { useOraConversations } from "@/hooks/ora-conversations-context";
@@ -126,6 +128,7 @@ function OraLibraryInner() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
+  const [historyAssetId, setHistoryAssetId] = useState<number | null>(null);
   const downloadingRef = useRef<Set<number>>(new Set());
 
   const fetchPage = useCallback(async (offset: number): Promise<OraAssetsResponse> => {
@@ -364,6 +367,17 @@ function OraLibraryInner() {
                           <Download className="h-3.5 w-3.5" />
                           Download
                         </button>
+                        {asset.kind === "file" && (
+                          <button
+                            type="button"
+                            onClick={() => setHistoryAssetId(asset.id)}
+                            title="Version history"
+                            className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            aria-label={`Version history for ${asset.fileName}`}
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => void handleDelete(asset)}
@@ -400,6 +414,15 @@ function OraLibraryInner() {
           )}
         </div>
       </main>
+
+      <OraVersionHistoryDialog
+        assetId={historyAssetId}
+        open={historyAssetId != null}
+        onOpenChange={(open) => {
+          if (!open) setHistoryAssetId(null);
+        }}
+        onRestored={() => void load()}
+      />
     </div>
   );
 }

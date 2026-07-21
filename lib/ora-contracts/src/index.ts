@@ -89,7 +89,11 @@ export const oraFileEditQualitySchema = z.object({
   /** Source file extension, e.g. "docx" | "pptx" | "xlsx". */
   sourceFileType: z.string().max(20).optional(),
   preservedLayout: z.boolean().optional(),
-  /** Reserved for the revision-history phase; not emitted yet. */
+  /**
+   * The persisted library asset id of this saved version. Clients can open
+   * revision history (`GET /api/ora/assets/:id/versions`) directly from it.
+   * Only present for signed-in users whose edited file was persisted.
+   */
   versionId: z.number().int().optional(),
   canRedesign: z.boolean().optional(),
   warning: z.string().max(500).optional(),

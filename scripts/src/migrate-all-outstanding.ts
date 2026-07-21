@@ -95,6 +95,7 @@ const MIGRATIONS = [
   "migrate-orax-projects",
   "migrate-ora-memory-supersede",
   "migrate-ora-realtime-usage",
+  "migrate-ora-asset-versions",
 ] as const;
 
 async function main(): Promise<void> {

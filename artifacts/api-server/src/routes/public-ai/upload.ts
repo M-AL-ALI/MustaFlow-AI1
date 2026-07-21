@@ -351,6 +351,9 @@ router.post(
             fileName: validation.sanitizedName,
             mimeType: file.mimetype,
             base64: file.buffer.toString("base64"),
+            // v1 root of a potential version chain: later in-place edits look
+            // this asset up by (userId, fileRef) to chain their lineage.
+            sourceFileRef: fileRef,
           },
           context: {
             userId: authed.userId,
@@ -456,6 +459,9 @@ router.post(
           fileName: validation.sanitizedName,
           mimeType: file.mimetype,
           base64: file.buffer.toString("base64"),
+          // v1 root of a potential version chain: later in-place edits look
+          // this asset up by (userId, fileRef) to chain their lineage.
+          sourceFileRef: fileRef,
         },
         context: {
           userId: authed.userId,

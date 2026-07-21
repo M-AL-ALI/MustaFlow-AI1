@@ -101,7 +101,9 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     // Images keep "Save"; documents are labeled "Download" for website parity.
     expect(index).toContain('"Save generated file"');
     expect(index).toContain('"Download generated file"');
-    expect(index).toContain('{isImageFile(message.generatedFile.mimeType) ? "Save" : "Download"}');
+    // The card reads from the restore-aware `generatedFile` (repointed after a
+    // version restore), not the raw message copy.
+    expect(index).toContain('{isImageFile(generatedFile.mimeType) ? "Save" : "Download"}');
     expect(index).toContain('accessibilityLabel="Revise generated file"');
     expect(index).toContain("<Pencil size={15} color={c.accentForeground} />");
     expect(index).toContain("<Text");

@@ -10,6 +10,8 @@ import type {
   GeneratedFile,
   HelpArticle,
   OraAssetsResponse,
+  OraAssetVersionsResponse,
+  RestoreAssetVersionResponse,
   OraConversationDetail,
   OraConversationSummary,
   SupportConversationSummary,
@@ -1303,6 +1305,27 @@ export function getAssets(): Promise<OraAssetsResponse> {
 
 export function deleteAsset(id: string | number): Promise<unknown> {
   return jsonRequest(`/api/ora/assets/${id}`, { method: "DELETE" });
+}
+
+/**
+ * List the full revision chain for a file asset. Accepts any asset id in the
+ * chain and returns all versions ordered v1-first, plus the current head id.
+ */
+export function listAssetVersions(id: number): Promise<OraAssetVersionsResponse> {
+  return jsonRequest<OraAssetVersionsResponse>(`/api/ora/assets/${id}/versions`);
+}
+
+/**
+ * Restore an older version: the server copies its bytes into a NEW head asset
+ * (history is never rewritten) and relinks the durable file context so a
+ * follow-up "Revise ..." targets the restored content.
+ */
+export function restoreAssetVersion(
+  versionAssetId: number,
+): Promise<RestoreAssetVersionResponse> {
+  return jsonRequest<RestoreAssetVersionResponse>(`/api/ora/assets/${versionAssetId}/restore`, {
+    method: "POST",
+  });
 }
 
 /**

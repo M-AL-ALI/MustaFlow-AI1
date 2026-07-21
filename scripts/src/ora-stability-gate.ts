@@ -226,6 +226,23 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Repeat the same four edit outcomes on TestFlight (upload, then edit as a follow-up turn): the compact quality card renders under the generated-file card with the matching tone (emerald/muted/sky/amber), shows the server warning verbatim for failed_safe, and caps visible change lines at three with a '+N more changes' note. Card is pure JS — ships with the next build, no native rebuild required.",
   },
   {
+    id: "file-revision-history",
+    title: "File revision history (version chains, restore, per-version download)",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /ora-version-history/i,
+      /VersionHistorySheet/i,
+      /asset-version-history-wiring/i,
+      /listAssetVersions/,
+      /restoreAssetVersion/,
+      /parentAssetId/,
+    ],
+    manualWebsite:
+      "Generate a file signed in, revise it at least twice, then open History from the chat file card (and from the Library card): versions list newest-first with a Current badge, edit summaries, sizes, and dates. Download an OLDER version and confirm you get the old bytes. Restore an older version: a NEW head version is created (history is never rewritten), the toast confirms, the badge moves, and the card's Download now returns the restored content. After a restore, a follow-up 'Revise ...' must target the RESTORED content (durable file context is relinked). Anonymous users must not see the History affordance (no durable asset id).",
+    manualMobile:
+      "Repeat on TestFlight: the file card shows the History icon button only for signed-in generated files; the bottom sheet lists versions newest-first with the Current badge; Download an older version via the share sheet; Restore moves the badge, and Save/View on the card now fetch the restored bytes (stale inline bytes are dropped). Library file cards expose the same History sheet and the list refreshes after a restore. Sheet is pure JS — ships with the next build, no native rebuild required.",
+  },
+  {
     id: "conversation-history",
     title: "Conversation history, pin/archive/search, badges, and last-active sync",
     ownerSurfaces: ["api", "website", "mobile"],

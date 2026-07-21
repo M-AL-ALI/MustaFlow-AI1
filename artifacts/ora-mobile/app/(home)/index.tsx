@@ -94,6 +94,7 @@ import {
   canViewFileInApp,
   GeneratedFileViewer,
 } from "@/components/ora/GeneratedFileViewer";
+import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";
 import { ImagePreviewModal } from "@/components/ora/ImagePreviewModal";
 import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
@@ -3941,6 +3942,17 @@ function MessageBubbleBase({
   const [savingImage, setSavingImage] = useState(false);
   const [viewingFile, setViewingFile] = useState(false);
   const [fileViewerUri, setFileViewerUri] = useState<string | null>(null);
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [restoredAssetId, setRestoredAssetId] = useState<number | null>(null);
+
+  // After a restore the server mints a NEW head asset (history is never
+  // rewritten). Point this card's Save/View at the new head and drop the stale
+  // inline bytes so downloads fetch the restored content, not the old version.
+  let generatedFile = message.generatedFile;
+  if (generatedFile && restoredAssetId != null) {
+    const { fileData: _staleBytes, ...rest } = generatedFile;
+    generatedFile = { ...rest, assetId: restoredAssetId };
+  }
 
   const copy = () => Clipboard.setStringAsync(message.content);
 
@@ -3952,10 +3964,10 @@ function MessageBubbleBase({
   };
 
   const handleSaveFile = useCallback(async () => {
-    if (!message.generatedFile || savingFile) return;
+    if (!generatedFile || savingFile) return;
     setSavingFile(true);
     try {
-      const outcome = await saveGeneratedFile(message.generatedFile);
+      const outcome = await saveGeneratedFile(generatedFile);
       if (outcome === "image-saved") {
         Alert.alert("Saved", "Image saved to your photo library.");
       }
@@ -3967,14 +3979,14 @@ function MessageBubbleBase({
     } finally {
       setSavingFile(false);
     }
-  }, [message.generatedFile, savingFile]);
+  }, [generatedFile, savingFile]);
 
   // Website parity: the file card exposes View alongside Download. On iOS the
   // file opens in an in-app WebView (WebKit renders docx/pptx/xlsx/pdf
   // natively); Android and older native builds fall back to the share sheet
   // ("Open with…"); web opens the file in a new tab.
   const handleViewFile = useCallback(async () => {
-    const file = message.generatedFile;
+    const file = generatedFile;
     if (!file || viewingFile) return;
     setViewingFile(true);
     try {
@@ -3996,7 +4008,7 @@ function MessageBubbleBase({
     } finally {
       setViewingFile(false);
     }
-  }, [message.generatedFile, viewingFile]);
+  }, [generatedFile, viewingFile]);
 
   const handleSaveImage = useCallback(async () => {
     if (!message.imageUrl || savingImage) return;
@@ -4226,7 +4238,7 @@ function MessageBubbleBase({
                 </View>
               )}
 
-              {message.generatedFile && (
+              {generatedFile && (
                 <View
                   style={{
                     marginTop: 10,
@@ -4244,11 +4256,11 @@ function MessageBubbleBase({
                   >
                     <FileText size={18} color={c.accentForeground} />
                     <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
-                      {message.generatedFile.fileName}
+                      {generatedFile.fileName}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                    {!isImageFile(message.generatedFile.mimeType) && (
+                    {!isImageFile(generatedFile.mimeType) && (
                       <Pressable
                         onPress={handleViewFile}
                         disabled={viewingFile}
@@ -4288,7 +4300,7 @@ function MessageBubbleBase({
                       disabled={savingFile}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        isImageFile(message.generatedFile.mimeType)
+                        isImageFile(generatedFile.mimeType)
                           ? "Save generated file"
                           : "Download generated file"
                       }
@@ -4315,12 +4327,12 @@ function MessageBubbleBase({
                           fontFamily: "Inter_600SemiBold",
                         }}
                       >
-                        {isImageFile(message.generatedFile.mimeType) ? "Save" : "Download"}
+                        {isImageFile(generatedFile.mimeType) ? "Save" : "Download"}
                       </Text>
                     </Pressable>
                     {onReviseFile ? (
                       <Pressable
-                        onPress={() => onReviseFile(message.generatedFile!)}
+                        onPress={() => onReviseFile(generatedFile!)}
                         accessibilityRole="button"
                         accessibilityLabel="Revise generated file"
                         style={{
@@ -4346,6 +4358,26 @@ function MessageBubbleBase({
                         >
                           Revise
                         </Text>
+                      </Pressable>
+                    ) : null}
+                    {/* History — only for durable library files (signed-in). */}
+                    {generatedFile.assetId != null ? (
+                      <Pressable
+                        onPress={() => setHistoryVisible(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel="View version history"
+                        style={{
+                          width: 34,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 9,
+                          paddingVertical: 8,
+                          borderWidth: 1,
+                          borderColor: c.border,
+                          backgroundColor: "transparent",
+                        }}
+                      >
+                        <History size={15} color={c.accentForeground} />
                       </Pressable>
                     ) : null}
                   </View>
@@ -4439,11 +4471,20 @@ function MessageBubbleBase({
                   );
                 })()}
 
-              {message.generatedFile && (
+              {generatedFile && (
                 <GeneratedFileViewer
                   uri={fileViewerUri}
-                  fileName={message.generatedFile.fileName}
+                  fileName={generatedFile.fileName}
                   onClose={() => setFileViewerUri(null)}
+                />
+              )}
+
+              {generatedFile?.assetId != null && (
+                <VersionHistorySheet
+                  assetId={generatedFile.assetId}
+                  visible={historyVisible}
+                  onClose={() => setHistoryVisible(false)}
+                  onRestored={setRestoredAssetId}
                 />
               )}
 

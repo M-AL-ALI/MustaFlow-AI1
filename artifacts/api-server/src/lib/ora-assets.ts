@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { db, oraAssetsTable, type OraAssetKind } from "@workspace/db";
+import { db, oraAssetsTable, oraFileContextsTable, type OraAssetKind } from "@workspace/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { r2Enabled, r2GetObject, r2PutObject } from "./cloudflare";
@@ -98,6 +98,72 @@ export interface PersistOraAssetInput {
   prompt?: string | null;
   /** Raw base64 (NO `data:` prefix). */
   base64: string;
+  // ── File revision lineage (all optional; omitted = standalone v1) ────────
+  /** The v1 root asset of this version chain (null/omitted for v1 itself). */
+  rootAssetId?: number | null;
+  /** The immediately-previous version's asset id (null/omitted for v1). */
+  parentAssetId?: number | null;
+  /** 1-based position within the chain. Defaults to 1. */
+  versionNumber?: number | null;
+  /** Upload fileRef this chain originated from, when applicable. */
+  sourceFileRef?: string | null;
+  /** Short human-readable description of what this version changed. */
+  editSummary?: string | null;
+}
+
+/**
+ * Lineage fields for persisting the NEXT version of an edited uploaded file.
+ * Resolves the durable file-context row for (userId, fileRef) to find the
+ * current head asset of the chain, then derives parent/root/version for the
+ * row about to be inserted. Returns null when there is no linked asset yet —
+ * the new asset then starts its own chain as v1. Best-effort: any failure
+ * returns null rather than blocking persistence.
+ */
+export async function getNextVersionLineage(
+  userId: string,
+  fileRef: string,
+): Promise<{ parentAssetId: number; rootAssetId: number; versionNumber: number } | null> {
+  try {
+    const [ctx] = await db
+      .select({ assetId: oraFileContextsTable.assetId })
+      .from(oraFileContextsTable)
+      .where(
+        and(
+          eq(oraFileContextsTable.userId, userId),
+          eq(oraFileContextsTable.fileRef, fileRef),
+          isNull(oraFileContextsTable.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!ctx?.assetId) return null;
+    const [head] = await db
+      .select({
+        id: oraAssetsTable.id,
+        rootAssetId: oraAssetsTable.rootAssetId,
+        versionNumber: oraAssetsTable.versionNumber,
+      })
+      .from(oraAssetsTable)
+      .where(
+        and(
+          eq(oraAssetsTable.id, ctx.assetId),
+          eq(oraAssetsTable.userId, userId),
+          isNull(oraAssetsTable.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!head) return null;
+    return {
+      parentAssetId: head.id,
+      rootAssetId: head.rootAssetId ?? head.id,
+      versionNumber: (head.versionNumber ?? 1) + 1,
+    };
+  } catch (err) {
+    logger.warn(
+      { component: "ora-assets", err, fileRef },
+      "Failed to resolve version lineage; persisting as standalone v1",
+    );
+    return null;
+  }
 }
 
 /**
@@ -189,6 +255,11 @@ export async function persistOraAsset(input: PersistOraAssetInput): Promise<numb
         data,
         storageKey,
         sizeBytes,
+        rootAssetId: input.rootAssetId ?? null,
+        parentAssetId: input.parentAssetId ?? null,
+        versionNumber: input.versionNumber ?? 1,
+        sourceFileRef: input.sourceFileRef ?? null,
+        editSummary: input.editSummary ?? null,
       })
       .returning({ id: oraAssetsTable.id });
     return row?.id ?? null;

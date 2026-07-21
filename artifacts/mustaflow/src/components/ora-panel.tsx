@@ -36,6 +36,7 @@ import {
   MoreHorizontal,
   Ghost,
   RotateCcw,
+  History,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ORA_MEMORIES_QUERY_KEY, MemoryFullError } from "@/lib/ora-memories";
@@ -81,6 +82,7 @@ import { OraSourceCards } from "@/components/ora/ora-source-cards";
 import { OraImageGallery, OraVideoCards } from "@/components/ora/ora-media-cards";
 import { OraRichText } from "@/components/ora/ora-rich-text";
 import { OraVoiceTip } from "@/components/ora/ora-voice-tip";
+import { OraVersionHistoryDialog } from "@/components/ora/ora-version-history";
 
 function downloadOraFile(file: GeneratedFile) {
   if (!file.fileData) return;
@@ -163,13 +165,48 @@ async function viewOraAssetById(assetId: number) {
 }
 
 function GeneratedFileCard({
-  file,
+  file: fileProp,
   onRevise,
 }: {
   file: GeneratedFile;
   onRevise?: (file: GeneratedFile) => void;
 }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [restoredAssetId, setRestoredAssetId] = useState<number | null>(null);
+
+  // After a restore the server mints a NEW head asset (history is never
+  // rewritten). Point this card's Download/View at the new head and drop the
+  // stale inline bytes so downloads fetch the restored content, not the old
+  // version.
+  let file = fileProp;
+  if (restoredAssetId != null) {
+    const { fileData: _staleBytes, ...rest } = fileProp;
+    file = { ...rest, assetId: restoredAssetId };
+  }
+
   const isPdf = file.format === "pdf";
+  // Version history only exists for durable (signed-in) assets; anonymous
+  // outputs carry no asset id, so the affordance is hidden entirely.
+  const hasHistory = file.assetId != null;
+  const historyDialog = hasHistory ? (
+    <OraVersionHistoryDialog
+      assetId={file.assetId!}
+      open={historyOpen}
+      onOpenChange={setHistoryOpen}
+      onRestored={setRestoredAssetId}
+    />
+  ) : null;
+  const historyButton = hasHistory ? (
+    <button
+      type="button"
+      onClick={() => setHistoryOpen(true)}
+      title="Version history"
+      className="inline-flex items-center gap-1 rounded-lg border border-[hsl(var(--ora-accent-hsl)/0.25)] bg-background/70 px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-[hsl(var(--ora-accent-hsl)/0.1)]"
+    >
+      <History className="h-3.5 w-3.5" />
+      History
+    </button>
+  ) : null;
 
   if (isPdf && (file.fileData || file.assetId != null)) {
     return (
@@ -202,6 +239,7 @@ function GeneratedFileCard({
             <Download className="h-3.5 w-3.5" />
             Download
           </button>
+          {historyButton}
           {onRevise && (
             <button
               type="button"
@@ -213,6 +251,7 @@ function GeneratedFileCard({
             </button>
           )}
         </div>
+        {historyDialog}
       </div>
     );
   }
@@ -242,6 +281,7 @@ function GeneratedFileCard({
             <Download className="h-3.5 w-3.5" />
             Download
           </button>
+          {historyButton}
           {onRevise && (
             <button
               type="button"
@@ -253,6 +293,7 @@ function GeneratedFileCard({
             </button>
           )}
         </div>
+        {historyDialog}
       </div>
     );
   }

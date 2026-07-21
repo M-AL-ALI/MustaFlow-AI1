@@ -1,12 +1,13 @@
 import { useAuth } from "@clerk/expo";
 import { Image } from "expo-image";
-import { Download, FileText, FolderOpen, HardDrive, Share2, Trash2 } from "lucide-react-native";
+import { Download, FileText, FolderOpen, HardDrive, History, Share2, Trash2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { SignInWall } from "@/components/SignInWall";
+import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";
 import { Card, EmptyState, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import { API_BASE, deleteAsset, getAssets } from "@/lib/api";
@@ -27,6 +28,7 @@ export default function LibraryScreen() {
   const [assets, setAssets] = useState<OraAsset[]>([]);
   const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [historyAssetId, setHistoryAssetId] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -108,16 +110,31 @@ export default function LibraryScreen() {
                 key={a.id}
                 asset={a}
                 onDelete={() => setAssets((prev) => prev.filter((x) => x.id !== a.id))}
+                onShowHistory={a.kind === "file" ? () => setHistoryAssetId(a.id) : undefined}
               />
             ))
           )}
         </ScrollView>
       )}
+      <VersionHistorySheet
+        assetId={historyAssetId}
+        visible={historyAssetId != null}
+        onClose={() => setHistoryAssetId(null)}
+        onRestored={() => void reload()}
+      />
     </View>
   );
 }
 
-function AssetCard({ asset, onDelete }: { asset: OraAsset; onDelete?: () => void }) {
+function AssetCard({
+  asset,
+  onDelete,
+  onShowHistory,
+}: {
+  asset: OraAsset;
+  onDelete?: () => void;
+  onShowHistory?: () => void;
+}) {
   const c = useColors();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -215,6 +232,24 @@ function AssetCard({ asset, onDelete }: { asset: OraAsset; onDelete?: () => void
         </Text>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {onShowHistory ? (
+          <Pressable
+            onPress={onShowHistory}
+            disabled={saving || deleting}
+            hitSlop={8}
+            accessibilityLabel="View version history"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: c.muted,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <History size={16} color={c.accentForeground} />
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={handleSave}
           disabled={saving || deleting}

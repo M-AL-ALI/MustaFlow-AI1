@@ -71,6 +71,43 @@ export function putFileEntry(fileRef: string, entry: Omit<FileEntry, "expiresAt"
   store.set(fileRef, { ...entry, expiresAt: Date.now() + TTL_MS });
 }
 
+/**
+ * Overwrite the bytes (and optionally re-extracted text) of an existing live
+ * entry looked up by fileRef ONLY — no sessionId check. Reserved for the
+ * version-restore path, where the caller has already proven ownership against
+ * the durable `ora_file_contexts` row (a stronger boundary than the anonymous
+ * sessionId check; anonymous uploads never have durable rows so they can never
+ * reach this). Without this write-back, a restore during a live session would
+ * leave stale pre-restore bytes in memory and follow-up edits would silently
+ * compound on the wrong version. Returns false when no live entry exists —
+ * the durable rehydration path then serves the restored bytes on next use.
+ */
+export function overwriteFileEntryBytesByRef(
+  fileRef: string,
+  updates: {
+    rawBase64: string;
+    rawSizeBytes: number;
+    extractedText?: string;
+  },
+): boolean {
+  const entry = store.get(fileRef);
+  if (!entry) return false;
+  if (entry.expiresAt <= Date.now()) {
+    store.delete(fileRef);
+    return false;
+  }
+  store.set(fileRef, {
+    ...entry,
+    rawBase64: updates.rawBase64,
+    rawSizeBytes: updates.rawSizeBytes,
+    ...(updates.extractedText !== undefined
+      ? { extractedText: updates.extractedText, charCount: updates.extractedText.length }
+      : {}),
+    expiresAt: Date.now() + TTL_MS,
+  });
+  return true;
+}
+
 export function getFile(fileRef: string, sessionId: string): FileEntry | null {
   const entry = store.get(fileRef);
   if (!entry) return null;
