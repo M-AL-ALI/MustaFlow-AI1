@@ -40,22 +40,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
-  artifacts/api-server/src/lib/public-ai/multi-file-planner.ts \
-  artifacts/api-server/src/lib/public-ai/carried-docs.ts \
-  artifacts/api-server/src/lib/public-ai/clarification-planner.ts \
-  artifacts/api-server/src/lib/public-ai/office-layout-edit.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/multi-file-intelligence.test.ts \
-  artifacts/api-server/src/routes/public-ai/chat.ts \
-  artifacts/api-server/src/routes/public-ai/generate-file.ts \
-  artifacts/mustaflow/src/components/ora-panel.tsx \
-  artifacts/mustaflow/src/components/ora/ora-used-files-chip.tsx \
-  artifacts/mustaflow/src/components/ora/__tests__/ora-used-files-wiring.test.ts \
-  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
-  "artifacts/ora-mobile/app/(home)/index.tsx" \
-  artifacts/ora-mobile/components/ora/MessageExtras.tsx \
-  artifacts/ora-mobile/lib/types.ts \
-  lib/ora-contracts/src/index.ts \
-  scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
