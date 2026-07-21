@@ -26,6 +26,7 @@ import {
   type ProfessionalDocType,
 } from "./professional-doc.js";
 import { PassThrough } from "stream";
+import type { OraFileEditQuality } from "@workspace/ora-contracts";
 import { logger } from "../logger";
 import { ORA_FILE_COMPLETENESS_ADDENDUM, ORA_IDENTITY_BLOCK, type FileFormat } from "./prompt";
 import {
@@ -177,6 +178,13 @@ export interface GeneratedFileResult {
    * the original upload. Never sent to the client.
    */
   editedFileRef?: string;
+  /**
+   * Edit-quality card metadata (edit mode, applied changes, layout
+   * preservation). Populated by the layout-preserving edit pipeline and by
+   * routes when the professional generator ran against an uploaded source.
+   * Sent to the client and persisted with the message.
+   */
+  editQuality?: OraFileEditQuality;
 }
 
 export type OraFileQualityDepth = "standard" | "polished" | "premium";

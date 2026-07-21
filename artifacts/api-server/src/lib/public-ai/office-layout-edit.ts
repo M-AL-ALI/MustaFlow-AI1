@@ -16,6 +16,7 @@ import {
   type FileEntry,
 } from "./file-store.js";
 import type { AiOfficeEditOp } from "./office-ai-edit.js";
+import type { OraFileEditQuality } from "@workspace/ora-contracts";
 import { logger } from "../logger";
 
 type OfficeRawType = "docx" | "pptx" | "xlsx";
@@ -653,7 +654,7 @@ async function applyAiOfficeEditOps(
   entry: FileEntry,
   type: OfficeRawType,
   ops: AiOfficeEditOp[],
-): Promise<{ buffer: Buffer; appliedCount: number } | null> {
+): Promise<{ buffer: Buffer; appliedCount: number; appliedIndices: number[] } | null> {
   const raw = base64Raw(entry);
   if (!raw || ops.length === 0) return null;
 
@@ -684,7 +685,11 @@ async function applyAiOfficeEditOps(
     });
     if (appliedOps.size === 0) return null;
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
-    return { buffer, appliedCount: appliedOps.size };
+    return {
+      buffer,
+      appliedCount: appliedOps.size,
+      appliedIndices: [...appliedOps].sort((a, b) => a - b),
+    };
   }
 
   const entries = unzipSync(new Uint8Array(raw));
@@ -738,7 +743,11 @@ async function applyAiOfficeEditOps(
     for (const path of changedPaths) setXml(entries, path, slideXmls.get(path)!);
   }
   if (appliedOps.size === 0) return null;
-  return { buffer: zipBuffer(entries), appliedCount: appliedOps.size };
+  return {
+    buffer: zipBuffer(entries),
+    appliedCount: appliedOps.size,
+    appliedIndices: [...appliedOps].sort((a, b) => a - b),
+  };
 }
 
 function professionalizeTextNodes(
@@ -1195,22 +1204,89 @@ function base64Raw(entry: FileEntry): Buffer | null {
   }
 }
 
+/* ── Edit-quality card metadata ─────────────────────────────────────────── */
+
+const EDIT_QUALITY_MAX_CHANGES = 20;
+const EDIT_QUALITY_MAX_CHANGE_CHARS = 300;
+const EDIT_QUALITY_MAX_WARNING_CHARS = 500;
+const EDIT_QUALITY_MAX_NAME_CHARS = 300;
+const EDIT_QUALITY_MAX_OP_SNIPPET_CHARS = 80;
+
+function truncateForCard(text: string, max: number): string {
+  const clean = text.trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+function capitalizeChange(text: string): string {
+  const clean = text.trim();
+  return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
+}
+
+/** Human-readable change line for one applied AI edit op. */
+function describeAiOfficeEditOp(op: AiOfficeEditOp): string {
+  const find = truncateForCard(op.find, EDIT_QUALITY_MAX_OP_SNIPPET_CHARS);
+  const replace = truncateForCard(op.replace, EDIT_QUALITY_MAX_OP_SNIPPET_CHARS);
+  return replace ? `Replaced: "${find}" → "${replace}"` : `Removed: "${find}"`;
+}
+
+/**
+ * Build the quality-card metadata for a layout-pipeline result. Values are
+ * defensively truncated to the persistence schema caps so a long honest note
+ * or filename can never make the message fail validation on save.
+ */
+function buildEditQuality(input: {
+  editMode: OraFileEditQuality["editMode"];
+  entry: FileEntry;
+  outputFileName: string;
+  type: OfficeRawType;
+  changes?: string[];
+  warning?: string;
+}): OraFileEditQuality {
+  const changes = (input.changes ?? [])
+    .map((change) => truncateForCard(change, EDIT_QUALITY_MAX_CHANGE_CHARS))
+    .filter(Boolean)
+    .slice(0, EDIT_QUALITY_MAX_CHANGES);
+  return {
+    editMode: input.editMode,
+    changes,
+    originalFileName: truncateForCard(input.entry.filename, EDIT_QUALITY_MAX_NAME_CHARS),
+    outputFileName: truncateForCard(input.outputFileName, EDIT_QUALITY_MAX_NAME_CHARS),
+    sourceFileType: input.type,
+    // The layout pipeline never rebuilds: edits are in-place and every
+    // non-edit outcome returns the original bytes untouched.
+    preservedLayout: true,
+    canRedesign: true,
+    ...(input.warning
+      ? { warning: truncateForCard(input.warning, EDIT_QUALITY_MAX_WARNING_CHARS) }
+      : {}),
+  };
+}
+
 function buildOfficeResult(
   entry: FileEntry,
   type: OfficeRawType,
   buffer: Buffer,
   action: string,
+  changes?: string[],
 ): GeneratedFileResult {
   const slideCount =
     type === "pptx"
       ? Math.max(1, (entry.extractedText.match(/\bSlide\s+\d+:/gi) ?? []).length)
       : undefined;
+  const fileName = safeFileName(entry.filename, type);
   return {
-    fileName: safeFileName(entry.filename, type),
+    fileName,
     fileData: buffer.toString("base64"),
     mimeType: MIME_BY_TYPE[type],
     reply: `I've updated the original ${type.toUpperCase()} file (${action}) while preserving its existing layout where possible. Click the card below to download it.`,
     ...(type === "pptx" ? { slideCount } : {}),
+    editQuality: buildEditQuality({
+      editMode: "original_edited",
+      entry,
+      outputFileName: fileName,
+      type,
+      changes: changes && changes.length > 0 ? changes : [capitalizeChange(action)],
+    }),
   };
 }
 
@@ -1803,12 +1879,20 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   if (actions.length === 0) return null;
 
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  const fileName = safeFileName(entry.filename, "xlsx");
   return {
-    fileName: safeFileName(entry.filename, "xlsx"),
+    fileName,
     fileData: buffer.toString("base64"),
     mimeType: MIME_BY_TYPE.xlsx,
     reply: `I've updated the original XLSX file (${actions.join("; ")}) while preserving the workbook where possible. Click the card below to download it.`,
     ...(entry.datasetSummary ? { rowCount: entry.datasetSummary.rowCount } : {}),
+    editQuality: buildEditQuality({
+      editMode: "original_edited",
+      entry,
+      outputFileName: fileName,
+      type: "xlsx",
+      changes: actions.map(capitalizeChange),
+    }),
   };
 }
 
@@ -1888,12 +1972,20 @@ function buildPassthroughResult(
   entry: FileEntry,
   type: OfficeRawType,
   reply: string,
+  quality: { editMode: "unchanged" | "failed_safe"; warning?: string },
 ): GeneratedFileResult {
   return {
     fileName: entry.filename,
     fileData: entry.rawBase64!,
     mimeType: MIME_BY_TYPE[type],
     reply,
+    editQuality: buildEditQuality({
+      editMode: quality.editMode,
+      entry,
+      outputFileName: entry.filename,
+      type,
+      warning: quality.warning,
+    }),
   };
 }
 
@@ -1963,6 +2055,7 @@ export async function tryApplyLayoutPreservingFileEdit(
       entry,
       type,
       `Here's your file "${entry.filename}" exactly as it is — no changes made. Click the card below to download it.`,
+      { editMode: "unchanged" },
     );
   }
 
@@ -2002,11 +2095,16 @@ export async function tryApplyLayoutPreservingFileEdit(
       const applied = await applyAiOfficeEditOps(entry, type, aiPlan.operations);
       if (applied && applied.appliedCount > 0) {
         appliedCount = applied.appliedCount;
+        const changes = applied.appliedIndices
+          .map((i) => aiPlan.operations[i])
+          .filter((op): op is AiOfficeEditOp => Boolean(op))
+          .map(describeAiOfficeEditOp);
         const editResult = buildOfficeResult(
           entry,
           type,
           applied.buffer,
           `applied ${applied.appliedCount} text edit${applied.appliedCount === 1 ? "" : "s"}`,
+          changes,
         );
         const wroteBack = await writeBackEditedEntry(input, fileRef, entry, editResult);
         if (wroteBack) editResult.editedFileRef = fileRef;
@@ -2032,5 +2130,11 @@ export async function tryApplyLayoutPreservingFileEdit(
     type,
     honestNote ??
       `I couldn't locate the exact text to change in "${entry.filename}", so I'm returning it unchanged rather than rebuilding it from scratch (that would lose your layout and styling). Tell me the exact wording to change — for example: replace "Old heading" with "New heading" — and I'll edit it in place.`,
+    {
+      editMode: "failed_safe",
+      warning: honestNote
+        ? "The requested change would mean restructuring the whole file, so the original was returned unchanged to protect its layout."
+        : "Couldn't locate the exact text to change, so the original file was returned unchanged.",
+    },
   );
 }

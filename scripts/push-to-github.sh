@@ -40,6 +40,21 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
+  lib/ora-contracts/src/index.ts \
+  artifacts/api-server/src/lib/public-ai/file-builder.ts \
+  artifacts/api-server/src/lib/public-ai/office-layout-edit.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/office-layout-edit.test.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/ora-contracts-dataset.test.ts \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  artifacts/api-server/src/routes/public-ai/generate-file.ts \
+  artifacts/mustaflow/src/components/ora-bubble.tsx \
+  artifacts/mustaflow/src/components/ora-panel.tsx \
+  artifacts/mustaflow/src/components/ora/ora-edit-quality-card.tsx \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  artifacts/ora-mobile/lib/types.ts \
+  artifacts/ora-mobile/lib/__tests__/edit-quality-card-wiring.test.ts \
+  scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

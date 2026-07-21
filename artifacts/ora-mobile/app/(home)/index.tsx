@@ -53,6 +53,7 @@ import {
   RefreshCw,
   Send,
   Share2,
+  Sparkles,
   Square,
   Trash2,
   Volume2,
@@ -179,6 +180,7 @@ import type {
   VoicePreset,
   GeneratedFile,
   OraConversationSummary,
+  OraFileEditQuality,
   OraMessage,
   OraMode,
   OraProjectSummary,
@@ -479,7 +481,7 @@ function detectFileFormat(fileName: string, mimeType: string): FileFormat {
 
 /** Build a downloadable generated-file payload only when bytes are present. */
 function buildGeneratedFile(
-  res: Pick<ChatResponse, "fileName" | "fileData" | "mimeType" | "assetId">,
+  res: Pick<ChatResponse, "fileName" | "fileData" | "mimeType" | "assetId" | "editQuality">,
 ): GeneratedFile | undefined {
   if (!res.fileName || !res.fileData || !res.mimeType) return undefined;
   return {
@@ -490,7 +492,38 @@ function buildGeneratedFile(
     // Carried so a reloaded message (bytes dropped) can still download via the
     // durable library asset.
     ...(res.assetId != null ? { assetId: res.assetId } : {}),
+    // Edit-quality transparency metadata (Phase A quality card).
+    ...(res.editQuality ? { editQuality: res.editQuality } : {}),
   };
+}
+
+/**
+ * Map an edit-quality payload to its honest one-line summary for the compact
+ * quality card shown under the generated-file card (website parity).
+ */
+function describeEditQuality(quality: OraFileEditQuality): {
+  label: string;
+  sublabel?: string;
+  tone: "ok" | "neutral" | "info" | "warn";
+} {
+  switch (quality.editMode) {
+    case "original_edited":
+      return {
+        label: "Edited your original file",
+        sublabel: quality.preservedLayout === false ? undefined : "Layout and design preserved",
+        tone: "ok",
+      };
+    case "unchanged":
+      return { label: "Original file returned unchanged", tone: "neutral" };
+    case "redesigned":
+      return {
+        label: "Rebuilt from your content",
+        sublabel: "The original layout was not preserved",
+        tone: "info",
+      };
+    case "failed_safe":
+      return { label: "Edit not applied — original returned unchanged", tone: "warn" };
+  }
 }
 
 /** Map the rich metadata from a (non-streamed) /chat reply onto a message. */
@@ -4318,6 +4351,93 @@ function MessageBubbleBase({
                   </View>
                 </View>
               )}
+
+              {(() => {
+                  const quality = message.generatedFile?.editQuality;
+                  if (!quality) return null;
+                  const summary = describeEditQuality(quality);
+                  const toneColor =
+                    summary.tone === "ok"
+                      ? "#10b981"
+                      : summary.tone === "warn"
+                        ? "#f59e0b"
+                        : summary.tone === "info"
+                          ? "#0ea5e9"
+                          : c.mutedForeground;
+                  const ToneIcon =
+                    summary.tone === "ok"
+                      ? Check
+                      : summary.tone === "warn"
+                        ? AlertCircle
+                        : summary.tone === "info"
+                          ? Sparkles
+                          : FileText;
+                  const changes = quality.changes ?? [];
+                  const visibleChanges = changes.slice(0, 3);
+                  const hiddenCount = changes.length - visibleChanges.length;
+                  return (
+                    <View
+                      style={{
+                        marginTop: 6,
+                        paddingVertical: 8,
+                        paddingHorizontal: 10,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: toneColor + "40",
+                        backgroundColor: toneColor + "0D",
+                      }}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+                        <View style={{ marginTop: 1 }}>
+                          <ToneIcon size={13} color={toneColor} />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text
+                            style={{
+                              color: c.foreground,
+                              fontSize: 12,
+                              fontFamily: "Inter_600SemiBold",
+                            }}
+                          >
+                            {summary.label}
+                          </Text>
+                          {summary.sublabel ? (
+                            <Text
+                              style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}
+                            >
+                              {summary.sublabel}
+                            </Text>
+                          ) : null}
+                          {quality.warning ? (
+                            <Text style={{ color: "#f59e0b", fontSize: 11, marginTop: 3 }}>
+                              {quality.warning}
+                            </Text>
+                          ) : null}
+                          {visibleChanges.map((change, i) => (
+                            <Text
+                              key={i}
+                              numberOfLines={2}
+                              style={{
+                                color: c.mutedForeground,
+                                fontSize: 11,
+                                marginTop: i === 0 ? 4 : 2,
+                              }}
+                            >
+                              {"\u2022"} {change}
+                            </Text>
+                          ))}
+                          {hiddenCount > 0 ? (
+                            <Text
+                              style={{ color: c.mutedForeground, fontSize: 10, marginTop: 3 }}
+                            >
+                              +{hiddenCount} more {hiddenCount === 1 ? "change" : "changes"}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })()}
 
               {message.generatedFile && (
                 <GeneratedFileViewer

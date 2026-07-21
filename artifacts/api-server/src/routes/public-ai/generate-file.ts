@@ -138,15 +138,16 @@ router.post("/public-ai/generate-file", async (req, res) => {
     const { tryApplyLayoutPreservingFileEdit } =
       await import("../../lib/public-ai/office-layout-edit");
     FileGenerationErrorCtor = fileBuilder.FileGenerationError;
+    const layoutEditResult = await tryApplyLayoutPreservingFileEdit({
+      message,
+      format,
+      documentRefs,
+      sessionId: session.sessionId,
+      userId: authed?.userId ?? null,
+      subscriptionTier: authed?.tier ?? null,
+    });
     const result =
-      (await tryApplyLayoutPreservingFileEdit({
-        message,
-        format,
-        documentRefs,
-        sessionId: session.sessionId,
-        userId: authed?.userId ?? null,
-        subscriptionTier: authed?.tier ?? null,
-      })) ??
+      layoutEditResult ??
       (await fileBuilder.generateFileFromPrompt(
         filePrompt,
         format,
@@ -155,6 +156,19 @@ router.post("/public-ai/generate-file", async (req, res) => {
         hasSourceData,
         authed?.tier ?? null,
       ));
+    // The full generator rebuilt the file from an uploaded source's extracted
+    // text — an honest "redesigned" stamp so the quality card can say the
+    // original layout was NOT carried over. Pure from-scratch generation
+    // (no uploaded source) intentionally gets no editQuality at all.
+    if (!layoutEditResult && documentRefs.length > 0 && hasSourceData) {
+      result.editQuality = {
+        editMode: "redesigned",
+        changes: [],
+        outputFileName: result.fileName.slice(0, 300),
+        preservedLayout: false,
+        canRedesign: false,
+      };
+    }
 
     // Persist to the durable asset library for signed-in users so the file
     // survives chat resets, reloads, and other devices. Best-effort — a library
@@ -219,6 +233,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       fileData: result.fileData,
       mimeType: result.mimeType,
       ...(assetId != null ? { assetId } : {}),
+      ...(result.editQuality ? { editQuality: result.editQuality } : {}),
       ...usage,
     });
   } catch (err) {

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
+import { OraEditQualityCard } from "@/components/ora/ora-edit-quality-card";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { cn } from "@/lib/utils";
 import { authFetch } from "@/lib/api-fetch";
@@ -1545,11 +1546,16 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     )}
 
                     {msg.generatedFile && (
-                      <GeneratedFileCard
-                        file={msg.generatedFile}
-                        compact
-                        onRevise={handleReviseGeneratedFile}
-                      />
+                      <>
+                        <GeneratedFileCard
+                          file={msg.generatedFile}
+                          compact
+                          onRevise={handleReviseGeneratedFile}
+                        />
+                        {msg.generatedFile.editQuality && (
+                          <OraEditQualityCard quality={msg.generatedFile.editQuality} compact />
+                        )}
+                      </>
                     )}
 
                     {msg.editedFrom && (

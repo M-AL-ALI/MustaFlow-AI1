@@ -20,12 +20,15 @@ export type {
   OraAttachmentMeta,
   OraDatasetResult,
   GeneratedFile,
+  OraFileEditMode,
+  OraFileEditQuality,
   OraMessageData,
   OraAccountConsistency,
   OraAccountConsistencyLatest,
 } from "@workspace/ora-contracts";
 
 import type {
+  OraFileEditQuality,
   OraImage,
   OraMemoryUsed,
   OraMessageData,
@@ -315,6 +318,11 @@ export interface ChatResponse {
   fileData?: string;
   mimeType?: string;
   assetId?: number;
+  /**
+   * Edit-quality transparency metadata attached when the file came out of an
+   * edit pipeline (Phase A quality card). Small display fields only.
+   */
+  editQuality?: OraFileEditQuality;
   imageUrl?: string;
   imageId?: number;
   imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };

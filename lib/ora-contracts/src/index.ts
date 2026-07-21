@@ -63,6 +63,41 @@ export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 /* ── Persisted sub-schemas (exact server wire contract) ─────────────────── */
 
 /**
+ * How a file response relates to the user's uploaded original:
+ *  - `original_edited`  — the uploaded package was edited in place (layout kept)
+ *  - `unchanged`        — the original was returned without modification
+ *  - `redesigned`       — a brand-new file was generated instead of editing
+ *  - `failed_safe`      — the edit could not be applied safely; original kept
+ */
+export type OraFileEditMode =
+  | "original_edited"
+  | "unchanged"
+  | "redesigned"
+  | "failed_safe";
+
+/**
+ * Structured edit-quality metadata attached to a generated-file response when
+ * the request involved an uploaded source file. Rendered as a quality card on
+ * both website and mobile, and persisted with the message (bytes are not).
+ */
+export const oraFileEditQualitySchema = z.object({
+  editMode: z.enum(["original_edited", "unchanged", "redesigned", "failed_safe"]),
+  /** Human-readable list of applied changes, e.g. `Replaced: "A" → "B"`. */
+  changes: z.array(z.string().max(300)).max(20).optional(),
+  originalFileName: z.string().max(300).optional(),
+  outputFileName: z.string().max(300).optional(),
+  /** Source file extension, e.g. "docx" | "pptx" | "xlsx". */
+  sourceFileType: z.string().max(20).optional(),
+  preservedLayout: z.boolean().optional(),
+  /** Reserved for the revision-history phase; not emitted yet. */
+  versionId: z.number().int().optional(),
+  canRedesign: z.boolean().optional(),
+  warning: z.string().max(500).optional(),
+});
+
+export type OraFileEditQuality = z.infer<typeof oraFileEditQualitySchema>;
+
+/**
  * A file generated in-session. The raw base64 `fileData` is intentionally
  * stripped before persistence (it would bloat the row), so a message reloaded
  * from storage keeps the file metadata but never the bytes.
@@ -77,6 +112,9 @@ export const oraGeneratedFileSchema = z
     // transform so a reloaded message can still be downloaded by fetching
     // /api/ora/assets/:id/download (signed-in users only).
     assetId: z.number().int().optional(),
+    // Edit-quality card metadata — KEPT through the transform so the quality
+    // card survives conversation reload on both website and mobile.
+    editQuality: oraFileEditQualitySchema.optional(),
   })
   .transform(({ fileData: _fileData, ...rest }) => rest);
 
@@ -363,6 +401,11 @@ export interface GeneratedFile {
    * downloaded via /api/ora/assets/:id/download when `fileData` is absent.
    */
   assetId?: number;
+  /**
+   * Edit-quality card metadata, present when the response relates to an
+   * uploaded source file. Survives persistence so the card renders on reload.
+   */
+  editQuality?: OraFileEditQuality;
 }
 
 /**

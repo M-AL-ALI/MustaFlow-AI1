@@ -1123,3 +1123,163 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     expect(slide1).not.toContain("Old Pricing");
   });
 });
+
+describe("editQuality card metadata", () => {
+  it("stamps original_edited with a change list on regex-engine edits", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: 'Replace the text "Old Pricing" with "New Pricing" in the deck',
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result?.editQuality).toBeDefined();
+    expect(result?.editQuality?.editMode).toBe("original_edited");
+    expect(result?.editQuality?.changes?.length).toBeGreaterThan(0);
+    expect(result?.editQuality?.originalFileName).toBe("board-review.pptx");
+    expect(result?.editQuality?.outputFileName).toBe(result?.fileName);
+    expect(result?.editQuality?.sourceFileType).toBe("pptx");
+    expect(result?.editQuality?.preservedLayout).toBe(true);
+    expect(result?.editQuality?.canRedesign).toBe(true);
+    expect(result?.editQuality?.warning).toBeUndefined();
+  });
+
+  it("stamps unchanged on send-it-back passthroughs", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "board-review.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Can you send me back the PowerPoint file?",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result?.editQuality?.editMode).toBe("unchanged");
+    expect(result?.editQuality?.changes).toEqual([]);
+    expect(result?.editQuality?.warning).toBeUndefined();
+    expect(result?.editQuality?.preservedLayout).toBe(true);
+  });
+
+  it("describes each applied AI-planned op as a Replaced change line", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [{ find: "Old Pricing", replace: "Refreshed Pricing" }],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Reword the pricing line in the deck so it sounds current",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result?.editQuality?.editMode).toBe("original_edited");
+    expect(result?.editQuality?.changes).toEqual([
+      'Replaced: "Old Pricing" → "Refreshed Pricing"',
+    ]);
+  });
+
+  it("stamps failed_safe with a warning when in-place ops cannot be located", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing\nSlide 2:\n- Delete Me",
+    });
+    aiPlanner.plan = {
+      mode: "edit",
+      operations: [{ find: "Text that does not exist anywhere", replace: "irrelevant" }],
+    };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Reword the executive summary paragraph in the deck",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result?.editQuality?.editMode).toBe("failed_safe");
+    expect(result?.editQuality?.changes).toEqual([]);
+    expect(result?.editQuality?.warning).toContain("Couldn't locate");
+    // Original returned untouched, so layout is intact by definition.
+    expect(result?.editQuality?.preservedLayout).toBe(true);
+  });
+
+  it("stamps failed_safe with a restructuring warning on a regenerate vote", async () => {
+    const sessionId = crypto.randomUUID();
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pricing-deck.pptx",
+      rawFileType: "pptx",
+      base64: makePptxBase64(),
+      extractedText: "Slide 1:\n- Old Pricing",
+    });
+    aiPlanner.plan = { mode: "regenerate", operations: [] };
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message: "Reword the whole deck into a completely different story arc",
+      format: "pptx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result?.editQuality?.editMode).toBe("failed_safe");
+    expect(result?.editQuality?.warning).toContain("restructuring");
+  });
+
+  it("lists each XLSX action as its own change line", async () => {
+    const sessionId = crypto.randomUUID();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Pipeline");
+    sheet.addRow(["Region", "Revenue"]);
+    sheet.addRow(["North", 120]);
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const ref = storeRawOffice({
+      sessionId,
+      filename: "pipeline.xlsx",
+      rawFileType: "xlsx",
+      base64: raw.toString("base64"),
+    });
+
+    const result = await tryApplyLayoutPreservingFileEdit({
+      message:
+        "Add a sheet named Summary, add a Status column, add row West, 150, Open, and return the Excel file",
+      format: "xlsx",
+      documentRefs: [ref],
+      sessionId,
+    });
+
+    expect(result?.editQuality?.editMode).toBe("original_edited");
+    expect(result?.editQuality?.sourceFileType).toBe("xlsx");
+    expect(result?.editQuality?.changes?.length).toBeGreaterThanOrEqual(2);
+    expect(
+      result?.editQuality?.changes?.some((change) => change.includes('worksheet "Summary"')),
+    ).toBe(true);
+  });
+});

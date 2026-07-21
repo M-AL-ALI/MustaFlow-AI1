@@ -48,3 +48,70 @@ describe("Ora dataset result persistence contract", () => {
     expect(parsed.datasetResult?.actionPlan?.[0]?.action).toBe("Review regional campaigns");
   });
 });
+
+describe("Ora file edit-quality persistence contract", () => {
+  it("keeps editQuality through the shared message schema while stripping file bytes", () => {
+    const parsed = oraMessageSchema.parse({
+      role: "assistant",
+      content: "I've updated your deck.",
+      generatedFile: {
+        fileName: "board-review.pptx",
+        fileData: "QUJD",
+        mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        format: "pptx",
+        assetId: 42,
+        editQuality: {
+          editMode: "original_edited",
+          changes: ['Replaced: "Old Pricing" → "New Pricing"'],
+          originalFileName: "board-review.pptx",
+          outputFileName: "board-review.pptx",
+          sourceFileType: "pptx",
+          preservedLayout: true,
+          canRedesign: true,
+        },
+      },
+    });
+
+    // Bytes are stripped on persistence; the quality card metadata is KEPT.
+    expect(parsed.generatedFile).toBeDefined();
+    expect((parsed.generatedFile as Record<string, unknown>).fileData).toBeUndefined();
+    expect(parsed.generatedFile?.assetId).toBe(42);
+    expect(parsed.generatedFile?.editQuality?.editMode).toBe("original_edited");
+    expect(parsed.generatedFile?.editQuality?.changes?.[0]).toBe(
+      'Replaced: "Old Pricing" → "New Pricing"',
+    );
+    expect(parsed.generatedFile?.editQuality?.preservedLayout).toBe(true);
+  });
+
+  it("keeps warnings for failed-safe outcomes and rejects unknown edit modes", () => {
+    const parsed = oraMessageSchema.parse({
+      role: "assistant",
+      content: "Returned unchanged.",
+      generatedFile: {
+        fileName: "report.docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        format: "docx",
+        editQuality: {
+          editMode: "failed_safe",
+          changes: [],
+          warning: "Couldn't locate the exact text to change.",
+        },
+      },
+    });
+    expect(parsed.generatedFile?.editQuality?.editMode).toBe("failed_safe");
+    expect(parsed.generatedFile?.editQuality?.warning).toContain("Couldn't locate");
+
+    expect(() =>
+      oraMessageSchema.parse({
+        role: "assistant",
+        content: "Bad mode.",
+        generatedFile: {
+          fileName: "report.docx",
+          mimeType: "application/msword",
+          format: "docx",
+          editQuality: { editMode: "made_up_mode" },
+        },
+      }),
+    ).toThrow();
+  });
+});

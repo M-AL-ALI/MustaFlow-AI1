@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { flushSync } from "react-dom";
 import { useUser } from "@clerk/react";
+import type { OraFileEditQuality } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
@@ -25,6 +26,12 @@ export interface GeneratedFile {
    * download via /api/ora/assets/:id/download when the inline bytes are gone.
    */
   assetId?: number;
+  /**
+   * Edit-quality transparency metadata for file edits (Phase A quality card).
+   * Persisted with the message (small display fields only) so the card
+   * survives reload alongside the file metadata.
+   */
+  editQuality?: OraFileEditQuality;
 }
 
 export interface OraSource {
@@ -1800,6 +1807,7 @@ export function useOraChat(): UseOraChatReturn {
             fileData?: string;
             mimeType?: string;
             assetId?: number;
+            editQuality?: OraFileEditQuality;
             imageUrl?: string;
             imageId?: number;
             imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
@@ -1854,6 +1862,7 @@ export function useOraChat(): UseOraChatReturn {
                     mimeType: d.mimeType,
                     format: d.fileName.split(".").pop() as GeneratedFile["format"],
                     ...(d.assetId != null ? { assetId: d.assetId } : {}),
+                    ...(d.editQuality ? { editQuality: d.editQuality } : {}),
                   } satisfies GeneratedFile,
                 }
               : {}),
@@ -2180,6 +2189,7 @@ export function useOraChat(): UseOraChatReturn {
           fileName: string;
           fileData: string;
           mimeType: string;
+          editQuality?: OraFileEditQuality;
           msgCount: number;
           msgLimit: number;
           imageCount?: number;
@@ -2199,6 +2209,7 @@ export function useOraChat(): UseOraChatReturn {
                 fileData: data.fileData,
                 mimeType: data.mimeType,
                 format,
+                ...(data.editQuality ? { editQuality: data.editQuality } : {}),
               } satisfies GeneratedFile,
             },
           ];
@@ -2255,6 +2266,7 @@ export function useOraChat(): UseOraChatReturn {
               fileName: string;
               fileData: string;
               mimeType: string;
+              editQuality?: OraFileEditQuality;
               msgCount: number;
               msgLimit: number;
               imageCount?: number;
@@ -2273,6 +2285,7 @@ export function useOraChat(): UseOraChatReturn {
                     fileData: retryData.fileData,
                     mimeType: retryData.mimeType,
                     format,
+                    ...(retryData.editQuality ? { editQuality: retryData.editQuality } : {}),
                   } satisfies GeneratedFile,
                 },
               ];

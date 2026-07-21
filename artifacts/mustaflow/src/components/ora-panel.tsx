@@ -43,6 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { authFetch } from "@/lib/api-fetch";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
+import { OraEditQualityCard } from "@/components/ora/ora-edit-quality-card";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
 import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
@@ -1761,10 +1762,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   )}
 
                   {msg.generatedFile && (
-                    <GeneratedFileCard
-                      file={msg.generatedFile}
-                      onRevise={handleReviseGeneratedFile}
-                    />
+                    <>
+                      <GeneratedFileCard
+                        file={msg.generatedFile}
+                        onRevise={handleReviseGeneratedFile}
+                      />
+                      {msg.generatedFile.editQuality && (
+                        <OraEditQualityCard quality={msg.generatedFile.editQuality} />
+                      )}
+                    </>
                   )}
 
                   {msg.role === "assistant" && msg.viaFallback && !msg.isStreaming && (

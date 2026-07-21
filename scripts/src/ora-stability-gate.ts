@@ -81,6 +81,7 @@ const ORA_FILE_HINTS = [
   // expired-session recovery), so any change to it is an Ora change.
   /^artifacts\/ora-mobile\/lib\/api\.ts$/,
   /^packages\/ora-contracts\//,
+  /^lib\/ora-contracts\//,
   /^docs\/ora-stability-gate\.md$/,
   /^scripts\/src\/ora-stability-gate\.ts$/,
 ];
@@ -207,6 +208,22 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Upload and generate PDF/DOCX/PPTX/XLSX/CSV/ZIP workflows, including charts and revisions. Uploaded-office-file safeguards: (1) upload a DOCX/PPTX, then ask 'send me back the file' — the ORIGINAL file must come back byte-identical (reply says no changes made), never a regenerated lookalike; (2) ask an in-place edit in natural wording (e.g. 'reword the pricing line') — the edited file must keep the original layout/styling (AI-planned in-place ops), and if the text cannot be located the file must come back UNCHANGED with an honest note, never silently rebuilt; (3) two consecutive edits must compound (second edit applies on top of the first, not the original upload); (4) never-silently-regenerate: even when the edit planner votes 'regenerate' or its JSON fails to parse, an uploaded-file edit request must return the ORIGINAL file unchanged with an honest note offering 'rebuild it from scratch' — only that explicit phrasing (e.g. 'rebuild it from scratch', 'start over') may trigger regeneration; (5) reload persistence: upload a PPTX, RELOAD the page, then ask 'Revise slide 2 ...' as the next turn — the edit must still target the original uploaded file (documentRefs are cached in sessionStorage per conversation and standalone chat, restored after reload, migrated to the conversation key on first save, and never persisted in temporary mode).",
     manualMobile:
       "Verify upload, generated file cards, View + Download parity with website (View opens an in-app preview on iOS via WebView, share sheet on Android/older builds; non-image cards say Download, images say Save), and revision actions on TestFlight when mobile code changed. From the attach menu, tap Browse files and confirm the iOS Files picker actually opens (regression: picker presented while the menu modal was still dismissing fails silently and poisons all later attempts until app restart); also confirm Take photo and Photo library still open after the menu closes. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn). Restart persistence (parity with website reload persistence): upload a PPTX in a saved conversation, FULLY close and reopen the app (or switch to another conversation and back), then ask 'Revise slide 2 ...' — the edit must still target the original uploaded file (refs are cached in AsyncStorage per conversation plus a standalone key, restored on conversation load and app launch, migrated to the conversation key when the conversation is created, and never persisted in temporary mode).",
+  },
+  {
+    id: "file-edit-quality-card",
+    title: "File edit-quality transparency card (editQuality metadata on edited-file replies)",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /edit-quality/i,
+      /editQuality/,
+      /ora-edit-quality-card/i,
+      /edit-quality-card-wiring/i,
+      /ora-contracts/i,
+    ],
+    manualWebsite:
+      "Upload a DOCX/PPTX/XLSX and run one of each edit outcome, verifying the quality card under the file card: (1) quoted in-place edit ('replace the text A with B') shows the emerald 'Edited your original file' card with 'Layout and design preserved' and the applied change lines (collapsed past 4 with an expand toggle); (2) 'send me back the file' shows the muted 'Original file returned unchanged' card; (3) an un-locatable edit shows the amber 'Edit not applied' card with the honest warning and the original file unchanged; (4) explicit 'rebuild it from scratch' shows the sky 'Rebuilt from your content' card noting layout was not preserved. The card must never claim an edit that did not happen.",
+    manualMobile:
+      "Repeat the same four edit outcomes on TestFlight (upload, then edit as a follow-up turn): the compact quality card renders under the generated-file card with the matching tone (emerald/muted/sky/amber), shows the server warning verbatim for failed_safe, and caps visible change lines at three with a '+N more changes' note. Card is pure JS — ships with the next build, no native rebuild required.",
   },
   {
     id: "conversation-history",
