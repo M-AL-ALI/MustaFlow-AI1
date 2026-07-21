@@ -9,7 +9,12 @@ import {
 } from "../../lib/public-ai/session";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import { scanUserInput } from "../../lib/public-ai/prompt";
-import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
+import {
+  buildCarriedDocumentContext,
+  resolveCarriedFileMeta,
+  type CarriedFileMeta,
+} from "../../lib/public-ai/carried-docs";
+import { planOraMultiFile } from "../../lib/public-ai/multi-file-planner";
 
 const router = Router();
 
@@ -127,7 +132,20 @@ router.post("/public-ai/generate-file", async (req, res) => {
     message,
     authed?.userId ?? null,
   );
-  const filePrompt = carriedDocs ? `${message}\n\n${carriedDocs}` : message;
+  // Phase 5: cross-file workflow planning (2+ uploads only). This route is
+  // explicitly file generation, so the planner never overrides the tool here;
+  // it contributes the role directive, target steering, and usedFiles payload.
+  const carriedFileMeta: CarriedFileMeta[] =
+    documentRefs.length >= 2
+      ? await resolveCarriedFileMeta(documentRefs, session.sessionId, authed?.userId ?? null)
+      : [];
+  const multiFilePlan = planOraMultiFile({
+    message,
+    files: carriedFileMeta,
+    finalTool: "file_generation",
+  });
+  const promptWithPlan = multiFilePlan ? `${message}\n\n${multiFilePlan.directive}` : message;
+  const filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
   const hasSourceData = carriedDocs.length > 0;
 
   let FileGenerationErrorCtor:
@@ -145,6 +163,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       sessionId: session.sessionId,
       userId: authed?.userId ?? null,
       subscriptionTier: authed?.tier ?? null,
+      preferredFileRef: multiFilePlan?.targetFileRef ?? null,
     });
     const result =
       layoutEditResult ??
@@ -255,6 +274,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       mimeType: result.mimeType,
       ...(assetId != null ? { assetId } : {}),
       ...(result.editQuality ? { editQuality: result.editQuality } : {}),
+      ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
       ...usage,
     });
   } catch (err) {

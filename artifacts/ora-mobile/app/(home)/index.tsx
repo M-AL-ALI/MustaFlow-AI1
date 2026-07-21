@@ -90,10 +90,7 @@ import {
   OraSuggestions,
 } from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
-import {
-  canViewFileInApp,
-  GeneratedFileViewer,
-} from "@/components/ora/GeneratedFileViewer";
+import { canViewFileInApp, GeneratedFileViewer } from "@/components/ora/GeneratedFileViewer";
 import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";
 import { ImagePreviewModal } from "@/components/ora/ImagePreviewModal";
 import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
@@ -548,6 +545,7 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     memorySaveCandidateConfidence: res.memorySaveCandidateConfidence,
     memorySaveCandidateSensitive: res.memorySaveCandidateSensitive,
     memoriesUsed: res.memoriesUsed,
+    ...(res.usedFiles && res.usedFiles.length > 0 ? { usedFiles: res.usedFiles } : {}),
     generatedFile: buildGeneratedFile(res),
     ...(res.searchFallback ? { searchFallback: true } : {}),
     ...(res.searchRetryable ? { searchRetryable: true } : {}),
@@ -2025,10 +2023,7 @@ export default function OraChatScreen() {
           // Mirror to the persistent cache (skipped in temporary mode) so a
           // "Revise ..." after an app restart still targets this upload.
           if (!temporaryRef.current) {
-            storeDocumentRefs(
-              docRefsKey(conversationIdRef.current),
-              documentRefsRef.current,
-            );
+            storeDocumentRefs(docRefsKey(conversationIdRef.current), documentRefsRef.current);
           }
         }
         setAttachment({
@@ -4460,91 +4455,87 @@ function MessageBubbleBase({
               )}
 
               {(() => {
-                  const quality = message.generatedFile?.editQuality;
-                  if (!quality) return null;
-                  const summary = describeEditQuality(quality);
-                  const toneColor =
-                    summary.tone === "ok"
-                      ? "#10b981"
-                      : summary.tone === "warn"
-                        ? "#f59e0b"
-                        : summary.tone === "info"
-                          ? "#0ea5e9"
-                          : c.mutedForeground;
-                  const ToneIcon =
-                    summary.tone === "ok"
-                      ? Check
-                      : summary.tone === "warn"
-                        ? AlertCircle
-                        : summary.tone === "info"
-                          ? Sparkles
-                          : FileText;
-                  const changes = quality.changes ?? [];
-                  const visibleChanges = changes.slice(0, 3);
-                  const hiddenCount = changes.length - visibleChanges.length;
-                  return (
-                    <View
-                      style={{
-                        marginTop: 6,
-                        paddingVertical: 8,
-                        paddingHorizontal: 10,
-                        borderRadius: 10,
-                        borderWidth: 1,
-                        borderColor: toneColor + "40",
-                        backgroundColor: toneColor + "0D",
-                      }}
-                    >
-                      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
-                        <View style={{ marginTop: 1 }}>
-                          <ToneIcon size={13} color={toneColor} />
-                        </View>
-                        <View style={{ flex: 1, minWidth: 0 }}>
+                const quality = message.generatedFile?.editQuality;
+                if (!quality) return null;
+                const summary = describeEditQuality(quality);
+                const toneColor =
+                  summary.tone === "ok"
+                    ? "#10b981"
+                    : summary.tone === "warn"
+                      ? "#f59e0b"
+                      : summary.tone === "info"
+                        ? "#0ea5e9"
+                        : c.mutedForeground;
+                const ToneIcon =
+                  summary.tone === "ok"
+                    ? Check
+                    : summary.tone === "warn"
+                      ? AlertCircle
+                      : summary.tone === "info"
+                        ? Sparkles
+                        : FileText;
+                const changes = quality.changes ?? [];
+                const visibleChanges = changes.slice(0, 3);
+                const hiddenCount = changes.length - visibleChanges.length;
+                return (
+                  <View
+                    style={{
+                      marginTop: 6,
+                      paddingVertical: 8,
+                      paddingHorizontal: 10,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: toneColor + "40",
+                      backgroundColor: toneColor + "0D",
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+                      <View style={{ marginTop: 1 }}>
+                        <ToneIcon size={13} color={toneColor} />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text
+                          style={{
+                            color: c.foreground,
+                            fontSize: 12,
+                            fontFamily: "Inter_600SemiBold",
+                          }}
+                        >
+                          {summary.label}
+                        </Text>
+                        {summary.sublabel ? (
+                          <Text style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}>
+                            {summary.sublabel}
+                          </Text>
+                        ) : null}
+                        {quality.warning ? (
+                          <Text style={{ color: "#f59e0b", fontSize: 11, marginTop: 3 }}>
+                            {quality.warning}
+                          </Text>
+                        ) : null}
+                        {visibleChanges.map((change, i) => (
                           <Text
+                            key={i}
+                            numberOfLines={2}
                             style={{
-                              color: c.foreground,
-                              fontSize: 12,
-                              fontFamily: "Inter_600SemiBold",
+                              color: c.mutedForeground,
+                              fontSize: 11,
+                              marginTop: i === 0 ? 4 : 2,
                             }}
                           >
-                            {summary.label}
+                            {"\u2022"} {change}
                           </Text>
-                          {summary.sublabel ? (
-                            <Text
-                              style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}
-                            >
-                              {summary.sublabel}
-                            </Text>
-                          ) : null}
-                          {quality.warning ? (
-                            <Text style={{ color: "#f59e0b", fontSize: 11, marginTop: 3 }}>
-                              {quality.warning}
-                            </Text>
-                          ) : null}
-                          {visibleChanges.map((change, i) => (
-                            <Text
-                              key={i}
-                              numberOfLines={2}
-                              style={{
-                                color: c.mutedForeground,
-                                fontSize: 11,
-                                marginTop: i === 0 ? 4 : 2,
-                              }}
-                            >
-                              {"\u2022"} {change}
-                            </Text>
-                          ))}
-                          {hiddenCount > 0 ? (
-                            <Text
-                              style={{ color: c.mutedForeground, fontSize: 10, marginTop: 3 }}
-                            >
-                              +{hiddenCount} more {hiddenCount === 1 ? "change" : "changes"}
-                            </Text>
-                          ) : null}
-                        </View>
+                        ))}
+                        {hiddenCount > 0 ? (
+                          <Text style={{ color: c.mutedForeground, fontSize: 10, marginTop: 3 }}>
+                            +{hiddenCount} more {hiddenCount === 1 ? "change" : "changes"}
+                          </Text>
+                        ) : null}
                       </View>
                     </View>
-                  );
-                })()}
+                  </View>
+                );
+              })()}
 
               {generatedFile && (
                 <GeneratedFileViewer

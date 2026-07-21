@@ -69,11 +69,7 @@ export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
  *  - `redesigned`       — a brand-new file was generated instead of editing
  *  - `failed_safe`      — the edit could not be applied safely; original kept
  */
-export type OraFileEditMode =
-  | "original_edited"
-  | "unchanged"
-  | "redesigned"
-  | "failed_safe";
+export type OraFileEditMode = "original_edited" | "unchanged" | "redesigned" | "failed_safe";
 
 /**
  * Structured edit-quality metadata attached to a generated-file response when
@@ -248,9 +244,38 @@ export const ORA_CLARIFICATION_KINDS = [
   "multi_file_source", // several uploads, source file for the edit unclear
   "unclear_replacement_target", // "change the pricing section" — no target text
   "missing_edit_instruction", // "return it after modification" — no modification stated
+  "ambiguous_target_file", // two+ same-format uploads, edit target file unclear
 ] as const;
 
 export type OraClarificationKind = (typeof ORA_CLARIFICATION_KINDS)[number];
+
+/**
+ * Phase 5 — Multi-File Intelligence. The role each uploaded file played in a
+ * multi-file turn (data source feeding a deck, one side of a comparison, ...).
+ * Static enum values only — safe for diagnostics and persistence.
+ */
+export const ORA_MULTI_FILE_ROLES = [
+  "source_data", // spreadsheet/CSV feeding an update
+  "target_document", // the DOCX/PDF being updated
+  "target_presentation", // the PPTX being updated
+  "comparison_a", // first side of a comparison
+  "comparison_b", // second side of a comparison
+  "merge_input", // one of several files being merged/combined
+  "reference", // consulted as context (summaries, archive reports)
+] as const;
+
+export type OraMultiFileRole = (typeof ORA_MULTI_FILE_ROLES)[number];
+
+/**
+ * "Working from" chip metadata: which uploaded file was used in which role on
+ * a multi-file turn. Names only — never refs, bytes, or content.
+ */
+export const oraUsedFileSchema = z.object({
+  name: z.string().max(300),
+  role: z.enum(ORA_MULTI_FILE_ROLES),
+});
+
+export type OraUsedFile = z.infer<typeof oraUsedFileSchema>;
 
 /**
  * The pending-task context a clarification round-trips through the CLIENT
@@ -327,6 +352,9 @@ export const oraMessageSchema = z.object({
   needsClarification: z.boolean().optional(),
   clarificationKind: z.enum(ORA_CLARIFICATION_KINDS).optional(),
   pendingTaskContext: oraPendingClarificationSchema.optional(),
+  // Multi-file turns: which uploads were used in which role — persisted so the
+  // "working from" chips survive reload. Mirrors the client documentRefs cap.
+  usedFiles: z.array(oraUsedFileSchema).max(5).optional(),
 });
 
 /** Post-transform persisted message type (bytes stripped from generatedFile). */
@@ -481,6 +509,9 @@ export interface OraMessageData {
   needsClarification?: boolean;
   clarificationKind?: OraClarificationKind;
   pendingTaskContext?: OraPendingClarification;
+  /** Multi-file turns: which uploads were used in which role ("working from"
+   * chips). Names + roles only — never refs or content. */
+  usedFiles?: OraUsedFile[];
 }
 
 /* ── Account consistency diagnostics ───────────────────────────────────────── */

@@ -5,6 +5,7 @@ import type {
   OraFileEditQuality,
   OraClarificationKind,
   OraPendingClarification,
+  OraUsedFile,
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
@@ -120,6 +121,12 @@ export interface OraMessage {
   videos?: OraVideo[];
   /** Saved Ora memories that shaped this reply (Ora-scoped only). */
   memoriesUsed?: OraMemoryUsed[];
+  /**
+   * Uploaded files this reply drew on and their planned roles (Phase 5
+   * multi-file intelligence) — drives the "Used: report.docx + budget.xlsx"
+   * chips under the reply. Metadata only, never bytes.
+   */
+  usedFiles?: OraUsedFile[];
   /** rolling conversation summary for this conversation. */
   conversationSummary?: string;
   /** True while this assistant message is still being streamed token-by-token. */
@@ -731,6 +738,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   images?: OraImage[];
   videos?: OraVideo[];
   memoriesUsed?: OraMemoryUsed[];
+  usedFiles?: OraUsedFile[];
   conversationSummary?: string;
   searchFallback?: boolean;
   searchRetryable?: boolean;
@@ -772,6 +780,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.videos && m.videos.length > 0 ? { videos: m.videos } : {}),
     // Persist which saved memories shaped the reply so the indicator survives reload
     ...(m.memoriesUsed && m.memoriesUsed.length > 0 ? { memoriesUsed: m.memoriesUsed } : {}),
+    // Persist which uploaded files the reply drew on so the chips survive reload
+    ...(m.usedFiles && m.usedFiles.length > 0 ? { usedFiles: m.usedFiles } : {}),
     // Persist the rolling summary so it can be re-sent after a reload
     ...(m.conversationSummary ? { conversationSummary: m.conversationSummary } : {}),
     // Persist the search-fallback flags so the caveat/Retry state survives reload
@@ -1923,6 +1933,7 @@ export function useOraChat(): UseOraChatReturn {
             videos?: OraVideo[];
             conversationSummary?: string;
             memoriesUsed?: OraMemoryUsed[];
+            usedFiles?: OraUsedFile[];
             msgCount: number;
             msgLimit: number;
             imageCount?: number;
@@ -1953,6 +1964,7 @@ export function useOraChat(): UseOraChatReturn {
             ...(d.memoriesUsed && d.memoriesUsed.length > 0
               ? { memoriesUsed: d.memoriesUsed }
               : {}),
+            ...(d.usedFiles && d.usedFiles.length > 0 ? { usedFiles: d.usedFiles } : {}),
             ...(d.conversationSummary ? { conversationSummary: d.conversationSummary } : {}),
             ...(d.memorySaveCandidate
               ? {

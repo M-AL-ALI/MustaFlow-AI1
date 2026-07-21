@@ -16,6 +16,48 @@ import { buildDatasetContextBlock } from "./dataset-prompt.js";
 // blow past the model's context window. ~12k chars ≈ a few thousand tokens.
 export const MAX_CARRIED_DOC_CHARS = 12_000;
 
+/**
+ * Lightweight metadata for one resolved carried file — used by the multi-file
+ * planner to classify roles without re-hydrating any content. Never carries
+ * extracted text or bytes.
+ */
+export interface CarriedFileMeta {
+  fileRef: string;
+  filename: string;
+  /** Raw Office bytes type when the original file is held for in-place edits. */
+  rawFileType: "docx" | "pptx" | "xlsx" | null;
+  /** True when the upload parsed as a dataset (CSV/XLSX with a data summary). */
+  isDataset: boolean;
+  /** True when the original bytes are available for layout-preserving edits. */
+  hasRawBytes: boolean;
+}
+
+/**
+ * Resolve display/type metadata for the given refs IN THE ORDER PROVIDED
+ * (clients append refs oldest → newest). Expired or foreign refs are silently
+ * skipped — exactly like `buildCarriedDocumentContext` — so a cross-session
+ * ref can never leak another user's filename into planning.
+ */
+export async function resolveCarriedFileMeta(
+  refs: string[],
+  sessionId: string,
+  userId?: string | null,
+): Promise<CarriedFileMeta[]> {
+  const metas: CarriedFileMeta[] = [];
+  for (const ref of refs) {
+    const entry = await resolveFileEntry(ref, { sessionId, userId });
+    if (!entry) continue;
+    metas.push({
+      fileRef: ref,
+      filename: entry.filename,
+      rawFileType: entry.rawFileType ?? null,
+      isDataset: !!entry.datasetSummary,
+      hasRawBytes: !!entry.rawBase64,
+    });
+  }
+  return metas;
+}
+
 function editableSourceBlueprint(filename: string, extractedText: string): string {
   const lower = filename.toLowerCase();
   const slideCount = (extractedText.match(/^Slide\s+\d+:/gim) ?? []).length;

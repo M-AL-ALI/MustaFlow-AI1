@@ -28,6 +28,14 @@ interface LayoutEditInput {
   sessionId: string;
   userId?: string | null;
   subscriptionTier?: string | null;
+  /**
+   * Phase 5: the multi-file planner's chosen edit target. When set (and it
+   * resolves to raw bytes of the requested format), the edit engine operates
+   * on THIS file's latest revision head instead of the first ref that matches
+   * the format — so "update the Q3 deck" with several uploads edits the right
+   * file. Falls back to the ordered scan when it doesn't resolve.
+   */
+  preferredFileRef?: string | null;
 }
 
 type ZipEntries = Record<string, Uint8Array>;
@@ -610,7 +618,10 @@ function applyAiOpsToParagraphs(
   const paraTag = nodeName === "a:t" ? "a:p" : "w:p";
   const paraRe = new RegExp(`<${paraTag}\\b[\\s\\S]*?</${paraTag}>`, "g");
   const fieldRe = nodeName === "w:t" ? /<w:fldChar\b|<w:instrText\b/ : /<a:fld\b/;
-  const textRe = new RegExp(`<${escapeRegExp(nodeName)}\\b[^>]*>([\\s\\S]*?)</${escapeRegExp(nodeName)}>`, "g");
+  const textRe = new RegExp(
+    `<${escapeRegExp(nodeName)}\\b[^>]*>([\\s\\S]*?)</${escapeRegExp(nodeName)}>`,
+    "g",
+  );
   const regexes = ops.map((op) => looseFindRegex(op.find));
   const appliedOps = new Set<number>();
 
@@ -1896,9 +1907,20 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
   };
 }
 
-async function resolveRawOfficeEntry(
+export async function resolveRawOfficeEntry(
   input: LayoutEditInput,
 ): Promise<{ entry: FileEntry; fileRef: string } | null> {
+  // Planner-steered target first: never silently edit the wrong file when the
+  // multi-file planner already resolved WHICH upload the user meant.
+  if (input.preferredFileRef) {
+    const preferred = await resolveFileEntry(input.preferredFileRef, {
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    if (preferred?.rawFileType === input.format && preferred.rawBase64) {
+      return { entry: preferred, fileRef: input.preferredFileRef };
+    }
+  }
   for (const ref of input.documentRefs) {
     const entry = await resolveFileEntry(ref, { sessionId: input.sessionId, userId: input.userId });
     if (!entry?.rawFileType || !entry.rawBase64) continue;
@@ -1923,8 +1945,7 @@ function isReturnOriginalRequest(message: string): boolean {
   const plan = planUploadedFileRequest(message);
   if (plan.operations.length === 0) return true;
   return (
-    UNCHANGED_PATTERN.test(message) &&
-    !plan.operations.some((op) => FILE_OUTPUT_OPERATIONS.has(op))
+    UNCHANGED_PATTERN.test(message) && !plan.operations.some((op) => FILE_OUTPUT_OPERATIONS.has(op))
   );
 }
 

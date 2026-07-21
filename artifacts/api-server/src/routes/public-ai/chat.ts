@@ -47,7 +47,12 @@ import {
   type OraPlanTier,
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
-import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
+import {
+  buildCarriedDocumentContext,
+  resolveCarriedFileMeta,
+  type CarriedFileMeta,
+} from "../../lib/public-ai/carried-docs";
+import { planOraMultiFile } from "../../lib/public-ai/multi-file-planner";
 import { buildOraExpertiseProfile } from "../../lib/public-ai/expertise";
 import { buildOraImageGenerationProfile } from "../../lib/public-ai/image-quality";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
@@ -1345,6 +1350,12 @@ router.post("/public-ai/chat", async (req, res) => {
     message,
     authed?.userId ?? null,
   );
+  // Phase 5: lightweight per-file metadata for the multi-file planner. Only
+  // resolved when TWO+ refs rode in — single-file turns pay zero extra cost.
+  const carriedFileMeta: CarriedFileMeta[] =
+    documentRefs.length >= 2
+      ? await resolveCarriedFileMeta(documentRefs, session.sessionId, authed?.userId ?? null)
+      : [];
 
   // Merge a clarification answer with its round-tripped pending task context
   // so ROUTING and the file-edit engine see the full original task. The raw
@@ -1371,6 +1382,20 @@ router.post("/public-ai/chat", async (req, res) => {
   });
   decision = finalRoute.decision;
 
+  // Phase 5: recognize cross-file workflows (compare/merge/data→deck/summary)
+  // over 2+ resolved uploads. Runs AFTER resolveFinalOraRoute (never fights
+  // image/search/ZIP escapes) and BEFORE routeDiag/access/quota. The only
+  // route change it can make is file_generation → answer for compare-analysis
+  // asks — both draw on the MESSAGE quota bucket, so cost is unchanged.
+  const multiFilePlan = planOraMultiFile({
+    message: routedMessage,
+    files: carriedFileMeta,
+    finalTool: decision.tool,
+  });
+  if (multiFilePlan?.toolOverride === "answer" && decision.tool === "file_generation") {
+    decision = { ...decision, tool: "answer" };
+  }
+
   const deepAllowed = decision.tool === "deep_thinking";
   const routedTool = decision.tool;
   const searchUsed = decision.tool === "search";
@@ -1384,6 +1409,7 @@ router.post("/public-ai/chat", async (req, res) => {
     searchUsed,
     inferredFileFormat: finalRoute.inferredFileFormat,
     conflictResolution: finalRoute.conflictResolution,
+    multiFileWorkflow: multiFilePlan?.workflow ?? null,
   };
 
   // Ask ONE clarifying question instead of guessing on an ambiguous
@@ -1400,6 +1426,7 @@ router.post("/public-ai/chat", async (req, res) => {
         conflictResolution: finalRoute.conflictResolution,
         inferredFileFormat: finalRoute.inferredFileFormat,
         hasPendingClarification: !!pendingClarification,
+        files: carriedFileMeta,
       });
   if (clarification) {
     res.json({
@@ -1497,8 +1524,12 @@ router.post("/public-ai/chat", async (req, res) => {
     // When the user is asking for a file built from an earlier upload, feed the
     // re-hydrated source text into the builder so the output reflects it.
     // routedMessage carries the merged original-task + clarification answer
-    // when this turn continues a clarifying question.
-    const filePrompt = carriedDocs ? `${routedMessage}\n\n${carriedDocs}` : routedMessage;
+    // when this turn continues a clarifying question. A multi-file plan
+    // prepends its role directive so generation uses each file as planned.
+    const promptWithPlan = multiFilePlan
+      ? `${routedMessage}\n\n${multiFilePlan.directive}`
+      : routedMessage;
+    const filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
     const { generateFileFromPrompt, FileGenerationError } =
       await import("../../lib/public-ai/file-builder");
     try {
@@ -1511,6 +1542,7 @@ router.post("/public-ai/chat", async (req, res) => {
         sessionId: session.sessionId,
         userId: authed?.userId ?? null,
         subscriptionTier: authed?.tier ?? null,
+        preferredFileRef: multiFilePlan?.targetFileRef ?? null,
       });
       const result =
         layoutEditResult ??
@@ -1603,6 +1635,7 @@ router.post("/public-ai/chat", async (req, res) => {
         mimeType: result.mimeType,
         ...(assetId != null ? { assetId } : {}),
         ...(result.editQuality ? { editQuality: result.editQuality } : {}),
+        ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
         ...usage,
         serverDiag: routeDiag,
       });
@@ -2092,7 +2125,11 @@ router.post("/public-ai/chat", async (req, res) => {
     hasCrossConversationContext: crossConvContext.trim().length > 0,
   });
 
-  const fileContextAddendum = buildFileContextAddendum(carriedDocs, documentRefs);
+  // A multi-file plan appends its role directive so the answer path (compare
+  // analyses, collection summaries) uses each uploaded file as planned.
+  const fileContextAddendum =
+    buildFileContextAddendum(carriedDocs, documentRefs) +
+    (multiFilePlan ? `\n\n${multiFilePlan.directive}` : "");
 
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed, parsed.data.timeZone) +
@@ -2411,6 +2448,9 @@ router.post("/public-ai/chat", async (req, res) => {
     // the client can show an unobtrusive "based on your saved memories"
     // indicator that deep-links to the Memory Center.
     ...(memory.used.length > 0 ? { memoriesUsed: memory.used } : {}),
+    // Phase 5: which uploaded files this reply drew on, and in what role —
+    // lets clients render "Used: report.docx + budget.xlsx" chips.
+    ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
     ...(rescuedDelivery?.fileName && rescuedDelivery.fileData && rescuedDelivery.mimeType
       ? {
           fileName: rescuedDelivery.fileName,
@@ -2621,6 +2661,13 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     message,
     authed?.userId ?? null,
   );
+  // Phase 5: multi-file metadata (2+ refs only) so the stream route can detect
+  // cross-file workflows and bounce them to /chat — multi-file turns need the
+  // planner directive and usedFiles payload, which only /chat produces.
+  const carriedFileMeta: CarriedFileMeta[] =
+    documentRefs.length >= 2
+      ? await resolveCarriedFileMeta(documentRefs, session.sessionId, authed?.userId ?? null)
+      : [];
 
   // Merge a clarification answer with its round-tripped pending task context
   // so routing sees the full original task (same logic as /chat — the merged
@@ -2706,9 +2753,26 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       conflictResolution: finalRoute.conflictResolution,
       inferredFileFormat: finalRoute.inferredFileFormat,
       hasPendingClarification: !!pendingClarification,
+      files: carriedFileMeta,
     })
   ) {
     res.json({ streamingFallback: true, tool: "file_generation" });
+    return;
+  }
+
+  // Phase 5: multi-file workflows (compare/merge/data→deck/summarize across
+  // 2+ uploads) always execute on the non-streaming /chat route, which owns
+  // the planner directive, target steering, and usedFiles payload. Bounce
+  // exactly like the specialist tools below. This does NOT change streaming
+  // cadence for any single-file or no-file turn.
+  if (
+    planOraMultiFile({
+      message: routedMessage,
+      files: carriedFileMeta,
+      finalTool: decision.tool,
+    })
+  ) {
+    res.json({ streamingFallback: true, tool: decision.tool });
     return;
   }
 

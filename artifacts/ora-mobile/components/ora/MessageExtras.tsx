@@ -7,6 +7,7 @@ import {
   Check,
   Download,
   ExternalLink,
+  Files,
   FileText,
   GitBranch,
   Image as ImageIcon,
@@ -61,6 +62,7 @@ export function OraAssistantExtras({
       <OraImageLineage editInstruction={message.editInstruction} c={c} />
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
       <OraMemoryIndicators message={message} c={c} />
+      <OraUsedFilesIndicator message={message} c={c} />
     </>
   );
 }
@@ -365,6 +367,38 @@ function OraMemoryIndicators({ message, c }: { message: OraMessage; c: Colors })
           </Text>
         </View>
       )}
+    </View>
+  );
+}
+
+/* ── Multi-file "working from" indicator (web parity: OraUsedFilesChip) ──── */
+
+const USED_FILE_ROLE_LABELS: Record<string, string> = {
+  source_data: "source data",
+  target_document: "document updated",
+  target_presentation: "presentation updated",
+  comparison_a: "compared (A)",
+  comparison_b: "compared (B)",
+  merge_input: "merged",
+  reference: "reference",
+};
+
+function OraUsedFilesIndicator({ message, c }: { message: OraMessage; c: Colors }) {
+  const files = message.usedFiles ?? [];
+  if (files.length === 0) return null;
+  return (
+    <View style={{ marginTop: 8, gap: 4 }}>
+      {files.map((f, i) => (
+        <View
+          key={`${f.name}-${f.role}-${i}`}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+        >
+          <Files size={13} color={c.mutedForeground} />
+          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12, flex: 1 }}>
+            {f.name} — {USED_FILE_ROLE_LABELS[f.role] ?? f.role}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }

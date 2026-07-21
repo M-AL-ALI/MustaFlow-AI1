@@ -27,6 +27,8 @@ export type {
   OraAccountConsistencyLatest,
   OraClarificationKind,
   OraPendingClarification,
+  OraMultiFileRole,
+  OraUsedFile,
 } from "@workspace/ora-contracts";
 
 import type {
@@ -40,6 +42,7 @@ import type {
   OraRole,
   OraSource,
   OraTier,
+  OraUsedFile,
   OraVideo,
 } from "@workspace/ora-contracts";
 
@@ -363,6 +366,9 @@ export interface ChatResponse {
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;
   memoriesUsed?: OraMemoryUsed[];
+  /** Multi-file turns: which uploads were used in which role ("working from"
+   * chips). Names + roles only — never refs or content. */
+  usedFiles?: OraUsedFile[];
   conversationSummary?: string;
   mode?: OraMode;
   msgCount?: number;

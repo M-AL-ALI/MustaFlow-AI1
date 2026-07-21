@@ -48,6 +48,7 @@ import { OraEditQualityCard } from "@/components/ora/ora-edit-quality-card";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
 import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
+import { OraUsedFilesChip } from "@/components/ora/ora-used-files-chip";
 import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
@@ -1871,6 +1872,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         onOpenMemoryCenter={() => setMemoryManagerOpen(true)}
                       />
                     )}
+
+                  {msg.role === "assistant" &&
+                    Array.isArray(msg.usedFiles) &&
+                    msg.usedFiles.length > 0 && <OraUsedFilesChip files={msg.usedFiles} />}
 
                   {msg.role === "assistant" &&
                     isSignedIn &&

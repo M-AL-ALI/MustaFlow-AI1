@@ -1,11 +1,9 @@
-import type {
-  OraClarificationKind,
-  OraPendingClarification,
-} from "@workspace/ora-contracts";
+import type { OraClarificationKind, OraPendingClarification } from "@workspace/ora-contracts";
 import type { OraTool } from "./orchestrator";
 import type { OraRouteConflictResolution } from "./route-resolution";
 import type { FileFormat } from "./prompt";
 import { detectFileRequest, isUploadedFileModificationRequest } from "./prompt";
+import { detectAmbiguousEditTarget } from "./multi-file-planner";
 
 /**
  * Phase 4 — Clarifying Questions.
@@ -43,11 +41,17 @@ export interface OraClarificationPlanInput {
   inferredFileFormat: FileFormat | null;
   /** True when this turn already carries a pendingClarification echo. */
   hasPendingClarification: boolean;
+  /**
+   * Resolved carried-file metadata (Phase 5). When provided, the planner can
+   * also detect an ambiguous edit TARGET ("update the deck" with two decks
+   * uploaded). Optional so existing call sites/tests stay valid.
+   */
+  files?: Array<{ fileRef: string; filename: string }>;
 }
 
-/** Static question templates (multi-file fills in the actual file names). */
+/** Static question templates (dynamic kinds fill in the actual file names). */
 export const ORA_CLARIFICATION_QUESTIONS: Record<
-  Exclude<OraClarificationKind, "multi_file_source">,
+  Exclude<OraClarificationKind, "multi_file_source" | "ambiguous_target_file">,
   string
 > = {
   vague_file_edit:
@@ -63,7 +67,8 @@ export const ORA_CLARIFICATION_QUESTIONS: Record<
  */
 
 /** Quoted text = the user already pinpointed the target. Never ask. */
-const QUOTED_TEXT_PATTERN = /"[^"]{2,}"|'[^']{4,}'|\u201c[^\u201d]{2,}\u201d|\u2018[^\u2019]{4,}\u2019/;
+const QUOTED_TEXT_PATTERN =
+  /"[^"]{2,}"|'[^']{4,}'|\u201c[^\u201d]{2,}\u201d|\u2018[^\u2019]{4,}\u2019/;
 
 /** The user already answered the layout question inside the request. */
 const EXPLICIT_LAYOUT_INTENT_PATTERN =
@@ -156,10 +161,7 @@ function mentionsCarriedFileName(message: string, fileNames: string[]): boolean 
   });
 }
 
-function detectMultiFileSource(
-  message: string,
-  carriedDocs: string,
-): { question: string } | null {
+function detectMultiFileSource(message: string, carriedDocs: string): { question: string } | null {
   const files = carriedFileNames(carriedDocs);
   if (files.length < 2) return null;
   const dataFiles = files.filter((f) => DATA_FILE_PATTERN.test(f));
@@ -190,7 +192,9 @@ function detectMultiFileSource(
  * Decide whether to ask ONE clarifying question for this turn.
  * Returns null when the request is clear enough to execute immediately.
  */
-export function planOraClarification(input: OraClarificationPlanInput): OraClarificationPlan | null {
+export function planOraClarification(
+  input: OraClarificationPlanInput,
+): OraClarificationPlan | null {
   const {
     message,
     carriedDocs,
@@ -241,6 +245,20 @@ export function planOraClarification(input: OraClarificationPlanInput): OraClari
       question: multi.question,
       pendingTaskContext: pendingContext("multi_file_source"),
     };
+  }
+
+  // 2b. Two+ same-family uploads + "update the deck" — TARGET file unclear.
+  //     Also checked before the explicit-format guard: naming the target
+  //     format does not say WHICH of the matching files to edit.
+  if (input.files && input.files.length >= 2) {
+    const ambiguousTarget = detectAmbiguousEditTarget(message, input.files);
+    if (ambiguousTarget) {
+      return {
+        kind: "ambiguous_target_file",
+        question: ambiguousTarget.question,
+        pendingTaskContext: pendingContext("ambiguous_target_file"),
+      };
+    }
   }
 
   // An explicit output-format ask is a clear instruction ("convert to PDF").

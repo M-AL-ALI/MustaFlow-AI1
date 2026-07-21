@@ -319,11 +319,30 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualMobile:
       "Repeat the DOCX 'Make this better.' → answer flow on mobile (streamed replies never ask; the question arrives via the /chat fallback). Kill and reopen the app between question and answer; the answer must still continue the original task. Verify a new chat or temporary toggle drops the pending question.",
   },
+  {
+    id: "multi-file-intelligence",
+    title:
+      "Multi-file intelligence (cross-file workflows: data→deck/doc updates, comparisons, merges, collection summaries; ambiguous-target question; 'working from' chips)",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /public-ai\/multi-file-planner/i,
+      /public-ai\/carried-docs/i,
+      /multi-file-intelligence\.test\.ts$/i,
+      /ora-used-files-wiring\.test\.ts$/i,
+      /ora-used-files-chip/i,
+      /ora\/MessageExtras/i,
+    ],
+    manualWebsite:
+      "Upload an XLSX and a PPTX, then: (1) 'Update the deck with the latest figures from the spreadsheet.' → the ORIGINAL deck is edited with the spreadsheet's real values and the reply shows a collapsed 'Used: …' chip listing both files with roles; (2) upload two DOCX contracts and ask 'What are the differences?' → an analysis ANSWER (no download) with comparison roles in the chip; (3) 'Merge them into one document.' → ONE merged DOCX; (4) upload a second PPTX and say 'Update the deck.' → Ora asks WHICH deck (uncharged), and answering by filename continues the edit on that file.",
+    manualMobile:
+      "Repeat the XLSX+PPTX 'update the deck from the spreadsheet' and two-DOCX compare flows on mobile; verify the same files/roles appear under the reply (web parity) and the ambiguous two-deck ask arrives via the /chat fallback (streamed replies never ask).",
+  },
 ];
 
 const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/current-datetime-block.test.ts",
   "src/lib/public-ai/__tests__/model-router.test.ts",
+  "src/lib/public-ai/__tests__/multi-file-intelligence.test.ts",
   "src/lib/public-ai/__tests__/ora-behavior-qa.test.ts",
   "src/lib/public-ai/__tests__/ora-clarifying-questions.test.ts",
   "src/lib/public-ai/__tests__/ora-conversation-smoke.test.ts",
@@ -409,6 +428,7 @@ const WEB_REALTIME = [
 
 const WEB_ORA_UI = [
   "src/components/ora/__tests__/ora-chat-ux-wiring.test.ts",
+  "src/components/ora/__tests__/ora-used-files-wiring.test.ts",
   "src/hooks/__tests__/ora-clarification-wiring.test.ts",
   "src/lib/__tests__/blocker-fixes-b39.test.ts",
   "src/pages/__tests__/billing-plan-cards.test.ts",
