@@ -507,6 +507,11 @@ export interface GenerateFileRequest {
    * actual data instead of fabricating it. Server caps at 5.
    */
   documentRefs?: string[];
+  /**
+   * Project space to file the generated asset under. Omitted/null keeps the
+   * asset in Personal. Server validates ownership and degrades to Personal.
+   */
+  oraProjectId?: number | null;
 }
 
 /**
@@ -526,6 +531,7 @@ export function generateFile(req: GenerateFileRequest): Promise<ChatResponse> {
         format: req.format,
         ...(req.language ? { language: req.language } : {}),
         documentRefs: req.documentRefs ?? [],
+        ...(req.oraProjectId != null ? { oraProjectId: req.oraProjectId } : {}),
       }),
     }),
   );
@@ -946,11 +952,14 @@ export async function streamChatNative(
   }
 }
 
-export function uploadFile(file: {
-  uri: string;
-  name: string;
-  type: string;
-}): Promise<UploadResponse> {
+export function uploadFile(
+  file: {
+    uri: string;
+    name: string;
+    type: string;
+  },
+  oraProjectId?: number | null,
+): Promise<UploadResponse> {
   return withOraSessionRecovery(async () => {
     // Rebuilt inside the retry closure — RN FormData may not be re-sendable
     // after a failed request.
@@ -961,6 +970,9 @@ export function uploadFile(file: {
       name: file.name,
       type: file.type,
     } as unknown as Blob);
+    // File the stored upload under the current project space (server validates
+    // ownership and silently degrades to Personal).
+    if (oraProjectId != null) form.append("oraProjectId", String(oraProjectId));
     // Multipart upload bypasses jsonRequest(), so it must opt into the same
     // fail-closed auth as the other file routes in pathRequiresAuth(): a signed-in
     // user with a temporarily-missing token throws instead of uploading as anon.
@@ -1282,12 +1294,14 @@ export function clearAllConversations(): Promise<unknown> {
 
 // ---------------------------------------------------------------------------
 // Ora projects (auth required). Conversations scope to a project via
-// `projectId`; null = standalone ("Recent"). Deleting a project detaches its
-// conversations (they become standalone) — handled entirely server-side.
+// `projectId`; null = standalone ("Recent"). Deleting a project archives it:
+// its chats, files, and memories stay attached and hidden until restored —
+// handled entirely server-side.
 // ---------------------------------------------------------------------------
 
-export async function listProjects(): Promise<OraProjectSummary[]> {
-  const data = await jsonRequest<{ projects: OraProjectSummary[] }>("/api/ora/projects");
+export async function listProjects(includeArchived?: boolean): Promise<OraProjectSummary[]> {
+  const path = includeArchived ? "/api/ora/projects?includeArchived=true" : "/api/ora/projects";
+  const data = await jsonRequest<{ projects: OraProjectSummary[] }>(path);
   return data.projects ?? [];
 }
 
@@ -1314,8 +1328,25 @@ export function deleteProject(id: number): Promise<unknown> {
   return jsonRequest(`/api/ora/projects/${id}`, { method: "DELETE" });
 }
 
-export function getAssets(): Promise<OraAssetsResponse> {
-  return jsonRequest<OraAssetsResponse>("/api/ora/assets");
+/** Un-archive a project; its chats, files, and memories become visible again. */
+export async function restoreProject(id: number): Promise<OraProjectSummary> {
+  const data = await jsonRequest<{ project: OraProjectSummary }>(
+    `/api/ora/projects/${id}/restore`,
+    { method: "POST" },
+  );
+  return data.project;
+}
+
+/**
+ * List Library assets. `projectFilter` mirrors the website tri-state:
+ * omitted = everything, "personal" = unfiled assets only, number = that project.
+ */
+export function getAssets(projectFilter?: "personal" | number): Promise<OraAssetsResponse> {
+  const path =
+    projectFilter === undefined
+      ? "/api/ora/assets"
+      : `/api/ora/assets?projectId=${projectFilter === "personal" ? "personal" : projectFilter}`;
+  return jsonRequest<OraAssetsResponse>(path);
 }
 
 export function deleteAsset(id: string | number): Promise<unknown> {
@@ -1351,10 +1382,19 @@ export function restoreAssetVersion(
 export async function editImage(
   imageId: number,
   instruction: string,
+  oraProjectId?: number | null,
 ): Promise<{ displayUrl: string; newImageId: number }> {
   const { jobId, imageId: newImageId } = await jsonRequest<{ jobId: string; imageId: number }>(
     `/api/images/${imageId}/edit`,
-    { method: "POST", body: JSON.stringify({ instruction, quality: "standard", origin: "ora" }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        instruction,
+        quality: "standard",
+        origin: "ora",
+        ...(oraProjectId != null ? { oraProjectId } : {}),
+      }),
+    },
   );
 
   let completed = false;

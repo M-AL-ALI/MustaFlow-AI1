@@ -100,6 +100,13 @@ export interface EnqueueImageJobOpts {
    * has its own gallery backed by `generated_images`.
    */
   persistToOraLibrary?: boolean;
+  /**
+   * Ora project space the library copy should be filed under. Callers MUST
+   * pre-validate ownership/liveness (this module never re-checks). Null or
+   * omitted = the user's Personal space. Only meaningful with
+   * `persistToOraLibrary` (or billingMode "ora" for edits).
+   */
+  oraProjectId?: number | null;
 }
 
 export function getJob(jobId: string): ImageJob | undefined {
@@ -389,6 +396,12 @@ export interface EnqueueImageEditJobOpts {
   providerInstruction?: string;
   /** Image Studio edits use credits; Ora inline edits use Ora's daily image quota. */
   billingMode?: "credits" | "ora";
+  /**
+   * Ora project space the Ora-library copy should be filed under (billingMode
+   * "ora" only). Callers MUST pre-validate ownership/liveness. Null/omitted =
+   * Personal space.
+   */
+  oraProjectId?: number | null;
 }
 
 export async function enqueueImageEditJob(
@@ -569,6 +582,7 @@ async function runImageEditJob(
         const { persistOraAsset } = await import("./ora-assets");
         await persistOraAsset({
           userId,
+          oraProjectId: opts.oraProjectId ?? null,
           kind: "image",
           fileName: `ora-edit-${Date.now()}.png`,
           mimeType: "image/png",
@@ -699,6 +713,7 @@ async function runImageJob(
         const { persistOraAsset } = await import("./ora-assets");
         await persistOraAsset({
           userId,
+          oraProjectId: opts.oraProjectId ?? null,
           kind: "image",
           fileName: `ora-image-${Date.now()}.png`,
           mimeType: "image/png",

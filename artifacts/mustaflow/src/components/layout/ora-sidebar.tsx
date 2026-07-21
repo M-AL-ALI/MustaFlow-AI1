@@ -535,21 +535,30 @@ function PinnedSection({ close }: { close: () => void }) {
   );
 }
 
-/** Archived conversations sheet — lazy-loaded when the user opens it. */
+/** Archived conversations + projects sheet — lazy-loaded when the user opens it. */
 function ArchivedSection({ close }: { close: () => void }) {
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-  const { projects, restoreConversation, permanentDeleteConversation } = useOraConversations();
+  const { projects, restoreConversation, permanentDeleteConversation, restoreProject } =
+    useOraConversations();
   const [open, setOpen] = useState(false);
   const [archived, setArchived] = useState<OraConversationSummary[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<OraProjectSummary[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await authFetch(`${BASE}/api/ora/conversations?archived=true`);
-      if (res.ok) {
-        const data = (await res.json()) as { conversations: OraConversationSummary[] };
+      const [convRes, projRes] = await Promise.all([
+        authFetch(`${BASE}/api/ora/conversations?archived=true`),
+        authFetch(`${BASE}/api/ora/projects?includeArchived=true`),
+      ]);
+      if (convRes.ok) {
+        const data = (await convRes.json()) as { conversations: OraConversationSummary[] };
         setArchived(data.conversations);
+      }
+      if (projRes.ok) {
+        const data = (await projRes.json()) as { projects: OraProjectSummary[] };
+        setArchivedProjects(data.projects.filter((p) => p.archivedAt != null));
       }
     } catch {
       /* best-effort */
@@ -579,11 +588,41 @@ function ArchivedSection({ close }: { close: () => void }) {
       </button>
       {open && (
         <div className="mt-1 space-y-0.5">
+          {!loading && archivedProjects.length > 0 && (
+            <>
+              <p className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Projects
+              </p>
+              {archivedProjects.map((p) => (
+                <div
+                  key={p.id}
+                  className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                >
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">
+                    {p.name}
+                  </span>
+                  <button
+                    onClick={() => {
+                      void restoreProject(p.id).then(() => {
+                        setArchivedProjects((prev) => prev.filter((x) => x.id !== p.id));
+                      });
+                    }}
+                    aria-label={`Restore project ${p.name}`}
+                    title="Restore project"
+                    className="p-1 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
           {loading ? (
             <p className="px-2 py-1 text-[10px] text-muted-foreground">Loading…</p>
-          ) : archived.length === 0 ? (
-            <p className="px-2 py-1 text-[10px] text-muted-foreground">No archived conversations</p>
-          ) : (
+          ) : archived.length === 0 && archivedProjects.length === 0 ? (
+            <p className="px-2 py-1 text-[10px] text-muted-foreground">Nothing archived</p>
+          ) : archived.length === 0 ? null : (
             archived.map((c) => (
               <ConversationRow
                 key={c.id}
@@ -791,15 +830,15 @@ function ProjectsSection({ close }: { close: () => void }) {
                       onClick={() => {
                         if (
                           window.confirm(
-                            "Delete this project? Conversations inside this project will be moved to Recent and will not be deleted.",
+                            "Archive this project? Its chats, files, and memories stay attached and are hidden until you restore it from Archived.",
                           )
                         )
                           void deleteProject(p.id);
                       }}
-                      aria-label="Delete project"
+                      aria-label="Archive project"
                       className="p-1 text-muted-foreground hover:text-destructive"
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <Archive className="h-3 w-3" />
                     </button>
                   </div>
                 </div>

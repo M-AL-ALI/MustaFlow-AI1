@@ -11299,6 +11299,12 @@ components:
           default: standard
         projectId:
           type: integer
+        oraProjectId:
+          type: integer
+          nullable: true
+          description:
+            Ora project space the edited result is filed under in the Ora library
+            (Ora-origin edits only). Null or omitted files it under the Personal space.
 
     DeveloperModeRuntimeStatus:
       type: object

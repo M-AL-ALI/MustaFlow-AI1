@@ -4532,6 +4532,29 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-project-spaces (Ora Phase 6: project-scoped assets/uploads) ─
+  // Null ora_project_id = the user's default "Personal" space (standalone).
+  // No FK by design, matching ora_conversations.project_id.
+  {
+    name: "migrate-ora-project-spaces",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(
+        `ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS ora_project_id INTEGER`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_assets_user_project_idx ON ora_assets(user_id, ora_project_id)`,
+      );
+      await client.query(
+        `ALTER TABLE ora_file_contexts ADD COLUMN IF NOT EXISTS ora_project_id INTEGER`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_file_contexts_user_project_idx ON ora_file_contexts(user_id, ora_project_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

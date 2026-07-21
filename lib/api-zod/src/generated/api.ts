@@ -7450,7 +7450,8 @@ export const editImageBodyQualityDefault = `standard`;
 export const EditImageBody = zod.object({
   "instruction": zod.string().min(1).max(editImageBodyInstructionMax),
   "quality": zod.enum(['standard', 'high']).default(editImageBodyQualityDefault),
-  "projectId": zod.number().optional()
+  "projectId": zod.number().optional(),
+  "oraProjectId": zod.number().nullish().describe('Ora project space the edited result is filed under in the Ora library (Ora-origin edits only). Null or omitted files it under the Personal space.')
 })
 
 

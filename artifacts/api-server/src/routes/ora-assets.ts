@@ -36,7 +36,29 @@ router.get("/ora/assets", async (req, res) => {
   const rawOffset = Number(req.query.offset);
   const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
 
-  const ownership = and(eq(oraAssetsTable.userId, userId), isNull(oraAssetsTable.deletedAt));
+  // Tri-state project filter: absent = all assets (legacy behavior),
+  // "personal" = Personal space only (ora_project_id IS NULL), a numeric
+  // string = that project only. Never collapse absent → null.
+  const rawProjectId = req.query.projectId;
+  let projectFilter;
+  if (typeof rawProjectId === "string" && rawProjectId !== "") {
+    if (rawProjectId === "personal") {
+      projectFilter = isNull(oraAssetsTable.oraProjectId);
+    } else {
+      const parsedProjectId = Number(rawProjectId);
+      if (!Number.isInteger(parsedProjectId) || parsedProjectId <= 0) {
+        res.status(400).json({ error: "Invalid projectId filter" });
+        return;
+      }
+      projectFilter = eq(oraAssetsTable.oraProjectId, parsedProjectId);
+    }
+  }
+
+  const ownership = and(
+    eq(oraAssetsTable.userId, userId),
+    isNull(oraAssetsTable.deletedAt),
+    ...(projectFilter ? [projectFilter] : []),
+  );
 
   try {
     const [rows, [countRow], usedBytes] = await Promise.all([
@@ -50,6 +72,7 @@ router.get("/ora/assets", async (req, res) => {
           prompt: oraAssetsTable.prompt,
           sizeBytes: oraAssetsTable.sizeBytes,
           createdAt: oraAssetsTable.createdAt,
+          oraProjectId: oraAssetsTable.oraProjectId,
         })
         .from(oraAssetsTable)
         .where(ownership)
@@ -75,6 +98,7 @@ router.get("/ora/assets", async (req, res) => {
         prompt: r.prompt,
         sizeBytes: r.sizeBytes,
         createdAt: r.createdAt.toISOString(),
+        oraProjectId: r.oraProjectId,
       })),
       total,
       limit,

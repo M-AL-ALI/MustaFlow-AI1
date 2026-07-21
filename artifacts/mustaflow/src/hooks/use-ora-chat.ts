@@ -1125,6 +1125,19 @@ export function useOraChat(): UseOraChatReturn {
   convRef.current = conv;
   const conversationMode = conv != null;
 
+  // Resolve the Ora project this chat surface is anchored to: the open
+  // conversation's own project first, falling back to the active route
+  // project. Used to file uploads and generated files under the right
+  // project space in the Library. Reads refs only, so it is render-stable.
+  const currentOraProjectId = useCallback((): number | null => {
+    const c = convRef.current;
+    const pid =
+      c?.conversations.find((x) => x.id === c.currentConversationId)?.projectId ??
+      c?.activeProjectId ??
+      null;
+    return typeof pid === "number" ? pid : null;
+  }, []);
+
   const sessionInitRef = useRef(false);
   const transcriptRestoredRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1571,6 +1584,12 @@ export function useOraChat(): UseOraChatReturn {
 
         const formData = new FormData();
         formData.append("file", uploadBlob, uploadName);
+        // File the upload under the current project space (signed-in only —
+        // the server ignores the field for anonymous sessions).
+        const uploadProjectId = currentOraProjectId();
+        if (uploadProjectId != null) {
+          formData.append("oraProjectId", String(uploadProjectId));
+        }
 
         const res = await safeAuthFetch(`${BASE}/api/public-ai/upload`, {
           method: "POST",
@@ -2317,6 +2336,11 @@ export function useOraChat(): UseOraChatReturn {
         if (documentRefsRef.current.length > 0) {
           body.documentRefs = documentRefsRef.current;
         }
+        // File the generated document under the current project space.
+        const genProjectId = currentOraProjectId();
+        if (genProjectId != null) {
+          body.oraProjectId = genProjectId;
+        }
 
         const data = await apiPost<{
           reply: string;
@@ -2394,6 +2418,11 @@ export function useOraChat(): UseOraChatReturn {
             // Carry any earlier-uploaded files so the file is built from real data.
             if (documentRefsRef.current.length > 0) {
               retryBody.documentRefs = documentRefsRef.current;
+            }
+            // File the generated document under the current project space.
+            const retryProjectId = currentOraProjectId();
+            if (retryProjectId != null) {
+              retryBody.oraProjectId = retryProjectId;
             }
             const retryData = await apiPost<{
               reply: string;
@@ -2478,10 +2507,18 @@ export function useOraChat(): UseOraChatReturn {
       setError(null);
 
       try {
+        // File the edited image under the current project space (server
+        // validates ownership and degrades to Personal when absent).
+        const editProjectId = currentOraProjectId();
         const enqueueRes = await safeAuthFetch(`${BASE}/api/images/${sourceImageId}/edit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ instruction: trimmed, quality: "standard", origin: "ora" }),
+          body: JSON.stringify({
+            instruction: trimmed,
+            quality: "standard",
+            origin: "ora",
+            ...(editProjectId != null ? { oraProjectId: editProjectId } : {}),
+          }),
         });
         if (!enqueueRes.ok) {
           const data = (await enqueueRes.json().catch(() => ({}))) as { error?: string };

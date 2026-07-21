@@ -49,6 +49,7 @@ import {
   renameConversation,
   restoreConversation,
   restoreMemory,
+  restoreProject,
   updateMemory,
   updateProfile,
 } from "@/lib/api";
@@ -1131,6 +1132,7 @@ function HistoryTab() {
   const { setPendingConversationId } = useActiveProject();
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [projects, setProjects] = useState<OraProjectSummary[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<OraProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -1145,10 +1147,12 @@ function HistoryTab() {
         showArchived
           ? listArchivedConversations({ q, limit: 100 })
           : listConversations({ q, limit: 100 }),
-        listProjects(),
+        // The archived view also needs archived project names + restore rows.
+        listProjects(showArchived),
       ]);
       setConversations(convs);
       setProjects(projs);
+      setArchivedProjects(showArchived ? projs.filter((p) => p.archivedAt != null) : []);
     } catch {
       setConversations([]);
     } finally {
@@ -1200,6 +1204,20 @@ function HistoryTab() {
       setConversations((prev) => prev.filter((c) => c.id !== id));
       try {
         await restoreConversation(id);
+      } catch {
+        await reload();
+      }
+    },
+    [reload],
+  );
+
+  const handleRestoreProject = useCallback(
+    async (id: number) => {
+      setArchivedProjects((prev) => prev.filter((p) => p.id !== id));
+      try {
+        await restoreProject(id);
+        // Restoring a project also un-hides its chats, so refresh both lists.
+        await reload();
       } catch {
         await reload();
       }
@@ -1295,6 +1313,43 @@ function HistoryTab() {
             </Pressable>
           )}
         </View>
+
+        {showArchived && archivedProjects.length > 0 && (
+          <View style={{ gap: 8 }}>
+            <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+              Archived projects
+            </Text>
+            {archivedProjects.map((p) => (
+              <Card
+                key={p.id}
+                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+              >
+                <FolderOpen size={18} color={c.mutedForeground} />
+                <View style={{ flex: 1 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 15 }}
+                  >
+                    {p.name}
+                  </Text>
+                  <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                    Chats, files, and memories are hidden until restored.
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => void handleRestoreProject(p.id)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Restore project ${p.name}`}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+                >
+                  <RotateCcw size={15} color={c.primary} />
+                  <Text style={{ color: c.primary, fontSize: 13 }}>Restore</Text>
+                </Pressable>
+              </Card>
+            ))}
+          </View>
+        )}
 
         {filtered.length === 0 ? (
           <EmptyState

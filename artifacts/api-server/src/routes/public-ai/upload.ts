@@ -160,6 +160,35 @@ router.post(
     const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
     const authed = await resolveAuthedOraUser(req);
 
+    // ── Ora project scoping (optional multipart text field) ────────────────
+    // Signed-in uploads may target a project space. Invalid targets are
+    // rejected up-front (before any byte processing) so an upload is never
+    // silently filed into the wrong space. Anonymous sessions have no
+    // projects — the field is ignored for them. "personal" / empty = Personal.
+    let oraProjectId: number | null = null;
+    {
+      const rawProjectId = (req.body as Record<string, unknown> | undefined)?.oraProjectId;
+      if (
+        authed &&
+        typeof rawProjectId === "string" &&
+        rawProjectId.trim() !== "" &&
+        rawProjectId.trim() !== "personal"
+      ) {
+        const parsedId = Number(rawProjectId);
+        if (!Number.isInteger(parsedId) || parsedId <= 0) {
+          res.status(400).json({ error: "Invalid project id" });
+          return;
+        }
+        const { checkOraProjectWritable } = await import("../../lib/public-ai/ora-projects");
+        const check = await checkOraProjectWritable(authed.userId, parsedId);
+        if (!check.ok) {
+          res.status(check.status).json({ error: check.error });
+          return;
+        }
+        oraProjectId = parsedId;
+      }
+    }
+
     // ── Image branch ────────────────────────────────────────────────────────
     if (isImageExtension(file.originalname)) {
       // Apply the image-specific per-IP rate limit inline (the broader
@@ -241,6 +270,7 @@ router.post(
       if (authed) {
         persistOraAssetBestEffort({
           userId: authed.userId,
+          oraProjectId,
           kind: "image",
           fileName: validation.sanitizedName,
           mimeType: validation.mimeType,
@@ -347,6 +377,7 @@ router.post(
         persistUploadMirrorsBestEffort({
           asset: {
             userId: authed.userId,
+            oraProjectId,
             kind: "file",
             fileName: validation.sanitizedName,
             mimeType: file.mimetype,
@@ -357,6 +388,7 @@ router.post(
           },
           context: {
             userId: authed.userId,
+            oraProjectId,
             fileRef,
             sessionId: session.sessionId,
             filename: validation.sanitizedName,
@@ -455,6 +487,7 @@ router.post(
       persistUploadMirrorsBestEffort({
         asset: {
           userId: authed.userId,
+          oraProjectId,
           kind: "file",
           fileName: validation.sanitizedName,
           mimeType: file.mimetype,
@@ -465,6 +498,7 @@ router.post(
         },
         context: {
           userId: authed.userId,
+          oraProjectId,
           fileRef,
           sessionId: session.sessionId,
           filename: validation.sanitizedName,

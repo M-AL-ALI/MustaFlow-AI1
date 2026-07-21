@@ -1110,6 +1110,27 @@ type RescuedFileDelivery = {
   assetId?: number | null;
 };
 
+/**
+ * Resolve the Ora project id that library persists should carry for this turn.
+ * Returns the id only when it names an ACTIVE project owned by the user;
+ * anything else (absent, foreign, archived, lookup failure) degrades to null —
+ * i.e. the Personal space — so persistence never fails on a bad project id.
+ * Called lazily at persist time (never on the pre-stream path) so it cannot
+ * affect time-to-first-token.
+ */
+async function resolveAssetProjectId(
+  userId: string,
+  oraProjectId: number | null | undefined,
+): Promise<number | null> {
+  if (typeof oraProjectId !== "number") return null;
+  try {
+    const { isOwnedActiveOraProject } = await import("../../lib/public-ai/ora-projects");
+    return (await isOwnedActiveOraProject(userId, oraProjectId)) ? oraProjectId : null;
+  } catch {
+    return null;
+  }
+}
+
 async function rescueClaimedFileDelivery(params: {
   reply: string;
   message: string;
@@ -1117,6 +1138,7 @@ async function rescueClaimedFileDelivery(params: {
   history: Array<{ role: "user" | "assistant"; content: string }>;
   language: string | undefined;
   authed: AuthedOraUser | null;
+  oraProjectId: number | null | undefined;
   logComponent: string;
 }): Promise<RescuedFileDelivery | null> {
   const claimedFormat = detectClaimedFileDelivery(params.reply);
@@ -1144,6 +1166,7 @@ async function rescueClaimedFileDelivery(params: {
         const { persistOraAsset } = await import("../../lib/ora-assets");
         assetId = await persistOraAsset({
           userId: params.authed.userId,
+          oraProjectId: await resolveAssetProjectId(params.authed.userId, params.oraProjectId),
           kind: "file",
           fileName: result.fileName,
           mimeType: result.mimeType,
@@ -1598,6 +1621,9 @@ router.post("/public-ai/chat", async (req, res) => {
             : null;
           assetId = await persistOraAsset({
             userId: authed.userId,
+            // Chained versions inherit the parent's project via the lineage
+            // spread below; only a standalone v1 uses this turn's project.
+            oraProjectId: await resolveAssetProjectId(authed.userId, oraProjectId),
             kind: "file",
             fileName: result.fileName,
             mimeType: result.mimeType,
@@ -1794,6 +1820,7 @@ router.post("/public-ai/chat", async (req, res) => {
               const ext = mimeType.split("/")[1]?.split("+")[0] ?? "png";
               await persistOraAsset({
                 userId: authed.userId,
+                oraProjectId: await resolveAssetProjectId(authed.userId, oraProjectId),
                 kind: "image",
                 fileName: `ora-image-${Date.now()}.${ext}`,
                 mimeType,
@@ -2331,6 +2358,7 @@ router.post("/public-ai/chat", async (req, res) => {
     history: historyMessages,
     language,
     authed,
+    oraProjectId,
     logComponent: "ora-chat",
   });
   if (rescuedDelivery) {
@@ -3199,6 +3227,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     history: historyMessages,
     language,
     authed,
+    oraProjectId,
     logComponent: "ora-chat-stream",
   });
   if (rescuedDelivery) {

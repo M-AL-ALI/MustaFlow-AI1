@@ -32,6 +32,10 @@ const bodySchema = z.object({
   // re-hydrate their real content so creation extracts/transforms actual data
   // instead of fabricating it.
   documentRefs: z.array(z.string().uuid()).max(5).default([]),
+  // Ora project space the generated file should be filed under in the library.
+  // Signed-in only; must name an active project owned by the caller. Null or
+  // omitted = the user's Personal space.
+  oraProjectId: z.number().int().positive().nullable().optional(),
 });
 
 router.post("/public-ai/generate-file", async (req, res) => {
@@ -41,7 +45,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  const { message, messages, format, language, documentRefs } = parsed.data;
+  const { message, messages, format, language, documentRefs, oraProjectId } = parsed.data;
 
   if (isKillSwitchActive("file_generation")) {
     res.status(503).json(killSwitchBody("file_generation"));
@@ -103,6 +107,20 @@ router.post("/public-ai/generate-file", async (req, res) => {
   if (!scanUserInput(message)) {
     res.status(400).json({ error: "Message contains patterns that cannot be processed." });
     return;
+  }
+
+  // Validate the requested Ora project space BEFORE consuming quota so a stale
+  // or foreign project selection is rejected without charging the user. Only
+  // meaningful for signed-in users; anonymous sessions have no projects.
+  let libraryProjectId: number | null = null;
+  if (authed && typeof oraProjectId === "number") {
+    const { checkOraProjectWritable } = await import("../../lib/public-ai/ora-projects");
+    const check = await checkOraProjectWritable(authed.userId, oraProjectId);
+    if (!check.ok) {
+      res.status(check.status).json({ error: check.error });
+      return;
+    }
+    libraryProjectId = oraProjectId;
   }
 
   // File generation draws on the rolling-window MESSAGE bucket. consumeOraQuota is atomic;
@@ -215,6 +233,9 @@ router.post("/public-ai/generate-file", async (req, res) => {
           : null;
         assetId = await persistOraAsset({
           userId: authed.userId,
+          // Chained versions inherit the parent's project via the lineage
+          // spread below; only a standalone v1 uses this request's project.
+          oraProjectId: libraryProjectId,
           kind: "file",
           fileName: result.fileName,
           mimeType: result.mimeType,

@@ -88,10 +88,17 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
   offset: z.coerce.number().int().min(0).default(0),
   archived: z.enum(["true", "false"]).optional(),
+  // Tri-state project filter: absent = all conversations (legacy behavior),
+  // "personal" = Personal space only (projectId IS NULL), a numeric string =
+  // that project only. Never collapse absent → null.
+  projectId: z
+    .union([z.literal("personal"), z.coerce.number().int().positive()])
+    .optional(),
 });
 
 // List the signed-in user's conversations (lightweight — no message bodies).
-// Query params: ?q= (search title + content), ?limit=, ?offset=, ?archived=true
+// Query params: ?q= (search title + content), ?limit=, ?offset=, ?archived=true,
+// ?projectId=<id|personal>
 router.get("/ora/conversations", async (req, res) => {
   const userId = req.userId!;
   const parsed = listQuerySchema.safeParse(req.query);
@@ -100,16 +107,24 @@ router.get("/ora/conversations", async (req, res) => {
     return;
   }
 
-  const { q, limit, offset, archived } = parsed.data;
+  const { q, limit, offset, archived, projectId } = parsed.data;
   const showArchived = archived === "true";
 
   try {
+    const projectCondition =
+      projectId === undefined
+        ? undefined
+        : projectId === "personal"
+          ? isNull(oraConversationsTable.projectId)
+          : eq(oraConversationsTable.projectId, projectId);
+
     const baseConditions = and(
       eq(oraConversationsTable.userId, userId),
       eq(oraConversationsTable.surface, "normal"),
       showArchived
         ? isNotNull(oraConversationsTable.archivedAt)
         : isNull(oraConversationsTable.archivedAt),
+      ...(projectCondition ? [projectCondition] : []),
     );
 
     const searchCondition = q
@@ -558,9 +573,11 @@ router.patch("/ora/settings", async (req, res) => {
 
 /* ─── Projects ────────────────────────────────────────────────────────────── */
 
-// List the user's projects.
+// List the user's projects. ?includeArchived=true also returns archived
+// projects (with archivedAt set) so clients can offer restore.
 router.get("/ora/projects", async (req, res) => {
   const userId = req.userId!;
+  const includeArchived = req.query.includeArchived === "true";
   try {
     const rows = await db
       .select({
@@ -569,9 +586,14 @@ router.get("/ora/projects", async (req, res) => {
         description: oraProjectsTable.description,
         createdAt: oraProjectsTable.createdAt,
         updatedAt: oraProjectsTable.updatedAt,
+        archivedAt: oraProjectsTable.archivedAt,
       })
       .from(oraProjectsTable)
-      .where(and(eq(oraProjectsTable.userId, userId), isNull(oraProjectsTable.archivedAt)))
+      .where(
+        includeArchived
+          ? eq(oraProjectsTable.userId, userId)
+          : and(eq(oraProjectsTable.userId, userId), isNull(oraProjectsTable.archivedAt)),
+      )
       .orderBy(desc(oraProjectsTable.updatedAt));
     res.json({ projects: rows });
   } catch (err) {
@@ -645,7 +667,10 @@ router.patch("/ora/projects/:id", async (req, res) => {
   }
 });
 
-// Soft-delete a project. Its conversations are detached (kept as standalone).
+// Archive a project (soft, restorable). Conversations, assets, uploads, and
+// memories KEEP their project id — they are hidden while the project is
+// archived and come back intact on restore. Memories are archived alongside
+// so they never inject anywhere while the project is archived.
 router.delete("/ora/projects/:id", async (req, res) => {
   const userId = req.userId!;
   const id = Number(req.params.id);
@@ -654,18 +679,23 @@ router.delete("/ora/projects/:id", async (req, res) => {
     return;
   }
   try {
-    await db
+    const [row] = await db
       .update(oraProjectsTable)
       .set({ archivedAt: new Date() })
-      .where(and(eq(oraProjectsTable.id, id), eq(oraProjectsTable.userId, userId)));
-    // Detach conversations so they remain accessible as standalone chats.
-    await db
-      .update(oraConversationsTable)
-      .set({ projectId: null })
       .where(
-        and(eq(oraConversationsTable.projectId, id), eq(oraConversationsTable.userId, userId)),
-      );
-    // Remove this project's persistent memories
+        and(
+          eq(oraProjectsTable.id, id),
+          eq(oraProjectsTable.userId, userId),
+          isNull(oraProjectsTable.archivedAt),
+        ),
+      )
+      .returning({ id: oraProjectsTable.id });
+    if (!row) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    // Archive this project's memories so they stop injecting while archived.
+    // Restore un-archives exactly the ones archived at/after this moment.
     await db
       .update(knowledgeEntriesTable)
       .set({ archivedAt: new Date() })
@@ -681,6 +711,58 @@ router.delete("/ora/projects/:id", async (req, res) => {
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to delete project");
     res.status(500).json({ error: "Failed to delete project" });
+  }
+});
+
+// Restore an archived project: clears archivedAt on the project and
+// un-archives the project memories that were archived when it was archived.
+router.post("/ora/projects/:id/restore", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+  try {
+    const [existing] = await db
+      .select({ id: oraProjectsTable.id, archivedAt: oraProjectsTable.archivedAt })
+      .from(oraProjectsTable)
+      .where(and(eq(oraProjectsTable.id, id), eq(oraProjectsTable.userId, userId)))
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (existing.archivedAt == null) {
+      res.status(400).json({ error: "Project is not archived" });
+      return;
+    }
+
+    const [row] = await db
+      .update(oraProjectsTable)
+      .set({ archivedAt: null, updatedAt: new Date() })
+      .where(and(eq(oraProjectsTable.id, id), eq(oraProjectsTable.userId, userId)))
+      .returning();
+
+    // Un-archive only the memories archived at/after the project was archived,
+    // so memories the user individually archived earlier stay archived.
+    await db
+      .update(knowledgeEntriesTable)
+      .set({ archivedAt: null })
+      .where(
+        and(
+          eq(knowledgeEntriesTable.userId, userId),
+          eq(knowledgeEntriesTable.origin, "ora"),
+          eq(knowledgeEntriesTable.oraProjectId, id),
+          isNotNull(knowledgeEntriesTable.archivedAt),
+          sql`${knowledgeEntriesTable.archivedAt} >= ${existing.archivedAt}`,
+        ),
+      );
+
+    res.json({ project: row });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to restore project");
+    res.status(500).json({ error: "Failed to restore project" });
   }
 });
 

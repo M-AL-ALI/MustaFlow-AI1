@@ -32,6 +32,8 @@ const REHYDRATE_TTL_MS = 2 * 60 * 60 * 1000;
 
 export interface PersistFileContextInput {
   userId: string;
+  /** Ora project this upload belongs to. Null/omitted = Personal space. */
+  oraProjectId?: number | null;
   fileRef: string;
   sessionId: string;
   assetId?: number | null;
@@ -55,6 +57,7 @@ export function persistFileContextBestEffort(input: PersistFileContextInput): vo
         .insert(oraFileContextsTable)
         .values({
           userId: input.userId,
+          oraProjectId: input.oraProjectId ?? null,
           fileRef: input.fileRef,
           sessionId: input.sessionId,
           assetId: input.assetId ?? null,
@@ -68,6 +71,9 @@ export function persistFileContextBestEffort(input: PersistFileContextInput): vo
         .onConflictDoUpdate({
           target: [oraFileContextsTable.userId, oraFileContextsTable.fileRef],
           set: {
+            // NOTE: oraProjectId is intentionally NOT updated on conflict — the
+            // upload keeps the project it was originally attached to. Re-sent
+            // documentRefs on later turns must never silently re-scope a file.
             sessionId: input.sessionId,
             assetId: input.assetId ?? null,
             filename: input.filename,

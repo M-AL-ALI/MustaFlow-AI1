@@ -449,6 +449,18 @@ export function OraConversationsProvider({
     [refresh],
   );
 
+  const restoreProject = useCallback(
+    async (id: number) => {
+      try {
+        await authFetch(`${BASE}/api/ora/projects/${id}/restore`, { method: "POST" });
+        await refresh();
+      } catch {
+        /* best-effort */
+      }
+    },
+    [refresh],
+  );
+
   const activeProject = useMemo(
     () =>
       activeProjectId == null ? null : (projects.find((p) => p.id === activeProjectId) ?? null),
@@ -476,6 +488,7 @@ export function OraConversationsProvider({
     createProject,
     renameProject,
     deleteProject,
+    restoreProject,
   };
 
   return (

@@ -22,6 +22,9 @@ export const oraFileContextsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
+    // Ora project this upload belongs to (ora_projects.id). Null = the user's
+    // default "Personal" space. No FK, matching ora_conversations.projectId.
+    oraProjectId: integer("ora_project_id"),
     // The opaque UUID returned by the in-memory storeFile() at upload time. The
     // client re-sends this ref on follow-up turns; we resolve memory first, then
     // fall back to this table by (user_id, file_ref).
@@ -46,6 +49,7 @@ export const oraFileContextsTable = pgTable(
   (t) => [
     uniqueIndex("ora_file_contexts_user_ref_unique").on(t.userId, t.fileRef),
     index("ora_file_contexts_user_id_idx").on(t.userId),
+    index("ora_file_contexts_user_project_idx").on(t.userId, t.oraProjectId),
   ],
 );
 

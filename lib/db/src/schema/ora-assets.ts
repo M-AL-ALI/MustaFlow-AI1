@@ -23,6 +23,11 @@ export const oraAssetsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
+    // Ora project this asset belongs to (ora_projects.id). Null = the user's
+    // default "Personal" space (standalone chats / no project selected). No FK
+    // by design, matching ora_conversations.projectId — archiving a project
+    // never cascades into asset rows.
+    oraProjectId: integer("ora_project_id"),
     kind: text("kind").notNull(),
     fileName: text("file_name").notNull(),
     mimeType: text("mime_type").notNull(),
@@ -57,6 +62,7 @@ export const oraAssetsTable = pgTable(
   (t) => [
     index("ora_assets_user_id_idx").on(t.userId),
     index("ora_assets_root_asset_id_idx").on(t.rootAssetId),
+    index("ora_assets_user_project_idx").on(t.userId, t.oraProjectId),
   ],
 );
 

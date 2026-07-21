@@ -1,0 +1,106 @@
+Proceed to Phase 6: Project Spaces.
+
+Do not publish. Do not submit TestFlight.
+
+Goal:
+Ora should support project-based organization so users can keep chats, files, memory, images, revisions, and style preferences separated by project.
+
+Requirements:
+
+1. Audit existing data model:
+- conversations
+- ora assets
+- file uploads
+- file revisions
+- memories
+- history
+- user settings
+- mobile and website state
+
+2. Backend project model:
+Create default personal Ora project for each user.
+Support:
+- create project
+- list projects
+- rename project
+- archive project
+- restore project if needed
+- select current project
+- project-scoped assets
+- project-scoped conversations
+- project-scoped memories
+- project-scoped file revisions
+- project-scoped generated images/files
+
+3. Project context flow:
+projectId must flow through:
+- chat
+- chat/stream
+- upload
+- file generation
+- file editing
+- asset library
+- conversation history
+- memory
+- image generation/editing if applicable
+
+If no project is selected:
+- use default personal Ora project.
+
+4. Isolation:
+No cross-user leakage.
+No cross-project leakage.
+A file uploaded in Project A should not appear in Project B unless explicitly copied.
+A memory saved in Project A should not affect Project B unless marked global.
+
+5. Website UI:
+- Project selector in Ora header/sidebar.
+- Current project visible.
+- Create project.
+- Rename/archive project.
+- Conversations filtered by project.
+- Assets filtered by project.
+- File/version history filtered by project.
+- Memory filtered by project.
+
+6. Mobile UI:
+- Same project selector in compact form.
+- Current project visible.
+- Create/switch/rename/archive project.
+- Preserve Back to Ora navigation.
+- No modal/back traps.
+
+7. Tests:
+- project creation/list/rename/archive
+- default project creation
+- project-scoped conversations
+- project-scoped assets
+- project-scoped memories
+- project-scoped revisions
+- no cross-project leakage
+- website project selector wiring
+- mobile project selector wiring
+- projectId persists through chat/upload/file edit
+- project context survives retry/session recovery
+
+8. Update ORA_FEATURE_REGISTRY with project-spaces.
+
+9. Run fast gate.
+
+10. Commit as scoped Phase 6 commit.
+
+11. Push to GitHub.
+
+12. Run fast gate again on clean tree.
+
+13. Report:
+- commit SHA
+- changed files
+- backend impact
+- website impact
+- mobile impact
+- tests added
+- fast gate result
+- known limitations
+
+No publish/TestFlight until all selected phases are complete and the full release gate passes.

@@ -10,9 +10,12 @@ import { SignInWall } from "@/components/SignInWall";
 import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";
 import { Card, EmptyState, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { API_BASE, deleteAsset, getAssets } from "@/lib/api";
+import { API_BASE, deleteAsset, getAssets, listProjects } from "@/lib/api";
 import { saveAsset } from "@/lib/files";
-import type { OraAsset } from "@/lib/types";
+import type { OraAsset, OraProjectSummary } from "@/lib/types";
+
+/** Tri-state Library scope: everything, unfiled ("Personal"), or one project. */
+type LibraryProjectFilter = "all" | "personal" | number;
 
 function formatBytes(bytes: number): string {
   if (!bytes) return "0 B";
@@ -29,10 +32,12 @@ export default function LibraryScreen() {
   const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [historyAssetId, setHistoryAssetId] = useState<number | null>(null);
+  const [projects, setProjects] = useState<OraProjectSummary[]>([]);
+  const [projectFilter, setProjectFilter] = useState<LibraryProjectFilter>("all");
 
   const reload = useCallback(async () => {
     try {
-      const res = await getAssets();
+      const res = await getAssets(projectFilter === "all" ? undefined : projectFilter);
       setAssets(res.assets ?? []);
       setStorage(res.storage ?? null);
     } catch {
@@ -40,12 +45,20 @@ export default function LibraryScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectFilter]);
 
   useEffect(() => {
     if (!isSignedIn) return;
     void reload();
   }, [reload, isSignedIn]);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    // Project chips are best-effort; the Library still works without them.
+    listProjects()
+      .then(setProjects)
+      .catch(() => setProjects([]));
+  }, [isSignedIn]);
 
   if (!isSignedIn) {
     return (
@@ -98,11 +111,62 @@ export default function LibraryScreen() {
             </Card>
           )}
 
+          {projects.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ flexDirection: "row", gap: 8 }}
+            >
+              {(
+                [
+                  { key: "all" as const, label: "All" },
+                  { key: "personal" as const, label: "Personal" },
+                  ...projects.map((p) => ({ key: p.id, label: p.name })),
+                ] as Array<{ key: LibraryProjectFilter; label: string }>
+              ).map((chip) => {
+                const selected = projectFilter === chip.key;
+                return (
+                  <Pressable
+                    key={String(chip.key)}
+                    onPress={() => setProjectFilter(chip.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Filter library: ${chip.label}`}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 999,
+                      backgroundColor: selected ? c.primary : c.muted,
+                    }}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        color: selected ? c.primaryForeground : c.foreground,
+                        fontSize: 13,
+                        fontFamily: "Inter_500Medium",
+                        maxWidth: 160,
+                      }}
+                    >
+                      {chip.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+
           {assets.length === 0 ? (
             <EmptyState
               icon={FolderOpen}
-              title="Your library is empty"
-              subtitle="Generated documents and images from your Ora chats will appear here."
+              title={projectFilter === "all" ? "Your library is empty" : "Nothing here yet"}
+              subtitle={
+                projectFilter === "all"
+                  ? "Generated documents and images from your Ora chats will appear here."
+                  : projectFilter === "personal"
+                    ? "Files and images not filed under a project will appear here."
+                    : "Files and images created in this project will appear here."
+              }
             />
           ) : (
             assets.map((a) => (

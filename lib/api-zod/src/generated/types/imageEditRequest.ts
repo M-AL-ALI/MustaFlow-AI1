@@ -15,4 +15,6 @@ export interface ImageEditRequest {
   instruction: string;
   quality?: ImageEditRequestQuality;
   projectId?: number;
+  /** Ora project space the edited result is filed under in the Ora library (Ora-origin edits only). Null or omitted files it under the Personal space. */
+  oraProjectId?: number | null;
 }

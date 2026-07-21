@@ -19,6 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
   AlertCircle,
+  Archive,
   ArrowUp,
   Brain,
   Camera,
@@ -1498,6 +1499,7 @@ export default function OraChatScreen() {
           format,
           language: language !== "auto" ? language : undefined,
           documentRefs: documentRefsRef.current,
+          oraProjectId: activeProjectIdRef.current,
         });
         const assistant: OraMessage = {
           id: pendingId,
@@ -1785,7 +1787,7 @@ export default function OraChatScreen() {
     setMessages((prev) => [...prev, userMsg, loadingMsg]);
 
     try {
-      const { displayUrl, newImageId } = await editImage(id, instr);
+      const { displayUrl, newImageId } = await editImage(id, instr, activeProjectIdRef.current);
       setMessages((prev) => [
         ...prev.slice(0, -1),
         {
@@ -2008,7 +2010,10 @@ export default function OraChatScreen() {
           );
           return;
         }
-        const res = await uploadFile({ uri: file.uri, name: file.name, type: file.type });
+        const res = await uploadFile(
+          { uri: file.uri, name: file.name, type: file.type },
+          activeProjectIdRef.current,
+        );
         const ref = res.imageRef ?? res.fileRef;
         if (!ref) throw new Error("Upload failed");
         const kind = attachmentKind(res.fileType, isImage || res.kind === "image");
@@ -2601,17 +2606,17 @@ export default function OraChatScreen() {
     [editingProject, refreshChatLists, startChatInScope],
   );
 
-  // Delete a project. The server detaches its conversations (they become
-  // standalone), so we only reset local scope and refresh the lists.
+  // Archive a project. The server hides it (and its chats, files, and
+  // memories) until it is restored, so we only reset local scope and refresh.
   const handleDeleteProject = useCallback(
     (project: OraProjectSummary) => {
       Alert.alert(
-        "Delete project?",
-        `"${project.name}" will be removed. Its chats are kept and moved to Recent.`,
+        "Archive project?",
+        `"${project.name}" and its chats, files, and memories stay attached and are hidden until you restore it.`,
         [
           { text: "Cancel", style: "cancel" },
           {
-            text: "Delete",
+            text: "Archive",
             style: "destructive",
             onPress: () => {
               void (async () => {
@@ -2620,7 +2625,7 @@ export default function OraChatScreen() {
                   if (activeProjectIdRef.current === project.id) setActiveProjectId(null);
                   await refreshChatLists();
                 } catch {
-                  Alert.alert("Couldn't delete project", "Please try again.");
+                  Alert.alert("Couldn't archive project", "Please try again.");
                 }
               })();
             },
@@ -5091,9 +5096,9 @@ function ChatsDrawer({
                           onPress={() => onDeleteProject(p)}
                           hitSlop={6}
                           accessibilityRole="button"
-                          accessibilityLabel={`Delete ${p.name}`}
+                          accessibilityLabel={`Archive ${p.name}`}
                         >
-                          <Trash2 size={15} color={c.mutedForeground} />
+                          <Archive size={15} color={c.mutedForeground} />
                         </Pressable>
                       </View>
                       {isOpen &&

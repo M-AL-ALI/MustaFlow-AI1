@@ -495,6 +495,12 @@ const ImageEditBody = z.object({
   quality: z.enum(["standard", "high"]).default("standard"),
   projectId: z.number().int().optional(),
   origin: z.enum(["image_studio", "ora"]).optional(),
+  /**
+   * Ora project space the edited result should be filed under in the Ora
+   * library. Only honored on Ora-origin edits and only when the caller owns
+   * the (non-archived) project; anything else degrades to the Personal space.
+   */
+  oraProjectId: z.number().int().positive().nullable().optional(),
 });
 
 router.post("/images/:id/edit", async (req, res): Promise<void> => {
@@ -523,8 +529,19 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
     return;
   }
 
-  const { instruction, quality, projectId, origin } = parsed.data;
+  const { instruction, quality, projectId, origin, oraProjectId } = parsed.data;
   const isOraEdit = origin === "ora";
+
+  // Resolve the Ora project the edited result should be filed under. Invalid,
+  // foreign, or archived projects silently degrade to Personal (null) — the
+  // edit itself must never fail because of a stale project selection.
+  let oraLibraryProjectId: number | null = null;
+  if (isOraEdit && typeof oraProjectId === "number") {
+    const { isOwnedActiveOraProject } = await import("../lib/public-ai/ora-projects");
+    oraLibraryProjectId = (await isOwnedActiveOraProject(userId, oraProjectId))
+      ? oraProjectId
+      : null;
+  }
 
   // Fetch parent image and verify ownership
   const [parent] = await db
@@ -609,6 +626,7 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       projectId,
       subscriptionTier: isOraEdit ? oraTier : undefined,
       billingMode: isOraEdit ? "ora" : "credits",
+      oraProjectId: oraLibraryProjectId,
     });
 
     res.status(202).json({

@@ -118,9 +118,17 @@ interface OraAssetsResponse {
   storage: { usedBytes: number; capBytes: number };
 }
 
+/**
+ * Which project space the Library shows:
+ *   "all"      → everything (no filter)
+ *   "personal" → only assets not filed under any project
+ *   number     → only that project's assets
+ */
+type LibraryProjectFilter = "all" | "personal" | number;
+
 function OraLibraryInner() {
   const { toast } = useToast();
-  const { newConversation } = useOraConversations();
+  const { newConversation, projects } = useOraConversations();
   const [, navigate] = useLocation();
   const [assets, setAssets] = useState<OraAsset[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,13 +137,20 @@ function OraLibraryInner() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
   const [historyAssetId, setHistoryAssetId] = useState<number | null>(null);
+  const [projectFilter, setProjectFilter] = useState<LibraryProjectFilter>("all");
   const downloadingRef = useRef<Set<number>>(new Set());
 
-  const fetchPage = useCallback(async (offset: number): Promise<OraAssetsResponse> => {
-    const res = await authFetch(`${BASE}/api/ora/assets?limit=${PAGE_SIZE}&offset=${offset}`);
-    if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as OraAssetsResponse;
-  }, []);
+  const fetchPage = useCallback(
+    async (offset: number): Promise<OraAssetsResponse> => {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+      if (projectFilter === "personal") params.set("projectId", "personal");
+      else if (typeof projectFilter === "number") params.set("projectId", String(projectFilter));
+      const res = await authFetch(`${BASE}/api/ora/assets?${params.toString()}`);
+      if (!res.ok) throw new Error(String(res.status));
+      return (await res.json()) as OraAssetsResponse;
+    },
+    [projectFilter],
+  );
 
   const load = useCallback(async () => {
     setError(null);
@@ -278,6 +293,32 @@ function OraLibraryInner() {
             )}
           </div>
 
+          {/* Project-space filter: All / Personal / one chip per project. */}
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by project">
+            {(
+              [
+                { key: "all" as const, label: "All" },
+                { key: "personal" as const, label: "Personal" },
+                ...projects.map((p) => ({ key: p.id, label: p.name })),
+              ] satisfies { key: LibraryProjectFilter; label: string }[]
+            ).map(({ key, label }) => (
+              <button
+                key={String(key)}
+                type="button"
+                onClick={() => setProjectFilter(key)}
+                aria-pressed={projectFilter === key}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  projectFilter === key
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {assets === null && (
             <div className="flex items-center justify-center py-24 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -295,10 +336,13 @@ function OraLibraryInner() {
               <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50">
                 <LibraryIcon className="h-7 w-7 text-muted-foreground/60" />
               </span>
-              <h2 className="mt-4 text-lg font-semibold">Your library is empty</h2>
+              <h2 className="mt-4 text-lg font-semibold">
+                {projectFilter === "all" ? "Your library is empty" : "No files in this space yet"}
+              </h2>
               <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                Ask Ora to create a spreadsheet, document, or image and it will be saved here
-                automatically.
+                {projectFilter === "all"
+                  ? "Ask Ora to create a spreadsheet, document, or image and it will be saved here automatically."
+                  : "Files and images created while chatting in this space will show up here."}
               </p>
               <Link
                 href="/ora"

@@ -104,6 +104,7 @@
     "migrate-vault-phase81": "tsx ./src/migrate-vault-phase81.ts",
     "migrate-vault-embeddings": "tsx ./src/migrate-vault-embeddings.ts",
     "migrate-ora-memory-center": "tsx ./src/migrate-ora-memory-center.ts",
+    "migrate-ora-project-spaces": "tsx ./src/migrate-ora-project-spaces.ts",
     "migrate-knowledge-origin": "tsx ./src/migrate-knowledge-origin.ts",
     "migrate-recover-ora-memories": "tsx ./src/migrate-recover-ora-memories.ts",
     "migrate-ora-project-memory": "tsx ./src/migrate-ora-project-memory.ts",

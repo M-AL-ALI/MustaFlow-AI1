@@ -32,6 +32,8 @@ export interface OraProjectSummary {
   description?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Set when the project is archived; only present on includeArchived fetches. */
+  archivedAt?: string | null;
 }
 
 export interface OraConversationsContextValue {
@@ -72,7 +74,14 @@ export interface OraConversationsContextValue {
   pinConversation: (id: number, pinned: boolean) => Promise<void>;
   createProject: (name: string) => Promise<OraProjectSummary | null>;
   renameProject: (id: number, name: string) => Promise<void>;
+  /**
+   * Archive a project (soft, restorable). Its conversations, files, and
+   * memories keep their project id and are hidden until the project is
+   * restored.
+   */
   deleteProject: (id: number) => Promise<void>;
+  /** Restore an archived project, bringing its chats/files/memories back. */
+  restoreProject: (id: number) => Promise<void>;
 }
 
 export const OraConversationsContext = createContext<OraConversationsContextValue | null>(null);

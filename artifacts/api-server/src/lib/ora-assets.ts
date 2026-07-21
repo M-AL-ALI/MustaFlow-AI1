@@ -89,6 +89,13 @@ export async function getOraAssetBytes(assetId: number, userId: string): Promise
 
 export interface PersistOraAssetInput {
   userId: string;
+  /**
+   * Ora project this asset belongs to. Null/omitted = the user's Personal
+   * space. Revisions of an existing chain should inherit the parent's project
+   * (see getNextVersionLineage) so a version chain never splits across
+   * projects.
+   */
+  oraProjectId?: number | null;
   kind: OraAssetKind;
   fileName: string;
   mimeType: string;
@@ -122,7 +129,13 @@ export interface PersistOraAssetInput {
 export async function getNextVersionLineage(
   userId: string,
   fileRef: string,
-): Promise<{ parentAssetId: number; rootAssetId: number; versionNumber: number } | null> {
+): Promise<{
+  parentAssetId: number;
+  rootAssetId: number;
+  versionNumber: number;
+  /** Parent's project — new versions must inherit this so chains never split. */
+  oraProjectId: number | null;
+} | null> {
   try {
     const [ctx] = await db
       .select({ assetId: oraFileContextsTable.assetId })
@@ -141,6 +154,7 @@ export async function getNextVersionLineage(
         id: oraAssetsTable.id,
         rootAssetId: oraAssetsTable.rootAssetId,
         versionNumber: oraAssetsTable.versionNumber,
+        oraProjectId: oraAssetsTable.oraProjectId,
       })
       .from(oraAssetsTable)
       .where(
@@ -156,6 +170,7 @@ export async function getNextVersionLineage(
       parentAssetId: head.id,
       rootAssetId: head.rootAssetId ?? head.id,
       versionNumber: (head.versionNumber ?? 1) + 1,
+      oraProjectId: head.oraProjectId ?? null,
     };
   } catch (err) {
     logger.warn(
@@ -247,6 +262,7 @@ export async function persistOraAsset(input: PersistOraAssetInput): Promise<numb
       .insert(oraAssetsTable)
       .values({
         userId: input.userId,
+        oraProjectId: input.oraProjectId ?? null,
         kind: input.kind,
         fileName: input.fileName,
         mimeType: input.mimeType,

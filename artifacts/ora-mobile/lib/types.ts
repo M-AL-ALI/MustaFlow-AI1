@@ -559,6 +559,8 @@ export interface OraProjectSummary {
   description: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Set when the project is archived; only present on includeArchived fetches. */
+  archivedAt?: string | null;
 }
 
 export interface OraAsset {

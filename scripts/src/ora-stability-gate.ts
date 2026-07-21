@@ -243,6 +243,23 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Repeat on TestFlight: the file card shows the History icon button only for signed-in generated files; the bottom sheet lists versions newest-first with the Current badge; Download an older version via the share sheet; Restore moves the badge, and Save/View on the card now fetch the restored bytes (stale inline bytes are dropped). Library file cards expose the same History sheet and the list refreshes after a restore. Sheet is pure JS — ships with the next build, no native rebuild required.",
   },
   {
+    id: "project-spaces",
+    title: "Ora Project Spaces: project-scoped chats, memories, assets, archive/restore",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /ora-project/i,
+      /oraProjectId/i,
+      /ora_project/i,
+      /library/i,
+      /archived/i,
+      /restore/i,
+    ],
+    manualWebsite:
+      "Create a project, chat inside it, verify generated files/uploads/image edits file under the project in Library, filter Library by project/Personal, archive a project (memories stop injecting), restore it from Memory Center, and confirm Personal chats stay unfiled.",
+    manualMobile:
+      "Verify project picker parity: generated files/uploads/image edits carry the active project, Library filter chips (All/Personal/project), archive copy says Archive, and archived projects can be restored from the History archived view.",
+  },
+  {
     id: "conversation-history",
     title: "Conversation history, pin/archive/search, badges, and last-active sync",
     ownerSurfaces: ["api", "website", "mobile"],
