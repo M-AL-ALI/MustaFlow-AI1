@@ -19,9 +19,6 @@ import {
   isPastedReferenceAnalysisRequest,
   summarizePastedReferenceSignals,
   detectClaimedFileDelivery,
-  detectFileRequest,
-  inferFileFormatFromUploadedContext,
-  isUploadedFileModificationRequest,
 } from "../../lib/public-ai/prompt";
 
 import { classifyIntent, CLASSIFIER_FALLBACK, type OraTopic } from "../../lib/public-ai/classifier";
@@ -29,8 +26,8 @@ import {
   routeOraMessage,
   checkToolAccess,
   extractMemorySaveCandidate,
-  isImageGenerationRequest,
 } from "../../lib/public-ai/orchestrator";
+import { resolveFinalOraRoute } from "../../lib/public-ai/route-resolution";
 import type { AuthedOraUser } from "../../lib/public-ai/authed-user";
 import type { Provider } from "../../lib/ai-provider-config";
 import type { OraVideo } from "../../lib/public-ai/web-search";
@@ -1321,16 +1318,6 @@ router.post("/public-ai/chat", async (req, res) => {
     recentMessages: messages.slice(-8),
     classifier: classifierResult, // pre-computed above — skips the internal AI call
   });
-  // A user-initiated "Retry live search" (forceSearch) pins this turn to the
-  // live web-search tool instead of re-classifying the message, so a retry always
-  // attempts a fresh LIVE search rather than possibly falling back to a plain
-  // conversational answer. Placed BEFORE the tool-access/quota/spend checks below
-  // so all auth and metering gating stays intact (anonymous callers still hit the
-  // sign-in CTA, quota is still consumed and refunded normally).
-  if (forceSearch) {
-    decision = { ...decision, tool: "search" };
-  }
-
   // Re-hydrate any documents the user uploaded earlier this conversation so
   // follow-up questions ("what did that file say?") and "make a summary of it"
   // both have the source text. Empty when nothing resolves (expired/foreign).
@@ -1341,27 +1328,28 @@ router.post("/public-ai/chat", async (req, res) => {
     authed?.userId ?? null,
   );
 
-  if (
-    decision.tool !== "search" &&
-    carriedDocs &&
-    isUploadedFileModificationRequest(message) &&
-    !isImageGenerationRequest(message)
-  ) {
-    const inferredFormat =
-      detectFileRequest(message) ?? inferFileFormatFromUploadedContext(carriedDocs);
-    if (inferredFormat) {
-      decision = {
-        ...decision,
-        tool: "file_generation",
-        fileFormat: inferredFormat,
-        reason: `${decision.reason}; uploaded file modification routed to ${inferredFormat}`,
-      };
-    }
-  }
+  // Deterministic final routing precedence — forceSearch pin (a user-initiated
+  // "Retry live search" is terminal and keeps all auth/metering gating below),
+  // uploaded-file-edit priority over chat/incidental image/incidental search,
+  // and the ZIP/code-archive analysis guard. Shared with /chat/stream via
+  // resolveFinalOraRoute so the two handlers cannot drift.
+  const finalRoute = resolveFinalOraRoute({ decision, message, carriedDocs, forceSearch });
+  decision = finalRoute.decision;
 
   const deepAllowed = decision.tool === "deep_thinking";
   const routedTool = decision.tool;
   const searchUsed = decision.tool === "search";
+  // Routing diagnostics attached to every successful /chat reply (privacy-safe:
+  // static reason templates and enum values only — no user content).
+  const routeDiag = {
+    routedTool,
+    routeReason: decision.reason,
+    classifierSkipped,
+    classifierMs,
+    searchUsed,
+    inferredFileFormat: finalRoute.inferredFileFormat,
+    conflictResolution: finalRoute.conflictResolution,
+  };
 
   // Plan gating is derived entirely from the selected tool's required access
   // level. Denied requests return a CTA without charging or counting them.
@@ -1551,6 +1539,7 @@ router.post("/public-ai/chat", async (req, res) => {
         ...(assetId != null ? { assetId } : {}),
         ...(result.editQuality ? { editQuality: result.editQuality } : {}),
         ...usage,
+        serverDiag: routeDiag,
       });
     } catch (err) {
       await refundOraQuotaFor(authed, quotaKind);
@@ -1678,6 +1667,7 @@ router.post("/public-ai/chat", async (req, res) => {
           quality: imageProfile.quality,
         },
         ...usage,
+        serverDiag: routeDiag,
       });
       // Persist to the durable asset library (best-effort, after the response so
       // the remote-URL fetch never adds latency) so the image survives chat
@@ -1801,6 +1791,7 @@ router.post("/public-ai/chat", async (req, res) => {
         videos: result.videos,
         ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
         ...usage,
+        serverDiag: routeDiag,
       });
     } catch (err) {
       // Graceful degradation (Deep-mode QA blocker): a live web-search failure or
@@ -1919,6 +1910,7 @@ router.post("/public-ai/chat", async (req, res) => {
           searchRetryable,
           ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
           ...usage,
+          serverDiag: routeDiag,
         });
       } catch (fallbackErr) {
         // Both the live search AND the general-knowledge fallback failed. Refund
@@ -2335,6 +2327,7 @@ router.post("/public-ai/chat", async (req, res) => {
   );
 
   res.json({
+    serverDiag: routeDiag,
     reply,
     suggestions,
     ...(videos.length > 0 ? { videos } : {}),
@@ -2560,23 +2553,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     authed?.userId ?? null,
   );
 
-  if (
-    decision.tool !== "search" &&
-    carriedDocs &&
-    isUploadedFileModificationRequest(message) &&
-    !isImageGenerationRequest(message)
-  ) {
-    const inferredFormat =
-      detectFileRequest(message) ?? inferFileFormatFromUploadedContext(carriedDocs);
-    if (inferredFormat) {
-      decision = {
-        ...decision,
-        tool: "file_generation",
-        fileFormat: inferredFormat,
-        reason: `${decision.reason}; uploaded file modification routed to ${inferredFormat}`,
-      };
-    }
-  }
+  // Deterministic final routing precedence — same shared resolver as the
+  // non-streaming /chat route so the two handlers cannot drift. The stream
+  // route never receives a user-forced search retry (clients send those to
+  // the non-streaming route), so forceSearch is always false here.
+  const finalRoute = resolveFinalOraRoute({ decision, message, carriedDocs, forceSearch: false });
+  decision = finalRoute.decision;
 
   const deepAllowed = decision.tool === "deep_thinking";
   const routedTool = decision.tool;
@@ -3139,6 +3121,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         routedTool,
         searchUsed,
         fallbackReason,
+        // Phase 3 route diagnostics (privacy-safe: static templates/enums only).
+        routeReason: decision.reason,
+        inferredFileFormat: finalRoute.inferredFileFormat,
+        conflictResolution: finalRoute.conflictResolution,
       },
     },
   });

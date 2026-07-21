@@ -119,10 +119,18 @@ export interface StreamDonePayload {
   /** Server-measured timing/routing metadata — privacy-safe, no user content. */
   serverDiag?: {
     ttftMs: number | null;
-    totalMs: number;
-    provider: string;
-    routeTier: string;
-    fastLane: boolean;
+    totalMs?: number;
+    provider?: string;
+    routeTier?: string;
+    fastLane?: boolean;
+    /** Phase 3 route diagnostics (static templates/enums only, no user content). */
+    routedTool?: string | null;
+    searchUsed?: boolean | null;
+    classifierSkipped?: boolean | null;
+    classifierMs?: number | null;
+    routeReason?: string | null;
+    inferredFileFormat?: string | null;
+    conflictResolution?: string | null;
   } | null;
 }
 
@@ -265,6 +273,12 @@ export interface ChatRequest {
   message: string;
   messages: Array<{ role: OraRole; content: string }>;
   language?: string;
+  /**
+   * Device BCP-47 locale (e.g. "en-US"). Used server-side ONLY as a language
+   * tiebreaker for short/ambiguous messages. Mirrors the website's
+   * `navigator.language` hint so web and mobile route identically.
+   */
+  languageHint?: string;
   /** IANA timezone resolved from the device; used for the local date/time line. */
   timeZone?: string;
   mode: OraMode;
@@ -306,6 +320,13 @@ export interface ChatRequest {
    * caps at 5. Mirrors the website hook's `body.documentRefs`.
    */
   documentRefs?: string[];
+  /**
+   * The persisted conversation id when this thread has been saved. The server
+   * uses it to exclude the CURRENT conversation from cross-conversation memory
+   * recall (otherwise recall would echo this thread back at itself). Mirrors
+   * the website hook's `body.conversationId`.
+   */
+  conversationId?: number | null;
 }
 
 export interface ChatResponse {

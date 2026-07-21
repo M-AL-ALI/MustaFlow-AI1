@@ -799,3 +799,14 @@ Structured `editQuality` transparency metadata on every file-edit response, rend
 - **Gate:** `ORA_FEATURE_REGISTRY` entry `file-edit-quality-card` in the same commit (four-outcome manual checklist for website + mobile); fixed the stale `packages/ora-contracts` file hint to `lib/ora-contracts` so contract changes are detected as Ora changes.
 
 Verification: `ora-gate-fast` pass=13 warn=1(git-clean only) fail=0; typecheck:libs + api-server + mustaflow + ora-mobile + scripts all green; ora-mobile suite 181/181. Architect review: PASS (streaming untouched, Ora isolation clean, labels honest, persistence round-trip verified).
+
+## Ora Phase 3 — Smarter Router Hardening
+
+Single deterministic route-precedence resolver shared by both chat handlers, privacy-safe route diagnostics, and mobile payload parity with the website.
+
+- **Server:** new `route-resolution.ts` exporting `resolveFinalOraRoute({ decision, message, carriedDocs, forceSearch })`. Precedence: (1) `forceSearch` terminal pin to search; (2) uploaded-file edit beats chat/incidental-image/incidental-search UNLESS explicit image ask (`resolveOraVisualIntent === "generate_image"`), explicit current-info search (`inferOraSearchPlan` freshness `current` AND `decision.tool === "search"`), or newest carried file is a ZIP/archive without an explicit export ask; (3) otherwise the router decision stands. Replaces the two hand-duplicated override blocks in `/public-ai/chat` and `/chat/stream` (resolver runs before `checkToolAccess`, so gating is unchanged).
+- **Diagnostics:** `serverDiag` extended with `routeReason` / `inferredFileFormat` / `conflictResolution` — static enums and templates only, never user content — across the API, `stream-adapter.ts` done-payload type, website `use-ora-chat.ts`, and mobile `types.ts`.
+- **Mobile parity:** `ChatRequest` gains `languageHint` (device BCP-47 locale via `Intl`, try/catch for Hermes) and `conversationId` (excludes the open thread from cross-conversation recall), matching the website hook. New fields placed after `temporary,` in `chatReq` to keep the parity test's 400-char window intact.
+- **Tests/gate:** `ora-router-hardening.test.ts` (13 tests, real pattern helpers, no mocks) in `API_PUBLIC_AI_CORE`; `chat-payload-parity.test.ts` (5 source-wiring tests) in `MOBILE_LIB_CRITICAL`; new `ORA_FEATURE_REGISTRY` entry `router-hardening` in the same commit.
+
+Verification: `ora-gate-fast` pass=13 warn=1 (git-clean pre-commit only) fail=0; search regression suites 62/62; api-server + mustaflow + ora-mobile + scripts typechecks green. Architect review: PASS (no gating bypass, streaming cadence untouched, Ora isolation intact, diagnostics privacy verified). Known limitation: mobile sends `languageHint` unconditionally while web sends it only when language is `auto` — harmless server-side tiebreaker asymmetry to align later.

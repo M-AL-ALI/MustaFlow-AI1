@@ -286,6 +286,22 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualMobile:
       "Verify memory/project behavior only when exposed on mobile or touched through shared API.",
   },
+  {
+    id: "router-hardening",
+    title:
+      "Deterministic routing precedence (forceSearch pin, uploaded-file edits, image/search guards, ZIP analysis) and route diagnostics",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /public-ai\/route-resolution/i,
+      /ora-router-hardening\.test\.ts$/i,
+      /public-ai\/stream-adapter/i,
+      /chat-payload-parity\.test\.ts$/i,
+    ],
+    manualWebsite:
+      "Upload a Word doc, then: (1) 'make it more professional' returns an edited file; (2) 'create a logo with the word Ora' returns an image; (3) 'latest scores' style prompts still search; (4) Retry live search stays search. Check serverDiag routeReason/conflictResolution in dev diagnostics.",
+    manualMobile:
+      "Repeat the Word-doc edit, logo-with-'word', and Retry-live-search prompts on mobile; verify identical routing to website (payload parity: languageHint + conversationId now sent).",
+  },
 ];
 
 const API_PUBLIC_AI_CORE = [
@@ -294,6 +310,7 @@ const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/ora-behavior-qa.test.ts",
   "src/lib/public-ai/__tests__/ora-conversation-smoke.test.ts",
   "src/lib/public-ai/__tests__/ora-quality-identity.test.ts",
+  "src/lib/public-ai/__tests__/ora-router-hardening.test.ts",
   "src/lib/public-ai/__tests__/response-quality.test.ts",
   "src/lib/public-ai/__tests__/routing-diagnostics.test.ts",
 ].join(" ");
@@ -397,6 +414,7 @@ const WEB_RELEASE_EXTENDED = [
 const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/account-sync-wiring.test.ts",
   "lib/__tests__/billing-plan-cards.test.ts",
+  "lib/__tests__/chat-payload-parity.test.ts",
   "lib/__tests__/document-picker-config.test.ts",
   "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",

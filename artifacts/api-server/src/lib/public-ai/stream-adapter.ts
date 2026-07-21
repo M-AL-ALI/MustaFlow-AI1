@@ -77,6 +77,15 @@ export interface OraStreamDonePayload {
     searchUsed: boolean;
     /** Classified fallback reason when a non-primary provider served the reply. */
     fallbackReason: string | null;
+    /**
+     * Phase 3 route diagnostics. Static reason templates / enum values only —
+     * never user content (same privacy rule as the rest of serverDiag).
+     */
+    routeReason?: string | null;
+    /** Format inferred for an uploaded-file edit route, when that rule fired. */
+    inferredFileFormat?: string | null;
+    /** Which image/file/search precedence rule resolved a routing conflict. */
+    conflictResolution?: string | null;
   } | null;
 }
 

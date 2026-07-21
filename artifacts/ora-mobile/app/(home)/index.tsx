@@ -144,6 +144,7 @@ import {
   renameProject,
   saveConversationMessages,
   saveOraMemory,
+  clientLanguageHint,
   clientTimeZone,
   sendChat,
   setOnOraSessionRecovered,
@@ -1204,6 +1205,15 @@ export default function OraChatScreen() {
             referenceChatHistory: getReferenceChatHistory() && !!isSignedIn && !temporary,
             temporary,
             oraProjectId: activeProjectIdRef.current,
+            // Device locale tiebreaker + persisted conversation id — routing-
+            // critical payload parity with the website hook (Phase 3): the
+            // server uses languageHint for short/ambiguous messages and
+            // conversationId to exclude this thread from cross-conversation
+            // memory recall. Every send path reuses this chatReq.
+            languageHint: clientLanguageHint(),
+            ...(conversationIdRef.current != null
+              ? { conversationId: conversationIdRef.current }
+              : {}),
             ...(opts?.forceSearch ? { forceSearch: true } : {}),
             // Carry uploaded document/dataset refs on every chat turn so the
             // server can route uploaded-file edit requests ("make it

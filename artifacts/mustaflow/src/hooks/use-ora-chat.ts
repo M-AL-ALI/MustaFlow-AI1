@@ -744,6 +744,14 @@ interface StreamDonePayload {
     provider?: string | null;
     routeTier?: string | null;
     fastLane?: boolean | null;
+    // Phase 3 route diagnostics (static templates/enums only, no user content).
+    routedTool?: string | null;
+    searchUsed?: boolean | null;
+    classifierSkipped?: boolean | null;
+    classifierMs?: number | null;
+    routeReason?: string | null;
+    inferredFileFormat?: string | null;
+    conflictResolution?: string | null;
   };
 }
 

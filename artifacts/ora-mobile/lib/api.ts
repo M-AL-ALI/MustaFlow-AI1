@@ -105,6 +105,21 @@ export function clientTimeZone(): string | undefined {
   }
 }
 
+/**
+ * The device's BCP-47 locale (e.g. "en-US"). Mirrors the website's
+ * `navigator.language` payload field: the server uses it ONLY as a language
+ * tiebreaker for short/ambiguous messages. Wrapped in try/catch because
+ * Hermes' Intl can throw or be absent on some builds; undefined is simply
+ * omitted from the payload (the server field is optional).
+ */
+export function clientLanguageHint(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function authHeaders(extra?: Record<string, string>): Promise<Headers> {
   const headers = new Headers(extra);
   const token = await getAuthToken();

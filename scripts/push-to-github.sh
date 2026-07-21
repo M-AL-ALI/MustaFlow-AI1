@@ -40,6 +40,16 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
+  artifacts/api-server/src/lib/public-ai/route-resolution.ts \
+  artifacts/api-server/src/lib/public-ai/stream-adapter.ts \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  "artifacts/api-server/src/lib/public-ai/__tests__/ora-router-hardening.test.ts" \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  artifacts/ora-mobile/lib/api.ts \
+  artifacts/ora-mobile/lib/types.ts \
+  "artifacts/ora-mobile/lib/__tests__/chat-payload-parity.test.ts" \
+  scripts/src/ora-stability-gate.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
