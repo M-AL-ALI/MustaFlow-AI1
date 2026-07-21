@@ -14,7 +14,7 @@ import {
   resolveCarriedFileMeta,
   type CarriedFileMeta,
 } from "../../lib/public-ai/carried-docs";
-import { planOraMultiFile } from "../../lib/public-ai/multi-file-planner";
+import { planOraMultiFile, resolveNamedEditTarget } from "../../lib/public-ai/multi-file-planner";
 
 const router = Router();
 
@@ -163,7 +163,10 @@ router.post("/public-ai/generate-file", async (req, res) => {
       sessionId: session.sessionId,
       userId: authed?.userId ?? null,
       subscriptionTier: authed?.tier ?? null,
-      preferredFileRef: multiFilePlan?.targetFileRef ?? null,
+      // Plan target first; otherwise pin a file the user named by filename so
+      // the ordered-refs scan never edits the wrong same-format upload.
+      preferredFileRef:
+        multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(message, carriedFileMeta),
     });
     const result =
       layoutEditResult ??

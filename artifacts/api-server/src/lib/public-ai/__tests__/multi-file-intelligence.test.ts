@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   detectAmbiguousEditTarget,
   planOraMultiFile,
+  resolveNamedEditTarget,
   type OraMultiFilePlanInput,
 } from "../multi-file-planner";
 import { planOraClarification } from "../clarification-planner";
@@ -428,5 +429,87 @@ describe("Phase 5 resolveRawOfficeEntry — planner-steered target pinning", () 
       preferredFileRef: xlsxRef,
     });
     expect(hit?.fileRef).toBe(deckRef);
+  });
+});
+
+describe("Phase 5 resolveNamedEditTarget — clarification answers pin the named file", () => {
+  it("answered clarification naming the SECOND deck pins the second file's ref", () => {
+    // detectAmbiguousEditTarget asked; the merged continuation message now
+    // names the second deck. No data source is present, so planOraMultiFile
+    // yields no plan — the named-target pin must steer the edit instead.
+    const first = meta("q3-review.pptx");
+    const second = meta("q4-forecast.pptx");
+    const merged = "Update the deck with our new branding. Use q4-forecast.pptx.";
+
+    expect(planOraMultiFile(planInput(merged, [first, second]))?.targetFileRef ?? null).toBeNull();
+    expect(resolveNamedEditTarget(merged, [first, second])).toBe(second.fileRef);
+  });
+
+  it("naming the first of two documents pins the first file's ref", () => {
+    const a = meta("board-letter.docx");
+    const b = meta("staff-memo.docx");
+    expect(resolveNamedEditTarget("Polish board-letter please.", [a, b])).toBe(a.fileRef);
+  });
+
+  it("no filename mentioned → null (ordered scan behavior unchanged)", () => {
+    const a = meta("q3-review.pptx");
+    const b = meta("q4-forecast.pptx");
+    expect(resolveNamedEditTarget("Update the deck with our new branding.", [a, b])).toBeNull();
+  });
+
+  it("two filenames mentioned → null (ambiguous, never guess)", () => {
+    const a = meta("q3-review.pptx");
+    const b = meta("q4-forecast.pptx");
+    expect(resolveNamedEditTarget("Blend q3-review and q4-forecast styling.", [a, b])).toBeNull();
+  });
+
+  it("single uploaded file → null (single-file behavior stays byte-identical)", () => {
+    const only = meta("solo-deck.pptx");
+    expect(resolveNamedEditTarget("Update solo-deck for me.", [only])).toBeNull();
+  });
+
+  it("end-to-end: the pinned ref beats upload order in resolveRawOfficeEntry", async () => {
+    const SESSION = "session-named-target";
+    const FAKE = Buffer.from("fake-office-bytes").toString("base64");
+    const seed = (filename: string) =>
+      storeFile({
+        sessionId: SESSION,
+        filename,
+        mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        extractedText: `Slide 1: ${filename}`,
+        charCount: 20,
+        rawBase64: FAKE,
+        rawSizeBytes: 17,
+        rawFileType: "pptx",
+      });
+    const refFirst = seed("q3-review.pptx");
+    const refSecond = seed("q4-forecast.pptx");
+    const files: CarriedFileMeta[] = [
+      {
+        fileRef: refFirst,
+        filename: "q3-review.pptx",
+        rawFileType: "pptx",
+        isDataset: false,
+        hasRawBytes: true,
+      },
+      {
+        fileRef: refSecond,
+        filename: "q4-forecast.pptx",
+        rawFileType: "pptx",
+        isDataset: false,
+        hasRawBytes: true,
+      },
+    ];
+    const merged = "Update the deck with our new branding. Use q4-forecast.pptx.";
+    const pinned = resolveNamedEditTarget(merged, files);
+    const hit = await resolveRawOfficeEntry({
+      message: merged,
+      format: "pptx",
+      documentRefs: [refFirst, refSecond],
+      sessionId: SESSION,
+      preferredFileRef: pinned,
+    });
+    expect(hit?.fileRef).toBe(refSecond);
+    expect(hit?.entry.filename).toBe("q4-forecast.pptx");
   });
 });

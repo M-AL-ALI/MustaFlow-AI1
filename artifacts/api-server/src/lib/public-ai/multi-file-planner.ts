@@ -230,6 +230,29 @@ export function detectAmbiguousEditTarget(
   };
 }
 
+/**
+ * Pin the edit target when the message names exactly ONE uploaded file but no
+ * multi-file plan produced a targetFileRef. Two paths depend on this promise:
+ *
+ *  1. detectAmbiguousEditTarget skips its question when a candidate is named —
+ *     so the name MUST steer the edit engine, or upload order wins anyway.
+ *  2. An ambiguous_target_file clarification answered with a filename merges
+ *     into routedMessage; without a data-source mention no plan fires, and the
+ *     ordered documentRefs scan would silently edit the FIRST same-format
+ *     upload — the exact wrong-file pick the question existed to avoid.
+ *
+ * Exactly-one semantics keep this conservative: zero or 2+ name matches
+ * return null and leave existing behavior untouched. The edit engine's
+ * format+bytes guard still applies, so naming a file of the wrong format
+ * (e.g. the data source) safely falls back to the ordered scan.
+ */
+export function resolveNamedEditTarget(message: string, files: CarriedFileMeta[]): string | null {
+  if (files.length < 2) return null;
+  const named = mentionedFiles(message, files);
+  if (named.length !== 1) return null;
+  return named[0].fileRef;
+}
+
 /* ── Workflow planners ──────────────────────────────────────────────────── */
 
 function planCompare(message: string, files: CarriedFileMeta[]): OraMultiFilePlan | null {

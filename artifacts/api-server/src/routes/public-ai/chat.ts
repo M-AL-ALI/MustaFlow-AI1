@@ -52,7 +52,7 @@ import {
   resolveCarriedFileMeta,
   type CarriedFileMeta,
 } from "../../lib/public-ai/carried-docs";
-import { planOraMultiFile } from "../../lib/public-ai/multi-file-planner";
+import { planOraMultiFile, resolveNamedEditTarget } from "../../lib/public-ai/multi-file-planner";
 import { buildOraExpertiseProfile } from "../../lib/public-ai/expertise";
 import { buildOraImageGenerationProfile } from "../../lib/public-ai/image-quality";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
@@ -1542,7 +1542,12 @@ router.post("/public-ai/chat", async (req, res) => {
         sessionId: session.sessionId,
         userId: authed?.userId ?? null,
         subscriptionTier: authed?.tier ?? null,
-        preferredFileRef: multiFilePlan?.targetFileRef ?? null,
+        // Plan target first; otherwise pin a file the user named by filename
+        // (covers answered ambiguous_target_file clarifications and explicit
+        // "update <name>" asks) so the ordered-refs scan never edits the
+        // wrong same-format upload.
+        preferredFileRef:
+          multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(routedMessage, carriedFileMeta),
       });
       const result =
         layoutEditResult ??
