@@ -1093,11 +1093,13 @@ export function updateProfile(profile: Partial<OraProfile>): Promise<unknown> {
   });
 }
 
-export async function listMemories(oraProjectId?: number | null): Promise<OraMemory[]> {
+export async function listMemories(scope?: number | "all" | null): Promise<OraMemory[]> {
   const url =
-    typeof oraProjectId === "number"
-      ? `/api/ora/memories?oraProjectId=${oraProjectId}`
-      : "/api/ora/memories";
+    scope === "all"
+      ? "/api/ora/memories?scope=all"
+      : typeof scope === "number"
+        ? `/api/ora/memories?oraProjectId=${scope}`
+        : "/api/ora/memories";
   const data = await jsonRequest<{ memories: OraMemory[] }>(url);
   return data.memories ?? [];
 }
@@ -1366,9 +1368,7 @@ export function listAssetVersions(id: number): Promise<OraAssetVersionsResponse>
  * (history is never rewritten) and relinks the durable file context so a
  * follow-up "Revise ..." targets the restored content.
  */
-export function restoreAssetVersion(
-  versionAssetId: number,
-): Promise<RestoreAssetVersionResponse> {
+export function restoreAssetVersion(versionAssetId: number): Promise<RestoreAssetVersionResponse> {
   return jsonRequest<RestoreAssetVersionResponse>(`/api/ora/assets/${versionAssetId}/restore`, {
     method: "POST",
   });

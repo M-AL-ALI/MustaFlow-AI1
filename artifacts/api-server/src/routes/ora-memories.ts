@@ -105,27 +105,29 @@ async function ownsOraProject(userId: string, oraProjectId: number): Promise<boo
 }
 
 // List the user's saved Ora memories.
+//   ?scope=all         — list ALL memories (global + every project); each row
+//                        carries oraProjectId so clients can render scope
+//                        badges and filter locally. (Phase 7)
 //   ?oraProjectId=<id> — list that project's memories.
 //   (omitted)          — list user-level memories (ora_project_id IS NULL).
 router.get("/ora/memories", async (req, res) => {
   const userId = req.userId!;
+  const allScopes = req.query.scope === "all";
   const projectIdParam = req.query.oraProjectId;
   const oraProjectId =
     typeof projectIdParam === "string" && /^\d+$/.test(projectIdParam)
       ? parseInt(projectIdParam, 10)
       : null;
   try {
+    const scopeFilter = allScopes
+      ? undefined
+      : oraProjectId !== null
+        ? eq(knowledgeEntriesTable.oraProjectId, oraProjectId)
+        : isNull(knowledgeEntriesTable.oraProjectId);
     const rows = await db
       .select(memoryColumns)
       .from(knowledgeEntriesTable)
-      .where(
-        and(
-          baseScope(userId),
-          oraProjectId !== null
-            ? eq(knowledgeEntriesTable.oraProjectId, oraProjectId)
-            : isNull(knowledgeEntriesTable.oraProjectId),
-        ),
-      )
+      .where(and(baseScope(userId), scopeFilter))
       .orderBy(desc(knowledgeEntriesTable.createdAt));
     res.json({ memories: rows.map(normalizeCategory) });
   } catch (err) {

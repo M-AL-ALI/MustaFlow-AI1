@@ -1886,6 +1886,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         <OraDocumentMemoryChip
                           fileRef={dm.fileRef}
                           filename={dm.filename}
+                          oraProjectId={saveOraProjectId}
                           saved={Boolean(msg.documentMemorySaved)}
                           onSaved={() => {
                             markDocumentMemorySaved(dm.fileRef);

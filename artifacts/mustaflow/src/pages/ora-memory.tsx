@@ -20,6 +20,8 @@ import {
   AlertTriangle,
   RotateCcw,
   Layers,
+  Globe,
+  Folder,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -287,8 +289,23 @@ function CategoryBadge({ category }: { category: OraMemoryCategory }) {
   );
 }
 
+/**
+ * Scope badge for a memory row: "Global" for user-level memories, or
+ * "Project: <name>" for memories anchored to an Ora project (Phase 7 memory
+ * upgrades). `label` is the resolved project name, or null for global.
+ */
+function ScopeBadge({ label }: { label: string | null }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      {label === null ? <Globe className="h-2.5 w-2.5" /> : <Folder className="h-2.5 w-2.5" />}
+      {label === null ? "Global" : `Project: ${label}`}
+    </span>
+  );
+}
+
 function MemoryRow({
   memory,
+  scopeLabel,
   onToggle,
   onSave,
   onCategoryChange,
@@ -296,6 +313,8 @@ function MemoryRow({
   onRestore,
 }: {
   memory: OraMemory;
+  /** Resolved project name for project-scoped memories; null = global. */
+  scopeLabel: string | null;
   onToggle: (enabled: boolean) => void;
   onSave: (patch: { title: string; content: string }) => void;
   onCategoryChange: (category: OraMemoryCategory) => void;
@@ -320,11 +339,12 @@ function MemoryRow({
       <div className="rounded-lg border border-border/50 bg-muted/30 px-4 py-3 opacity-80">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <Layers className="h-2.5 w-2.5" />
                 Superseded
               </span>
+              <ScopeBadge label={scopeLabel} />
             </div>
             <p className="mt-1.5 text-sm font-medium text-foreground line-through decoration-muted-foreground/40">
               {memory.title}
@@ -425,8 +445,9 @@ function MemoryRow({
                 {memory.content}
               </p>
             )}
-            <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <CategoryBadge category={memory.category} />
+              <ScopeBadge label={scopeLabel} />
               <span className="text-[11px] text-muted-foreground">
                 {new Date(memory.createdAt).toLocaleDateString()}
                 {!memory.enabled && " · Paused"}
@@ -462,10 +483,14 @@ function MemoryRow({
 
 function MemoriesTab() {
   const { toast } = useToast();
+  const { projects } = useOraConversations();
   const [memories, setMemories] = useState<OraMemory[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<OraMemoryCategory | "all">("all");
+  // Scope filter across global + project memories: "all" shows everything,
+  // "global" only user-level rows, a number only that project's rows.
+  const [scopeFilter, setScopeFilter] = useState<"all" | "global" | number>("all");
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
@@ -476,7 +501,7 @@ function MemoriesTab() {
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await fetchOraMemories();
+        const rows = await fetchOraMemories("all");
         if (!cancelled) setMemories(rows);
       } catch {
         if (!cancelled) toast({ title: "Could not load memories", variant: "destructive" });
@@ -489,14 +514,37 @@ function MemoriesTab() {
     };
   }, [toast]);
 
+  // Resolve project names for scope badges/filters. Memories can reference a
+  // project the sidebar list no longer has (e.g. archived) — fall back to a
+  // generic "Project" label rather than hiding the scope.
+  const projectNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of projects) map.set(p.id, p.name);
+    return map;
+  }, [projects]);
+
+  // Project scopes that actually appear in the loaded memories, in the order
+  // the projects list presents them (unknown/archived projects last).
+  const projectScopes = useMemo(() => {
+    const present = new Set<number>();
+    for (const m of memories) {
+      if (typeof m.oraProjectId === "number") present.add(m.oraProjectId);
+    }
+    const known = projects.filter((p) => present.has(p.id)).map((p) => p.id);
+    const unknown = [...present].filter((id) => !projectNameById.has(id));
+    return [...known, ...unknown];
+  }, [memories, projects, projectNameById]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return memories.filter((m) => {
+      if (scopeFilter === "global" && m.oraProjectId !== null) return false;
+      if (typeof scopeFilter === "number" && m.oraProjectId !== scopeFilter) return false;
       if (categoryFilter !== "all" && m.category !== categoryFilter) return false;
       if (!q) return true;
       return m.title.toLowerCase().includes(q) || (m.content ?? "").toLowerCase().includes(q);
     });
-  }, [memories, query, categoryFilter]);
+  }, [memories, query, categoryFilter, scopeFilter]);
 
   async function handleToggle(m: OraMemory, enabled: boolean) {
     setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled } : x)));
@@ -579,7 +627,7 @@ function MemoriesTab() {
       // Saving may have superseded existing overlapping memories server-side; refetch
       // so those rows immediately reflect their superseded state (badge + Restore).
       try {
-        const rows = await fetchOraMemories();
+        const rows = await fetchOraMemories("all");
         setMemories(rows);
       } catch {
         /* non-fatal: the optimistic insert above still shows the new memory */
@@ -697,6 +745,36 @@ function MemoriesTab() {
               </button>
             ))}
           </div>
+          {projectScopes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(["all", "global", ...projectScopes] as const).map((s) => (
+                <button
+                  key={String(s)}
+                  onClick={() => setScopeFilter(s)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                    scopeFilter === s
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {s === "all" ? (
+                    "All scopes"
+                  ) : s === "global" ? (
+                    <>
+                      <Globe className="h-3 w-3" />
+                      Global
+                    </>
+                  ) : (
+                    <>
+                      <Folder className="h-3 w-3" />
+                      {projectNameById.get(s) ?? "Project"}
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {memories.length === 0 ? (
@@ -717,6 +795,9 @@ function MemoriesTab() {
             <MemoryRow
               key={m.id}
               memory={m}
+              scopeLabel={
+                m.oraProjectId === null ? null : (projectNameById.get(m.oraProjectId) ?? "Project")
+              }
               onToggle={(enabled) => void handleToggle(m, enabled)}
               onSave={(patch) => void handleSave(m, patch)}
               onCategoryChange={(category) => void handleCategoryChange(m, category)}

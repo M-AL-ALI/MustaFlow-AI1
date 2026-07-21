@@ -105,11 +105,15 @@ describe("T4 — Ora memory capacity meter + atomic cap", () => {
   }, 30000);
 });
 
-describe("T5 — Ora memory project isolation (buildMemoryContext)", () => {
-  it("injects ONLY the active tier (project chat → project memories; general chat → user memories)", async () => {
+describe("T5 — Ora memory scope model (buildMemoryContext, Phase 7 blend)", () => {
+  it("global applies everywhere; project memories only in their own project; foreign projects inject nothing", async () => {
     const [project] = await db
       .insert(oraProjectsTable)
       .values({ userId: ISO_USER, name: "Isolation Project" })
+      .returning({ id: oraProjectsTable.id });
+    const [otherProject] = await db
+      .insert(oraProjectsTable)
+      .values({ userId: ISO_USER, name: "Other Project" })
       .returning({ id: oraProjectsTable.id });
 
     const baseRow = {
@@ -132,21 +136,38 @@ describe("T5 — Ora memory project isolation (buildMemoryContext)", () => {
         content: "project scope",
         oraProjectId: project.id,
       },
+      {
+        ...baseRow,
+        title: "OtherProjectFact",
+        content: "other project scope",
+        oraProjectId: otherProject.id,
+      },
     ]);
 
-    // General (standalone) chat: only the user-level fact, never the project one.
+    // General (standalone) chat: only the global fact — never any project fact.
     const general = await buildMemoryContext(ISO_USER, null);
     expect(general.text).toContain("UserLevelFact");
     expect(general.text).not.toContain("ProjectScopedFact");
+    expect(general.text).not.toContain("OtherProjectFact");
     expect(general.used.map((u) => u.title)).toEqual(["UserLevelFact"]);
 
-    // Project chat: only the project fact, never the general one.
+    // Project chat: BLENDS that project's memories with global memories
+    // (global applies everywhere), never another project's.
     const inProject = await buildMemoryContext(ISO_USER, project.id);
     expect(inProject.text).toContain("ProjectScopedFact");
-    expect(inProject.text).not.toContain("UserLevelFact");
-    expect(inProject.used.map((u) => u.title)).toEqual(["ProjectScopedFact"]);
+    expect(inProject.text).toContain("UserLevelFact");
+    expect(inProject.text).not.toContain("OtherProjectFact");
+    // Project memories rank first (reserved sub-budget), then global.
+    expect(inProject.used.map((u) => u.title)).toEqual(["ProjectScopedFact", "UserLevelFact"]);
 
-    // A project the user does NOT own injects nothing (ownership-gated).
+    // The other project sees its own fact + global, never the first project's.
+    const inOther = await buildMemoryContext(ISO_USER, otherProject.id);
+    expect(inOther.text).toContain("OtherProjectFact");
+    expect(inOther.text).toContain("UserLevelFact");
+    expect(inOther.text).not.toContain("ProjectScopedFact");
+
+    // A project the user does NOT own injects nothing at all — not even
+    // global memories (forged projectId must never harvest context).
     const foreign = await buildMemoryContext(ISO_USER, project.id + 999_999);
     expect(foreign.text).toBe("");
     expect(foreign.used).toEqual([]);

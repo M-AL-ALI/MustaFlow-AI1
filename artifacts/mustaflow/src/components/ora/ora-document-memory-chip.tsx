@@ -17,11 +17,15 @@ export function OraDocumentMemoryChip({
   filename,
   saved,
   onSaved,
+  oraProjectId = null,
 }: {
   fileRef: string;
   filename: string;
   saved: boolean;
   onSaved: () => void;
+  /** When set, the document memory is anchored to this Ora project so it is
+   * recalled across that project's conversations (alongside global memories). */
+  oraProjectId?: number | null;
 }) {
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -42,7 +46,7 @@ export function OraDocumentMemoryChip({
     setStatus("saving");
     setErrorMsg(null);
     try {
-      const result = await rememberDocument(fileRef, confirmSensitive);
+      const result = await rememberDocument(fileRef, confirmSensitive, oraProjectId);
       if (result.saved) {
         onSaved();
         return;
@@ -103,7 +107,7 @@ export function OraDocumentMemoryChip({
         ) : (
           <FileText className="h-3.5 w-3.5" />
         )}
-        {sensitive ? "Save anyway" : "Remember"}
+        {status === "error" ? "Try again" : sensitive ? "Save anyway" : "Remember"}
       </button>
     </div>
   );

@@ -13,15 +13,16 @@ describe("Ora mobile parity — memory API functions", () => {
   const api = read("../api.ts");
   const types = read("../types.ts");
 
-  it("listMemories() accepts an optional oraProjectId parameter", () => {
-    expect(api).toContain("export async function listMemories(oraProjectId?: number | null)");
+  it("listMemories() accepts an optional scope (project id, 'all', or null)", () => {
+    // Phase 7: the scope can also be "all" to list every memory across scopes.
+    expect(api).toContain('export async function listMemories(scope?: number | "all" | null)');
   });
 
   it("listMemories(projectId) appends ?oraProjectId= to the URL", () => {
     const fnStart = api.indexOf("export async function listMemories(");
     const fnBody = api.slice(fnStart, fnStart + 300);
-    expect(fnBody).toContain("oraProjectId=${oraProjectId}");
-    expect(fnBody).toContain('typeof oraProjectId === "number"');
+    expect(fnBody).toContain("oraProjectId=${scope}");
+    expect(fnBody).toContain('typeof scope === "number"');
   });
 
   it("listMemories() without project id fetches /api/ora/memories (user-level only)", () => {
@@ -172,11 +173,14 @@ describe("Ora mobile parity — memory screen project support", () => {
     expect(screen).toContain("Clear all memories");
   });
 
-  it("memory screen fetches both memories and usage in parallel on mount", () => {
-    // Promise.all([listMemories(), getMemoryUsage()]) in MemoriesTab reload callback
+  it("memory screen fetches memories, usage, and project names in parallel on mount", () => {
+    // Phase 7: MemoriesTab loads ALL scopes plus project names for badges;
+    // the project fetch is non-fatal so a failure degrades to badge-less view.
     const tabStart = screen.indexOf("function MemoriesTab(");
-    const tabBody = screen.slice(tabStart, tabStart + 1200);
-    expect(tabBody).toContain("Promise.all([listMemories(), getMemoryUsage()])");
+    const tabBody = screen.slice(tabStart, tabStart + 3000);
+    expect(tabBody).toContain('listMemories("all")');
+    expect(tabBody).toContain("getMemoryUsage()");
+    expect(tabBody).toContain("listProjects(true).catch(() => [] as OraProjectSummary[])");
   });
 });
 

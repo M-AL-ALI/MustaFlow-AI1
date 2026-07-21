@@ -12,6 +12,10 @@ const bodySchema = z.object({
   /** When true, the caller has acknowledged a sensitive-info warning and wants
    * to persist anyway. Required to save a summary flagged as sensitive. */
   confirmSensitive: z.boolean().optional(),
+  /** When set, the document memory is anchored to an Ora project (recalled in
+   * that project's chats alongside global memories). Ownership-validated
+   * server-side — never trusted from the body alone. (Phase 7) */
+  oraProjectId: z.number().int().positive().nullable().optional(),
 });
 
 const MAX_TITLE = 200;
@@ -41,7 +45,7 @@ router.post("/public-ai/remember-document", async (req, res) => {
     res.status(400).json({ error: "Invalid request body." });
     return;
   }
-  const { fileRef, confirmSensitive } = parsed.data;
+  const { fileRef, confirmSensitive, oraProjectId } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
@@ -79,6 +83,29 @@ router.post("/public-ai/remember-document", async (req, res) => {
         resetAt: capResult.resetAt,
         retryAfter: capResult.retryAfter,
       });
+      return;
+    }
+  }
+
+  // Project-scoped saves require the caller to OWN the (non-archived) project.
+  // Reject outright rather than silently downgrading to a global save, so the
+  // client's scope badge never lies about where a memory landed.
+  if (typeof oraProjectId === "number") {
+    const { db, oraProjectsTable } = await import("@workspace/db");
+    const { and, eq, isNull } = await import("drizzle-orm");
+    const [owned] = await db
+      .select({ id: oraProjectsTable.id })
+      .from(oraProjectsTable)
+      .where(
+        and(
+          eq(oraProjectsTable.id, oraProjectId),
+          eq(oraProjectsTable.userId, authed.userId),
+          isNull(oraProjectsTable.archivedAt),
+        ),
+      )
+      .limit(1);
+    if (!owned) {
+      res.status(404).json({ error: "Project not found." });
       return;
     }
   }
@@ -127,6 +154,7 @@ router.post("/public-ai/remember-document", async (req, res) => {
         origin: "ora",
         userId: authed.userId,
         projectId: null,
+        oraProjectId: typeof oraProjectId === "number" ? oraProjectId : null,
         enabled: true,
         approvedForReuse: false,
       })
@@ -137,10 +165,17 @@ router.post("/public-ai/remember-document", async (req, res) => {
         category: knowledgeEntriesTable.category,
         enabled: knowledgeEntriesTable.enabled,
         createdAt: knowledgeEntriesTable.createdAt,
+        oraProjectId: knowledgeEntriesTable.oraProjectId,
       });
 
     logger.info(
-      { component: "ora-doc-memory", userId: authed.userId, memoryId: row?.id, sensitive },
+      {
+        component: "ora-doc-memory",
+        userId: authed.userId,
+        memoryId: row?.id,
+        sensitive,
+        oraProjectId: row?.oraProjectId ?? null,
+      },
       "Document memory saved",
     );
     res.status(201).json({ saved: true, sensitive, memory: row });

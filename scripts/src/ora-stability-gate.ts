@@ -304,6 +304,27 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Verify memory/project behavior only when exposed on mobile or touched through shared API.",
   },
   {
+    id: "memory-upgrades",
+    title:
+      "Memory upgrades (Phase 7: global+project recall blend in project chats, all-scopes Memory Center with scope badges/filters, project-anchored document memories)",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /ora-memory-upgrades\.test\.ts$/i,
+      /ora-memory-enhancements\.test\.ts$/i,
+      /ora-memory-scope-wiring\.test\.ts$/i,
+      /remember-document/i,
+      /routes\/ora-memories/i,
+      /ora-document-memory-chip/i,
+      /pages\/ora-memory\.tsx$/i,
+      /app\/\(home\)\/memory\.tsx$/i,
+      /lib\/ora-memories\.ts$/i,
+    ],
+    manualWebsite:
+      "In a PROJECT chat, verify Ora recalls BOTH a global fact and that project's fact (never another project's). In Memory Center → Memories, verify every memory shows a Global or Project badge and the scope chips (All scopes / Global / project names) filter the list. Upload a doc inside a project chat and click 'Remember this document' → the saved memory carries that project's badge; a failed save shows 'Try again' and retries.",
+    manualMobile:
+      "Open Memory → Memories and verify the same scope badges and scope filter chips as website (parity). Project memories tab still lists only that project's memories with no badge. Document remember flow is website-only in this phase.",
+  },
+  {
     id: "router-hardening",
     title:
       "Deterministic routing precedence (forceSearch pin, uploaded-file edits, image/search guards, ZIP analysis) and route diagnostics",
@@ -431,6 +452,7 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/ora-memory-consolidation.test.ts",
   "src/routes/__tests__/ora-memory-enhancements.test.ts",
   "src/routes/__tests__/ora-memory-relevance.test.ts",
+  "src/routes/__tests__/ora-memory-upgrades.test.ts",
   "src/routes/__tests__/ora-support-surface-isolation.test.ts",
   "src/routes/__tests__/ora-tiers-meta.test.ts",
 ].join(" ");
@@ -451,6 +473,7 @@ const WEB_ORA_UI = [
   "src/pages/__tests__/billing-plan-cards.test.ts",
   "src/pages/__tests__/ora-account-sync-wiring.test.ts",
   "src/pages/__tests__/ora-live-voice-privacy.test.ts",
+  "src/pages/__tests__/ora-memory-scope-wiring.test.ts",
   "src/pages/__tests__/ora-realtime-reconnect-ui.test.ts",
   "src/pages/__tests__/pricing-deeplink.test.ts",
 ].join(" ");
@@ -476,6 +499,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
+  "lib/__tests__/ora-memory-scope-wiring.test.ts",
   "lib/__tests__/ora-mobile-parity.test.ts",
   "lib/__tests__/ora-session-recovery.test.ts",
   "lib/__tests__/safe-url.test.ts",

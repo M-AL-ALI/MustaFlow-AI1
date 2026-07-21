@@ -38,6 +38,22 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  "artifacts/api-server/src/lib/public-ai/orchestrator.ts" \
+  "artifacts/api-server/src/routes/__tests__/ora-memory-enhancements.test.ts" \
+  "artifacts/api-server/src/routes/__tests__/ora-memory-upgrades.test.ts" \
+  "artifacts/api-server/src/routes/ora-memories.ts" \
+  "artifacts/api-server/src/routes/public-ai/chat.ts" \
+  "artifacts/api-server/src/routes/public-ai/remember-document.ts" \
+  "artifacts/mustaflow/src/components/ora-panel.tsx" \
+  "artifacts/mustaflow/src/components/ora/ora-document-memory-chip.tsx" \
+  "artifacts/mustaflow/src/lib/ora-memories.ts" \
+  "artifacts/mustaflow/src/pages/ora-memory.tsx" \
+  "artifacts/mustaflow/src/pages/__tests__/ora-memory-scope-wiring.test.ts" \
+  "artifacts/ora-mobile/app/(home)/memory.tsx" \
+  "artifacts/ora-mobile/lib/api.ts" \
+  "artifacts/ora-mobile/lib/__tests__/ora-memory-scope-wiring.test.ts" \
+  "artifacts/ora-mobile/lib/__tests__/ora-mobile-parity.test.ts" \
+  "scripts/src/ora-stability-gate.ts" \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true

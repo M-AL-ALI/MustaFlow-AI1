@@ -50,13 +50,16 @@ export interface OraMemory {
 /**
  * List Ora memories. With no argument, returns user-level memories (those not
  * anchored to any project). Pass an `oraProjectId` to list that project's
- * persistent memories instead.
+ * persistent memories instead, or `"all"` to list every memory across scopes
+ * (each row carries `oraProjectId` for scope badges/filters).
  */
-export async function fetchOraMemories(oraProjectId?: number | null): Promise<OraMemory[]> {
+export async function fetchOraMemories(scope?: number | "all" | null): Promise<OraMemory[]> {
   const url =
-    typeof oraProjectId === "number"
-      ? `${BASE}/api/ora/memories?oraProjectId=${oraProjectId}`
-      : `${BASE}/api/ora/memories`;
+    scope === "all"
+      ? `${BASE}/api/ora/memories?scope=all`
+      : typeof scope === "number"
+        ? `${BASE}/api/ora/memories?oraProjectId=${scope}`
+        : `${BASE}/api/ora/memories`;
   const res = await authFetch(url);
   if (!res.ok) throw new Error(`Failed to load memories (${res.status})`);
   const data = (await res.json()) as { memories: OraMemory[] };
@@ -179,16 +182,22 @@ export interface RememberDocumentResult {
  * Persist a concise summary of an analyzed document into Ora's memory (opt-in,
  * Task #1372). The backend summarizes the still-cached file by its ref — the
  * raw bytes are never stored. A summary flagged sensitive is NOT saved until the
- * caller re-invokes with confirmSensitive=true.
+ * caller re-invokes with confirmSensitive=true. When `oraProjectId` is set the
+ * memory is anchored to that project (ownership-validated server-side).
  */
 export async function rememberDocument(
   fileRef: string,
   confirmSensitive = false,
+  oraProjectId?: number | null,
 ): Promise<RememberDocumentResult> {
   const res = await authFetch(`${BASE}/api/public-ai/remember-document`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileRef, ...(confirmSensitive ? { confirmSensitive: true } : {}) }),
+    body: JSON.stringify({
+      fileRef,
+      ...(confirmSensitive ? { confirmSensitive: true } : {}),
+      ...(typeof oraProjectId === "number" ? { oraProjectId } : {}),
+    }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };

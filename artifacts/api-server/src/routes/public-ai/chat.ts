@@ -175,6 +175,13 @@ const ORA_MEMORY_BACKFILL_PER_CALL = 8;
 const ORA_MEMORY_SEMANTIC_WEIGHT = 6.0;
 /** Max time we'll wait for the query embedding before falling back to TF-IDF. */
 const ORA_MEMORY_EMBED_TIMEOUT_MS = 2500;
+/**
+ * Share of the recall budget reserved for the CURRENT project's memories in a
+ * project chat (Phase 7 blend). Project facts rank first against this reserve
+ * so a relevant project memory always survives; global memories fill the
+ * remainder plus any unused reserve.
+ */
+const ORA_PROJECT_MEMORY_RESERVE = 0.45;
 
 export interface OraMemoryRecallProfile {
   planTier: OraPlanTier;
@@ -372,6 +379,22 @@ export function selectMemoriesWithinBudget(
 }
 
 /**
+ * Best-effort embedding of the current prompt, raced against a short timeout.
+ * Returns null on any failure or slow provider — recall then degrades to
+ * TF-IDF; it never blocks or noticeably slows the reply.
+ */
+async function embedPromptBestEffort(trimmed: string): Promise<number[] | null> {
+  try {
+    return await Promise.race([
+      generateEmbedding(trimmed),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ORA_MEMORY_EMBED_TIMEOUT_MS)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Rank memories by relevance to the current message, following the Builder
  * vault's approach: semantic cosine similarity when an entry has an embedding,
  * per-entry TF-IDF keyword overlap as a fallback, plus a light recency
@@ -383,22 +406,21 @@ export async function rankMemoriesByRelevance(
   rows: OraMemoryRow[],
   message: string,
   profile: OraMemoryRecallProfile = resolveOraMemoryRecallProfile(),
+  promptEmbeddingOverride?: number[] | null,
 ): Promise<OraMemoryRow[]> {
   const trimmed = message.trim();
   if (trimmed.length === 0) return selectMemoriesWithinBudget(rows, profile);
 
   // Best-effort prompt embedding, raced against a short timeout. On any failure
   // OR if the provider is slow, we fall back to TF-IDF for every entry — never
-  // block or noticeably slow the reply on the embedding provider.
-  let promptEmbedding: number[] | null = null;
-  try {
-    promptEmbedding = await Promise.race([
-      generateEmbedding(trimmed),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), ORA_MEMORY_EMBED_TIMEOUT_MS)),
-    ]);
-  } catch {
-    promptEmbedding = null;
-  }
+  // block or noticeably slow the reply on the embedding provider. Callers that
+  // rank multiple pools for the same message (e.g. the project + global blend
+  // in buildMemoryContext) pass a precomputed embedding so the prompt is only
+  // embedded once per reply.
+  const promptEmbedding =
+    promptEmbeddingOverride !== undefined
+      ? promptEmbeddingOverride
+      : await embedPromptBestEffort(trimmed);
 
   const promptTokens = tokeniseMemory(trimmed);
   const queryCategories = inferMemoryQueryCategories(trimmed);
@@ -541,6 +563,11 @@ export interface MemoryContextResult {
  * facts are recalled even past the old 15-entry recency window. Without a
  * message, it falls back to a budget-aware recency ordering.
  *
+ * SCOPE MODEL (Phase 7): global (user-level) memories apply everywhere; a
+ * project chat blends them with that project's memories via a reserved
+ * sub-budget for project facts. Other projects' memories never appear, and
+ * standalone chats never see project-scoped facts.
+ *
  * ISOLATION: Ora is a standalone assistant kept fully separate from the AI
  * Builder. This intentionally injects ONLY user-approved Ora memories
  * (scope="user" AND origin="ora"). It must never pull AI Builder Knowledge Vault
@@ -557,51 +584,16 @@ export async function buildMemoryContext(
   try {
     const { db, knowledgeEntriesTable, oraProjectsTable } = await import("@workspace/db");
     const profile = resolveOraMemoryRecallProfile(subscriptionTier);
-    // ISOLATION (project vs general): a project chat sees ONLY that project's
-    // memories; a standalone chat sees ONLY user-level memories. The two tiers
-    // are never mixed — a project's context must not leak general facts, and a
-    // general chat must not surface project-specific facts.
+    // SCOPE MODEL (Phase 7): global (user-level) memories apply EVERYWHERE —
+    // standalone chats and every project chat. Project memories apply ONLY
+    // inside their own project. A project chat therefore blends global +
+    // that-project memories; other projects' memories are never pulled, and a
+    // standalone chat never sees project-scoped facts.
     const isProjectChat = typeof oraProjectId === "number";
 
-    // User-level memories apply to standalone (non-project) chats only. We skip
-    // this query entirely inside a project chat so isolation is enforced.
-    let userRows: OraMemoryRow[] = [];
-    if (!isProjectChat) {
-      userRows = await db
-        .select({
-          id: knowledgeEntriesTable.id,
-          title: knowledgeEntriesTable.title,
-          content: knowledgeEntriesTable.content,
-          category: knowledgeEntriesTable.category,
-          embedding: knowledgeEntriesTable.embedding,
-          createdAt: knowledgeEntriesTable.createdAt,
-        })
-        .from(knowledgeEntriesTable)
-        .where(
-          and(
-            eq(knowledgeEntriesTable.userId, userId),
-            eq(knowledgeEntriesTable.scope, "user"),
-            eq(knowledgeEntriesTable.origin, "ora"),
-            // Respect the Memory Center "pause" toggle: paused memories are kept
-            // but excluded from Ora's context.
-            eq(knowledgeEntriesTable.enabled, true),
-            // Consolidation: never inject a memory that a newer fact superseded —
-            // only the current version of a fact reaches Ora's context.
-            isNull(knowledgeEntriesTable.supersededBy),
-            isNull(knowledgeEntriesTable.archivedAt),
-            // User-level only — project memories are pulled separately below.
-            isNull(knowledgeEntriesTable.oraProjectId),
-          ),
-        )
-        .orderBy(desc(knowledgeEntriesTable.createdAt))
-        .limit(profile.candidateLimit);
-    }
-
-    // Project memories persist across every conversation in an Ora project, but
-    // only when the caller actually owns the (non-archived) project. They must
-    // also exclude superseded entries so only the current version of a fact is
-    // injected, matching the user-level query above.
-    let projectRows: OraMemoryRow[] = [];
+    // A project chat must belong to a project the caller actually owns (and
+    // that is not archived). An unowned/unknown project injects NOTHING — not
+    // even global memories — so a forged projectId can never harvest context.
     if (isProjectChat) {
       const [owned] = await db
         .select({ id: oraProjectsTable.id })
@@ -614,49 +606,109 @@ export async function buildMemoryContext(
           ),
         )
         .limit(1);
-      if (owned) {
-        projectRows = await db
-          .select({
-            id: knowledgeEntriesTable.id,
-            title: knowledgeEntriesTable.title,
-            content: knowledgeEntriesTable.content,
-            category: knowledgeEntriesTable.category,
-            embedding: knowledgeEntriesTable.embedding,
-            createdAt: knowledgeEntriesTable.createdAt,
-          })
-          .from(knowledgeEntriesTable)
-          .where(
-            and(
-              eq(knowledgeEntriesTable.userId, userId),
-              eq(knowledgeEntriesTable.scope, "user"),
-              eq(knowledgeEntriesTable.origin, "ora"),
-              eq(knowledgeEntriesTable.enabled, true),
-              isNull(knowledgeEntriesTable.supersededBy),
-              isNull(knowledgeEntriesTable.archivedAt),
-              eq(knowledgeEntriesTable.oraProjectId, oraProjectId),
-            ),
-          )
-          .orderBy(desc(knowledgeEntriesTable.createdAt))
-          .limit(profile.candidateLimit);
-      }
+      if (!owned) return { text: "", used: [] };
     }
 
-    // Single-tier candidate pool (project chat → project memories only; general
-    // chat → user-level only), then apply the Builder-style semantic/TF-IDF
-    // ranker so only pertinent memories surface within the budget.
-    const pool = (isProjectChat ? projectRows : userRows).filter(
+    const baseMemoryFilter = [
+      eq(knowledgeEntriesTable.userId, userId),
+      eq(knowledgeEntriesTable.scope, "user"),
+      eq(knowledgeEntriesTable.origin, "ora"),
+      // Respect the Memory Center "pause" toggle: paused memories are kept
+      // but excluded from Ora's context.
+      eq(knowledgeEntriesTable.enabled, true),
+      // Consolidation: never inject a memory that a newer fact superseded —
+      // only the current version of a fact reaches Ora's context.
+      isNull(knowledgeEntriesTable.supersededBy),
+      isNull(knowledgeEntriesTable.archivedAt),
+    ];
+    const memorySelection = {
+      id: knowledgeEntriesTable.id,
+      title: knowledgeEntriesTable.title,
+      content: knowledgeEntriesTable.content,
+      category: knowledgeEntriesTable.category,
+      embedding: knowledgeEntriesTable.embedding,
+      createdAt: knowledgeEntriesTable.createdAt,
+    };
+
+    // Global (user-level) memories — recalled in every chat.
+    const userRowsPromise = db
+      .select(memorySelection)
+      .from(knowledgeEntriesTable)
+      .where(and(...baseMemoryFilter, isNull(knowledgeEntriesTable.oraProjectId)))
+      .orderBy(desc(knowledgeEntriesTable.createdAt))
+      .limit(profile.candidateLimit);
+
+    // Project memories persist across every conversation in an Ora project
+    // (ownership already verified above). Only the CURRENT project's memories
+    // are ever pulled — no cross-project leakage.
+    const projectRowsPromise = isProjectChat
+      ? db
+          .select(memorySelection)
+          .from(knowledgeEntriesTable)
+          .where(and(...baseMemoryFilter, eq(knowledgeEntriesTable.oraProjectId, oraProjectId)))
+          .orderBy(desc(knowledgeEntriesTable.createdAt))
+          .limit(profile.candidateLimit)
+      : Promise.resolve([] as OraMemoryRow[]);
+
+    const [userRows, projectRows] = await Promise.all([userRowsPromise, projectRowsPromise]);
+
+    const globalPool = userRows.filter(
       (row) => !memoryConflictsWithCurrentMessage(row, currentMessage),
     );
-    if (pool.length === 0) return { text: "", used: [] };
+    const projectPool = projectRows.filter(
+      (row) => !memoryConflictsWithCurrentMessage(row, currentMessage),
+    );
+    if (globalPool.length === 0 && projectPool.length === 0) return { text: "", used: [] };
 
-    const selected =
-      currentMessage && currentMessage.trim().length > 0
-        ? await rankMemoriesByRelevance(pool, currentMessage, profile)
-        : selectMemoriesWithinBudget(pool, profile);
+    const trimmedMessage = currentMessage?.trim() ?? "";
+    const hasMessage = trimmedMessage.length > 0;
+    // Embed the prompt ONCE and share it across both ranking passes so the
+    // blend never doubles embedding latency/cost on the pre-reply path.
+    const promptEmbedding = hasMessage ? await embedPromptBestEffort(trimmedMessage) : null;
+    const rankPool = async (
+      pool: OraMemoryRow[],
+      poolProfile: OraMemoryRecallProfile,
+    ): Promise<OraMemoryRow[]> =>
+      hasMessage
+        ? rankMemoriesByRelevance(pool, currentMessage ?? "", poolProfile, promptEmbedding)
+        : selectMemoriesWithinBudget(pool, poolProfile);
+
+    let selected: OraMemoryRow[];
+    if (!isProjectChat || projectPool.length === 0) {
+      // Single-tier: standalone chats (or a project chat with no project
+      // memories yet) rank the global pool against the full budget.
+      selected = await rankPool(globalPool, profile);
+    } else {
+      // Blend via sub-budgets: project memories rank first against a reserved
+      // share of the budget so relevant project facts always survive, then
+      // global memories fill the remainder (plus any unused reserve). This is
+      // deterministic — no score-boost constants to tune.
+      const reserveProfile: OraMemoryRecallProfile = {
+        ...profile,
+        charBudget: Math.max(1, Math.floor(profile.charBudget * ORA_PROJECT_MEMORY_RESERVE)),
+        maxEntries: Math.max(1, Math.ceil(profile.maxEntries / 2)),
+      };
+      const selectedProject = await rankPool(projectPool, reserveProfile);
+      const usedChars = selectedProject.reduce(
+        (sum, r) => sum + r.title.length + (r.content?.length ?? 0) + 4,
+        0,
+      );
+      const remainingEntries = profile.maxEntries - selectedProject.length;
+      const remainingChars = profile.charBudget - usedChars;
+      const selectedGlobal =
+        remainingEntries > 0 && remainingChars > 0 && globalPool.length > 0
+          ? await rankPool(globalPool, {
+              ...profile,
+              charBudget: remainingChars,
+              maxEntries: remainingEntries,
+            })
+          : [];
+      selected = [...selectedProject, ...selectedGlobal];
+    }
 
     // Lazily index any memories missing an embedding so later retrievals can
     // use semantic similarity. Fire-and-forget; never blocks this reply.
-    backfillMemoryEmbeddings(pool);
+    backfillMemoryEmbeddings([...projectPool, ...globalPool]);
 
     if (selected.length === 0) return { text: "", used: [] };
 

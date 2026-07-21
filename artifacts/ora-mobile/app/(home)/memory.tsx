@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import {
   Bookmark,
   FolderOpen,
+  Globe,
   History,
   Pencil,
   Plus,
@@ -373,13 +374,47 @@ function CategorySelector({
 
 /* ── Memory card ─────────────────────────────────────────────────────────── */
 
+/**
+ * Scope badge for a memory card: "Global" for user-level memories, or
+ * "Project: <name>" for memories anchored to an Ora project (Phase 7 memory
+ * upgrades). Rendered only when the parent passes a scope (the all-scopes
+ * Memories tab); project-scoped tabs omit it.
+ */
+function ScopeBadge({ label }: { label: string | null }) {
+  const c = useColors();
+  const Icon = label === null ? Globe : FolderOpen;
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        alignSelf: "flex-start",
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+      }}
+    >
+      <Icon size={11} color={c.mutedForeground} />
+      <Text style={{ color: c.mutedForeground, fontSize: 11 }}>
+        {label === null ? "Global" : `Project: ${label}`}
+      </Text>
+    </View>
+  );
+}
+
 function MemoryCard({
   memory,
+  scopeLabel,
   onToggle,
   onDelete,
   onEdit,
 }: {
   memory: OraMemory;
+  /** Resolved project name (null = global). Omit to hide the scope badge. */
+  scopeLabel?: string | null;
   onToggle: (m: OraMemory) => void;
   onDelete: (id: number) => void;
   onEdit?: (m: OraMemory) => void;
@@ -399,7 +434,10 @@ function MemoryCard({
           <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
             {memory.title}
           </Text>
-          <CategoryBadge category={memory.category} />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <CategoryBadge category={memory.category} />
+            {scopeLabel !== undefined && <ScopeBadge label={scopeLabel} />}
+          </View>
         </View>
         <Switch
           value={memory.enabled}
@@ -438,10 +476,13 @@ function MemoryCard({
 
 function SupersededCard({
   memory,
+  scopeLabel,
   onRestore,
   onDelete,
 }: {
   memory: OraMemory;
+  /** Resolved project name (null = global). Omit to hide the scope badge. */
+  scopeLabel?: string | null;
   onRestore: (m: OraMemory) => void;
   onDelete: (id: number) => void;
 }) {
@@ -477,6 +518,7 @@ function SupersededCard({
           <Text style={{ color: c.mutedForeground, fontSize: 11 }}>Superseded</Text>
         </View>
       </View>
+      {scopeLabel !== undefined && <ScopeBadge label={scopeLabel} />}
       <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
         {memory.content}
       </Text>
@@ -516,6 +558,10 @@ function MemoriesTab() {
   const [newCategory, setNewCategory] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  // Scope filter across global + project memories: "all" shows everything,
+  // "global" only user-level rows, a number only that project's rows.
+  const [scopeFilter, setScopeFilter] = useState<"all" | "global" | number>("all");
+  const [projects, setProjects] = useState<OraProjectSummary[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
@@ -524,9 +570,15 @@ function MemoriesTab() {
 
   const reload = useCallback(async () => {
     try {
-      const [mems, usageData] = await Promise.all([listMemories(), getMemoryUsage()]);
+      const [mems, usageData, projs] = await Promise.all([
+        listMemories("all"),
+        getMemoryUsage(),
+        // Project names resolve scope badges; non-fatal if the fetch fails.
+        listProjects(true).catch(() => [] as OraProjectSummary[]),
+      ]);
       setMemories(mems);
       setUsage(usageData);
+      setProjects(projs);
     } catch {
       setMemories([]);
     } finally {
@@ -620,8 +672,28 @@ function MemoriesTab() {
 
   if (loading) return <Loading label="Loading memories…" />;
 
-  const active = memories.filter((m) => m.supersededBy == null);
-  const superseded = memories.filter((m) => m.supersededBy != null);
+  // Resolve project names for scope badges/filters; memories can reference a
+  // project no longer in the list — fall back to a generic "Project" label.
+  const projectNameById = new Map<number, string>(projects.map((p) => [p.id, p.name]));
+  const presentProjectIds = new Set<number>();
+  for (const m of memories) {
+    if (typeof m.oraProjectId === "number") presentProjectIds.add(m.oraProjectId);
+  }
+  const projectScopes = [
+    ...projects.filter((p) => presentProjectIds.has(p.id)).map((p) => p.id),
+    ...[...presentProjectIds].filter((id) => !projectNameById.has(id)),
+  ];
+  const scopeMatch = (m: OraMemory) =>
+    scopeFilter === "all"
+      ? true
+      : scopeFilter === "global"
+        ? m.oraProjectId == null
+        : m.oraProjectId === scopeFilter;
+  const scopeLabelFor = (m: OraMemory): string | null =>
+    m.oraProjectId == null ? null : (projectNameById.get(m.oraProjectId) ?? "Project");
+
+  const active = memories.filter((m) => m.supersededBy == null && scopeMatch(m));
+  const superseded = memories.filter((m) => m.supersededBy != null && scopeMatch(m));
   const filtered = categoryFilter ? active.filter((m) => m.category === categoryFilter) : active;
 
   return (
@@ -639,6 +711,54 @@ function MemoriesTab() {
         </Text>
 
         <UsageMeter usage={usage} />
+
+        {/* Scope filter (only when project-scoped memories exist) */}
+        {projectScopes.length > 0 && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {(["all", "global", ...projectScopes] as ("all" | "global" | number)[]).map((s) => {
+              const isActive = scopeFilter === s;
+              const label =
+                s === "all"
+                  ? "All scopes"
+                  : s === "global"
+                    ? "Global"
+                    : (projectNameById.get(s) ?? "Project");
+              return (
+                <Pressable
+                  key={String(s)}
+                  onPress={() => setScopeFilter(s)}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingVertical: 4,
+                    paddingHorizontal: 10,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: isActive ? c.primary : c.border,
+                    backgroundColor: isActive ? `${c.primary}18` : c.muted,
+                  }}
+                >
+                  {s === "global" && (
+                    <Globe size={12} color={isActive ? c.primary : c.mutedForeground} />
+                  )}
+                  {typeof s === "number" && (
+                    <FolderOpen size={12} color={isActive ? c.primary : c.mutedForeground} />
+                  )}
+                  <Text
+                    style={{
+                      color: isActive ? c.primary : c.mutedForeground,
+                      fontSize: 12,
+                      fontFamily: isActive ? "Inter_600SemiBold" : "Inter_400Regular",
+                    }}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         {/* Category filter */}
         {active.length > 0 && (
@@ -779,6 +899,7 @@ function MemoriesTab() {
               <MemoryCard
                 key={m.id}
                 memory={m}
+                scopeLabel={scopeLabelFor(m)}
                 onToggle={toggle}
                 onDelete={remove}
                 onEdit={startEdit}
@@ -804,7 +925,13 @@ function MemoriesTab() {
                   Superseded
                 </Text>
                 {superseded.map((m) => (
-                  <SupersededCard key={m.id} memory={m} onRestore={restore} onDelete={remove} />
+                  <SupersededCard
+                    key={m.id}
+                    memory={m}
+                    scopeLabel={scopeLabelFor(m)}
+                    onRestore={restore}
+                    onDelete={remove}
+                  />
                 ))}
               </>
             )}
@@ -1320,10 +1447,7 @@ function HistoryTab() {
               Archived projects
             </Text>
             {archivedProjects.map((p) => (
-              <Card
-                key={p.id}
-                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
-              >
+              <Card key={p.id} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <FolderOpen size={18} color={c.mutedForeground} />
                 <View style={{ flex: 1 }}>
                   <Text
