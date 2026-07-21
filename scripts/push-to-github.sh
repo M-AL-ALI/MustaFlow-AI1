@@ -38,39 +38,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
-  "artifacts/api-server/src/lib/image-generation-jobs.ts" \
-  "artifacts/api-server/src/lib/ora-assets.ts" \
-  "artifacts/api-server/src/lib/public-ai/file-context-store.ts" \
-  "artifacts/api-server/src/lib/public-ai/ora-projects.ts" \
-  "artifacts/api-server/src/lib/startup-migrations.ts" \
-  "artifacts/api-server/src/routes/image-gen.ts" \
-  "artifacts/api-server/src/routes/ora-assets.ts" \
-  "artifacts/api-server/src/routes/ora-conversations.ts" \
-  "artifacts/api-server/src/routes/public-ai/chat.ts" \
-  "artifacts/api-server/src/routes/public-ai/generate-file.ts" \
-  "artifacts/api-server/src/routes/public-ai/upload.ts" \
-  "artifacts/api-server/src/routes/__tests__/ora-project-spaces.test.ts" \
-  "artifacts/mustaflow/src/components/layout/ora-sidebar.tsx" \
-  "artifacts/mustaflow/src/hooks/ora-conversations-context.ts" \
-  "artifacts/mustaflow/src/hooks/use-ora-chat.ts" \
-  "artifacts/mustaflow/src/hooks/use-ora-conversations.tsx" \
-  "artifacts/mustaflow/src/pages/ora-library.tsx" \
-  "artifacts/ora-mobile/app/(home)/index.tsx" \
-  "artifacts/ora-mobile/app/(home)/library.tsx" \
-  "artifacts/ora-mobile/app/(home)/memory.tsx" \
-  "artifacts/ora-mobile/lib/api.ts" \
-  "artifacts/ora-mobile/lib/types.ts" \
-  "lib/api-client-react/src/generated/api.schemas.ts" \
-  "lib/api-spec/openapi.yaml" \
-  "lib/api-zod/src/generated/api.ts" \
-  "lib/api-zod/src/generated/types/imageEditRequest.ts" \
-  "lib/db/src/schema/ora-assets.ts" \
-  "lib/db/src/schema/ora-file-contexts.ts" \
-  "scripts/package.json" \
-  "scripts/src/migrate-all-outstanding.ts" \
-  "scripts/src/migrate-ora-project-spaces.ts" \
-  "scripts/src/ora-stability-gate.ts" \
-  attached_assets \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true
