@@ -33,9 +33,15 @@ resolves.
   oldest-first (`slice(-5)`); server office-layout-edit picks the FIRST ref
   matching the target format, so with 2+ same-format docs mobile edits the
   newest, web the oldest. Align web to newest-first if this bites.
-- Web residual gap: conversation switch/reload clears the web
-  `documentRefsRef`; after a reload the edit path silently loses refs until
-  a new upload.
+- Refs now PERSIST across reload/restart on both surfaces: web mirrors to
+  sessionStorage, mobile to AsyncStorage (in-memory mirror hydrated once via a
+  cached promise so reads stay sync). Key scheme on both: `conv:<id>` +
+  `standalone`; standalone refs migrate to the conv key when the conversation
+  is first saved. Rules: never write the cache in temporary mode; restore on
+  conversation load AND app launch (launch restore guarded on no active conv,
+  no live refs, not temporary); clear the device-global mobile cache on
+  sign-out and account deletion (AsyncStorage outlives the session, unlike
+  sessionStorage). Cap keeps the HEAD of the list — callers are newest-first.
 - QA note: the FIRST turn after an upload consumes the attachment via
   file-analysis; the documentRefs edit path is only exercised on a
   FOLLOW-UP turn. Test edits as turn 2+, never turn 1.

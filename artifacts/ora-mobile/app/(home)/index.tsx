@@ -155,6 +155,13 @@ import {
 } from "@/lib/api";
 import { useActiveProject } from "@/context/ActiveProjectContext";
 import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
+import {
+  DOC_REFS_STANDALONE_KEY,
+  docRefsKey,
+  getStoredDocumentRefs,
+  loadDocumentRefsStore,
+  storeDocumentRefs,
+} from "@/lib/document-refs-store";
 import { readStoredFocusMode } from "@/lib/focus-mode";
 import {
   getAutoSaveMemories,
@@ -579,9 +586,16 @@ export default function OraChatScreen() {
   // UUID refs of documents/datasets uploaded this conversation. The server
   // re-hydrates their real content during file creation so a generated file is
   // built from the user's actual data instead of fabricated values. Cleared on
-  // every context switch (new chat, temporary toggle, conversation load) since
-  // refs are session-scoped. Capped at the server's max (5, most recent first).
+  // new chat and temporary toggle; mirrored to AsyncStorage (cache-only, keyed
+  // per conversation) so reopening a saved conversation or fully restarting
+  // the app doesn't turn an in-place "Revise ..." into a regeneration —
+  // matches the website's sessionStorage cache. Capped at the server's max
+  // (5, most recent first). Never persisted in temporary mode.
   const documentRefsRef = useRef<string[]>([]);
+  // Mirror of conversationId for callbacks with empty deps (e.g. doUpload) so
+  // ref persistence always writes under the CURRENT conversation's cache key.
+  const conversationIdRef = useRef<number | null>(null);
+  conversationIdRef.current = conversationId;
   const router = useRouter();
   const [actionsMessage, setActionsMessage] = useState<OraMessage | null>(null);
   // Source (remote URL / data URI / local file URI) of the image shown in the
@@ -951,6 +965,13 @@ export default function OraChatScreen() {
           const created = await createConversation(title, activeProjectIdRef.current);
           convId = created.conversation.id;
           setConversationId(convId);
+          // Uploads that happened before this conversation existed were cached
+          // under the "standalone" key — move them to the new conversation's
+          // key so reopening it later restores them (mirrors the website).
+          if (documentRefsRef.current.length > 0) {
+            storeDocumentRefs(docRefsKey(convId), documentRefsRef.current);
+            storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+          }
         }
         await saveConversationMessages(convId, msgs);
       } catch {
@@ -1909,6 +1930,14 @@ export default function OraChatScreen() {
             ref,
             ...documentRefsRef.current.filter((r) => r !== ref),
           ].slice(0, 5);
+          // Mirror to the persistent cache (skipped in temporary mode) so a
+          // "Revise ..." after an app restart still targets this upload.
+          if (!temporaryRef.current) {
+            storeDocumentRefs(
+              docRefsKey(conversationIdRef.current),
+              documentRefsRef.current,
+            );
+          }
         }
         setAttachment({
           ref,
@@ -2058,6 +2087,8 @@ export default function OraChatScreen() {
     setAttachment(null);
     setInput("");
     documentRefsRef.current = [];
+    // A new blank chat must not inherit pre-conversation upload refs.
+    storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
   }, [stopRealtimeForContextSwitch]);
 
   // Toggle temporary mode. Either direction starts a clean conversation so
@@ -2311,12 +2342,20 @@ export default function OraChatScreen() {
       stopRealtimeForContextSwitch();
       // Opening a saved conversation always exits temporary mode.
       setTemporary(false);
-      // Uploaded-file refs are session-scoped to the prior thread; drop them so a
-      // "Create file" in this conversation never reuses a stale ref.
+      // The prior thread's upload refs no longer apply; drop them first so a
+      // failed load never leaves another thread's refs active.
       documentRefsRef.current = [];
       try {
-        const detail = await getConversation(id);
+        // Hydrate the persistent ref cache alongside the fetch so the restore
+        // below works even when this is the first read after an app restart.
+        const [detail] = await Promise.all([getConversation(id), loadDocumentRefsStore()]);
         setConversationId(id);
+        // Restore THIS conversation's cached upload refs so a follow-up
+        // "Revise ..." still targets the file uploaded here — even after the
+        // app was fully closed and reopened. Stale refs are harmless (the
+        // server skips unresolvable ones; signed-in users also recover via
+        // the server-side durable mirror).
+        documentRefsRef.current = getStoredDocumentRefs(docRefsKey(id));
         // Sync last-active to server settings (fire-and-forget).
         void patchOraUserSettings({ lastConversationId: id }).catch(() => {});
         // Follow the loaded chat's scope so a subsequent "new chat" stays in the
@@ -2366,6 +2405,24 @@ export default function OraChatScreen() {
   // "entering" a project on the website (route becomes source of truth there).
   const selectProjectScope = useCallback((projectId: number) => {
     setActiveProjectId(projectId);
+  }, []);
+
+  // Hydrate the persistent upload-ref cache once on launch and restore
+  // standalone (pre-conversation) refs so a "Revise ..." typed right after an
+  // app restart still targets the earlier upload. Skipped when a conversation
+  // is already active (loadConversation restores that thread's own refs),
+  // when refs already exist (a fresh upload must not be clobbered), and in
+  // temporary mode (temporary chats never persist refs).
+  useEffect(() => {
+    void loadDocumentRefsStore().then(() => {
+      if (
+        conversationIdRef.current == null &&
+        documentRefsRef.current.length === 0 &&
+        !temporaryRef.current
+      ) {
+        documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);
+      }
+    });
   }, []);
 
   // ── Drawer → chat bridge ──────────────────────────────────────────────────

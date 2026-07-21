@@ -1,5 +1,6 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { setAuthState, setAuthTokenGetter } from "@/lib/auth-client";
+import { clearAllStoredDocumentRefs } from "@/lib/document-refs-store";
 import { DrawerContentScrollView, DrawerContentComponentProps } from "@react-navigation/drawer";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -771,6 +772,9 @@ function CustomDrawer(props: DrawerContentComponentProps) {
             </View>
             <Pressable
               onPress={async () => {
+                // Device-global cache hygiene: drop cached upload refs so the
+                // next signed-in user never inherits them.
+                clearAllStoredDocumentRefs();
                 await signOut();
                 router.replace("/sign-in");
               }}

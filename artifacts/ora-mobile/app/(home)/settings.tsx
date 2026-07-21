@@ -49,6 +49,7 @@ import {
   updatePreferences,
 } from "@/lib/api";
 import { TokenUnavailableError } from "@/lib/auth-client";
+import { clearAllStoredDocumentRefs } from "@/lib/document-refs-store";
 import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
 import {
   getAutoSaveMemories,
@@ -773,6 +774,9 @@ function AccountSection() {
         variant="destructive"
         icon={LogOut}
         onPress={async () => {
+          // Device-global cache hygiene: drop cached upload refs so the next
+          // signed-in user never inherits them.
+          clearAllStoredDocumentRefs();
           await signOut();
           router.replace("/sign-in");
         }}
@@ -819,6 +823,7 @@ function AccountSection() {
                           }
                           // Account is deleted — sign out and leave. The remote
                           // session is already invalidated, so ignore signOut errors.
+                          clearAllStoredDocumentRefs();
                           try {
                             await signOut();
                           } catch {

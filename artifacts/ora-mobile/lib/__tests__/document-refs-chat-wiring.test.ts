@@ -123,3 +123,86 @@ describe("Mobile Ora — documentRefs ride on every chat path", () => {
     expect(sendMessageBody).not.toContain("documentRefsRef.current = [];");
   });
 });
+
+/**
+ * Regression suite: uploaded refs must survive an app restart / conversation
+ * re-open (parity with the website's sessionStorage reload persistence).
+ *
+ * Root cause being guarded: mobile used to keep refs only in a useRef, so
+ * fully closing the app (or reopening a saved conversation) dropped them and
+ * a follow-up "Revise slide 2 ..." regenerated a lookalike instead of editing
+ * the original uploaded file. Refs are now mirrored to AsyncStorage keyed per
+ * conversation ("conv:<id>") with "standalone" for pre-conversation chat.
+ */
+describe("Mobile Ora — upload refs persist across app restarts", () => {
+  const index = read("../../app/(home)/index.tsx");
+  const store = read("../document-refs-store.ts");
+
+  it("store module is AsyncStorage-backed with the website's key scheme", () => {
+    expect(store).toContain('from "@react-native-async-storage/async-storage"');
+    expect(store).toContain('const DOC_REFS_STORAGE_KEY = "ora_doc_refs";');
+    expect(store).toContain('export const DOC_REFS_STANDALONE_KEY = "standalone";');
+    expect(store).toContain("`conv:${conversationId}`");
+  });
+
+  it("upload mirrors refs to the persistent cache, skipped in temporary mode", () => {
+    const upStart = index.indexOf("const doUpload = useCallback(");
+    expect(upStart).toBeGreaterThan(-1);
+    const upEnd = index.indexOf("const handleCameraCapture = useCallback(", upStart);
+    const upBody = index.slice(upStart, upEnd);
+    expect(upBody).toContain("if (!temporaryRef.current) {");
+    expect(upBody).toContain("docRefsKey(conversationIdRef.current)");
+    expect(upBody).toContain("storeDocumentRefs(");
+  });
+
+  it("creating a conversation migrates standalone refs to its key", () => {
+    const pStart = index.indexOf("const persist = useCallback(");
+    expect(pStart).toBeGreaterThan(-1);
+    const pBody = index.slice(pStart, pStart + 2500);
+    expect(pBody).toContain("storeDocumentRefs(docRefsKey(convId), documentRefsRef.current);");
+    expect(pBody).toContain("storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);");
+  });
+
+  it("loadConversation hydrates the store and restores that thread's refs", () => {
+    const lcStart = index.indexOf("const loadConversation = useCallback(");
+    expect(lcStart).toBeGreaterThan(-1);
+    const lcBody = index.slice(lcStart, lcStart + 3000);
+    // Hydration must complete before the restore read (first read after a
+    // cold app start would otherwise see an empty in-memory map).
+    expect(lcBody).toContain("loadDocumentRefsStore()");
+    expect(lcBody).toContain("documentRefsRef.current = getStoredDocumentRefs(docRefsKey(id));");
+  });
+
+  it("newChat resets the standalone cache so a blank chat inherits nothing", () => {
+    const ncStart = index.indexOf("const newChat = useCallback(");
+    expect(ncStart).toBeGreaterThan(-1);
+    const ncEnd = index.indexOf("const toggleTemporary = useCallback(", ncStart);
+    const ncBody = index.slice(ncStart, ncEnd);
+    expect(ncBody).toContain("storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);");
+  });
+
+  it("toggleTemporary clears the live refs but never writes the store", () => {
+    const ttStart = index.indexOf("const toggleTemporary = useCallback(");
+    expect(ttStart).toBeGreaterThan(-1);
+    const ttEnd = index.indexOf("const toggleVoiceResponses = useCallback(", ttStart);
+    const ttBody = index.slice(ttStart, ttEnd);
+    expect(ttBody).toContain("documentRefsRef.current = [];");
+    expect(ttBody).not.toContain("storeDocumentRefs(");
+  });
+
+  it("launch effect hydrates the cache and restores standalone refs", () => {
+    const anchor = "Hydrate the persistent upload-ref cache once on launch";
+    const hStart = index.indexOf(anchor);
+    expect(hStart).toBeGreaterThan(-1);
+    const hBody = index.slice(hStart, hStart + 1200);
+    expect(hBody).toContain("void loadDocumentRefsStore().then(() => {");
+    // Guards: never clobber an active conversation, fresh uploads, or
+    // temporary mode.
+    expect(hBody).toContain("conversationIdRef.current == null");
+    expect(hBody).toContain("documentRefsRef.current.length === 0");
+    expect(hBody).toContain("!temporaryRef.current");
+    expect(hBody).toContain(
+      "documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);",
+    );
+  });
+});
