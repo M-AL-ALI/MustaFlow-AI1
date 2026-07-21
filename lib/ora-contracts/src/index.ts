@@ -240,6 +240,35 @@ export const oraVideoSchema = z.object({
 });
 
 /**
+ * Why Ora asked a clarifying question instead of executing an ambiguous
+ * uploaded-file edit. Static enum values only — safe for diagnostics.
+ */
+export const ORA_CLARIFICATION_KINDS = [
+  "vague_file_edit", // "make this better" — no concrete instruction
+  "multi_file_source", // several uploads, source file for the edit unclear
+  "unclear_replacement_target", // "change the pricing section" — no target text
+  "missing_edit_instruction", // "return it after modification" — no modification stated
+] as const;
+
+export type OraClarificationKind = (typeof ORA_CLARIFICATION_KINDS)[number];
+
+/**
+ * The pending-task context a clarification round-trips through the CLIENT
+ * (the server is stateless per turn). Returned on a clarification response,
+ * echoed back as `pendingClarification` on the user's next send, and merged
+ * server-side with the answer so the original task continues.
+ */
+export const oraPendingClarificationSchema = z.object({
+  /** The original ambiguous request (re-validated server-side on echo). */
+  originalMessage: z.string().min(1).max(4000),
+  kind: z.enum(ORA_CLARIFICATION_KINDS),
+  /** Output format inferred at ask time, so continuation doesn't re-infer. */
+  inferredFileFormat: z.enum(["csv", "xlsx", "docx", "pdf", "pptx"]).nullable().optional(),
+});
+
+export type OraPendingClarification = z.infer<typeof oraPendingClarificationSchema>;
+
+/**
  * The canonical persisted Ora message schema. Mirrored byte-for-byte by both
  * the conversations store and the legacy/anonymous transcript store.
  */
@@ -293,6 +322,11 @@ export const oraMessageSchema = z.object({
     .array(z.object({ id: z.number().int(), title: z.string().max(200) }))
     .max(30)
     .optional(),
+  // Clarifying-question state — persisted so a pending clarification survives
+  // reload and the client can re-arm the continuation context.
+  needsClarification: z.boolean().optional(),
+  clarificationKind: z.enum(ORA_CLARIFICATION_KINDS).optional(),
+  pendingTaskContext: oraPendingClarificationSchema.optional(),
 });
 
 /** Post-transform persisted message type (bytes stripped from generatedFile). */
@@ -441,6 +475,12 @@ export interface OraMessageData {
   memorySaved?: boolean;
   memorySupersededTitles?: string[];
   memoriesUsed?: OraMemoryUsed[];
+  /** True when this assistant turn is a clarifying question for an ambiguous
+   * uploaded-file edit; the client echoes `pendingTaskContext` back as
+   * `pendingClarification` on the next send so the original task continues. */
+  needsClarification?: boolean;
+  clarificationKind?: OraClarificationKind;
+  pendingTaskContext?: OraPendingClarification;
 }
 
 /* ── Account consistency diagnostics ───────────────────────────────────────── */

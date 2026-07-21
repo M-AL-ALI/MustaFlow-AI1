@@ -302,12 +302,30 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualMobile:
       "Repeat the Word-doc edit, logo-with-'word', and Retry-live-search prompts on mobile; verify identical routing to website (payload parity: languageHint + conversationId now sent).",
   },
+  {
+    id: "clarifying-questions",
+    title:
+      "Clarifying questions for ambiguous uploaded-file edits (one question max, pendingClarification round-trip, stale-pending guard)",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /public-ai\/clarification-planner/i,
+      /ora-clarifying-questions\.test\.ts$/i,
+      /ora-clarification-wiring\.test\.ts$/i,
+      /clarification-parity\.test\.ts$/i,
+      /pending-clarification-store/i,
+    ],
+    manualWebsite:
+      "Upload a DOCX, then: (1) 'Make this better.' → Ora asks layout-vs-redesign (uncharged, no file yet); (2) answer 'keep the layout' → the ORIGINAL edit executes and returns an edited file; (3) 'Make it more professional' executes immediately with NO question; (4) upload a second file (XLSX) and say 'Update the presentation.' → Ora asks which file is the data source. Reload between question and answer — the answer must still continue the original task.",
+    manualMobile:
+      "Repeat the DOCX 'Make this better.' → answer flow on mobile (streamed replies never ask; the question arrives via the /chat fallback). Kill and reopen the app between question and answer; the answer must still continue the original task. Verify a new chat or temporary toggle drops the pending question.",
+  },
 ];
 
 const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/current-datetime-block.test.ts",
   "src/lib/public-ai/__tests__/model-router.test.ts",
   "src/lib/public-ai/__tests__/ora-behavior-qa.test.ts",
+  "src/lib/public-ai/__tests__/ora-clarifying-questions.test.ts",
   "src/lib/public-ai/__tests__/ora-conversation-smoke.test.ts",
   "src/lib/public-ai/__tests__/ora-quality-identity.test.ts",
   "src/lib/public-ai/__tests__/ora-router-hardening.test.ts",
@@ -391,6 +409,7 @@ const WEB_REALTIME = [
 
 const WEB_ORA_UI = [
   "src/components/ora/__tests__/ora-chat-ux-wiring.test.ts",
+  "src/hooks/__tests__/ora-clarification-wiring.test.ts",
   "src/lib/__tests__/blocker-fixes-b39.test.ts",
   "src/pages/__tests__/billing-plan-cards.test.ts",
   "src/pages/__tests__/ora-account-sync-wiring.test.ts",
@@ -415,6 +434,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/account-sync-wiring.test.ts",
   "lib/__tests__/billing-plan-cards.test.ts",
   "lib/__tests__/chat-payload-parity.test.ts",
+  "lib/__tests__/clarification-parity.test.ts",
   "lib/__tests__/document-picker-config.test.ts",
   "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",

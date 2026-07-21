@@ -2,6 +2,23 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora Phase 4 — Clarifying Questions for ambiguous uploaded-file edits (2026-07-21)
+
+Ora now asks ONE clarifying question instead of guessing when an uploaded-file edit request is ambiguous, then executes the original task once the user answers. No publish/TestFlight yet (roadmap phases continue).
+
+Server (`artifacts/api-server/src/lib/public-ai/clarification-planner.ts`):
+
+- `planOraClarification`: deterministic, pre-LLM planner that runs AFTER `resolveFinalOraRoute` (never fights image/search/ZIP/forced-search escapes) and BEFORE quota (a clarification is never charged). Four kinds: `vague_file_edit` ("Make this better."), `unclear_replacement_target` ("Change the pricing section."), `missing_edit_instruction` ("Return it after modification."), `multi_file_source` (data + deck uploaded, "Update the presentation." — question names the actual files). Anchored patterns: ANY concrete instruction (direction, quoted text, named source, explicit format, stated modification) stays clear. One question max per task (`hasPendingClarification` caps it).
+- Stateless round-trip: the clarifying reply carries `needsClarification`/`clarificationKind`/`pendingTaskContext`; the client echoes it back as `pendingClarification` and `resolveClarificationContinuation` merges answer + original ask (with a stale-pending guard: a complete new instruction bypasses the old context). Merged message re-routes to the file editor with the original format.
+- `/chat/stream` bounces would-be clarifications pre-stream (`{streamingFallback:true, tool:"file_generation"}`) so a streamed reply is never a question — no streaming-cadence changes.
+- Contract fields added to `lib/ora-contracts` (`OraClarificationKind`, `OraPendingClarification`, ChatRequest/ChatResponse fields).
+
+Website (`use-ora-chat.ts`): echoes `pendingClarification` on the next send; one-shot arm/clear from every reply; sessionStorage cache keyed like document refs (standalone→conversation move on first save, restore on conversation open, never in temporary mode).
+
+Mobile (`artifacts/ora-mobile`): full parity — new `lib/pending-clarification-store.ts` (AsyncStorage-backed sync-mirror cache, validated entries, capped keys), `chatReq.pendingClarification` echo, `applyPendingClarification` one-shot helper on all /chat paths (streaming success clears), lifecycle clears (new chat, temporary toggle) and restores (conversation open, app launch), `buildChatExtras` maps the reply flags.
+
+Tests/gate: `ora-clarifying-questions.test.ts` (17, real helpers, no mocks), `ora-clarification-wiring.test.ts` (web, 7), `clarification-parity.test.ts` (mobile, 10); `document-refs-chat-wiring.test.ts` updated for the widened launch hydration; all wired into the stability gate; new `ORA_FEATURE_REGISTRY` entry `clarifying-questions` with manual website/mobile checklists. Fast gate: 13 pass / 1 warn (git-clean, pre-commit only) / 0 fail.
+
 ## Release: Office in-place edits shipped to production + TestFlight build 52 (2026-07-20)
 
 - Website published to https://www.mustaflow.com at commit `7619dac1` (feature commits `dd7a41d1`/`69b26cfd`/`8c926c3a`; release gate 20/20 PASS, clean tree).

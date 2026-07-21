@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { flushSync } from "react-dom";
 import { useUser } from "@clerk/react";
-import type { OraFileEditQuality } from "@workspace/ora-contracts";
+import type {
+  OraFileEditQuality,
+  OraClarificationKind,
+  OraPendingClarification,
+} from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
@@ -139,6 +143,15 @@ export interface OraMessage {
    * answerable from general knowledge leave this false.
    */
   searchRetryable?: boolean;
+  /**
+   * True when this assistant reply is a clarifying question about an ambiguous
+   * uploaded-file edit request instead of an executed edit. The user's next
+   * message is sent with the round-tripped pending task context so the server
+   * can merge the answer with the original ask and execute it.
+   */
+  needsClarification?: boolean;
+  /** Which ambiguity triggered the clarifying question (analytics/UI hints). */
+  clarificationKind?: OraClarificationKind;
 }
 
 export interface OraSession {
@@ -559,6 +572,61 @@ function clearAllStoredDocumentRefs(): void {
   }
 }
 
+// Pending clarification context is persisted (cache-only, same keying as doc
+// refs) so a reload between Ora's clarifying question and the user's answer
+// doesn't lose the original task — without it the answer ("Keep the original
+// layout...") would be executed as a brand-new standalone message.
+const PENDING_CLARIFICATION_STORAGE_KEY = "ora_pending_clarification";
+
+function readPendingClarificationMap(): Record<string, OraPendingClarification> {
+  try {
+    const raw = sessionStorage.getItem(PENDING_CLARIFICATION_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, OraPendingClarification> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (
+        value &&
+        typeof value === "object" &&
+        typeof (value as { originalMessage?: unknown }).originalMessage === "string" &&
+        typeof (value as { kind?: unknown }).kind === "string"
+      ) {
+        map[key] = value as OraPendingClarification;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function getStoredPendingClarification(key: string): OraPendingClarification | null {
+  return readPendingClarificationMap()[key] ?? null;
+}
+
+function storePendingClarification(key: string, pending: OraPendingClarification | null): void {
+  try {
+    const map = readPendingClarificationMap();
+    if (pending == null) {
+      delete map[key];
+    } else {
+      map[key] = pending;
+    }
+    const keys = Object.keys(map);
+    if (keys.length > DOC_REFS_MAX_KEYS) {
+      for (const stale of keys.slice(0, keys.length - DOC_REFS_MAX_KEYS)) delete map[stale];
+    }
+    if (Object.keys(map).length === 0) {
+      sessionStorage.removeItem(PENDING_CLARIFICATION_STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(PENDING_CLARIFICATION_STORAGE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   // authFetch (not raw fetch) so a fresh Clerk bearer token is attached: the
   // dev-mode JWT cookie expires ~60s and is unreliable in the preview iframe,
@@ -709,6 +777,9 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     // Persist the search-fallback flags so the caveat/Retry state survives reload
     ...(m.searchFallback ? { searchFallback: true } : {}),
     ...(m.searchRetryable ? { searchRetryable: true } : {}),
+    // Persist the clarifying-question flags so the state survives reload
+    ...(m.needsClarification ? { needsClarification: true } : {}),
+    ...(m.clarificationKind ? { clarificationKind: m.clarificationKind } : {}),
   }));
 }
 
@@ -1077,6 +1148,14 @@ export function useOraChat(): UseOraChatReturn {
   // sessionStorage (cache-only) so a reload doesn't break "Revise ..." turns.
   const documentRefsRef = useRef<string[]>([]);
 
+  // The pending clarification context for THIS conversation. Set when Ora
+  // replies with a clarifying question about an ambiguous uploaded-file edit;
+  // the user's next message is sent WITH this context so the server merges the
+  // answer into the original task and executes it. One-shot: replaced/cleared
+  // by whatever the next reply returns. Mirrored to sessionStorage (cache-only,
+  // skipped in temporary mode) so a reload doesn't orphan the answer.
+  const pendingClarificationRef = useRef<OraPendingClarification | null>(null);
+
   // Rolling conversation summary for THIS conversation. As the chat grows past
   // the recent-message window, older turns are condensed into this running
   // summary (maintained server-side, returned each reply) and re-sent so long
@@ -1126,6 +1205,11 @@ export function useOraChat(): UseOraChatReturn {
       if (id != null && !temporaryRef.current && documentRefsRef.current.length > 0) {
         storeDocumentRefs(docRefsKey(id), documentRefsRef.current);
         storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+      }
+      // Same move for a clarification asked before the conversation existed.
+      if (id != null && !temporaryRef.current && pendingClarificationRef.current) {
+        storePendingClarification(docRefsKey(id), pendingClarificationRef.current);
+        storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
       }
     }
     if (id == null) return;
@@ -1215,6 +1299,8 @@ export function useOraChat(): UseOraChatReturn {
             // Same session as before the reload — its cached upload refs are
             // still valid, so restore them alongside the transcript.
             documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);
+            pendingClarificationRef.current =
+              getStoredPendingClarification(DOC_REFS_STANDALONE_KEY);
           }
           return;
         } catch (err: unknown) {
@@ -1276,6 +1362,8 @@ export function useOraChat(): UseOraChatReturn {
             // rotated, signed-in users still resolve via the durable mirror
             // and any truly stale refs are skipped server-side.
             documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);
+            pendingClarificationRef.current =
+              getStoredPendingClarification(DOC_REFS_STANDALONE_KEY);
           }
           return;
         } catch (err: unknown) {
@@ -1346,6 +1434,7 @@ export function useOraChat(): UseOraChatReturn {
     if (temporaryRef.current) {
       loadedConvRef.current = null;
       documentRefsRef.current = [];
+      pendingClarificationRef.current = null;
       conversationSummaryRef.current = "";
       summarizedUpToRef.current = 0;
       setMessages([]);
@@ -1355,6 +1444,7 @@ export function useOraChat(): UseOraChatReturn {
     if (id == null) {
       loadedConvRef.current = null;
       documentRefsRef.current = [];
+      pendingClarificationRef.current = null;
       conversationSummaryRef.current = "";
       summarizedUpToRef.current = 0;
       setMessages([]);
@@ -1367,6 +1457,7 @@ export function useOraChat(): UseOraChatReturn {
     // THIS conversation's cached upload refs so follow-up "Revise ..." turns
     // still target the original uploaded file after a reload or switch-back.
     documentRefsRef.current = getStoredDocumentRefs(docRefsKey(id));
+    pendingClarificationRef.current = getStoredPendingClarification(docRefsKey(id));
     conversationSummaryRef.current = "";
     summarizedUpToRef.current = 0;
     // Snapshot the edit generation before fetching. If the user types/sends a
@@ -1798,6 +1889,11 @@ export function useOraChat(): UseOraChatReturn {
           if (documentRefsRef.current.length > 0) {
             body.documentRefs = documentRefsRef.current;
           }
+          // A clarifying question is outstanding — send its round-tripped task
+          // context so the server merges this answer with the original ask.
+          if (pendingClarificationRef.current) {
+            body.pendingClarification = pendingClarificationRef.current;
+          }
           if (language && language !== "auto") {
             body.language = language;
           } else {
@@ -1835,6 +1931,9 @@ export function useOraChat(): UseOraChatReturn {
             windowHours?: number;
             searchFallback?: boolean;
             searchRetryable?: boolean;
+            needsClarification?: boolean;
+            clarificationKind?: OraClarificationKind;
+            pendingTaskContext?: OraPendingClarification;
           };
 
           const buildAssistantMsg = (d: ChatResponseData): OraMessage => ({
@@ -1849,6 +1948,8 @@ export function useOraChat(): UseOraChatReturn {
             ...(d.videos && d.videos.length > 0 ? { videos: d.videos } : {}),
             ...(d.searchFallback ? { searchFallback: true } : {}),
             ...(d.searchRetryable ? { searchRetryable: true } : {}),
+            ...(d.needsClarification ? { needsClarification: true } : {}),
+            ...(d.clarificationKind ? { clarificationKind: d.clarificationKind } : {}),
             ...(d.memoriesUsed && d.memoriesUsed.length > 0
               ? { memoriesUsed: d.memoriesUsed }
               : {}),
@@ -2020,6 +2121,19 @@ export function useOraChat(): UseOraChatReturn {
           }
 
           streamAbortRef.current = null;
+
+          // One-shot pending-clarification bookkeeping: a clarifying reply arms
+          // the NEXT turn with its round-tripped task context; any other reply
+          // clears whatever was pending (answered, superseded, or stale).
+          const nextPending =
+            data.needsClarification && data.pendingTaskContext ? data.pendingTaskContext : null;
+          pendingClarificationRef.current = nextPending;
+          if (!temporaryRef.current) {
+            storePendingClarification(
+              docRefsKey(convRef.current?.currentConversationId ?? null),
+              nextPending,
+            );
+          }
 
           // True when this reply bypassed real provider-level token streaming.
           // Covers both the /chat fallback path and SSE providers that wrap a

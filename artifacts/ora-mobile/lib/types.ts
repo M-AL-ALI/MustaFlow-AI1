@@ -25,14 +25,18 @@ export type {
   OraMessageData,
   OraAccountConsistency,
   OraAccountConsistencyLatest,
+  OraClarificationKind,
+  OraPendingClarification,
 } from "@workspace/ora-contracts";
 
 import type {
+  OraClarificationKind,
   OraFileEditQuality,
   OraImage,
   OraMemoryUsed,
   OraMessageData,
   OraMode,
+  OraPendingClarification,
   OraRole,
   OraSource,
   OraTier,
@@ -327,6 +331,14 @@ export interface ChatRequest {
    * the website hook's `body.conversationId`.
    */
   conversationId?: number | null;
+  /**
+   * Round-tripped task context from a prior clarifying question about an
+   * ambiguous uploaded-file edit. Present ONLY on the turn immediately after
+   * Ora asked for clarification, so the server merges this message (the
+   * answer) with the original ask and executes it. Mirrors the website hook's
+   * `body.pendingClarification`.
+   */
+  pendingClarification?: OraPendingClarification;
 }
 
 export interface ChatResponse {
@@ -369,6 +381,17 @@ export interface ChatResponse {
    * search" affordance is worth offering.
    */
   searchRetryable?: boolean;
+  /**
+   * True when this reply is a clarifying question about an ambiguous
+   * uploaded-file edit instead of an executed edit. The client echoes
+   * `pendingTaskContext` back as `pendingClarification` on the next send so
+   * the original task continues. Uncharged server-side.
+   */
+  needsClarification?: boolean;
+  /** Which ambiguity triggered the clarifying question. */
+  clarificationKind?: OraClarificationKind;
+  /** Opaque task context to round-trip on the user's next message. */
+  pendingTaskContext?: OraPendingClarification;
 }
 
 export interface UploadResponse {

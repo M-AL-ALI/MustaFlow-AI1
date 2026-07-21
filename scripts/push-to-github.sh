@@ -38,6 +38,19 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  lib/ora-contracts/src/index.ts \
+  artifacts/api-server/src/lib/public-ai/clarification-planner.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/ora-clarifying-questions.test.ts \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  artifacts/mustaflow/src/hooks/__tests__/ora-clarification-wiring.test.ts \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  artifacts/ora-mobile/lib/types.ts \
+  artifacts/ora-mobile/lib/pending-clarification-store.ts \
+  artifacts/ora-mobile/lib/__tests__/clarification-parity.test.ts \
+  artifacts/ora-mobile/lib/__tests__/document-refs-chat-wiring.test.ts \
+  scripts/src/ora-stability-gate.ts \
+  attached_assets \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true

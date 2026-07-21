@@ -28,6 +28,11 @@ import {
   extractMemorySaveCandidate,
 } from "../../lib/public-ai/orchestrator";
 import { resolveFinalOraRoute } from "../../lib/public-ai/route-resolution";
+import {
+  planOraClarification,
+  resolveClarificationContinuation,
+} from "../../lib/public-ai/clarification-planner";
+import { oraPendingClarificationSchema } from "@workspace/ora-contracts";
 import type { AuthedOraUser } from "../../lib/public-ai/authed-user";
 import type { Provider } from "../../lib/ai-provider-config";
 import type { OraVideo } from "../../lib/public-ai/web-search";
@@ -953,6 +958,15 @@ const bodySchema = z.object({
    * funneled to the sign-in CTA.
    */
   forceSearch: z.boolean().optional(),
+  /**
+   * Echo of the pendingTaskContext from a clarifying-question response. When
+   * Ora asked ONE clarification for an ambiguous uploaded-file edit, the
+   * client sends this back with the user's answer so the server can merge
+   * them and continue the ORIGINAL task (the server is stateless per turn).
+   * Client-supplied: originalMessage is capped by the schema and re-scanned
+   * with scanUserInput exactly like `message`.
+   */
+  pendingClarification: oraPendingClarificationSchema.optional(),
 });
 
 /**
@@ -1182,6 +1196,7 @@ router.post("/public-ai/chat", async (req, res) => {
     conversationId,
     streamFallbackToken,
     forceSearch,
+    pendingClarification,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -1290,7 +1305,10 @@ router.post("/public-ai/chat", async (req, res) => {
   }
   timing.t3 = Date.now();
 
-  if (!scanUserInput(message)) {
+  if (
+    !scanUserInput(message) ||
+    (pendingClarification && !scanUserInput(pendingClarification.originalMessage))
+  ) {
     res
       .status(400)
       .json({ error: "Your message contains patterns that cannot be processed. Please rephrase." });
@@ -1328,12 +1346,29 @@ router.post("/public-ai/chat", async (req, res) => {
     authed?.userId ?? null,
   );
 
+  // Merge a clarification answer with its round-tripped pending task context
+  // so ROUTING and the file-edit engine see the full original task. The raw
+  // `message` stays the chat-visible user turn everywhere else (persistence,
+  // memory extraction). Includes the stale-pending guard: a self-sufficient
+  // new instruction ignores the pending context entirely.
+  const continuation = resolveClarificationContinuation({
+    message,
+    pending: pendingClarification ?? null,
+    carriedDocs,
+  });
+  const routedMessage = continuation.routedMessage;
+
   // Deterministic final routing precedence — forceSearch pin (a user-initiated
   // "Retry live search" is terminal and keeps all auth/metering gating below),
   // uploaded-file-edit priority over chat/incidental image/incidental search,
   // and the ZIP/code-archive analysis guard. Shared with /chat/stream via
   // resolveFinalOraRoute so the two handlers cannot drift.
-  const finalRoute = resolveFinalOraRoute({ decision, message, carriedDocs, forceSearch });
+  const finalRoute = resolveFinalOraRoute({
+    decision,
+    message: routedMessage,
+    carriedDocs,
+    forceSearch,
+  });
   decision = finalRoute.decision;
 
   const deepAllowed = decision.tool === "deep_thinking";
@@ -1350,6 +1385,34 @@ router.post("/public-ai/chat", async (req, res) => {
     inferredFileFormat: finalRoute.inferredFileFormat,
     conflictResolution: finalRoute.conflictResolution,
   };
+
+  // Ask ONE clarifying question instead of guessing on an ambiguous
+  // uploaded-file edit. Deterministic and pre-LLM — returned BEFORE
+  // checkToolAccess/quota so a clarification is never charged or counted
+  // (deny-CTA precedent). The pending context round-trips through the client;
+  // documentRefs persist because clients re-send them on every turn.
+  const clarification = continuation.applied
+    ? null
+    : planOraClarification({
+        message,
+        carriedDocs,
+        finalTool: decision.tool,
+        conflictResolution: finalRoute.conflictResolution,
+        inferredFileFormat: finalRoute.inferredFileFormat,
+        hasPendingClarification: !!pendingClarification,
+      });
+  if (clarification) {
+    res.json({
+      reply: clarification.question,
+      needsClarification: true,
+      clarificationKind: clarification.kind,
+      pendingTaskContext: clarification.pendingTaskContext,
+      msgCount: session.msgCount,
+      msgLimit: effectiveMsgLimit,
+      serverDiag: { ...routeDiag, clarificationKind: clarification.kind },
+    });
+    return;
+  }
 
   // Plan gating is derived entirely from the selected tool's required access
   // level. Denied requests return a CTA without charging or counting them.
@@ -1433,14 +1496,16 @@ router.post("/public-ai/chat", async (req, res) => {
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     // When the user is asking for a file built from an earlier upload, feed the
     // re-hydrated source text into the builder so the output reflects it.
-    const filePrompt = carriedDocs ? `${message}\n\n${carriedDocs}` : message;
+    // routedMessage carries the merged original-task + clarification answer
+    // when this turn continues a clarifying question.
+    const filePrompt = carriedDocs ? `${routedMessage}\n\n${carriedDocs}` : routedMessage;
     const { generateFileFromPrompt, FileGenerationError } =
       await import("../../lib/public-ai/file-builder");
     try {
       const { tryApplyLayoutPreservingFileEdit } =
         await import("../../lib/public-ai/office-layout-edit");
       const layoutEditResult = await tryApplyLayoutPreservingFileEdit({
-        message,
+        message: routedMessage,
         format: detectedFormat,
         documentRefs,
         sessionId: session.sessionId,
@@ -2415,6 +2480,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     oraProjectId,
     temporary,
     conversationId,
+    pendingClarification,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -2429,7 +2495,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   }
   timing.t1 = Date.now(); // session cookie validated
 
-  if (!scanUserInput(message)) {
+  if (
+    !scanUserInput(message) ||
+    (pendingClarification && !scanUserInput(pendingClarification.originalMessage))
+  ) {
     res
       .status(400)
       .json({ error: "Your message contains patterns that cannot be processed. Please rephrase." });
@@ -2553,11 +2622,26 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     authed?.userId ?? null,
   );
 
+  // Merge a clarification answer with its round-tripped pending task context
+  // so routing sees the full original task (same logic as /chat — the merged
+  // edit then bounces to /chat below, which repeats the merge and executes).
+  const continuation = resolveClarificationContinuation({
+    message,
+    pending: pendingClarification ?? null,
+    carriedDocs,
+  });
+  const routedMessage = continuation.routedMessage;
+
   // Deterministic final routing precedence — same shared resolver as the
   // non-streaming /chat route so the two handlers cannot drift. The stream
   // route never receives a user-forced search retry (clients send those to
   // the non-streaming route), so forceSearch is always false here.
-  const finalRoute = resolveFinalOraRoute({ decision, message, carriedDocs, forceSearch: false });
+  const finalRoute = resolveFinalOraRoute({
+    decision,
+    message: routedMessage,
+    carriedDocs,
+    forceSearch: false,
+  });
   decision = finalRoute.decision;
 
   const deepAllowed = decision.tool === "deep_thinking";
@@ -2605,6 +2689,26 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       msgCount: session.msgCount,
       msgLimit: effectiveMsgLimit,
     });
+    return;
+  }
+
+  // Clarifying questions are only ever emitted by the non-streaming /chat
+  // route. When this turn would trigger one (including the "answer"-routed
+  // "return it after modification" case that would otherwise stream a generic
+  // reply), bounce the client there exactly like the specialist tools below —
+  // stream clients discard any other plain JSON on this endpoint.
+  if (
+    !continuation.applied &&
+    planOraClarification({
+      message,
+      carriedDocs,
+      finalTool: decision.tool,
+      conflictResolution: finalRoute.conflictResolution,
+      inferredFileFormat: finalRoute.inferredFileFormat,
+      hasPendingClarification: !!pendingClarification,
+    })
+  ) {
+    res.json({ streamingFallback: true, tool: "file_generation" });
     return;
   }
 

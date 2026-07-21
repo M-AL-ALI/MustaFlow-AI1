@@ -1,0 +1,87 @@
+Proceed to Phase 4: Clarifying Questions.
+
+Do not publish. Do not submit TestFlight.
+
+Goal:
+Ora should ask one smart clarification question when a user request is too vague or ambiguous, instead of guessing and producing the wrong file/answer.
+
+Scope:
+This must work for website and mobile. It must preserve documentRefs, conversationId, project/context, mode, and file-edit state while waiting for the user's clarification.
+
+Clarification examples:
+1. User uploads file and says:
+   “Make this better.”
+   Ora should ask:
+   “Do you want me to preserve the original layout, or create a redesigned version?”
+
+2. User uploads multiple files and says:
+   “Update the presentation.”
+   Ora should ask:
+   “Should I use the spreadsheet as the data source for the PowerPoint?”
+
+3. User says:
+   “Change the pricing section.”
+   Ora should ask:
+   “Which pricing text should I replace? You can quote the sentence or tell me the slide/section.”
+
+4. User asks:
+   “Return it after modification.”
+   Ora should ask:
+   “What modification should I make before returning the file?”
+
+Rules:
+- Ask only when needed.
+- Do not over-ask obvious requests.
+- Clear requests should execute immediately.
+- Clarification follow-up must continue the original task.
+- documentRefs must persist through clarification.
+- The clarification should not consume/lose uploaded file context.
+- No image CTA or generic text-only answer for vague uploaded-file edits.
+- Preserve mobile/website parity.
+
+Implementation requirements:
+1. Audit existing routing/file-edit ambiguity handling.
+2. Add a clarification planner/resolver:
+   - detect vague uploaded-file edit requests
+   - detect ambiguous multi-file references
+   - detect unclear replacement targets
+   - detect missing edit instruction
+3. Response should return a structured clarification state:
+   - needsClarification: true
+   - clarificationQuestion
+   - clarificationKind
+   - pendingTaskContext
+4. Website UI:
+   - show the clarification as a normal Ora message
+   - keep uploaded-file context active
+   - allow user response to continue the same task
+5. Mobile UI:
+   - same behavior
+   - context persists through send/retry/session recovery
+6. Backend:
+   - when clarification answer arrives, merge it with pendingTaskContext and continue route/tool execution
+   - do not drop documentRefs
+7. Tests:
+   - vague “make this better” asks clarification
+   - “return it after modification” asks what modification
+   - clear DOCX Risk Notes edit does not ask clarification
+   - multi-file ambiguity asks source-file question
+   - clarification follow-up resumes file edit
+   - documentRefs persist through clarification
+   - website/mobile payload parity
+8. Update ORA_FEATURE_REGISTRY if needed.
+9. Run fast gate.
+10. Commit as scoped Phase 4 commit.
+11. Push to GitHub.
+12. Run fast gate again on clean tree.
+13. Report:
+   - commit SHA
+   - changed files
+   - backend impact
+   - website impact
+   - mobile impact
+   - tests added
+   - fast gate result
+   - known limitations
+
+No publish/TestFlight until all selected phases are complete and the full release gate passes.

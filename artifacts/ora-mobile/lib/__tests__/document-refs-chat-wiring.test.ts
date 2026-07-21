@@ -195,7 +195,11 @@ describe("Mobile Ora — upload refs persist across app restarts", () => {
     const hStart = index.indexOf(anchor);
     expect(hStart).toBeGreaterThan(-1);
     const hBody = index.slice(hStart, hStart + 1200);
-    expect(hBody).toContain("void loadDocumentRefsStore().then(() => {");
+    // Phase 4 widened the launch hydration to also load the pending-
+    // clarification cache; both stores hydrate before the standalone restore.
+    expect(hBody).toContain(
+      "void Promise.all([loadDocumentRefsStore(), loadPendingClarificationStore()]).then(() => {",
+    );
     // Guards: never clobber an active conversation, fresh uploads, or
     // temporary mode.
     expect(hBody).toContain("conversationIdRef.current == null");

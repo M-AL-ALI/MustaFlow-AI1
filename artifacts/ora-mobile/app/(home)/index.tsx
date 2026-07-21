@@ -165,6 +165,11 @@ import {
   loadDocumentRefsStore,
   storeDocumentRefs,
 } from "@/lib/document-refs-store";
+import {
+  getStoredPendingClarification,
+  loadPendingClarificationStore,
+  storePendingClarification,
+} from "@/lib/pending-clarification-store";
 import { readStoredFocusMode } from "@/lib/focus-mode";
 import {
   getAutoSaveMemories,
@@ -185,6 +190,7 @@ import type {
   OraFileEditQuality,
   OraMessage,
   OraMode,
+  OraPendingClarification,
   OraProjectSummary,
   OraSession,
 } from "@/lib/types";
@@ -545,6 +551,8 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     generatedFile: buildGeneratedFile(res),
     ...(res.searchFallback ? { searchFallback: true } : {}),
     ...(res.searchRetryable ? { searchRetryable: true } : {}),
+    ...(res.needsClarification ? { needsClarification: true } : {}),
+    ...(res.clarificationKind ? { clarificationKind: res.clarificationKind } : {}),
   };
 }
 
@@ -627,6 +635,14 @@ export default function OraChatScreen() {
   // matches the website's sessionStorage cache. Capped at the server's max
   // (5, most recent first). Never persisted in temporary mode.
   const documentRefsRef = useRef<string[]>([]);
+  // The pending clarification context for THIS conversation. Set when Ora
+  // replies with a clarifying question about an ambiguous uploaded-file edit;
+  // the user's next message is sent WITH this context so the server merges the
+  // answer into the original task and executes it. One-shot: replaced/cleared
+  // by whatever the next reply returns. Mirrored to AsyncStorage (cache-only,
+  // keyed per conversation, never in temporary mode) so reopening the app or a
+  // saved conversation doesn't orphan the answer. Mirrors the website hook.
+  const pendingClarificationRef = useRef<OraPendingClarification | null>(null);
   // Mirror of conversationId for callbacks with empty deps (e.g. doUpload) so
   // ref persistence always writes under the CURRENT conversation's cache key.
   const conversationIdRef = useRef<number | null>(null);
@@ -1007,6 +1023,11 @@ export default function OraChatScreen() {
             storeDocumentRefs(docRefsKey(convId), documentRefsRef.current);
             storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
           }
+          // Same move for a clarification asked before the conversation existed.
+          if (pendingClarificationRef.current) {
+            storePendingClarification(docRefsKey(convId), pendingClarificationRef.current);
+            storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
+          }
         }
         await saveConversationMessages(convId, msgs);
       } catch {
@@ -1225,6 +1246,26 @@ export default function OraChatScreen() {
             ...(documentRefsRef.current.length > 0
               ? { documentRefs: documentRefsRef.current }
               : {}),
+            // A clarifying question is outstanding — send its round-tripped
+            // task context so the server merges this answer with the original
+            // ask and executes it. Mirrors the website hook.
+            ...(pendingClarificationRef.current
+              ? { pendingClarification: pendingClarificationRef.current }
+              : {}),
+          };
+
+          // One-shot pending-clarification bookkeeping: a clarifying reply arms
+          // the NEXT turn with its round-tripped task context; any other
+          // completed reply clears whatever was pending (answered, superseded,
+          // or stale). Mirrors the website hook; never persisted in temporary
+          // mode.
+          const applyPendingClarification = (res: ChatResponse | null) => {
+            const nextPending =
+              res?.needsClarification && res.pendingTaskContext ? res.pendingTaskContext : null;
+            pendingClarificationRef.current = nextPending;
+            if (!turnIsTemporary) {
+              storePendingClarification(docRefsKey(conversationIdRef.current), nextPending);
+            }
           };
 
           if (opts?.forceSearch) {
@@ -1236,6 +1277,7 @@ export default function OraChatScreen() {
             // in catch) instead of repeating the general-knowledge fallback the
             // user just rejected.
             const res = await sendChat(chatReq);
+            applyPendingClarification(res);
             assistant = {
               id: pendingId,
               role: "assistant",
@@ -1269,6 +1311,7 @@ export default function OraChatScreen() {
               // Streaming could not start — fall back to regular /chat.
               notifyStreamFallbackCalled();
               const res = await sendChat(chatReq);
+              applyPendingClarification(res);
               assistant = {
                 id: pendingId,
                 role: "assistant",
@@ -1282,10 +1325,14 @@ export default function OraChatScreen() {
                 );
               }
             } else if (streamResult.ok) {
-              // Streaming succeeded — apply final metadata from the done payload.
-              // The conversational stream carries suggestions/videos/memory, plus
-              // a generated file when the server's false-delivery safety net
-              // built one for real (sources/images still come from /chat).
+              // Streaming succeeded — a streamed reply is never a clarifying
+              // question (the server bounces those to /chat pre-stream), so any
+              // outstanding pending context is now answered/superseded.
+              applyPendingClarification(null);
+              // Apply final metadata from the done payload. The conversational
+              // stream carries suggestions/videos/memory, plus a generated file
+              // when the server's false-delivery safety net built one for real
+              // (sources/images still come from /chat).
               assistant = {
                 id: pendingId,
                 role: "assistant",
@@ -1318,6 +1365,7 @@ export default function OraChatScreen() {
                   ? { streamFallbackToken: streamResult.fallbackToken }
                   : {}),
               });
+              applyPendingClarification(res);
               assistant = {
                 id: pendingId,
                 role: "assistant",
@@ -2131,8 +2179,11 @@ export default function OraChatScreen() {
     setAttachment(null);
     setInput("");
     documentRefsRef.current = [];
-    // A new blank chat must not inherit pre-conversation upload refs.
+    pendingClarificationRef.current = null;
+    // A new blank chat must not inherit pre-conversation upload refs or a
+    // pre-conversation pending clarification.
     storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+    storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
   }, [stopRealtimeForContextSwitch]);
 
   // Toggle temporary mode. Either direction starts a clean conversation so
@@ -2149,6 +2200,7 @@ export default function OraChatScreen() {
     setAttachment(null);
     setInput("");
     documentRefsRef.current = [];
+    pendingClarificationRef.current = null;
   }, [sending, stopRealtimeForContextSwitch]);
 
   // Header overflow menu: flip the "Voice responses on" preference and persist
@@ -2389,10 +2441,15 @@ export default function OraChatScreen() {
       // The prior thread's upload refs no longer apply; drop them first so a
       // failed load never leaves another thread's refs active.
       documentRefsRef.current = [];
+      pendingClarificationRef.current = null;
       try {
         // Hydrate the persistent ref cache alongside the fetch so the restore
         // below works even when this is the first read after an app restart.
-        const [detail] = await Promise.all([getConversation(id), loadDocumentRefsStore()]);
+        const [detail] = await Promise.all([
+          getConversation(id),
+          loadDocumentRefsStore(),
+          loadPendingClarificationStore(),
+        ]);
         setConversationId(id);
         // Restore THIS conversation's cached upload refs so a follow-up
         // "Revise ..." still targets the file uploaded here — even after the
@@ -2400,6 +2457,7 @@ export default function OraChatScreen() {
         // server skips unresolvable ones; signed-in users also recover via
         // the server-side durable mirror).
         documentRefsRef.current = getStoredDocumentRefs(docRefsKey(id));
+        pendingClarificationRef.current = getStoredPendingClarification(docRefsKey(id));
         // Sync last-active to server settings (fire-and-forget).
         void patchOraUserSettings({ lastConversationId: id }).catch(() => {});
         // Follow the loaded chat's scope so a subsequent "new chat" stays in the
@@ -2458,13 +2516,20 @@ export default function OraChatScreen() {
   // when refs already exist (a fresh upload must not be clobbered), and in
   // temporary mode (temporary chats never persist refs).
   useEffect(() => {
-    void loadDocumentRefsStore().then(() => {
+    void Promise.all([loadDocumentRefsStore(), loadPendingClarificationStore()]).then(() => {
       if (
         conversationIdRef.current == null &&
         documentRefsRef.current.length === 0 &&
         !temporaryRef.current
       ) {
         documentRefsRef.current = getStoredDocumentRefs(DOC_REFS_STANDALONE_KEY);
+      }
+      if (
+        conversationIdRef.current == null &&
+        pendingClarificationRef.current == null &&
+        !temporaryRef.current
+      ) {
+        pendingClarificationRef.current = getStoredPendingClarification(DOC_REFS_STANDALONE_KEY);
       }
     });
   }, []);
