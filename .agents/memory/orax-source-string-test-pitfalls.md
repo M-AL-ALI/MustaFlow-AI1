@@ -24,3 +24,7 @@ window is just a bound, not a precise measure). Seen in
 
 ## Mobile `app/(home)/settings.tsx` inference gap
 The first domain inference heuristic did not score `app/(home)/settings.tsx` high enough for mobile prompts because the regex only matched `screen|tab|navigation|nav|stack|component|style|theme|layout`. Adding the `app/(home)` path segment pattern (or any `/(home)/`, `/(tabs)/`, `/(screens)/` style Expo router segment) was required to catch these correctly.
+
+## Sliced-window assertions are insertion-order sensitive
+
+`indexOf(anchor)` + `slice(start, start + N)` assertions (e.g. ora-mobile-parity's 400-char chatReq window) fail when new fields or comments are inserted *before* the asserted key, pushing it past the window. When adding fields to an object literal guarded this way, append them AFTER the asserted keys — object key order is semantically irrelevant, so this is always safe and avoids touching the existing test.
