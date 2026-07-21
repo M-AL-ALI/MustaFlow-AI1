@@ -54,6 +54,7 @@ Important optional env:
 
 - Ora voice TTS: `OPENAI_API_KEY`
 - Ora realtime "Talk to Ora" voice (WebRTC): requires `OPENAI_API_KEY` (direct client mints short-lived ephemeral tokens; the proxy rejects audio). Tuning: `ORA_REALTIME_ENABLED` (default on; `false` disables), `ORA_REALTIME_DISABLED` (kill switch), `ORA_REALTIME_MODEL` (default `gpt-realtime-mini`), `ORA_REALTIME_VOICE` (default `marin`), `ORA_REALTIME_TRANSCRIBE_MODEL`, and `ORA_REALTIME_VAD_*` turn-detection knobs.
+- Ora project memory blend: `ORA_PROJECT_MEMORY_RESERVE` (0..1 share of recall budget reserved for project memories in project chats, default 0.45)
 - Anthropic/Gemini/DeepSeek routing: provider keys as configured in `artifacts/api-server/src/lib/public-ai/model-router.ts`
 - Disable DeepSeek temporarily: `DEEPSEEK_DISABLED=true`
 - GitHub OAuth: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URL`

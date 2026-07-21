@@ -179,9 +179,15 @@ const ORA_MEMORY_EMBED_TIMEOUT_MS = 2500;
  * Share of the recall budget reserved for the CURRENT project's memories in a
  * project chat (Phase 7 blend). Project facts rank first against this reserve
  * so a relevant project memory always survives; global memories fill the
- * remainder plus any unused reserve.
+ * remainder plus any unused reserve. Tunable via the
+ * ORA_PROJECT_MEMORY_RESERVE env var (0..1); defaults to 0.45.
  */
-const ORA_PROJECT_MEMORY_RESERVE = 0.45;
+function resolveProjectMemoryReserve(): number {
+  const raw = Number.parseFloat(process.env.ORA_PROJECT_MEMORY_RESERVE ?? "");
+  if (Number.isFinite(raw) && raw >= 0 && raw <= 1) return raw;
+  return 0.45;
+}
+const ORA_PROJECT_MEMORY_RESERVE = resolveProjectMemoryReserve();
 
 export interface OraMemoryRecallProfile {
   planTier: OraPlanTier;
