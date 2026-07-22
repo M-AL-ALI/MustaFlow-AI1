@@ -2375,16 +2375,29 @@ export async function generateFileFromPrompt(
     openaiModel,
   });
 
+  // Cap each provider attempt so the full fallback chain finishes before any
+  // browser client disconnects (~300 s). Default: 70 s × 3 providers = 210 s max.
+  const fileGenAttemptTimeoutMs =
+    Number(process.env.ORA_FILE_GEN_ATTEMPT_TIMEOUT_MS) || 70_000;
+
   const chain = await runCandidateChain(candidates, async (candidate) => {
-    const result = await createChatCompletion({
-      provider: candidate.provider,
-      model: candidate.model,
-      messages: callMessages,
-      response_format: { type: "json_object" },
-      // Higher cap so extracting a real dataset into a file isn't truncated
-      // mid-JSON (which previously threw on parse and 500'd the request).
-      max_completion_tokens: quality.maxCompletionTokens,
-    });
+    const result = await Promise.race([
+      createChatCompletion({
+        provider: candidate.provider,
+        model: candidate.model,
+        messages: callMessages,
+        response_format: { type: "json_object" },
+        // Higher cap so extracting a real dataset into a file isn't truncated
+        // mid-JSON (which previously threw on parse and 500'd the request).
+        max_completion_tokens: quality.maxCompletionTokens,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("file-gen-attempt-timeout")),
+          fileGenAttemptTimeoutMs,
+        ),
+      ),
+    ]);
 
     const raw = result.choices[0]?.message?.content?.trim() ?? "";
     const parsed = safeParseFileJson(raw);
