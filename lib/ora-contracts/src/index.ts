@@ -221,6 +221,8 @@ export const oraDatasetResultSchema = z
 export const oraSourceSchema = z.object({
   title: z.string().max(500),
   url: z.string().max(2000),
+  /** Publication/last-updated date reported by the search provider (display string). */
+  date: z.string().max(40).optional(),
 });
 
 export const oraImageSchema = z.object({
@@ -276,6 +278,35 @@ export const oraUsedFileSchema = z.object({
 });
 
 export type OraUsedFile = z.infer<typeof oraUsedFileSchema>;
+
+/**
+ * Phase 8 — Source-Aware Answers. The kind of location inside an uploaded
+ * file a reply cited. Static enum values only — safe for persistence.
+ */
+export const ORA_FILE_CITATION_KINDS = [
+  "slide", // PPTX slide number ("Slide 3")
+  "sheet", // spreadsheet sheet name
+  "section", // document section/heading (reserved; DOCX/PDF extract flat text today)
+  "file", // whole-file reference (no finer locator available)
+] as const;
+
+export type OraFileCitationKind = (typeof ORA_FILE_CITATION_KINDS)[number];
+
+/**
+ * A verified citation of an uploaded file beneath an assistant reply.
+ * Derived server-side by cross-checking the reply text against the file
+ * content actually injected into the model's context — never model-claimed,
+ * so a citation can only exist for a file/slide/sheet that is really there.
+ * Names and locators only — never refs, bytes, or content.
+ */
+export const oraFileCitationSchema = z.object({
+  file: z.string().max(300),
+  /** Human-readable locator inside the file, e.g. "Slide 3" or a sheet name. */
+  locator: z.string().max(120).optional(),
+  kind: z.enum(ORA_FILE_CITATION_KINDS).optional(),
+});
+
+export type OraFileCitation = z.infer<typeof oraFileCitationSchema>;
 
 /**
  * The pending-task context a clarification round-trips through the CLIENT
@@ -355,6 +386,9 @@ export const oraMessageSchema = z.object({
   // Multi-file turns: which uploads were used in which role — persisted so the
   // "working from" chips survive reload. Mirrors the client documentRefs cap.
   usedFiles: z.array(oraUsedFileSchema).max(5).optional(),
+  // Phase 8: verified uploaded-file citations (file + slide/sheet locator) —
+  // persisted so the source chips survive reload.
+  fileCitations: z.array(oraFileCitationSchema).max(10).optional(),
 });
 
 /** Post-transform persisted message type (bytes stripped from generatedFile). */
@@ -365,6 +399,8 @@ export type OraPersistedMessage = z.infer<typeof oraMessageSchema>;
 export interface OraSource {
   title: string;
   url: string;
+  /** Publication/last-updated date reported by the search provider (display string). */
+  date?: string;
 }
 
 /** A real image found on the web during search, shown inline in the chat. */
@@ -512,6 +548,9 @@ export interface OraMessageData {
   /** Multi-file turns: which uploads were used in which role ("working from"
    * chips). Names + roles only — never refs or content. */
   usedFiles?: OraUsedFile[];
+  /** Phase 8: verified uploaded-file citations (file + slide/sheet locator),
+   * derived server-side against the actually-injected file content. */
+  fileCitations?: OraFileCitation[];
 }
 
 /* ── Account consistency diagnostics ───────────────────────────────────────── */

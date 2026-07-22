@@ -29,10 +29,13 @@ export type {
   OraPendingClarification,
   OraMultiFileRole,
   OraUsedFile,
+  OraFileCitation,
+  OraFileCitationKind,
 } from "@workspace/ora-contracts";
 
 import type {
   OraClarificationKind,
+  OraFileCitation,
   OraFileEditQuality,
   OraImage,
   OraMemoryUsed,
@@ -104,6 +107,8 @@ export interface StreamDonePayload {
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;
   memoriesUsed?: OraMemoryUsed[];
+  /** Phase 8: verified uploaded-file citations derived server-side. */
+  fileCitations?: OraFileCitation[];
   /** Updated rolling summary echoed so the client can advance its pointer. */
   conversationSummary?: string;
   mode?: OraMode;
@@ -369,6 +374,9 @@ export interface ChatResponse {
   /** Multi-file turns: which uploads were used in which role ("working from"
    * chips). Names + roles only — never refs or content. */
   usedFiles?: OraUsedFile[];
+  /** Phase 8: verified uploaded-file citations (file + slide/sheet locator),
+   * derived server-side against the injected content — never model-claimed. */
+  fileCitations?: OraFileCitation[];
   conversationSummary?: string;
   mode?: OraMode;
   msgCount?: number;

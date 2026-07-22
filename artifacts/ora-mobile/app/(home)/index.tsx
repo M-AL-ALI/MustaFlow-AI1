@@ -463,6 +463,27 @@ function sourceHostname(url: string): string {
   }
 }
 
+/**
+ * Best-effort short display date for a web source (e.g. "Mar 12, 2026").
+ * Returns null when the raw value does not parse as a real date — a
+ * non-date provider string must never be rendered as one. Mirrors the
+ * website's formatSourceDate in ora-source-cards.tsx.
+ */
+function formatSourceDate(raw: string | undefined): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > 40) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const year = parsed.getFullYear();
+  if (year < 1990 || year > 2100) return null;
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function isImageFile(mimeType?: string): boolean {
   return !!mimeType && mimeType.toLowerCase().startsWith("image/");
 }
@@ -547,6 +568,9 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     memorySaveCandidateSensitive: res.memorySaveCandidateSensitive,
     memoriesUsed: res.memoriesUsed,
     ...(res.usedFiles && res.usedFiles.length > 0 ? { usedFiles: res.usedFiles } : {}),
+    ...(res.fileCitations && res.fileCitations.length > 0
+      ? { fileCitations: res.fileCitations }
+      : {}),
     generatedFile: buildGeneratedFile(res),
     ...(res.searchFallback ? { searchFallback: true } : {}),
     ...(res.searchRetryable ? { searchRetryable: true } : {}),
@@ -1343,6 +1367,9 @@ export default function OraChatScreen() {
                 memorySaveCandidateConfidence: streamResult.memorySaveCandidateConfidence,
                 memorySaveCandidateSensitive: streamResult.memorySaveCandidateSensitive,
                 memoriesUsed: streamResult.memoriesUsed,
+                ...(streamResult.fileCitations && streamResult.fileCitations.length > 0
+                  ? { fileCitations: streamResult.fileCitations }
+                  : {}),
                 generatedFile: buildGeneratedFile(streamResult),
                 ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
               };
@@ -4627,6 +4654,10 @@ function MessageBubbleBase({
                             style={{ color: c.mutedForeground + "B3", fontSize: 10 }}
                           >
                             {sourceHostname(s.url)}
+                            {(() => {
+                              const d = formatSourceDate(s.date);
+                              return d ? ` · ${d}` : "";
+                            })()}
                           </Text>
                         </View>
                         <ExternalLink size={14} color={c.mutedForeground + "80"} />

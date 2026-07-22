@@ -52,6 +52,11 @@ import {
   resolveCarriedFileMeta,
   type CarriedFileMeta,
 } from "../../lib/public-ai/carried-docs";
+import {
+  buildFileCitationAllowList,
+  buildSourceCitationAddendum,
+  deriveFileCitations,
+} from "../../lib/public-ai/source-citations";
 import { planOraMultiFile, resolveNamedEditTarget } from "../../lib/public-ai/multi-file-planner";
 import { buildOraExpertiseProfile } from "../../lib/public-ai/expertise";
 import { buildOraImageGenerationProfile } from "../../lib/public-ai/image-quality";
@@ -2229,6 +2234,7 @@ router.post("/public-ai/chat", async (req, res) => {
       : "") +
     expertiseProfile.systemAddendum +
     fileContextAddendum +
+    buildSourceCitationAddendum(carriedDocs) +
     profileContext +
     memoryStatusContext +
     memory.text +
@@ -2442,6 +2448,11 @@ router.post("/public-ai/chat", async (req, res) => {
     }
   }
 
+  // Phase 8: derive verified uploaded-file citations from the FINAL reply text
+  // (post-rescue, post video-lift) against the file content actually injected
+  // this turn. Deterministic and allow-listed — the model cannot fabricate one.
+  const fileCitations = deriveFileCitations(reply, buildFileCitationAllowList(carriedDocs));
+
   // Extract suggestions — failures are silently swallowed so the main reply is never blocked.
   let suggestions: string[] = [];
   if (!referenceAnalysisTurn) {
@@ -2542,6 +2553,9 @@ router.post("/public-ai/chat", async (req, res) => {
     // Phase 5: which uploaded files this reply drew on, and in what role —
     // lets clients render "Used: report.docx + budget.xlsx" chips.
     ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
+    // Phase 8: verified uploaded-file citations (file + slide/sheet locator),
+    // derived server-side against the injected content — never model-claimed.
+    ...(fileCitations.length > 0 ? { fileCitations } : {}),
     ...(rescuedDelivery?.fileName && rescuedDelivery.fileData && rescuedDelivery.mimeType
       ? {
           fileName: rescuedDelivery.fileName,
@@ -3006,6 +3020,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       : "") +
     expertiseProfile.systemAddendum +
     fileContextAddendum +
+    buildSourceCitationAddendum(carriedDocs) +
     profileContext +
     memoryStatusContext +
     memory.text +
@@ -3303,6 +3318,11 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     }
   }
 
+  // Phase 8: derive verified uploaded-file citations from the FINAL reply text
+  // (post-rescue, post video-lift). Runs after the token stream has fully
+  // completed, so it has zero impact on streaming cadence.
+  const fileCitations = deriveFileCitations(reply, buildFileCitationAllowList(carriedDocs));
+
   let suggestions: string[] = [];
   const suggestionResult = await suggestionPromise;
   if (!referenceAnalysisTurn && suggestionResult) {
@@ -3350,6 +3370,9 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         : {}),
       ...(referenceChatHistory && !temporary ? { conversationSummary } : {}),
       ...(memory.used.length > 0 ? { memoriesUsed: memory.used } : {}),
+      // Phase 8: verified uploaded-file citations — derived server-side
+      // against the injected content, never model-claimed.
+      ...(fileCitations.length > 0 ? { fileCitations } : {}),
       ...(rescuedDelivery?.fileName && rescuedDelivery.fileData && rescuedDelivery.mimeType
         ? {
             fileName: rescuedDelivery.fileName,

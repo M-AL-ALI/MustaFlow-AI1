@@ -2,6 +2,25 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora Phase 8 — Source-Aware Answers (2026-07-22)
+
+Ora replies now cite their sources honestly on both website and mobile: uploaded-file citations (file / slide / sheet) that are verified server-side, and web-search sources with a validated publish date. Fabricated citations are structurally impossible. No publish/TestFlight.
+
+Server (`artifacts/api-server/src/lib/public-ai/source-citations.ts`):
+
+- `buildFileCitationAllowList` parses the carried-docs context actually injected into the model (File: headers, "Slide N:" markers, "Sheet analyzed:" lines) — `File:` lines inside `"""` content blocks are ignored so uploads cannot inject phantom citable files.
+- `deriveFileCitations` cross-checks the FINAL reply against that allow-list (never model-emitted): slide citations only for slides that exist; ambiguous slide numbers across multiple decks are skipped unless the reply names exactly one owning file; whole-file citations are suppressed when a finer locator was cited; base filenames only count when distinctive (digit/separator/space — "presentation.pptx" is never cited by the word "presentation"); cap 10.
+- `buildSourceCitationAddendum` (only when file content is present) instructs grounded slide/sheet/section references and forbids invented ones.
+- Wired into `/chat` (response `fileCitations`) and `/chat/stream` (done payload) — zero streaming-cadence changes. Search sources now pass through a `date` field.
+
+Contracts (`lib/ora-contracts`): `OraFileCitation` / `OraFileCitationKind`; `fileCitations` on ChatResponse, stream done payload, and persisted `OraMessage` (conversation save round-trips it).
+
+Website: `ora-file-citations-chip.tsx` — collapsed "From your file: X" / "From your files: N files" chip that expands to per-citation labels; slide locators render verbatim ("Slide N" arrives pre-formatted). `ora-source-cards.tsx` — `formatSourceDate` renders a short date beside the hostname only when the raw value parses as a real date (rejects non-dates, years outside 1990-2100, >40-char strings).
+
+Mobile (`artifacts/ora-mobile`): full parity — `fileCitations` typed and mapped on both stream and non-stream chat paths, file-citations indicator in `MessageExtras.tsx` with the same labels, `formatSourceDate` + dated source cards in `index.tsx`.
+
+Tests/gate: API `source-citations.test.ts` (14 — allow-list parse, phantom-file injection, slide/sheet/file derivation, ambiguity, suppression, cap, addendum), web `ora-file-citations-chip.test.tsx` (7) + `ora-source-cards.test.tsx` extended (6 date tests), mobile `source-citations-parity.test.ts` (7 wiring assertions). New `ORA_FEATURE_REGISTRY` entry `source-aware-answers` with manual website/mobile checklists; tests wired into `API_RELEASE_EXTENDED`, `WEB_RELEASE_EXTENDED`, `MOBILE_LIB_CRITICAL`. Fast gate: 13 pass / 1 warn (git-clean, pre-commit only) / 0 fail.
+
 ## Release-gate blockers cleared before Phase 8 (2026-07-21)
 
 Fixed the Phase 1-7 release-gate blockers so the release profile can run green before Phase 8 starts. No publish/TestFlight.

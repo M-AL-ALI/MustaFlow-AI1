@@ -6,6 +6,7 @@ import type {
   OraClarificationKind,
   OraPendingClarification,
   OraUsedFile,
+  OraFileCitation,
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
@@ -42,6 +43,8 @@ export interface GeneratedFile {
 export interface OraSource {
   title: string;
   url: string;
+  /** Publication/last-updated date reported by the search provider (display string). */
+  date?: string;
 }
 
 /** A real image found on the web during search, shown inline in the chat. */
@@ -127,6 +130,12 @@ export interface OraMessage {
    * chips under the reply. Metadata only, never bytes.
    */
   usedFiles?: OraUsedFile[];
+  /**
+   * Phase 8: verified uploaded-file citations (file + slide/sheet locator),
+   * derived server-side against the injected file content — never
+   * model-claimed. Drives the "From your files" chips under the reply.
+   */
+  fileCitations?: OraFileCitation[];
   /** rolling conversation summary for this conversation. */
   conversationSummary?: string;
   /** True while this assistant message is still being streamed token-by-token. */
@@ -739,6 +748,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   videos?: OraVideo[];
   memoriesUsed?: OraMemoryUsed[];
   usedFiles?: OraUsedFile[];
+  fileCitations?: OraFileCitation[];
   conversationSummary?: string;
   searchFallback?: boolean;
   searchRetryable?: boolean;
@@ -782,6 +792,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.memoriesUsed && m.memoriesUsed.length > 0 ? { memoriesUsed: m.memoriesUsed } : {}),
     // Persist which uploaded files the reply drew on so the chips survive reload
     ...(m.usedFiles && m.usedFiles.length > 0 ? { usedFiles: m.usedFiles } : {}),
+    // Persist verified file citations so the "From your files" chips survive reload
+    ...(m.fileCitations && m.fileCitations.length > 0 ? { fileCitations: m.fileCitations } : {}),
     // Persist the rolling summary so it can be re-sent after a reload
     ...(m.conversationSummary ? { conversationSummary: m.conversationSummary } : {}),
     // Persist the search-fallback flags so the caveat/Retry state survives reload
@@ -804,6 +816,8 @@ interface StreamDonePayload {
   conversationSummary?: string;
   memoriesUsed?: OraMemoryUsed[];
   videos?: OraVideo[];
+  /** Phase 8: verified uploaded-file citations derived server-side. */
+  fileCitations?: OraFileCitation[];
   mode?: "instant" | "deep";
   msgCount: number;
   msgLimit: number;
@@ -1953,6 +1967,7 @@ export function useOraChat(): UseOraChatReturn {
             conversationSummary?: string;
             memoriesUsed?: OraMemoryUsed[];
             usedFiles?: OraUsedFile[];
+            fileCitations?: OraFileCitation[];
             msgCount: number;
             msgLimit: number;
             imageCount?: number;
@@ -1984,6 +1999,9 @@ export function useOraChat(): UseOraChatReturn {
               ? { memoriesUsed: d.memoriesUsed }
               : {}),
             ...(d.usedFiles && d.usedFiles.length > 0 ? { usedFiles: d.usedFiles } : {}),
+            ...(d.fileCitations && d.fileCitations.length > 0
+              ? { fileCitations: d.fileCitations }
+              : {}),
             ...(d.conversationSummary ? { conversationSummary: d.conversationSummary } : {}),
             ...(d.memorySaveCandidate
               ? {

@@ -38,6 +38,22 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  artifacts/api-server/src/lib/public-ai/source-citations.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/source-citations.test.ts \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  artifacts/mustaflow/src/components/ora-panel.tsx \
+  artifacts/mustaflow/src/components/ora/ora-file-citations-chip.tsx \
+  artifacts/mustaflow/src/components/ora/ora-source-cards.tsx \
+  artifacts/mustaflow/src/components/ora/__tests__/ora-file-citations-chip.test.tsx \
+  artifacts/mustaflow/src/components/ora/__tests__/ora-source-cards.test.tsx \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  artifacts/ora-mobile/components/ora/MessageExtras.tsx \
+  artifacts/ora-mobile/lib/api.ts \
+  artifacts/ora-mobile/lib/types.ts \
+  artifacts/ora-mobile/lib/__tests__/source-citations-parity.test.ts \
+  lib/ora-contracts/src/index.ts \
+  scripts/src/ora-stability-gate.ts \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true

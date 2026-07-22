@@ -63,6 +63,7 @@ export function OraAssistantExtras({
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
       <OraMemoryIndicators message={message} c={c} />
       <OraUsedFilesIndicator message={message} c={c} />
+      <OraFileCitationsIndicator message={message} c={c} />
     </>
   );
 }
@@ -396,6 +397,45 @@ function OraUsedFilesIndicator({ message, c }: { message: OraMessage; c: Colors 
           <Files size={13} color={c.mutedForeground} />
           <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12, flex: 1 }}>
             {f.name} — {USED_FILE_ROLE_LABELS[f.role] ?? f.role}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/* ── Verified file citations (Phase 8 source-aware answers) ──────────────── */
+
+/** Compact display string for one citation, e.g. "deck.pptx — Slide 4".
+ * Mirrors the website's fileCitationLabel in ora-file-citations-chip.tsx.
+ * Slide locators already arrive as "Slide N" — rendered verbatim. */
+function fileCitationLabel(citation: {
+  file: string;
+  locator?: string;
+  kind?: string;
+}): string {
+  if (!citation.locator) return citation.file;
+  if (citation.kind === "slide") return `${citation.file} — ${citation.locator}`;
+  if (citation.kind === "sheet") return `${citation.file} — Sheet "${citation.locator}"`;
+  const kind = citation.kind
+    ? `${citation.kind[0].toUpperCase()}${citation.kind.slice(1)} `
+    : "";
+  return `${citation.file} — ${kind}${citation.locator}`;
+}
+
+function OraFileCitationsIndicator({ message, c }: { message: OraMessage; c: Colors }) {
+  const citations = message.fileCitations ?? [];
+  if (citations.length === 0) return null;
+  return (
+    <View style={{ marginTop: 8, gap: 4 }}>
+      {citations.map((citation, i) => (
+        <View
+          key={`${citation.file}-${citation.locator ?? ""}-${i}`}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+        >
+          <FileText size={13} color="#2FA36B" />
+          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12, flex: 1 }}>
+            From your file: {fileCitationLabel(citation)}
           </Text>
         </View>
       ))}

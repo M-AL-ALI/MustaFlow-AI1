@@ -49,6 +49,7 @@ import { OraUsageInline } from "@/components/ora-usage-inline";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
 import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
 import { OraUsedFilesChip } from "@/components/ora/ora-used-files-chip";
+import { OraFileCitationsChip } from "@/components/ora/ora-file-citations-chip";
 import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
@@ -1876,6 +1877,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   {msg.role === "assistant" &&
                     Array.isArray(msg.usedFiles) &&
                     msg.usedFiles.length > 0 && <OraUsedFilesChip files={msg.usedFiles} />}
+
+                  {msg.role === "assistant" &&
+                    Array.isArray(msg.fileCitations) &&
+                    msg.fileCitations.length > 0 && (
+                      <OraFileCitationsChip citations={msg.fileCitations} />
+                    )}
 
                   {msg.role === "assistant" &&
                     isSignedIn &&

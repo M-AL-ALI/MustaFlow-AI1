@@ -144,6 +144,21 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Ask the same current-info prompts and verify Retry live search behavior if mobile UI changed.",
   },
   {
+    id: "source-aware-answers",
+    title: "Source-aware answers: verified uploaded-file citations and dated web sources",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /source-citations/i,
+      /file-citations/i,
+      /ora-file-citations-chip/i,
+      /ora-source-cards/i,
+    ],
+    manualWebsite:
+      "Upload a PPTX/XLSX, ask about specific slides/sheets, and verify the 'From your file' chip cites only real slides/sheets; run a live-search prompt and verify source cards show a publish date only when one exists.",
+    manualMobile:
+      "Repeat the same upload + citation and dated-source checks on the current TestFlight build when mobile code changed.",
+  },
+  {
     id: "talk-to-ora",
     title: "Talk to Ora realtime voice, settle window, focus, reconnect, and tier time budget",
     ownerSurfaces: ["api", "website", "mobile"],
@@ -414,6 +429,7 @@ const API_REALTIME = [
 
 const API_RELEASE_EXTENDED = [
   "src/lib/public-ai/document-prompt.test.ts",
+  "src/lib/public-ai/__tests__/source-citations.test.ts",
   "src/lib/public-ai/memory-consolidation.test.ts",
   "src/lib/public-ai/ora-file-handling.test.ts",
   "src/lib/public-ai/__tests__/authed-user.test.ts",
@@ -482,6 +498,7 @@ const WEB_ORA_UI = [
 const WEB_RELEASE_EXTENDED = [
   "src/components/admin/__tests__/ora-routing-diagnostics-panel.test.ts",
   "src/components/ora/__tests__/ora-edit-quality-card.test.tsx",
+  "src/components/ora/__tests__/ora-file-citations-chip.test.tsx",
   "src/components/ora/__tests__/ora-memory-manager.test.tsx",
   "src/components/ora/__tests__/ora-message-actions.test.tsx",
   "src/components/ora/__tests__/ora-rich-text.test.tsx",
@@ -508,6 +525,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/ora-mobile-parity.test.ts",
   "lib/__tests__/ora-session-recovery.test.ts",
   "lib/__tests__/safe-url.test.ts",
+  "lib/__tests__/source-citations-parity.test.ts",
 ].join(" ");
 
 const CHECKS: GateCheck[] = [

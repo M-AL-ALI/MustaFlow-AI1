@@ -1,9 +1,30 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
-import { OraSourceCards, isSafeHttpUrl } from "../ora-source-cards";
+import { OraSourceCards, isSafeHttpUrl, formatSourceDate } from "../ora-source-cards";
 import type { OraSource } from "@/hooks/use-ora-chat";
 
 afterEach(() => cleanup());
+
+describe("formatSourceDate", () => {
+  it("formats a real ISO date into a short display date", () => {
+    const formatted = formatSourceDate("2026-03-12T00:00:00Z");
+    expect(formatted).not.toBeNull();
+    expect(formatted).toContain("2026");
+  });
+
+  it("returns null for missing, empty, or non-date strings", () => {
+    expect(formatSourceDate(undefined)).toBeNull();
+    expect(formatSourceDate("")).toBeNull();
+    expect(formatSourceDate("   ")).toBeNull();
+    expect(formatSourceDate("not a date")).toBeNull();
+  });
+
+  it("rejects absurd years and over-long provider strings", () => {
+    expect(formatSourceDate("1888-01-01")).toBeNull();
+    expect(formatSourceDate("3026-01-01")).toBeNull();
+    expect(formatSourceDate("x".repeat(41))).toBeNull();
+  });
+});
 
 describe("isSafeHttpUrl", () => {
   it("accepts http and https", () => {
@@ -53,5 +74,17 @@ describe("OraSourceCards", () => {
     const sources: OraSource[] = [{ title: "Evil", url: "javascript:alert(1)" }];
     const { container } = render(<OraSourceCards sources={sources} />);
     expect(container.querySelector('[data-testid="ora-source-cards"]')).toBeNull();
+  });
+
+  it("shows the publish date beside the hostname only when the date is real", () => {
+    const sources: OraSource[] = [
+      { title: "Dated", url: "https://example.com/a", date: "2026-03-12T00:00:00Z" },
+      { title: "Junk date", url: "https://example.org/b", date: "yesterday-ish" },
+      { title: "No date", url: "https://example.net/c" },
+    ];
+    const { container } = render(<OraSourceCards sources={sources} />);
+    expect(container.textContent).toContain("2026");
+    expect(container.textContent).toContain(" · ");
+    expect(container.textContent).not.toContain("yesterday-ish");
   });
 });

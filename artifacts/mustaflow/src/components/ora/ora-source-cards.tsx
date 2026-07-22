@@ -58,6 +58,26 @@ export function isSafeHttpUrl(url: string): boolean {
 }
 
 /**
+ * Best-effort short display date for a source (e.g. "Mar 12, 2026").
+ * Returns null when the raw value does not parse as a real date — a
+ * non-date string from the provider must never be rendered as one.
+ */
+export function formatSourceDate(raw: string | undefined): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > 40) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const year = parsed.getFullYear();
+  if (year < 1990 || year > 2100) return null;
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/**
  * Renders the cited web-search sources beneath an Ora answer as compact,
  * clickable cards. Each opens the source in a new tab. Non-http(s) URLs are
  * defensively dropped so a poisoned citation can never become a live link.
@@ -89,6 +109,10 @@ export function OraSourceCards({ sources }: { sources: OraSource[] }) {
               </span>
               <span className="block text-[10px] text-muted-foreground/70 truncate">
                 {sourceHostname(s.url)}
+                {(() => {
+                  const d = formatSourceDate(s.date);
+                  return d ? <span className="text-muted-foreground/60"> · {d}</span> : null;
+                })()}
               </span>
             </span>
             <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 group-hover:text-foreground/70 transition-colors" />
