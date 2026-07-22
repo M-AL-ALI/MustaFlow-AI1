@@ -106,3 +106,4 @@
 - [RN Modal picker race](rn-modal-native-picker-race.md) — defer native pickers to Modal onDismiss on iOS; failed present leaks expo-document-picker context; Files picker needs NO iCloud entitlement.
 - [Filtered pnpm add prunes root bins](filtered-pnpm-add-prunes-root-bins.md) — pnpm --filter add can strip root .bin links (vitest); fix = full HUSKY=0 pnpm install, not code debugging.
 - [Ora gate DB env](ora-gate-db-env.md) — gate ECONNREFUSED 127.0.0.1:5432 = DATABASE_URL unset (off-Replit run), not a code bug; Replit dev DB is the canonical gate env.
+- [File-gen per-attempt timeout](file-gen-attempt-timeout.md) — wrap createChatCompletion in Promise.race(70s) so the fallback chain finishes inside any browser's 300 s cutoff.
