@@ -375,7 +375,11 @@ export function extractSources(output: unknown): OraSource[] {
           (ann?.published_at as string | undefined) ??
           (ann?.publishedDate as string | undefined) ??
           undefined;
-        const date = typeof rawDate === "string" && rawDate.trim() ? rawDate.trim() : undefined;
+        // Persistence contract (oraSourceSchema) caps date at 40 chars; a
+        // longer provider annotation is not a clean date string, so drop it
+        // rather than truncate — the client date guard would reject it anyway.
+        const trimmedDate = typeof rawDate === "string" ? rawDate.trim() : "";
+        const date = trimmedDate && trimmedDate.length <= 40 ? trimmedDate : undefined;
         sources.push({
           title: title ?? hostnameOf(cleaned),
           url: cleaned,

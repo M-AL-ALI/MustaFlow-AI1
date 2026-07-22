@@ -11,7 +11,7 @@ Server (`artifacts/api-server/src/lib/public-ai/source-citations.ts`):
 - `buildFileCitationAllowList` parses the carried-docs context actually injected into the model (File: headers, "Slide N:" markers, "Sheet analyzed:" lines) — `File:` lines inside `"""` content blocks are ignored so uploads cannot inject phantom citable files.
 - `deriveFileCitations` cross-checks the FINAL reply against that allow-list (never model-emitted): slide citations only for slides that exist; ambiguous slide numbers across multiple decks are skipped unless the reply names exactly one owning file; whole-file citations are suppressed when a finer locator was cited; base filenames only count when distinctive (digit/separator/space — "presentation.pptx" is never cited by the word "presentation"); cap 10.
 - `buildSourceCitationAddendum` (only when file content is present) instructs grounded slide/sheet/section references and forbids invented ones.
-- Wired into `/chat` (response `fileCitations`) and `/chat/stream` (done payload) — zero streaming-cadence changes. Search sources now pass through a `date` field.
+- Wired into `/chat` (response `fileCitations`) and `/chat/stream` (done payload) — zero streaming-cadence changes. Search sources now pass through a `date` field; provider date annotations longer than the 40-char `oraSourceSchema` persistence cap are dropped at extraction (they are not clean date strings) so conversation saves never fail on an oversized date.
 
 Contracts (`lib/ora-contracts`): `OraFileCitation` / `OraFileCitationKind`; `fileCitations` on ChatResponse, stream done payload, and persisted `OraMessage` (conversation save round-trips it).
 
