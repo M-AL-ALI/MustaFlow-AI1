@@ -38,7 +38,7 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
-  artifacts/api-server/src/lib/public-ai/web-search.ts \
+  docs/phase8-manual-qa-checklist.md \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true
