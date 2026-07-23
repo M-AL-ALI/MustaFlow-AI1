@@ -117,6 +117,7 @@ function OraFileAgentPreviewIndicator({
     ...(preview.plannedActions ?? []),
     ...(preview.calculations ?? []),
     ...(preview.charts ?? []),
+    ...(preview.outputSections ?? []),
   ].slice(0, 5);
 
   return (

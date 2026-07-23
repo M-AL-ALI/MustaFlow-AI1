@@ -41,8 +41,8 @@ git add \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
-  scripts/src/ora-stability-gate.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/file-agent-regression.test.ts 2>/dev/null || true
+  artifacts/ora-mobile/components/ora/MessageExtras.tsx \
+  artifacts/ora-mobile/lib/__tests__/file-agent-preview-wiring.test.ts 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
