@@ -111,6 +111,7 @@ function OraFileAgentPreviewIndicator({
 }) {
   const preview = message.fileAgentPreview ?? message.datasetResult?.fileAgentPreview;
   if (!preview) return null;
+  if (preview.status === "applied") return null;
   const tone = previewTone(preview.status);
   const bullets = [
     ...(preview.detectedInputs ?? []),

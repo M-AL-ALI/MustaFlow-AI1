@@ -1838,7 +1838,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       {msg.generatedFile.editQuality && (
                         <OraEditQualityCard quality={msg.generatedFile.editQuality} />
                       )}
-                      {msg.fileAgentPreview && (
+                      {msg.fileAgentPreview && msg.fileAgentPreview.status !== "applied" && (
                         <OraFileAgentPreviewCard
                           preview={msg.fileAgentPreview}
                           onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
@@ -1851,7 +1851,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     </>
                   )}
 
-                  {!msg.generatedFile && msg.fileAgentPreview && (
+                  {!msg.generatedFile && msg.fileAgentPreview && msg.fileAgentPreview.status !== "applied" && (
                     <OraFileAgentPreviewCard
                       preview={msg.fileAgentPreview}
                       onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}

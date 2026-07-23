@@ -1621,7 +1621,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         {msg.generatedFile.editQuality && (
                           <OraEditQualityCard quality={msg.generatedFile.editQuality} compact />
                         )}
-                        {msg.fileAgentPreview && (
+                        {msg.fileAgentPreview && msg.fileAgentPreview.status !== "applied" && (
                           <OraFileAgentPreviewCard
                             preview={msg.fileAgentPreview}
                             compact
@@ -1639,7 +1639,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       </>
                     )}
 
-                    {!msg.generatedFile && msg.fileAgentPreview && (
+                    {!msg.generatedFile && msg.fileAgentPreview && msg.fileAgentPreview.status !== "applied" && (
                       <OraFileAgentPreviewCard
                         preview={msg.fileAgentPreview}
                         compact
