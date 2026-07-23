@@ -1,6 +1,7 @@
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
 import {
+  ArrowRight,
   BarChart3,
   BrainCircuit,
   Calculator,
@@ -144,6 +145,83 @@ function OraFileAgentPreviewIndicator({
               {"\u2022"} {item}
             </Text>
           ))}
+          {preview.contentChanges && preview.contentChanges.length > 0 ? (
+            <View style={{ marginTop: 8, gap: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <ArrowRight size={11} color={c.mutedForeground} />
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 10,
+                    fontFamily: "Inter_600SemiBold",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Content being changed
+                </Text>
+              </View>
+              {preview.contentChanges.map((change, i) => (
+                <View
+                  key={`cc-${i}`}
+                  style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}
+                >
+                  <Text
+                    style={{
+                      color: c.mutedForeground,
+                      fontSize: 11,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    {change.label}
+                  </Text>
+                  {change.from ? (
+                    <>
+                      <Text
+                        style={{
+                          color: "#ef4444",
+                          fontSize: 10,
+                          backgroundColor: "rgba(239,68,68,0.1)",
+                          borderRadius: 4,
+                          paddingHorizontal: 4,
+                          paddingVertical: 1,
+                          textDecorationLine: "line-through",
+                        }}
+                      >
+                        {change.from}
+                      </Text>
+                      <ArrowRight size={10} color={c.mutedForeground} />
+                      <Text
+                        style={{
+                          color: tone,
+                          fontSize: 10,
+                          backgroundColor: tone + "1A",
+                          borderRadius: 4,
+                          paddingHorizontal: 4,
+                          paddingVertical: 1,
+                        }}
+                      >
+                        {change.to ?? "\u2026"}
+                      </Text>
+                    </>
+                  ) : change.to ? (
+                    <Text
+                      style={{
+                        color: tone,
+                        fontSize: 10,
+                        backgroundColor: tone + "1A",
+                        borderRadius: 4,
+                        paddingHorizontal: 4,
+                        paddingVertical: 1,
+                      }}
+                    >
+                      {change.to}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
           {preview.status === "needs_confirmation" && (onApply || onRevise || onRedesign) ? (
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
               {onApply ? (

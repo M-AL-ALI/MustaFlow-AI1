@@ -7,6 +7,71 @@ import type {
 } from "@workspace/ora-contracts";
 import type { UploadedFileOperation } from "./file-edit-planner";
 
+type ContentChange = { label: string; from?: string; to?: string };
+
+/**
+ * Extract specific before→after content pairs from the user's raw message.
+ * Used to populate `contentChanges` in the preview card so the user can see
+ * what will change before confirming a high-risk edit.
+ *
+ * Uses literal regex patterns (not string interpolation) to avoid character-
+ * class nesting ambiguity with mixed straight + smart quote character sets.
+ */
+function extractContentChanges(
+  message: string,
+  operations: UploadedFileOperation[],
+): ContentChange[] {
+  const changes: ContentChange[] = [];
+  let m: RegExpExecArray | null;
+
+  // Pattern 1a: replace/change "A" to/with "B" — ASCII straight quotes
+  const pairStraight =
+    /\b(?:replace|change|rename|reword|update|set)\b[^"]{0,25}"([^"]{2,100})"\s+(?:to|with)\s+"([^"]{2,100})"/gi;
+  while ((m = pairStraight.exec(message)) !== null && changes.length < 3) {
+    changes.push({ label: "Text replacement", from: m[1].trim(), to: m[2].trim() });
+  }
+
+  // Pattern 1b: same with Unicode smart double quotes
+  if (changes.length === 0) {
+    const pairSmart =
+      /\b(?:replace|change|rename|reword|update|set)\b[^\u201c\u2018]{0,25}[\u201c\u2018]([^\u201c\u201d\u2018\u2019]{2,100})[\u201d\u2019]\s+(?:to|with)\s+[\u201c\u2018]([^\u201c\u201d\u2018\u2019]{2,100})[\u201d\u2019]/gi;
+    while ((m = pairSmart.exec(message)) !== null && changes.length < 3) {
+      changes.push({ label: "Text replacement", from: m[1].trim(), to: m[2].trim() });
+    }
+  }
+
+  // Pattern 2a: verb ... "new value" — only the target is quoted (ASCII)
+  if (changes.length === 0) {
+    const targetStraight =
+      /\b(?:change|rename|update|set)\b[^"]{0,40}"([^"]{2,100})"/gi;
+    while ((m = targetStraight.exec(message)) !== null && changes.length < 3) {
+      changes.push({ label: "New content", to: m[1].trim() });
+    }
+  }
+
+  // Pattern 2b: same with Unicode smart double quotes
+  if (changes.length === 0) {
+    const targetSmart =
+      /\b(?:change|rename|update|set)\b[^\u201c\u2018]{0,40}[\u201c\u2018]([^\u201c\u201d\u2018\u2019]{2,100})[\u201d\u2019]/gi;
+    while ((m = targetSmart.exec(message)) !== null && changes.length < 3) {
+      changes.push({ label: "New content", to: m[1].trim() });
+    }
+  }
+
+  // Pattern 3: structural operations — "delete slide 3", "move row 5"
+  const hasStructural = operations.some((op) => ["delete", "move", "reorder"].includes(op));
+  if (hasStructural && changes.length < 3) {
+    const structPattern =
+      /\b(delete|remove|move|reorder)\b[^.!\n]{0,15}\b(slides?\s+\d+(?:[–\-]\d+)?(?:\s+(?:and|,)\s+\d+)*|rows?\s+\d+|sheets?\s+\d+|section\s+\d+)\b/gi;
+    while ((m = structPattern.exec(message)) !== null && changes.length < 3) {
+      const verb = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+      changes.push({ label: `${verb} ${m[2].trim()}` });
+    }
+  }
+
+  return changes.slice(0, 5);
+}
+
 function uniqueNonEmpty(values: Array<string | null | undefined>, max: number): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -113,6 +178,8 @@ export function buildFileEditConfirmationPreview(input: {
   fileNames: string[];
   operations: UploadedFileOperation[];
   requestedPreview: boolean;
+  /** Raw user message — used to extract specific before→after content pairs. */
+  message?: string;
 }): OraFileAgentPreview {
   const detectedInputs = uniqueNonEmpty(
     [...input.fileNames.slice(0, 5), `Output: ${formatLabel(input.format)}`],
@@ -124,6 +191,10 @@ export function buildFileEditConfirmationPreview(input: {
       : ["Apply the requested edit to the uploaded file"],
     8,
   );
+  const contentChanges =
+    input.message && input.message.trim().length > 0
+      ? extractContentChanges(input.message, input.operations)
+      : undefined;
 
   return {
     kind: "file_edit",
@@ -140,6 +211,7 @@ export function buildFileEditConfirmationPreview(input: {
     ],
     canApply: true,
     canRedesign: true,
+    contentChanges: contentChanges && contentChanges.length > 0 ? contentChanges : undefined,
   };
 }
 

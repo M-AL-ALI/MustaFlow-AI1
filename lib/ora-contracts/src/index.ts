@@ -132,6 +132,21 @@ export const oraFileAgentPreviewSchema = z.object({
   safetyNotes: z.array(z.string().max(220)).max(6).optional(),
   canApply: z.boolean().optional(),
   canRedesign: z.boolean().optional(),
+  /**
+   * Specific content-level changes extracted from the user's message.
+   * Shown as before→after pairs in the preview card so the user can see
+   * exactly what will change before confirming.
+   */
+  contentChanges: z
+    .array(
+      z.object({
+        label: z.string().max(120),
+        from: z.string().max(300).optional(),
+        to: z.string().max(300).optional(),
+      }),
+    )
+    .max(5)
+    .optional(),
 });
 
 export type OraFileAgentPreview = z.infer<typeof oraFileAgentPreviewSchema>;

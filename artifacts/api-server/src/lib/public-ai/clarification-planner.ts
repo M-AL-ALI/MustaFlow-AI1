@@ -324,6 +324,7 @@ export function planOraClarification(
         fileNames: names,
         operations: filePlan.operations,
         requestedPreview,
+        message,
       }),
     };
   }

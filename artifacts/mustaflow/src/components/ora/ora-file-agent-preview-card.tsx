@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   BarChart3,
   CheckCircle2,
   ClipboardList,
@@ -160,6 +161,40 @@ export function OraFileAgentPreviewCard({
                   Create redesigned copy
                 </button>
               ) : null}
+            </div>
+          ) : null}
+
+          {preview.contentChanges && preview.contentChanges.length > 0 ? (
+            <div className="mt-2.5 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                <ArrowRight className="h-3 w-3" />
+                <span>Content being changed</span>
+              </div>
+              {preview.contentChanges.map((change, i) => (
+                <div
+                  key={`cc-${i}`}
+                  className="flex flex-wrap items-center gap-1.5 leading-snug"
+                >
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {change.label}
+                  </span>
+                  {change.from ? (
+                    <>
+                      <code className="rounded bg-destructive/10 px-1 py-px text-[10px] text-destructive/80 line-through">
+                        {change.from}
+                      </code>
+                      <ArrowRight className="h-2.5 w-2.5 shrink-0 text-muted-foreground/50" />
+                      <code className="rounded bg-primary/10 px-1 py-px text-[10px] text-primary/80">
+                        {change.to ?? "…"}
+                      </code>
+                    </>
+                  ) : change.to ? (
+                    <code className="rounded bg-primary/10 px-1 py-px text-[10px] text-primary/80">
+                      {change.to}
+                    </code>
+                  ) : null}
+                </div>
+              ))}
             </div>
           ) : null}
 

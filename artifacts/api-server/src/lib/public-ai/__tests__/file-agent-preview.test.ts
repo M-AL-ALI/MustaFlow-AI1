@@ -122,3 +122,90 @@ describe("Phase 9A file/data agent preview metadata", () => {
     expect(preview.canRedesign).toBe(true);
   });
 });
+
+describe("Phase 9C — before/after content changes in confirmation preview", () => {
+  it("extracts a quoted replace pair from the message", () => {
+    const preview = buildFileEditConfirmationPreview({
+      format: "docx",
+      fileNames: ["proposal.docx"],
+      operations: ["replace"],
+      requestedPreview: false,
+      message: `Replace "Q3 targets" with "H2 goals" in the executive summary.`,
+    });
+
+    expect(preview.contentChanges).toBeDefined();
+    expect(preview.contentChanges!.length).toBeGreaterThan(0);
+    const change = preview.contentChanges![0];
+    expect(change.label).toBe("Text replacement");
+    expect(change.from).toBe("Q3 targets");
+    expect(change.to).toBe("H2 goals");
+  });
+
+  it("extracts a structural operation label for slide delete", () => {
+    const preview = buildFileEditConfirmationPreview({
+      format: "pptx",
+      fileNames: ["deck.pptx"],
+      operations: ["delete"],
+      requestedPreview: false,
+      message: "Delete slide 3 from the deck.",
+    });
+
+    expect(preview.contentChanges).toBeDefined();
+    expect(preview.contentChanges!.length).toBeGreaterThan(0);
+    expect(preview.contentChanges![0].label).toMatch(/slide\s*3/i);
+  });
+
+  it("returns no contentChanges when message has no quoted text or structural ops", () => {
+    const preview = buildFileEditConfirmationPreview({
+      format: "xlsx",
+      fileNames: ["budget.xlsx"],
+      operations: ["formula"],
+      requestedPreview: false,
+      message: "Add formulas for totals.",
+    });
+
+    expect(preview.contentChanges == null || preview.contentChanges.length === 0).toBe(true);
+  });
+
+  it("returns no contentChanges when message is omitted", () => {
+    const preview = buildFileEditConfirmationPreview({
+      format: "pptx",
+      fileNames: ["deck.pptx"],
+      operations: ["delete"],
+      requestedPreview: false,
+    });
+
+    expect(preview.contentChanges == null || preview.contentChanges.length === 0).toBe(true);
+  });
+
+  it("extracts target-only quote when source text not provided", () => {
+    const preview = buildFileEditConfirmationPreview({
+      format: "pptx",
+      fileNames: ["pitch.pptx"],
+      operations: ["rename"],
+      requestedPreview: false,
+      message: `Change the title to "Our 2025 Vision".`,
+    });
+
+    expect(preview.contentChanges).toBeDefined();
+    const change = preview.contentChanges![0];
+    expect(change.to).toContain("2025 Vision");
+    expect(change.from).toBeUndefined();
+  });
+
+  it("caps contentChanges at 5 even with many quoted pairs", () => {
+    const pairs = Array.from(
+      { length: 8 },
+      (_, i) => `Replace "term${i}" with "new${i}"`,
+    ).join(". ");
+    const preview = buildFileEditConfirmationPreview({
+      format: "docx",
+      fileNames: ["doc.docx"],
+      operations: ["replace"],
+      requestedPreview: false,
+      message: pairs,
+    });
+
+    expect((preview.contentChanges ?? []).length).toBeLessThanOrEqual(5);
+  });
+});
