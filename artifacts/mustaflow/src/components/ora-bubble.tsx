@@ -552,9 +552,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     format: FileFormat;
   } | null>(null);
 
-  // Auto-track the latest generated file with a durable assetId. Fires only
-  // when message count changes to avoid fighting with manual state changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Auto-track the latest generated file with a durable assetId.
   useEffect(() => {
     if (messages.length === 0) return;
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
@@ -562,7 +560,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     if (gf?.assetId != null) {
       setActiveArtifactRef({ assetId: gf.assetId, fileName: gf.fileName, format: gf.format });
     }
-  }, [messages.length]);
+  }, [messages]);
   const [showFormatMenu, setShowFormatMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
