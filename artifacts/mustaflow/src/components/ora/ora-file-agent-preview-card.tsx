@@ -6,6 +6,7 @@ import {
   FileCog,
   ListChecks,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import type { OraFileAgentPreview } from "@workspace/ora-contracts";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,7 @@ export function OraFileAgentPreviewCard({
   onApply,
   onRevise,
   onRedesign,
+  onCancel,
   disabled = false,
 }: {
   preview?: OraFileAgentPreview;
@@ -75,6 +77,7 @@ export function OraFileAgentPreviewCard({
   onApply?: () => void;
   onRevise?: () => void;
   onRedesign?: () => void;
+  onCancel?: () => void;
   disabled?: boolean;
 }) {
   if (!preview) return null;
@@ -120,7 +123,8 @@ export function OraFileAgentPreviewCard({
             </p>
           ) : null}
 
-          {preview.status === "needs_confirmation" && (onApply || onRevise || onRedesign) ? (
+          {preview.status === "needs_confirmation" &&
+          (onApply || onRevise || onRedesign || onCancel) ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {onApply ? (
                 <button
@@ -159,6 +163,20 @@ export function OraFileAgentPreviewCard({
                   )}
                 >
                   Create redesigned copy
+                </button>
+              ) : null}
+              {onCancel ? (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  disabled={disabled}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md border border-border/50 bg-transparent px-2 py-1 font-medium text-muted-foreground/70 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-50",
+                    compact ? "text-[10px]" : "text-[11px]",
+                  )}
+                >
+                  <X className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+                  Never mind
                 </button>
               ) : null}
             </div>

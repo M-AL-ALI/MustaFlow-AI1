@@ -1063,6 +1063,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     void sendMessage("Create a redesigned copy instead");
   }, [atLimit, isLoading, sendMessage]);
 
+  const handleCancelFileEditPreview = useCallback(() => {
+    if (isLoading) return;
+    void sendMessage("Never mind, cancel the edit");
+  }, [isLoading, sendMessage]);
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -1625,6 +1630,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                             onRedesign={
                               isLatestAssistant ? handleRedesignFileEditPreview : undefined
                             }
+                            onCancel={
+                              isLatestAssistant ? handleCancelFileEditPreview : undefined
+                            }
                             disabled={isLoading || atLimit}
                           />
                         )}
@@ -1638,6 +1646,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
                         onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
                         onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
+                        onCancel={isLatestAssistant ? handleCancelFileEditPreview : undefined}
                         disabled={isLoading || atLimit}
                       />
                     )}

@@ -10,6 +10,24 @@ const hookSource = read("../../../hooks/use-ora-chat.ts");
 const panelSource = read("../../ora-panel.tsx");
 const bubbleSource = read("../../ora-bubble.tsx");
 
+describe("Phase 9D — cancel file-edit preview wiring (website)", () => {
+  it("panel has handleCancelFileEditPreview callback and sends the cancel message", () => {
+    expect(panelSource).toContain("handleCancelFileEditPreview");
+    expect(panelSource).toContain('void sendMessage("Never mind, cancel the edit")');
+    expect(panelSource).toMatch(
+      /onCancel=\{[\s\S]*isLatestAssistant \? handleCancelFileEditPreview/,
+    );
+  });
+
+  it("bubble has handleCancelFileEditPreview callback and sends the cancel message", () => {
+    expect(bubbleSource).toContain("handleCancelFileEditPreview");
+    expect(bubbleSource).toContain('void sendMessage("Never mind, cancel the edit")');
+    expect(bubbleSource).toMatch(
+      /onCancel=\{[\s\S]*isLatestAssistant \? handleCancelFileEditPreview/,
+    );
+  });
+});
+
 describe("Ora chat UX response wiring", () => {
   it("keeps the public chat response fields in the hook contract", () => {
     [

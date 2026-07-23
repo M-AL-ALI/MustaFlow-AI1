@@ -356,6 +356,13 @@ export function planOraClarification(
 
 /* ── Continuation ─────────────────────────────────────────────────────────── */
 
+/**
+ * Matches explicit cancel phrasing. Only triggers when there is an active
+ * pending clarification (e.g. a file-edit preview awaiting confirmation).
+ */
+const CANCEL_EDIT_PATTERN =
+  /\b(?:never\s+mind|cancel(?:\s+(?:that|it|the\s+edit|the\s+plan|this))?|forget\s+it|stop\s+(?:that|it)|skip\s+it|discard(?:\s+(?:that|it))?|no\s+thanks|abort)\b/i;
+
 export interface OraClarificationContinuation {
   /**
    * The message ROUTING and the file-edit engine should see. When a pending
@@ -366,6 +373,14 @@ export interface OraClarificationContinuation {
   routedMessage: string;
   /** True when the pending context was merged into routedMessage. */
   applied: boolean;
+  /**
+   * True when the user's message matches a cancel pattern while a file-edit
+   * preview is pending. The chat route should short-circuit and return
+   * `cancelledReply` without charging quota or running the LLM.
+   */
+  isCancelled?: boolean;
+  /** Short acknowledgement reply to show the user when `isCancelled` is true. */
+  cancelledReply?: string;
 }
 
 /**
@@ -402,6 +417,18 @@ export function resolveClarificationContinuation(input: {
   const { message, pending } = input;
   const carriedDocs = input.carriedDocs ?? "";
   if (!pending) return { routedMessage: message, applied: false };
+
+  // Cancel gate — runs before any merge so "never mind" always wins.
+  if (CANCEL_EDIT_PATTERN.test(message)) {
+    return {
+      routedMessage: message,
+      applied: false,
+      isCancelled: true,
+      cancelledReply:
+        "No problem — I've cancelled the edit. Let me know if you'd like to make a different change.",
+    };
+  }
+
   if (pending.kind === "file_edit_preview_confirmation") {
     if (REDESIGN_CONFIRMATION_PATTERN.test(message)) {
       return {

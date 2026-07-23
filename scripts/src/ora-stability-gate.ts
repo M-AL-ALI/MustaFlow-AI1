@@ -238,11 +238,15 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /MessageExtras/i,
       /contentChanges/,
       /extractContentChanges/,
+      /CANCEL_EDIT_PATTERN/,
+      /isCancelled/,
+      /cancelledReply/,
+      /handleCancelFileEditPreview/,
     ],
     manualWebsite:
-      "Generate/edit DOCX/PPTX/XLSX/PDF and analyze a dataset; verify the preview card accurately lists detected inputs, planned actions, calculations/charts, and safe-edit notes without claiming changes that did not happen. For risky or user-requested preview edits, verify the card says it needs confirmation and that Apply edit executes the original uploaded-file edit, Revise plan focuses the composer, and Create redesigned copy intentionally rebuilds a copy instead of silently changing layout. Phase 9C: when a message contains quoted text replacement ('replace A with B') or structural ops ('delete slide 3'), the preview card must show a 'Content being changed' before/after section with old text struck-through and new text highlighted.",
+      "Generate/edit DOCX/PPTX/XLSX/PDF and analyze a dataset; verify the preview card accurately lists detected inputs, planned actions, calculations/charts, and safe-edit notes without claiming changes that did not happen. For risky or user-requested preview edits, verify the card says it needs confirmation and that Apply edit executes the original uploaded-file edit, Revise plan focuses the composer, and Create redesigned copy intentionally rebuilds a copy instead of silently changing layout. Phase 9C: when a message contains quoted text replacement ('replace A with B') or structural ops ('delete slide 3'), the preview card must show a 'Content being changed' before/after section with old text struck-through and new text highlighted. Phase 9D: a 'Never mind' button must appear next to Apply/Revise/Redesign; clicking it sends the cancel message and the server must reply with a polite acknowledgement without running the file edit or charging quota.",
     manualMobile:
-      "Repeat generated-file, edited-file, and dataset-analysis preview checks on TestFlight when mobile code changed; compact preview must match website meaning even if layout is flatter. Confirm Apply edit, Revise plan, and Redesigned copy actions appear only on the latest confirmation card and route through the normal chat send path with uploaded-file refs preserved. Phase 9C: verify the 'Content being changed' before/after pairs appear in the mobile preview indicator when quoted text is detected in the message.",
+      "Repeat generated-file, edited-file, and dataset-analysis preview checks on TestFlight when mobile code changed; compact preview must match website meaning even if layout is flatter. Confirm Apply edit, Revise plan, and Redesigned copy actions appear only on the latest confirmation card and route through the normal chat send path with uploaded-file refs preserved. Phase 9C: verify the 'Content being changed' before/after pairs appear in the mobile preview indicator when quoted text is detected in the message. Phase 9D: confirm the 'Never mind' button appears in the compact mobile preview card and sends the cancel message; the server reply must be a polite acknowledgement with no file generated.",
   },
   {
     id: "file-edit-quality-card",

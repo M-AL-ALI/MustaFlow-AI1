@@ -41,12 +41,16 @@ git add \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
-  lib/ora-contracts/src/index.ts \
-  artifacts/api-server/src/lib/public-ai/file-agent-preview.ts \
   artifacts/api-server/src/lib/public-ai/clarification-planner.ts \
-  "artifacts/api-server/src/lib/public-ai/__tests__/file-agent-preview.test.ts" \
+  artifacts/api-server/src/routes/public-ai/chat.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/ora-clarifying-questions.test.ts \
   artifacts/mustaflow/src/components/ora/ora-file-agent-preview-card.tsx \
+  artifacts/mustaflow/src/components/ora-bubble.tsx \
+  artifacts/mustaflow/src/components/ora-panel.tsx \
+  "artifacts/mustaflow/src/components/ora/__tests__/ora-chat-ux-wiring.test.ts" \
+  artifacts/ora-mobile/app/\(home\)/index.tsx \
   artifacts/ora-mobile/components/ora/MessageExtras.tsx \
+  "artifacts/ora-mobile/lib/__tests__/file-agent-preview-wiring.test.ts" \
   scripts/src/ora-stability-gate.ts 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

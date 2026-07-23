@@ -61,3 +61,22 @@ describe("Mobile Ora - Phase 9A file/data agent preview parity", () => {
     expect(index).toContain("isLatest ? onApplyFileEditPreview : undefined");
   });
 });
+
+describe("Phase 9D — cancel file-edit preview wiring (mobile)", () => {
+  const index = read("../../app/(home)/index.tsx");
+  const extras = read("../../components/ora/MessageExtras.tsx");
+
+  it("index has handleCancelFileEditPreview callback that sends the cancel message", () => {
+    expect(index).toContain("handleCancelFileEditPreview");
+    expect(index).toContain('void sendMessage("Never mind, cancel the edit", null)');
+    expect(index).toContain("onCancelFileEditPreview={handleCancelFileEditPreview}");
+    expect(index).toContain("isLatest ? onCancelFileEditPreview : undefined");
+  });
+
+  it("OraAssistantExtras and OraFileAgentPreviewIndicator accept onCancel", () => {
+    expect(extras).toContain("onCancelFileEditPreview");
+    expect(extras).toContain("onCancel?: () => void;");
+    expect(extras).toContain("onCancel={onCancelFileEditPreview}");
+    expect(extras).toContain("Never mind");
+  });
+});

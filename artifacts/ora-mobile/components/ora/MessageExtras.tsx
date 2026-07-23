@@ -17,6 +17,7 @@ import {
   Sheet,
   Sparkles,
   Table2,
+  X,
 } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import {
@@ -49,6 +50,7 @@ export function OraAssistantExtras({
   onApplyFileEditPreview,
   onReviseFileEditPreview,
   onRedesignFileEditPreview,
+  onCancelFileEditPreview,
 }: {
   message: OraMessage;
   // Omitted in temporary chats so the save-to-memory prompt is hidden entirely.
@@ -56,6 +58,7 @@ export function OraAssistantExtras({
   onApplyFileEditPreview?: () => void;
   onReviseFileEditPreview?: () => void;
   onRedesignFileEditPreview?: () => void;
+  onCancelFileEditPreview?: () => void;
 }) {
   const c = useColors();
   // Order mirrors the website assistant response: web image gallery, video
@@ -73,6 +76,7 @@ export function OraAssistantExtras({
         onApply={onApplyFileEditPreview}
         onRevise={onReviseFileEditPreview}
         onRedesign={onRedesignFileEditPreview}
+        onCancel={onCancelFileEditPreview}
       />
       <OraImageLineage editInstruction={message.editInstruction} c={c} />
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
@@ -96,12 +100,14 @@ function OraFileAgentPreviewIndicator({
   onApply,
   onRevise,
   onRedesign,
+  onCancel,
 }: {
   message: OraMessage;
   c: Colors;
   onApply?: () => void;
   onRevise?: () => void;
   onRedesign?: () => void;
+  onCancel?: () => void;
 }) {
   const preview = message.fileAgentPreview ?? message.datasetResult?.fileAgentPreview;
   if (!preview) return null;
@@ -294,6 +300,35 @@ function OraFileAgentPreviewIndicator({
                     }}
                   >
                     Redesigned copy
+                  </Text>
+                </Pressable>
+              ) : null}
+              {onCancel ? (
+                <Pressable
+                  onPress={onCancel}
+                  accessibilityRole="button"
+                  accessibilityLabel="Never mind, cancel"
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 9,
+                    borderWidth: 1,
+                    borderColor: c.border + "80",
+                    backgroundColor: "transparent",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <X size={11} color={c.mutedForeground} />
+                  <Text
+                    style={{
+                      color: c.mutedForeground,
+                      fontSize: 11,
+                      fontFamily: "Inter_500Medium",
+                    }}
+                  >
+                    Never mind
                   </Text>
                 </Pressable>
               ) : null}

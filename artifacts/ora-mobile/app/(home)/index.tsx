@@ -1508,6 +1508,11 @@ export default function OraChatScreen() {
     void sendMessage("Create a redesigned copy instead", null);
   }, [sendMessage, sending]);
 
+  const handleCancelFileEditPreview = useCallback(() => {
+    if (sending) return;
+    void sendMessage("Never mind, cancel the edit", null);
+  }, [sendMessage, sending]);
+
   // Author a brand-new file (csv/xlsx/docx/pdf/pptx) from a prompt via the
   // "Create file" sheet. Mirrors the website Create-file flow: append the user's
   // request and a pending assistant turn, call the dedicated generate-file
@@ -3144,6 +3149,7 @@ export default function OraChatScreen() {
               onApplyFileEditPreview={handleApplyFileEditPreview}
               onReviseFileEditPreview={handleReviseFileEditPreview}
               onRedesignFileEditPreview={handleRedesignFileEditPreview}
+              onCancelFileEditPreview={handleCancelFileEditPreview}
               isLatest={item.id === messages.at(-1)?.id}
             />
           )}
@@ -4046,6 +4052,7 @@ function MessageBubbleBase({
   onApplyFileEditPreview,
   onReviseFileEditPreview,
   onRedesignFileEditPreview,
+  onCancelFileEditPreview,
   isLatest,
 }: {
   message: OraMessage;
@@ -4062,6 +4069,7 @@ function MessageBubbleBase({
   onApplyFileEditPreview?: () => void;
   onReviseFileEditPreview?: () => void;
   onRedesignFileEditPreview?: () => void;
+  onCancelFileEditPreview?: () => void;
   isLatest?: boolean;
 }) {
   const c = useColors();
@@ -4701,6 +4709,7 @@ function MessageBubbleBase({
                 onApplyFileEditPreview={isLatest ? onApplyFileEditPreview : undefined}
                 onReviseFileEditPreview={isLatest ? onReviseFileEditPreview : undefined}
                 onRedesignFileEditPreview={isLatest ? onRedesignFileEditPreview : undefined}
+                onCancelFileEditPreview={isLatest ? onCancelFileEditPreview : undefined}
               />
             </>
           )}

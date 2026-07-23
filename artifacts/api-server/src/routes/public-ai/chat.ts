@@ -1454,6 +1454,19 @@ router.post("/public-ai/chat", async (req, res) => {
     pending: pendingClarification ?? null,
     carriedDocs,
   });
+
+  // Cancel short-circuit — free (pre-quota, pre-LLM), like clarifications.
+  if (continuation.isCancelled) {
+    res.json({
+      reply:
+        continuation.cancelledReply ??
+        "No problem — cancelled. Let me know if you'd like to make a different change.",
+      msgCount: session.msgCount,
+      msgLimit: effectiveMsgLimit,
+    });
+    return;
+  }
+
   const routedMessage = continuation.routedMessage;
 
   // Deterministic final routing precedence — forceSearch pin (a user-initiated
@@ -2795,6 +2808,20 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     pending: pendingClarification ?? null,
     carriedDocs,
   });
+
+  // Cancel short-circuit — mirrors the non-streaming handler; streams a
+  // single acknowledgement chunk so the client SSE path stays consistent.
+  if (continuation.isCancelled) {
+    const cancelReply =
+      continuation.cancelledReply ??
+      "No problem — cancelled. Let me know if you'd like to make a different change.";
+    res.setHeader("Content-Type", "text/event-stream");
+    res.write(`data: ${JSON.stringify({ chunk: cancelReply, done: false })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+    return;
+  }
+
   const routedMessage = continuation.routedMessage;
 
   // Deterministic final routing precedence — same shared resolver as the

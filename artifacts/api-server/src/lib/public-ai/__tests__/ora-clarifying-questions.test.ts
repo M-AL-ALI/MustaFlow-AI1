@@ -260,6 +260,56 @@ describe("Phase 4 clarifying questions — continuation merge", () => {
   });
 });
 
+describe("Phase 9D — cancel edit short-circuit", () => {
+  const pending = {
+    originalMessage: "Delete slide 3 and return the PowerPoint file.",
+    kind: "file_edit_preview_confirmation" as const,
+    inferredFileFormat: "pptx" as const,
+  };
+
+  it("'Never mind, cancel the edit' returns isCancelled and a friendly reply", () => {
+    const cont = resolveClarificationContinuation({
+      message: "Never mind, cancel the edit",
+      pending,
+      carriedDocs: MULTI_DOCS,
+    });
+    expect(cont.isCancelled).toBe(true);
+    expect(cont.cancelledReply).toBeTruthy();
+    expect(cont.applied).toBe(false);
+  });
+
+  it("'cancel' without pending context is a normal no-op (not a cancel)", () => {
+    const cont = resolveClarificationContinuation({
+      message: "Never mind, cancel the edit",
+      pending: null,
+      carriedDocs: DOCX_DOCS,
+    });
+    expect(cont.isCancelled).toBeFalsy();
+    expect(cont.applied).toBe(false);
+  });
+
+  it("cancel fires for common cancel phrasings", () => {
+    for (const msg of ["forget it", "cancel it", "never mind"]) {
+      const cont = resolveClarificationContinuation({
+        message: msg,
+        pending,
+        carriedDocs: DOCX_DOCS,
+      });
+      expect(cont.isCancelled).toBe(true);
+    }
+  });
+
+  it("cancel does NOT fire on clear edit instructions (no false positives)", () => {
+    const cont = resolveClarificationContinuation({
+      message: "Delete the intro heading and replace it with the company name",
+      pending,
+      carriedDocs: DOCX_DOCS,
+    });
+    expect(cont.isCancelled).toBeFalsy();
+    expect(cont.applied).toBe(true);
+  });
+});
+
 describe("Phase 9B file edit preview confirmation continuation", () => {
   const pending = {
     originalMessage: "Delete slide 3 and return the PowerPoint file.",
