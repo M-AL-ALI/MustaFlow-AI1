@@ -8,8 +8,8 @@ Vitest runs in this workspace can be killed silently (exit code -1, zero output)
 **Why:** The Replit container OOM-kills multi-worker vitest runs. api-server suites are worst (heavy router imports), but even a single mustaflow test file via `pnpm --filter @workspace/mustaflow run test -- <file>` has died this way.
 
 **How to apply:**
-- Retry with: `cd <artifact> && NODE_OPTIONS="--max-old-space-size=3072" npx vitest run <file> --maxWorkers=1` — this reliably passes (mustaflow orax-wiring 300 tests in ~3s).
-- Vitest 4 removed `--poolOptions.*` CLI flags; use `--maxWorkers=1` instead.
+- Retry with: `NODE_OPTIONS="--max-old-space-size=3072" pnpm --filter @workspace/<pkg> exec vitest run <files> --no-file-parallelism` — this reliably passes.
+- Vitest 4 removed `--poolOptions.*` CLI flags; use `--maxWorkers=1` instead for older invocations.
 - For api-server, if even single-file runs die, fall back to typechecks + manual node assertion scripts as the gate.
 
 Manual tsx assertion scripts must live INSIDE the package dir (e.g. artifacts/api-server/tmp-script.mts): /tmp scripts run as CJS (no top-level await) and cannot resolve package deps like fflate. Use .mts, run via `pnpm --filter @workspace/api-server exec tsx <file>`, delete after.
@@ -28,3 +28,9 @@ The `ora-stability-gate` workflow runner itself gets OOM-killed after ~3 minutes
 5. lint → `pnpm run lint`
 
 **Key:** web-build requires PORT and BASE_PATH env vars (vite.config.ts throws without them). From bash without PORT set, use `PORT=5000 BASE_PATH=/ pnpm --filter @workspace/mustaflow run build`.
+
+## pnpm install concurrent with gate = vitest "Command not found"
+
+Running `pnpm install` (or `pnpm add`) while the stability gate is active causes pnpm's per-package `.bin` directory to be temporarily unlinked mid-gate. Bundles that run DURING the relinking window fail with `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "vitest" not found` even though the binary exists before and after.
+
+**How to apply:** Always commit package.json changes and run `HUSKY=0 pnpm install` BEFORE starting the gate. Never run install concurrently with the gate workflow. If the gate shows "vitest not found" but the binary exists in `.bin`, the cause is a concurrent install — restart the gate from scratch once the install is complete and the working tree is committed and clean.
