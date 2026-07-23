@@ -462,7 +462,7 @@ What should I tell Replit?`;
     expect(mainCompletionCalls()).toEqual([]);
   });
 
-  it("routes terse uploaded-file edits to real file generation instead of a text answer", async () => {
+  it("destructive uploaded-file edits show a preview-confirmation before generating the file", async () => {
     const sessionId = "ora-chat-uploaded-edit-session";
     const fileRef = storeFile({
       sessionId,
@@ -490,13 +490,11 @@ What should I tell Replit?`;
       });
 
     expect(res.status).toBe(200);
-    expect(fileBuilderMock.generateFileFromPrompt).toHaveBeenCalledTimes(1);
-    const [filePrompt, fileFormat] = fileBuilderMock.generateFileFromPrompt.mock
-      .calls[0] as unknown as [string, string];
-    expect(fileFormat).toBe("pptx");
-    expect(filePrompt).toContain("Slide 3");
-    expect(mainCompletionCalls()).toEqual([]);
-    expect(res.body.fileName).toBe("service-packages.csv");
+    expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
+    expect(res.body.clarificationKind).toBe("file_edit_preview_confirmation");
+    expect(res.body.pendingTaskContext?.kind).toBe("file_edit_preview_confirmation");
+    expect(res.body.fileAgentPreview?.status).toBe("needs_confirmation");
+    expect(res.body.reply).toContain("confirmation");
   });
 
   it("returns inline image fields for signed-in image generation without sign-in hedging", async () => {
