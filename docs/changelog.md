@@ -2,6 +2,19 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora Phase 10 — True Artifact Revision Engine (2026-07-23)
+
+Gate: pass=13 warn=1(git-clean) fail=0. Manual checklist required before publish/TestFlight.
+
+- **edit-intent-classifier.ts** (NEW) — pure regex classifier returning one of `content_edit / style_edit / layout_edit / structure_edit / formula_chart / full_redesign / new_creation / revision_ambiguous / unrelated`. 40+ test cases in `edit-intent-classifier.test.ts`.
+- **ora-assets.ts** — `getOraAssetMeta` + `getNextVersionLineageFromAssetId` to fetch a generated asset's bytes and thread version lineage into revision commits.
+- **office-layout-edit.ts** — accepts `activeAssetBuffer` + `activeAssetFileName`; builds a synthetic `FileEntry` from the buffer so the edit engine works identically regardless of whether the source was an upload or a prior generation. xlsx excluded from `extractText` (unsupported type); only docx/pptx extracted.
+- **generate-file.ts** — accepts `activeAssetId`; fetches bytes via `getOraAssetBytes`; injects text context for docx/pptx; passes `activeAssetBuffer`+`fileName` to `tryApplyLayoutPreservingFileEdit`.
+- **chat.ts** — accepts `activeAssetId` in the file-generation branch; fetches bytes, injects context, passes `activeAssetBuffer` to the edit engine; version lineage threaded.
+- **Website** — `use-ora-chat.ts`: `generateFile` accepts `activeAssetId`, stores returned assetId, passes in body + retry body. `ora-panel.tsx`: `activeArtifactRef` state, auto-track latest assetId via `useEffect`, "Revising: [filename]" chip UI, `handleReviseGeneratedFile`, `clearConversation` clears ref.
+- **Mobile** — `api.ts`: `GenerateFileRequest.activeAssetId` added. `index.tsx`: `activeArtifactRef` state, `handleGenerateFile` tracks response assetId, `handleReviseGeneratedFile` sets `activeAssetId` in draft, `generateFileDraftRef` pattern, `onGenerate` wrapper passes `activeAssetId`.
+- **Stability gate** — `ORA_FEATURE_REGISTRY` entry added for `artifact-revision-engine`.
+
 ## Ora Phases 9C–9G — File edit preview hardening + regression coverage (2026-07-23)
 
 No publish / no TestFlight submit. Each phase committed and gate-verified separately.

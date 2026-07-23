@@ -582,6 +582,21 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
 
   // Inline image editing: which editable image's edit box is open, and its draft
   // instruction text. Keyed by the image's generated_images id (unique per image).
+  // Phase 10: auto-track the latest generated file with a durable assetId as
+  // the active working artifact. Fires only when the message count changes so it
+  // doesn't fight with the user manually clearing the chip.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const gf = lastAssistant?.generatedFile;
+    if (gf?.assetId != null) {
+      setActiveArtifactRef({ assetId: gf.assetId, fileName: gf.fileName, format: gf.format });
+    }
+    // Intentionally only track message count, not full messages reference, to
+    // avoid fighting with the user's manual × clear action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+
   const [editingImageId, setEditingImageId] = useState<number | null>(null);
   const [editImageInstruction, setEditImageInstruction] = useState("");
   const submitImageEdit = useCallback(
@@ -666,6 +681,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
+  // Phase 10: active working artifact for the revision engine. Set automatically
+  // after every file generation that returns a durable assetId. Cleared by the
+  // × chip or when the user starts a new conversation.
+  const [activeArtifactRef, setActiveArtifactRef] = useState<{
+    assetId: number;
+    fileName: string;
+    format: FileFormat;
+  } | null>(null);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
@@ -1118,7 +1141,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     if (selectedFormat) {
       const fmt = selectedFormat;
       setSelectedFormat(null);
-      void generateFile(text, fmt);
+      // Phase 10: pass active working artifact id so the revision engine can
+      // apply the edit in-place instead of regenerating from scratch.
+      const revisionAssetId = activeArtifactRef?.assetId ?? null;
+      void generateFile(text, fmt, revisionAssetId);
     } else {
       const editedFrom = editingFromIdx !== null ? true : undefined;
       setEditingFromIdx(null);
@@ -1154,6 +1180,11 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const handleReviseGeneratedFile = useCallback((file: GeneratedFile) => {
     const revisionPrompt = `Revise the ${file.format.toUpperCase()} file "${file.fileName}": `;
     setSelectedFormat(file.format);
+    // Phase 10: pin the active working artifact so the next send targets this
+    // exact file's bytes rather than regenerating a lookalike.
+    if (file.assetId != null) {
+      setActiveArtifactRef({ assetId: file.assetId, fileName: file.fileName, format: file.format });
+    }
     setInput(revisionPrompt);
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -1563,6 +1594,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     disabled={isLoading}
                     onClick={() => {
                       void clearConversation();
+                      setActiveArtifactRef(null);
                       setShowHeaderMenu(false);
                     }}
                     className={cn(
@@ -2256,6 +2288,26 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                           onClick={() => setSelectedFormat(null)}
                           className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
                           aria-label="Cancel file generation"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Phase 10: active working artifact chip — shown when a
+                        generated file is pinned as the revision target. Cleared
+                        by × or by starting a new conversation. */}
+                    {!selectedFormat && activeArtifactRef && (
+                      <div className="flex items-center gap-2 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.07)] px-3 py-2 text-xs mb-2">
+                        <FileText className="h-3.5 w-3.5 text-[hsl(var(--ora-accent-hsl))] shrink-0" />
+                        <span className="flex-1 text-foreground truncate">
+                          Revising: {activeArtifactRef.fileName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setActiveArtifactRef(null)}
+                          className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
+                          aria-label="Stop revising this file"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>

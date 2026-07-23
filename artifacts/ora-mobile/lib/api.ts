@@ -514,6 +514,12 @@ export interface GenerateFileRequest {
    * asset in Personal. Server validates ownership and degrades to Personal.
    */
   oraProjectId?: number | null;
+  /**
+   * Phase 10 — Artifact Revision Engine: the `assetId` of the active working
+   * file the user is revising. When set, the backend fetches the file bytes
+   * and applies the edit in-place rather than regenerating from scratch.
+   */
+  activeAssetId?: number | null;
 }
 
 /**
@@ -534,6 +540,7 @@ export function generateFile(req: GenerateFileRequest): Promise<ChatResponse> {
         ...(req.language ? { language: req.language } : {}),
         documentRefs: req.documentRefs ?? [],
         ...(req.oraProjectId != null ? { oraProjectId: req.oraProjectId } : {}),
+        ...(req.activeAssetId != null ? { activeAssetId: req.activeAssetId } : {}),
       }),
     }),
   );

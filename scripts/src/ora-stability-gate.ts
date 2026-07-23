@@ -185,6 +185,25 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Repeat image generation/edit/search after mobile image UI changes or after a TestFlight build.",
   },
   {
+    id: "artifact-revision-engine",
+    title:
+      "Phase 10 — True Artifact Revision Engine: in-place revision of generated files via activeAssetId",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /edit-intent-classifier/i,
+      /activeAssetId/i,
+      /activeArtifactRef/i,
+      /getOraAssetMeta/i,
+      /getNextVersionLineageFromAssetId/i,
+      /ACTIVE_ASSET_FILEREF/i,
+      /activeAssetBuffer/i,
+    ],
+    manualWebsite:
+      "Generate a DOCX/PPTX/XLSX. Immediately click Revise — the 'Revising: [filename]' chip must appear. Send a specific edit (e.g. 'change the title to Project Alpha'). The returned file must apply the change in-place on the ORIGINAL generated file, not regenerate from scratch. Verify the revision chip has the correct filename. Click × — the chip must disappear. Clear conversation — the chip must also disappear. Confirm version chain: the revised file's assetId appears in the Library as a child version of the original.",
+    manualMobile:
+      "Repeat the same generate → revise flow on the current TestFlight build: generate a DOCX/PPTX, then revise it with a specific change, verify the file is edited in-place (not regenerated), and the Library shows the revision chain.",
+  },
+  {
     id: "advanced-files-reports",
     title: "Advanced files, uploads, charts, exports, reports, and revisions",
     ownerSurfaces: ["api", "website", "mobile"],

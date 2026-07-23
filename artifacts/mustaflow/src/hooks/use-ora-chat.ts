@@ -277,7 +277,11 @@ export interface UseOraChatReturn {
     content: string,
     opts?: { truncateTo?: number; editedFrom?: boolean; forceSearch?: boolean },
   ) => Promise<void>;
-  generateFile: (content: string, format: FileFormat) => Promise<void>;
+  generateFile: (
+    content: string,
+    format: FileFormat,
+    activeAssetId?: number | null,
+  ) => Promise<void>;
   editInlineImage: (sourceImageId: number, instruction: string) => Promise<void>;
   clearError: () => void;
   uploadFile: (file: File) => Promise<void>;
@@ -2330,13 +2334,16 @@ export function useOraChat(): UseOraChatReturn {
   );
 
   const generateFile = useCallback(
-    async (content: string, format: FileFormat) => {
+    async (content: string, format: FileFormat, activeAssetId?: number | null) => {
       if (!content.trim() || isLoading) return;
 
       const formatLabel = format.toUpperCase();
+      const isRevision = activeAssetId != null;
       const userMsg: OraMessage = {
         role: "user",
-        content: `Create a ${formatLabel} file: ${content}`,
+        content: isRevision
+          ? content
+          : `Create a ${formatLabel} file: ${content}`,
       };
       setMessages((prev) => {
         const next = [...prev, userMsg];
@@ -2369,12 +2376,19 @@ export function useOraChat(): UseOraChatReturn {
         if (genProjectId != null) {
           body.oraProjectId = genProjectId;
         }
+        // Phase 10: revision engine — pass the active working artifact id so
+        // the backend can fetch its bytes and apply the edit in-place rather
+        // than regenerating from scratch.
+        if (activeAssetId != null) {
+          body.activeAssetId = activeAssetId;
+        }
 
         const data = await apiPost<{
           reply: string;
           fileName: string;
           fileData: string;
           mimeType: string;
+          assetId?: number;
           editQuality?: OraFileEditQuality;
           fileAgentPreview?: OraFileAgentPreview;
           msgCount: number;
@@ -2396,6 +2410,7 @@ export function useOraChat(): UseOraChatReturn {
                 fileData: data.fileData,
                 mimeType: data.mimeType,
                 format,
+                ...(data.assetId != null ? { assetId: data.assetId } : {}),
                 ...(data.editQuality ? { editQuality: data.editQuality } : {}),
               } satisfies GeneratedFile,
               ...(data.fileAgentPreview ? { fileAgentPreview: data.fileAgentPreview } : {}),
@@ -2439,6 +2454,8 @@ export function useOraChat(): UseOraChatReturn {
               messages: retryHistory,
               format,
               timeZone: clientTimeZone(),
+              // Preserve the active-asset revision target across the retry.
+              ...(activeAssetId != null ? { activeAssetId } : {}),
             };
             if (language && language !== "auto") {
               retryBody.language = language;

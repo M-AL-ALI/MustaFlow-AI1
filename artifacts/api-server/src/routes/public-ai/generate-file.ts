@@ -37,6 +37,12 @@ const bodySchema = z.object({
   // Signed-in only; must name an active project owned by the caller. Null or
   // omitted = the user's Personal space.
   oraProjectId: z.number().int().positive().nullable().optional(),
+  // Phase 10 — True Artifact Revision Engine: the asset id of the last file
+  // this user generated/edited in this conversation. When provided, revision
+  // requests are applied directly to these bytes (layout-preserving in-place
+  // edit) instead of regenerating a lookalike from extracted text.
+  // Signed-in only; anonymous users never have persisted assets.
+  activeAssetId: z.number().int().positive().nullable().optional(),
 });
 
 router.post("/public-ai/generate-file", async (req, res) => {
@@ -46,7 +52,8 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  const { message, messages, format, language, documentRefs, oraProjectId } = parsed.data;
+  const { message, messages, format, language, documentRefs, oraProjectId, activeAssetId } =
+    parsed.data;
 
   if (isKillSwitchActive("file_generation")) {
     res.status(503).json(killSwitchBody("file_generation"));
@@ -142,6 +149,42 @@ router.post("/public-ai/generate-file", async (req, res) => {
 
   const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
 
+  // Phase 10: resolve the active working artifact (last generated/edited file)
+  // so revision requests can be applied directly to those bytes rather than
+  // regenerating a lookalike. Only available for signed-in users who have a
+  // persisted asset. Ownership is enforced by getOraAssetBytes.
+  let activeAssetBuffer: Buffer | null = null;
+  let activeAssetFileName: string | null = null;
+  let activeAssetContextText = "";
+  if (activeAssetId && authed) {
+    try {
+      const { getOraAssetBytes, getOraAssetMeta } = await import("../../lib/ora-assets");
+      const [buffer, meta] = await Promise.all([
+        getOraAssetBytes(activeAssetId, authed.userId),
+        getOraAssetMeta(activeAssetId, authed.userId),
+      ]);
+      if (buffer && meta) {
+        activeAssetBuffer = buffer;
+        activeAssetFileName = meta.fileName;
+        // xlsx not supported by extractText (txt/docx/pptx/pdf only).
+        if (format === "docx" || format === "pptx") {
+          try {
+            const { extractText } = await import("../../lib/public-ai/file-extract");
+            const text = await extractText(buffer, format as "docx" | "pptx");
+            if (text.trim()) activeAssetContextText = text.slice(0, 8_000);
+          } catch {
+            // no text extraction — AI edit path still works
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { component: "ora-generate-file", activeAssetId, err },
+        "Failed to resolve active asset; proceeding without revision target",
+      );
+    }
+  }
+
   // Re-hydrate any uploaded documents/datasets so the file is built from the
   // user's real data. Empty when nothing resolves (expired/foreign refs); in
   // that case generation falls back to its non-source-data behavior.
@@ -164,8 +207,19 @@ router.post("/public-ai/generate-file", async (req, res) => {
     finalTool: "file_generation",
   });
   const promptWithPlan = multiFilePlan ? `${message}\n\n${multiFilePlan.directive}` : message;
-  const filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
-  const hasSourceData = carriedDocs.length > 0;
+  let filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
+  // Inject extracted text from the active working artifact so the AI generates
+  // something coherent when the layout edit path can't apply the change.
+  if (activeAssetFileName && activeAssetContextText) {
+    filePrompt =
+      filePrompt +
+      "\n\n[ACTIVE WORKING FILE — REVISION TARGET]\n" +
+      `The user wants to revise this file: ${activeAssetFileName}\n` +
+      "Apply only the requested changes. Preserve all other content, structure, and layout.\n\n" +
+      `"""\n${activeAssetContextText}\n"""\n` +
+      "[END OF ACTIVE WORKING FILE]";
+  }
+  const hasSourceData = carriedDocs.length > 0 || activeAssetContextText.length > 0;
 
   let FileGenerationErrorCtor:
     | (typeof import("../../lib/public-ai/file-builder"))["FileGenerationError"]
@@ -186,6 +240,10 @@ router.post("/public-ai/generate-file", async (req, res) => {
       // the ordered-refs scan never edits the wrong same-format upload.
       preferredFileRef:
         multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(message, carriedFileMeta),
+      // Phase 10: pass active working artifact bytes so revision requests are
+      // applied in-place instead of regenerating a lookalike from text.
+      activeAssetBuffer,
+      activeAssetFileName,
     });
     const result =
       layoutEditResult ??
@@ -218,20 +276,25 @@ router.post("/public-ai/generate-file", async (req, res) => {
     let assetId: number | null = null;
     if (authed) {
       try {
-        const { persistOraAsset, getNextVersionLineage } = await import("../../lib/ora-assets");
-        // In-place Office edit: chain this save onto the source file's version
-        // lineage (parent = current head asset, root = the chain's v1) so
-        // revision history shows every version in order. Falls back to a
-        // standalone v1 when no prior asset is linked.
-        const lineage = result.editedFileRef
-          ? await getNextVersionLineage(authed.userId, result.editedFileRef)
-          : null;
-        const editSummary = result.editedFileRef
-          ? (result.editQuality?.changes?.length
-              ? result.editQuality.changes.join("; ")
-              : `Edited: ${message}`
-            ).slice(0, 300)
-          : null;
+        const { persistOraAsset, getNextVersionLineage, getNextVersionLineageFromAssetId } =
+          await import("../../lib/ora-assets");
+        // Version lineage: Phase 10 active-asset revisions chain off the
+        // activeAssetId directly. Uploaded-file in-place edits chain via the
+        // editedFileRef session-store key. Plain generation is standalone v1.
+        const lineage =
+          activeAssetId && layoutEditResult
+            ? await getNextVersionLineageFromAssetId(authed.userId, activeAssetId)
+            : result.editedFileRef
+              ? await getNextVersionLineage(authed.userId, result.editedFileRef)
+              : null;
+        const isRevision = activeAssetId && layoutEditResult;
+        const editSummary =
+          isRevision || result.editedFileRef
+            ? (result.editQuality?.changes?.length
+                ? result.editQuality.changes.join("; ")
+                : `Revised: ${message}`
+              ).slice(0, 300)
+            : null;
         assetId = await persistOraAsset({
           userId: authed.userId,
           // Chained versions inherit the parent's project via the lineage
@@ -252,9 +315,9 @@ router.post("/public-ai/generate-file", async (req, res) => {
         if (assetId != null && result.editQuality) {
           result.editQuality.versionId = assetId;
         }
-        // In-place Office edit: repoint the durable file-context mirror at the
-        // edited asset so revisions after a restart/rotated session compound
-        // instead of reverting to the original upload.
+        // In-place Office edit on an uploaded file: repoint the durable
+        // file-context mirror at the edited asset so revisions after a
+        // restart/rotated session compound instead of reverting to the upload.
         if (assetId != null && result.editedFileRef) {
           const { relinkDurableFileContextBestEffort } =
             await import("../../lib/public-ai/file-context-store");

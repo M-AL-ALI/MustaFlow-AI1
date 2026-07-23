@@ -648,7 +648,13 @@ export default function OraChatScreen() {
   const [generateFileDraft, setGenerateFileDraft] = useState<{
     prompt: string;
     format: FileFormat;
+    // Phase 10: carried through when the user taps Revise on a generated file.
+    activeAssetId?: number | null;
   } | null>(null);
+  // Ref so the onGenerate wrapper always reads the current draft even inside a
+  // stable memoized callback (avoids a stale-closure on generateFileDraft).
+  const generateFileDraftRef = useRef(generateFileDraft);
+  generateFileDraftRef.current = generateFileDraft;
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   // UUID refs of documents/datasets uploaded this conversation. The server
   // re-hydrates their real content during file creation so a generated file is
@@ -1518,8 +1524,17 @@ export default function OraChatScreen() {
   // request and a pending assistant turn, call the dedicated generate-file
   // endpoint (re-hydrating any uploaded source data), then settle the reply with
   // a downloadable generated-file card. Generation is non-streaming.
+  // Phase 10: track the active working artifact for the revision engine.
+  // Set after every generate-file response that returns a durable assetId.
+  // Cleared when the user explicitly picks a new format (new creation) or clears.
+  const [activeArtifactRef, setActiveArtifactRef] = useState<{
+    assetId: number;
+    fileName: string;
+    format: FileFormat;
+  } | null>(null);
+
   const handleGenerateFile = useCallback(
-    async (prompt: string, format: FileFormat) => {
+    async (prompt: string, format: FileFormat, activeAssetId?: number | null) => {
       const text = prompt.trim();
       if (!text || sending) return;
       setShowGenerateFile(false);
@@ -1551,6 +1566,9 @@ export default function OraChatScreen() {
           language: language !== "auto" ? language : undefined,
           documentRefs: documentRefsRef.current,
           oraProjectId: activeProjectIdRef.current,
+          // Phase 10: pass active artifact id so the backend applies the edit
+          // in-place rather than regenerating the file from scratch.
+          activeAssetId: activeAssetId ?? null,
         });
         const assistant: OraMessage = {
           id: pendingId,
@@ -1565,6 +1583,11 @@ export default function OraChatScreen() {
         setMessages(finalMsgs);
         scrollToEnd();
         void persist(finalMsgs, turnIsTemporary);
+        // Auto-track the result as the new active working artifact if it has a
+        // durable assetId (signed-in users only).
+        if (res.assetId != null && res.fileName) {
+          setActiveArtifactRef({ assetId: res.assetId, fileName: res.fileName, format });
+        }
       } catch (err) {
         const msg = friendlyOraSendErrorMessage(err, "Couldn't create that file. Try again.");
         setMessages((prev) =>
@@ -1585,6 +1608,9 @@ export default function OraChatScreen() {
     setGenerateFileDraft({
       prompt: `Revise the ${file.format.toUpperCase()} file "${file.fileName}": `,
       format: file.format,
+      // Phase 10: carry the assetId so the GenerateFileSheet's onGenerate call
+      // picks it up from generateFileDraftRef and forwards it to handleGenerateFile.
+      activeAssetId: file.assetId ?? null,
     });
     setShowGenerateFile(true);
   }, []);
@@ -3809,7 +3835,9 @@ export default function OraChatScreen() {
           setShowGenerateFile(false);
           setGenerateFileDraft(null);
         }}
-        onGenerate={handleGenerateFile}
+        onGenerate={(prompt, format) =>
+          void handleGenerateFile(prompt, format, generateFileDraftRef.current?.activeAssetId)
+        }
       />
 
       <OraHeaderMenu

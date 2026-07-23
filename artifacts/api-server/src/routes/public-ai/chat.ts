@@ -1036,6 +1036,14 @@ const bodySchema = z.object({
    * with scanUserInput exactly like `message`.
    */
   pendingClarification: oraPendingClarificationSchema.optional(),
+  /**
+   * Phase 10 — True Artifact Revision Engine: the asset id of the last file
+   * generated or edited in this conversation. When provided and an edit intent
+   * is detected, the file-gen branch applies the change to those exact bytes
+   * rather than regenerating a lookalike from extracted text.
+   * Signed-in only; anonymous users never have persisted assets.
+   */
+  activeAssetId: z.number().int().positive().nullable().optional(),
 });
 
 /**
@@ -1289,6 +1297,7 @@ router.post("/public-ai/chat", async (req, res) => {
     streamFallbackToken,
     forceSearch,
     pendingClarification,
+    activeAssetId,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -1632,7 +1641,58 @@ router.post("/public-ai/chat", async (req, res) => {
     const promptWithPlan = multiFilePlan
       ? `${routedMessage}\n\n${multiFilePlan.directive}`
       : routedMessage;
-    const filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
+
+    // Phase 10: resolve active working artifact so revision requests target the
+    // exact bytes the user is working with rather than regenerating a lookalike.
+    let chatActiveAssetBuffer: Buffer | null = null;
+    let chatActiveAssetFileName: string | null = null;
+    if (activeAssetId && authed) {
+      try {
+        const { getOraAssetBytes, getOraAssetMeta } = await import("../../lib/ora-assets");
+        const [buffer, meta] = await Promise.all([
+          getOraAssetBytes(activeAssetId, authed.userId),
+          getOraAssetMeta(activeAssetId, authed.userId),
+        ]);
+        if (buffer && meta) {
+          chatActiveAssetBuffer = buffer;
+          chatActiveAssetFileName = meta.fileName;
+        }
+      } catch (err) {
+        logger.warn(
+          { component: "ora-chat-file", activeAssetId, err },
+          "Failed to resolve active asset; proceeding without revision target",
+        );
+      }
+    }
+
+    let filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
+    // Inject active-asset context text so the fallback generator is anchored
+    // to the file's actual content when the in-place edit path returns null.
+    if (chatActiveAssetFileName && chatActiveAssetBuffer) {
+      const ext = chatActiveAssetFileName.replace(/^.*\./, "").toLowerCase();
+      // xlsx not supported by extractText (txt/docx/pptx/pdf only).
+      if (ext === "docx" || ext === "pptx") {
+        try {
+          const { extractText } = await import("../../lib/public-ai/file-extract");
+          const text = await extractText(
+            chatActiveAssetBuffer,
+            ext as "docx" | "pptx",
+          );
+          if (text.trim()) {
+            filePrompt =
+              filePrompt +
+              "\n\n[ACTIVE WORKING FILE — REVISION TARGET]\n" +
+              `The user wants to revise this file: ${chatActiveAssetFileName}\n` +
+              "Apply only the requested changes. Preserve all other content, structure, and layout.\n\n" +
+              `"""\n${text.slice(0, 8_000)}\n"""\n` +
+              "[END OF ACTIVE WORKING FILE]";
+          }
+        } catch {
+          // no text extraction — AI edit path still works
+        }
+      }
+    }
+
     const { generateFileFromPrompt, FileGenerationError } =
       await import("../../lib/public-ai/file-builder");
     try {
@@ -1651,6 +1711,9 @@ router.post("/public-ai/chat", async (req, res) => {
         // wrong same-format upload.
         preferredFileRef:
           multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(routedMessage, carriedFileMeta),
+        // Phase 10: revision of the active working artifact.
+        activeAssetBuffer: chatActiveAssetBuffer,
+        activeAssetFileName: chatActiveAssetFileName,
       });
       const result =
         layoutEditResult ??
@@ -1685,20 +1748,25 @@ router.post("/public-ai/chat", async (req, res) => {
       let assetId: number | null = null;
       if (authed && result.fileData) {
         try {
-          const { persistOraAsset, getNextVersionLineage } = await import("../../lib/ora-assets");
-          // In-place Office edit: chain this save onto the source file's
-          // version lineage (parent = current head asset, root = the chain's
-          // v1) so revision history shows every version in order. Falls back
-          // to a standalone v1 when no prior asset is linked.
-          const lineage = result.editedFileRef
-            ? await getNextVersionLineage(authed.userId, result.editedFileRef)
-            : null;
-          const editSummary = result.editedFileRef
-            ? (result.editQuality?.changes?.length
-                ? result.editQuality.changes.join("; ")
-                : `Edited: ${message}`
-              ).slice(0, 300)
-            : null;
+          const { persistOraAsset, getNextVersionLineage, getNextVersionLineageFromAssetId } =
+            await import("../../lib/ora-assets");
+          // Version lineage: Phase 10 active-asset revisions chain off the
+          // activeAssetId directly. Uploaded-file in-place edits chain via the
+          // editedFileRef session-store key. Plain generation is standalone v1.
+          const lineage =
+            activeAssetId && layoutEditResult
+              ? await getNextVersionLineageFromAssetId(authed.userId, activeAssetId)
+              : result.editedFileRef
+                ? await getNextVersionLineage(authed.userId, result.editedFileRef)
+                : null;
+          const isRevision = activeAssetId && layoutEditResult;
+          const editSummary =
+            isRevision || result.editedFileRef
+              ? (result.editQuality?.changes?.length
+                  ? result.editQuality.changes.join("; ")
+                  : `Revised: ${message}`
+                ).slice(0, 300)
+              : null;
           assetId = await persistOraAsset({
             userId: authed.userId,
             // Chained versions inherit the parent's project via the lineage

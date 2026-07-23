@@ -36,7 +36,23 @@ interface LayoutEditInput {
    * file. Falls back to the ordered scan when it doesn't resolve.
    */
   preferredFileRef?: string | null;
+  /**
+   * Phase 10: raw bytes of the active working artifact (last generated or
+   * edited file in this conversation). When provided, the edit engine targets
+   * these bytes directly — no documentRefs lookup needed. The caller is
+   * responsible for verifying ownership before populating this field.
+   */
+  activeAssetBuffer?: Buffer | null;
+  /** Display name paired with activeAssetBuffer. Required when buffer is set. */
+  activeAssetFileName?: string | null;
 }
+
+/**
+ * Sentinel fileRef used for synthetic FileEntry objects built from an active
+ * asset buffer. The session store is NOT updated for this ref — the route
+ * layer handles version chaining via getNextVersionLineageFromAssetId instead.
+ */
+const ACTIVE_ASSET_FILEREF = "__active_asset__" as const;
 
 type ZipEntries = Record<string, Uint8Array>;
 
@@ -1910,6 +1926,41 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
 export async function resolveRawOfficeEntry(
   input: LayoutEditInput,
 ): Promise<{ entry: FileEntry; fileRef: string } | null> {
+  // Phase 10: active working artifact takes highest priority — the user is
+  // explicitly revising the file they just generated/edited. Build a synthetic
+  // FileEntry from the provided buffer so the rest of the edit engine can work
+  // identically regardless of whether the source was an upload or a generation.
+  if (input.activeAssetBuffer && input.activeAssetFileName) {
+    const rawFileType = input.format as OfficeRawType;
+    // xlsx extraction is not supported by extractText (only txt/docx/pptx/pdf).
+    const supportsExtract = rawFileType === "docx" || rawFileType === "pptx";
+    if (!MIME_BY_TYPE[rawFileType]) return null; // unsupported format guard
+    let extractedText = "";
+    if (supportsExtract) {
+      try {
+        const { extractText } = await import("./file-extract.js");
+        const text = await extractText(
+          input.activeAssetBuffer,
+          rawFileType as "docx" | "pptx",
+        );
+        if (text.trim()) extractedText = text.slice(0, MAX_TEXT_CHARS_PER_FILE);
+      } catch {
+        // Proceed with empty text — the regex/AI edit paths still work
+      }
+    }
+    const syntheticEntry: FileEntry = {
+      sessionId: input.sessionId,
+      filename: input.activeAssetFileName,
+      mimeType: MIME_BY_TYPE[rawFileType],
+      charCount: extractedText.length,
+      extractedText,
+      rawBase64: input.activeAssetBuffer.toString("base64"),
+      rawSizeBytes: input.activeAssetBuffer.length,
+      rawFileType,
+      expiresAt: Date.now() + 3_600_000,
+    };
+    return { entry: syntheticEntry, fileRef: ACTIVE_ASSET_FILEREF };
+  }
   // Planner-steered target first: never silently edit the wrong file when the
   // multi-file planner already resolved WHICH upload the user meant.
   if (input.preferredFileRef) {
@@ -2026,6 +2077,9 @@ async function writeBackEditedEntry(
   entry: FileEntry,
   result: GeneratedFileResult,
 ): Promise<boolean> {
+  // Phase 10: synthetic active-asset entries have no session store row to
+  // update. The route layer handles version chaining via the original assetId.
+  if (fileRef === ACTIVE_ASSET_FILEREF) return true;
   try {
     const buffer = Buffer.from(result.fileData, "base64");
     if (buffer.length === 0 || buffer.length > MAX_RAW_BYTES_PER_FILE) return false;
@@ -2087,7 +2141,7 @@ export async function tryApplyLayoutPreservingFileEdit(
   else result = await editXlsx(entry, input.message);
   if (result) {
     const wroteBack = await writeBackEditedEntry(input, fileRef, entry, result);
-    if (wroteBack) result.editedFileRef = fileRef;
+    if (wroteBack && fileRef !== ACTIVE_ASSET_FILEREF) result.editedFileRef = fileRef;
     return result;
   }
 
@@ -2128,7 +2182,7 @@ export async function tryApplyLayoutPreservingFileEdit(
           changes,
         );
         const wroteBack = await writeBackEditedEntry(input, fileRef, entry, editResult);
-        if (wroteBack) editResult.editedFileRef = fileRef;
+        if (wroteBack && fileRef !== ACTIVE_ASSET_FILEREF) editResult.editedFileRef = fileRef;
         return editResult;
       }
     }

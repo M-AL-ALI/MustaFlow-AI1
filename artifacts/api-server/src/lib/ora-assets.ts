@@ -182,6 +182,93 @@ export async function getNextVersionLineage(
 }
 
 /**
+ * Lightweight metadata snapshot for one owner-scoped, non-deleted asset.
+ * Used to resolve the file name, format, and project when the caller already
+ * has an assetId (e.g. the active-artifact revision path).
+ */
+export async function getOraAssetMeta(
+  assetId: number,
+  userId: string,
+): Promise<{
+  fileName: string;
+  mimeType: string;
+  format: string | null;
+  oraProjectId: number | null;
+} | null> {
+  try {
+    const [row] = await db
+      .select({
+        fileName: oraAssetsTable.fileName,
+        mimeType: oraAssetsTable.mimeType,
+        format: oraAssetsTable.format,
+        oraProjectId: oraAssetsTable.oraProjectId,
+        deletedAt: oraAssetsTable.deletedAt,
+      })
+      .from(oraAssetsTable)
+      .where(and(eq(oraAssetsTable.id, assetId), eq(oraAssetsTable.userId, userId)));
+    if (!row || row.deletedAt) return null;
+    return {
+      fileName: row.fileName,
+      mimeType: row.mimeType,
+      format: row.format,
+      oraProjectId: row.oraProjectId,
+    };
+  } catch (err) {
+    logger.error({ component: "ora-assets", err, assetId }, "Failed to load Ora asset metadata");
+    return null;
+  }
+}
+
+/**
+ * Lineage fields for persisting the NEXT version of an asset when the caller
+ * already has the parent assetId (e.g. generated-file revisions where no
+ * upload fileRef exists). Unlike getNextVersionLineage this skips the
+ * oraFileContexts lookup and queries the asset row directly. Best-effort:
+ * failures return null so persistence falls back to standalone v1.
+ */
+export async function getNextVersionLineageFromAssetId(
+  userId: string,
+  parentAssetId: number,
+): Promise<{
+  parentAssetId: number;
+  rootAssetId: number;
+  versionNumber: number;
+  oraProjectId: number | null;
+} | null> {
+  try {
+    const [head] = await db
+      .select({
+        id: oraAssetsTable.id,
+        rootAssetId: oraAssetsTable.rootAssetId,
+        versionNumber: oraAssetsTable.versionNumber,
+        oraProjectId: oraAssetsTable.oraProjectId,
+      })
+      .from(oraAssetsTable)
+      .where(
+        and(
+          eq(oraAssetsTable.id, parentAssetId),
+          eq(oraAssetsTable.userId, userId),
+          isNull(oraAssetsTable.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!head) return null;
+    return {
+      parentAssetId: head.id,
+      rootAssetId: head.rootAssetId ?? head.id,
+      versionNumber: (head.versionNumber ?? 1) + 1,
+      oraProjectId: head.oraProjectId ?? null,
+    };
+  } catch (err) {
+    logger.warn(
+      { component: "ora-assets", err, parentAssetId },
+      "Failed to resolve version lineage from assetId; persisting as standalone v1",
+    );
+    return null;
+  }
+}
+
+/**
  * Strip an optional `data:<mime>;base64,` prefix and return the raw base64 plus
  * the embedded mime type (if present). Image generation may hand us either a
  * data URI or a remote URL; only data URIs are persistable here.
