@@ -79,7 +79,7 @@
 - [Radix jsdom overlays](radix-jsdom-overlay-testing.md) / [CRLF parity tests](source-slice-parity-crlf.md) — overlay content portals to document.body; normalize \r\n in shared slice helpers or Windows-only failures.
 - [Playwright JWT redaction](playwright-jwt-redaction.md) / [pre-auth E2E auth](ora-preauth-e2e-auth.md) — UI-only flows (no raw fetch); pre-auth endpoints need the shared isE2ETestAuthEnabled() guard.
 - [Supertest multipart keep-alive hang](supertest-multipart-keepalive.md) — early-rejected multipart blocks server.close(); req.resume() + auth-before-rate-limiter.
-- [TS5.9 match filter never](ts59-regexp-match-array-filter.md) / [stale lib decls](stale-lib-decls-ora-contracts.md) — type match results as string[]; "no exported member" from @workspace/* = run typecheck:libs first.
+- [TS5.9 match filter never](ts59-regexp-match-array-filter.md) / [stale lib decls](stale-lib-decls-ora-contracts.md) — type match results as string[]; "no exported member" from @workspace/* = run typecheck:libs BEFORE restarting the stability gate (mobile-typecheck runs early and fails if libs aren't rebuilt first).
 - [Prettier sig collapse](prettier-function-sig-collapse.md) / [pnpm husky guard](main-agent-pnpm-husky-guard.md) / [post-merge lockfile](post-merge-lockfile-husky.md) — prettier --write then read the diff; HUSKY=0 for installs; lockfile-only fix after merges.
 - [RN SSRF URL guard](rn-url-ssrf-guard.md) — RN needs manual numeric-IPv4 canonicalization or obfuscated forms bypass the host guard.
 - [Wouter Link nested anchors](wouter-link-nested-anchors.md) — Link renders <a>; use Button asChild around Link or className on Link.
