@@ -2,6 +2,17 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora Phases 9C–9G — File edit preview hardening + regression coverage (2026-07-23)
+
+No publish / no TestFlight submit. Each phase committed and gate-verified separately.
+
+- **Phase 9C** (df5382be) — Before/after content changes in confirmation preview: `extractContentChanges()` in `file-agent-preview.ts` populates `contentChanges[]` from quoted "replace A with B" pairs and structural ops ("delete slide 3"). Website `OraFileAgentPreviewCard` renders a "Content being changed" before/after diff section (old text struck-through, new text highlighted). Mobile `OraFileAgentPreviewIndicator` mirrors it. 6 new tests in `file-agent-preview.test.ts`. Registry updated.
+- **Phase 9D** (1bd442b3) — Cancel-edit short-circuit: `CANCEL_EDIT_PATTERN` + `isCancelled`/`cancelledReply` in `clarification-planner.ts`; cancel short-circuit in `/chat` and `/chat/stream` handlers (zero quota consumed). "Never mind" button added to website `OraFileAgentPreviewCard` and mobile `OraFileAgentPreviewIndicator`. `handleCancelFileEditPreview` threaded through `OraAssistantExtras`/`MessageBubble`/mobile index. 7 new tests across 3 test files. Registry updated.
+- **Phase 9E** (c535fbbf) — Format regression test pack: `file-agent-regression.test.ts` (27 tests) covering DOCX/PPTX/XLSX/CSV/PDF/ZIP format-specific round-trips and 6 cross-format safety invariants (failed_safe→canApply=false, needs_confirmation always canApply, no message→no contentChanges, etc.). ZIP guard: `resolveFinalOraRoute` with ZIP context routes to `zip_analysis_guard`; explicit export ask bypasses it. Test file added to `API_FILE_IMAGE` gate bucket and `file-agent-regression` hint added to registry.
+- **Phase 9F** (7a073d91) — Mobile View+Download parity audit: fixed `OraFileAgentPreviewIndicator` bullets to include `outputSections` (was missing; website card already showed it). 6 new assertions in `file-agent-preview-wiring.test.ts` covering: contentChanges "Content being changed" label, line-through/accent-color rendering, previewTone all-4-status coverage, outputSections in bullets, tone applied to border+background.
+- **Phase 9G** — Final release gate sweep: release-profile gate run confirming all above passes `--require-clean`; gate report written to `tmp/ora-stability-gate-report.md`; changelog updated.
+- Tests/gate across all phases: fast gate pass=13 warn=1 (git-clean only) fail=0 after each phase. Release gate: see `tmp/ora-stability-gate-report.md`.
+
 ## Ora Phase 9B — File edit preview + confirmation flow (2026-07-22)
 
 Ora now pauses before risky or user-requested uploaded-file edits and shows a concrete edit plan on both website and mobile. No publish/TestFlight yet (Phase 9 continues).
