@@ -40,6 +40,8 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
+  artifacts/mustaflow/package.json \
+  pnpm-lock.yaml \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
