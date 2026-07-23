@@ -152,7 +152,13 @@ const assetsMock = vi.hoisted(() => ({
   persistOraAsset: vi.fn(async (): Promise<number | null> => 1),
   // Standalone file generation has no prior version chain, so lineage is null.
   getNextVersionLineage: vi.fn(async (): Promise<null> => null),
+  getNextVersionLineageFromAssetId: vi.fn(async (): Promise<null> => null),
+  getOraAssetBytes: vi.fn(async (): Promise<Buffer | null> => null),
+  getOraAssetMeta: vi.fn(async (): Promise<null> => null),
 }));
+
+// Controls real-persistOraAsset fallback behaviour when the mock is bypassed.
+const dbState = vi.hoisted(() => ({ insertShouldThrow: false }));
 
 const imageMock = vi.hoisted(() => ({
   generateImage: vi.fn(async () => ({
@@ -229,9 +235,14 @@ vi.mock("../../../lib/image-provider", () => ({
   isImageProviderConfigured: imageMock.isImageProviderConfigured,
 }));
 
-vi.mock("../../../lib/ora-assets", () => ({
+vi.mock("../../../lib/ora-assets", async () => ({
   persistOraAsset: assetsMock.persistOraAsset,
   getNextVersionLineage: assetsMock.getNextVersionLineage,
+  getNextVersionLineageFromAssetId: assetsMock.getNextVersionLineageFromAssetId,
+  getOraAssetBytes: assetsMock.getOraAssetBytes,
+  getOraAssetMeta: assetsMock.getOraAssetMeta,
+  oraR2OffloadEnabled: vi.fn(() => false),
+  PER_USER_STORAGE_BYTES: 200 * 1024 * 1024,
   parseDataUri: (value: string) => {
     const match = value.match(/^data:([^;]+);base64,(.+)$/);
     return match ? { mimeType: match[1], base64: match[2] } : null;
@@ -304,17 +315,36 @@ vi.mock("@workspace/db", () => {
     return query;
   }
 
+  // Safety-net for when the ora-assets mock is bypassed and the real
+  // persistOraAsset runs. Returning [{id:1}] makes test-1 pass; the
+  // dbState.insertShouldThrow flag lets test-2 simulate a DB failure.
+  function makeInsertMutation() {
+    const query: Record<string, unknown> = {
+      values: () => query,
+      where: () => query,
+      returning: () =>
+        dbState.insertShouldThrow
+          ? Promise.reject(new Error("DB: insert failed (test-induced)"))
+          : Promise.resolve([{ id: 1 }]),
+      then: (resolve: (rows: unknown[]) => unknown) => resolve([]),
+    };
+    return query;
+  }
+
   const table = tableStub();
   return {
     db: {
       select: (selection?: unknown) => makeSelect(selection),
-      insert: () => makeMutation(),
+      insert: () => makeInsertMutation(),
       update: () => makeMutation(),
+      delete: () => makeMutation(),
     },
     knowledgeEntriesTable: table,
     oraProfilesTable: table,
     oraProjectsTable: table,
     oraConversationsTable: table,
+    oraAssetsTable: table,
+    oraFileContextsTable: table,
     generatedImagesTable: table,
     TIER_ORA_MESSAGE_LIMIT: { free: 100, core: 1000, wave: 5000 },
     TIER_ORA_IMAGE_LIMIT: { free: 10, core: 50, wave: 100 },
@@ -1205,6 +1235,7 @@ describe("n) Explicit file generation — POST /public-ai/generate-file", () => 
   beforeEach(async () => {
     vi.clearAllMocks();
     authState.user = null;
+    dbState.insertShouldThrow = false;
     app = await buildGenerateFileApp();
   });
 
@@ -1246,7 +1277,10 @@ describe("n) Explicit file generation — POST /public-ai/generate-file", () => 
 
   it("still returns the file (200, no assetId) when durable persistence fails — best-effort", async () => {
     authState.user = { userId: "gen-user-2", tier: "core", isPaid: true };
+    // Primary: reject through the mock. Fallback: if the mock is bypassed and
+    // the real persistOraAsset runs, the dbState flag makes the DB insert throw.
     assetsMock.persistOraAsset.mockRejectedValueOnce(new Error("R2/library outage"));
+    dbState.insertShouldThrow = true;
 
     const res = await request(app)
       .post("/public-ai/generate-file")
