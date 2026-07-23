@@ -242,6 +242,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /isCancelled/,
       /cancelledReply/,
       /handleCancelFileEditPreview/,
+      /file-agent-regression/i,
     ],
     manualWebsite:
       "Generate/edit DOCX/PPTX/XLSX/PDF and analyze a dataset; verify the preview card accurately lists detected inputs, planned actions, calculations/charts, and safe-edit notes without claiming changes that did not happen. For risky or user-requested preview edits, verify the card says it needs confirmation and that Apply edit executes the original uploaded-file edit, Revise plan focuses the composer, and Create redesigned copy intentionally rebuilds a copy instead of silently changing layout. Phase 9C: when a message contains quoted text replacement ('replace A with B') or structural ops ('delete slide 3'), the preview card must show a 'Content being changed' before/after section with old text struck-through and new text highlighted. Phase 9D: a 'Never mind' button must appear next to Apply/Revise/Redesign; clicking it sends the cancel message and the server must reply with a polite acknowledgement without running the file edit or charging quota.",
@@ -434,6 +435,7 @@ const API_FILE_IMAGE = [
   "src/lib/public-ai/__tests__/dataset-workflow.test.ts",
   "src/lib/public-ai/__tests__/export-content.test.ts",
   "src/lib/public-ai/__tests__/file-agent-preview.test.ts",
+  "src/lib/public-ai/__tests__/file-agent-regression.test.ts",
   "src/lib/public-ai/__tests__/office-layout-edit.test.ts",
   "src/lib/public-ai/__tests__/ora-image-quality.test.ts",
   "src/lib/public-ai/__tests__/professional-doc.test.ts",
