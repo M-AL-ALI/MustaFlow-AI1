@@ -1317,6 +1317,180 @@ function buildOfficeResult(
   };
 }
 
+// ─── Phase 10: color resolution and heading/title style operations ───────────
+
+/** Maps common color names to 6-digit hex values (no leading #). */
+const COLOR_MAP: Record<string, string> = {
+  "dark blue": "003366",
+  "navy blue": "003366",
+  "light blue": "00B0F0",
+  "dark red": "C00000",
+  "dark green": "006400",
+  "dark gray": "404040",
+  "dark grey": "404040",
+  "light gray": "D3D3D3",
+  "light grey": "D3D3D3",
+  navy: "003366",
+  blue: "0070C0",
+  cyan: "00B0F0",
+  teal: "008080",
+  green: "00B050",
+  red: "FF0000",
+  orange: "FF6600",
+  yellow: "FFFF00",
+  gold: "FFD700",
+  purple: "7030A0",
+  violet: "7F00FF",
+  maroon: "800000",
+  brown: "964B00",
+  black: "000000",
+  white: "FFFFFF",
+  gray: "808080",
+  grey: "808080",
+};
+
+/**
+ * Resolve a human-readable color reference to a 6-digit uppercase hex string
+ * (no leading #). Returns null when no color is detected.
+ */
+function resolveColorHex(message: string): string | null {
+  const lower = message.toLowerCase();
+  // Sort multi-word names first so "dark blue" beats "blue".
+  const sorted = Object.entries(COLOR_MAP).sort((a, b) => b[0].length - a[0].length);
+  for (const [name, hex] of sorted) {
+    if (lower.includes(name)) return hex;
+  }
+  const hexMatch = message.match(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/);
+  if (hexMatch) {
+    const h = hexMatch[1]!;
+    return h.length === 3
+      ? (h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!).toUpperCase()
+      : h.toUpperCase();
+  }
+  return null;
+}
+
+/** Returns true when the message asks to change the color of headings/headers. */
+function hasDocxHeadingColorIntent(message: string): boolean {
+  return /\b(heading|header)s?\b/i.test(message) && resolveColorHex(message) !== null;
+}
+
+/**
+ * Apply a w:color element to runs inside Heading1–Heading6 paragraphs.
+ * Returns updated XML and number of heading paragraphs modified.
+ */
+function applyDocxHeadingColor(
+  docXml: string,
+  hexColor: string,
+): { xml: string; count: number } {
+  let count = 0;
+  const upper = hexColor.toUpperCase();
+  const xml = docXml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (para) => {
+    if (!/w:pStyle w:val="Heading[1-6]"/i.test(para)) return para;
+    count++;
+    // Match <w:r> runs but not <w:rPr> elements.
+    return para.replace(
+      /(<w:r(?!Pr\b)\b[^>]*>)([\s\S]*?)(<\/w:r>)/g,
+      (_, open, inner, close) => {
+        const colorTag = `<w:color w:val="${upper}"/>`;
+        if (/<w:rPr/.test(inner)) {
+          const updated = inner.replace(
+            /(<w:rPr\b[^>]*>)([\s\S]*?)(<\/w:rPr>)/,
+            (_a: string, ropen: string, rcontent: string, rclose: string) =>
+              `${ropen}${rcontent.replace(/<w:color[^/]*\/>/g, "")}${colorTag}${rclose}`,
+          );
+          return `${open}${updated}${close}`;
+        }
+        return `${open}<w:rPr>${colorTag}</w:rPr>${inner}${close}`;
+      },
+    );
+  });
+  return { xml, count };
+}
+
+interface DocxSpacingParams {
+  before: number;
+  after: number;
+}
+
+/** Parse a paragraph spacing change intent from a message. */
+function parseDocxSpacingIntent(message: string): DocxSpacingParams | null {
+  if (!/\b(spacing|space\s+between|paragraph\s+space|line\s+space)\b/i.test(message)) return null;
+  if (/\b(more|increase|larger|bigger|double)\b/i.test(message)) return { before: 240, after: 120 };
+  if (/\b(less|decrease|smaller|compact|tight|single)\b/i.test(message)) return { before: 60, after: 60 };
+  if (/\b(remove|none|zero|no)\b/i.test(message)) return { before: 0, after: 0 };
+  return { before: 160, after: 80 };
+}
+
+/**
+ * Apply w:spacing before/after to body paragraphs (skips heading paragraphs).
+ * Returns updated XML and count of paragraphs modified.
+ */
+function applyDocxParagraphSpacing(
+  docXml: string,
+  params: DocxSpacingParams,
+): { xml: string; count: number } {
+  let count = 0;
+  const spacingTag = `<w:spacing w:before="${params.before}" w:after="${params.after}"/>`;
+  const xml = docXml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (para) => {
+    if (/w:pStyle w:val="Heading[1-6]"/i.test(para)) return para;
+    count++;
+    if (/<w:pPr/.test(para)) {
+      return para.replace(
+        /(<w:pPr\b[^>]*>)([\s\S]*?)(<\/w:pPr>)/,
+        (_, open, content, close) =>
+          `${open}${content.replace(/<w:spacing\s[^/]*\/>/g, "")}${spacingTag}${close}`,
+      );
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, `$1<w:pPr>${spacingTag}</w:pPr>`);
+  });
+  return { xml, count };
+}
+
+/** Returns true when the message asks to change slide title color. */
+function hasPptxTitleColorIntent(message: string): boolean {
+  return /\b(title|heading)s?\b/i.test(message) && resolveColorHex(message) !== null;
+}
+
+/**
+ * Apply an a:solidFill color to runs inside title/ctrTitle placeholder shapes
+ * across all slides. Returns count of shapes modified.
+ */
+function applyPptxTitleColor(entries: ZipEntries, hexColor: string): number {
+  const upper = hexColor.toUpperCase();
+  let changed = 0;
+  for (const slide of slideOrder(entries)) {
+    const xml = getXml(entries, slide.path);
+    if (!xml) continue;
+    const updated = xml.replace(/<p:sp\b[\s\S]*?<\/p:sp>/g, (sp) => {
+      if (!/p:ph\b[^>]*type="(?:title|ctrTitle)"/i.test(sp)) return sp;
+      let applied = false;
+      const result = sp.replace(
+        /(<a:r\b[^>]*>)([\s\S]*?)(<\/a:r>)/g,
+        (_, open, inner, close) => {
+          applied = true;
+          const fill = `<a:solidFill><a:srgbClr val="${upper}"/></a:solidFill>`;
+          if (/<a:rPr/.test(inner)) {
+            const u = inner.replace(
+              /(<a:rPr\b[^>]*>)([\s\S]*?)(<\/a:rPr>)/,
+              (_all: string, ropen: string, rc: string, rclose: string) =>
+                `${ropen}${rc.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/g, "")}${fill}${rclose}`,
+            );
+            return `${open}${u}${close}`;
+          }
+          return `${open}<a:rPr>${fill}</a:rPr>${inner}${close}`;
+        },
+      );
+      if (applied) changed++;
+      return result;
+    });
+    if (updated !== xml) setXml(entries, slide.path, updated);
+  }
+  return changed;
+}
+
+// ─── End Phase 10 color utilities ────────────────────────────────────────────
+
 async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFileResult | null> {
   const raw = base64Raw(entry);
   if (!raw) return null;
@@ -1413,6 +1587,22 @@ async function editPptx(entry: FileEntry, message: string): Promise<GeneratedFil
     }
   }
 
+  // Phase 10: slide title color change
+  if (hasPptxTitleColorIntent(message)) {
+    const hex = resolveColorHex(message);
+    if (hex) {
+      const changed = applyPptxTitleColor(entries, hex);
+      if (changed > 0) {
+        return buildOfficeResult(
+          entry,
+          "pptx",
+          zipBuffer(entries),
+          `updated color on ${changed} slide title${changed === 1 ? "" : "s"}`,
+        );
+      }
+    }
+  }
+
   return null;
 }
 
@@ -1459,6 +1649,33 @@ async function editDocx(entry: FileEntry, message: string): Promise<GeneratedFil
         zipBuffer(entries),
         `polished ${updated.count} text item${updated.count === 1 ? "" : "s"}`,
       );
+    }
+  }
+
+  // Phase 10: heading color change
+  if (hasDocxHeadingColorIntent(message)) {
+    const hex = resolveColorHex(message);
+    if (hex) {
+      const updated = applyDocxHeadingColor(docXml, hex);
+      if (updated.count > 0) {
+        setXml(entries, "word/document.xml", updated.xml);
+        return buildOfficeResult(
+          entry,
+          "docx",
+          zipBuffer(entries),
+          `updated color on ${updated.count} heading${updated.count === 1 ? "" : "s"}`,
+        );
+      }
+    }
+  }
+
+  // Phase 10: paragraph spacing adjustment
+  const spacingParams = parseDocxSpacingIntent(message);
+  if (spacingParams) {
+    const updated = applyDocxParagraphSpacing(docXml, spacingParams);
+    if (updated.count > 0) {
+      setXml(entries, "word/document.xml", updated.xml);
+      return buildOfficeResult(entry, "docx", zipBuffer(entries), "adjusted paragraph spacing");
     }
   }
 

@@ -452,6 +452,7 @@ const API_PUBLIC_AI_CORE = [
 const API_FILE_IMAGE = [
   "src/lib/public-ai/__tests__/advanced-excel-workbook.test.ts",
   "src/lib/public-ai/__tests__/dataset-workflow.test.ts",
+  "src/lib/public-ai/__tests__/edit-intent-classifier.test.ts",
   "src/lib/public-ai/__tests__/export-content.test.ts",
   "src/lib/public-ai/__tests__/file-agent-preview.test.ts",
   "src/lib/public-ai/__tests__/file-agent-regression.test.ts",

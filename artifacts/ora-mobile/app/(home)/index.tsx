@@ -594,6 +594,22 @@ function formatOraImageMeta(meta?: {
   return [quality, meta.aspectRatio, style, kind].filter(Boolean);
 }
 
+/**
+ * Phase 10: lightweight revision-intent heuristic for mobile handleSend.
+ * Mirrors the server-side classifier in a compact form so the mobile client
+ * auto-routes natural follow-up messages to the generate-file endpoint when
+ * an active working artifact is tracked.
+ */
+function mobileIsRevision(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return false;
+  if (/\b(create a new|generate a new|from scratch|completely different)\b/.test(lower))
+    return false;
+  return /\b(fix|correct|replace|rewrite|reorder|remove|delete|insert|shorten|expand|change|update|modify|color|colour|font|theme|heading|format|bold|italic|spacing|align|chart|formula|calculate)\b/.test(
+    lower,
+  );
+}
+
 export default function OraChatScreen() {
   const { isSignedIn, isLoaded } = useAuth();
   const c = useColors();
@@ -1491,14 +1507,30 @@ export default function OraChatScreen() {
     ],
   );
 
+  // Phase 10: track the active working artifact for the revision engine.
+  // Declared here (before handleSend) so it's available in handleSend's
+  // dependency array, which is evaluated eagerly during hook call.
+  const [activeArtifactRef, setActiveArtifactRef] = useState<{
+    assetId: number;
+    fileName: string;
+    format: FileFormat;
+  } | null>(null);
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if ((!text && !attachment) || sending) return;
+    // Phase 10: auto-route natural follow-up revision messages to the file
+    // generation engine when an active artifact is tracked.
+    if (activeArtifactRef && !attachment && mobileIsRevision(text)) {
+      setInput("");
+      void handleGenerateFileRef.current?.(text, activeArtifactRef.format, activeArtifactRef.assetId);
+      return;
+    }
     const attch = attachment;
     setInput("");
     setAttachment(null);
     await sendMessage(text, attch);
-  }, [input, attachment, sending, sendMessage]);
+  }, [input, attachment, sending, sendMessage, activeArtifactRef]);
 
   const handleApplyFileEditPreview = useCallback(() => {
     if (sending) return;
@@ -1524,14 +1556,6 @@ export default function OraChatScreen() {
   // request and a pending assistant turn, call the dedicated generate-file
   // endpoint (re-hydrating any uploaded source data), then settle the reply with
   // a downloadable generated-file card. Generation is non-streaming.
-  // Phase 10: track the active working artifact for the revision engine.
-  // Set after every generate-file response that returns a durable assetId.
-  // Cleared when the user explicitly picks a new format (new creation) or clears.
-  const [activeArtifactRef, setActiveArtifactRef] = useState<{
-    assetId: number;
-    fileName: string;
-    format: FileFormat;
-  } | null>(null);
 
   const handleGenerateFile = useCallback(
     async (prompt: string, format: FileFormat, activeAssetId?: number | null) => {
@@ -2060,6 +2084,10 @@ export default function OraChatScreen() {
   // the latest function/state without stale closure captures.
   const sendMessageRef = useRef(sendMessage);
   sendMessageRef.current = sendMessage;
+  // Phase 10: stable ref so handleSend can call handleGenerateFile even though
+  // handleGenerateFile is defined later in the component body.
+  const handleGenerateFileRef = useRef<typeof handleGenerateFile | null>(null);
+  handleGenerateFileRef.current = handleGenerateFile;
   startRecordingRef.current = startRecording;
   const stopRecordingRef = useRef(stopRecording);
   stopRecordingRef.current = stopRecording;

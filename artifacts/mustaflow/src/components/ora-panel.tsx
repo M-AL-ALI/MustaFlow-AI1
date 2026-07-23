@@ -55,6 +55,7 @@ import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
+import { looksLikeFileRevision } from "@/lib/revision-intent";
 import {
   getAutoSaveMemories,
   getReferenceSavedMemories,
@@ -1145,6 +1146,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
       // apply the edit in-place instead of regenerating from scratch.
       const revisionAssetId = activeArtifactRef?.assetId ?? null;
       void generateFile(text, fmt, revisionAssetId);
+    } else if (activeArtifactRef && looksLikeFileRevision(text)) {
+      // Phase 10: natural follow-up revision — auto-route to the file
+      // generation + revision engine when the active artifact is tracked and
+      // the message looks like an edit request, so the user doesn't have to
+      // click "Revise" manually.
+      void generateFile(text, activeArtifactRef.format, activeArtifactRef.assetId);
     } else {
       const editedFrom = editingFromIdx !== null ? true : undefined;
       setEditingFromIdx(null);

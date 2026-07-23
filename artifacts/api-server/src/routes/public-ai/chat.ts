@@ -1665,6 +1665,20 @@ router.post("/public-ai/chat", async (req, res) => {
       }
     }
 
+    // Phase 10: classifier guard — when the user is explicitly asking for a
+    // brand-new file or a full redesign, clear the active revision buffer so
+    // the engine generates fresh content instead of trying to edit the tracked
+    // artifact. "Create a deck about AI" must never silently revise slide 1.
+    if (chatActiveAssetBuffer && chatActiveAssetFileName) {
+      const { classifyEditIntent, isRevisionIntent } = await import(
+        "../../lib/public-ai/edit-intent-classifier"
+      );
+      if (!isRevisionIntent(classifyEditIntent(routedMessage))) {
+        chatActiveAssetBuffer = null;
+        chatActiveAssetFileName = null;
+      }
+    }
+
     let filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
     // Inject active-asset context text so the fallback generator is anchored
     // to the file's actual content when the in-place edit path returns null.

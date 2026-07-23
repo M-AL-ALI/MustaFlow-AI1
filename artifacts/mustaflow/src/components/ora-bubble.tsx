@@ -52,6 +52,7 @@ import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraRichText } from "@/components/ora/ora-rich-text";
+import { looksLikeFileRevision } from "@/lib/revision-intent";
 import { OraVoiceTip } from "@/components/ora/ora-voice-tip";
 
 function downloadOraFile(file: GeneratedFile) {
@@ -542,6 +543,26 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
+  // Phase 10: active working artifact for the revision engine. Tracks the last
+  // generated file with a durable assetId so natural follow-up messages can be
+  // auto-routed without the user clicking "Revise".
+  const [activeArtifactRef, setActiveArtifactRef] = useState<{
+    assetId: number;
+    fileName: string;
+    format: FileFormat;
+  } | null>(null);
+
+  // Auto-track the latest generated file with a durable assetId. Fires only
+  // when message count changes to avoid fighting with manual state changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const gf = lastAssistant?.generatedFile;
+    if (gf?.assetId != null) {
+      setActiveArtifactRef({ assetId: gf.assetId, fileName: gf.fileName, format: gf.format });
+    }
+  }, [messages.length]);
   const [showFormatMenu, setShowFormatMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
@@ -1006,7 +1027,13 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     if (selectedFormat) {
       const fmt = selectedFormat;
       setSelectedFormat(null);
-      void generateFile(text, fmt);
+      // Phase 10: pass active artifact id so the revision engine applies the
+      // edit in-place rather than regenerating from scratch.
+      void generateFile(text, fmt, activeArtifactRef?.assetId ?? null);
+    } else if (activeArtifactRef && looksLikeFileRevision(text)) {
+      // Phase 10: natural follow-up revision — auto-route to the revision
+      // engine when an active artifact is tracked and message looks like an edit.
+      void generateFile(text, activeArtifactRef.format, activeArtifactRef.assetId);
     } else {
       const editedFrom = editingFromIdx !== null ? true : undefined;
       setEditingFromIdx(null);
@@ -1037,6 +1064,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const handleReviseGeneratedFile = useCallback((file: GeneratedFile) => {
     const revisionPrompt = `Revise the ${file.format.toUpperCase()} file "${file.fileName}": `;
     setSelectedFormat(file.format);
+    // Phase 10: pin the active working artifact so the next send targets these
+    // exact bytes rather than regenerating a lookalike from AI.
+    if (file.assetId != null) {
+      setActiveArtifactRef({ assetId: file.assetId, fileName: file.fileName, format: file.format });
+    }
     setInput(revisionPrompt);
     setTimeout(() => {
       textareaRef.current?.focus();

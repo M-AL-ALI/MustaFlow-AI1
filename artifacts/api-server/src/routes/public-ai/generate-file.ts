@@ -185,6 +185,20 @@ router.post("/public-ai/generate-file", async (req, res) => {
     }
   }
 
+  // Phase 10: classifier guard — skip the active revision buffer for
+  // new-creation or full-redesign intents so "create a new deck about AI"
+  // doesn't accidentally revise the tracked artifact.
+  if (activeAssetBuffer && activeAssetFileName) {
+    const { classifyEditIntent, isRevisionIntent } = await import(
+      "../../lib/public-ai/edit-intent-classifier"
+    );
+    if (!isRevisionIntent(classifyEditIntent(message))) {
+      activeAssetBuffer = null;
+      activeAssetFileName = null;
+      activeAssetContextText = "";
+    }
+  }
+
   // Re-hydrate any uploaded documents/datasets so the file is built from the
   // user's real data. Empty when nothing resolves (expired/foreign refs); in
   // that case generation falls back to its non-source-data behavior.
