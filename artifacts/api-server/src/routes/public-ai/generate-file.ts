@@ -14,6 +14,7 @@ import {
   resolveCarriedFileMeta,
   type CarriedFileMeta,
 } from "../../lib/public-ai/carried-docs";
+import { buildFileAgentPreview } from "../../lib/public-ai/file-agent-preview";
 import { planOraMultiFile, resolveNamedEditTarget } from "../../lib/public-ai/multi-file-planner";
 
 const router = Router();
@@ -291,6 +292,14 @@ router.post("/public-ai/generate-file", async (req, res) => {
     );
 
     const usage = await oraMessageFields(authed, payload.msgCount);
+    const fileAgentPreview = buildFileAgentPreview({
+      format,
+      fileName: result.fileName,
+      hasSourceData,
+      sourceCount: documentRefs.length,
+      editQuality: result.editQuality,
+      usedFiles: multiFilePlan?.usedFiles,
+    });
     res.json({
       reply: result.reply,
       fileName: result.fileName,
@@ -298,6 +307,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       mimeType: result.mimeType,
       ...(assetId != null ? { assetId } : {}),
       ...(result.editQuality ? { editQuality: result.editQuality } : {}),
+      fileAgentPreview,
       ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
       ...usage,
     });

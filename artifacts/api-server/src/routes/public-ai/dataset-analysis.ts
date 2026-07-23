@@ -20,6 +20,7 @@ import {
   oraDomainExpertiseGuidance,
 } from "../../lib/public-ai/expertise";
 import { buildDatasetAnalystWorkflow } from "../../lib/public-ai/dataset-workflow";
+import { buildDatasetAgentPreview } from "../../lib/public-ai/file-agent-preview";
 import { logger } from "../../lib/logger";
 import type { Provider } from "../../lib/ai-providers";
 import {
@@ -368,19 +369,23 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
   setSessionCookie(res, token);
 
   const usage = await oraMessageFields(authed, payload.msgCount);
+  const result = {
+    ...aiOutput,
+    analystWorkflow,
+    datasetProfile: {
+      rowCount: summary.rowCount,
+      colCount: summary.colCount,
+      truncated: summary.truncated,
+      sheetName: summary.sheetName,
+    },
+    usedFallback,
+    sanitizedCellCount: summary.sanitizedCellCount,
+    truncated: summary.truncated,
+  };
   res.json({
     result: {
-      ...aiOutput,
-      analystWorkflow,
-      datasetProfile: {
-        rowCount: summary.rowCount,
-        colCount: summary.colCount,
-        truncated: summary.truncated,
-        sheetName: summary.sheetName,
-      },
-      usedFallback,
-      sanitizedCellCount: summary.sanitizedCellCount,
-      truncated: summary.truncated,
+      ...result,
+      fileAgentPreview: buildDatasetAgentPreview(result),
     },
     ...usage,
   });

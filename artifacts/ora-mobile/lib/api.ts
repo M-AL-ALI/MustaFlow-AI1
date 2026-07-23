@@ -19,6 +19,7 @@ import type {
   OraMemory,
   OraMemoryUsed,
   OraFileCitation,
+  OraFileAgentPreview,
   OraAccountConsistency,
   OraMessage,
   OraProfile,
@@ -730,6 +731,7 @@ export type StreamChatNativeResult =
       memoriesUsed?: OraMemoryUsed[];
       /** Phase 8: verified uploaded-file citations derived server-side. */
       fileCitations?: OraFileCitation[];
+      fileAgentPreview?: OraFileAgentPreview;
       conversationSummary?: string;
       // Present only when the server's false-delivery safety net generated a
       // real file after the streamed reply claimed one was attached.
@@ -944,6 +946,7 @@ export async function streamChatNative(
       memorySaveCandidateSensitive: resolvedDone.memorySaveCandidateSensitive,
       memoriesUsed: resolvedDone.memoriesUsed,
       fileCitations: resolvedDone.fileCitations,
+      fileAgentPreview: resolvedDone.fileAgentPreview,
       conversationSummary: resolvedDone.conversationSummary,
       fileName: resolvedDone.fileName,
       fileData: resolvedDone.fileData,

@@ -11,6 +11,7 @@ import {
   FileText,
   GitBranch,
   Image as ImageIcon,
+  ListChecks,
   Play,
   Sheet,
   Sparkles,
@@ -59,12 +60,69 @@ export function OraAssistantExtras({
       <OraVideoCards videos={message.videos} c={c} />
       <OraDatasetCard result={message.datasetResult} c={c} />
       <OraDatasetWorkflow result={message.datasetResult} c={c} />
+      <OraFileAgentPreviewIndicator message={message} c={c} />
       <OraImageLineage editInstruction={message.editInstruction} c={c} />
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
       <OraMemoryIndicators message={message} c={c} />
       <OraUsedFilesIndicator message={message} c={c} />
       <OraFileCitationsIndicator message={message} c={c} />
     </>
+  );
+}
+
+function previewTone(status: NonNullable<OraMessage["fileAgentPreview"]>["status"]): string {
+  if (status === "applied") return "#10b981";
+  if (status === "failed_safe") return "#f59e0b";
+  if (status === "unchanged") return "#94a3b8";
+  return "#0ea5e9";
+}
+
+function OraFileAgentPreviewIndicator({ message, c }: { message: OraMessage; c: Colors }) {
+  const preview = message.fileAgentPreview ?? message.datasetResult?.fileAgentPreview;
+  if (!preview) return null;
+  const tone = previewTone(preview.status);
+  const bullets = [
+    ...(preview.detectedInputs ?? []),
+    ...(preview.plannedActions ?? []),
+    ...(preview.calculations ?? []),
+    ...(preview.charts ?? []),
+  ].slice(0, 5);
+
+  return (
+    <View
+      style={{
+        marginTop: 8,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: tone + "40",
+        backgroundColor: tone + "0D",
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 7 }}>
+        <ListChecks size={14} color={tone} style={{ marginTop: 1 }} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: c.foreground, fontSize: 12, fontFamily: "Inter_600SemiBold" }}>
+            {preview.title}
+          </Text>
+          {preview.summary ? (
+            <Text style={{ color: c.mutedForeground, fontSize: 11, marginTop: 2 }}>
+              {preview.summary}
+            </Text>
+          ) : null}
+          {bullets.map((item, i) => (
+            <Text
+              key={`${preview.title}-${i}`}
+              numberOfLines={2}
+              style={{ color: c.mutedForeground, fontSize: 11, marginTop: i === 0 ? 5 : 2 }}
+            >
+              {"\u2022"} {item}
+            </Text>
+          ))}
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -409,17 +467,11 @@ function OraUsedFilesIndicator({ message, c }: { message: OraMessage; c: Colors 
 /** Compact display string for one citation, e.g. "deck.pptx — Slide 4".
  * Mirrors the website's fileCitationLabel in ora-file-citations-chip.tsx.
  * Slide locators already arrive as "Slide N" — rendered verbatim. */
-function fileCitationLabel(citation: {
-  file: string;
-  locator?: string;
-  kind?: string;
-}): string {
+function fileCitationLabel(citation: { file: string; locator?: string; kind?: string }): string {
   if (!citation.locator) return citation.file;
   if (citation.kind === "slide") return `${citation.file} — ${citation.locator}`;
   if (citation.kind === "sheet") return `${citation.file} — Sheet "${citation.locator}"`;
-  const kind = citation.kind
-    ? `${citation.kind[0].toUpperCase()}${citation.kind.slice(1)} `
-    : "";
+  const kind = citation.kind ? `${citation.kind[0].toUpperCase()}${citation.kind.slice(1)} ` : "";
   return `${citation.file} — ${kind}${citation.locator}`;
 }
 

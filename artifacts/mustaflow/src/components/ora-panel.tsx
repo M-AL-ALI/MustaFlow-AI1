@@ -50,6 +50,7 @@ import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
 import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
 import { OraUsedFilesChip } from "@/components/ora/ora-used-files-chip";
 import { OraFileCitationsChip } from "@/components/ora/ora-file-citations-chip";
+import { OraFileAgentPreviewCard } from "@/components/ora/ora-file-agent-preview-card";
 import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
@@ -1813,7 +1814,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       {msg.generatedFile.editQuality && (
                         <OraEditQualityCard quality={msg.generatedFile.editQuality} />
                       )}
+                      {msg.fileAgentPreview && (
+                        <OraFileAgentPreviewCard preview={msg.fileAgentPreview} />
+                      )}
                     </>
+                  )}
+
+                  {!msg.generatedFile && msg.fileAgentPreview && (
+                    <OraFileAgentPreviewCard preview={msg.fileAgentPreview} />
                   )}
 
                   {msg.role === "assistant" && msg.viaFallback && !msg.isStreaming && (

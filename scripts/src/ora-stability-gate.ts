@@ -225,6 +225,23 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Verify upload, generated file cards, View + Download parity with website (View opens an in-app preview on iOS via WebView, share sheet on Android/older builds; non-image cards say Download, images say Save), and revision actions on TestFlight when mobile code changed. From the attach menu, tap Browse files and confirm the iOS Files picker actually opens (regression: picker presented while the menu modal was still dismissing fails silently and poisons all later attempts until app restart); also confirm Take photo and Photo library still open after the menu closes. Also upload a DOCX, wait for the first analysis reply, then send the edit request as a FOLLOW-UP turn in NORMAL chat (e.g. 'Make it professional and add a Risk Notes section, return the Word document') — the first turn after upload consumes the attachment via file analysis; the follow-up turn exercises documentRefs and must return a real edited DOCX with layout preserved, never a text-only answer or image CTA (documentRefs must ride every chat turn). Restart persistence (parity with website reload persistence): upload a PPTX in a saved conversation, FULLY close and reopen the app (or switch to another conversation and back), then ask 'Revise slide 2 ...' — the edit must still target the original uploaded file (refs are cached in AsyncStorage per conversation plus a standalone key, restored on conversation load and app launch, migrated to the conversation key when the conversation is created, and never persisted in temporary mode).",
   },
   {
+    id: "file-agent-preview",
+    title:
+      "File/data agent preview: detected inputs, plan, calculations, charts, and safe-edit notes",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /file-agent-preview/i,
+      /fileAgentPreview/,
+      /ora-file-agent-preview-card/i,
+      /ora-chat-ux-wiring\.test\.ts$/i,
+      /MessageExtras/i,
+    ],
+    manualWebsite:
+      "Generate/edit DOCX/PPTX/XLSX/PDF and analyze a dataset; verify the preview card accurately lists detected inputs, planned actions, calculations/charts, and safe-edit notes without claiming changes that did not happen.",
+    manualMobile:
+      "Repeat generated-file, edited-file, and dataset-analysis preview checks on TestFlight when mobile code changed; compact preview must match website meaning even if layout is flatter.",
+  },
+  {
     id: "file-edit-quality-card",
     title: "File edit-quality transparency card (editQuality metadata on edited-file replies)",
     ownerSurfaces: ["api", "website", "mobile"],
@@ -409,6 +426,7 @@ const API_FILE_IMAGE = [
   "src/lib/public-ai/__tests__/advanced-excel-workbook.test.ts",
   "src/lib/public-ai/__tests__/dataset-workflow.test.ts",
   "src/lib/public-ai/__tests__/export-content.test.ts",
+  "src/lib/public-ai/__tests__/file-agent-preview.test.ts",
   "src/lib/public-ai/__tests__/office-layout-edit.test.ts",
   "src/lib/public-ai/__tests__/ora-image-quality.test.ts",
   "src/lib/public-ai/__tests__/professional-doc.test.ts",
@@ -519,6 +537,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/document-picker-config.test.ts",
   "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/edit-quality-card-wiring.test.ts",
+  "lib/__tests__/file-agent-preview-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
   "lib/__tests__/ora-memory-scope-wiring.test.ts",

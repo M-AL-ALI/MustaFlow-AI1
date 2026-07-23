@@ -7,6 +7,7 @@ import type {
   OraPendingClarification,
   OraUsedFile,
   OraFileCitation,
+  OraFileAgentPreview,
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
@@ -136,6 +137,7 @@ export interface OraMessage {
    * model-claimed. Drives the "From your files" chips under the reply.
    */
   fileCitations?: OraFileCitation[];
+  fileAgentPreview?: OraFileAgentPreview;
   /** rolling conversation summary for this conversation. */
   conversationSummary?: string;
   /** True while this assistant message is still being streamed token-by-token. */
@@ -749,6 +751,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   memoriesUsed?: OraMemoryUsed[];
   usedFiles?: OraUsedFile[];
   fileCitations?: OraFileCitation[];
+  fileAgentPreview?: OraFileAgentPreview;
   conversationSummary?: string;
   searchFallback?: boolean;
   searchRetryable?: boolean;
@@ -794,6 +797,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.usedFiles && m.usedFiles.length > 0 ? { usedFiles: m.usedFiles } : {}),
     // Persist verified file citations so the "From your files" chips survive reload
     ...(m.fileCitations && m.fileCitations.length > 0 ? { fileCitations: m.fileCitations } : {}),
+    // Persist file/data agent preview metadata so quality planning survives reload
+    ...(m.fileAgentPreview ? { fileAgentPreview: m.fileAgentPreview } : {}),
     // Persist the rolling summary so it can be re-sent after a reload
     ...(m.conversationSummary ? { conversationSummary: m.conversationSummary } : {}),
     // Persist the search-fallback flags so the caveat/Retry state survives reload
@@ -1838,6 +1843,9 @@ export function useOraChat(): UseOraChatReturn {
                   role: "assistant" as const,
                   content: data.result.summary,
                   datasetResult: data.result,
+                  ...(data.result.fileAgentPreview
+                    ? { fileAgentPreview: data.result.fileAgentPreview }
+                    : {}),
                 },
               ];
               storeTranscript(next);
@@ -1968,6 +1976,7 @@ export function useOraChat(): UseOraChatReturn {
             memoriesUsed?: OraMemoryUsed[];
             usedFiles?: OraUsedFile[];
             fileCitations?: OraFileCitation[];
+            fileAgentPreview?: OraFileAgentPreview;
             msgCount: number;
             msgLimit: number;
             imageCount?: number;
@@ -2002,6 +2011,7 @@ export function useOraChat(): UseOraChatReturn {
             ...(d.fileCitations && d.fileCitations.length > 0
               ? { fileCitations: d.fileCitations }
               : {}),
+            ...(d.fileAgentPreview ? { fileAgentPreview: d.fileAgentPreview } : {}),
             ...(d.conversationSummary ? { conversationSummary: d.conversationSummary } : {}),
             ...(d.memorySaveCandidate
               ? {
@@ -2366,6 +2376,7 @@ export function useOraChat(): UseOraChatReturn {
           fileData: string;
           mimeType: string;
           editQuality?: OraFileEditQuality;
+          fileAgentPreview?: OraFileAgentPreview;
           msgCount: number;
           msgLimit: number;
           imageCount?: number;
@@ -2387,6 +2398,7 @@ export function useOraChat(): UseOraChatReturn {
                 format,
                 ...(data.editQuality ? { editQuality: data.editQuality } : {}),
               } satisfies GeneratedFile,
+              ...(data.fileAgentPreview ? { fileAgentPreview: data.fileAgentPreview } : {}),
             },
           ];
           storeTranscript(next);
@@ -2448,6 +2460,7 @@ export function useOraChat(): UseOraChatReturn {
               fileData: string;
               mimeType: string;
               editQuality?: OraFileEditQuality;
+              fileAgentPreview?: OraFileAgentPreview;
               msgCount: number;
               msgLimit: number;
               imageCount?: number;
@@ -2468,6 +2481,9 @@ export function useOraChat(): UseOraChatReturn {
                     format,
                     ...(retryData.editQuality ? { editQuality: retryData.editQuality } : {}),
                   } satisfies GeneratedFile,
+                  ...(retryData.fileAgentPreview
+                    ? { fileAgentPreview: retryData.fileAgentPreview }
+                    : {}),
                 },
               ];
               storeTranscript(next);

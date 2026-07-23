@@ -31,11 +31,13 @@ export type {
   OraUsedFile,
   OraFileCitation,
   OraFileCitationKind,
+  OraFileAgentPreview,
 } from "@workspace/ora-contracts";
 
 import type {
   OraClarificationKind,
   OraFileCitation,
+  OraFileAgentPreview,
   OraFileEditQuality,
   OraImage,
   OraMemoryUsed,
@@ -109,6 +111,7 @@ export interface StreamDonePayload {
   memoriesUsed?: OraMemoryUsed[];
   /** Phase 8: verified uploaded-file citations derived server-side. */
   fileCitations?: OraFileCitation[];
+  fileAgentPreview?: OraFileAgentPreview;
   /** Updated rolling summary echoed so the client can advance its pointer. */
   conversationSummary?: string;
   mode?: OraMode;
@@ -377,6 +380,7 @@ export interface ChatResponse {
   /** Phase 8: verified uploaded-file citations (file + slide/sheet locator),
    * derived server-side against the injected content — never model-claimed. */
   fileCitations?: OraFileCitation[];
+  fileAgentPreview?: OraFileAgentPreview;
   conversationSummary?: string;
   mode?: OraMode;
   msgCount?: number;
@@ -475,6 +479,7 @@ export interface DatasetAnalysisResult {
   }>;
   nextSteps?: string[];
   risksAndLimitations?: string[];
+  fileAgentPreview?: OraFileAgentPreview;
   analystWorkflow?: {
     chartSuggestions?: Array<{
       title: string;

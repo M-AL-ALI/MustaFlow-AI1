@@ -118,6 +118,24 @@ export const oraGeneratedFileSchema = z
   })
   .transform(({ fileData: _fileData, ...rest }) => rest);
 
+export const oraFileAgentPreviewSchema = z.object({
+  kind: z.enum(["file_edit", "file_generation", "data_analysis", "report_export"]),
+  status: z.enum(["applied", "planned", "unchanged", "failed_safe", "needs_confirmation"]),
+  title: z.string().max(120),
+  summary: z.string().max(500).optional(),
+  detectedInputs: z.array(z.string().max(180)).max(8).optional(),
+  plannedActions: z.array(z.string().max(180)).max(8).optional(),
+  calculations: z.array(z.string().max(180)).max(8).optional(),
+  charts: z.array(z.string().max(180)).max(8).optional(),
+  outputSections: z.array(z.string().max(180)).max(10).optional(),
+  assumptions: z.array(z.string().max(220)).max(6).optional(),
+  safetyNotes: z.array(z.string().max(220)).max(6).optional(),
+  canApply: z.boolean().optional(),
+  canRedesign: z.boolean().optional(),
+});
+
+export type OraFileAgentPreview = z.infer<typeof oraFileAgentPreviewSchema>;
+
 export const oraDatasetResultSchema = z
   .object({
     summary: z.string().optional(),
@@ -186,6 +204,7 @@ export const oraDatasetResultSchema = z
           .optional(),
       })
       .optional(),
+    fileAgentPreview: oraFileAgentPreviewSchema.optional(),
   })
   .catchall(z.unknown())
   .transform(
@@ -202,6 +221,7 @@ export const oraDatasetResultSchema = z
       nextSteps,
       risksAndLimitations,
       analystWorkflow,
+      fileAgentPreview,
     }) => ({
       summary,
       columnCount,
@@ -215,6 +235,7 @@ export const oraDatasetResultSchema = z
       nextSteps,
       risksAndLimitations,
       analystWorkflow,
+      fileAgentPreview,
     }),
   );
 
@@ -389,6 +410,8 @@ export const oraMessageSchema = z.object({
   // Phase 8: verified uploaded-file citations (file + slide/sheet locator) —
   // persisted so the source chips survive reload.
   fileCitations: z.array(oraFileCitationSchema).max(10).optional(),
+  // Phase 9A: file/data agent preview metadata. Display-only, never file bytes.
+  fileAgentPreview: oraFileAgentPreviewSchema.optional(),
 });
 
 /** Post-transform persisted message type (bytes stripped from generatedFile). */
@@ -484,6 +507,7 @@ export interface OraDatasetResult {
   nextSteps?: string[];
   risksAndLimitations?: string[];
   analystWorkflow?: OraDatasetAnalystWorkflow;
+  fileAgentPreview?: OraFileAgentPreview;
   [key: string]: unknown;
 }
 
@@ -551,6 +575,8 @@ export interface OraMessageData {
   /** Phase 8: verified uploaded-file citations (file + slide/sheet locator),
    * derived server-side against the actually-injected file content. */
   fileCitations?: OraFileCitation[];
+  /** Phase 9A: display-only file/data agent preview metadata. */
+  fileAgentPreview?: OraFileAgentPreview;
 }
 
 /* ── Account consistency diagnostics ───────────────────────────────────────── */

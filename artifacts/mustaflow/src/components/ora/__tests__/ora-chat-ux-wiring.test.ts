@@ -23,6 +23,7 @@ describe("Ora chat UX response wiring", () => {
       'memorySaveCandidateConfidence?: "high" | "low";',
       "memorySaveCandidateSensitive?: boolean;",
       "memoriesUsed?: OraMemoryUsed[];",
+      "fileAgentPreview?: OraFileAgentPreview;",
       "conversationSummary?: string;",
     ].forEach((field) => {
       expect(hookSource).toContain(field);
@@ -43,6 +44,12 @@ describe("Ora chat UX response wiring", () => {
     expect(hookSource).toMatch(
       /d\.fileName\s*&&\s*d\.fileData\s*&&\s*d\.mimeType[\s\S]*generatedFile:[\s\S]*fileName:\s*d\.fileName[\s\S]*fileData:\s*d\.fileData[\s\S]*mimeType:\s*d\.mimeType/,
     );
+    expect(hookSource).toContain(
+      "...(d.fileAgentPreview ? { fileAgentPreview: d.fileAgentPreview } : {})",
+    );
+    expect(hookSource).toContain(
+      "...(m.fileAgentPreview ? { fileAgentPreview: m.fileAgentPreview } : {})",
+    );
   });
 
   it("keeps image profile metadata when inline edits create a new image", () => {
@@ -62,6 +69,9 @@ describe("Ora chat UX response wiring", () => {
     expect(panelSource).toContain(
       'import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";',
     );
+    expect(panelSource).toContain(
+      'import { OraFileAgentPreviewCard } from "@/components/ora/ora-file-agent-preview-card";',
+    );
 
     expect(panelSource).toMatch(/msg\.imageUrl\s*&&[\s\S]*<img[\s\S]*src=\{msg\.imageUrl\}/);
     expect(panelSource).toContain("formatOraImageMeta(msg.imageMeta)");
@@ -80,6 +90,7 @@ describe("Ora chat UX response wiring", () => {
     expect(panelSource).toContain("setSelectedFormat(file.format)");
     expect(panelSource).toContain("onRevise={handleReviseGeneratedFile}");
     expect(panelSource).toMatch(/msg\.generatedFile\s*&&\s*\([\s\S]*<GeneratedFileCard/);
+    expect(panelSource).toContain("<OraFileAgentPreviewCard preview={msg.fileAgentPreview}");
     expect(panelSource).toMatch(
       /msg\.memorySaveCandidate\s*\|\|\s*msg\.memorySaved[\s\S]*<OraMemorySaveChip[\s\S]*onSave=\{\(\) => handleSaveMemory/,
     );
@@ -108,6 +119,7 @@ describe("Ora chat UX response wiring", () => {
     expect(bubbleSource).toContain("setSelectedFormat(file.format)");
     expect(bubbleSource).toContain("onRevise={handleReviseGeneratedFile}");
     expect(bubbleSource).toMatch(/msg\.generatedFile\s*&&\s*\([\s\S]*<GeneratedFileCard/);
+    expect(bubbleSource).toContain("<OraFileAgentPreviewCard preview={msg.fileAgentPreview}");
     expect(bubbleSource).toMatch(
       /const showSuggestions =[\s\S]*Array\.isArray\(msg\.suggestions\)[\s\S]*msg\.suggestions\.length > 0/,
     );

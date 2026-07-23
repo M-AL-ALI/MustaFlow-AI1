@@ -1,3 +1,5 @@
+import type { OraFileAgentPreview } from "@workspace/ora-contracts";
+
 export interface DatasetProfile {
   rowCount: number;
   colCount: number;
@@ -185,4 +187,5 @@ export interface DatasetAnalysisResult {
   strategicRoadmap?: StrategicRoadmap;
   enhancedRisks?: EnhancedRisk[];
   analystWorkflow?: DatasetAnalystWorkflow;
+  fileAgentPreview?: OraFileAgentPreview;
 }

@@ -571,6 +571,7 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
     ...(res.fileCitations && res.fileCitations.length > 0
       ? { fileCitations: res.fileCitations }
       : {}),
+    ...(res.fileAgentPreview ? { fileAgentPreview: res.fileAgentPreview } : {}),
     generatedFile: buildGeneratedFile(res),
     ...(res.searchFallback ? { searchFallback: true } : {}),
     ...(res.searchRetryable ? { searchRetryable: true } : {}),
@@ -1225,6 +1226,7 @@ export default function OraChatScreen() {
                 columnCount: profile?.colCount,
                 truncated: result.truncated ?? profile?.truncated,
               },
+              ...(result.fileAgentPreview ? { fileAgentPreview: result.fileAgentPreview } : {}),
             };
           } else {
             const res = await analyzeDocument(attch.ref, prompt, history);
@@ -1369,6 +1371,9 @@ export default function OraChatScreen() {
                 memoriesUsed: streamResult.memoriesUsed,
                 ...(streamResult.fileCitations && streamResult.fileCitations.length > 0
                   ? { fileCitations: streamResult.fileCitations }
+                  : {}),
+                ...(streamResult.fileAgentPreview
+                  ? { fileAgentPreview: streamResult.fileAgentPreview }
                   : {}),
                 generatedFile: buildGeneratedFile(streamResult),
                 ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),

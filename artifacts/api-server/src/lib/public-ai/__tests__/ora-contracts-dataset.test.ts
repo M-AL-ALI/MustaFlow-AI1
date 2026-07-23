@@ -47,6 +47,38 @@ describe("Ora dataset result persistence contract", () => {
     );
     expect(parsed.datasetResult?.actionPlan?.[0]?.action).toBe("Review regional campaigns");
   });
+
+  it("keeps Phase 9A file/data preview metadata through the shared message schema", () => {
+    const parsed = oraMessageSchema.parse({
+      role: "assistant",
+      content: "Dataset analyzed.",
+      datasetResult: {
+        summary: "Revenue rose in the West region.",
+        fileAgentPreview: {
+          kind: "data_analysis",
+          status: "planned",
+          title: "Data analysis workflow",
+          detectedInputs: ["120 rows", "4 columns"],
+          plannedActions: ["Compare regional revenue"],
+          calculations: ["Total revenue"],
+          charts: ["Revenue by region"],
+        },
+      },
+      fileAgentPreview: {
+        kind: "data_analysis",
+        status: "planned",
+        title: "Data analysis workflow",
+        detectedInputs: ["120 rows", "4 columns"],
+        plannedActions: ["Compare regional revenue"],
+        calculations: ["Total revenue"],
+        charts: ["Revenue by region"],
+      },
+    });
+
+    expect(parsed.datasetResult?.fileAgentPreview?.title).toBe("Data analysis workflow");
+    expect(parsed.fileAgentPreview?.detectedInputs).toContain("120 rows");
+    expect(parsed.fileAgentPreview?.charts).toContain("Revenue by region");
+  });
 });
 
 describe("Ora file edit-quality persistence contract", () => {
@@ -113,5 +145,29 @@ describe("Ora file edit-quality persistence contract", () => {
         },
       }),
     ).toThrow();
+  });
+
+  it("keeps Phase 9A generated-file preview metadata with persisted file cards", () => {
+    const parsed = oraMessageSchema.parse({
+      role: "assistant",
+      content: "I've updated your deck.",
+      generatedFile: {
+        fileName: "board-review.pptx",
+        fileData: "QUJD",
+        mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        format: "pptx",
+        assetId: 42,
+      },
+      fileAgentPreview: {
+        kind: "file_generation",
+        status: "applied",
+        title: "Created PowerPoint deck",
+        plannedActions: ["Structure content into presentation slides"],
+        charts: ["Create charts or histograms when the request and data support them"],
+      },
+    });
+
+    expect(parsed.fileAgentPreview?.title).toBe("Created PowerPoint deck");
+    expect(parsed.fileAgentPreview?.plannedActions?.[0]).toContain("presentation slides");
   });
 });

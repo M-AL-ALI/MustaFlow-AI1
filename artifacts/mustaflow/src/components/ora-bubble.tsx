@@ -27,6 +27,7 @@ import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraVersionHistoryDialog } from "@/components/ora/ora-version-history";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { OraEditQualityCard } from "@/components/ora/ora-edit-quality-card";
+import { OraFileAgentPreviewCard } from "@/components/ora/ora-file-agent-preview-card";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { cn } from "@/lib/utils";
 import { authFetch } from "@/lib/api-fetch";
@@ -1596,7 +1597,14 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         {msg.generatedFile.editQuality && (
                           <OraEditQualityCard quality={msg.generatedFile.editQuality} compact />
                         )}
+                        {msg.fileAgentPreview && (
+                          <OraFileAgentPreviewCard preview={msg.fileAgentPreview} compact />
+                        )}
                       </>
+                    )}
+
+                    {!msg.generatedFile && msg.fileAgentPreview && (
+                      <OraFileAgentPreviewCard preview={msg.fileAgentPreview} compact />
                     )}
 
                     {msg.editedFrom && (
