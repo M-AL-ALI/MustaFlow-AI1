@@ -459,6 +459,7 @@ const API_FILE_IMAGE = [
   "src/lib/public-ai/__tests__/office-layout-edit.test.ts",
   "src/lib/public-ai/__tests__/ora-image-quality.test.ts",
   "src/lib/public-ai/__tests__/professional-doc.test.ts",
+  "src/lib/public-ai/__tests__/xlsx-workbook-edit.test.ts",
   "src/routes/public-ai/__tests__/export-file.test.ts",
 ].join(" ");
 

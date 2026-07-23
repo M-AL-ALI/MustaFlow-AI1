@@ -8,6 +8,7 @@ import {
 import { inferChartsFromTabularData, renderChartPng } from "./file-charts.js";
 import { resolveFileEntry } from "./file-context-store.js";
 import type { DatasetSummary } from "./dataset-extract.js";
+import type { ColumnProfile } from "./dataset-stats.js";
 import type { FileFormat, GeneratedFileResult, TabularData } from "./file-builder.js";
 import {
   putFileEntry,
@@ -118,6 +119,74 @@ function hasSpreadsheetCleanIntent(message: string): boolean {
   return /\b(clean|cleanup|clean\s+up|format|formatting|professional|polish|normalize|tidy|dedupe|deduplicate)\b/i.test(
     message,
   );
+}
+
+const XLSX_HEADER_COLOR_ARGB: Record<string, string> = {
+  blue: "FF0070C0",
+  red: "FFFF0000",
+  green: "FF00B050",
+  yellow: "FFFFFF00",
+  orange: "FFFF6600",
+  purple: "FF7030A0",
+  black: "FF000000",
+  white: "FFFFFFFF",
+  gray: "FF808080",
+  grey: "FF808080",
+  navy: "FF002060",
+  teal: "FF008080",
+  maroon: "FF800000",
+  olive: "FF808000",
+  aqua: "FF00FFFF",
+  lime: "FF00FF00",
+  silver: "FFC0C0C0",
+};
+
+interface XlsxHeaderStyle {
+  bold?: boolean;
+  colorArgb?: string;
+  colorName?: string;
+}
+
+function parseXlsxHeaderStyle(message: string): XlsxHeaderStyle | null {
+  const headerTarget =
+    /\b(header|heading|headers|headings|row\s*1|first\s*row|title\s*row|column\s*header)\b/i.test(message);
+  if (!headerTarget) return null;
+
+  const hasBold = /\bbold\b/i.test(message);
+  const colorMatch = /\b(blue|red|green|yellow|orange|purple|black|white|gray|grey|navy|teal|maroon|olive|aqua|lime|silver)\b/i.exec(
+    message,
+  );
+  const colorName = colorMatch?.[1]?.toLowerCase();
+  const colorArgb = colorName ? (XLSX_HEADER_COLOR_ARGB[colorName] ?? undefined) : undefined;
+
+  if (!hasBold && !colorArgb) return null;
+  return { bold: hasBold || undefined, colorArgb, colorName };
+}
+
+function applyXlsxHeaderStyle(workbook: ExcelJS.Workbook, style: XlsxHeaderStyle): number {
+  let count = 0;
+  workbook.eachSheet((sheet) => {
+    if (sheet.actualRowCount < 1) return;
+    const firstRow = sheet.getRow(1);
+    firstRow.eachCell({ includeEmpty: false }, (cell) => {
+      if (style.bold) {
+        cell.font = {
+          ...(typeof cell.font === "object" && cell.font != null ? cell.font : {}),
+          bold: true,
+        };
+      }
+      if (style.colorArgb) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: style.colorArgb },
+        };
+      }
+      count++;
+    });
+    firstRow.commit();
+  });
+  return count;
 }
 
 function targetSlideNumber(message: string): number | null {
@@ -1700,6 +1769,89 @@ function hasCalculationIntent(message: string): boolean {
   );
 }
 
+/**
+ * Returns true when the user's message is asking for a structured workbook
+ * operation (formula, chart, header style) rather than a plain text replacement.
+ * Used to gate XLSX-specific failure messages so we never say
+ * "couldn't locate exact text" for formula/chart/format requests.
+ */
+function isXlsxStructuredWorkbookOp(message: string): boolean {
+  return (
+    hasCalculationIntent(message) ||
+    hasChartIntent(message) ||
+    parseXlsxHeaderStyle(message) !== null ||
+    /\b(pivot|summary\s+sheet|dashboard\s+sheet|overview\s+sheet|aggregate|subtotal|percentage|percentages)\b/i.test(
+      message,
+    )
+  );
+}
+
+/**
+ * Builds a minimal DatasetSummary from a loaded workbook when the session
+ * entry has no pre-extracted `datasetSummary`. Reads headers from row 1 and
+ * detects numeric columns by sampling up to 20 data rows. Used as a fallback
+ * so formula generation can still run for freshly uploaded XLSX files that
+ * haven't gone through the full dataset-extraction pipeline.
+ */
+function deriveMinimalSummaryFromWorkbook(workbook: ExcelJS.Workbook): DatasetSummary | null {
+  const sheet =
+    workbook.worksheets.find((s) => s.actualRowCount > 1) ?? workbook.worksheets[0];
+  if (!sheet) return null;
+
+  const headers: string[] = [];
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    headers.push(cellText(cell.value) || `Column ${colNumber}`);
+  });
+  if (headers.length === 0) return null;
+
+  const numericCounts: number[] = new Array(headers.length).fill(0) as number[];
+  const totalCounts: number[] = new Array(headers.length).fill(0) as number[];
+  const sampleLimit = Math.min(sheet.actualRowCount, 21);
+  for (let r = 2; r <= sampleLimit; r++) {
+    const row = sheet.getRow(r);
+    for (let c = 1; c <= headers.length; c++) {
+      const val = row.getCell(c).value;
+      if (val == null || val === "") continue;
+      totalCounts[c - 1] = (totalCounts[c - 1] ?? 0) + 1;
+      if (
+        typeof val === "number" ||
+        (typeof val === "object" &&
+          val !== null &&
+          "result" in val &&
+          typeof (val as { result?: unknown }).result === "number")
+      ) {
+        numericCounts[c - 1] = (numericCounts[c - 1] ?? 0) + 1;
+      }
+    }
+  }
+
+  const columnProfiles: ColumnProfile[] = headers.map((_, index) => {
+    const total = totalCounts[index] ?? 0;
+    const numeric = numericCounts[index] ?? 0;
+    const isNumeric = total > 0 && numeric / total >= 0.6;
+    return {
+      index,
+      type: isNumeric ? "numeric" : "string",
+      nullCount: 0,
+      uniqueCount: 0,
+    };
+  });
+
+  return {
+    rowCount: Math.max(0, sheet.actualRowCount - 1),
+    colCount: headers.length,
+    headers,
+    sampleRows: [],
+    columnProfiles,
+    paretoSets: [],
+    sanitizedCellCount: 0,
+    hiddenSheetsSkipped: 0,
+    truncated: false,
+    sheetName: sheet.name,
+  };
+}
+
 function excelColumnName(index: number): string {
   let n = index;
   let out = "";
@@ -2094,12 +2246,22 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
     if (changed > 0) actions.push(`updated ${changed} cell${changed === 1 ? "" : "s"}`);
   }
 
-  if (entry.datasetSummary && hasCalculationIntent(message)) {
-    const formulas = addCalculationWorksheet(workbook, entry.datasetSummary);
-    if (formulas > 0) actions.push("added an Ora Calculations worksheet with real formulas");
+  // Formula/calculation: try with datasetSummary first, fall back to
+  // workbook-derived summary so freshly uploaded XLSX files without a
+  // pre-extracted summary still get a calculations worksheet.
+  const formulaAttempted = hasCalculationIntent(message);
+  if (formulaAttempted) {
+    const summary = entry.datasetSummary ?? deriveMinimalSummaryFromWorkbook(workbook);
+    if (summary) {
+      const formulas = addCalculationWorksheet(workbook, summary);
+      if (formulas > 0) actions.push("added an Ora Calculations worksheet with real formulas");
+    }
   }
 
-  if (entry.datasetSummary && hasChartIntent(message)) {
+  // Charts: require datasetSummary for image rendering (chart generation needs
+  // the full tabular data pipeline).
+  const chartAttempted = hasChartIntent(message);
+  if (chartAttempted && entry.datasetSummary) {
     const charts = await addChartsWorksheet(workbook, entry, message);
     if (charts > 0) actions.push(`added ${charts} generated chart${charts === 1 ? "" : "s"}`);
   }
@@ -2120,7 +2282,68 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
     if (changed > 0) actions.push("cleaned and formatted the workbook");
   }
 
-  if (actions.length === 0) return null;
+  // Header style: applied LAST so an explicit color request always wins over
+  // the generic light-blue that cleanXlsxWorkbook applies to row 1.
+  const headerStyle = parseXlsxHeaderStyle(message);
+  if (headerStyle) {
+    const changed = applyXlsxHeaderStyle(workbook, headerStyle);
+    if (changed > 0) {
+      const parts = [
+        headerStyle.bold ? "bold" : null,
+        headerStyle.colorName ? `${headerStyle.colorName} fill` : null,
+      ].filter((p): p is string => p !== null);
+      actions.push(`styled ${changed} header cell${changed === 1 ? "" : "s"} (${parts.join(" and ")})`);
+    }
+  }
+
+  if (actions.length === 0) {
+    // For structured workbook operations (formula/chart/header-style), return an
+    // XLSX-specific failure result — NOT null. Returning null here would send the
+    // request to the AI text planner, which produces "couldn't locate exact text",
+    // a message that is wrong and confusing for workbook-structured requests.
+    // null is reserved for true text-replacement requests that the AI planner can help with.
+    if (isXlsxStructuredWorkbookOp(message)) {
+      let failReply: string;
+      let failWarning: string;
+      if (formulaAttempted) {
+        const noNumericCols =
+          !entry.datasetSummary &&
+          (deriveMinimalSummaryFromWorkbook(workbook)?.columnProfiles ?? []).every(
+            (p) => p.type !== "numeric",
+          );
+        if (noNumericCols) {
+          failReply = `I couldn't find any numeric columns in "${entry.filename}" to create formulas for. Add some numbers to your spreadsheet, then ask again — or specify the column, e.g. "add a SUM formula for the Downtime column".`;
+          failWarning = "No numeric columns found for formula generation.";
+        } else {
+          failReply = `I couldn't apply the formula calculation to "${entry.filename}". Try specifying the column name, e.g. "add a SUM formula for the Downtime column".`;
+          failWarning = "Formula calculation could not be applied.";
+        }
+      } else if (chartAttempted) {
+        failReply = `I need a data preview to generate charts for "${entry.filename}". Try uploading the file again and asking for the chart in the same message, e.g. "create a histogram using the Downtime column".`;
+        failWarning = "Chart generation requires a pre-extracted data summary.";
+      } else if (headerStyle) {
+        failReply = `I couldn't find any headers in row 1 of "${entry.filename}" to apply the style to. Make sure the first row contains column headers, then try again.`;
+        failWarning = "No header row found for header-style operation.";
+      } else {
+        failReply = `I couldn't apply the requested workbook operation to "${entry.filename}". Try being more specific — for example: "add a SUM formula for column B" or "make the headers in row 1 bold and blue".`;
+        failWarning = "Workbook operation could not be applied.";
+      }
+      return {
+        fileName: entry.filename,
+        fileData: entry.rawBase64!,
+        mimeType: MIME_BY_TYPE.xlsx,
+        reply: failReply,
+        editQuality: buildEditQuality({
+          editMode: "failed_safe",
+          entry,
+          outputFileName: entry.filename,
+          type: "xlsx",
+          warning: failWarning,
+        }),
+      };
+    }
+    return null;
+  }
 
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   const fileName = safeFileName(entry.filename, "xlsx");
