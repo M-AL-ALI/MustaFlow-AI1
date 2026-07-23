@@ -1044,6 +1044,25 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     }, 40);
   }, []);
 
+  const handleApplyFileEditPreview = useCallback(() => {
+    if (isLoading || atLimit) return;
+    void sendMessage("Apply edit");
+  }, [atLimit, isLoading, sendMessage]);
+
+  const handleReviseFileEditPreview = useCallback(() => {
+    const revisionPrompt = "Revise the edit plan: ";
+    setInput(revisionPrompt);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(revisionPrompt.length, revisionPrompt.length);
+    }, 40);
+  }, []);
+
+  const handleRedesignFileEditPreview = useCallback(() => {
+    if (isLoading || atLimit) return;
+    void sendMessage("Create a redesigned copy instead");
+  }, [atLimit, isLoading, sendMessage]);
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -1598,13 +1617,29 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                           <OraEditQualityCard quality={msg.generatedFile.editQuality} compact />
                         )}
                         {msg.fileAgentPreview && (
-                          <OraFileAgentPreviewCard preview={msg.fileAgentPreview} compact />
+                          <OraFileAgentPreviewCard
+                            preview={msg.fileAgentPreview}
+                            compact
+                            onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
+                            onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
+                            onRedesign={
+                              isLatestAssistant ? handleRedesignFileEditPreview : undefined
+                            }
+                            disabled={isLoading || atLimit}
+                          />
                         )}
                       </>
                     )}
 
                     {!msg.generatedFile && msg.fileAgentPreview && (
-                      <OraFileAgentPreviewCard preview={msg.fileAgentPreview} compact />
+                      <OraFileAgentPreviewCard
+                        preview={msg.fileAgentPreview}
+                        compact
+                        onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
+                        onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
+                        onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
+                        disabled={isLoading || atLimit}
+                      />
                     )}
 
                     {msg.editedFrom && (

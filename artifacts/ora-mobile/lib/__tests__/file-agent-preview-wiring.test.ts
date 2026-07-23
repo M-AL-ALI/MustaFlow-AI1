@@ -41,9 +41,23 @@ describe("Mobile Ora - Phase 9A file/data agent preview parity", () => {
   it("renders the compact preview card from message or dataset metadata", () => {
     expect(extras).toContain("function OraFileAgentPreviewIndicator");
     expect(extras).toContain("message.fileAgentPreview ?? message.datasetResult?.fileAgentPreview");
-    expect(extras).toContain("OraFileAgentPreviewIndicator message={message}");
+    expect(extras).toMatch(/<OraFileAgentPreviewIndicator[\s\S]*message=\{message\}/);
     expect(extras).toContain("preview.plannedActions");
     expect(extras).toContain("preview.calculations");
     expect(extras).toContain("preview.charts");
+    expect(extras).toContain('preview.status === "needs_confirmation"');
+    expect(extras).toContain("Apply edit");
+    expect(extras).toContain("Revise plan");
+    expect(extras).toContain("Redesigned copy");
+  });
+
+  it("wires preview confirmation actions through the normal chat send path", () => {
+    expect(index).toContain('void sendMessage("Apply edit", null)');
+    expect(index).toContain('void sendMessage("Create a redesigned copy instead", null)');
+    expect(index).toContain('setInput("Revise the edit plan: ")');
+    expect(index).toContain("onApplyFileEditPreview={handleApplyFileEditPreview}");
+    expect(index).toContain("onReviseFileEditPreview={handleReviseFileEditPreview}");
+    expect(index).toContain("onRedesignFileEditPreview={handleRedesignFileEditPreview}");
+    expect(index).toContain("isLatest ? onApplyFileEditPreview : undefined");
   });
 });

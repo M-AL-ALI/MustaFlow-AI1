@@ -1,9 +1,15 @@
-import type { OraClarificationKind, OraPendingClarification } from "@workspace/ora-contracts";
+import type {
+  OraClarificationKind,
+  OraFileAgentPreview,
+  OraPendingClarification,
+} from "@workspace/ora-contracts";
 import type { OraTool } from "./orchestrator";
 import type { OraRouteConflictResolution } from "./route-resolution";
 import type { FileFormat } from "./prompt";
 import { detectFileRequest, isUploadedFileModificationRequest } from "./prompt";
 import { detectAmbiguousEditTarget } from "./multi-file-planner";
+import { buildFileEditConfirmationPreview } from "./file-agent-preview";
+import { planUploadedFileRequest, type UploadedFileOperation } from "./file-edit-planner";
 
 /**
  * Phase 4 — Clarifying Questions.
@@ -26,6 +32,7 @@ export interface OraClarificationPlan {
   kind: OraClarificationKind;
   question: string;
   pendingTaskContext: OraPendingClarification;
+  fileAgentPreview?: OraFileAgentPreview;
 }
 
 export interface OraClarificationPlanInput {
@@ -51,7 +58,10 @@ export interface OraClarificationPlanInput {
 
 /** Static question templates (dynamic kinds fill in the actual file names). */
 export const ORA_CLARIFICATION_QUESTIONS: Record<
-  Exclude<OraClarificationKind, "multi_file_source" | "ambiguous_target_file">,
+  Exclude<
+    OraClarificationKind,
+    "multi_file_source" | "ambiguous_target_file" | "file_edit_preview_confirmation"
+  >,
   string
 > = {
   vague_file_edit:
@@ -73,6 +83,15 @@ const QUOTED_TEXT_PATTERN =
 /** The user already answered the layout question inside the request. */
 const EXPLICIT_LAYOUT_INTENT_PATTERN =
   /\b(?:preserve|keep|maintain|retain)\b[^.?!\n]{0,30}\b(?:layout|format(?:ting)?|design|style)\b|\b(?:redesign(?:ed)?|restyle|reformat)\b/i;
+
+const PREVIEW_BEFORE_APPLY_PATTERN =
+  /\b(?:preview|review|show\s+me|confirm|approve|approval|ask\s+me)\b[^.?!\n]{0,80}\b(?:before|prior\s+to|first|plan|changes?|edits?|applying|apply)\b|\b(?:before|prior\s+to)\b[^.?!\n]{0,80}\b(?:applying|changing|editing|modifying|deleting|removing)\b/i;
+
+const CONFIRMED_EDIT_PATTERN =
+  /\b(?:apply|confirm|approved|approve|go\s+ahead|proceed|do\s+it|yes|yep|looks\s+good)\b/i;
+
+const REDESIGN_CONFIRMATION_PATTERN =
+  /\b(?:redesign(?:ed)?|rebuild|new\s+(?:design|layout|version)|fresh\s+(?:design|layout)|from\s+scratch|different\s+layout)\b/i;
 
 const FILE_NOUN = String.raw`file|document|doc|deck|presentation|slides?|slide\s*deck|spreadsheet|sheet|workbook|report|pdf|resume|cv`;
 
@@ -132,6 +151,18 @@ const DATA_FILE_PATTERN = /\.(?:xlsx?|csv)$/i;
 const PRESENTATION_FILE_PATTERN = /\.(?:pptx?)$/i;
 const DOCUMENT_FILE_PATTERN = /\.(?:docx?|pdf)$/i;
 
+const PREVIEW_REQUIRED_OPERATIONS = new Set<UploadedFileOperation>([
+  "delete",
+  "move",
+  "reorder",
+  "convert",
+  "chart",
+  "dashboard",
+  "formula",
+  "merge",
+  "split",
+]);
+
 /** Route outcomes where a clarification must never fire: an explicit image,
  * current-info search, ZIP-analysis, or user-forced search escape already won
  * the turn. */
@@ -159,6 +190,22 @@ function mentionsCarriedFileName(message: string, fileNames: string[]): boolean 
     const base = name.replace(/\.[^.]+$/, "").toLowerCase();
     return base.length >= 3 && lower.includes(base);
   });
+}
+
+function inferredFormatFromFiles(files: string[]): FileFormat | null {
+  const lower = files.map((f) => f.toLowerCase());
+  if (lower.some((f) => /\.pptx?$/.test(f))) return "pptx";
+  if (lower.some((f) => /\.docx?$/.test(f))) return "docx";
+  if (lower.some((f) => /\.pdf$/.test(f))) return "pdf";
+  if (lower.some((f) => /\.xlsx?$/.test(f))) return "xlsx";
+  if (lower.some((f) => /\.csv$/.test(f))) return "csv";
+  return null;
+}
+
+function shouldPreviewFileEdit(message: string, operations: UploadedFileOperation[]): boolean {
+  if (PREVIEW_BEFORE_APPLY_PATTERN.test(message)) return true;
+  if (CONFIRMED_EDIT_PATTERN.test(message)) return false;
+  return operations.some((op) => PREVIEW_REQUIRED_OPERATIONS.has(op));
 }
 
 function detectMultiFileSource(message: string, carriedDocs: string): { question: string } | null {
@@ -214,8 +261,10 @@ export function planOraClarification(
   // Only the edit path (file_generation) or a plain answer that LOOKS like an
   // uninstructed edit ("return it after modification") are eligible.
   if (finalTool !== "file_generation" && finalTool !== "answer") return null;
-  // Quoted text pinpoints the target — clear.
-  if (QUOTED_TEXT_PATTERN.test(message)) return null;
+  const requestedPreview = PREVIEW_BEFORE_APPLY_PATTERN.test(message);
+  // Quoted text pinpoints the target, unless the user explicitly asked to
+  // review the edit plan before applying it.
+  if (QUOTED_TEXT_PATTERN.test(message) && !requestedPreview) return null;
 
   const pendingContext = (kind: OraClarificationKind): OraPendingClarification => ({
     originalMessage: message.slice(0, 4000),
@@ -259,6 +308,24 @@ export function planOraClarification(
         pendingTaskContext: pendingContext("ambiguous_target_file"),
       };
     }
+  }
+
+  const filePlan = planUploadedFileRequest(message);
+  if (filePlan.requiresFileOutput && shouldPreviewFileEdit(message, filePlan.operations)) {
+    const names = input.files?.map((f) => f.filename) ?? carriedFileNames(carriedDocs);
+    const format = inferredFileFormat ?? inferredFormatFromFiles(names) ?? "docx";
+    return {
+      kind: "file_edit_preview_confirmation",
+      question:
+        "I can make this edit, but I'll wait for your confirmation before changing the uploaded file. Review the plan below, then choose Apply edit, revise the instruction, or create a redesigned copy.",
+      pendingTaskContext: pendingContext("file_edit_preview_confirmation"),
+      fileAgentPreview: buildFileEditConfirmationPreview({
+        format,
+        fileNames: names,
+        operations: filePlan.operations,
+        requestedPreview,
+      }),
+    };
   }
 
   // An explicit output-format ask is a clear instruction ("convert to PDF").
@@ -334,6 +401,24 @@ export function resolveClarificationContinuation(input: {
   const { message, pending } = input;
   const carriedDocs = input.carriedDocs ?? "";
   if (!pending) return { routedMessage: message, applied: false };
+  if (pending.kind === "file_edit_preview_confirmation") {
+    if (REDESIGN_CONFIRMATION_PATTERN.test(message)) {
+      return {
+        routedMessage: `${pending.originalMessage}\n\nUser confirmation: create a redesigned copy instead. Rebuild from the uploaded content; preserving the original layout is not required.`,
+        applied: true,
+      };
+    }
+    if (CONFIRMED_EDIT_PATTERN.test(message)) {
+      return {
+        routedMessage: `${pending.originalMessage}\n\nUser confirmation: apply the planned edit now while preserving the original file layout where possible.`,
+        applied: true,
+      };
+    }
+    return {
+      routedMessage: `${pending.originalMessage}\n\nUser clarification: ${message}`,
+      applied: true,
+    };
+  }
   if (isUploadedFileModificationRequest(message) && !looksAmbiguous(message, carriedDocs)) {
     return { routedMessage: message, applied: false };
   }

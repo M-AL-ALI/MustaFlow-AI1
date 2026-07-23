@@ -268,6 +268,7 @@ export const ORA_CLARIFICATION_KINDS = [
   "unclear_replacement_target", // "change the pricing section" — no target text
   "missing_edit_instruction", // "return it after modification" — no modification stated
   "ambiguous_target_file", // two+ same-format uploads, edit target file unclear
+  "file_edit_preview_confirmation", // risky/requested file edit preview awaiting Apply/Redesign
 ] as const;
 
 export type OraClarificationKind = (typeof ORA_CLARIFICATION_KINDS)[number];

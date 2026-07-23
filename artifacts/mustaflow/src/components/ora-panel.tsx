@@ -1161,6 +1161,25 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     }, 40);
   }, []);
 
+  const handleApplyFileEditPreview = useCallback(() => {
+    if (isLoading || atLimit) return;
+    void sendMessage("Apply edit");
+  }, [atLimit, isLoading, sendMessage]);
+
+  const handleReviseFileEditPreview = useCallback(() => {
+    const revisionPrompt = "Revise the edit plan: ";
+    setInput(revisionPrompt);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(revisionPrompt.length, revisionPrompt.length);
+    }, 40);
+  }, []);
+
+  const handleRedesignFileEditPreview = useCallback(() => {
+    if (isLoading || atLimit) return;
+    void sendMessage("Create a redesigned copy instead");
+  }, [atLimit, isLoading, sendMessage]);
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -1815,13 +1834,25 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         <OraEditQualityCard quality={msg.generatedFile.editQuality} />
                       )}
                       {msg.fileAgentPreview && (
-                        <OraFileAgentPreviewCard preview={msg.fileAgentPreview} />
+                        <OraFileAgentPreviewCard
+                          preview={msg.fileAgentPreview}
+                          onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
+                          onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
+                          onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
+                          disabled={isLoading || atLimit}
+                        />
                       )}
                     </>
                   )}
 
                   {!msg.generatedFile && msg.fileAgentPreview && (
-                    <OraFileAgentPreviewCard preview={msg.fileAgentPreview} />
+                    <OraFileAgentPreviewCard
+                      preview={msg.fileAgentPreview}
+                      onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
+                      onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
+                      onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
+                      disabled={isLoading || atLimit}
+                    />
                   )}
 
                   {msg.role === "assistant" && msg.viaFallback && !msg.isStreaming && (

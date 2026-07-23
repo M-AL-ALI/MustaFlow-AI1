@@ -5,6 +5,7 @@ import type {
   OraFileEditQuality,
   OraUsedFile,
 } from "@workspace/ora-contracts";
+import type { UploadedFileOperation } from "./file-edit-planner";
 
 function uniqueNonEmpty(values: Array<string | null | undefined>, max: number): string[] {
   const out: string[] = [];
@@ -59,6 +60,87 @@ function actionsForFormat(format: FileFormat, hasSourceData: boolean): string[] 
     return [...base, "Organize the document into professional sections"];
   }
   return [...base, "Keep the output easy to import into spreadsheets"];
+}
+
+function actionLabel(operation: UploadedFileOperation): string {
+  switch (operation) {
+    case "delete":
+      return "Remove the requested content from the uploaded file";
+    case "replace":
+      return "Replace the requested text inside the original file";
+    case "add":
+    case "insert":
+      return "Add the requested content while preserving the file structure";
+    case "move":
+    case "reorder":
+      return "Rearrange the requested content in the uploaded file";
+    case "rename":
+      return "Rename the requested title, heading, sheet, or slide";
+    case "rewrite":
+    case "professionalize":
+      return "Polish the requested content in place";
+    case "format":
+      return "Clean up formatting while keeping the original file usable";
+    case "translate":
+      return "Translate the requested content in the uploaded file";
+    case "convert":
+      return "Create the requested converted output";
+    case "chart":
+      return "Add the requested chart if the uploaded data supports it";
+    case "dashboard":
+      return "Build the requested dashboard view if the data supports it";
+    case "formula":
+      return "Add the requested formulas or calculations";
+    case "merge":
+      return "Combine the requested uploaded files";
+    case "split":
+      return "Split the requested content into separate parts";
+    case "extract":
+      return "Extract the requested content";
+    case "compare":
+      return "Compare the requested uploaded files";
+    case "analyze":
+      return "Inspect the uploaded file before editing";
+    case "summarize":
+      return "Summarize the uploaded file content";
+    case "code_review_zip":
+      return "Inspect the uploaded archive safely";
+  }
+}
+
+export function buildFileEditConfirmationPreview(input: {
+  format: FileFormat;
+  fileNames: string[];
+  operations: UploadedFileOperation[];
+  requestedPreview: boolean;
+}): OraFileAgentPreview {
+  const detectedInputs = uniqueNonEmpty(
+    [...input.fileNames.slice(0, 5), `Output: ${formatLabel(input.format)}`],
+    8,
+  );
+  const plannedActions = uniqueNonEmpty(
+    input.operations.length
+      ? input.operations.map(actionLabel)
+      : ["Apply the requested edit to the uploaded file"],
+    8,
+  );
+
+  return {
+    kind: "file_edit",
+    status: "needs_confirmation",
+    title: "Review edit before applying",
+    summary: input.requestedPreview
+      ? "Ora prepared an edit plan and will wait for you to confirm before changing the file."
+      : "This edit can materially change the uploaded file, so Ora is waiting for confirmation.",
+    detectedInputs,
+    plannedActions,
+    safetyNotes: [
+      "No downloadable file will be created until you choose Apply edit.",
+      "If the edit cannot be applied safely, Ora returns the original file unchanged instead of rebuilding a lookalike.",
+    ],
+    canApply: true,
+    canRedesign: true,
+  };
 }
 
 export function buildFileAgentPreview(input: {

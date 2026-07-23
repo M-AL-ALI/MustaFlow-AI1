@@ -45,10 +45,16 @@ type Colors = ReturnType<typeof useColors>;
 export function OraAssistantExtras({
   message,
   onSaveMemory,
+  onApplyFileEditPreview,
+  onReviseFileEditPreview,
+  onRedesignFileEditPreview,
 }: {
   message: OraMessage;
   // Omitted in temporary chats so the save-to-memory prompt is hidden entirely.
   onSaveMemory?: (message: OraMessage) => Promise<void>;
+  onApplyFileEditPreview?: () => void;
+  onReviseFileEditPreview?: () => void;
+  onRedesignFileEditPreview?: () => void;
 }) {
   const c = useColors();
   // Order mirrors the website assistant response: web image gallery, video
@@ -60,7 +66,13 @@ export function OraAssistantExtras({
       <OraVideoCards videos={message.videos} c={c} />
       <OraDatasetCard result={message.datasetResult} c={c} />
       <OraDatasetWorkflow result={message.datasetResult} c={c} />
-      <OraFileAgentPreviewIndicator message={message} c={c} />
+      <OraFileAgentPreviewIndicator
+        message={message}
+        c={c}
+        onApply={onApplyFileEditPreview}
+        onRevise={onReviseFileEditPreview}
+        onRedesign={onRedesignFileEditPreview}
+      />
       <OraImageLineage editInstruction={message.editInstruction} c={c} />
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
       <OraMemoryIndicators message={message} c={c} />
@@ -77,7 +89,19 @@ function previewTone(status: NonNullable<OraMessage["fileAgentPreview"]>["status
   return "#0ea5e9";
 }
 
-function OraFileAgentPreviewIndicator({ message, c }: { message: OraMessage; c: Colors }) {
+function OraFileAgentPreviewIndicator({
+  message,
+  c,
+  onApply,
+  onRevise,
+  onRedesign,
+}: {
+  message: OraMessage;
+  c: Colors;
+  onApply?: () => void;
+  onRevise?: () => void;
+  onRedesign?: () => void;
+}) {
   const preview = message.fileAgentPreview ?? message.datasetResult?.fileAgentPreview;
   if (!preview) return null;
   const tone = previewTone(preview.status);
@@ -120,6 +144,83 @@ function OraFileAgentPreviewIndicator({ message, c }: { message: OraMessage; c: 
               {"\u2022"} {item}
             </Text>
           ))}
+          {preview.status === "needs_confirmation" && (onApply || onRevise || onRedesign) ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {onApply ? (
+                <Pressable
+                  onPress={onApply}
+                  accessibilityRole="button"
+                  accessibilityLabel="Apply edit"
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 9,
+                    backgroundColor: c.primary,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: c.primaryForeground,
+                      fontSize: 11,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    Apply edit
+                  </Text>
+                </Pressable>
+              ) : null}
+              {onRevise ? (
+                <Pressable
+                  onPress={onRevise}
+                  accessibilityRole="button"
+                  accessibilityLabel="Revise plan"
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 9,
+                    borderWidth: 1,
+                    borderColor: c.border,
+                    backgroundColor: c.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: c.foreground,
+                      fontSize: 11,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    Revise plan
+                  </Text>
+                </Pressable>
+              ) : null}
+              {onRedesign ? (
+                <Pressable
+                  onPress={onRedesign}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create redesigned copy"
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 9,
+                    borderWidth: 1,
+                    borderColor: c.border,
+                    backgroundColor: c.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: c.foreground,
+                      fontSize: 11,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    Redesigned copy
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       </View>
     </View>

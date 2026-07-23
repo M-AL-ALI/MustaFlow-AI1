@@ -232,14 +232,15 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     fileHints: [
       /file-agent-preview/i,
       /fileAgentPreview/,
+      /file_edit_preview_confirmation/,
       /ora-file-agent-preview-card/i,
       /ora-chat-ux-wiring\.test\.ts$/i,
       /MessageExtras/i,
     ],
     manualWebsite:
-      "Generate/edit DOCX/PPTX/XLSX/PDF and analyze a dataset; verify the preview card accurately lists detected inputs, planned actions, calculations/charts, and safe-edit notes without claiming changes that did not happen.",
+      "Generate/edit DOCX/PPTX/XLSX/PDF and analyze a dataset; verify the preview card accurately lists detected inputs, planned actions, calculations/charts, and safe-edit notes without claiming changes that did not happen. For risky or user-requested preview edits, verify the card says it needs confirmation and that Apply edit executes the original uploaded-file edit, Revise plan focuses the composer, and Create redesigned copy intentionally rebuilds a copy instead of silently changing layout.",
     manualMobile:
-      "Repeat generated-file, edited-file, and dataset-analysis preview checks on TestFlight when mobile code changed; compact preview must match website meaning even if layout is flatter.",
+      "Repeat generated-file, edited-file, and dataset-analysis preview checks on TestFlight when mobile code changed; compact preview must match website meaning even if layout is flatter. Confirm Apply edit, Revise plan, and Redesigned copy actions appear only on the latest confirmation card and route through the normal chat send path with uploaded-file refs preserved.",
   },
   {
     id: "file-edit-quality-card",

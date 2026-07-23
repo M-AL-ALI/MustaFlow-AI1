@@ -64,9 +64,17 @@ function Section({
 export function OraFileAgentPreviewCard({
   preview,
   compact = false,
+  onApply,
+  onRevise,
+  onRedesign,
+  disabled = false,
 }: {
   preview?: OraFileAgentPreview;
   compact?: boolean;
+  onApply?: () => void;
+  onRevise?: () => void;
+  onRedesign?: () => void;
+  disabled?: boolean;
 }) {
   if (!preview) return null;
   const visibleSections = [
@@ -109,6 +117,50 @@ export function OraFileAgentPreviewCard({
             >
               {preview.summary}
             </p>
+          ) : null}
+
+          {preview.status === "needs_confirmation" && (onApply || onRevise || onRedesign) ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {onApply ? (
+                <button
+                  type="button"
+                  onClick={onApply}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-md bg-primary px-2.5 py-1 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50",
+                    compact ? "text-[10px]" : "text-[11px]",
+                  )}
+                >
+                  Apply edit
+                </button>
+              ) : null}
+              {onRevise ? (
+                <button
+                  type="button"
+                  onClick={onRevise}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-md border border-border/70 bg-background/60 px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-muted/60 disabled:pointer-events-none disabled:opacity-50",
+                    compact ? "text-[10px]" : "text-[11px]",
+                  )}
+                >
+                  Revise plan
+                </button>
+              ) : null}
+              {onRedesign ? (
+                <button
+                  type="button"
+                  onClick={onRedesign}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-md border border-border/70 bg-background/60 px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-muted/60 disabled:pointer-events-none disabled:opacity-50",
+                    compact ? "text-[10px]" : "text-[11px]",
+                  )}
+                >
+                  Create redesigned copy
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           {visibleSections > 0 ? (

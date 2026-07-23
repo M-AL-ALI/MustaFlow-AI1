@@ -90,7 +90,15 @@ describe("Ora chat UX response wiring", () => {
     expect(panelSource).toContain("setSelectedFormat(file.format)");
     expect(panelSource).toContain("onRevise={handleReviseGeneratedFile}");
     expect(panelSource).toMatch(/msg\.generatedFile\s*&&\s*\([\s\S]*<GeneratedFileCard/);
-    expect(panelSource).toContain("<OraFileAgentPreviewCard preview={msg.fileAgentPreview}");
+    expect(panelSource).toMatch(/<OraFileAgentPreviewCard[\s\S]*preview=\{msg\.fileAgentPreview\}/);
+    expect(panelSource).toContain("handleApplyFileEditPreview");
+    expect(panelSource).toContain('void sendMessage("Apply edit")');
+    expect(panelSource).toContain('void sendMessage("Create a redesigned copy instead")');
+    expect(panelSource).toContain('const revisionPrompt = "Revise the edit plan: ";');
+    expect(panelSource).toMatch(/onApply=\{[\s\S]*isLatestAssistant \? handleApplyFileEditPreview/);
+    expect(panelSource).toMatch(
+      /onRedesign=\{[\s\S]*isLatestAssistant \? handleRedesignFileEditPreview/,
+    );
     expect(panelSource).toMatch(
       /msg\.memorySaveCandidate\s*\|\|\s*msg\.memorySaved[\s\S]*<OraMemorySaveChip[\s\S]*onSave=\{\(\) => handleSaveMemory/,
     );
@@ -119,7 +127,19 @@ describe("Ora chat UX response wiring", () => {
     expect(bubbleSource).toContain("setSelectedFormat(file.format)");
     expect(bubbleSource).toContain("onRevise={handleReviseGeneratedFile}");
     expect(bubbleSource).toMatch(/msg\.generatedFile\s*&&\s*\([\s\S]*<GeneratedFileCard/);
-    expect(bubbleSource).toContain("<OraFileAgentPreviewCard preview={msg.fileAgentPreview}");
+    expect(bubbleSource).toMatch(
+      /<OraFileAgentPreviewCard[\s\S]*preview=\{msg\.fileAgentPreview\}/,
+    );
+    expect(bubbleSource).toContain("handleApplyFileEditPreview");
+    expect(bubbleSource).toContain('void sendMessage("Apply edit")');
+    expect(bubbleSource).toContain('void sendMessage("Create a redesigned copy instead")');
+    expect(bubbleSource).toContain('const revisionPrompt = "Revise the edit plan: ";');
+    expect(bubbleSource).toMatch(
+      /onApply=\{[\s\S]*isLatestAssistant \? handleApplyFileEditPreview/,
+    );
+    expect(bubbleSource).toMatch(
+      /onRedesign=\{[\s\S]*isLatestAssistant \? handleRedesignFileEditPreview/,
+    );
     expect(bubbleSource).toMatch(
       /const showSuggestions =[\s\S]*Array\.isArray\(msg\.suggestions\)[\s\S]*msg\.suggestions\.length > 0/,
     );

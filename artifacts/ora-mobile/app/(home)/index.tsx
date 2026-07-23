@@ -1494,6 +1494,20 @@ export default function OraChatScreen() {
     await sendMessage(text, attch);
   }, [input, attachment, sending, sendMessage]);
 
+  const handleApplyFileEditPreview = useCallback(() => {
+    if (sending) return;
+    void sendMessage("Apply edit", null);
+  }, [sendMessage, sending]);
+
+  const handleReviseFileEditPreview = useCallback(() => {
+    setInput("Revise the edit plan: ");
+  }, []);
+
+  const handleRedesignFileEditPreview = useCallback(() => {
+    if (sending) return;
+    void sendMessage("Create a redesigned copy instead", null);
+  }, [sendMessage, sending]);
+
   // Author a brand-new file (csv/xlsx/docx/pdf/pptx) from a prompt via the
   // "Create file" sheet. Mirrors the website Create-file flow: append the user's
   // request and a pending assistant turn, call the dedicated generate-file
@@ -3127,6 +3141,9 @@ export default function OraChatScreen() {
               onImagePreview={openImagePreview}
               onRetrySearch={handleRetrySearch}
               onReviseFile={handleReviseGeneratedFile}
+              onApplyFileEditPreview={handleApplyFileEditPreview}
+              onReviseFileEditPreview={handleReviseFileEditPreview}
+              onRedesignFileEditPreview={handleRedesignFileEditPreview}
               isLatest={item.id === messages.at(-1)?.id}
             />
           )}
@@ -4026,6 +4043,9 @@ function MessageBubbleBase({
   onImagePreview,
   onRetrySearch,
   onReviseFile,
+  onApplyFileEditPreview,
+  onReviseFileEditPreview,
+  onRedesignFileEditPreview,
   isLatest,
 }: {
   message: OraMessage;
@@ -4039,6 +4059,9 @@ function MessageBubbleBase({
   onImagePreview?: (source: string) => void;
   onRetrySearch?: (message: OraMessage) => void;
   onReviseFile?: (file: GeneratedFile) => void;
+  onApplyFileEditPreview?: () => void;
+  onReviseFileEditPreview?: () => void;
+  onRedesignFileEditPreview?: () => void;
   isLatest?: boolean;
 }) {
   const c = useColors();
@@ -4672,7 +4695,13 @@ function MessageBubbleBase({
                 </View>
               )}
 
-              <OraAssistantExtras message={message} onSaveMemory={onSaveMemory} />
+              <OraAssistantExtras
+                message={message}
+                onSaveMemory={onSaveMemory}
+                onApplyFileEditPreview={isLatest ? onApplyFileEditPreview : undefined}
+                onReviseFileEditPreview={isLatest ? onReviseFileEditPreview : undefined}
+                onRedesignFileEditPreview={isLatest ? onRedesignFileEditPreview : undefined}
+              />
             </>
           )}
         </Pressable>

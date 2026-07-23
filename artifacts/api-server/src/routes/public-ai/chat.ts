@@ -1521,6 +1521,9 @@ router.post("/public-ai/chat", async (req, res) => {
       needsClarification: true,
       clarificationKind: clarification.kind,
       pendingTaskContext: clarification.pendingTaskContext,
+      ...(clarification.fileAgentPreview
+        ? { fileAgentPreview: clarification.fileAgentPreview }
+        : {}),
       msgCount: session.msgCount,
       msgLimit: effectiveMsgLimit,
       serverDiag: { ...routeDiag, clarificationKind: clarification.kind },

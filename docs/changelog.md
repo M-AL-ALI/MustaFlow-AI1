@@ -2,6 +2,16 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora Phase 9B — File edit preview + confirmation flow (2026-07-22)
+
+Ora now pauses before risky or user-requested uploaded-file edits and shows a concrete edit plan on both website and mobile. No publish/TestFlight yet (Phase 9 continues).
+
+- Server: `file_edit_preview_confirmation` extends the existing clarification/pending-task rail, so previews are uncharged and document refs/project refs are preserved. The planner triggers when the user asks to preview/confirm before applying, or when the edit is destructive/structural (delete, move/reorder, convert, charts/dashboards/formulas, merge/split). Apply confirmation merges back into the original edit request; redesigned-copy confirmation explicitly permits rebuilding instead of preserving the uploaded layout.
+- Preview metadata: `buildFileEditConfirmationPreview` returns a `fileAgentPreview` card with `status: "needs_confirmation"`, detected files/output type, planned actions, and safety notes. It never claims a downloadable file already exists.
+- Website: `OraFileAgentPreviewCard` gained Apply edit, Revise plan, and Create redesigned copy actions, wired in both the full Ora panel and public bubble only on the latest assistant card.
+- Mobile: compact preview card gained the same actions and routes Apply/Redesign through the normal chat send path (`documentRefs` + `pendingClarification` preserved); Revise plan seeds the composer.
+- Tests/gate: backend preview + clarification continuation tests (27), website wiring tests (5), mobile parity wiring tests (5). `ORA_FEATURE_REGISTRY` `file-agent-preview` manual QA now includes confirmation actions. Fast gate: 13 pass / 1 warn (git-clean, pre-commit only) / 0 fail.
+
 ## Ora Phase 8 — Source-Aware Answers (2026-07-22)
 
 Ora replies now cite their sources honestly on both website and mobile: uploaded-file citations (file / slide / sheet) that are verified server-side, and web-search sources with a validated publish date. Fabricated citations are structurally impossible. No publish/TestFlight.

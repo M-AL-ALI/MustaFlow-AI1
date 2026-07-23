@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildDatasetAgentPreview, buildFileAgentPreview } from "../file-agent-preview";
+import {
+  buildDatasetAgentPreview,
+  buildFileAgentPreview,
+  buildFileEditConfirmationPreview,
+} from "../file-agent-preview";
 
 describe("Phase 9A file/data agent preview metadata", () => {
   it("describes an in-place Office edit without claiming a redesign", () => {
@@ -94,5 +98,27 @@ describe("Phase 9A file/data agent preview metadata", () => {
     expect(preview.calculations).toContain("Total revenue");
     expect(preview.charts).toContain("Revenue by region");
     expect(preview.outputSections).toContain("Executive report");
+  });
+
+  it("describes a confirmation-gated edit before changing the uploaded file", () => {
+    const preview = buildFileEditConfirmationPreview({
+      format: "pptx",
+      fileNames: ["board-review.pptx"],
+      operations: ["delete", "reorder"],
+      requestedPreview: false,
+    });
+
+    expect(preview.kind).toBe("file_edit");
+    expect(preview.status).toBe("needs_confirmation");
+    expect(preview.title).toBe("Review edit before applying");
+    expect(preview.detectedInputs).toContain("board-review.pptx");
+    expect(preview.detectedInputs).toContain("Output: PowerPoint deck");
+    expect(preview.plannedActions).toContain("Remove the requested content from the uploaded file");
+    expect(preview.plannedActions).toContain(
+      "Rearrange the requested content in the uploaded file",
+    );
+    expect(preview.safetyNotes?.[0]).toContain("No downloadable file will be created");
+    expect(preview.canApply).toBe(true);
+    expect(preview.canRedesign).toBe(true);
   });
 });

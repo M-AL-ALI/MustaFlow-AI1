@@ -110,6 +110,37 @@ describe("Phase 4 clarifying questions — ambiguous asks trigger ONE question",
     const plan = planOraClarification(planInput({ message: "Change the pricing section." }));
     expect(plan?.kind).toBe("unclear_replacement_target");
   });
+
+  it("destructive uploaded-file edits show a preview and wait for confirmation", () => {
+    const plan = planOraClarification(
+      planInput({
+        message: "Delete slide 3 and return the PowerPoint file.",
+        inferredFileFormat: "pptx",
+        files: [{ fileRef: "pptx-1", filename: "board-review.pptx" }],
+      }),
+    );
+    expect(plan?.kind).toBe("file_edit_preview_confirmation");
+    expect(plan?.question).toContain("wait for your confirmation");
+    expect(plan?.pendingTaskContext.kind).toBe("file_edit_preview_confirmation");
+    expect(plan?.fileAgentPreview?.status).toBe("needs_confirmation");
+    expect(plan?.fileAgentPreview?.detectedInputs).toContain("board-review.pptx");
+    expect(plan?.fileAgentPreview?.plannedActions).toContain(
+      "Remove the requested content from the uploaded file",
+    );
+  });
+
+  it("honors an explicit preview-before-apply request even with quoted replacement text", () => {
+    const plan = planOraClarification(
+      planInput({
+        message:
+          'Preview the edit before applying: replace "Q3 targets" with "H2 goals" in the uploaded deck.',
+        inferredFileFormat: "pptx",
+        files: [{ fileRef: "pptx-1", filename: "board-review.pptx" }],
+      }),
+    );
+    expect(plan?.kind).toBe("file_edit_preview_confirmation");
+    expect(plan?.fileAgentPreview?.summary).toContain("wait for you to confirm");
+  });
 });
 
 describe("Phase 4 clarifying questions — clear requests execute immediately", () => {
@@ -121,7 +152,10 @@ describe("Phase 4 clarifying questions — clear requests execute immediately", 
           "Rewrite the Risk Notes section of the uploaded DOCX to mention the 2026 audit deadline.",
       },
     ],
-    ["a directional improvement ('more professional')", { message: "Make this more professional." }],
+    [
+      "a directional improvement ('more professional')",
+      { message: "Make this more professional." },
+    ],
     [
       "quoted replacement text pinpoints the target",
       { message: 'Change the pricing section to say "starting at $99".' },
@@ -223,5 +257,46 @@ describe("Phase 4 clarifying questions — continuation merge", () => {
     });
     expect(cont.applied).toBe(false);
     expect(cont.routedMessage).toBe("Keep the original layout");
+  });
+});
+
+describe("Phase 9B file edit preview confirmation continuation", () => {
+  const pending = {
+    originalMessage: "Delete slide 3 and return the PowerPoint file.",
+    kind: "file_edit_preview_confirmation" as const,
+    inferredFileFormat: "pptx" as const,
+  };
+
+  it("apply confirmation merges back to the original file edit request", () => {
+    const cont = resolveClarificationContinuation({
+      message: "Apply edit",
+      pending,
+      carriedDocs: MULTI_DOCS,
+    });
+    expect(cont.applied).toBe(true);
+    expect(cont.routedMessage).toContain("Delete slide 3");
+    expect(cont.routedMessage).toContain("apply the planned edit now");
+    expect(isUploadedFileModificationRequest(cont.routedMessage)).toBe(true);
+  });
+
+  it("redesign action explicitly permits rebuilding instead of preserving layout", () => {
+    const cont = resolveClarificationContinuation({
+      message: "Create a redesigned copy instead",
+      pending,
+      carriedDocs: MULTI_DOCS,
+    });
+    expect(cont.applied).toBe(true);
+    expect(cont.routedMessage).toContain("create a redesigned copy instead");
+    expect(cont.routedMessage).toContain("preserving the original layout is not required");
+  });
+
+  it("revised instructions update the pending edit instead of ignoring the preview context", () => {
+    const cont = resolveClarificationContinuation({
+      message: "Delete slide 4 instead, and keep all speaker notes",
+      pending,
+      carriedDocs: MULTI_DOCS,
+    });
+    expect(cont.applied).toBe(true);
+    expect(cont.routedMessage).toContain("User clarification: Delete slide 4 instead");
   });
 });
