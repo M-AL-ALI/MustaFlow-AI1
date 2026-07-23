@@ -42,8 +42,7 @@ function extractContentChanges(
 
   // Pattern 2a: verb ... "new value" — only the target is quoted (ASCII)
   if (changes.length === 0) {
-    const targetStraight =
-      /\b(?:change|rename|update|set)\b[^"]{0,40}"([^"]{2,100})"/gi;
+    const targetStraight = /\b(?:change|rename|update|set)\b[^"]{0,40}"([^"]{2,100})"/gi;
     while ((m = targetStraight.exec(message)) !== null && changes.length < 3) {
       changes.push({ label: "New content", to: m[1].trim() });
     }
@@ -62,7 +61,7 @@ function extractContentChanges(
   const hasStructural = operations.some((op) => ["delete", "move", "reorder"].includes(op));
   if (hasStructural && changes.length < 3) {
     const structPattern =
-      /\b(delete|remove|move|reorder)\b[^.!\n]{0,15}\b(slides?\s+\d+(?:[–\-]\d+)?(?:\s+(?:and|,)\s+\d+)*|rows?\s+\d+|sheets?\s+\d+|section\s+\d+)\b/gi;
+      /\b(delete|remove|move|reorder)\b[^.!\n]{0,15}\b(slides?\s+\d+(?:[–-]\d+)?(?:\s+(?:and|,)\s+\d+)*|rows?\s+\d+|sheets?\s+\d+|section\s+\d+)\b/gi;
     while ((m = structPattern.exec(message)) !== null && changes.length < 3) {
       const verb = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
       changes.push({ label: `${verb} ${m[2].trim()}` });
