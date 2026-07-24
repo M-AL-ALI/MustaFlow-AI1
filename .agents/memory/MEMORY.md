@@ -95,6 +95,7 @@
 - [Mode-select migration](mode-select-migration.md) — preferred_mode column needs an explicit migration; db push alone won't add it without TTY confirmation.
 - [Ora benchmark E2E rate limit](ora-benchmark-e2e-ratelimit.md) — oraLimiter concurrency gate must be bypassed for E2E benchmarks; createExhaustedSession() for session-limit CTA tests.
 - [Ora Library persistence](ora-library-not-built.md) — Ora asset Library vs public lessons gallery are distinct; all Ora output-generation paths must persist to the Library.
+- [Release gate lint is blocking](release-gate-lint-blocking.md) — lint FAIL blocks the release gate; unused vars (even intermediate helpers) must be removed or prefixed with _; `kitFont`-style dead assignments silently slip in during file-builder brand-kit work.
 - [Ora mobile theme](ora-mobile-theme.md) — ThemeContext is the mobile light/dark source of truth.
 - [Ora search test TDZ](ora-search-test-tdz.md) — search-*.test.ts vi.mock factories hit TDZ on isolated load ("no tests"); see file for the runnable pattern.
 - [Ora spend ledger design](ora-spend-ledger-design.md) — Wave 1C durable spend-cap ledger: schema, init pattern, test injection, alert thresholds.
