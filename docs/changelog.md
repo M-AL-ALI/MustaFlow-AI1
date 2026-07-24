@@ -2,6 +2,17 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ora GitHub Repo Analysis — READ-ONLY (2026-07-24)
+
+Ora connects to GitHub (OAuth, 2 clicks, no token pasting), reads a chosen repo through a sandboxed tarball workspace, narrates its investigation live (Claude Code-style status streaming), and outputs file:line findings plus paste-ready fix instructions (Replit/agent block + self-code steps). HARD BOUNDARY: read-only at the tool layer — the five tools are list_files/read_file/search_repo/read_commits/diff; no write/commit/push path exists anywhere in Ora. No Orax/Builder imports; Ora-owned OAuth flow reuses only the GITHUB_OAUTH_CLIENT_ID/SECRET env creds with signed-HMAC state (works from web + mobile in-app browser).
+
+- **DB/migration:** ora_github_connections (AES-256-GCM-encrypted token, never client-exposed) + ora_repo_sessions; `migrate-ora-github` registered in package.json + migrate-all-outstanding.
+- **Backend:** lib/public-ai/repo-github-auth.ts (OAuth + read-only REST), repo-workspace.ts (tarball download — never git clone; size/file caps, symlink removal, TTL sweeper started in index.ts), repo-read-tools.ts (path-traversal guards, result caps), repo-analyst.ts (JSON-action investigation loop, max 10 steps, duplicate-call stop, untrusted-content markers, guidance addendum); routes/ora-github.ts (callback public-mounted via signed state; the rest authed). Chat wiring: both /public-ai/chat and /chat/stream inject investigation evidence when an active repo session exists; streaming route narrates via existing `status` SSE events.
+- **Website:** ora-github-repo.tsx (picker dialog, chip, useOraRepoSession), plus-menu "Analyze GitHub repo", settings GithubConnectionSection, use-ora-chat streamStatus (status SSE → live narration in ora-panel pending indicator).
+- **Mobile:** api.ts GitHub helpers + streamChatNative onStatus; RepoPickerSheet; index.tsx chip + plus-menu row + narration in thinking row; settings GitHub connect via in-app browser (server-side token, same connection as website).
+- **Tests/gate:** ora-repo-readonly.test.ts (10: read-only surface, traversal guards, OAuth state HMAC, real-workspace tools) in API_PUBLIC_AI_CORE; ora-github-repo-wiring.test.ts (6) in WEB_ORA_UI; ora-repo-wiring.test.ts (6) in MOBILE_LIB_CRITICAL; ORA_FEATURE_REGISTRY entry `github-repo-analysis` with website+mobile manual checklists.
+- **Config note:** Ora's OAuth callback defaults to /api/ora/github/oauth/callback (override: ORA_GITHUB_OAUTH_REDIRECT_URL). If GitHub rejects redirect_uri on first connect, the OAuth app's registered callback must be loosened to a shared path prefix (e.g. /api) or the override pointed at a subdirectory of the registered URL.
+
 ## Ship-readiness infra — mobile crash reporting, OTA updates, CI gate (2026-07-24)
 
 Pre-submission infrastructure wave; no Ora feature-code changes. Gate: release profile pass required before merge (see report in commit).

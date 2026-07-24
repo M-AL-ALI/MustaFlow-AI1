@@ -459,10 +459,31 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualMobile:
       "In Settings → Brand Kit, tap 'Edit Brand Kit' and confirm the Ora Settings page opens in the in-app browser (mobile surfaces a link to the website settings, not a native editor — this is the intended behavior).",
   },
+  {
+    id: "github-repo-analysis",
+    title:
+      "GitHub repo analysis (READ-ONLY): OAuth connect, repo picker, sandboxed tarball workspace, 4 read tools, live narration, guidance report",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /repo-github-auth/i,
+      /repo-workspace/i,
+      /repo-read-tools/i,
+      /repo-analyst/i,
+      /ora-github/i,
+      /ora-github-repo/i,
+      /RepoPickerSheet/i,
+      /migrate-ora-github/i,
+    ],
+    manualWebsite:
+      "In Ora Settings → GitHub, click Connect GitHub and authorize (2 clicks, no token pasting). In a chat, open the + menu → Analyze GitHub repo, pick a repo from the dropdown, and confirm the 'Analyzing: owner/repo (read-only)' chip appears. Ask 'find bugs in this repo' and confirm live narration ('Fetching snapshot… Reading file… Searching for…') streams before the answer, findings cite file:line, and the reply ends with a 'How to apply this fix' section containing a paste-ready Replit/agent block plus self-code steps. Click × on the chip and confirm repo context stops. Verify Ora NEVER claims to have written/committed/pushed anything.",
+    manualMobile:
+      "In Settings → GitHub, tap Connect GitHub, authorize in the in-app browser, and confirm 'Connected as <login>' after returning. In chat, open the + menu → Analyze GitHub repo, pick a repo, confirm the read-only chip above the composer, ask a repo question, and confirm the thinking row shows the live narration statuses and the answer matches website behavior (file:line findings + paste-ready fix block). Detach via the chip's ×.",
+  },
 ];
 
 const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/current-datetime-block.test.ts",
+  "src/lib/public-ai/__tests__/ora-repo-readonly.test.ts",
   "src/lib/public-ai/__tests__/model-router.test.ts",
   "src/lib/public-ai/__tests__/multi-file-intelligence.test.ts",
   "src/lib/public-ai/__tests__/ora-behavior-qa.test.ts",
@@ -559,6 +580,7 @@ const WEB_REALTIME = [
 
 const WEB_ORA_UI = [
   "src/components/ora/__tests__/ora-chat-ux-wiring.test.ts",
+  "src/components/ora/__tests__/ora-github-repo-wiring.test.ts",
   "src/components/ora/__tests__/ora-used-files-wiring.test.ts",
   "src/hooks/__tests__/ora-clarification-wiring.test.ts",
   "src/lib/__tests__/blocker-fixes-b39.test.ts",
@@ -588,6 +610,7 @@ const WEB_RELEASE_EXTENDED = [
 
 const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/account-sync-wiring.test.ts",
+  "lib/__tests__/ora-repo-wiring.test.ts",
   "lib/__tests__/asset-version-history-wiring.test.ts",
   "lib/__tests__/billing-plan-cards.test.ts",
   "lib/__tests__/chat-payload-parity.test.ts",

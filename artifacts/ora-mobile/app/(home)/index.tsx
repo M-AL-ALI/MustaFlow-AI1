@@ -45,6 +45,8 @@ import {
   History,
   Image as ImageIcon,
   Images,
+  GitBranch,
+  X as XIcon,
   MessageSquare,
   Mic,
   MoreHorizontal,
@@ -153,7 +155,12 @@ import {
   transcribeAudio,
   updatePreferences,
   uploadFile,
+  getGithubStatus,
+  getRepoSession,
+  detachRepoSession,
+  type OraRepoSessionSummary,
 } from "@/lib/api";
+import { RepoPickerSheet } from "@/components/ora/RepoPickerSheet";
 import { useActiveProject } from "@/context/ActiveProjectContext";
 import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
 import {
@@ -617,6 +624,11 @@ export default function OraChatScreen() {
   const listRef = useRef<FlatList<OraMessage>>(null);
 
   const [session, setSession] = useState<OraSession | null>(null);
+  // Ora GitHub repo analysis (read-only): active session + picker + live narration.
+  const [repoSession, setRepoSession] = useState<OraRepoSessionSummary | null>(null);
+  const [showRepoPicker, setShowRepoPicker] = useState(false);
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const [sessionSyncError, setSessionSyncError] = useState<"token_unavailable" | null>(null);
   const [messages, setMessages] = useState<OraMessage[]>([]);
   const [input, setInput] = useState("");
@@ -819,6 +831,20 @@ export default function OraChatScreen() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setRepoSession(null);
+      setGithubConnected(false);
+      return;
+    }
+    getGithubStatus()
+      .then((status) => setGithubConnected(status.connected))
+      .catch(() => {});
+    getRepoSession()
+      .then(setRepoSession)
+      .catch(() => {});
+  }, [isSignedIn]);
 
   useEffect(() => {
     // Wait for Clerk auth to load before creating the Ora session.
@@ -1343,6 +1369,7 @@ export default function OraChatScreen() {
             const streamResult = await streamChatNative(
               chatReq,
               (delta) => {
+                if (streamedContent.length === 0) setStreamStatus(null);
                 streamedContent += delta;
                 const content = streamedContent;
                 setMessages((prev) =>
@@ -1352,6 +1379,7 @@ export default function OraChatScreen() {
                 );
               },
               abortController.signal,
+              (statusText) => setStreamStatus(statusText),
             );
 
             if (streamResult === null) {
@@ -1489,6 +1517,7 @@ export default function OraChatScreen() {
         );
       } finally {
         setSending(false);
+        setStreamStatus(null);
         if (streamAbortRef.current === abortController) {
           streamAbortRef.current = null;
         }
@@ -1523,7 +1552,11 @@ export default function OraChatScreen() {
     // generation engine when an active artifact is tracked.
     if (activeArtifactRef && !attachment && mobileIsRevision(text)) {
       setInput("");
-      void handleGenerateFileRef.current?.(text, activeArtifactRef.format, activeArtifactRef.assetId);
+      void handleGenerateFileRef.current?.(
+        text,
+        activeArtifactRef.format,
+        activeArtifactRef.assetId,
+      );
       return;
     }
     const attch = attachment;
@@ -1623,6 +1656,7 @@ export default function OraChatScreen() {
         );
       } finally {
         setSending(false);
+        setStreamStatus(null);
       }
     },
     [sending, messages, temporary, language, scrollToEnd, persist],
@@ -3109,7 +3143,9 @@ export default function OraChatScreen() {
           }}
           onContentSizeChange={scrollToEnd}
           ListFooterComponent={
-            showThinkingRow ? <OraThinkingRow accentColor={tierAccent} label="Thinking…" /> : null
+            showThinkingRow ? (
+              <OraThinkingRow accentColor={tierAccent} label={streamStatus ?? "Thinking…"} />
+            ) : null
           }
           ListEmptyComponent={
             <View
@@ -3271,6 +3307,41 @@ export default function OraChatScreen() {
                 hitSlop={8}
               >
                 <X size={16} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+          )}
+
+          {repoSession && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                alignSelf: "flex-start",
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                marginHorizontal: 16,
+                marginBottom: 6,
+              }}
+            >
+              <GitBranch size={12} color={c.accent} />
+              <Text style={{ color: c.foreground, fontSize: 12, fontWeight: "600" }}>
+                Analyzing: {repoSession.fullName}
+              </Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 11 }}>read-only</Text>
+              <Pressable
+                accessibilityLabel="Stop analyzing this repository"
+                hitSlop={8}
+                onPress={() => {
+                  const current = repoSession;
+                  setRepoSession(null);
+                  if (current) void detachRepoSession(current.id).catch(() => {});
+                }}
+              >
+                <XIcon size={12} color={c.mutedForeground} />
               </Pressable>
             </View>
           )}
@@ -3838,6 +3909,25 @@ export default function OraChatScreen() {
         onSave={handleSaveProject}
       />
 
+      <RepoPickerSheet
+        visible={showRepoPicker}
+        connected={githubConnected}
+        onClose={() => setShowRepoPicker(false)}
+        onSelected={(sessionRow) => setRepoSession(sessionRow)}
+        onNeedConnect={() => {
+          setShowRepoPicker(false);
+          router.push("/settings");
+        }}
+        colors={{
+          background: c.background,
+          card: c.card,
+          border: c.border,
+          foreground: c.foreground,
+          mutedForeground: c.mutedForeground,
+          accent: c.accent,
+        }}
+      />
+
       <PlusMenu
         visible={showPlusMenu}
         onClose={() => setShowPlusMenu(false)}
@@ -3845,6 +3935,7 @@ export default function OraChatScreen() {
         onTakePhoto={() => closePlusMenuThen(() => void handleCameraCapture())}
         onPickPhoto={() => closePlusMenuThen(() => void handleGalleryPick())}
         onBrowseFiles={() => closePlusMenuThen(() => void handleBrowseFiles())}
+        onAnalyzeRepo={isSignedIn ? () => closePlusMenuThen(() => setShowRepoPicker(true)) : null}
         onGenerateFile={() =>
           closePlusMenuThen(() => {
             setGenerateFileDraft(null);
@@ -5597,6 +5688,7 @@ function PlusMenu({
   onPickPhoto,
   onBrowseFiles,
   onGenerateFile,
+  onAnalyzeRepo,
   onDismissed,
 }: {
   visible: boolean;
@@ -5605,6 +5697,7 @@ function PlusMenu({
   onPickPhoto: () => void;
   onBrowseFiles: () => void;
   onGenerateFile: () => void;
+  onAnalyzeRepo: (() => void) | null;
   onDismissed: () => void;
 }) {
   const c = useColors();
@@ -5646,6 +5739,12 @@ function PlusMenu({
 
           <SheetSectionLabel label="Create" />
           <ActionRow icon={FilePlus2} label="Create file" onPress={onGenerateFile} />
+          {onAnalyzeRepo && (
+            <>
+              <SheetSectionLabel label="Analyze" />
+              <ActionRow icon={GitBranch} label="Analyze GitHub repo" onPress={onAnalyzeRepo} />
+            </>
+          )}
         </View>
       </View>
     </Modal>

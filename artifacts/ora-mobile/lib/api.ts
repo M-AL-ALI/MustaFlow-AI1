@@ -754,6 +754,7 @@ export async function streamChatNative(
   req: ChatRequest,
   onToken: (delta: string) => void | Promise<void>,
   signal?: AbortSignal,
+  onStatus?: (text: string) => void,
 ): Promise<StreamChatNativeResult> {
   const callStart = Date.now();
   const diag: StreamChatDiagnostics = {
@@ -849,7 +850,9 @@ export async function streamChatNative(
         const type = eventTypeLine ?? (parsed.type as string | undefined);
         if (!type) continue;
 
-        if (type === "token") {
+        if (type === "status") {
+          onStatus?.((parsed as { text?: string }).text ?? "");
+        } else if (type === "token") {
           const text = (parsed as { text?: string }).text ?? "";
           if (!firstTokenReceived) {
             firstTokenReceived = true;
@@ -2046,4 +2049,78 @@ export function getProjectThreadContext(
     };
     threadMode: string;
   }>(`/api/orax/projects/${projectId}/threads/${threadId}/context`);
+}
+
+// ── Ora GitHub repo analysis (READ-ONLY) ─────────────────────────────────────
+// Ora reads and analyzes repositories; it can never write, commit, or push.
+
+export interface OraGithubStatus {
+  available: boolean;
+  connected: boolean;
+  login: string | null;
+}
+
+export interface OraGithubRepoSummary {
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  defaultBranch: string;
+  description: string | null;
+  pushedAt: string | null;
+}
+
+export interface OraRepoSessionSummary {
+  id: number;
+  owner: string;
+  repo: string;
+  fullName: string;
+  defaultBranch: string;
+}
+
+export async function getGithubStatus(): Promise<OraGithubStatus> {
+  return jsonRequest<OraGithubStatus>("/api/ora/github/status");
+}
+
+export async function getGithubConnectUrl(): Promise<string> {
+  const data = await jsonRequest<{ url: string }>("/api/ora/github/connect", {
+    method: "POST",
+    body: JSON.stringify({ platform: "mobile" }),
+  });
+  return data.url;
+}
+
+export async function disconnectGithub(): Promise<void> {
+  await jsonRequest<{ ok: boolean }>("/api/ora/github", { method: "DELETE" });
+}
+
+export async function listGithubRepos(): Promise<OraGithubRepoSummary[]> {
+  const data = await jsonRequest<{ repos: OraGithubRepoSummary[] }>("/api/ora/github/repos");
+  return data.repos ?? [];
+}
+
+export async function getRepoSession(): Promise<OraRepoSessionSummary | null> {
+  const data = await jsonRequest<{ session: OraRepoSessionSummary | null }>(
+    "/api/ora/github/repo-session",
+  );
+  return data.session;
+}
+
+export async function selectRepoSession(
+  owner: string,
+  repo: string,
+  conversationId?: string | null,
+): Promise<OraRepoSessionSummary> {
+  const data = await jsonRequest<{ session: OraRepoSessionSummary }>(
+    "/api/ora/github/repo-session",
+    {
+      method: "POST",
+      body: JSON.stringify({ owner, repo, conversationId: conversationId ?? null }),
+    },
+  );
+  return data.session;
+}
+
+export async function detachRepoSession(id: number): Promise<void> {
+  await jsonRequest<{ ok: boolean }>(`/api/ora/github/repo-session/${id}`, { method: "DELETE" });
 }

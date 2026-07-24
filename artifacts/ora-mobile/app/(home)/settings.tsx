@@ -18,6 +18,7 @@ import {
   Monitor,
   Moon,
   Palette,
+  GitBranch,
   RefreshCw,
   Shield,
   Sun,
@@ -48,6 +49,10 @@ import {
   getRealtimeDiagnostics,
   getSubscription,
   updatePreferences,
+  getGithubStatus,
+  getGithubConnectUrl,
+  disconnectGithub,
+  type OraGithubStatus,
 } from "@/lib/api";
 import { TokenUnavailableError } from "@/lib/auth-client";
 import { clearAllStoredDocumentRefs } from "@/lib/document-refs-store";
@@ -927,6 +932,7 @@ export default function SettingsScreen() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
   const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
+  const [githubStatus, setGithubStatus] = useState<OraGithubStatus | null>(null);
   const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
 
   useEffect(() => {
@@ -960,6 +966,9 @@ export default function SettingsScreen() {
         });
       getOraUsage()
         .then(setUsage)
+        .catch(() => {});
+      getGithubStatus()
+        .then(setGithubStatus)
         .catch(() => {});
     }
   }, [isSignedIn]);
@@ -2169,6 +2178,63 @@ export default function SettingsScreen() {
           )}
         </SectionCard>
 
+        {/* ── GitHub (read-only repo analysis) ───────────────────────────── */}
+        <SectionCard title="GitHub" icon={GitBranch}>
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 20 }}>
+              Connect GitHub so Ora can read and analyze your repositories in chat. Read-only: Ora
+              can never commit, push, or change your code.
+            </Text>
+            {githubStatus?.connected ? (
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: c.foreground, fontSize: 13, fontWeight: "600" }}>
+                  Connected as {githubStatus.login}
+                </Text>
+                <Button
+                  label="Disconnect GitHub"
+                  variant="secondary"
+                  onPress={() => {
+                    Alert.alert("Disconnect GitHub?", "Ora will lose read access to your repos.", [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Disconnect",
+                        style: "destructive",
+                        onPress: () => {
+                          void disconnectGithub().then(() =>
+                            setGithubStatus((prev) =>
+                              prev ? { ...prev, connected: false, login: null } : prev,
+                            ),
+                          );
+                        },
+                      },
+                    ]);
+                  }}
+                  full
+                />
+              </View>
+            ) : (
+              <Button
+                label="Connect GitHub"
+                onPress={() => {
+                  void (async () => {
+                    try {
+                      const url = await getGithubConnectUrl();
+                      await WebBrowser.openBrowserAsync(url);
+                      // Refresh after the in-app browser closes — the OAuth
+                      // callback stored the connection server-side.
+                      const status = await getGithubStatus();
+                      setGithubStatus(status);
+                    } catch {
+                      Alert.alert("Connection failed", "Could not start GitHub sign-in.");
+                    }
+                  })();
+                }}
+                full
+              />
+            )}
+          </View>
+        </SectionCard>
+
         {/* ── Brand Kit ──────────────────────────────────────────────────── */}
         <SectionCard title="Brand Kit" icon={Palette}>
           <View style={{ gap: 12 }}>
@@ -2178,9 +2244,7 @@ export default function SettingsScreen() {
             </Text>
             <Button
               label="Edit Brand Kit"
-              onPress={() =>
-                void WebBrowser.openBrowserAsync(`https://${DOMAIN}/ora/settings`)
-              }
+              onPress={() => void WebBrowser.openBrowserAsync(`https://${DOMAIN}/ora/settings`)}
               full
             />
           </View>

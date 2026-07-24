@@ -12,6 +12,7 @@ import {
   Send,
   Globe,
   ChevronDown,
+  Github,
   Paperclip,
   FileText,
   Table2,
@@ -43,6 +44,11 @@ import { ORA_MEMORIES_QUERY_KEY, MemoryFullError } from "@/lib/ora-memories";
 import { useToast } from "@/hooks/use-toast";
 import { authFetch } from "@/lib/api-fetch";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
+import {
+  OraRepoChip,
+  OraRepoPickerDialog,
+  useOraRepoSession,
+} from "@/components/ora/ora-github-repo";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { OraEditQualityCard } from "@/components/ora/ora-edit-quality-card";
 import { OraUsageInline } from "@/components/ora-usage-inline";
@@ -537,6 +543,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     clearUploadError,
     session,
     oraStatus,
+    streamStatus,
     clearConversation,
     sessionExpired,
     dismissSessionExpired,
@@ -691,6 +698,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     format: FileFormat;
   } | null>(null);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
+  // Ora GitHub repo analysis (read-only) — active session + picker dialog.
+  const {
+    connected: githubConnected,
+    repoSession,
+    selectRepo,
+    detachRepo,
+  } = useOraRepoSession(!!isSignedIn);
+  const [showRepoPicker, setShowRepoPicker] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
@@ -1890,16 +1905,18 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     </>
                   )}
 
-                  {!msg.generatedFile && msg.fileAgentPreview && msg.fileAgentPreview.status !== "applied" && (
-                    <OraFileAgentPreviewCard
-                      preview={msg.fileAgentPreview}
-                      onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
-                      onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
-                      onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
-                      onCancel={isLatestAssistant ? handleCancelFileEditPreview : undefined}
-                      disabled={isLoading || atLimit}
-                    />
-                  )}
+                  {!msg.generatedFile &&
+                    msg.fileAgentPreview &&
+                    msg.fileAgentPreview.status !== "applied" && (
+                      <OraFileAgentPreviewCard
+                        preview={msg.fileAgentPreview}
+                        onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
+                        onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
+                        onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
+                        onCancel={isLatestAssistant ? handleCancelFileEditPreview : undefined}
+                        disabled={isLoading || atLimit}
+                      />
+                    )}
 
                   {msg.role === "assistant" && msg.viaFallback && !msg.isStreaming && (
                     <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/50 select-none">
@@ -2067,9 +2084,9 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     />
                   ))}
                 </div>
-                {oraStatus !== "idle" && (
+                {(streamStatus || oraStatus !== "idle") && (
                   <span className="text-[11px] font-medium text-muted-foreground">
-                    {STATUS_LABELS[oraStatus]}
+                    {streamStatus ?? STATUS_LABELS[oraStatus]}
                   </span>
                 )}
               </div>
@@ -2094,6 +2111,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           centered max-w-3xl column so the composer aligns with the message thread. */}
       <div className={cn("shrink-0", isFull && "border-t border-border/40 bg-background")}>
         <div className={cn(isFull && "mx-auto w-full max-w-3xl")}>
+          {/* Active GitHub repo (read-only analysis) */}
+          {repoSession && (
+            <div className="mx-4 mb-2 mt-3 flex">
+              <OraRepoChip session={repoSession} onDetach={() => void detachRepo()} />
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="mx-4 mb-3 mt-3 rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
@@ -2502,6 +2526,27 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                                 {atAllLimits ? "Upload limit reached" : "Upload image or file"}
                               </span>
                             </button>
+                            {isSignedIn && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid="ora-repo-menu-item"
+                                disabled={isLoading}
+                                onClick={() => {
+                                  setShowPlusMenu(false);
+                                  setShowRepoPicker(true);
+                                }}
+                                className={cn(
+                                  "w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2",
+                                  isLoading && "opacity-40 cursor-not-allowed",
+                                )}
+                              >
+                                <Github className="h-3.5 w-3.5 shrink-0" />
+                                <span className="flex-1">
+                                  {repoSession ? "Switch GitHub repo" : "Analyze GitHub repo"}
+                                </span>
+                              </button>
+                            )}
                             <div className="my-1 h-px bg-border/60" />
                             <p className="px-3 pt-1 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                               Generate file
@@ -2630,6 +2675,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
         open={memoryManagerOpen}
         onOpenChange={setMemoryManagerOpen}
         oraProjectId={saveOraProjectId}
+      />
+
+      <OraRepoPickerDialog
+        open={showRepoPicker}
+        onClose={() => setShowRepoPicker(false)}
+        onSelect={async (owner, repo) => {
+          await selectRepo(owner, repo);
+        }}
+        connected={githubConnected}
       />
     </div>
   );

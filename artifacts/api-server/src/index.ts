@@ -25,6 +25,7 @@ import {
 import { runStartupMigrations } from "./lib/startup-migrations";
 import { isOraSecretConfigured } from "./lib/public-ai/session";
 import { initSpendLedger } from "./lib/public-ai/ora-spend-cap";
+import { startWorkspaceSweeper } from "./lib/public-ai/repo-workspace";
 import { pool } from "@workspace/db";
 import { auditImageProviderConfig } from "./lib/image-provider";
 
@@ -106,6 +107,9 @@ startOraAssetsRetentionScheduler();
 // Runs after other boot tasks; degrades gracefully if the DB is temporarily
 // unavailable (logs ora_spend_ledger_degraded and falls back to in-memory).
 void initSpendLedger(pool);
+
+// Ora repo-analysis workspaces are ephemeral; sweep expired ones by TTL.
+startWorkspaceSweeper();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);
