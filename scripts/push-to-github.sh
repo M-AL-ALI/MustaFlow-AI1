@@ -126,7 +126,7 @@ echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub …"
 ATTEMPTS=5
 for i in $(seq 1 "$ATTEMPTS"); do
   if git -c credential.helper="$CRED_HELPER" \
-       push "$REMOTE_URL" "$BRANCH:$BRANCH" $REALLY_FORCE; then
+       push "$REMOTE_URL" "HEAD:$BRANCH" $REALLY_FORCE; then
     echo "Done."
     exit 0
   fi
