@@ -178,7 +178,7 @@ describe("Ora activity events — withOraActivity wrapper", () => {
     // to a general-knowledge answer, and the stream still delivers tokens+done.
     const wire: Array<Record<string, unknown>> = [];
     const writeSSE = (ev: Record<string, unknown>) => wire.push(ev);
-    const emitter: OraActivityEmitter = createOraActivityEmitter((ev) => writeSSE(ev));
+    const emitter: OraActivityEmitter = createOraActivityEmitter((ev) => writeSSE({ ...ev }));
 
     try {
       await withOraActivity(emitter, "web-search", async () => {

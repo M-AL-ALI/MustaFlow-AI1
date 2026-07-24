@@ -466,6 +466,24 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "In Settings → Brand Kit, tap 'Edit Brand Kit' and confirm the Ora Settings page opens in the in-app browser (mobile surfaces a link to the website settings, not a native editor — this is the intended behavior).",
   },
   {
+    id: "live-activity-trace",
+    title:
+      "Universal live activity trace: typed SSE activity events (start/ok/fail per tool), shared wording map, animated fade-in/fade-out trace on website + mobile",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /public-ai\/activity-events/i,
+      /ora-activity-events\.test\.ts$/i,
+      /ora-activity-trace/i,
+      /lib\/ora-activity\.ts$/i,
+      /ora-activity-wiring\.test\.ts$/i,
+      /OraThinkingRow/i,
+    ],
+    manualWebsite:
+      "Send prompts that trigger web search, file generation, image generation, and (with a connected repo) repo analysis. While each runs, the loading row must show the live activity line ('Searching the web…', 'Generating your file…', 'Creating your image…', 'Reading <file>…') fading in, replaced with a fade-out when the next step starts, and clearing on the first answer token. Force a search failure (offline/kill switch) and confirm the honest 'Web search failed — answering from what I know' line appears and Ora still answers. Verify no provider names, model ids, or server paths ever appear in the activity text.",
+    manualMobile:
+      "Repeat the same web-search / file-generation / image-generation / repo-analysis prompts on the current TestFlight build: the thinking row must show the identical wording to the website with reanimated fade-in/fade-out per step, clear on the first streamed token, and show the honest failure line (muted red) when a tool fails while Ora continues to answer. Row is pure JS — ships with the next build, no native rebuild required.",
+  },
+  {
     id: "github-repo-analysis",
     title:
       "GitHub repo analysis (READ-ONLY): OAuth connect, repo picker, sandboxed tarball workspace, 4 read tools, live narration, guidance report",
