@@ -111,3 +111,4 @@
 - [Ora gate DB env](ora-gate-db-env.md) — gate ECONNREFUSED 127.0.0.1:5432 = DATABASE_URL unset (off-Replit run), not a code bug; Replit dev DB is the canonical gate env.
 - [File-gen per-attempt timeout](file-gen-attempt-timeout.md) — wrap createChatCompletion in Promise.race(70s) so the fallback chain finishes inside any browser's 300 s cutoff.
 - [configureWorkflow phantom slot count](configureworkflow-phantom-count.md) — removeWorkflow clears live list but not slot counter; phantom clears after 2-3 commits trigger system restarts.
+- [Branch merge via push-to-github abort removal](branch-merge-abort-removal.md) — when push-to-github.sh has `git merge --abort` blocking a merge commit, remove that line temporarily, complete the push, then restore the file.
