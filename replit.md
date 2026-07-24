@@ -55,6 +55,7 @@ Core:
 Important optional env:
 
 - Mobile crash reporting: `EXPO_PUBLIC_SENTRY_DSN` (set in eas.json build env or EAS secrets; Sentry stays fully disabled when absent, mirroring the website's `VITE_SENTRY_DSN` convention)
+- Ora GitHub repo analysis (READ-ONLY): reuses `GITHUB_OAUTH_CLIENT_ID/SECRET`; optional `ORA_GITHUB_OAUTH_REDIRECT_URL` callback override (default `/api/ora/github/oauth/callback` — must be the registered OAuth callback or a subdirectory of it)
 - Ora voice TTS: `OPENAI_API_KEY`
 - Ora realtime "Talk to Ora" voice (WebRTC): requires `OPENAI_API_KEY` (direct client mints short-lived ephemeral tokens; the proxy rejects audio). Tuning: `ORA_REALTIME_ENABLED` (default on; `false` disables), `ORA_REALTIME_DISABLED` (kill switch), `ORA_REALTIME_MODEL` (default `gpt-realtime-mini`), `ORA_REALTIME_VOICE` (default `marin`), `ORA_REALTIME_TRANSCRIBE_MODEL`, and `ORA_REALTIME_VAD_*` turn-detection knobs.
 - Ora project memory blend: `ORA_PROJECT_MEMORY_RESERVE` (0..1 share of recall budget reserved for project memories in project chats, default 0.45)

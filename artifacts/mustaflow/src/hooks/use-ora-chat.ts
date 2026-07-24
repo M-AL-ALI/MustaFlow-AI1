@@ -267,6 +267,8 @@ export interface UseOraChatReturn {
   messages: OraMessage[];
   session: OraSession | null;
   isLoading: boolean;
+  /** Live work narration from SSE `status` events (repo analysis etc.). */
+  streamStatus: string | null;
   error: string | null;
   atLimit: boolean;
   language: string;
@@ -954,6 +956,7 @@ async function consumeOraStream(
   body: Record<string, unknown>,
   onToken: (delta: string) => void,
   signal: AbortSignal,
+  onStatus?: (text: string) => void,
 ): Promise<StreamDonePayload> {
   const res = await safeAuthFetch(`${base}/api/public-ai/chat/stream`, {
     method: "POST",
@@ -1058,6 +1061,8 @@ async function consumeOraStream(
 
       if (eventType === "start") {
         // Connection confirmed — no action needed, just a liveness signal.
+      } else if (eventType === "status") {
+        onStatus?.((parsed as { text: string }).text);
       } else if (eventType === "token") {
         const text = (parsed as { text: string }).text;
         firstTokenReceived = true;
@@ -1123,6 +1128,9 @@ export function useOraChat(): UseOraChatReturn {
   messagesRef.current = messages;
   const [session, setSession] = useState<OraSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Live work narration from SSE `status` events (repo analysis etc.) —
+  // shown in place of the generic "thinking" indicator, cleared on first token.
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguageState] = useState<string>(getStoredLanguage);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
@@ -2082,6 +2090,7 @@ export function useOraChat(): UseOraChatReturn {
                 BASE,
                 body,
                 (delta) => {
+                  setStreamStatus(null);
                   // flushSync forces React to commit this update synchronously,
                   // bypassing automatic batching. Without it, when the Replit dev
                   // proxy delivers all SSE frames in one TCP chunk, every onToken
@@ -2103,6 +2112,7 @@ export function useOraChat(): UseOraChatReturn {
                   });
                 },
                 streamAbort.signal,
+                (statusText) => setStreamStatus(statusText),
               );
 
               isRealStreamingPayload = donePayload.isRealStreaming ?? true;
@@ -2328,6 +2338,7 @@ export function useOraChat(): UseOraChatReturn {
       } finally {
         setPendingImageAnalysis(false);
         setIsLoading(false);
+        setStreamStatus(null);
       }
     },
     [isLoading, messages, language, attachedFile, isSignedIn, saveToServer, mode],
@@ -2341,9 +2352,7 @@ export function useOraChat(): UseOraChatReturn {
       const isRevision = activeAssetId != null;
       const userMsg: OraMessage = {
         role: "user",
-        content: isRevision
-          ? content
-          : `Create a ${formatLabel} file: ${content}`,
+        content: isRevision ? content : `Create a ${formatLabel} file: ${content}`,
       };
       setMessages((prev) => {
         const next = [...prev, userMsg];
@@ -2509,6 +2518,7 @@ export function useOraChat(): UseOraChatReturn {
             });
             setSession((prev) => mergeUsage(prev, retryData));
             setIsLoading(false);
+            setStreamStatus(null);
             return;
           } catch {
             // Retry failed; fall through to error state
@@ -2526,6 +2536,7 @@ export function useOraChat(): UseOraChatReturn {
         });
       } finally {
         setIsLoading(false);
+        setStreamStatus(null);
       }
     },
     [isLoading, messages, language, isSignedIn, saveToServer, currentOraProjectId],
@@ -2660,6 +2671,7 @@ export function useOraChat(): UseOraChatReturn {
         });
       } finally {
         setIsLoading(false);
+        setStreamStatus(null);
       }
     },
     [isLoading, isSignedIn, saveToServer, currentOraProjectId],
@@ -2931,6 +2943,7 @@ export function useOraChat(): UseOraChatReturn {
     messages,
     session,
     isLoading,
+    streamStatus,
     error,
     atLimit,
     language,

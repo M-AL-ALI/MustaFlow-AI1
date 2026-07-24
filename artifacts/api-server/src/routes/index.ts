@@ -102,6 +102,7 @@ import oraMemoriesRouter from "./ora-memories";
 import oraAssetsRouter from "./ora-assets";
 import oraAccountConsistencyRouter from "./ora-account-consistency";
 import oraBrandKitRouter from "./ora-brand-kit";
+import { oraGithubRouter, oraGithubCallbackRouter } from "./ora-github";
 import builderHandoffRouter from "./builder-handoff";
 import vaultKnowledgeRouter from "./vault-knowledge";
 import developerModeRouter from "./developer-mode";
@@ -139,6 +140,7 @@ router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beac
 router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 router.use(billingPublicRouter); // GET /billing/ora-plans   — public Ora plan metadata (no auth)
+router.use(oraGithubCallbackRouter); // GET /ora/github/oauth/callback — signed-state OAuth callback (no auth)
 router.use(clerkWebhookRouter); // POST /webhooks/clerk     (Clerk → us)
 router.use(publicGalleryRouter); // GET /gallery-templates[/:slug] — public browsing
 router.use(publicExtensionsRouter); // GET /extensions[/:slug] — public browsing
@@ -365,6 +367,7 @@ router.use(oraProfileRouter); // GET/PUT /ora/profile (Ora-only custom instructi
 router.use(oraMemoriesRouter); // GET/PATCH/DELETE /ora/memories (Ora-only saved memories)
 router.use(oraAssetsRouter); // GET/DELETE /ora/assets (durable asset library)
 router.use(oraBrandKitRouter); // GET/PUT/DELETE /ora/brand-kit + POST /ora/brand-kit/logo
+router.use(oraGithubRouter); // Ora GitHub connect + read-only repo sessions (never writes to GitHub)
 router.use(oraAccountConsistencyRouter); // GET /ora/account-consistency (cross-platform diagnostics)
 router.use(oraxRouter); // ORAX coding-agent foundation
 router.use(oraxDesktopRouter); // Orax Desktop host registration, pairing, heartbeat

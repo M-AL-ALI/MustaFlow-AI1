@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { MobileAppBanner } from "@/components/mobile-app-banner";
 import {
@@ -28,6 +28,7 @@ import {
   RefreshCw,
   Activity,
   Palette,
+  Github,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
@@ -1761,6 +1762,120 @@ const SAFE_FONTS_WEB = [
 ] as const;
 type SafeFont = (typeof SAFE_FONTS_WEB)[number];
 
+function GithubConnectionSection() {
+  const { toast } = useToast();
+  const [status, setStatus] = useState<{
+    available: boolean;
+    connected: boolean;
+    login: string | null;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadStatus = useCallback(() => {
+    authFetch("/api/ora/github/status")
+      .then(async (res) => {
+        if (res.ok) setStatus((await res.json()) as typeof status);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadStatus();
+    // Surface the OAuth redirect outcome (?github=connected|error).
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("github");
+    if (outcome === "connected") {
+      toast({ title: "GitHub connected", description: "Ora can now read your repositories." });
+    } else if (outcome === "error") {
+      toast({
+        title: "GitHub connection failed",
+        description: "Please try connecting again.",
+        variant: "destructive",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const res = await authFetch("/api/ora/github/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "web" }),
+      });
+      if (!res.ok) throw new Error("connect failed");
+      const { url } = (await res.json()) as { url: string };
+      window.location.href = url;
+    } catch {
+      toast({
+        title: "Could not start GitHub connection",
+        description: "GitHub sign-in may not be configured. Try again later.",
+        variant: "destructive",
+      });
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await authFetch("/api/ora/github", { method: "DELETE" });
+      setStatus((prev) => (prev ? { ...prev, connected: false, login: null } : prev));
+      toast({ title: "GitHub disconnected" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SectionCard
+      icon={Github}
+      title="GitHub"
+      description="Connect GitHub so Ora can read and analyze your repositories. Read-only: Ora can never commit, push, or change your code."
+    >
+      {status?.connected ? (
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Connected as {status.login}</p>
+            <p className="text-xs text-muted-foreground">
+              Pick a repo from the + menu in any Ora chat to start an analysis.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void disconnect()}
+            disabled={busy}
+            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/60 transition-colors disabled:opacity-50"
+          >
+            Disconnect
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-xs text-muted-foreground">
+            Two clicks: authorize on GitHub, then choose a repository in chat.
+          </p>
+          <button
+            type="button"
+            data-testid="ora-github-connect"
+            onClick={() => void connect()}
+            disabled={busy || status?.available === false}
+            className="inline-flex items-center gap-2 rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Github className="h-3.5 w-3.5" />
+            )}
+            Connect GitHub
+          </button>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 interface BrandKitApiResponse {
   kit?: {
     primaryColor?: string | null;
@@ -2086,6 +2201,7 @@ function OraSettingsInner() {
           <AccountSyncSection />
           <MemorySection />
           <BrandKitSection />
+          <GithubConnectionSection />
           <PlanLimitsSection targetSection={targetSection} />
         </div>
       </main>

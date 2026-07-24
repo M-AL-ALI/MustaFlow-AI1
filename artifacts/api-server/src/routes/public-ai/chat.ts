@@ -1670,9 +1670,8 @@ router.post("/public-ai/chat", async (req, res) => {
     // the engine generates fresh content instead of trying to edit the tracked
     // artifact. "Create a deck about AI" must never silently revise slide 1.
     if (chatActiveAssetBuffer && chatActiveAssetFileName) {
-      const { classifyEditIntent, isRevisionIntent } = await import(
-        "../../lib/public-ai/edit-intent-classifier"
-      );
+      const { classifyEditIntent, isRevisionIntent } =
+        await import("../../lib/public-ai/edit-intent-classifier");
       if (!isRevisionIntent(classifyEditIntent(routedMessage))) {
         chatActiveAssetBuffer = null;
         chatActiveAssetFileName = null;
@@ -1688,10 +1687,7 @@ router.post("/public-ai/chat", async (req, res) => {
       if (ext === "docx" || ext === "pptx") {
         try {
           const { extractText } = await import("../../lib/public-ai/file-extract");
-          const text = await extractText(
-            chatActiveAssetBuffer,
-            ext as "docx" | "pptx",
-          );
+          const text = await extractText(chatActiveAssetBuffer, ext as "docx" | "pptx");
           if (text.trim()) {
             filePrompt =
               filePrompt +
@@ -2401,6 +2397,33 @@ router.post("/public-ai/chat", async (req, res) => {
     openCircuits,
     openaiModel: primaryModel,
   });
+
+  // ── Ora repo analysis (read-only, non-streaming fallback path) ─────────────
+  // Same investigation as the streaming route, minus live narration (there is
+  // no SSE channel here). Evidence is injected as UNTRUSTED context.
+  if (authed) {
+    try {
+      const { runRepoInvestigation, REPO_GUIDANCE_ADDENDUM } =
+        await import("../../lib/public-ai/repo-analyst");
+      const investigation = await runRepoInvestigation({
+        userId: authed.userId,
+        message,
+        candidates,
+        onStatus: () => {},
+      });
+      if (investigation) {
+        callMessages.push({
+          role: "user" as const,
+          content: `${investigation.contextBlock}${REPO_GUIDANCE_ADDENDUM}`,
+        });
+      }
+    } catch (repoErr) {
+      logger.warn(
+        { component: "ora-chat", err: repoErr },
+        "ora-repo: investigation failed; continuing without repo context",
+      );
+    }
+  }
 
   // Run the main reply and suggestion generation in parallel to reduce latency.
   // Suggestions use the conversation history + current message + topic context;
@@ -3257,6 +3280,36 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     ...(conversationId ? { conversationId: String(conversationId) } : {}),
   });
   timing.t6 = Date.now(); // SSE headers flushed + start event emitted
+
+  // ── Ora repo analysis (read-only) ──────────────────────────────────────────
+  // When the signed-in user has an active GitHub repo session, run the
+  // Claude Code-style investigation loop first: each read-tool step is
+  // narrated live via `status` events, and the collected evidence is injected
+  // as UNTRUSTED context for the final streamed answer. Anonymous users and
+  // users without a session skip this entirely (zero change to normal chat).
+  if (authed) {
+    try {
+      const { runRepoInvestigation, REPO_GUIDANCE_ADDENDUM } =
+        await import("../../lib/public-ai/repo-analyst");
+      const investigation = await runRepoInvestigation({
+        userId: authed.userId,
+        message,
+        candidates,
+        onStatus: (text) => writeSSE(res, { type: "status", text }),
+      });
+      if (investigation) {
+        callMessages.push({
+          role: "user" as const,
+          content: `${investigation.contextBlock}${REPO_GUIDANCE_ADDENDUM}`,
+        });
+      }
+    } catch (repoErr) {
+      logger.warn(
+        { component: "ora-chat-stream", err: repoErr },
+        "ora-repo: investigation failed; continuing without repo context",
+      );
+    }
+  }
 
   // Abort the stream when the client closes the connection.
   const abortController = new AbortController();
