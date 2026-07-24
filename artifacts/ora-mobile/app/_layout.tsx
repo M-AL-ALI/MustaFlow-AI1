@@ -17,12 +17,24 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import * as Sentry from "@sentry/react-native";
+
 import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { logError } from "@/lib/log";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text, View } from "react-native";
+
+// Same convention as the website (VITE_SENTRY_DSN): no DSN means Sentry stays
+// fully disabled, so dev/simulator runs never report.
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
+Sentry.init({
+  dsn: sentryDsn,
+  enabled: Boolean(sentryDsn),
+  tracesSampleRate: 0.1,
+  sendDefaultPii: false,
+});
 
 const domain = process.env.EXPO_PUBLIC_DOMAIN || "www.mustaflow.com";
 setBaseUrl(`https://${domain}`);
@@ -52,7 +64,7 @@ function ThemedStatusBar() {
   return <StatusBar style={effectiveScheme === "dark" ? "light" : "dark"} />;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -126,3 +138,5 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);

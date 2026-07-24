@@ -113,7 +113,11 @@ async function migrate() {
     `);
 
     // ── orax_projects ─────────────────────────────────────────────────────────
-    // Local project folders registered on a desktop host.
+    // Local project folders registered on a desktop host (legacy Phase 2B shape).
+    // Phase 2G reshaped orax_projects into a cloud-first workspace WITHOUT
+    // host_id (see lib/db/src/schema/orax-desktop.ts); on a fresh DB where
+    // `drizzle-kit push` ran first, the table already exists in that shape,
+    // so the legacy host_id index must be skipped.
     await client.query(`
       CREATE TABLE IF NOT EXISTS orax_projects (
         id                       TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -131,10 +135,16 @@ async function migrate() {
         updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS orax_projects_host_id_idx
-        ON orax_projects (host_id)
+    const { rowCount: hasLegacyHostId } = await client.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'orax_projects' AND column_name = 'host_id'
     `);
+    if (hasLegacyHostId) {
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS orax_projects_host_id_idx
+          ON orax_projects (host_id)
+      `);
+    }
     await client.query(`
       CREATE INDEX IF NOT EXISTS orax_projects_user_id_idx
         ON orax_projects (user_id)

@@ -22,6 +22,8 @@ Full historical implementation notes belong in `docs/changelog.md`. Keep this fi
 - After the automated gate passes, complete the manual checklist in `docs/ora-stability-gate.md` (multi-turn voice web+mobile, search/current info, image gen/edit, file upload/analysis/chart/export, billing/account sync, conversation history, App Store compliance areas, website/mobile parity).
 - Every fix report must include: (1) commit SHA, (2) gate command used, (3) pass/fail counts, (4) manual checklist result, (5) known warnings or skipped checks.
 - Gate implementation: `scripts/src/ora-stability-gate.ts`; mobile-only changes use `pnpm run ora:stability-gate:mobile`.
+- The release-profile gate also runs in CI on every PR and push to main (`.github/workflows/ora-stability-gate.yml`, pgvector Postgres service; fresh-DB bootstrap order is push → migrate-agent-inbox → push → migrate-all-outstanding).
+- Mobile OTA updates: EAS Update is configured (`runtimeVersion.policy: appVersion`; store builds use channel `production`, preview builds channel `preview`). JS-only fixes ship with `eas update --channel production` instead of a new TestFlight build; native-module or app.json native changes still need a full build.
 - **Ora feature registry:** every new Ora feature must update `ORA_FEATURE_REGISTRY` in `scripts/src/ora-stability-gate.ts` in the same commit. Each entry needs: feature name (`id`/`title`), API/website/mobile surfaces (`ownerSurfaces`), changed-file detection hints (`fileHints`), website validation notes (`manualWebsite`), and mobile validation notes (`manualMobile`).
 - If the gate reports changed Ora files that do not map to a registered feature (`feature-registry` check: warn on fast profile, FAIL on release profile), do not publish or submit TestFlight until the registry and tests/checklist are updated.
 
@@ -52,6 +54,7 @@ Core:
 
 Important optional env:
 
+- Mobile crash reporting: `EXPO_PUBLIC_SENTRY_DSN` (set in eas.json build env or EAS secrets; Sentry stays fully disabled when absent, mirroring the website's `VITE_SENTRY_DSN` convention)
 - Ora voice TTS: `OPENAI_API_KEY`
 - Ora realtime "Talk to Ora" voice (WebRTC): requires `OPENAI_API_KEY` (direct client mints short-lived ephemeral tokens; the proxy rejects audio). Tuning: `ORA_REALTIME_ENABLED` (default on; `false` disables), `ORA_REALTIME_DISABLED` (kill switch), `ORA_REALTIME_MODEL` (default `gpt-realtime-mini`), `ORA_REALTIME_VOICE` (default `marin`), `ORA_REALTIME_TRANSCRIBE_MODEL`, and `ORA_REALTIME_VAD_*` turn-detection knobs.
 - Ora project memory blend: `ORA_PROJECT_MEMORY_RESERVE` (0..1 share of recall budget reserved for project memories in project chats, default 0.45)

@@ -2,6 +2,17 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Ship-readiness infra — mobile crash reporting, OTA updates, CI gate (2026-07-24)
+
+Pre-submission infrastructure wave; no Ora feature-code changes. Gate: release profile pass required before merge (see report in commit).
+
+- **Mobile crash reporting** — `@sentry/react-native@~7.2.0` (SDK 54 pinned version) added to ora-mobile. Init in `app/_layout.tsx` gated on `EXPO_PUBLIC_SENTRY_DSN` (absent → fully disabled, mirroring website `VITE_SENTRY_DSN`); `sendDefaultPii: false`, `tracesSampleRate: 0.1`; root layout wrapped with `Sentry.wrap`. DSN goes in eas.json build env or EAS secrets. Sourcemap upload (the Sentry Expo config plugin + `SENTRY_AUTH_TOKEN`) intentionally deferred until a Sentry org/project exists for mobile.
+- **EAS Update (OTA)** — `expo-updates@~29.0.19` installed; `app.json` gains `updates.url` (EAS project `3d5b04c7…`) and `runtimeVersion.policy: appVersion`; eas.json store profiles (`testflight`, `production`) share update channel `production`, `preview` uses `preview`. JS-only fixes now ship via `eas update --channel production` without a new store build. First build containing expo-updates must be a full native build.
+- **Android permission cleanup** — removed legacy `READ/WRITE_EXTERNAL_STORAGE` from `app.json` (Play flags them on modern API levels; media access uses the granular `READ_MEDIA_*` set already present). iOS unaffected.
+- **CI gate** — new `.github/workflows/ora-stability-gate.yml` runs the full release-profile gate on every PR/main push with a pgvector Postgres service. Fresh-DB bootstrap order encoded: best-effort push → `migrate-agent-inbox` (creates `chat_messages.content_tsv`) → final push → `migrate-all-outstanding`.
+- **Gate fix** — new first check `libs-build` (`pnpm run typecheck:libs`, all profiles): fresh checkouts have no `lib/*` dist outputs and every downstream typecheck failed with TS6305 before this.
+- **Migration fix** — `migrate-orax-desktop` no longer fails on fresh DBs where `drizzle-kit push` already created the Phase 2G cloud-first `orax_projects` (no `host_id`): the legacy host_id index is now guarded by an information_schema column check.
+
 ## Ora Phase 10 — True Artifact Revision Engine (2026-07-23)
 
 Gate: pass=13 warn=1(git-clean) fail=0. Manual checklist required before publish/TestFlight.

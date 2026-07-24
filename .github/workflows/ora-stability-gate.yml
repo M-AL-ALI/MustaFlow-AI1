@@ -1,0 +1,99 @@
+name: Ora Stability Gate
+
+# Runs the full release-profile Ora stability gate (typechecks, all Ora test
+# suites, production builds, lint) on every PR and push to main, against a
+# real Postgres. This is the same gate required before every website publish
+# and TestFlight build (see docs/ora-stability-gate.md) — running it here
+# catches regressions before they reach a release branch.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ora-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    name: Release-profile gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # pgvector/pgvector (not plain postgres): the schema's embedding
+        # columns need the vector extension.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: mustaflow_gate
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mustaflow_gate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable pgvector extension
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mustaflow_gate \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+
+      # Fresh-DB bootstrap ordering: the first push creates all tables but
+      # cannot create chat_messages_content_tsv_idx (the generated content_tsv
+      # column only exists after migrate-agent-inbox), so it is best-effort.
+      # migrate-agent-inbox then adds the column, and the second push completes
+      # cleanly. See docs/ora-verification-report-2026-07-24.md.
+      - name: Push database schema (bootstrap pass)
+        run: pnpm --filter @workspace/db run push-force || true
+
+      - name: Add chat_messages FTS column (migrate-agent-inbox)
+        run: pnpm --filter @workspace/scripts run migrate-agent-inbox
+
+      - name: Push database schema (final pass)
+        run: pnpm --filter @workspace/db run push-force
+
+      - name: Run outstanding migrations
+        run: pnpm --filter @workspace/scripts run migrate-all-outstanding
+
+      - name: Run Ora stability gate (release profile)
+        run: >-
+          pnpm --filter @workspace/scripts run ora-stability-gate --
+          --profile=release --require-clean
+          --report=tmp/ora-stability-gate-report.md
+
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ora-stability-gate-report
+          path: tmp/ora-stability-gate-report.md
+          if-no-files-found: ignore
