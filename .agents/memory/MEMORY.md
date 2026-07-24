@@ -102,7 +102,7 @@
 - [Orax Phase 2L lessons](orax-phase2l-lessons.md) — AI patch generation + approval-gated apply patterns in the desktop pipeline.
 - [ORAX source-string test pitfalls](orax-source-string-test-pitfalls.md) — common failures writing source-string assertions for orax.ts wiring tests.
 - [PDFKit bufferPages](pdfkit-buffer-pages.md) — page numbers via bufferPages, never the pageAdded event (recursive stack overflow).
-- [Post-merge migrations](post-merge-migrations.md) — after task-agent merges, db push fails non-interactively; run the individual migration scripts.
+- [Post-merge migrations](post-merge-migrations.md) — after task-agent merges, db push fails non-interactively; run the individual migration scripts AND verify startup-migrations.ts has a matching CREATE TABLE IF NOT EXISTS step for any new table introduced by the merge.
 - [Scripts pg pattern](scripts-pg-pattern.md) — migration scripts must use pool from @workspace/db, not pg directly.
 - [Vitest cold-import timeout](vitest-cold-import-timeout.md) — first test importing a heavy router tree can blow the 5s default; fix with a per-test timeout.
 - [Vitest dynamic-import mock gap](vitest-dynamic-import-mock-gap.md) — sync vi.mock factory misses route handler dynamic import(); fix = async factory + all exports + DB table stubs as safety net.
