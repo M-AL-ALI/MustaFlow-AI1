@@ -6,6 +6,8 @@ import {
   toPdfColor,
   toPdfFont,
 } from "../brand-kit-apply";
+import type { BrandKit } from "../brand-kit-apply";
+import type { ColumnType } from "../file-builder";
 
 describe("toDocxColor", () => {
   it("strips # and returns uppercase 6-char hex for valid input", () => {
@@ -85,4 +87,145 @@ describe("toPdfFont", () => {
     expect(toPdfFont(null, false)).toBe("Helvetica");
     expect(toPdfFont("Unknown Font XYZ", false)).toBe("Helvetica");
   });
+});
+
+describe("buildPptx smoke tests (with brand kit)", () => {
+  const minimalPresentation = {
+    title: "Test Deck",
+    subtitle: "Smoke test",
+    slides: [
+      { heading: "Slide One", bullets: ["Point A", "Point B"] },
+    ],
+    charts: [],
+  };
+
+  const kitWithLogo: BrandKit = {
+    primaryColor: "#1a1a2e",
+    secondaryColor: null,
+    accentColor: "#e94560",
+    headingFont: "Arial",
+    bodyFont: "Calibri",
+    logoBuf: Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    ]),
+    logoMimeType: "image/png",
+  };
+
+  const kitNoLogo: BrandKit = {
+    primaryColor: "#1a1a2e",
+    secondaryColor: null,
+    accentColor: "#e94560",
+    headingFont: "Georgia",
+    bodyFont: "Times New Roman",
+    logoBuf: null,
+    logoMimeType: null,
+  };
+
+  it("returns a non-empty Buffer without a brand kit", async () => {
+    const { buildPptx } = await import("../file-builder");
+    const buf = await buildPptx(minimalPresentation);
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(1000);
+  }, 30000);
+
+  it("returns a non-empty Buffer with a brand kit (no logo)", async () => {
+    const { buildPptx } = await import("../file-builder");
+    const buf = await buildPptx(minimalPresentation, kitNoLogo);
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(1000);
+  }, 30000);
+
+  it("produces a larger buffer when a logo is included", async () => {
+    const { buildPptx } = await import("../file-builder");
+    const bufNoLogo = await buildPptx(minimalPresentation, kitNoLogo);
+    const bufWithLogo = await buildPptx(minimalPresentation, kitWithLogo);
+    expect(bufWithLogo.length).toBeGreaterThan(bufNoLogo.length);
+  }, 30000);
+});
+
+describe("buildDocx smoke tests (with brand kit)", () => {
+  const minimalDocument = {
+    title: "Test Doc",
+    subtitle: "Subtitle",
+    sections: [
+      {
+        heading: "Introduction",
+        content: "This is some body text.\n\nSecond paragraph.",
+        bullets: ["Bullet one", "Bullet two"],
+      },
+    ],
+    charts: [],
+  };
+
+  const kitWithBothFonts: BrandKit = {
+    primaryColor: "#1a1a2e",
+    secondaryColor: null,
+    accentColor: "#e94560",
+    headingFont: "Georgia",
+    bodyFont: "Arial",
+    logoBuf: Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]),
+    logoMimeType: "image/png",
+  };
+
+  it("returns a non-empty Buffer without a brand kit", async () => {
+    const { buildDocx } = await import("../file-builder");
+    const buf = await buildDocx(minimalDocument);
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(1000);
+  }, 30000);
+
+  it("returns a non-empty Buffer with a full brand kit (logo + both fonts)", async () => {
+    const { buildDocx } = await import("../file-builder");
+    const buf = await buildDocx(minimalDocument, kitWithBothFonts);
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(1000);
+  }, 30000);
+
+  it("produces a larger buffer when a logo is included in the document header", async () => {
+    const { buildDocx } = await import("../file-builder");
+    const noLogo: BrandKit = { ...kitWithBothFonts, logoBuf: null, logoMimeType: null };
+    const bufNoLogo = await buildDocx(minimalDocument, noLogo);
+    const bufWithLogo = await buildDocx(minimalDocument, kitWithBothFonts);
+    expect(bufWithLogo.length).toBeGreaterThan(bufNoLogo.length);
+  }, 30000);
+});
+
+describe("buildXlsx smoke tests (with brand kit)", () => {
+  const minimalTabular = {
+    title: "Sales Report",
+    sheetName: "Sales",
+    headers: ["Month", "Revenue", "Units"],
+    columnTypes: ["text", "currency", "number"] as ColumnType[],
+    rows: [
+      ["January", "12000", "150"],
+      ["February", "15500", "190"],
+    ],
+  };
+
+  const kitForXlsx: BrandKit = {
+    primaryColor: "#0f172a",
+    secondaryColor: null,
+    accentColor: "#2563eb",
+    headingFont: "Calibri",
+    bodyFont: "Arial",
+    logoBuf: null,
+    logoMimeType: null,
+  };
+
+  it("returns a non-empty Buffer without a brand kit", async () => {
+    const { buildXlsx } = await import("../file-builder");
+    const buf = await buildXlsx(minimalTabular);
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(1000);
+  }, 30000);
+
+  it("returns a non-empty Buffer with a brand kit applied", async () => {
+    const { buildXlsx } = await import("../file-builder");
+    const buf = await buildXlsx(minimalTabular, kitForXlsx);
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(1000);
+  }, 30000);
 });

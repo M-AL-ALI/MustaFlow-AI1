@@ -1756,19 +1756,20 @@ const SAFE_FONTS_WEB = [
   "Times New Roman",
   "Georgia",
   "Helvetica",
-  "Tahoma",
   "Verdana",
   "Trebuchet MS",
 ] as const;
 type SafeFont = (typeof SAFE_FONTS_WEB)[number];
 
 interface BrandKitApiResponse {
-  primaryColor?: string | null;
-  accentColor?: string | null;
-  headingFont?: string | null;
-  bodyFont?: string | null;
-  logoAssetId?: number | null;
-  logoUrl?: string | null;
+  kit?: {
+    primaryColor?: string | null;
+    accentColor?: string | null;
+    headingFont?: string | null;
+    bodyFont?: string | null;
+    logoAssetId?: number | null;
+    logoPreviewUrl?: string | null;
+  } | null;
 }
 
 function BrandKitSection() {
@@ -1789,14 +1790,16 @@ function BrandKitSection() {
     void authFetch("/api/ora/brand-kit")
       .then((r) => (r.ok ? r.json() : Promise.resolve({})))
       .then((d: BrandKitApiResponse) => {
-        if (d.primaryColor) setPrimaryColor(d.primaryColor);
-        if (d.accentColor) setAccentColor(d.accentColor);
-        if (d.headingFont && (SAFE_FONTS_WEB as readonly string[]).includes(d.headingFont))
-          setHeadingFont(d.headingFont as SafeFont);
-        if (d.bodyFont && (SAFE_FONTS_WEB as readonly string[]).includes(d.bodyFont))
-          setBodyFont(d.bodyFont as SafeFont);
-        if (d.logoUrl) setLogoUrl(d.logoUrl);
-        if (d.logoAssetId != null) setLogoAssetId(d.logoAssetId);
+        const kit = d.kit;
+        if (!kit) return;
+        if (kit.primaryColor) setPrimaryColor(kit.primaryColor);
+        if (kit.accentColor) setAccentColor(kit.accentColor);
+        if (kit.headingFont && (SAFE_FONTS_WEB as readonly string[]).includes(kit.headingFont))
+          setHeadingFont(kit.headingFont as SafeFont);
+        if (kit.bodyFont && (SAFE_FONTS_WEB as readonly string[]).includes(kit.bodyFont))
+          setBodyFont(kit.bodyFont as SafeFont);
+        if (kit.logoPreviewUrl) setLogoUrl(kit.logoPreviewUrl);
+        if (kit.logoAssetId != null) setLogoAssetId(kit.logoAssetId);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -1823,19 +1826,31 @@ function BrandKitSection() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast({ description: "Please select an image file.", variant: "destructive" });
+    const allowed = ["image/png", "image/jpeg"];
+    if (!allowed.includes(file.type)) {
+      toast({ description: "Please select a PNG or JPEG file.", variant: "destructive" });
       return;
     }
     setUploadingLogo(true);
     try {
-      const form = new FormData();
-      form.append("logo", file);
-      const r = await authFetch("/api/ora/brand-kit/logo", { method: "POST", body: form });
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1] ?? "");
+        };
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+      const r = await authFetch("/api/ora/brand-kit/logo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: base64, mimeType: file.type, fileName: file.name }),
+      });
       if (!r.ok) throw new Error("Upload failed");
-      const d = (await r.json()) as { assetId: number; logoUrl: string };
+      const d = (await r.json()) as { assetId: number; previewUrl: string };
       setLogoAssetId(d.assetId);
-      setLogoUrl(d.logoUrl);
+      setLogoUrl(d.previewUrl);
       toast({ description: "Logo uploaded." });
     } catch {
       toast({ description: "Logo upload failed.", variant: "destructive" });
@@ -1960,7 +1975,7 @@ function BrandKitSection() {
             <input
               ref={logoInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              accept="image/png,image/jpeg"
               className="hidden"
               onChange={(e) => void handleLogoUpload(e)}
             />
@@ -1984,7 +1999,7 @@ function BrandKitSection() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            PNG, JPEG, WebP, or SVG. Appears on the title slide and document header.
+            PNG or JPEG (max 5 MB). Appears on the title slide and document header.
           </p>
         </div>
 

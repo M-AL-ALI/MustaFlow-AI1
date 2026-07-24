@@ -457,7 +457,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualWebsite:
       "In Ora Settings → Brand Kit, set a primary color, accent color, heading font, and upload a logo. Generate a DOCX, XLSX, PPTX, and PDF and verify each output uses the custom palette. Verify the logo appears on the title slide (PPTX) and document header (DOCX). Reset the brand kit and confirm the defaults are restored.",
     manualMobile:
-      "In Settings → Brand Kit, verify the read-only color swatches, font names, and logo thumbnail match what was set on the website. Tap 'Edit on website' and confirm the Ora Settings Brand Kit section opens in the in-app browser.",
+      "In Settings → Brand Kit, tap 'Edit Brand Kit' and confirm the Ora Settings page opens in the in-app browser (mobile surfaces a link to the website settings, not a native editor — this is the intended behavior).",
   },
 ];
 
@@ -563,6 +563,7 @@ const WEB_ORA_UI = [
   "src/hooks/__tests__/ora-clarification-wiring.test.ts",
   "src/lib/__tests__/blocker-fixes-b39.test.ts",
   "src/pages/__tests__/billing-plan-cards.test.ts",
+  "src/pages/__tests__/brand-kit-wiring.test.ts",
   "src/pages/__tests__/ora-account-sync-wiring.test.ts",
   "src/pages/__tests__/ora-live-voice-privacy.test.ts",
   "src/pages/__tests__/ora-memory-scope-wiring.test.ts",
@@ -595,6 +596,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/document-refs-chat-wiring.test.ts",
   "lib/__tests__/edit-quality-card-wiring.test.ts",
   "lib/__tests__/file-agent-preview-wiring.test.ts",
+  "lib/__tests__/brand-kit-mobile-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
   "lib/__tests__/ora-memory-scope-wiring.test.ts",

@@ -42,7 +42,7 @@ const kitBodySchema = z.object({
 
 const logoUploadSchema = z.object({
   data: z.string().min(1, "Base64 data required"),
-  mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  mimeType: z.enum(["image/png", "image/jpeg"]),
   fileName: z.string().min(1).max(200),
   oraProjectId: z.number().int().positive().nullable().optional(),
 });

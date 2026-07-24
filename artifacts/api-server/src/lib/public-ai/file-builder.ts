@@ -537,9 +537,24 @@ export async function buildPptx(
   };
   const slides = Array.isArray(data.slides) ? data.slides : [];
 
+  const pptxFont = brandKit?.headingFont ?? undefined;
+
   // Title slide (dark background)
   const titleSlide = pptx.addSlide();
   titleSlide.background = { color: pptxColors.titleBg };
+
+  // Brand kit logo — top-left of title slide (PNG/JPEG only)
+  if (brandKit?.logoBuf) {
+    const logoMime = brandKit.logoMimeType?.includes("png") ? "image/png" : "image/jpeg";
+    const logoB64 = brandKit.logoBuf.toString("base64");
+    titleSlide.addImage({
+      data: `data:${logoMime};base64,${logoB64}`,
+      x: 0.4,
+      y: 0.2,
+      h: 0.55,
+      w: 1.4,
+    });
+  }
 
   titleSlide.addText(data.title ?? "Presentation", {
     x: 0.8,
@@ -550,6 +565,7 @@ export async function buildPptx(
     bold: true,
     color: pptxColors.white,
     align: "center",
+    ...(pptxFont ? { fontFace: pptxFont } : {}),
   });
 
   if (data.subtitle) {
@@ -561,6 +577,7 @@ export async function buildPptx(
       fontSize: 18,
       color: pptxColors.lightBlue,
       align: "center",
+      ...(pptxFont ? { fontFace: pptxFont } : {}),
     });
   }
 
@@ -1131,6 +1148,7 @@ export async function buildDocx(
   const DARK = toDocxColor(brandKit?.primaryColor) ?? "1E1B4B";
   const GRAY = "6B7280";
   const KIT_FONT = brandKit?.headingFont ?? "Calibri";
+  const BODY_FONT = brandKit?.bodyFont ?? "Calibri";
 
   const children: (Paragraph | Table)[] = [];
 
@@ -1211,7 +1229,7 @@ export async function buildDocx(
           for (const line of parseBullets(trimmed)) {
             children.push(
               new Paragraph({
-                children: [new TextRun({ text: line, size: 22, font: KIT_FONT })],
+                children: [new TextRun({ text: line, size: 22, font: BODY_FONT })],
                 bullet: { level: 0 },
                 spacing: { after: 80 },
               }),
@@ -1221,7 +1239,7 @@ export async function buildDocx(
           children.push(
             new Paragraph({
               children: [
-                new TextRun({ text: trimmed, size: 22, color: "374151", font: KIT_FONT }),
+                new TextRun({ text: trimmed, size: 22, color: "374151", font: BODY_FONT }),
               ],
               alignment: AlignmentType.JUSTIFIED,
               spacing: { after: 180, line: 300 },
@@ -1236,7 +1254,7 @@ export async function buildDocx(
       for (const bullet of section.bullets) {
         children.push(
           new Paragraph({
-            children: [new TextRun({ text: bullet.trim(), size: 22, font: KIT_FONT })],
+            children: [new TextRun({ text: bullet.trim(), size: 22, font: BODY_FONT })],
             bullet: { level: 0 },
             spacing: { after: 80 },
           }),
@@ -1251,7 +1269,9 @@ export async function buildDocx(
       const ROW_FILL_ODD = "F5F4FF";
       const makeCellPara = (text: string, bold: boolean) =>
         new Paragraph({
-          children: [new TextRun({ text, bold, size: 18, font: KIT_FONT, color: DARK })],
+          children: [
+            new TextRun({ text, bold, size: 18, font: bold ? KIT_FONT : BODY_FONT, color: DARK }),
+          ],
           spacing: { before: 60, after: 60 },
           indent: { left: convertInchesToTwip(0.05) },
         });
@@ -1361,7 +1381,7 @@ export async function buildDocx(
     styles: {
       default: {
         document: {
-          run: { font: KIT_FONT, size: 22 },
+          run: { font: BODY_FONT, size: 22 },
         },
       },
     },
