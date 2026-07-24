@@ -52,4 +52,21 @@ describe("ora-settings GitHub section", () => {
     expect(settings).toContain('authFetch("/api/ora/github", { method: "DELETE" })');
     expect(settings).toContain("GithubConnectionSection");
   });
+
+  // Regression: the Connect button was disabled on `available === false` with
+  // no explanation, so an unconfigured server rendered a dead greyed-out
+  // button the user could neither press nor understand.
+  it("explains why connecting is unavailable instead of rendering a dead button", () => {
+    expect(settings).toContain("ora-github-unavailable");
+    expect(settings).toMatch(/isn&apos;t set up on this server/);
+  });
+
+  it("never disables the Connect button on availability — only while busy", () => {
+    expect(settings).toContain("disabled={busy}");
+    expect(settings).not.toContain("disabled={busy || status?.available === false}");
+  });
+
+  it("flips to the unavailable panel when connect returns 503", () => {
+    expect(settings).toContain("res.status === 503");
+  });
 });
