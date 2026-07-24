@@ -41,22 +41,8 @@ git add \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
-  lib/db/src/schema/brand-kits.ts \
-  lib/db/src/schema/index.ts \
-  scripts/src/migrate-brand-kits.ts \
-  scripts/package.json \
-  scripts/src/ora-stability-gate.ts \
-  artifacts/api-server/src/routes/ora-brand-kit.ts \
-  artifacts/api-server/src/routes/index.ts \
-  artifacts/api-server/src/lib/brand-kit-loader.ts \
   artifacts/api-server/src/lib/public-ai/brand-kit-apply.ts \
-  artifacts/api-server/src/lib/public-ai/file-builder.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/brand-kit-file-builder.test.ts \
-  artifacts/api-server/src/routes/__tests__/brand-kit-api.test.ts \
-  artifacts/api-server/src/routes/public-ai/generate-file.ts \
-  artifacts/mustaflow/src/pages/ora-settings.tsx \
-  'artifacts/ora-mobile/app/(home)/settings.tsx' \
-  .local/.commit_message 2>/dev/null || true
+  artifacts/api-server/src/routes/__tests__/brand-kit-api.test.ts 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
