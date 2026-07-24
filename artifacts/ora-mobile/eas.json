@@ -17,6 +17,7 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "ios": {
         "simulator": true
       },
@@ -28,6 +29,7 @@
     "testflight": {
       "autoIncrement": true,
       "distribution": "store",
+      "channel": "production",
       "ios": {
         "simulator": false,
         "resourceClass": "m-medium"
@@ -42,6 +44,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "channel": "production",
       "ios": {
         "resourceClass": "m-medium"
       },
