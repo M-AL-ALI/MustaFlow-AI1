@@ -9,6 +9,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? Buffer.alloc(32, 7).toString("base64");
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ?? "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
+// repo-analyst transitively imports the AI provider client, which asserts
+// these at module load. The URL-parse tests never make an AI call.
+process.env.AI_INTEGRATIONS_OPENAI_BASE_URL =
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ?? "http://127.0.0.1:9/v1";
+process.env.AI_INTEGRATIONS_OPENAI_API_KEY =
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? "test-placeholder";
 
 // Dynamic imports so the env defaults above land before @workspace/db loads
 // (static imports would hoist past them). No test in this file touches the DB.
@@ -51,6 +57,31 @@ describe("path traversal guards", () => {
   it("classifies binaries by extension", () => {
     expect(isBinaryPath("logo.png")).toBe(true);
     expect(isBinaryPath("src/app.ts")).toBe(false);
+  });
+});
+
+describe("pasted GitHub URL parsing (auto-attach)", () => {
+  it("extracts owner/repo from pasted URLs in chat messages", async () => {
+    const { parseGithubRepoUrl } = await import("../repo-analyst");
+    expect(parseGithubRepoUrl("look at https://github.com/M-AL-ALI/MustaFlow-AI1 please")).toEqual({
+      owner: "M-AL-ALI",
+      repo: "MustaFlow-AI1",
+    });
+    expect(parseGithubRepoUrl("https://github.com/foo/bar/tree/main/src")).toEqual({
+      owner: "foo",
+      repo: "bar",
+    });
+    expect(parseGithubRepoUrl("git clone https://github.com/foo/bar.git")).toEqual({
+      owner: "foo",
+      repo: "bar",
+    });
+  });
+
+  it("ignores non-repo GitHub paths and plain text", async () => {
+    const { parseGithubRepoUrl } = await import("../repo-analyst");
+    expect(parseGithubRepoUrl("no url here at all")).toBeNull();
+    expect(parseGithubRepoUrl("https://github.com/orgs/anthropics")).toBeNull();
+    expect(parseGithubRepoUrl("https://github.com/features/copilot")).toBeNull();
   });
 });
 
