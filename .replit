@@ -32,6 +32,14 @@ args = "ora-stability-gate"
 task = "workflow.run"
 args = "ora-gate-fast"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "codegen-drift"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "pull-from-github"
+
 [[workflows.workflow]]
 name = "push-to-github"
 author = "agent"
@@ -72,6 +80,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run ora:stability-gate"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "codegen-drift"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "pull-from-github"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/pull-from-github.sh"
 
 [workflows.workflow.metadata]
 outputType = "console"
