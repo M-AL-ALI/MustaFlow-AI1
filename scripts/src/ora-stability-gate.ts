@@ -90,6 +90,11 @@ const ORA_FILE_HINTS = [
   /^lib\/db\/src\/schema\/brand-kits/i,
   /^artifacts\/mustaflow\/src\/pages\/ora-settings/i,
   /^artifacts\/ora-mobile\/app\/\(home\)\/settings/i,
+  // Boot-time schema creation for Ora tables (brand_kits, ora_github_*) —
+  // must stay in sync with scripts/src/migrate-*.ts or production can 500
+  // on a DB that never had the manual migration run.
+  /^artifacts\/api-server\/src\/lib\/startup-migrations\.ts$/,
+  /^artifacts\/api-server\/src\/lib\/__tests__\/startup-migrations-parity\.test\.ts$/,
 ];
 
 const ORA_FEATURE_REGISTRY: OraFeature[] = [
@@ -453,6 +458,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /brand-kit-file-builder/i,
       /brand-kit-api/i,
       /brand-kit-route/i,
+      /startup-migrations/i,
     ],
     manualWebsite:
       "In Ora Settings → Brand Kit, set a primary color, accent color, heading font, and upload a logo. Generate a DOCX, XLSX, PPTX, and PDF and verify each output uses the custom palette. Verify the logo appears on the title slide (PPTX) and document header (DOCX). Reset the brand kit and confirm the defaults are restored.",
@@ -474,9 +480,10 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /ora-repo-/i,
       /RepoPickerSheet/i,
       /migrate-ora-github/i,
+      /startup-migrations/i,
     ],
     manualWebsite:
-      "In Ora Settings → GitHub, click Connect GitHub and authorize (2 clicks, no token pasting). In a chat, open the + menu → Analyze GitHub repo, pick a repo from the dropdown, and confirm the 'Analyzing: owner/repo (read-only)' chip appears. Ask 'find bugs in this repo' and confirm live narration ('Fetching snapshot… Reading file… Searching for…') streams before the answer, findings cite file:line, and the reply ends with a 'How to apply this fix' section containing a paste-ready Replit/agent block plus self-code steps. Click × on the chip and confirm repo context stops. Verify Ora NEVER claims to have written/committed/pushed anything.",
+      "In Ora Settings → GitHub, click Connect GitHub and authorize (2 clicks, no token pasting). In a chat, open the + menu → Analyze GitHub repo, pick a repo from the dropdown, and confirm the 'Analyzing: owner/repo (read-only)' chip appears. Ask 'find bugs in this repo' and confirm live narration ('Fetching snapshot… Reading file… Searching for…') streams before the answer, findings cite file:line, and the reply ends with a 'How to apply this fix' section containing a paste-ready Replit/agent block plus self-code steps. Click × on the chip and confirm repo context stops. Verify Ora NEVER claims to have written/committed/pushed anything. Production readiness: ora_github_connections and ora_repo_sessions are created automatically at server boot (runStartupMigrations, no manual migration required) — covered by startup-migrations-parity.test.ts, which drops the tables and proves the boot runner recreates them.",
     manualMobile:
       "In Settings → GitHub, tap Connect GitHub, authorize in the in-app browser, and confirm 'Connected as <login>' after returning. In chat, open the + menu → Analyze GitHub repo, pick a repo, confirm the read-only chip above the composer, ask a repo question, and confirm the thinking row shows the live narration statuses and the answer matches website behavior (file:line findings + paste-ready fix block). Detach via the chip's ×.",
   },
@@ -524,6 +531,7 @@ const API_REALTIME = [
 ].join(" ");
 
 const API_RELEASE_EXTENDED = [
+  "src/lib/__tests__/startup-migrations-parity.test.ts",
   "src/lib/public-ai/document-prompt.test.ts",
   "src/lib/public-ai/__tests__/source-citations.test.ts",
   "src/lib/public-ai/memory-consolidation.test.ts",

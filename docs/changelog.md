@@ -2,6 +2,14 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Fix: production boot must create Ora GitHub + Brand Kit tables (2026-07-24)
+
+A Codex review flagged that `ora_github_connections`/`ora_repo_sessions` were only created by the manual `migrate-ora-github` script, not by `runStartupMigrations()` (which genuinely does run automatically on every server boot, per `index.ts`). A fresh production DB that skipped the manual migration step would 500 on `/api/ora/github/*`. Verified the same gap exists for `brand_kits` — it was never added to `startup-migrations.ts` either, despite that file's own docstring promising to cover "all outstanding schema migrations." Declined Codex's proposed textual parity test (asserting two files mention the same keywords proves nothing about correctness) in favor of a functional one.
+
+- **startup-migrations.ts:** added `migrate-brand-kits` and `migrate-ora-github` steps, hand-written to match each table's `scripts/src/migrate-*.ts` script (this file's established pattern — every entry is a standalone copy, not a shared import, since `@workspace/scripts` and `@workspace/api-server` have no dependency relationship in either direction).
+- **New test** `startup-migrations-parity.test.ts`: drops all three tables against a real Postgres, runs the actual `runStartupMigrations()`, and asserts the tables/indexes exist afterward — proves the boot-time SQL works, not just that two files share keywords. Also asserts idempotency (safe to run twice). Registered in `API_RELEASE_EXTENDED`.
+- **Gate:** `startup-migrations.ts` and its test were previously invisible to the `ORA_FILE_HINTS` feature-registry scanner (matched no existing pattern) — added hints so future edits are tracked, routed to `brand-kit-file-branding` and `github-repo-analysis`.
+
 ## Ora GitHub Repo Analysis — READ-ONLY (2026-07-24)
 
 Ora connects to GitHub (OAuth, 2 clicks, no token pasting), reads a chosen repo through a sandboxed tarball workspace, narrates its investigation live (Claude Code-style status streaming), and outputs file:line findings plus paste-ready fix instructions (Replit/agent block + self-code steps). HARD BOUNDARY: read-only at the tool layer — the five tools are list_files/read_file/search_repo/read_commits/diff; no write/commit/push path exists anywhere in Ora. No Orax/Builder imports; Ora-owned OAuth flow reuses only the GITHUB_OAUTH_CLIENT_ID/SECRET env creds with signed-HMAC state (works from web + mobile in-app browser).
