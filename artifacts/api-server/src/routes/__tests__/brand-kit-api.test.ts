@@ -339,3 +339,47 @@ describe("oraBrandKit router", () => {
     expect(typeof router).toBe("function");
   });
 });
+
+describe("brand-kit migration index parity", () => {
+  it("startup-migrations.ts and migrate-brand-kits.ts define the same Brand Kit unique indexes", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const dir = path.dirname(new URL(import.meta.url).pathname);
+
+    const startupText = fs.readFileSync(
+      path.resolve(dir, "../../lib/startup-migrations.ts"),
+      "utf8",
+    );
+    const standaloneText = fs.readFileSync(
+      path.resolve(dir, "../../../../../scripts/src/migrate-brand-kits.ts"),
+      "utf8",
+    );
+
+    const requiredIndexes = [
+      "brand_kits_user_personal_idx",
+      "brand_kits_user_project_idx",
+      "brand_kits_user_id_idx",
+    ] as const;
+
+    for (const idx of requiredIndexes) {
+      expect(startupText).toContain(idx);
+      expect(standaloneText).toContain(idx);
+    }
+
+    for (const src of [startupText, standaloneText]) {
+      const personalBlock = src.slice(
+        src.indexOf("brand_kits_user_personal_idx"),
+        src.indexOf("brand_kits_user_personal_idx") + 200,
+      );
+      expect(personalBlock.toLowerCase()).toContain("unique");
+      expect(personalBlock).toContain("ora_project_id IS NULL");
+
+      const projectBlock = src.slice(
+        src.indexOf("brand_kits_user_project_idx"),
+        src.indexOf("brand_kits_user_project_idx") + 200,
+      );
+      expect(projectBlock.toLowerCase()).toContain("unique");
+      expect(projectBlock).toContain("ora_project_id IS NOT NULL");
+    }
+  });
+});

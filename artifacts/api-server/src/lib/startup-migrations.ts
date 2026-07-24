@@ -4576,12 +4576,20 @@ const MIGRATION_STEPS: MigrationStep[] = [
           updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `);
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS brand_kits_user_id_idx ON brand_kits(user_id)`,
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS brand_kits_user_project_idx ON brand_kits(user_id, ora_project_id)`,
-      );
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_personal_idx
+          ON brand_kits(user_id)
+          WHERE ora_project_id IS NULL
+      `);
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_project_idx
+          ON brand_kits(user_id, ora_project_id)
+          WHERE ora_project_id IS NOT NULL
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS brand_kits_user_id_idx
+          ON brand_kits(user_id)
+      `);
       await client.query("COMMIT");
     },
   },
