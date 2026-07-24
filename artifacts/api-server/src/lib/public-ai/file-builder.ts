@@ -535,8 +535,6 @@ export async function buildPptx(
       accent: toDocxColor(brandKit!.accentColor)!,
     }),
   };
-  const kitFont = brandKit?.headingFont;
-
   const slides = Array.isArray(data.slides) ? data.slides : [];
 
   // Title slide (dark background)
