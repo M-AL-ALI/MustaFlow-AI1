@@ -161,30 +161,32 @@ export async function runRepoInvestigation(
   );
 
   for (let i = 0; i < REPO_ANALYST_LIMITS.maxSteps; i++) {
-    let decisionRaw = "";
-    try {
-      const chain = await runCandidateChain(args.candidates, async (candidate) => {
-        const completion = await createChatCompletion({
-          provider: candidate.provider,
-          model: candidate.model,
-          messages: [
-            { role: "system", content: INVESTIGATION_SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `User question:\n${args.message}\n\nInvestigation so far:\n${transcript.join("\n\n")}\n\nReply with your next single JSON action.`,
-            },
-          ],
-          response_format: { type: "text" },
-          max_completion_tokens: REPO_ANALYST_LIMITS.decisionMaxTokens,
-          disableThinking: true,
+    const decisionRaw = await (async (): Promise<string | null> => {
+      try {
+        const chain = await runCandidateChain(args.candidates, async (candidate) => {
+          const completion = await createChatCompletion({
+            provider: candidate.provider,
+            model: candidate.model,
+            messages: [
+              { role: "system", content: INVESTIGATION_SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: `User question:\n${args.message}\n\nInvestigation so far:\n${transcript.join("\n\n")}\n\nReply with your next single JSON action.`,
+              },
+            ],
+            response_format: { type: "text" },
+            max_completion_tokens: REPO_ANALYST_LIMITS.decisionMaxTokens,
+            disableThinking: true,
+          });
+          return completion;
         });
-        return completion;
-      });
-      decisionRaw = chain.result.choices[0]?.message?.content?.trim() ?? "";
-    } catch (err) {
-      logger.warn({ err }, "ora-repo: decision call failed");
-      break;
-    }
+        return chain.result.choices[0]?.message?.content?.trim() ?? "";
+      } catch (err) {
+        logger.warn({ err }, "ora-repo: decision call failed");
+        return null;
+      }
+    })();
+    if (decisionRaw === null) break;
 
     const action = parseAction(decisionRaw);
     if (!action) {
