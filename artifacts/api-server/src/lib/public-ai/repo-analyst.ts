@@ -16,9 +16,13 @@ import { db, oraRepoSessionsTable, type OraRepoSessionRow } from "@workspace/db"
 import { createChatCompletion } from "../ai-providers";
 import { logger } from "../logger";
 import { runCandidateChain, type ModelCandidate } from "./model-router";
-import { getOraGithubToken } from "./repo-github-auth";
+import { fetchRepoMeta, getOraGithubToken } from "./repo-github-auth";
 import { diffCommit, listFiles, readCommits, readFile, searchRepo } from "./repo-read-tools";
-import { materializeRepoWorkspace, type RepoWorkspace } from "./repo-workspace";
+import {
+  destroyRepoWorkspace,
+  materializeRepoWorkspace,
+  type RepoWorkspace,
+} from "./repo-workspace";
 
 export const REPO_ANALYST_LIMITS = {
   maxSteps: 10,
@@ -92,6 +96,94 @@ export async function getActiveRepoSession(userId: string): Promise<OraRepoSessi
   return rows[0] ?? null;
 }
 
+// GitHub UI paths that look like owner names but never are repositories.
+const NON_REPO_OWNERS = new Set([
+  "orgs",
+  "topics",
+  "collections",
+  "features",
+  "marketplace",
+  "sponsors",
+  "settings",
+  "apps",
+  "login",
+  "about",
+  "pricing",
+  "search",
+  "notifications",
+  "explore",
+]);
+
+/**
+ * Extract owner/repo from the first github.com URL in a chat message.
+ * Users naturally paste repo URLs instead of using the picker; a pasted URL
+ * should attach the repo, not fall through to a useless web search.
+ */
+export function parseGithubRepoUrl(text: string): { owner: string; repo: string } | null {
+  const m = /github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)/.exec(text);
+  if (!m) return null;
+  const owner = m[1]!;
+  const repo = m[2]!.replace(/\.git$/, "");
+  if (NON_REPO_OWNERS.has(owner.toLowerCase())) return null;
+  if (!repo || repo === "." || repo === "..") return null;
+  return { owner, repo };
+}
+
+/**
+ * When a connected user pastes a github.com/owner/repo URL, attach that repo
+ * as the active session (detaching any previous one) — same effect as picking
+ * it in the dropdown. Access is validated against GitHub first; on any
+ * failure the existing session (or none) is kept and chat proceeds normally.
+ */
+async function attachRepoFromMessage(
+  userId: string,
+  token: string,
+  message: string,
+  current: OraRepoSessionRow | null,
+): Promise<OraRepoSessionRow | null> {
+  const parsed = parseGithubRepoUrl(message);
+  if (!parsed) return current;
+  if (current && current.owner === parsed.owner && current.repo === parsed.repo) return current;
+  try {
+    const meta = await fetchRepoMeta(token, parsed.owner, parsed.repo);
+    const previous = await db
+      .select({ id: oraRepoSessionsTable.id })
+      .from(oraRepoSessionsTable)
+      .where(
+        and(eq(oraRepoSessionsTable.userId, userId), eq(oraRepoSessionsTable.status, "active")),
+      );
+    if (previous.length > 0) {
+      await db
+        .update(oraRepoSessionsTable)
+        .set({ status: "detached" })
+        .where(
+          and(eq(oraRepoSessionsTable.userId, userId), eq(oraRepoSessionsTable.status, "active")),
+        );
+      for (const s of previous) await destroyRepoWorkspace(s.id).catch(() => {});
+    }
+    const inserted = await db
+      .insert(oraRepoSessionsTable)
+      .values({
+        userId,
+        conversationId: null,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        ref: "",
+        defaultBranch: meta.defaultBranch,
+        status: "active",
+      })
+      .returning();
+    logger.info(
+      { owner: parsed.owner, repo: parsed.repo },
+      "ora-repo: session auto-attached from pasted URL",
+    );
+    return inserted[0] ?? current;
+  } catch (err) {
+    logger.warn({ err, owner: parsed.owner, repo: parsed.repo }, "ora-repo: URL attach failed");
+    return current;
+  }
+}
+
 export interface RunRepoInvestigationArgs {
   userId: string;
   message: string;
@@ -107,10 +199,17 @@ export interface RunRepoInvestigationArgs {
 export async function runRepoInvestigation(
   args: RunRepoInvestigationArgs,
 ): Promise<RepoInvestigationResult | null> {
-  const session = await getActiveRepoSession(args.userId);
-  if (!session) return null;
   const token = await getOraGithubToken(args.userId);
   if (!token) return null;
+  // A pasted github.com/owner/repo URL attaches that repo (dropdown parity);
+  // otherwise the previously selected session is used. No session → null,
+  // and the chat flow continues completely unchanged.
+  const existing = await getActiveRepoSession(args.userId);
+  const session = await attachRepoFromMessage(args.userId, token, args.message, existing);
+  if (!session) return null;
+  if (session.id !== existing?.id) {
+    args.onStatus(`Attached ${session.owner}/${session.repo} for read-only analysis…`);
+  }
 
   const repoFullName = `${session.owner}/${session.repo}`;
   args.onStatus(`Fetching ${repoFullName} snapshot…`);

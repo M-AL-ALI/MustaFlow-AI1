@@ -2,6 +2,14 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Feat: pasted GitHub URL auto-attaches the repo for analysis (2026-07-24)
+
+Live-usage finding: after connecting GitHub, the natural user move is to paste a repo URL into chat — but only the + menu picker created a repo session, so a pasted URL fell through to the web-search route and produced a useless "I'll search for it" reply.
+
+- **repo-analyst.ts:** new exported `parseGithubRepoUrl()` (first `github.com/owner/repo` in the message; strips `.git`/paths; rejects non-repo GitHub paths like `/orgs/…`, `/features/…`). `runRepoInvestigation` now auto-attaches a pasted repo: validates access via `fetchRepoMeta` with the user's token, detaches the previous active session, inserts the new one (dropdown parity), and narrates "Attached owner/repo for read-only analysis…". On any validation failure the existing session (or none) is kept and chat proceeds unchanged — an inaccessible URL can never break normal chat. Anonymous / not-connected users are unaffected (token check comes first).
+- **Tests:** 2 new cases in `ora-repo-readonly.test.ts` (12 total) covering URL extraction incl. `/tree/…` paths and `.git` suffix, and rejection of non-repo paths; test env now sets AI-client placeholder vars since repo-analyst transitively imports the provider client.
+- Known minor gap: the "Analyzing:" chip reflects an auto-attached session after the next page load (it fetches on mount); the in-chat narration provides immediate feedback.
+
 ## Fix: dead "Connect GitHub" button when OAuth is unconfigured (2026-07-24)
 
 Reported from the live site: the Connect GitHub button rendered greyed-out and unclickable with no explanation. Root cause was two layered issues — (1) the server correctly reports `available: false` when `GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET` are unset, and (2) the UI turned that into `disabled={busy || status?.available === false}`, i.e. a dead control with zero indication of why. A disabled button with no reason is a UX defect regardless of the underlying config state.
