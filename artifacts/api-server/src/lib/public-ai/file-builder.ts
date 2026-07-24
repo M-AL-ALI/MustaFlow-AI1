@@ -537,7 +537,8 @@ export async function buildPptx(
   };
   const slides = Array.isArray(data.slides) ? data.slides : [];
 
-  const pptxFont = brandKit?.headingFont ?? undefined;
+  const pptxHeadingFont = brandKit?.headingFont ?? undefined;
+  const pptxBodyFont = brandKit?.bodyFont ?? undefined;
 
   // Title slide (dark background)
   const titleSlide = pptx.addSlide();
@@ -565,7 +566,7 @@ export async function buildPptx(
     bold: true,
     color: pptxColors.white,
     align: "center",
-    ...(pptxFont ? { fontFace: pptxFont } : {}),
+    ...(pptxHeadingFont ? { fontFace: pptxHeadingFont } : {}),
   });
 
   if (data.subtitle) {
@@ -577,7 +578,7 @@ export async function buildPptx(
       fontSize: 18,
       color: pptxColors.lightBlue,
       align: "center",
-      ...(pptxFont ? { fontFace: pptxFont } : {}),
+      ...(pptxHeadingFont ? { fontFace: pptxHeadingFont } : {}),
     });
   }
 
@@ -639,6 +640,7 @@ export async function buildPptx(
       fontSize: 26,
       bold: true,
       color: pptxColors.heading,
+      ...(pptxHeadingFont ? { fontFace: pptxHeadingFont } : {}),
     });
 
     // Thin accent underline beneath heading
@@ -666,6 +668,7 @@ export async function buildPptx(
         fontSize: 15,
         color: pptxColors.body,
         valign: "top",
+        ...(pptxBodyFont ? { fontFace: pptxBodyFont } : {}),
       });
     }
 
@@ -691,6 +694,7 @@ export async function buildPptx(
       fontSize: 26,
       bold: true,
       color: pptxColors.heading,
+      ...(pptxHeadingFont ? { fontFace: pptxHeadingFont } : {}),
     });
     s.addText(" ", {
       x: 0.5,
@@ -1443,6 +1447,8 @@ export async function buildPdf(
   const PDF_ACCENT = toPdfColor(brandKit?.accentColor) ?? "#6366F1";
   const PDF_HEAD_BOLD = toPdfFont(brandKit?.headingFont, true);
   const PDF_HEAD = toPdfFont(brandKit?.headingFont, false);
+  const PDF_BODY = toPdfFont(brandKit?.bodyFont, false);
+  const PDF_BODY_BOLD = toPdfFont(brandKit?.bodyFont, true);
 
   return new Promise((resolve, reject) => {
     const MARGIN = 60;
@@ -1554,7 +1560,7 @@ export async function buildPdf(
                 .fill()
                 .restore();
               doc
-                .font(PDF_HEAD)
+                .font(PDF_BODY)
                 .fontSize(11)
                 .fillColor("#374151")
                 .text(text, MARGIN + 14, bulletY, { width: CONTENT_W - 14, lineGap: 2 });
@@ -1563,7 +1569,7 @@ export async function buildPdf(
             doc.moveDown(0.4);
           } else {
             doc
-              .font(PDF_HEAD)
+              .font(PDF_BODY)
               .fontSize(11)
               .fillColor("#374151")
               .text(trimmed, MARGIN, doc.y, { width: CONTENT_W, align: "justify", lineGap: 3 });
@@ -1584,7 +1590,7 @@ export async function buildPdf(
             .fill()
             .restore();
           doc
-            .font(PDF_HEAD)
+            .font(PDF_BODY)
             .fontSize(11)
             .fillColor("#374151")
             .text(trimmed, MARGIN + 14, bulletY, { width: CONTENT_W - 14, lineGap: 2 });
@@ -1612,7 +1618,7 @@ export async function buildPdf(
 
         const rowHeight = (cells: string[], bold: boolean): number => {
           const fontSize = cols > 5 ? 7 : 8;
-          doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
+          doc.font(bold ? PDF_BODY_BOLD : PDF_BODY).fontSize(fontSize);
           const heights = cells.slice(0, cols).map((cell) =>
             doc.heightOfString(fitCellText(cell), {
               width: colW - CELL_PAD_X * 2,
@@ -1641,7 +1647,7 @@ export async function buildPdf(
             const cell = fitCellText(cells[i] ?? "");
             const fontSize = bold ? (cols > 5 ? 7 : 8) : cols > 5 ? 7 : 8;
             doc
-              .font(bold ? "Helvetica-Bold" : "Helvetica")
+              .font(bold ? PDF_BODY_BOLD : PDF_BODY)
               .fontSize(fontSize)
               .fillColor(bold ? "#1E1B4B" : "#374151")
               .text(cell, MARGIN + colW * i + CELL_PAD_X, rowY + CELL_PAD_Y, {

@@ -10,15 +10,15 @@ const read = (rel: string) =>
 describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   const src = read("../ora-settings.tsx");
 
-  it("BrandKitApiResponse nests all fields under a kit property", () => {
+  it("BrandKitApiResponse exposes only `kit` at the top level", () => {
     const ifaceStart = src.indexOf("interface BrandKitApiResponse");
     expect(ifaceStart).toBeGreaterThan(-1);
-    const ifaceEnd = src.indexOf("\n}", ifaceStart);
-    const iface = src.slice(ifaceStart, ifaceEnd + 2);
-    expect(iface).toContain("kit?:");
+    const iface = src.slice(ifaceStart, src.indexOf("\n}", ifaceStart) + 2);
+    const topLevelKeys = [...iface.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1]);
+    expect(topLevelKeys).toEqual(["kit"]);
+    expect(iface).toMatch(/^ {4}primaryColor\?:/m);
     expect(iface).toContain("logoPreviewUrl");
     expect(iface).not.toContain("logoUrl?:");
-    expect(iface).not.toMatch(/^\s+primaryColor\?:/m);
   });
 
   it("useEffect reads colors/fonts/logo from d.kit (not flat d)", () => {
