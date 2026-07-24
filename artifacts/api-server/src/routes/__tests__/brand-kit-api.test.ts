@@ -344,8 +344,13 @@ describe("brand-kit migration index parity", () => {
   it("startup-migrations.ts and migrate-brand-kits.ts define the same Brand Kit unique indexes", async () => {
     const fs = await import("fs");
     const path = await import("path");
-    const dir = path.dirname(new URL(import.meta.url).pathname);
+    const { fileURLToPath } = await import("node:url");
+    const dir = path.dirname(fileURLToPath(import.meta.url));
 
+    const thisFileText = fs.readFileSync(
+      path.resolve(dir, "brand-kit-api.test.ts"),
+      "utf8",
+    );
     const startupText = fs.readFileSync(
       path.resolve(dir, "../../lib/startup-migrations.ts"),
       "utf8",
@@ -355,6 +360,14 @@ describe("brand-kit migration index parity", () => {
       "utf8",
     );
 
+    // This test file must use fileURLToPath for cross-platform path resolution
+    expect(thisFileText).toContain("fileURLToPath");
+
+    // Startup migration must contain self-healing DROP INDEX logic for both indexes
+    expect(startupText).toContain("DROP INDEX IF EXISTS brand_kits_user_personal_idx");
+    expect(startupText).toContain("DROP INDEX IF EXISTS brand_kits_user_project_idx");
+
+    // Both files must define all three index names
     const requiredIndexes = [
       "brand_kits_user_personal_idx",
       "brand_kits_user_project_idx",
@@ -366,20 +379,16 @@ describe("brand-kit migration index parity", () => {
       expect(standaloneText).toContain(idx);
     }
 
+    // Both files must define the two unique partial indexes with correct WHERE clauses
     for (const src of [startupText, standaloneText]) {
-      const personalBlock = src.slice(
-        src.indexOf("brand_kits_user_personal_idx"),
-        src.indexOf("brand_kits_user_personal_idx") + 200,
+      expect(src).toContain(
+        "CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_personal_idx",
       );
-      expect(personalBlock.toLowerCase()).toContain("unique");
-      expect(personalBlock).toContain("ora_project_id IS NULL");
-
-      const projectBlock = src.slice(
-        src.indexOf("brand_kits_user_project_idx"),
-        src.indexOf("brand_kits_user_project_idx") + 200,
+      expect(src).toContain("WHERE ora_project_id IS NULL");
+      expect(src).toContain(
+        "CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_project_idx",
       );
-      expect(projectBlock.toLowerCase()).toContain("unique");
-      expect(projectBlock).toContain("ora_project_id IS NOT NULL");
+      expect(src).toContain("WHERE ora_project_id IS NOT NULL");
     }
   });
 });

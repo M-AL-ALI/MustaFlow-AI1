@@ -4576,10 +4576,44 @@ const MIGRATION_STEPS: MigrationStep[] = [
           updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `);
+      // Self-healing: if brand_kits_user_personal_idx exists but lacks the correct
+      // partial WHERE clause (ora_project_id IS NULL), drop it so the CREATE below
+      // can replace it with the right unique partial index.
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_indexes
+            WHERE tablename  = 'brand_kits'
+              AND indexname  = 'brand_kits_user_personal_idx'
+              AND indexdef   NOT ILIKE '%where%ora_project_id is null%'
+          ) THEN
+            DROP INDEX IF EXISTS brand_kits_user_personal_idx;
+          END IF;
+        END
+        $$
+      `);
       await client.query(`
         CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_personal_idx
           ON brand_kits(user_id)
           WHERE ora_project_id IS NULL
+      `);
+      // Self-healing: if brand_kits_user_project_idx exists but lacks the correct
+      // partial WHERE clause (ora_project_id IS NOT NULL), drop it so the CREATE
+      // below can replace it with the right unique partial index.
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_indexes
+            WHERE tablename  = 'brand_kits'
+              AND indexname  = 'brand_kits_user_project_idx'
+              AND indexdef   NOT ILIKE '%where%ora_project_id is not null%'
+          ) THEN
+            DROP INDEX IF EXISTS brand_kits_user_project_idx;
+          END IF;
+        END
+        $$
       `);
       await client.query(`
         CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_project_idx
