@@ -101,6 +101,7 @@ import oraProfileRouter from "./ora-profile";
 import oraMemoriesRouter from "./ora-memories";
 import oraAssetsRouter from "./ora-assets";
 import oraAccountConsistencyRouter from "./ora-account-consistency";
+import oraBrandKitRouter from "./ora-brand-kit";
 import builderHandoffRouter from "./builder-handoff";
 import vaultKnowledgeRouter from "./vault-knowledge";
 import developerModeRouter from "./developer-mode";
@@ -363,6 +364,7 @@ router.use(oraConversationsRouter); // CRUD /ora/conversations + /ora/projects
 router.use(oraProfileRouter); // GET/PUT /ora/profile (Ora-only custom instructions)
 router.use(oraMemoriesRouter); // GET/PATCH/DELETE /ora/memories (Ora-only saved memories)
 router.use(oraAssetsRouter); // GET/DELETE /ora/assets (durable asset library)
+router.use(oraBrandKitRouter); // GET/PUT/DELETE /ora/brand-kit + POST /ora/brand-kit/logo
 router.use(oraAccountConsistencyRouter); // GET /ora/account-consistency (cross-platform diagnostics)
 router.use(oraxRouter); // ORAX coding-agent foundation
 router.use(oraxDesktopRouter); // Orax Desktop host registration, pairing, heartbeat

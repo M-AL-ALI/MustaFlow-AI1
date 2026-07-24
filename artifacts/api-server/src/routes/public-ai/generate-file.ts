@@ -235,6 +235,17 @@ router.post("/public-ai/generate-file", async (req, res) => {
   }
   const hasSourceData = carriedDocs.length > 0 || activeAssetContextText.length > 0;
 
+  // Load brand kit for authenticated users (best-effort; never blocks file generation).
+  let oraBrandKit: import("../../lib/public-ai/brand-kit-apply").BrandKit | null = null;
+  if (authed) {
+    try {
+      const { loadBrandKit } = await import("../../lib/brand-kit-loader");
+      oraBrandKit = await loadBrandKit(authed.userId, libraryProjectId);
+    } catch {
+      // Non-critical — file will be generated without branding.
+    }
+  }
+
   let FileGenerationErrorCtor:
     | (typeof import("../../lib/public-ai/file-builder"))["FileGenerationError"]
     | null = null;
@@ -268,6 +279,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
         language,
         hasSourceData,
         authed?.tier ?? null,
+        oraBrandKit,
       ));
     // The full generator rebuilt the file from an uploaded source's extracted
     // text — an honest "redesigned" stamp so the quality card can say the

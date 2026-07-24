@@ -44,6 +44,8 @@ import {
 // Types are erased at compile time and are safe to import statically.
 import type { ModelCandidate, OraPlanTier } from "./model-router";
 import PptxGenJS from "pptxgenjs";
+import type { BrandKit } from "./brand-kit-apply.js";
+import { toDocxColor, toArgb, lightenArgb, toPdfColor, toPdfFont } from "./brand-kit-apply.js";
 
 export type { FileFormat };
 
@@ -514,15 +516,32 @@ const PPTX_COLORS = {
   lightBlue: "7DD3FC",
 } as const;
 
-export async function buildPptx(data: PresentationData): Promise<Buffer> {
+export async function buildPptx(
+  data: PresentationData,
+  brandKit?: BrandKit | null,
+): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
+
+  // Allow brand kit to override accent and title-background colors.
+  // Remaining entries fall back to the default PPTX_COLORS palette.
+  const pptxColors = {
+    ...PPTX_COLORS,
+    ...(toDocxColor(brandKit?.primaryColor) !== null && {
+      titleBg: toDocxColor(brandKit!.primaryColor)!,
+      heading: toDocxColor(brandKit!.primaryColor)!,
+    }),
+    ...(toDocxColor(brandKit?.accentColor) !== null && {
+      accent: toDocxColor(brandKit!.accentColor)!,
+    }),
+  };
+  const kitFont = brandKit?.headingFont;
 
   const slides = Array.isArray(data.slides) ? data.slides : [];
 
   // Title slide (dark background)
   const titleSlide = pptx.addSlide();
-  titleSlide.background = { color: PPTX_COLORS.titleBg };
+  titleSlide.background = { color: pptxColors.titleBg };
 
   titleSlide.addText(data.title ?? "Presentation", {
     x: 0.8,
@@ -531,7 +550,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
     h: 1.8,
     fontSize: 40,
     bold: true,
-    color: PPTX_COLORS.white,
+    color: pptxColors.white,
     align: "center",
   });
 
@@ -542,7 +561,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       w: 11.73,
       h: 0.7,
       fontSize: 18,
-      color: PPTX_COLORS.lightBlue,
+      color: pptxColors.lightBlue,
       align: "center",
     });
   }
@@ -553,7 +572,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
     w: 11.73,
     h: 0.4,
     fontSize: 12,
-    color: PPTX_COLORS.footer,
+    color: pptxColors.footer,
     align: "center",
   });
 
@@ -564,7 +583,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       w: 12.73,
       h: 0.35,
       fontSize: 9,
-      color: PPTX_COLORS.footer,
+      color: pptxColors.footer,
       align: "right",
     });
   };
@@ -604,7 +623,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       h: 0.8,
       fontSize: 26,
       bold: true,
-      color: PPTX_COLORS.heading,
+      color: pptxColors.heading,
     });
 
     // Thin accent underline beneath heading
@@ -613,9 +632,9 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       y: 1.1,
       w: 12.33,
       h: 0.06,
-      fill: { color: PPTX_COLORS.accent },
+      fill: { color: pptxColors.accent },
       fontSize: 1,
-      color: PPTX_COLORS.accent,
+      color: pptxColors.accent,
     });
 
     if (bullets.length > 0) {
@@ -630,7 +649,7 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
         w: slide.chart && slide.layout === "split" ? 5.75 : 12.33,
         h: 5.65,
         fontSize: 15,
-        color: PPTX_COLORS.body,
+        color: pptxColors.body,
         valign: "top",
       });
     }
@@ -656,16 +675,16 @@ export async function buildPptx(data: PresentationData): Promise<Buffer> {
       h: 0.8,
       fontSize: 26,
       bold: true,
-      color: PPTX_COLORS.heading,
+      color: pptxColors.heading,
     });
     s.addText(" ", {
       x: 0.5,
       y: 1.1,
       w: 12.33,
       h: 0.06,
-      fill: { color: PPTX_COLORS.accent },
+      fill: { color: pptxColors.accent },
       fontSize: 1,
-      color: PPTX_COLORS.accent,
+      color: pptxColors.accent,
     });
     await addChartImage(s, chart, { x: 0.8, y: 1.38, w: 11.75, h: 4.95 });
     addFooter(s);
@@ -891,7 +910,7 @@ function buildAppSheetBlueprintSheets(data: TabularData): ExcelSheetData[] {
   ];
 }
 
-export async function buildXlsx(data: TabularData): Promise<Buffer> {
+export async function buildXlsx(data: TabularData, brandKit?: BrandKit | null): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MustaFlow Ora";
   wb.created = new Date();
@@ -904,12 +923,13 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
     forceFullCalc: true,
   };
 
-  const HEADER_BG = "FF1E1B4B";
+  const HEADER_BG = toArgb(brandKit?.primaryColor) ?? "FF1E1B4B";
   const HEADER_FG = "FFFFFFFF";
-  const ACCENT = "FF6366F1";
-  const ROW_ODD = "FFF5F4FF";
+  const ACCENT = toArgb(brandKit?.accentColor) ?? "FF6366F1";
+  const ROW_ODD = lightenArgb(HEADER_BG) ?? "FFF5F4FF";
   const ROW_EVEN = "FFFFFFFF";
   const BORDER_COLOR = "FFD1D5DB";
+  const CELL_FONT = brandKit?.bodyFont ?? "Calibri";
 
   const thinBorder: Partial<ExcelJS.Borders> = {
     top: { style: "thin", color: { argb: BORDER_COLOR } },
@@ -961,7 +981,7 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
     const headerRow = ws.getRow(1);
     headerRow.height = 22;
     headerRow.eachCell((cell, colIdx) => {
-      cell.font = { bold: true, color: { argb: HEADER_FG }, size: 11, name: "Calibri" };
+      cell.font = { bold: true, color: { argb: HEADER_FG }, size: 11, name: CELL_FONT };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
       cell.border = {
         top: { style: "medium", color: { argb: ACCENT } },
@@ -988,7 +1008,7 @@ export async function buildXlsx(data: TabularData): Promise<Buffer> {
           fgColor: { argb: isOdd ? ROW_ODD : ROW_EVEN },
         };
         cell.border = thinBorder;
-        cell.font = { name: "Calibri", size: 10 };
+        cell.font = { name: CELL_FONT, size: 10 };
         cell.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
 
         if (type === "currency") {
@@ -1105,18 +1125,38 @@ function parseBullets(content: string): string[] {
     .filter(Boolean);
 }
 
-export async function buildDocx(data: DocumentData): Promise<Buffer> {
-  const ACCENT = "6366F1";
-  const DARK = "1E1B4B";
+export async function buildDocx(
+  data: DocumentData,
+  brandKit?: BrandKit | null,
+): Promise<Buffer> {
+  const ACCENT = toDocxColor(brandKit?.accentColor) ?? "6366F1";
+  const DARK = toDocxColor(brandKit?.primaryColor) ?? "1E1B4B";
   const GRAY = "6B7280";
+  const KIT_FONT = brandKit?.headingFont ?? "Calibri";
 
   const children: (Paragraph | Table)[] = [];
+
+  // Brand kit logo — top-left header block
+  if (brandKit?.logoBuf) {
+    children.push(
+      new Paragraph({
+        children: [
+          new ImageRun({
+            data: brandKit.logoBuf,
+            transformation: { width: 120, height: 60 },
+            type: (brandKit.logoMimeType?.includes("png") ? "png" : "jpg") as "png" | "jpg",
+          }),
+        ],
+        spacing: { after: 160 },
+      }),
+    );
+  }
 
   // Title
   children.push(
     new Paragraph({
       children: [
-        new TextRun({ text: data.title, bold: true, size: 48, color: DARK, font: "Calibri" }),
+        new TextRun({ text: data.title, bold: true, size: 48, color: DARK, font: KIT_FONT }),
       ],
       spacing: { after: data.subtitle ? 80 : 240 },
     }),
@@ -1126,7 +1166,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
   if (data.subtitle) {
     children.push(
       new Paragraph({
-        children: [new TextRun({ text: data.subtitle, size: 22, color: GRAY, font: "Calibri" })],
+        children: [new TextRun({ text: data.subtitle, size: 22, color: GRAY, font: KIT_FONT })],
         spacing: { after: 240 },
       }),
     );
@@ -1151,7 +1191,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
               bold: true,
               size: 28,
               color: DARK,
-              font: "Calibri",
+              font: KIT_FONT,
             }),
           ],
           spacing: { before: 400, after: 120 },
@@ -1173,7 +1213,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
           for (const line of parseBullets(trimmed)) {
             children.push(
               new Paragraph({
-                children: [new TextRun({ text: line, size: 22, font: "Calibri" })],
+                children: [new TextRun({ text: line, size: 22, font: KIT_FONT })],
                 bullet: { level: 0 },
                 spacing: { after: 80 },
               }),
@@ -1183,7 +1223,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
           children.push(
             new Paragraph({
               children: [
-                new TextRun({ text: trimmed, size: 22, color: "374151", font: "Calibri" }),
+                new TextRun({ text: trimmed, size: 22, color: "374151", font: KIT_FONT }),
               ],
               alignment: AlignmentType.JUSTIFIED,
               spacing: { after: 180, line: 300 },
@@ -1198,7 +1238,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
       for (const bullet of section.bullets) {
         children.push(
           new Paragraph({
-            children: [new TextRun({ text: bullet.trim(), size: 22, font: "Calibri" })],
+            children: [new TextRun({ text: bullet.trim(), size: 22, font: KIT_FONT })],
             bullet: { level: 0 },
             spacing: { after: 80 },
           }),
@@ -1213,7 +1253,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
       const ROW_FILL_ODD = "F5F4FF";
       const makeCellPara = (text: string, bold: boolean) =>
         new Paragraph({
-          children: [new TextRun({ text, bold, size: 18, font: "Calibri", color: DARK })],
+          children: [new TextRun({ text, bold, size: 18, font: KIT_FONT, color: DARK })],
           spacing: { before: 60, after: 60 },
           indent: { left: convertInchesToTwip(0.05) },
         });
@@ -1283,7 +1323,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
             bold: true,
             size: 28,
             color: DARK,
-            font: "Calibri",
+            font: KIT_FONT,
           }),
         ],
         spacing: { before: 400, after: 120 },
@@ -1294,7 +1334,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
     for (const chart of topLevelCharts) {
       children.push(
         new Paragraph({
-          children: [new TextRun({ text: chart.title, bold: true, size: 22, font: "Calibri" })],
+          children: [new TextRun({ text: chart.title, bold: true, size: 22, font: KIT_FONT })],
           spacing: { before: 160, after: 80 },
         }),
       );
@@ -1323,7 +1363,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
     styles: {
       default: {
         document: {
-          run: { font: "Calibri", size: 22 },
+          run: { font: KIT_FONT, size: 22 },
         },
       },
     },
@@ -1365,7 +1405,10 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
 // PDF builder
 // ---------------------------------------------------------------------------
 
-export async function buildPdf(data: DocumentData): Promise<Buffer> {
+export async function buildPdf(
+  data: DocumentData,
+  brandKit?: BrandKit | null,
+): Promise<Buffer> {
   const PDFDocument = (await import("pdfkit")).default;
   const sectionChartImages = await Promise.all(
     data.sections.map((section) =>
@@ -1376,6 +1419,12 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
   const topLevelChartImages = await Promise.all(
     topLevelCharts.map((chart) => renderChartPng(chart, 900, 420)),
   );
+
+  // Resolved brand-kit values — fall back to default palette when absent
+  const PDF_PRIMARY = toPdfColor(brandKit?.primaryColor) ?? "#1E1B4B";
+  const PDF_ACCENT = toPdfColor(brandKit?.accentColor) ?? "#6366F1";
+  const PDF_HEAD_BOLD = toPdfFont(brandKit?.headingFont, true);
+  const PDF_HEAD = toPdfFont(brandKit?.headingFont, false);
 
   return new Promise((resolve, reject) => {
     const MARGIN = 60;
@@ -1410,17 +1459,26 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
       doc.y += chartH + 18;
     };
 
+    // Brand kit logo — top-right of first page header
+    if (brandKit?.logoBuf) {
+      try {
+        doc.image(brandKit.logoBuf, PAGE_W - MARGIN - 120, MARGIN, { height: 40 });
+      } catch {
+        // Non-fatal — logo format may be unsupported; continue without it.
+      }
+    }
+
     // Title block
     doc
-      .font("Helvetica-Bold")
+      .font(PDF_HEAD_BOLD)
       .fontSize(22)
-      .fillColor("#1E1B4B")
+      .fillColor(PDF_PRIMARY)
       .text(data.title, MARGIN, MARGIN, { width: CONTENT_W });
 
     if (data.subtitle) {
       doc
         .moveDown(0.3)
-        .font("Helvetica")
+        .font(PDF_HEAD)
         .fontSize(11)
         .fillColor("#6B7280")
         .text(data.subtitle, { width: CONTENT_W });
@@ -1432,7 +1490,7 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
     doc
       .moveTo(MARGIN, ruleY)
       .lineTo(PAGE_W - MARGIN, ruleY)
-      .strokeColor("#6366F1")
+      .strokeColor(PDF_ACCENT)
       .lineWidth(2)
       .stroke();
     doc.moveDown(1.2);
@@ -1449,12 +1507,12 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
       if (section.heading) {
         const headingY = doc.y;
         // Left accent bar
-        doc.save().rect(MARGIN, headingY, 3, 16).fillColor("#6366F1").fill().restore();
+        doc.save().rect(MARGIN, headingY, 3, 16).fillColor(PDF_ACCENT).fill().restore();
 
         doc
-          .font("Helvetica-Bold")
+          .font(PDF_HEAD_BOLD)
           .fontSize(13)
-          .fillColor("#1E1B4B")
+          .fillColor(PDF_PRIMARY)
           .text(section.heading, MARGIN + 10, headingY, { width: CONTENT_W - 10 });
         doc.moveDown(0.4);
       }
@@ -1474,11 +1532,11 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
               doc
                 .save()
                 .circle(MARGIN + 5, bulletY + 5, 2)
-                .fillColor("#6366F1")
+                .fillColor(PDF_ACCENT)
                 .fill()
                 .restore();
               doc
-                .font("Helvetica")
+                .font(PDF_HEAD)
                 .fontSize(11)
                 .fillColor("#374151")
                 .text(text, MARGIN + 14, bulletY, { width: CONTENT_W - 14, lineGap: 2 });
@@ -1487,7 +1545,7 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
             doc.moveDown(0.4);
           } else {
             doc
-              .font("Helvetica")
+              .font(PDF_HEAD)
               .fontSize(11)
               .fillColor("#374151")
               .text(trimmed, MARGIN, doc.y, { width: CONTENT_W, align: "justify", lineGap: 3 });
@@ -1504,11 +1562,11 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
           doc
             .save()
             .circle(MARGIN + 5, bulletY + 5, 2)
-            .fillColor("#6366F1")
+            .fillColor(PDF_ACCENT)
             .fill()
             .restore();
           doc
-            .font("Helvetica")
+            .font(PDF_HEAD)
             .fontSize(11)
             .fillColor("#374151")
             .text(trimmed, MARGIN + 14, bulletY, { width: CONTENT_W - 14, lineGap: 2 });
@@ -1601,17 +1659,17 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
         doc.y = MARGIN + 20;
       }
       doc
-        .font("Helvetica-Bold")
+        .font(PDF_HEAD_BOLD)
         .fontSize(13)
-        .fillColor("#1E1B4B")
+        .fillColor(PDF_PRIMARY)
         .text("Generated Charts", MARGIN, doc.y, { width: CONTENT_W });
       doc.moveDown(0.6);
 
       topLevelCharts.forEach((chart, index) => {
         doc
-          .font("Helvetica-Bold")
+          .font(PDF_HEAD_BOLD)
           .fontSize(11)
-          .fillColor("#1E1B4B")
+          .fillColor(PDF_PRIMARY)
           .text(chart.title, MARGIN, doc.y, { width: CONTENT_W });
         doc.moveDown(0.3);
         const image = topLevelChartImages[index];
@@ -1626,7 +1684,7 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
       doc.switchToPage(range.start + i);
       doc
         .save()
-        .font("Helvetica")
+        .font(PDF_HEAD)
         .fontSize(9)
         .fillColor("#9CA3AF")
         .text(`Page ${i + 1} of ${totalPages}`, MARGIN, doc.page.height - 40, {
@@ -2318,6 +2376,7 @@ export async function generateFileFromPrompt(
   language?: string,
   hasSourceData = false,
   subscriptionTier?: string | null,
+  brandKit?: BrandKit | null,
 ): Promise<GeneratedFileResult> {
   // Lazy-load AI provider + routing here so this module stays AI-free at import
   // time (see import note above). Only prompt-based generation needs a model.
@@ -2443,7 +2502,7 @@ export async function generateFileFromPrompt(
         "Could not extract the data from your file. Please try again, or re-upload it.",
       );
     }
-    fileBuffer = format === "csv" ? await buildCsv(data) : await buildXlsx(data);
+    fileBuffer = format === "csv" ? await buildCsv(data) : await buildXlsx(data, brandKit);
   } else if (isPptx) {
     const data = normalizePresentationFileData(aiData);
     title = data.title;
@@ -2453,7 +2512,7 @@ export async function generateFileFromPrompt(
         "Could not build slides from your file. Please try again, or re-upload it.",
       );
     }
-    fileBuffer = await buildPptx(data);
+    fileBuffer = await buildPptx(data, brandKit);
   } else {
     const data = normalizeDocumentFileData(aiData);
     title = data.title;
@@ -2463,7 +2522,7 @@ export async function generateFileFromPrompt(
         "Could not build a document from your file. Please try again, or re-upload it.",
       );
     }
-    fileBuffer = format === "docx" ? await buildDocx(data) : await buildPdf(data);
+    fileBuffer = format === "docx" ? await buildDocx(data, brandKit) : await buildPdf(data, brandKit);
   }
 
   const formatLabel = format.toUpperCase();

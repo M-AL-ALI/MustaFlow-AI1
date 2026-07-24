@@ -84,6 +84,12 @@ const ORA_FILE_HINTS = [
   /^lib\/ora-contracts\//,
   /^docs\/ora-stability-gate\.md$/,
   /^scripts\/src\/ora-stability-gate\.ts$/,
+  /^artifacts\/api-server\/src\/routes\/ora-brand-kit/i,
+  /^artifacts\/api-server\/src\/lib\/brand-kit/i,
+  /^artifacts\/api-server\/src\/lib\/public-ai\/brand-kit/i,
+  /^lib\/db\/src\/schema\/brand-kits/i,
+  /^artifacts\/mustaflow\/src\/pages\/ora-settings/i,
+  /^artifacts\/ora-mobile\/app\/\(home\)\/settings/i,
 ];
 
 const ORA_FEATURE_REGISTRY: OraFeature[] = [
@@ -434,6 +440,25 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     manualMobile:
       "Repeat the XLSX+PPTX 'update the deck from the spreadsheet' and two-DOCX compare flows on mobile; verify the same files/roles appear under the reply (web parity) and the ambiguous two-deck ask arrives via the /chat fallback (streamed replies never ask).",
   },
+  {
+    id: "brand-kit-file-branding",
+    title:
+      "Brand Kit: per-user CRUD (colors/fonts/logo), DB schema, file-builder branding (DOCX/XLSX/PPTX/PDF), and Settings section",
+    ownerSurfaces: ["api", "website", "mobile"],
+    fileHints: [
+      /ora-brand-kit/i,
+      /brand-kit-apply/i,
+      /brand-kit-loader/i,
+      /brand-kits\.ts$/i,
+      /brand-kit-file-builder/i,
+      /brand-kit-api/i,
+      /brand-kit-route/i,
+    ],
+    manualWebsite:
+      "In Ora Settings → Brand Kit, set a primary color, accent color, heading font, and upload a logo. Generate a DOCX, XLSX, PPTX, and PDF and verify each output uses the custom palette. Verify the logo appears on the title slide (PPTX) and document header (DOCX). Reset the brand kit and confirm the defaults are restored.",
+    manualMobile:
+      "In Settings → Brand Kit, verify the read-only color swatches, font names, and logo thumbnail match what was set on the website. Tap 'Edit on website' and confirm the Ora Settings Brand Kit section opens in the in-app browser.",
+  },
 ];
 
 const API_PUBLIC_AI_CORE = [
@@ -461,6 +486,7 @@ const API_FILE_IMAGE = [
   "src/lib/public-ai/__tests__/professional-doc.test.ts",
   "src/lib/public-ai/__tests__/xlsx-workbook-edit.test.ts",
   "src/routes/public-ai/__tests__/export-file.test.ts",
+  "src/lib/public-ai/__tests__/brand-kit-file-builder.test.ts",
 ].join(" ");
 
 const API_SEARCH = [
@@ -520,6 +546,7 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/ora-project-spaces.test.ts",
   "src/routes/__tests__/ora-support-surface-isolation.test.ts",
   "src/routes/__tests__/ora-tiers-meta.test.ts",
+  "src/routes/__tests__/brand-kit-api.test.ts",
 ].join(" ");
 
 const WEB_REALTIME = [

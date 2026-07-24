@@ -27,6 +27,7 @@ import {
   Focus,
   RefreshCw,
   Activity,
+  Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
@@ -1749,6 +1750,275 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
   );
 }
 
+const SAFE_FONTS_WEB = [
+  "Calibri",
+  "Arial",
+  "Times New Roman",
+  "Georgia",
+  "Helvetica",
+  "Tahoma",
+  "Verdana",
+  "Trebuchet MS",
+] as const;
+type SafeFont = (typeof SAFE_FONTS_WEB)[number];
+
+interface BrandKitApiResponse {
+  primaryColor?: string | null;
+  accentColor?: string | null;
+  headingFont?: string | null;
+  bodyFont?: string | null;
+  logoAssetId?: number | null;
+  logoUrl?: string | null;
+}
+
+function BrandKitSection() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [primaryColor, setPrimaryColor] = useState("#1E1B4B");
+  const [accentColor, setAccentColor] = useState("#6366F1");
+  const [headingFont, setHeadingFont] = useState<SafeFont>("Calibri");
+  const [bodyFont, setBodyFont] = useState<SafeFont>("Calibri");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoAssetId, setLogoAssetId] = useState<number | null>(null);
+  const { toast } = useToast();
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void authFetch("/api/ora/brand-kit")
+      .then((r) => (r.ok ? r.json() : Promise.resolve({})))
+      .then((d: BrandKitApiResponse) => {
+        if (d.primaryColor) setPrimaryColor(d.primaryColor);
+        if (d.accentColor) setAccentColor(d.accentColor);
+        if (d.headingFont && (SAFE_FONTS_WEB as readonly string[]).includes(d.headingFont))
+          setHeadingFont(d.headingFont as SafeFont);
+        if (d.bodyFont && (SAFE_FONTS_WEB as readonly string[]).includes(d.bodyFont))
+          setBodyFont(d.bodyFont as SafeFont);
+        if (d.logoUrl) setLogoUrl(d.logoUrl);
+        if (d.logoAssetId != null) setLogoAssetId(d.logoAssetId);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await authFetch("/api/ora/brand-kit", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ primaryColor, accentColor, headingFont, bodyFont, logoAssetId }),
+      });
+      if (!r.ok) throw new Error("Save failed");
+      toast({ description: "Brand Kit saved." });
+    } catch {
+      setError("Could not save Brand Kit. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ description: "Please select an image file.", variant: "destructive" });
+      return;
+    }
+    setUploadingLogo(true);
+    try {
+      const form = new FormData();
+      form.append("logo", file);
+      const r = await authFetch("/api/ora/brand-kit/logo", { method: "POST", body: form });
+      if (!r.ok) throw new Error("Upload failed");
+      const d = (await r.json()) as { assetId: number; logoUrl: string };
+      setLogoAssetId(d.assetId);
+      setLogoUrl(d.logoUrl);
+      toast({ description: "Logo uploaded." });
+    } catch {
+      toast({ description: "Logo upload failed.", variant: "destructive" });
+    } finally {
+      setUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleReset = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await authFetch("/api/ora/brand-kit", { method: "DELETE" });
+      setPrimaryColor("#1E1B4B");
+      setAccentColor("#6366F1");
+      setHeadingFont("Calibri");
+      setBodyFont("Calibri");
+      setLogoUrl(null);
+      setLogoAssetId(null);
+      toast({ description: "Brand Kit reset to defaults." });
+    } catch {
+      setError("Could not reset. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <SectionCard
+      icon={Palette}
+      title="Brand Kit"
+      description="Customize the colors, fonts, and logo applied to files Ora generates for you (DOCX, XLSX, PPTX, PDF)."
+    >
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bk-primary">
+              Primary color
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                id="bk-primary"
+                type="color"
+                value={primaryColor}
+                onChange={(e) => setPrimaryColor(e.target.value)}
+                className="h-9 w-12 cursor-pointer rounded border border-border bg-card p-0.5"
+              />
+              <span className="font-mono text-xs text-muted-foreground">
+                {primaryColor.toUpperCase()}
+              </span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bk-accent">
+              Accent color
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                id="bk-accent"
+                type="color"
+                value={accentColor}
+                onChange={(e) => setAccentColor(e.target.value)}
+                className="h-9 w-12 cursor-pointer rounded border border-border bg-card p-0.5"
+              />
+              <span className="font-mono text-xs text-muted-foreground">
+                {accentColor.toUpperCase()}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bk-heading-font">
+              Heading font
+            </label>
+            <select
+              id="bk-heading-font"
+              value={headingFont}
+              onChange={(e) => setHeadingFont(e.target.value as SafeFont)}
+              className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm"
+            >
+              {SAFE_FONTS_WEB.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bk-body-font">
+              Body font
+            </label>
+            <select
+              id="bk-body-font"
+              value={bodyFont}
+              onChange={(e) => setBodyFont(e.target.value as SafeFont)}
+              className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm"
+            >
+              {SAFE_FONTS_WEB.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <span className="text-sm font-medium">Logo</span>
+          <div className="flex items-center gap-3">
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt="Brand logo"
+                className="h-10 max-w-[120px] rounded border border-border bg-muted object-contain p-1"
+              />
+            )}
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={(e) => void handleLogoUpload(e)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={uploadingLogo}
+              onClick={() => logoInputRef.current?.click()}
+            >
+              {uploadingLogo ? (
+                <>
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Uploading
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="mr-2 h-3.5 w-3.5" />
+                  {logoUrl ? "Replace logo" : "Upload logo"}
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            PNG, JPEG, WebP, or SVG. Appears on the title slide and document header.
+          </p>
+        </div>
+
+        {error && <p className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex items-center gap-3 pt-1">
+          <Button onClick={() => void handleSave()} disabled={saving}>
+            {saving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving
+              </>
+            ) : (
+              <>
+                <Save className="mr-2 h-4 w-4" />
+                Save Brand Kit
+              </>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleReset()}
+            disabled={saving}
+            className="text-muted-foreground"
+          >
+            Reset to defaults
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 function OraSettingsInner() {
   const { newConversation } = useOraConversations();
   const [, navigate] = useLocation();
@@ -1800,6 +2070,7 @@ function OraSettingsInner() {
           <ChatDiagnosticsSection />
           <AccountSyncSection />
           <MemorySection />
+          <BrandKitSection />
           <PlanLimitsSection targetSection={targetSection} />
         </div>
       </main>

@@ -17,6 +17,7 @@ import {
   Mic,
   Monitor,
   Moon,
+  Palette,
   RefreshCw,
   Shield,
   Sun,
@@ -2166,6 +2167,23 @@ export default function SettingsScreen() {
               ))}
             </View>
           )}
+        </SectionCard>
+
+        {/* ── Brand Kit ──────────────────────────────────────────────────── */}
+        <SectionCard title="Brand Kit" icon={Palette}>
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 20 }}>
+              Set custom colors, fonts, and a logo that Ora applies to every file it generates
+              (DOCX, XLSX, PPTX, PDF). Configure on the website.
+            </Text>
+            <Button
+              label="Edit Brand Kit"
+              onPress={() =>
+                void WebBrowser.openBrowserAsync(`https://${DOMAIN}/ora/settings`)
+              }
+              full
+            />
+          </View>
         </SectionCard>
       </ScrollView>
     </View>

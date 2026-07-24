@@ -145,6 +145,7 @@
     "verify-preview-ws-smoke": "tsx ./src/verify-preview-ws-smoke.ts",
     "probe-preview-ws": "tsx ./src/probe-preview-ws.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
+    "migrate-brand-kits": "tsx ./src/migrate-brand-kits.ts",
     "ora-benchmark": "tsx ./src/ora-benchmark.ts",
     "benchmark-streaming": "tsx ./src/benchmark-ora-streaming.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
