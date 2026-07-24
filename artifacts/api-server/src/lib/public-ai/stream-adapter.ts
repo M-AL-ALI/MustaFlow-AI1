@@ -1,31 +1,36 @@
 import type { Response } from "express";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { OraActivityEvent } from "@workspace/ora-contracts";
 import type { Provider } from "../ai-provider-config";
 import { classifyProviderError, type ProviderErrorKind } from "./model-router";
 
 /**
  * SSE event shapes emitted by /api/public-ai/chat/stream.
  *
- * start  — headers flushed, stream open; lets the client know the connection
- *          is established before the first AI token arrives. Carries optional
- *          `conversationId` so the client can correlate stream events to the
- *          persisted conversation row.
- * token  — incremental text fragment streamed token-by-token from the AI
- *          provider. Field is `text` (not `delta`) for readability.
- * status — specialist tool is running (file-gen, image-gen, search); no tokens
- *          follow for that branch (client falls back to /chat).
- * done   — stream complete; carries the full metadata set equivalent to the
- *          non-streaming /api/public-ai/chat JSON response.
- * error  — unrecoverable error that occurred after SSE headers were already
- *          flushed. `code` is a machine-readable category; `message` is
- *          human-readable. The client distinguishes pre-first-token errors
- *          (silent /chat fallback) from post-first-token errors (partial text
- *          already displayed; show a cut-off notice).
+ * start    — headers flushed, stream open; lets the client know the connection
+ *            is established before the first AI token arrives. Carries optional
+ *            `conversationId` so the client can correlate stream events to the
+ *            persisted conversation row.
+ * token    — incremental text fragment streamed token-by-token from the AI
+ *            provider. Field is `text` (not `delta`) for readability.
+ * status   — legacy live-work narration line (repo analysis). Kept for already
+ *            shipped clients; new clients prefer the typed `activity` event.
+ * activity — typed live activity trace step (tool + start/ok/fail phase + human
+ *            line) — the structured extension of `status`. Fire-and-forget;
+ *            clients that don't know it ignore it.
+ * done     — stream complete; carries the full metadata set equivalent to the
+ *            non-streaming /api/public-ai/chat JSON response.
+ * error    — unrecoverable error that occurred after SSE headers were already
+ *            flushed. `code` is a machine-readable category; `message` is
+ *            human-readable. The client distinguishes pre-first-token errors
+ *            (silent /chat fallback) from post-first-token errors (partial text
+ *            already displayed; show a cut-off notice).
  */
 export type OraStreamEvent =
   | { type: "start"; conversationId?: string; messageId?: string }
   | { type: "token"; text: string }
   | { type: "status"; text: string }
+  | OraActivityEvent
   | { type: "done"; payload: OraStreamDonePayload }
   | { type: "error"; code: string; message: string; fallbackToken?: string };
 

@@ -8,11 +8,25 @@ import type {
   OraUsedFile,
   OraFileCitation,
   OraFileAgentPreview,
+  OraActivityStep,
+} from "@workspace/ora-contracts";
+import {
+  oraActivityStep,
+  oraActivityToolForRoutedTool,
+  oraAnalyzingDatasetText,
+  oraReadingFileText,
+  parseOraActivityStep,
+  ORA_ANALYZING_IMAGE_TEXT,
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { getReferenceSavedMemories, getReferenceChatHistory } from "@/lib/ora-memory-settings";
+import {
+  clearedOraActivity,
+  reduceOraActivity,
+  type OraActivityTraceStep,
+} from "@/lib/ora-activity";
 
 export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 
@@ -269,6 +283,13 @@ export interface UseOraChatReturn {
   isLoading: boolean;
   /** Live work narration from SSE `status` events (repo analysis etc.). */
   streamStatus: string | null;
+  /**
+   * Live activity trace for the in-flight turn: the animated, step-by-step
+   * "what Ora is doing" line (web search, file generation, image generation,
+   * repo analysis, file reading). Bounded, newest last; empty when idle.
+   * Cleared on the first real answer token.
+   */
+  activitySteps: OraActivityTraceStep[];
   error: string | null;
   atLimit: boolean;
   language: string;
@@ -957,6 +978,7 @@ async function consumeOraStream(
   onToken: (delta: string) => void,
   signal: AbortSignal,
   onStatus?: (text: string) => void,
+  onActivity?: (step: OraActivityStep) => void,
 ): Promise<StreamDonePayload> {
   const res = await safeAuthFetch(`${base}/api/public-ai/chat/stream`, {
     method: "POST",
@@ -981,7 +1003,16 @@ async function consumeOraStream(
     const data = (await res.json().catch(() => ({}))) as {
       streamingFallback?: boolean;
       error?: string;
+      tool?: string;
     };
+    // Specialist-tool bounce: the JSON signal names the tool the /chat retry is
+    // about to run, so surface the matching "start" activity step now — the
+    // trace shows "Searching the web…" / "Generating your file…" for the whole
+    // non-streaming wait. Uses the shared wording map (web/mobile identical).
+    const bouncedTool = oraActivityToolForRoutedTool(data.tool);
+    if (data.streamingFallback && bouncedTool) {
+      onActivity?.(oraActivityStep(bouncedTool, "start"));
+    }
     throw Object.assign(new Error(data.error ?? "streaming_unavailable"), {
       streamingFallback: true,
     });
@@ -1063,6 +1094,11 @@ async function consumeOraStream(
         // Connection confirmed — no action needed, just a liveness signal.
       } else if (eventType === "status") {
         onStatus?.((parsed as { text: string }).text);
+      } else if (eventType === "activity") {
+        // Typed live activity trace step (tool + start/ok/fail + human line).
+        // Malformed frames are dropped — activity is display-only.
+        const step = parseOraActivityStep(parsed);
+        if (step) onActivity?.(step);
       } else if (eventType === "token") {
         const text = (parsed as { text: string }).text;
         firstTokenReceived = true;
@@ -1131,6 +1167,26 @@ export function useOraChat(): UseOraChatReturn {
   // Live work narration from SSE `status` events (repo analysis etc.) —
   // shown in place of the generic "thinking" indicator, cleared on first token.
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  // Live activity trace for the in-flight turn (typed tool steps). A living
+  // line, not a log: pushActivity folds a step into the bounded trace and
+  // clearActivity empties it (first token, turn end, errors).
+  const [activitySteps, setActivitySteps] = useState<OraActivityTraceStep[]>([]);
+  const pushActivity = useCallback((step: OraActivityStep) => {
+    setActivitySteps((prev) => reduceOraActivity(prev, step));
+  }, []);
+  const clearActivity = useCallback(() => {
+    setActivitySteps(clearedOraActivity());
+  }, []);
+  // Honest failure line: if a tool step is still in progress when the turn
+  // errors out, flip it to its shared "tried and failed" wording.
+  const failInFlightActivity = useCallback(() => {
+    setActivitySteps((prev) => {
+      const current = prev[prev.length - 1];
+      return current && current.phase === "start"
+        ? reduceOraActivity(prev, oraActivityStep(current.tool, "fail"))
+        : prev;
+    });
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguageState] = useState<string>(getStoredLanguage);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
@@ -1761,6 +1817,8 @@ export function useOraChat(): UseOraChatReturn {
       });
       setIsLoading(true);
       setError(null);
+      // Fresh turn — drop any stale activity trace from the previous send.
+      clearActivity();
 
       const history = baseMessages
         .slice(-RECENT_WINDOW)
@@ -1808,11 +1866,13 @@ export function useOraChat(): UseOraChatReturn {
             setPendingImageAnalysis(true);
             body.imageRef = currentAttachment.fileRef;
 
+            pushActivity(oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT));
             const data = await apiPost<{
               reply: string;
               imageAnalysisCount: number;
               imageAnalysisLimit: number;
             }>("/api/public-ai/image-analysis", body);
+            pushActivity(oraActivityStep("file-reading", "ok"));
 
             setMessages((prev) => {
               const next = [
@@ -1838,6 +1898,13 @@ export function useOraChat(): UseOraChatReturn {
             );
           } else if (currentAttachment.isDataset) {
             body.fileRef = currentAttachment.fileRef;
+            pushActivity(
+              oraActivityStep(
+                "file-reading",
+                "start",
+                oraAnalyzingDatasetText(currentAttachment.filename),
+              ),
+            );
             const data = await apiPost<{
               result: DatasetAnalysisResult;
               msgCount: number;
@@ -1847,6 +1914,7 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/dataset-analysis", body);
+            pushActivity(oraActivityStep("file-reading", "ok"));
 
             setMessages((prev) => {
               const next = [
@@ -1867,6 +1935,13 @@ export function useOraChat(): UseOraChatReturn {
             setSession((prev) => mergeUsage(prev, data));
           } else {
             body.fileRef = currentAttachment.fileRef;
+            pushActivity(
+              oraActivityStep(
+                "file-reading",
+                "start",
+                oraReadingFileText(currentAttachment.filename),
+              ),
+            );
             const data = await apiPost<{
               reply: string;
               msgCount: number;
@@ -1876,6 +1951,7 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/file-analysis", body);
+            pushActivity(oraActivityStep("file-reading", "ok"));
 
             setMessages((prev) => {
               const next = [
@@ -2000,6 +2076,16 @@ export function useOraChat(): UseOraChatReturn {
             needsClarification?: boolean;
             clarificationKind?: OraClarificationKind;
             pendingTaskContext?: OraPendingClarification;
+            activity?: OraActivityStep[];
+          };
+
+          // Server-reported terminal activity steps (the non-streaming tool
+          // paths report ok/fail with the response since they have no SSE).
+          const applyServerActivity = (d: ChatResponseData): void => {
+            for (const raw of d.activity ?? []) {
+              const step = parseOraActivityStep(raw);
+              if (step) pushActivity(step);
+            }
           };
 
           const buildAssistantMsg = (d: ChatResponseData): OraMessage => ({
@@ -2067,7 +2153,9 @@ export function useOraChat(): UseOraChatReturn {
             // the stream route would only bounce it back with a streamingFallback
             // signal — skip that round-trip and POST straight to /chat with
             // forceSearch:true.
+            pushActivity(oraActivityStep("web-search", "start"));
             data = await apiPost<ChatResponseData>("/api/public-ai/chat", body);
+            applyServerActivity(data);
             setLastOraStreamDiagnostics(
               mapOraStreamDiagnostics({
                 mode: body.mode,
@@ -2086,10 +2174,18 @@ export function useOraChat(): UseOraChatReturn {
                 { role: "assistant" as const, content: "", isStreaming: true },
               ]);
 
+              // The activity trace is cleared on the FIRST real answer token
+              // and stays cleared — late activity frames (e.g. the post-stream
+              // false-delivery rescue) must not resurrect the trace row.
+              let sawFirstToken = false;
               const donePayload = await consumeOraStream(
                 BASE,
                 body,
                 (delta) => {
+                  if (!sawFirstToken) {
+                    sawFirstToken = true;
+                    clearActivity();
+                  }
                   setStreamStatus(null);
                   // flushSync forces React to commit this update synchronously,
                   // bypassing automatic batching. Without it, when the Replit dev
@@ -2113,6 +2209,9 @@ export function useOraChat(): UseOraChatReturn {
                 },
                 streamAbort.signal,
                 (statusText) => setStreamStatus(statusText),
+                (step) => {
+                  if (!sawFirstToken) pushActivity(step);
+                },
               );
 
               isRealStreamingPayload = donePayload.isRealStreaming ?? true;
@@ -2180,6 +2279,7 @@ export function useOraChat(): UseOraChatReturn {
                 ...body,
                 ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),
               });
+              applyServerActivity(data);
               setLastOraStreamDiagnostics(
                 mapOraStreamDiagnostics({
                   mode: body.mode,
@@ -2260,6 +2360,10 @@ export function useOraChat(): UseOraChatReturn {
       try {
         await executeApiCall();
       } catch (err: unknown) {
+        // Whatever tool was mid-flight gets its honest "tried and failed" line
+        // (invisible once the error banner replaces the loading row, but keeps
+        // the trace state truthful for diagnostics and retries).
+        failInFlightActivity();
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;
         if (status === 429) {
@@ -2341,7 +2445,18 @@ export function useOraChat(): UseOraChatReturn {
         setStreamStatus(null);
       }
     },
-    [isLoading, messages, language, attachedFile, isSignedIn, saveToServer, mode],
+    [
+      isLoading,
+      messages,
+      language,
+      attachedFile,
+      isSignedIn,
+      saveToServer,
+      mode,
+      pushActivity,
+      clearActivity,
+      failInFlightActivity,
+    ],
   );
 
   const generateFile = useCallback(
@@ -2362,6 +2477,11 @@ export function useOraChat(): UseOraChatReturn {
       });
       setIsLoading(true);
       setError(null);
+      // Live activity trace: explicit file generation runs on a non-streaming
+      // route, so synthesize the shared "Generating your file…" start step here
+      // and let the response's terminal step (or the catch) close it.
+      clearActivity();
+      pushActivity(oraActivityStep("file-generation", "start"));
 
       try {
         const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
@@ -2406,8 +2526,13 @@ export function useOraChat(): UseOraChatReturn {
           imageLimit?: number;
           resetsAt?: string | null;
           windowHours?: number;
+          activity?: OraActivityStep[];
         }>("/api/public-ai/generate-file", body);
 
+        for (const raw of data.activity ?? []) {
+          const step = parseOraActivityStep(raw);
+          if (step) pushActivity(step);
+        }
         setMessages((prev) => {
           const next = [
             ...prev,
@@ -2431,6 +2556,8 @@ export function useOraChat(): UseOraChatReturn {
         });
         setSession((prev) => mergeUsage(prev, data));
       } catch (err: unknown) {
+        // Honest terminal step for the in-flight "Generating your file…" line.
+        failInFlightActivity();
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;
         if (status === 429) {
@@ -2539,7 +2666,17 @@ export function useOraChat(): UseOraChatReturn {
         setStreamStatus(null);
       }
     },
-    [isLoading, messages, language, isSignedIn, saveToServer, currentOraProjectId],
+    [
+      isLoading,
+      messages,
+      language,
+      isSignedIn,
+      saveToServer,
+      currentOraProjectId,
+      pushActivity,
+      clearActivity,
+      failInFlightActivity,
+    ],
   );
 
   // Inline image editing: refine an Ora-generated image with a text instruction.
@@ -2944,6 +3081,7 @@ export function useOraChat(): UseOraChatReturn {
     session,
     isLoading,
     streamStatus,
+    activitySteps,
     error,
     atLimit,
     language,

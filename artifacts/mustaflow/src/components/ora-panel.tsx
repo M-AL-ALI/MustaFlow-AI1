@@ -58,6 +58,8 @@ import { OraUsedFilesChip } from "@/components/ora/ora-used-files-chip";
 import { OraFileCitationsChip } from "@/components/ora/ora-file-citations-chip";
 import { OraFileAgentPreviewCard } from "@/components/ora/ora-file-agent-preview-card";
 import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
+import { OraActivityTrace } from "@/components/ora/ora-activity-trace";
+import { currentOraActivityStep } from "@/lib/ora-activity";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
@@ -544,6 +546,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     session,
     oraStatus,
     streamStatus,
+    activitySteps,
     clearConversation,
     sessionExpired,
     dismissSessionExpired,
@@ -1413,7 +1416,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           </div>
           {oraStatus !== "idle" && (
             <span className="text-[11px] text-muted-foreground animate-pulse">
-              {STATUS_LABELS[oraStatus]}
+              {currentOraActivityStep(activitySteps)?.text ?? STATUS_LABELS[oraStatus]}
             </span>
           )}
         </div>
@@ -2084,10 +2087,16 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     />
                   ))}
                 </div>
-                {(streamStatus || oraStatus !== "idle") && (
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {streamStatus ?? STATUS_LABELS[oraStatus]}
-                  </span>
+                {activitySteps.length > 0 ? (
+                  // Live activity trace: the fading, step-by-step "what Ora is
+                  // doing" line (web search, files, images, repo analysis).
+                  <OraActivityTrace steps={activitySteps} />
+                ) : (
+                  (streamStatus || oraStatus !== "idle") && (
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {streamStatus ?? STATUS_LABELS[oraStatus]}
+                    </span>
+                  )
                 )}
               </div>
             </div>

@@ -52,6 +52,149 @@ export type LegalSection = (typeof LEGAL_SECTIONS)[number];
  * persistence tests — this shape is what is written to and read from storage.
  */
 
+/* ── Live activity trace ────────────────────────────────────────────────────
+ * Single source of truth for the Ora activity trace: the animated, step-by-step
+ * "what Ora is doing right now" line shown while a reply is being prepared
+ * (web search, file generation, image generation, repo analysis, file reading).
+ *
+ * The server emits `{ type: "activity", phase, tool, text }` frames on the
+ * existing SSE stream (an extension of the `status` event — same channel), and
+ * both clients synthesize the same steps for the non-streaming specialist-tool
+ * paths. ALL human-visible wording lives here so the website and mobile app
+ * always show byte-identical copy for the same tool + phase.
+ *
+ * Wording rules: present-continuous while running ("Searching the web…"),
+ * short on success, honest on failure. NEVER include provider names, model
+ * ids, stack traces, or filesystem paths in activity text.
+ */
+
+export const ORA_ACTIVITY_TOOLS = [
+  "web-search",
+  "file-generation",
+  "image-generation",
+  "repo-analysis",
+  "file-reading",
+] as const;
+
+export type OraActivityTool = (typeof ORA_ACTIVITY_TOOLS)[number];
+
+export const ORA_ACTIVITY_PHASES = ["start", "ok", "fail"] as const;
+
+export type OraActivityPhase = (typeof ORA_ACTIVITY_PHASES)[number];
+
+/** One step of the live activity trace (tool + lifecycle phase + human line). */
+export interface OraActivityStep {
+  tool: OraActivityTool;
+  phase: OraActivityPhase;
+  text: string;
+}
+
+/** The SSE wire shape: an OraActivityStep tagged with the event type. */
+export interface OraActivityEvent extends OraActivityStep {
+  type: "activity";
+}
+
+/** Default copy per tool + phase — the branded, user-friendly voice. */
+export const ORA_ACTIVITY_TEXT: Record<
+  OraActivityTool,
+  Record<OraActivityPhase, string>
+> = {
+  "web-search": {
+    start: "Searching the web…",
+    ok: "Search complete",
+    fail: "Web search failed — answering from what I know",
+  },
+  "file-generation": {
+    start: "Generating your file…",
+    ok: "File ready",
+    fail: "File generation failed — continuing",
+  },
+  "image-generation": {
+    start: "Creating your image…",
+    ok: "Image ready",
+    fail: "Image generation failed — continuing",
+  },
+  "repo-analysis": {
+    start: "Reading the repository…",
+    ok: "Repository analysis complete",
+    fail: "Couldn't finish reading the repository — continuing",
+  },
+  "file-reading": {
+    start: "Reading your file…",
+    ok: "Finished reading",
+    fail: "Couldn't read that file — continuing",
+  },
+};
+
+/** Resolve the shared copy for a tool + phase. */
+export function oraActivityText(tool: OraActivityTool, phase: OraActivityPhase): string {
+  return ORA_ACTIVITY_TEXT[tool][phase];
+}
+
+/** Build an activity step, defaulting the text to the shared copy. */
+export function oraActivityStep(
+  tool: OraActivityTool,
+  phase: OraActivityPhase,
+  text?: string,
+): OraActivityStep {
+  return { tool, phase, text: text?.trim() ? text : oraActivityText(tool, phase) };
+}
+
+/** "Found N sources" — the web-search success line (source-count aware). */
+export function oraWebSearchOkText(sourceCount: number): string {
+  if (!Number.isFinite(sourceCount) || sourceCount <= 0) return ORA_ACTIVITY_TEXT["web-search"].ok;
+  return sourceCount === 1 ? "Found 1 source" : `Found ${sourceCount} sources`;
+}
+
+/** "Reading report.docx…" — name-aware document-reading line. */
+export function oraReadingFileText(fileName: string): string {
+  const name = fileName.trim();
+  return name ? `Reading ${name}…` : ORA_ACTIVITY_TEXT["file-reading"].start;
+}
+
+/** "Analyzing sales.xlsx…" — name-aware dataset-analysis line. */
+export function oraAnalyzingDatasetText(fileName: string): string {
+  const name = fileName.trim();
+  return name ? `Analyzing ${name}…` : ORA_ACTIVITY_TEXT["file-reading"].start;
+}
+
+/** "Analyzing your image…" — image-analysis line (never echoes the file name). */
+export const ORA_ANALYZING_IMAGE_TEXT = "Analyzing your image…";
+
+/**
+ * Map the server's routed-tool ids (as carried on the streamingFallback JSON
+ * signal: "search" | "file_generation" | "image_generation" | "image_editing")
+ * to an activity tool, so clients can show the right "start" step while the
+ * non-streaming /chat specialist branch runs. Unknown tools → null (no trace).
+ */
+export function oraActivityToolForRoutedTool(tool: string | undefined): OraActivityTool | null {
+  switch (tool) {
+    case "search":
+      return "web-search";
+    case "file_generation":
+      return "file-generation";
+    case "image_generation":
+    case "image_editing":
+      return "image-generation";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Validate an unknown parsed SSE `data:` payload as an activity step.
+ * Hand-rolled (no zod) so the mobile bundle stays slim; returns null for
+ * anything malformed so a bad frame can never break the stream loop.
+ */
+export function parseOraActivityStep(value: unknown): OraActivityStep | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as { tool?: unknown; phase?: unknown; text?: unknown };
+  if (!(ORA_ACTIVITY_TOOLS as readonly string[]).includes(v.tool as string)) return null;
+  if (!(ORA_ACTIVITY_PHASES as readonly string[]).includes(v.phase as string)) return null;
+  if (typeof v.text !== "string" || v.text.length === 0 || v.text.length > 300) return null;
+  return { tool: v.tool as OraActivityTool, phase: v.phase as OraActivityPhase, text: v.text };
+}
+
 /* ── Scalar unions ──────────────────────────────────────────────────────── */
 
 export type OraRole = "user" | "assistant";

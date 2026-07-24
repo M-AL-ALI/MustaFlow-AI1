@@ -491,6 +491,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
 
 const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/current-datetime-block.test.ts",
+  "src/lib/public-ai/__tests__/ora-activity-events.test.ts",
   "src/lib/public-ai/__tests__/ora-repo-readonly.test.ts",
   "src/lib/public-ai/__tests__/model-router.test.ts",
   "src/lib/public-ai/__tests__/multi-file-intelligence.test.ts",
@@ -591,6 +592,7 @@ const WEB_ORA_UI = [
   "src/components/ora/__tests__/ora-chat-ux-wiring.test.ts",
   "src/components/ora/__tests__/ora-github-repo-wiring.test.ts",
   "src/components/ora/__tests__/ora-used-files-wiring.test.ts",
+  "src/hooks/__tests__/ora-activity-trace.test.ts",
   "src/hooks/__tests__/ora-clarification-wiring.test.ts",
   "src/lib/__tests__/blocker-fixes-b39.test.ts",
   "src/pages/__tests__/billing-plan-cards.test.ts",
@@ -631,6 +633,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/brand-kit-mobile-wiring.test.ts",
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
+  "lib/__tests__/ora-activity-wiring.test.ts",
   "lib/__tests__/ora-memory-scope-wiring.test.ts",
   "lib/__tests__/ora-mobile-parity.test.ts",
   "lib/__tests__/ora-session-recovery.test.ts",

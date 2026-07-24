@@ -32,7 +32,15 @@ import {
   planOraClarification,
   resolveClarificationContinuation,
 } from "../../lib/public-ai/clarification-planner";
-import { oraPendingClarificationSchema } from "@workspace/ora-contracts";
+import {
+  oraActivityStep,
+  oraPendingClarificationSchema,
+  oraWebSearchOkText,
+} from "@workspace/ora-contracts";
+import {
+  createOraActivityEmitter,
+  type OraActivityEmitter,
+} from "../../lib/public-ai/activity-events";
 import type { AuthedOraUser } from "../../lib/public-ai/authed-user";
 import type { Provider } from "../../lib/ai-provider-config";
 import type { OraVideo } from "../../lib/public-ai/web-search";
@@ -1212,6 +1220,8 @@ async function rescueClaimedFileDelivery(params: {
   authed: AuthedOraUser | null;
   oraProjectId: number | null | undefined;
   logComponent: string;
+  /** Live activity trace emitter — present on the streaming route only. */
+  activity?: OraActivityEmitter;
 }): Promise<RescuedFileDelivery | null> {
   const claimedFormat = detectClaimedFileDelivery(params.reply);
   if (!claimedFormat) return null;
@@ -1219,6 +1229,7 @@ async function rescueClaimedFileDelivery(params: {
     { component: params.logComponent, claimedFormat },
     "Conversational reply claimed a file delivery with no file attached — generating it for real",
   );
+  params.activity?.start("file-generation");
   try {
     const { generateFileFromPrompt } = await import("../../lib/public-ai/file-builder");
     const filePrompt = params.carriedDocs
@@ -1253,6 +1264,7 @@ async function rescueClaimedFileDelivery(params: {
         );
       }
     }
+    params.activity?.ok("file-generation");
     return {
       reply: result.reply,
       fileName: result.fileName,
@@ -1261,6 +1273,7 @@ async function rescueClaimedFileDelivery(params: {
       assetId,
     };
   } catch (err) {
+    params.activity?.fail("file-generation");
     logger.error(
       { component: params.logComponent, claimedFormat, err },
       "False-delivery rescue generation failed — replacing claim with honest correction",
@@ -1834,6 +1847,9 @@ router.post("/public-ai/chat", async (req, res) => {
         ...(result.editQuality ? { editQuality: result.editQuality } : {}),
         fileAgentPreview,
         ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
+        // Live activity trace terminal step (no SSE on this route; clients
+        // synthesized the "start" step from the streamingFallback tool signal).
+        activity: [oraActivityStep("file-generation", "ok")],
         ...usage,
         serverDiag: routeDiag,
       });
@@ -1843,12 +1859,15 @@ router.post("/public-ai/chat", async (req, res) => {
         { component: "ora-chat-file", format: detectedFormat, err },
         "Auto file generation failed",
       );
+      const failActivity = [oraActivityStep("file-generation", "fail")];
       // A FileGenerationError carries a user-safe message (e.g. the model lost
       // the attached data) — surface it instead of the generic 500 fallback.
       if (err instanceof FileGenerationError) {
-        res.status(422).json({ error: err.message });
+        res.status(422).json({ error: err.message, activity: failActivity });
       } else {
-        res.status(500).json({ error: "Failed to generate file. Please try again." });
+        res
+          .status(500)
+          .json({ error: "Failed to generate file. Please try again.", activity: failActivity });
       }
     }
     return;
@@ -1883,6 +1902,7 @@ router.post("/public-ai/chat", async (req, res) => {
       res.json({
         reply:
           "Image generation isn't configured on this server right now. Please try again later.",
+        activity: [oraActivityStep("image-generation", "fail")],
         ...usage,
       });
       return;
@@ -1962,6 +1982,7 @@ router.post("/public-ai/chat", async (req, res) => {
           style: imageProfile.style,
           quality: imageProfile.quality,
         },
+        activity: [oraActivityStep("image-generation", "ok")],
         ...usage,
         serverDiag: routeDiag,
       });
@@ -2007,7 +2028,10 @@ router.post("/public-ai/chat", async (req, res) => {
     } catch (err) {
       await refundOraQuotaFor(authed, quotaKind);
       logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
-      res.status(500).json({ error: "Failed to generate the image. Please try again." });
+      res.status(500).json({
+        error: "Failed to generate the image. Please try again.",
+        activity: [oraActivityStep("image-generation", "fail")],
+      });
     }
     return;
   }
@@ -2041,6 +2065,7 @@ router.post("/public-ai/chat", async (req, res) => {
       res.json({
         reply:
           "Live web search isn't configured on this server right now. I can still help from what I already know.",
+        activity: [oraActivityStep("web-search", "fail")],
         ...usage,
       });
       return;
@@ -2087,6 +2112,9 @@ router.post("/public-ai/chat", async (req, res) => {
         images: result.images,
         videos: result.videos,
         ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
+        activity: [
+          oraActivityStep("web-search", "ok", oraWebSearchOkText(result.sources?.length ?? 0)),
+        ],
         ...usage,
         serverDiag: routeDiag,
       });
@@ -2128,6 +2156,7 @@ router.post("/public-ai/chat", async (req, res) => {
           error:
             "Live search is temporarily unavailable. I could not verify current results. Please try again in a moment — your message is still here.",
           searchRetryable: true,
+          activity: [oraActivityStep("web-search", "fail")],
         });
         return;
       }
@@ -2206,6 +2235,9 @@ router.post("/public-ai/chat", async (req, res) => {
           searchFallback: true,
           searchRetryable,
           ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
+          // Honest "tried and failed" trace step: live search failed and this
+          // answer came from the model's own knowledge instead.
+          activity: [oraActivityStep("web-search", "fail")],
           ...usage,
           serverDiag: routeDiag,
         });
@@ -2222,6 +2254,7 @@ router.post("/public-ai/chat", async (req, res) => {
           error:
             "I couldn't reach live web results just now. Please try again in a moment — your message is still here.",
           searchRetryable: true,
+          activity: [oraActivityStep("web-search", "fail")],
         });
       }
     }
@@ -3281,12 +3314,18 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   });
   timing.t6 = Date.now(); // SSE headers flushed + start event emitted
 
+  // Live activity trace: typed start/ok/fail steps riding the same SSE stream.
+  // Fire-and-forget — a write failure can never take down the answer stream.
+  const activity: OraActivityEmitter = createOraActivityEmitter((ev) => writeSSE(res, ev));
+
   // ── Ora repo analysis (read-only) ──────────────────────────────────────────
   // When the signed-in user has an active GitHub repo session, run the
   // Claude Code-style investigation loop first: each read-tool step is
-  // narrated live via `status` events, and the collected evidence is injected
-  // as UNTRUSTED context for the final streamed answer. Anonymous users and
-  // users without a session skip this entirely (zero change to normal chat).
+  // narrated live — as legacy `status` events for already-shipped clients AND
+  // as typed `activity` steps for the animated trace — and the collected
+  // evidence is injected as UNTRUSTED context for the final streamed answer.
+  // Anonymous users and users without a session skip this entirely (zero
+  // change to normal chat).
   if (authed) {
     try {
       const { runRepoInvestigation, REPO_GUIDANCE_ADDENDUM } =
@@ -3295,7 +3334,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         userId: authed.userId,
         message,
         candidates,
-        onStatus: (text) => writeSSE(res, { type: "status", text }),
+        onStatus: (text, phase) => {
+          writeSSE(res, { type: "status", text });
+          if (phase === "ok") activity.ok("repo-analysis", text);
+          else if (phase === "fail") activity.fail("repo-analysis", text);
+          else activity.start("repo-analysis", text);
+        },
       });
       if (investigation) {
         callMessages.push({
@@ -3303,7 +3347,13 @@ router.post("/public-ai/chat/stream", async (req, res) => {
           content: `${investigation.contextBlock}${REPO_GUIDANCE_ADDENDUM}`,
         });
       }
+      // Close the trace if the analyst returned without its own terminal line
+      // (no-op when it already emitted ok/fail or never started).
+      activity.ok("repo-analysis");
     } catch (repoErr) {
+      // Honest failure step (no-op when the investigation never narrated),
+      // then continue gracefully — a repo failure never kills the stream.
+      activity.fail("repo-analysis");
       logger.warn(
         { component: "ora-chat-stream", err: repoErr },
         "ora-repo: investigation failed; continuing without repo context",
@@ -3477,6 +3527,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     authed,
     oraProjectId,
     logComponent: "ora-chat-stream",
+    activity,
   });
   if (rescuedDelivery) {
     reply = rescuedDelivery.reply;

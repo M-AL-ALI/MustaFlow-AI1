@@ -1,4 +1,12 @@
 import { getAuthToken, requireAuthToken, TokenUnavailableError } from "./auth-client";
+// Shared activity-trace helpers (tiny hand-rolled functions, zod-free) so the
+// mobile trace shows byte-identical wording to the website.
+import {
+  oraActivityStep,
+  oraActivityToolForRoutedTool,
+  parseOraActivityStep,
+} from "@workspace/ora-contracts";
+import type { OraActivityStep } from "@workspace/ora-contracts";
 
 import type {
   AnalysisResponse,
@@ -755,6 +763,7 @@ export async function streamChatNative(
   onToken: (delta: string) => void | Promise<void>,
   signal?: AbortSignal,
   onStatus?: (text: string) => void,
+  onActivity?: (step: OraActivityStep) => void,
 ): Promise<StreamChatNativeResult> {
   const callStart = Date.now();
   const diag: StreamChatDiagnostics = {
@@ -852,6 +861,11 @@ export async function streamChatNative(
 
         if (type === "status") {
           onStatus?.((parsed as { text?: string }).text ?? "");
+        } else if (type === "activity") {
+          // Typed live activity trace step (tool + start/ok/fail + human line).
+          // Malformed frames are dropped — activity is display-only.
+          const step = parseOraActivityStep(parsed);
+          if (step) onActivity?.(step);
         } else if (type === "token") {
           const text = (parsed as { text?: string }).text ?? "";
           if (!firstTokenReceived) {
@@ -915,6 +929,23 @@ export async function streamChatNative(
     diag.contentType = xhrResult.contentType;
 
     if (!xhrResult.ok || !xhrResult.contentType.includes("text/event-stream")) {
+      // Specialist-tool bounce: the JSON signal (delivered whole into the SSE
+      // buffer — no "\n\n" separators) names the tool the /chat fallback is
+      // about to run. Surface the matching "start" activity step now so the
+      // trace shows "Searching the web…" / "Generating your file…" for the
+      // whole non-streaming wait. Shared wording map — identical to web.
+      try {
+        const bounce = JSON.parse(sseBuffer.trim()) as {
+          streamingFallback?: boolean;
+          tool?: string;
+        };
+        const bouncedTool = oraActivityToolForRoutedTool(bounce.tool);
+        if (bounce.streamingFallback && bouncedTool) {
+          onActivity?.(oraActivityStep(bouncedTool, "start"));
+        }
+      } catch {
+        // Not a JSON bounce signal — nothing to narrate.
+      }
       finish("null_bad_response");
       return null;
     }

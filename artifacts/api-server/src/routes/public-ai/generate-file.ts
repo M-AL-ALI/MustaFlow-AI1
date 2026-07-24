@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { oraActivityStep } from "@workspace/ora-contracts";
 import { logger } from "../../lib/logger";
 import {
   validateSession,
@@ -398,17 +399,23 @@ router.post("/public-ai/generate-file", async (req, res) => {
       ...(result.editQuality ? { editQuality: result.editQuality } : {}),
       fileAgentPreview,
       ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
+      // Live activity trace terminal step (no SSE on this route; clients
+      // synthesize the "start" step when they kick off the generation).
+      activity: [oraActivityStep("file-generation", "ok")],
       ...usage,
     });
   } catch (err) {
     if (authed) await refundOraQuota(authed.userId, "message");
     logger.error({ component: "ora-generate-file", format, err }, "File generation failed");
+    const failActivity = [oraActivityStep("file-generation", "fail")];
     // FileGenerationError carries a user-safe message (e.g. the model lost the
     // attached data) — surface it instead of the generic 500 fallback.
     if (FileGenerationErrorCtor && err instanceof FileGenerationErrorCtor) {
-      res.status(422).json({ error: err.message });
+      res.status(422).json({ error: err.message, activity: failActivity });
     } else {
-      res.status(500).json({ error: "Failed to generate file. Please try again." });
+      res
+        .status(500)
+        .json({ error: "Failed to generate file. Please try again.", activity: failActivity });
     }
   }
 });

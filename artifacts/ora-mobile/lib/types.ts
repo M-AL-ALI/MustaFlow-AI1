@@ -32,9 +32,13 @@ export type {
   OraFileCitation,
   OraFileCitationKind,
   OraFileAgentPreview,
+  OraActivityTool,
+  OraActivityPhase,
+  OraActivityStep,
 } from "@workspace/ora-contracts";
 
 import type {
+  OraActivityStep,
   OraClarificationKind,
   OraFileCitation,
   OraFileAgentPreview,
@@ -410,6 +414,12 @@ export interface ChatResponse {
   clarificationKind?: OraClarificationKind;
   /** Opaque task context to round-trip on the user's next message. */
   pendingTaskContext?: OraPendingClarification;
+  /**
+   * Live activity trace terminal steps reported with the response (the
+   * non-streaming tool paths have no SSE, so ok/fail rides the JSON).
+   * Wording comes from the shared @workspace/ora-contracts copy map.
+   */
+  activity?: OraActivityStep[];
 }
 
 export interface UploadResponse {

@@ -191,6 +191,7 @@ import type {
   FocusMode,
   VoicePreset,
   GeneratedFile,
+  OraActivityStep,
   OraConversationSummary,
   OraFileEditQuality,
   OraMessage,
@@ -199,6 +200,15 @@ import type {
   OraProjectSummary,
   OraSession,
 } from "@/lib/types";
+// Shared activity-trace wording (tiny zod-free helpers) — identical copy to web.
+import {
+  oraActivityStep,
+  oraAnalyzingDatasetText,
+  oraReadingFileText,
+  parseOraActivityStep,
+  ORA_ANALYZING_IMAGE_TEXT,
+} from "@workspace/ora-contracts";
+import type { OraActivityRowStep } from "@/components/ora/OraThinkingRow";
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -629,6 +639,24 @@ export default function OraChatScreen() {
   const [showRepoPicker, setShowRepoPicker] = useState(false);
   const [githubConnected, setGithubConnected] = useState(false);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  // Live activity trace: the current typed tool step (web search, file gen,
+  // image gen, repo analysis, file reading) shown by OraThinkingRow with a
+  // fade-in/fade-out lifecycle. One living step, cleared on first token.
+  const [streamActivity, setStreamActivity] = useState<OraActivityRowStep | null>(null);
+  const activityIdRef = useRef(0);
+  // Fold an incoming shared-shape step into the single-row trace: a terminal
+  // ok/fail updates the in-progress step in place (same id — the row
+  // crossfades); anything else becomes a NEW keyed step (fade out old, fade
+  // in new). Mirrors the website reducer in mustaflow/src/lib/ora-activity.ts.
+  const pushActivity = useCallback((step: OraActivityStep) => {
+    setStreamActivity((prev) => {
+      if (step.phase !== "start" && prev && prev.tool === step.tool && prev.phase === "start") {
+        return { ...prev, phase: step.phase, text: step.text };
+      }
+      activityIdRef.current += 1;
+      return { id: activityIdRef.current, tool: step.tool, text: step.text, phase: step.phase };
+    });
+  }, []);
   const [sessionSyncError, setSessionSyncError] = useState<"token_unavailable" | null>(null);
   const [messages, setMessages] = useState<OraMessage[]>([]);
   const [input, setInput] = useState("");
@@ -1240,6 +1268,8 @@ export default function OraChatScreen() {
       const next = [...base, userMsg, pendingMsg];
       setMessages(next);
       setSending(true);
+      // Fresh turn — drop any stale activity trace from the previous send.
+      setStreamActivity(null);
       scrollToEnd();
 
       try {
@@ -1247,9 +1277,13 @@ export default function OraChatScreen() {
 
         if (attch) {
           // Attachment analysis — no streaming on these specialized endpoints.
+          // Narrate via the shared activity trace ("Reading …" / "Analyzing …")
+          // so the thinking row shows the same wording as the website.
           const prompt = text || "Please analyze this attachment.";
           if (attch.kind === "image") {
+            pushActivity(oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT));
             const res = await analyzeImage(attch.ref, prompt, history);
+            pushActivity(oraActivityStep("file-reading", "ok"));
             assistant = {
               id: pendingId,
               role: "assistant",
@@ -1257,7 +1291,11 @@ export default function OraChatScreen() {
               messageKind: "image-analysis",
             };
           } else if (attch.kind === "dataset") {
+            pushActivity(
+              oraActivityStep("file-reading", "start", oraAnalyzingDatasetText(attch.filename)),
+            );
             const { result } = await analyzeDataset(attch.ref, prompt, history);
+            pushActivity(oraActivityStep("file-reading", "ok"));
             const profile = result.datasetProfile;
             const summary =
               typeof result.summary === "string" && result.summary.trim()
@@ -1277,7 +1315,11 @@ export default function OraChatScreen() {
               ...(result.fileAgentPreview ? { fileAgentPreview: result.fileAgentPreview } : {}),
             };
           } else {
+            pushActivity(
+              oraActivityStep("file-reading", "start", oraReadingFileText(attch.filename)),
+            );
             const res = await analyzeDocument(attch.ref, prompt, history);
+            pushActivity(oraActivityStep("file-reading", "ok"));
             assistant = {
               id: pendingId,
               role: "assistant",
@@ -1341,6 +1383,15 @@ export default function OraChatScreen() {
             }
           };
 
+          // Server-reported terminal activity steps (non-streaming tool paths
+          // report ok/fail with the JSON response since they have no SSE).
+          const applyServerActivity = (res: ChatResponse | null) => {
+            for (const raw of res?.activity ?? []) {
+              const step = parseOraActivityStep(raw);
+              if (step) pushActivity(step);
+            }
+          };
+
           if (opts?.forceSearch) {
             // "Retry live search" must deterministically re-run the LIVE web-search
             // tool. Search is a non-streaming specialist branch that the stream
@@ -1349,7 +1400,9 @@ export default function OraChatScreen() {
             // forced search still fails the server returns a retryable 503 (handled
             // in catch) instead of repeating the general-knowledge fallback the
             // user just rejected.
+            pushActivity(oraActivityStep("web-search", "start"));
             const res = await sendChat(chatReq);
+            applyServerActivity(res);
             applyPendingClarification(res);
             assistant = {
               id: pendingId,
@@ -1369,7 +1422,13 @@ export default function OraChatScreen() {
             const streamResult = await streamChatNative(
               chatReq,
               (delta) => {
-                if (streamedContent.length === 0) setStreamStatus(null);
+                // First real answer token clears the activity trace and the
+                // legacy status line — and the trace stays cleared (late
+                // activity frames are ignored below).
+                if (streamedContent.length === 0) {
+                  setStreamStatus(null);
+                  setStreamActivity(null);
+                }
                 streamedContent += delta;
                 const content = streamedContent;
                 setMessages((prev) =>
@@ -1380,12 +1439,18 @@ export default function OraChatScreen() {
               },
               abortController.signal,
               (statusText) => setStreamStatus(statusText),
+              (step) => {
+                if (streamedContent.length === 0) pushActivity(step);
+              },
             );
 
             if (streamResult === null) {
               // Streaming could not start — fall back to regular /chat.
+              // (streamChatNative already surfaced the specialist tool's
+              // "start" step when the bounce signal named one.)
               notifyStreamFallbackCalled();
               const res = await sendChat(chatReq);
+              applyServerActivity(res);
               applyPendingClarification(res);
               assistant = {
                 id: pendingId,
@@ -1446,6 +1511,7 @@ export default function OraChatScreen() {
                   ? { streamFallbackToken: streamResult.fallbackToken }
                   : {}),
               });
+              applyServerActivity(res);
               applyPendingClarification(res);
               assistant = {
                 id: pendingId,
@@ -1489,6 +1555,13 @@ export default function OraChatScreen() {
         }
       } catch (err) {
         if (abortController.signal.aborted) return;
+        // Honest failure line for whatever tool was mid-flight (kept truthful
+        // even though the error bubble replaces the thinking row).
+        setStreamActivity((prev) =>
+          prev && prev.phase === "start"
+            ? { ...prev, phase: "fail", text: oraActivityStep(prev.tool, "fail").text }
+            : prev,
+        );
         // Session-expiry phrasing is rewritten by the API layer's silent
         // recovery; this guard ensures the raw server wording can never render
         // even from an unwrapped path.
@@ -1518,6 +1591,7 @@ export default function OraChatScreen() {
       } finally {
         setSending(false);
         setStreamStatus(null);
+        setStreamActivity(null);
         if (streamAbortRef.current === abortController) {
           streamAbortRef.current = null;
         }
@@ -1533,6 +1607,7 @@ export default function OraChatScreen() {
       persist,
       scheduleTalkRestart,
       isSignedIn,
+      pushActivity,
     ],
   );
 
@@ -1613,6 +1688,10 @@ export default function OraChatScreen() {
       const next = [...messages, userMsg, pendingMsg];
       setMessages(next);
       setSending(true);
+      // Live activity trace: file generation is non-streaming, so synthesize
+      // the shared "Generating your file…" start step for the thinking row.
+      setStreamActivity(null);
+      pushActivity(oraActivityStep("file-generation", "start"));
       scrollToEnd();
 
       try {
@@ -1627,6 +1706,10 @@ export default function OraChatScreen() {
           // in-place rather than regenerating the file from scratch.
           activeAssetId: activeAssetId ?? null,
         });
+        for (const raw of res.activity ?? []) {
+          const step = parseOraActivityStep(raw);
+          if (step) pushActivity(step);
+        }
         const assistant: OraMessage = {
           id: pendingId,
           role: "assistant",
@@ -1646,6 +1729,8 @@ export default function OraChatScreen() {
           setActiveArtifactRef({ assetId: res.assetId, fileName: res.fileName, format });
         }
       } catch (err) {
+        // Honest terminal step for the in-flight "Generating your file…" line.
+        pushActivity(oraActivityStep("file-generation", "fail"));
         const msg = friendlyOraSendErrorMessage(err, "Couldn't create that file. Try again.");
         setMessages((prev) =>
           prev.map((m) =>
@@ -1657,9 +1742,10 @@ export default function OraChatScreen() {
       } finally {
         setSending(false);
         setStreamStatus(null);
+        setStreamActivity(null);
       }
     },
-    [sending, messages, temporary, language, scrollToEnd, persist],
+    [sending, messages, temporary, language, scrollToEnd, persist, pushActivity],
   );
 
   const handleReviseGeneratedFile = useCallback((file: GeneratedFile) => {
@@ -3144,7 +3230,11 @@ export default function OraChatScreen() {
           onContentSizeChange={scrollToEnd}
           ListFooterComponent={
             showThinkingRow ? (
-              <OraThinkingRow accentColor={tierAccent} label={streamStatus ?? "Thinking…"} />
+              <OraThinkingRow
+                accentColor={tierAccent}
+                label={streamStatus ?? "Thinking…"}
+                activity={streamActivity}
+              />
             ) : null
           }
           ListEmptyComponent={
