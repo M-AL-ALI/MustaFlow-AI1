@@ -471,6 +471,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /repo-analyst/i,
       /ora-github/i,
       /ora-github-repo/i,
+      /ora-repo-/i,
       /RepoPickerSheet/i,
       /migrate-ora-github/i,
     ],

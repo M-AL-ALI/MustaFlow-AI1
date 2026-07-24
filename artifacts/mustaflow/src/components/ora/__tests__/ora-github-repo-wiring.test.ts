@@ -42,7 +42,7 @@ describe("use-ora-chat status events", () => {
   it("parses SSE status events into streamStatus", () => {
     expect(hook).toContain('eventType === "status"');
     expect(hook).toContain("streamStatus");
-    expect(hook).toMatch(/onStatus\?\: \(text: string\) => void/);
+    expect(hook).toMatch(/onStatus\?: \(text: string\) => void/);
   });
 });
 
