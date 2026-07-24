@@ -2,6 +2,16 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Fix: dead "Connect GitHub" button when OAuth is unconfigured (2026-07-24)
+
+Reported from the live site: the Connect GitHub button rendered greyed-out and unclickable with no explanation. Root cause was two layered issues — (1) the server correctly reports `available: false` when `GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET` are unset, and (2) the UI turned that into `disabled={busy || status?.available === false}`, i.e. a dead control with zero indication of why. A disabled button with no reason is a UX defect regardless of the underlying config state.
+
+- **Website** (`ora-settings.tsx`): the section is now a three-way branch — connected / unavailable / connect. When `available === false` it renders an explanatory panel (`data-testid="ora-github-unavailable"`) instead of a dead button; the Connect button is disabled only while a request is in flight (`disabled={busy}`). A 503 from `/ora/github/connect` now flips the section to the same explanatory panel rather than showing a vague toast.
+- **Mobile** (`app/(home)/settings.tsx`): matching three-way branch, so an unconfigured server explains itself instead of offering a Connect action that always fails with a generic alert.
+- **Tests:** 4 new regression assertions (3 website, 1 mobile) pinning the explanation text, the `disabled={busy}`-only rule, and the 503 handling, so the dead-button state cannot silently return.
+
+**Operator note:** the feature itself is unaffected — to enable connecting, set `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` in the deployment environment (Ora reuses the Builder's OAuth app credentials; see replit.md → Required Env).
+
 ## Fix: production boot must create Ora GitHub + Brand Kit tables (2026-07-24)
 
 A Codex review flagged that `ora_github_connections`/`ora_repo_sessions` were only created by the manual `migrate-ora-github` script, not by `runStartupMigrations()` (which genuinely does run automatically on every server boot, per `index.ts`). A fresh production DB that skipped the manual migration step would 500 on `/api/ora/github/*`. Verified the same gap exists for `brand_kits` — it was never added to `startup-migrations.ts` either, despite that file's own docstring promising to cover "all outstanding schema migrations." Declined Codex's proposed textual parity test (asserting two files mention the same keywords proves nothing about correctness) in favor of a functional one.

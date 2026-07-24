@@ -1804,13 +1804,20 @@ function GithubConnectionSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platform: "web" }),
       });
+      if (res.status === 503) {
+        // Server reports GitHub OAuth is not configured — flip the section to
+        // the explanatory panel instead of leaving a button that does nothing.
+        setStatus((prev) => ({ ...(prev ?? { connected: false, login: null }), available: false }));
+        setBusy(false);
+        return;
+      }
       if (!res.ok) throw new Error("connect failed");
       const { url } = (await res.json()) as { url: string };
       window.location.href = url;
     } catch {
       toast({
         title: "Could not start GitHub connection",
-        description: "GitHub sign-in may not be configured. Try again later.",
+        description: "Something went wrong reaching GitHub. Please try again.",
         variant: "destructive",
       });
       setBusy(false);
@@ -1851,6 +1858,17 @@ function GithubConnectionSection() {
             Disconnect
           </button>
         </div>
+      ) : status?.available === false ? (
+        // Server has no GitHub OAuth credentials configured. Say so plainly —
+        // never render a disabled button with no explanation for why it is dead.
+        <div
+          data-testid="ora-github-unavailable"
+          className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground"
+        >
+          GitHub sign-in isn&apos;t set up on this server yet, so connecting is unavailable right
+          now. Once it&apos;s configured, you&apos;ll be able to connect here and Ora can read and
+          analyze your repositories.
+        </div>
       ) : (
         <div className="flex items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground">
@@ -1860,7 +1878,7 @@ function GithubConnectionSection() {
             type="button"
             data-testid="ora-github-connect"
             onClick={() => void connect()}
-            disabled={busy || status?.available === false}
+            disabled={busy}
             className="inline-flex items-center gap-2 rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {busy ? (

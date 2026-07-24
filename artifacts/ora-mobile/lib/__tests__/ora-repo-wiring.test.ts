@@ -52,6 +52,13 @@ describe("mobile settings GitHub section", () => {
     expect(settings).toContain("disconnectGithub");
     expect(settings).toMatch(/read-only/i);
   });
+
+  // Website parity: an unconfigured server must explain itself rather than
+  // offering a Connect action that cannot succeed.
+  it("explains unavailability instead of offering an action that cannot succeed", () => {
+    expect(settings).toContain("githubStatus?.available === false");
+    expect(settings).toMatch(/isn't set up on this server/);
+  });
 });
 
 describe("repo picker sheet", () => {

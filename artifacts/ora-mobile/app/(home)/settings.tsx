@@ -2212,6 +2212,13 @@ export default function SettingsScreen() {
                   full
                 />
               </View>
+            ) : githubStatus?.available === false ? (
+              // Server has no GitHub OAuth credentials — say why instead of
+              // offering an action that cannot succeed (website parity).
+              <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 20 }}>
+                GitHub sign-in isn't set up on this server yet, so connecting is unavailable right
+                now. Once it's configured you'll be able to connect here.
+              </Text>
             ) : (
               <Button
                 label="Connect GitHub"
