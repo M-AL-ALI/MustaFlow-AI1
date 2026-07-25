@@ -10,8 +10,9 @@
  * HARD BOUNDARY: this module only downloads and reads. No function here
  * mutates a repository or talks to GitHub with anything but GET.
  */
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { createGunzip } from "node:zlib";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -145,6 +146,171 @@ export function resolveWorkspacePath(root: string, relPath: string): string | nu
   return resolved;
 }
 
+// ── Pure-JS tar.gz extraction ────────────────────────────────────────────────
+// Deliberately no system `tar` / no child process: deployment containers may
+// not ship the binary, and a failed spawn's stdin emits an unhandled `error`
+// event that can crash the whole server mid-request. Built-in zlib + a
+// minimal ustar/pax parser has no environment dependency at all.
+
+function cstr(buf: Buffer, offset: number, length: number): string {
+  const slice = buf.subarray(offset, offset + length);
+  const nul = slice.indexOf(0);
+  return slice.subarray(0, nul === -1 ? length : nul).toString("utf8");
+}
+
+const PAX_COLLECT_CAP = 64 * 1024;
+
+/**
+ * Streaming ustar/pax extractor for GitHub tarballs. Strips the leading
+ * `owner-repo-sha/` root directory, writes ONLY regular files that pass the
+ * sandbox guards (path safety, skip-dirs, binary/size caps), and ignores
+ * symlinks, hardlinks, and devices entirely — they are never created on disk.
+ * Exported for tests (fixtures are real `tar czf` output).
+ */
+export class TarGzEntryExtractor {
+  private buf: Buffer = Buffer.alloc(0);
+  private pending:
+    | { kind: "file"; fh: fs.FileHandle; remaining: number; padding: number }
+    | { kind: "collect"; chunks: Buffer[]; type: string; remaining: number; padding: number }
+    | { kind: "skip"; remaining: number; padding: number }
+    | null = null;
+  private paxPath: string | null = null;
+  private extractedBytes = 0;
+
+  constructor(private readonly dest: string) {}
+
+  async push(chunk: Buffer): Promise<void> {
+    this.buf = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
+    await this.drain();
+  }
+
+  async finish(): Promise<void> {
+    await this.drain();
+    if (this.pending) {
+      if (this.pending.kind === "file") await this.pending.fh.close().catch(() => {});
+      throw new Error("truncated tarball: archive ended mid-entry");
+    }
+  }
+
+  private async drain(): Promise<void> {
+    for (;;) {
+      if (this.pending) {
+        const take = Math.min(this.pending.remaining, this.buf.length);
+        if (take > 0) {
+          const data = this.buf.subarray(0, take);
+          if (this.pending.kind === "file") await this.pending.fh.write(data);
+          else if (this.pending.kind === "collect") this.pending.chunks.push(Buffer.from(data));
+          this.pending.remaining -= take;
+          this.buf = this.buf.subarray(take);
+        }
+        if (this.pending.remaining > 0) return;
+        if (this.buf.length < this.pending.padding) return;
+        this.buf = this.buf.subarray(this.pending.padding);
+        if (this.pending.kind === "file") await this.pending.fh.close();
+        else if (this.pending.kind === "collect") this.onMetadata(this.pending);
+        this.pending = null;
+        continue;
+      }
+
+      if (this.buf.length < 512) return;
+      const header = this.buf.subarray(0, 512);
+      this.buf = this.buf.subarray(512);
+      if (header.every((b) => b === 0)) continue; // end-of-archive blocks
+
+      const size = parseInt(cstr(header, 124, 12).trim() || "0", 8) || 0;
+      const typeflag = String.fromCharCode(header[156] ?? 0);
+      const padding = (512 - (size % 512)) % 512;
+      const prefix = cstr(header, 345, 155);
+      const rawName = cstr(header, 0, 100);
+      const name = this.paxPath ?? (prefix ? `${prefix}/${rawName}` : rawName);
+      this.paxPath = null;
+
+      // pax extended header ('x') / GNU longname ('L') carry the NEXT entry's
+      // real path; global pax ('g') is skipped like everything non-file.
+      if (typeflag === "x" || typeflag === "L") {
+        this.pending =
+          size <= PAX_COLLECT_CAP
+            ? { kind: "collect", chunks: [], type: typeflag, remaining: size, padding }
+            : { kind: "skip", remaining: size, padding };
+        continue;
+      }
+      if (typeflag !== "0" && typeflag !== "\0") {
+        // dirs, symlinks, hardlinks, devices, global pax — never materialized.
+        this.pending = { kind: "skip", remaining: size, padding };
+        continue;
+      }
+
+      // Strip the tarball's single root directory (owner-repo-sha/).
+      const slash = name.indexOf("/");
+      const relPath = slash === -1 ? "" : name.slice(slash + 1);
+      const abs = relPath ? resolveWorkspacePath(this.dest, relPath) : null;
+      const withinBudget =
+        size <= REPO_WORKSPACE_LIMITS.maxFileBytes &&
+        this.extractedBytes + size <= REPO_WORKSPACE_LIMITS.maxExtractedBytes;
+      if (!abs || !relPath || isSkippedPath(relPath) || isBinaryPath(relPath) || !withinBudget) {
+        this.pending = { kind: "skip", remaining: size, padding };
+        continue;
+      }
+
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      const fh = await fs.open(abs, "w");
+      this.extractedBytes += size;
+      this.pending = { kind: "file", fh, remaining: size, padding };
+    }
+  }
+
+  private onMetadata(entry: { chunks: Buffer[]; type: string }): void {
+    const data = Buffer.concat(entry.chunks).toString("utf8");
+    if (entry.type === "L") {
+      this.paxPath = data.replace(/\0+$/, "");
+      return;
+    }
+    // pax records: "<len> key=value\n"
+    const m = /(?:^|\n)\d+ path=([^\n]*)/.exec(data);
+    if (m?.[1]) this.paxPath = m[1];
+  }
+}
+
+/**
+ * Gunzip + extract a tarball from any byte source into `dest`.
+ * Exported for tests; `downloadAndExtract` feeds it the HTTP body.
+ */
+export async function extractTarGz(
+  source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  dest: string,
+): Promise<void> {
+  await fs.mkdir(dest, { recursive: true });
+  const gunzip = createGunzip();
+  const extractor = new TarGzEntryExtractor(dest);
+
+  let feedError: unknown = null;
+  const feed = (async () => {
+    try {
+      let received = 0;
+      for await (const value of source) {
+        received += value.byteLength;
+        if (received > REPO_WORKSPACE_LIMITS.maxTarballBytes) {
+          throw new Error(
+            `repository tarball exceeds the ${Math.round(REPO_WORKSPACE_LIMITS.maxTarballBytes / 1024 / 1024)} MB limit`,
+          );
+        }
+        if (!gunzip.write(Buffer.from(value))) await once(gunzip, "drain");
+      }
+      gunzip.end();
+    } catch (err) {
+      feedError = err;
+      gunzip.destroy(err as Error);
+    }
+  })();
+
+  for await (const chunk of gunzip) {
+    await extractor.push(chunk as Buffer);
+  }
+  await feed;
+  if (feedError) throw feedError;
+  await extractor.finish();
+}
+
 async function downloadAndExtract(url: string, token: string, dest: string): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REPO_WORKSPACE_LIMITS.materializeTimeoutMs);
@@ -162,46 +328,7 @@ async function downloadAndExtract(url: string, token: string, dest: string): Pro
     if (!res.ok || !res.body) {
       throw new Error(`tarball download failed: HTTP ${res.status}`);
     }
-
-    await fs.mkdir(dest, { recursive: true });
-    const tar = spawn("tar", ["-xz", "--strip-components=1", "-C", dest], {
-      stdio: ["pipe", "ignore", "pipe"],
-    });
-    let stderr = "";
-    tar.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString();
-    });
-
-    const tarDone = new Promise<void>((resolve, reject) => {
-      tar.on("error", reject);
-      tar.on("close", (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`tar exited ${code}: ${stderr.slice(0, 400)}`));
-      });
-    });
-
-    const reader = res.body.getReader();
-    let received = 0;
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.byteLength;
-        if (received > REPO_WORKSPACE_LIMITS.maxTarballBytes) {
-          tar.stdin.destroy();
-          throw new Error(
-            `repository tarball exceeds the ${Math.round(REPO_WORKSPACE_LIMITS.maxTarballBytes / 1024 / 1024)} MB limit`,
-          );
-        }
-        const ok = tar.stdin.write(Buffer.from(value));
-        if (!ok) await new Promise<void>((r) => tar.stdin.once("drain", () => r()));
-      }
-      tar.stdin.end();
-    } catch (err) {
-      tar.kill("SIGKILL");
-      throw err;
-    }
-    await tarDone;
+    await extractTarGz(res.body as unknown as AsyncIterable<Uint8Array>, dest);
   } finally {
     clearTimeout(timer);
   }

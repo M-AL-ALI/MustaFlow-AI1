@@ -100,6 +100,46 @@ describe("OAuth state HMAC", () => {
   });
 });
 
+describe("pure-JS tarball extraction (no system tar dependency)", () => {
+  it("extracts a real tar.gz, strips the root dir, and skips symlinks/binaries/node_modules", async () => {
+    const { extractTarGz } = await import("../repo-workspace");
+    const { execSync } = await import("node:child_process");
+    const stage = await fs.mkdtemp(path.join(os.tmpdir(), "ora-tarfix-"));
+    const repoDir = path.join(stage, "owner-repo-abc123");
+    await fs.mkdir(path.join(repoDir, "src"), { recursive: true });
+    await fs.mkdir(path.join(repoDir, "node_modules", "junk"), { recursive: true });
+    await fs.writeFile(path.join(repoDir, "README.md"), "hello ora\n");
+    await fs.writeFile(path.join(repoDir, "src", "app.ts"), "export const x = 1;\n");
+    await fs.writeFile(path.join(repoDir, "logo.png"), Buffer.from([137, 80, 78, 71]));
+    await fs.writeFile(path.join(repoDir, "node_modules", "junk", "index.js"), "junk\n");
+    await fs.symlink("/etc/passwd", path.join(repoDir, "evil-link"));
+    const longDir = "a-quite-long-directory-name-segment-for-pax/".repeat(3);
+    await fs.mkdir(path.join(repoDir, longDir), { recursive: true });
+    await fs.writeFile(path.join(repoDir, longDir, "deep.txt"), "deep pax path\n");
+    const tarPath = path.join(stage, "fixture.tar.gz");
+    execSync(`tar -czf ${JSON.stringify(tarPath)} -C ${JSON.stringify(stage)} owner-repo-abc123`);
+
+    const dest = await fs.mkdtemp(path.join(os.tmpdir(), "ora-tarout-"));
+    const gz = await fs.readFile(tarPath);
+    await extractTarGz([gz], dest);
+
+    expect(await fs.readFile(path.join(dest, "README.md"), "utf8")).toBe("hello ora\n");
+    expect(await fs.readFile(path.join(dest, "src", "app.ts"), "utf8")).toBe(
+      "export const x = 1;\n",
+    );
+    expect(await fs.readFile(path.join(dest, longDir, "deep.txt"), "utf8")).toBe("deep pax path\n");
+    await expect(fs.lstat(path.join(dest, "evil-link"))).rejects.toThrow();
+    await expect(fs.stat(path.join(dest, "logo.png"))).rejects.toThrow();
+    await expect(fs.stat(path.join(dest, "node_modules"))).rejects.toThrow();
+  });
+
+  it("rejects corrupt input instead of hanging", async () => {
+    const { extractTarGz } = await import("../repo-workspace");
+    const dest = await fs.mkdtemp(path.join(os.tmpdir(), "ora-tarbad-"));
+    await expect(extractTarGz([Buffer.from("not gzip at all")], dest)).rejects.toThrow();
+  });
+});
+
 describe("read tools against a real sandbox workspace", () => {
   let ws: RepoWorkspace;
   beforeAll(async () => {
