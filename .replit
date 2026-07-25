@@ -145,7 +145,6 @@ AI_PROVIDER_PLAN = "anthropic:claude-sonnet-4-6"
 AI_PROVIDER_ARCHITECT = "anthropic:claude-opus-4-7"
 STRIPE_CORE_PRICE_ID = "price_1TevbdDCzx2AknNDiqa2FXAy"
 STRIPE_WAVE_PRICE_ID = "price_1TiEDUDCzx2AknNDdfTcn6ZL"
-PULL_BRANCH = "claude/ora-mobile-website-verify-3217e1"
 
 [userenv.production]
 AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
