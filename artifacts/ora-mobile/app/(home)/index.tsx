@@ -1170,6 +1170,7 @@ export default function OraChatScreen() {
         role: "assistant",
         content: result.content.trim() || "Ora finished the requested tool.",
         ...(result.sources ? { sources: result.sources } : {}),
+        ...(result.usedFiles ? { usedFiles: result.usedFiles } : {}),
         ...(result.generatedFile ? { generatedFile: result.generatedFile } : {}),
         ...(result.imageUrl ? { imageUrl: result.imageUrl } : {}),
         ...(result.imageId ? { imageId: result.imageId } : {}),

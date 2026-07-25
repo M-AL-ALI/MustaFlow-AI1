@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   ORA_ACTIVITY_TEXT,
   ORA_REALTIME_RECONNECT_BACKOFF_MS,
@@ -73,6 +75,22 @@ describe("Ora realtime tool surface", () => {
     expect(ORA_REALTIME_RECONNECT_BACKOFF_MS).toEqual([2_000, 5_000, 10_000]);
     expect(ORA_REALTIME_RECONNECT_MAX_ATTEMPTS).toBe(6);
   });
+
+  it("keeps voice file revisions on the same durable lineage contract as text Ora", async () => {
+    const source = await readFile(
+      fileURLToPath(new URL("../realtime-tools.ts", import.meta.url)),
+      "utf8",
+    );
+
+    expect(source).toContain("getNextVersionLineageFromAssetId(context.userId, active.assetId)");
+    expect(source).toContain("getNextVersionLineage(context.userId, result.editedFileRef)");
+    expect(source).toContain("result.editQuality.versionId = assetId");
+    expect(source).toContain("relinkDurableFileContextBestEffort");
+    expect(source).toContain("planOraMultiFile");
+    expect(source).toContain("multiFilePlan?.targetFileRef");
+    expect(source).toContain('editMode: "redesigned"');
+    expect(source).toContain("usedFiles: multiFilePlan.usedFiles");
+  });
 });
 
 describe("Ora realtime function-call protocol", () => {
@@ -135,6 +153,7 @@ describe("Ora realtime function-call protocol", () => {
       writtenResult: {
         content: "Verified current information.",
         sources: [{ title: "Source", url: "https://example.com" }],
+        usedFiles: [{ name: "budget.xlsx", role: "source_data" as const }],
       },
     }));
 
@@ -154,7 +173,10 @@ describe("Ora realtime function-call protocol", () => {
       output: "Verified: current status",
       recoverable: true,
       activity: { tool: "web-search", phase: "ok" },
-      writtenResult: { content: "Verified current information." },
+      writtenResult: {
+        content: "Verified current information.",
+        usedFiles: [{ name: "budget.xlsx", role: "source_data" }],
+      },
     });
   });
 

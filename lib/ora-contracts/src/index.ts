@@ -804,6 +804,7 @@ export interface OraRealtimeActiveArtifact {
 export interface OraRealtimeToolWrittenResult {
   content: string;
   sources?: OraSource[];
+  usedFiles?: OraUsedFile[];
   generatedFile?: GeneratedFile;
   imageUrl?: string;
   imageId?: number;

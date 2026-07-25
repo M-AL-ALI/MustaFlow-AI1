@@ -10,7 +10,11 @@ import {
 } from "@workspace/ora-contracts";
 import { db, oraRepoSessionsTable } from "@workspace/db";
 import { logger } from "../logger";
-import { persistOraAsset, getNextVersionLineageFromAssetId } from "../ora-assets";
+import {
+  persistOraAsset,
+  getNextVersionLineage,
+  getNextVersionLineageFromAssetId,
+} from "../ora-assets";
 import { loadBrandKit } from "../brand-kit-loader";
 import { generateImage, isImageProviderConfigured } from "../image-provider";
 import { buildOraImageGenerationProfile } from "./image-quality";
@@ -24,7 +28,7 @@ import {
 import { classifyEditIntent, isRevisionIntent } from "./edit-intent-classifier";
 import { generateFileFromPrompt } from "./file-builder";
 import { relinkDurableFileContextBestEffort } from "./file-context-store";
-import { resolveNamedEditTarget } from "./multi-file-planner";
+import { planOraMultiFile, resolveNamedEditTarget } from "./multi-file-planner";
 import {
   REPO_GUIDANCE_ADDENDUM,
   resolveOraRepoSessionForRequest,
@@ -327,7 +331,13 @@ async function executeFileGeneration(
     documentRefs.length > 0
       ? await resolveCarriedFileMeta(documentRefs, context.oraSessionId, context.userId)
       : [];
-  let filePrompt = carriedDocs ? `${prompt}\n\n${carriedDocs}` : prompt;
+  const multiFilePlan = planOraMultiFile({
+    message: prompt,
+    files: carriedFileMeta,
+    finalTool: "file_generation",
+  });
+  const promptWithPlan = multiFilePlan ? `${prompt}\n\n${multiFilePlan.directive}` : prompt;
+  let filePrompt = carriedDocs ? `${promptWithPlan}\n\n${carriedDocs}` : promptWithPlan;
   if (activeAssetFileName && activeAssetContextText) {
     filePrompt += `\n\n[ACTIVE WORKING FILE — REVISION TARGET]\nThe user wants to revise ${activeAssetFileName}. Apply only the requested changes and preserve everything else.\n"""\n${activeAssetContextText}\n"""\n[END ACTIVE WORKING FILE]`;
   }
@@ -340,13 +350,15 @@ async function executeFileGeneration(
     sessionId: context.oraSessionId,
     userId: context.userId,
     subscriptionTier: context.tier,
-    preferredFileRef: resolveNamedEditTarget(prompt, carriedFileMeta),
+    preferredFileRef:
+      multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(prompt, carriedFileMeta),
     activeAssetBuffer,
     activeAssetFileName,
   });
   const brandKit = context.userId
     ? await loadBrandKit(context.userId, projectId).catch(() => null)
     : null;
+  const hasSourceData = carriedDocs.length > 0 || activeAssetContextText.length > 0;
   const result =
     layoutEdit ??
     (await generateFileFromPrompt(
@@ -354,19 +366,33 @@ async function executeFileGeneration(
       format,
       context.history ?? [],
       context.language,
-      carriedDocs.length > 0 || activeAssetContextText.length > 0,
+      hasSourceData,
       context.tier,
       brandKit,
     ));
+  if (!layoutEdit && documentRefs.length > 0 && hasSourceData) {
+    result.editQuality = {
+      editMode: "redesigned",
+      changes: [],
+      outputFileName: result.fileName.slice(0, 300),
+      preservedLayout: false,
+      canRedesign: false,
+    };
+  }
 
   let assetId: number | null = null;
   if (context.userId) {
     const lineage =
       active && layoutEdit
         ? await getNextVersionLineageFromAssetId(context.userId, active.assetId)
-        : null;
+        : result.editedFileRef
+          ? await getNextVersionLineage(context.userId, result.editedFileRef)
+          : null;
+    const isRevision = Boolean((active && layoutEdit) || result.editedFileRef);
     assetId = await persistOraAsset({
       userId: context.userId,
+      // Chained versions inherit their parent's project through lineage.
+      // Only a standalone v1 uses the project resolved from this voice turn.
       oraProjectId: projectId,
       kind: "file",
       fileName: result.fileName,
@@ -376,11 +402,16 @@ async function executeFileGeneration(
       base64: result.fileData,
       ...(lineage ?? {}),
       sourceFileRef: result.editedFileRef ?? null,
-      editSummary:
-        layoutEdit && result.editQuality?.changes?.length
-          ? result.editQuality.changes.join("; ").slice(0, 300)
-          : null,
+      editSummary: isRevision
+        ? (result.editQuality?.changes?.length
+            ? result.editQuality.changes.join("; ")
+            : `Revised: ${prompt}`
+          ).slice(0, 300)
+        : null,
     });
+    if (assetId && result.editQuality) {
+      result.editQuality.versionId = assetId;
+    }
     if (assetId && result.editedFileRef) {
       relinkDurableFileContextBestEffort({
         fileRef: result.editedFileRef,
@@ -395,6 +426,7 @@ async function executeFileGeneration(
     output: `The ${format.toUpperCase()} file is ready. Briefly explain what was created or changed and tell the user it is in the chat.`,
     writtenResult: {
       content: result.reply,
+      ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
       generatedFile: {
         fileName: result.fileName,
         fileData: result.fileData,
