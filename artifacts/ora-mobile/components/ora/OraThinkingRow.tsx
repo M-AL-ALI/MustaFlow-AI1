@@ -25,7 +25,8 @@ import type { OraActivityPhase, OraActivityTool } from "@/lib/types";
  * optional status label ("Thinking…", "Replying…", etc.).
  *
  * When an `activity` step is provided (the live activity trace — web search,
- * file generation, image generation, repo analysis, file reading), its label
+ * file generation, image generation, repo analysis, file reading, dataset
+ * analysis), its label
  * replaces the plain status label with a fade-in/fade-out lifecycle: each step
  * fades in as it starts, fades out when the next begins (keyed remount), and a
  * failed step shows briefly in a muted destructive tint. Wording arrives via

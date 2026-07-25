@@ -1907,7 +1907,7 @@ export function useOraChat(): UseOraChatReturn {
             body.fileRef = currentAttachment.fileRef;
             pushActivity(
               oraActivityStep(
-                "file-reading",
+                "dataset-analysis",
                 "start",
                 oraAnalyzingDatasetText(currentAttachment.filename),
               ),
@@ -1921,7 +1921,7 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/dataset-analysis", body);
-            pushActivity(oraActivityStep("file-reading", "ok"));
+            pushActivity(oraActivityStep("dataset-analysis", "ok"));
 
             setMessages((prev) => {
               const next = [

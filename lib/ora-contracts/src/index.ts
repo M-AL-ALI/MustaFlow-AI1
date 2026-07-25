@@ -141,6 +141,7 @@ export const ORA_ACTIVITY_TOOLS = [
   "image-generation",
   "repo-analysis",
   "file-reading",
+  "dataset-analysis",
 ] as const;
 
 export type OraActivityTool = (typeof ORA_ACTIVITY_TOOLS)[number];
@@ -188,6 +189,11 @@ export const ORA_ACTIVITY_TEXT: Record<OraActivityTool, Record<OraActivityPhase,
     ok: "Finished reading",
     fail: "Couldn't read that file — continuing",
   },
+  "dataset-analysis": {
+    start: "Analyzing your data…",
+    ok: "Analysis complete",
+    fail: "Dataset analysis failed — continuing",
+  },
 };
 
 /** Resolve the shared copy for a tool + phase. */
@@ -219,7 +225,7 @@ export function oraReadingFileText(fileName: string): string {
 /** "Analyzing sales.xlsx…" — name-aware dataset-analysis line. */
 export function oraAnalyzingDatasetText(fileName: string): string {
   const name = fileName.trim();
-  return name ? `Analyzing ${name}…` : ORA_ACTIVITY_TEXT["file-reading"].start;
+  return name ? `Analyzing ${name}…` : ORA_ACTIVITY_TEXT["dataset-analysis"].start;
 }
 
 /** "Analyzing your image…" — image-analysis line (never echoes the file name). */
@@ -227,9 +233,10 @@ export const ORA_ANALYZING_IMAGE_TEXT = "Analyzing your image…";
 
 /**
  * Map the server's routed-tool ids (as carried on the streamingFallback JSON
- * signal: "search" | "file_generation" | "image_generation" | "image_editing")
- * to an activity tool, so clients can show the right "start" step while the
- * non-streaming /chat specialist branch runs. Unknown tools → null (no trace).
+ * signal: "search" | "file_generation" | "image_generation" | "image_editing"
+ * | "dataset_analysis") to an activity tool, so clients can show the right
+ * "start" step while the non-streaming /chat specialist branch runs. Unknown
+ * tools → null (no trace).
  */
 export function oraActivityToolForRoutedTool(tool: string | undefined): OraActivityTool | null {
   switch (tool) {
@@ -240,6 +247,8 @@ export function oraActivityToolForRoutedTool(tool: string | undefined): OraActiv
     case "image_generation":
     case "image_editing":
       return "image-generation";
+    case "dataset_analysis":
+      return "dataset-analysis";
     default:
       return null;
   }
