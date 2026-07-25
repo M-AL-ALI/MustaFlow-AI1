@@ -6,7 +6,11 @@ import {
   oraActivityToolForRoutedTool,
   parseOraActivityStep,
 } from "@workspace/ora-contracts";
-import type { OraActivityStep } from "@workspace/ora-contracts";
+import type {
+  OraActivityStep,
+  OraRealtimeFunctionCall,
+  OraRealtimeToolBridgeResponse,
+} from "@workspace/ora-contracts";
 
 import type {
   AnalysisResponse,
@@ -380,6 +384,32 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
       message: ctx.message,
       focusMode: ctx.focusMode,
       voicePreset: ctx.voicePreset,
+    }),
+  });
+}
+
+export function executeRealtimeTool(
+  realtimeSessionId: string,
+  call: OraRealtimeFunctionCall,
+  context: RealtimeSessionContext & {
+    history?: Array<{ role: "user" | "assistant"; content: string }>;
+  },
+): Promise<OraRealtimeToolBridgeResponse> {
+  return jsonRequest<OraRealtimeToolBridgeResponse>("/api/public-ai/realtime/tool", {
+    method: "POST",
+    body: JSON.stringify({
+      realtimeSessionId,
+      callId: call.callId,
+      name: call.name,
+      argumentsJson: call.argumentsJson,
+      context: {
+        oraProjectId: context.oraProjectId ?? null,
+        conversationId: context.conversationId ?? null,
+        language: context.language,
+        history: context.history,
+        documentRefs: context.documentRefs,
+        activeArtifact: context.activeArtifact ?? null,
+      },
     }),
   });
 }

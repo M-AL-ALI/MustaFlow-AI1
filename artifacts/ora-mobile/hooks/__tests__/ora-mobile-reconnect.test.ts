@@ -1,7 +1,7 @@
 /**
  * Mobile reconnect state machine — useOraRealtimeVoiceNative
  *
- * Covers the single-attempt auto-reconnect / legacy-fallback path.
+ * Covers the shared six-attempt auto-reconnect ladder and legacy fallback.
  * Two behaviors are mobile-specific:
  *  1. WebRTC events use addEventListener() (EventTarget style, from
  *     react-native-webrtc), not onXxx properties.
@@ -24,7 +24,7 @@ import {
   _setWebRTCModuleForTest,
   _resetWebRTCCacheForTest,
 } from "../useOraRealtimeVoiceNative";
-import { createRealtimeSession } from "@/lib/api";
+import { createRealtimeSession, executeRealtimeTool } from "@/lib/api";
 
 const RECONNECT_DELAY_MS = 2_000;
 
@@ -80,7 +80,7 @@ class FakePCMobile extends FakeEmitter {
 
 class FakeDCMobile extends FakeEmitter {
   readyState: string = "connecting";
-  send(_data: unknown) {}
+  send = vi.fn();
   close() {}
 }
 
@@ -150,14 +150,11 @@ vi.mock("@/lib/api", () => {
   return {
     ApiRequestError,
     createRealtimeSession: vi.fn(),
+    executeRealtimeTool: vi.fn(),
     endRealtimeSession: vi.fn(async () => {}),
     heartbeatRealtimeSession: vi.fn(async () => ({ ok: true })),
   };
 });
-
-vi.mock("@workspace/ora-contracts", () => ({
-  OPENAI_REALTIME_CALLS_URL: "https://api.openai.com/v1/realtime/calls",
-}));
 
 // ─── SDP stub ─────────────────────────────────────────────────────────────────
 
@@ -167,7 +164,12 @@ const sdpResponse = () =>
     headers: { "Content-Type": "application/sdp" },
   });
 
-const mintOk = { value: "ek_test_token", model: "gpt-realtime-mini", expiresAt: null };
+const mintOk = {
+  value: "ek_test_token",
+  model: "gpt-realtime-mini",
+  expiresAt: null,
+  realtimeSessionId: "00000000-0000-4000-8000-000000000001",
+};
 
 // ─── Setup / teardown ─────────────────────────────────────────────────────────
 
@@ -183,6 +185,12 @@ beforeEach(() => {
   _setWebRTCModuleForTest(fakeWebRTCModule as never);
 
   vi.mocked(createRealtimeSession).mockResolvedValue(mintOk as never);
+  vi.mocked(executeRealtimeTool).mockResolvedValue({
+    ok: true,
+    output: "Tool complete.",
+    activity: { tool: "repo-analysis", phase: "ok", text: "Repository analyzed." },
+    recoverable: true,
+  });
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => sdpResponse()),
@@ -217,6 +225,7 @@ async function connectHook(
   const pc = pcInstances[pcInstances.length - 1];
   if (pc) {
     await act(async () => {
+      if (pc.dc) pc.dc.readyState = "open";
       pc.dc?.dispatch("open");
       await vi.advanceTimersByTimeAsync(0);
     });
@@ -242,6 +251,64 @@ describe("useOraRealtimeVoiceNative — reconnect state machine", () => {
 
     expect(hook.result.current.state).toBe("listening");
     expect(hook.result.current.networkQuality).toBe("good");
+    expect(hook.result.current.fallbackReason).toBeNull();
+  });
+
+  it("executes a realtime function call, mirrors its written result, and resumes the model", async () => {
+    const onToolWrittenResult = vi.fn();
+    vi.mocked(executeRealtimeTool).mockResolvedValue({
+      ok: true,
+      output: "Repository analysis complete.",
+      activity: { tool: "repo-analysis", phase: "ok", text: "Repository analyzed." },
+      writtenResult: { content: "Read-only repository findings." },
+      recoverable: true,
+    });
+    const hook = renderHook(() =>
+      useOraRealtimeVoiceNative({
+        onUserTranscript: vi.fn(),
+        onAssistantTranscript: vi.fn(),
+        onToolWrittenResult,
+      }),
+    );
+    const pc = await connectHook(hook);
+
+    await act(async () => {
+      pc.dc?.dispatch("message", {
+        data: JSON.stringify({
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_repo",
+            name: "analyze_repo",
+            arguments: '{"question":"find bugs"}',
+          },
+        }),
+      });
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    });
+
+    expect(executeRealtimeTool).toHaveBeenCalledWith(
+      expect.any(String),
+      {
+        callId: "call_repo",
+        name: "analyze_repo",
+        argumentsJson: '{"question":"find bugs"}',
+      },
+      expect.objectContaining({ language: "en" }),
+    );
+    expect(onToolWrittenResult).toHaveBeenCalledWith({
+      content: "Read-only repository findings.",
+    });
+    const sent = pc.dc!.send.mock.calls.map(([raw]) => JSON.parse(String(raw)) as { type: string });
+    expect(sent).toContainEqual({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "call_repo",
+        output: "Repository analysis complete.",
+      },
+    });
+    expect(sent).toContainEqual({ type: "response.create" });
     expect(hook.result.current.fallbackReason).toBeNull();
   });
 

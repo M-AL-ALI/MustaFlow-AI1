@@ -28,6 +28,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
+import { ORA_REALTIME_TOOL_NAMES } from "@workspace/ora-contracts";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,11 @@ const metering = vi.hoisted(() => ({
   heartbeatRealtimeSession: vi.fn(),
   endRealtimeSession: vi.fn(),
   getRealtimeUsage: vi.fn(),
+}));
+
+const repoContext = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  investigate: vi.fn(),
 }));
 
 // ─── Mocks (hoisted before router import) ─────────────────────────────────────
@@ -97,6 +103,12 @@ vi.mock("../chat", () => ({
     text: "\n\n## Saved memories\nUser prefers metric units.",
     used: [],
   })),
+}));
+
+vi.mock("../../../lib/public-ai/repo-analyst", () => ({
+  REPO_GUIDANCE_ADDENDUM: "",
+  resolveOraRepoSessionForRequest: repoContext.resolve,
+  runRepoInvestigation: repoContext.investigate,
 }));
 
 // The metering service is mocked so the route is the unit under test. Keep the
@@ -149,6 +161,13 @@ interface FetchCapture {
       type: string;
       model: string;
       instructions: string;
+      tools: Array<{
+        type: string;
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      }>;
+      tool_choice: string;
       audio: {
         output: { voice: string };
         input: {
@@ -226,6 +245,13 @@ beforeEach(() => {
   metering.heartbeatRealtimeSession.mockReset();
   metering.endRealtimeSession.mockReset();
   metering.getRealtimeUsage.mockReset();
+  repoContext.resolve.mockReset();
+  repoContext.investigate.mockReset();
+  repoContext.resolve.mockResolvedValue({
+    connected: false,
+    token: null,
+    session: null,
+  });
   metering.startRealtimeSession.mockResolvedValue({
     status: "ok",
     sessionId: "00000000-0000-4000-8000-000000000000",
@@ -405,6 +431,11 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(url).toBe("https://api.openai.com/v1/realtime/client_secrets");
     expect(body.session.type).toBe("realtime");
     expect(body.session.model).toBe("gpt-realtime-mini");
+    expect(body.session.tool_choice).toBe("auto");
+    expect(body.session.tools.map((tool) => tool.name)).toEqual([...ORA_REALTIME_TOOL_NAMES]);
+    expect(body.session.tools.map((tool) => tool.name).join(" ")).not.toMatch(
+      /\b(?:write_file|commit_change|push|create_pr|mutate|delete_file|apply_patch)\b/i,
+    );
     expect(body.session.audio.output.voice).toBe("marin");
     expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
     // interrupt_response defaults FALSE: the client hooks own barge-in via a
@@ -468,7 +499,13 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(body.session.instructions).toContain(
       "Do not default to English when the selected language or the user's speech is non-English.",
     );
-    expect(buildSystemPrompt).toHaveBeenCalledWith("ar", undefined, false, undefined, "the start of this voice session");
+    expect(buildSystemPrompt).toHaveBeenCalledWith(
+      "ar",
+      undefined,
+      false,
+      undefined,
+      "the start of this voice session",
+    );
   });
 
   it("anon: buildSystemPrompt called with isSignedIn=false; no profile/memory", async () => {
@@ -477,7 +514,13 @@ describe("Talk to Ora realtime — anonymous mint", () => {
       .set("Cookie", freshCookie())
       .send({ message: "what's the weather" });
 
-    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, false, undefined, "the start of this voice session");
+    expect(buildSystemPrompt).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      false,
+      undefined,
+      "the start of this voice session",
+    );
     expect(buildProfileContext).not.toHaveBeenCalled();
     expect(buildMemoryContext).not.toHaveBeenCalled();
   });
@@ -613,8 +656,55 @@ describe("Talk to Ora realtime — signed-in reservation + context injection", (
 
     expect(res.status).toBe(200);
     expect(metering.startRealtimeSession).toHaveBeenCalledWith("user_123", "core");
-    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, true, undefined, "the start of this voice session");
+    expect(buildSystemPrompt).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      "the start of this voice session",
+    );
     expect(buildProfileContext).toHaveBeenCalledWith("user_123");
+  });
+
+  it("injects an already-selected repository and never asks for its URL", async () => {
+    signIn("core");
+    repoContext.resolve.mockResolvedValue({
+      connected: true,
+      token: "encrypted-test-token",
+      session: {
+        id: 17,
+        userId: "user_123",
+        conversationId: null,
+        owner: "M-AL-ALI",
+        repo: "MustaFlow-AI1",
+        ref: "",
+        defaultBranch: "main",
+        status: "active",
+        fileCount: null,
+        totalBytes: null,
+        createdAt: new Date(),
+        lastUsedAt: new Date(),
+      },
+    });
+
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ message: "Find bugs in my app." });
+
+    expect(res.status).toBe(200);
+    expect(repoContext.resolve).toHaveBeenCalledWith({
+      userId: "user_123",
+      message: "Find bugs in my app.",
+    });
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.instructions).toContain(
+      "The selected repository is M-AL-ALI/MustaFlow-AI1.",
+    );
+    expect(body.session.instructions).toContain("Never ask the user to paste its URL.");
+    expect(body.session.instructions).toContain(
+      "you can never write, edit, commit, push, or open a pull request",
+    );
   });
 });
 

@@ -2447,7 +2447,9 @@ router.post("/public-ai/chat", async (req, res) => {
       if (investigation) {
         callMessages.push({
           role: "user" as const,
-          content: `${investigation.contextBlock}${REPO_GUIDANCE_ADDENDUM}`,
+          content: `${investigation.contextBlock}${
+            investigation.guidanceAddendum ?? REPO_GUIDANCE_ADDENDUM
+          }`,
         });
       }
     } catch (repoErr) {
@@ -3344,7 +3346,9 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       if (investigation) {
         callMessages.push({
           role: "user" as const,
-          content: `${investigation.contextBlock}${REPO_GUIDANCE_ADDENDUM}`,
+          content: `${investigation.contextBlock}${
+            investigation.guidanceAddendum ?? REPO_GUIDANCE_ADDENDUM
+          }`,
         });
       }
       // Close the trace if the analyst returned without its own terminal line

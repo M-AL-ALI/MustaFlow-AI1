@@ -19,6 +19,11 @@
 import { createHash } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
+import {
+  ORA_ACTIVITY_TEXT,
+  ORA_REALTIME_TOOL_NAMES,
+  type OraRealtimeToolName,
+} from "@workspace/ora-contracts";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraRealtimeSessionLimiter, oraRealtimeSessionTickLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
@@ -33,9 +38,15 @@ import {
   getRealtimeVoiceAllowance,
   REALTIME_HEARTBEAT_INTERVAL_SECONDS,
 } from "../../lib/public-ai/ora-realtime-usage";
+import {
+  ORA_REALTIME_TOOL_DEFINITIONS,
+  assertRealtimeToolSurface,
+} from "../../lib/public-ai/realtime-tool-definitions";
+import { resolveOraRepoSessionForRequest } from "../../lib/public-ai/repo-analyst";
 import { buildSystemPrompt, buildProfileContext, buildMemoryContext } from "./chat";
 
 const router = Router();
+assertRealtimeToolSurface();
 
 const OPENAI_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets";
 
@@ -167,7 +178,21 @@ const VOICE_ADDENDUM =
   "what to remember. Your spoken audio and the visible transcript must always use the " +
   "same language. If the user selected a reply language, speak entirely in that " +
   "language. If the language is Auto, follow the user's latest spoken language. Do " +
-  "not default to English when the selected language or the user's speech is non-English.";
+  "not default to English when the selected language or the user's speech is non-English." +
+  "\n\n## Live tools and spoken narration\n" +
+  "You have Ora's real tools. Use them whenever the same request in text chat would " +
+  "need search, repository reading, a file, an image, or a repository investigation. " +
+  "Before each function call, speak one short natural status sentence in the user's " +
+  "language so there is no dead air. Use the same meaning as these shared Ora lines: " +
+  `"${ORA_ACTIVITY_TEXT["web-search"].start}", ` +
+  `"${ORA_ACTIVITY_TEXT["repo-analysis"].start}", ` +
+  `"${ORA_ACTIVITY_TEXT["file-generation"].start}", and ` +
+  `"${ORA_ACTIVITY_TEXT["image-generation"].start}". ` +
+  "After the tool result arrives, continue naturally and summarize it aloud. If a tool " +
+  "fails, say so plainly and continue; never end the live session for a recoverable tool " +
+  "failure. Never speak raw URLs, provider names, model ids, stack traces, secrets, or " +
+  "absolute filesystem paths. GitHub tools are strictly read-only: never claim to write, " +
+  "edit, commit, push, open a pull request, or change repository content.";
 
 const bodySchema = z.object({
   language: z.string().max(20).optional(),
@@ -409,6 +434,33 @@ async function buildRealtimeInstructions(opts: {
         // Memory injection is best-effort — never block a session on it.
       }
     }
+
+    // Resolve GitHub context server-side so a connected/selected repository is
+    // authoritative and the model never asks the user to paste a URL it already
+    // has. A named repo in the recent message can also resolve from the connected
+    // account without a URL. Failures are best-effort and never block voice.
+    try {
+      const repo = await resolveOraRepoSessionForRequest({
+        userId: authed.userId,
+        message,
+      });
+      if (repo.connected && repo.session) {
+        instructions +=
+          "\n\n## Connected GitHub repository (read-only)\n" +
+          `The selected repository is ${repo.session.owner}/${repo.session.repo}. ` +
+          "Use the repository tools directly. Never ask the user to paste its URL. " +
+          "You may read, search, inspect commits, and analyze it, but you can never " +
+          "write, edit, commit, push, or open a pull request.";
+      } else if (repo.connected) {
+        instructions +=
+          "\n\n## Connected GitHub account (read-only)\n" +
+          "GitHub is already connected. If the user names a repository, pass that " +
+          "name to the repository tool so the server can resolve it. If no repository " +
+          "can be resolved, ask them to name or select one; never ask for a pasted URL.";
+      }
+    } catch {
+      // Connected-repo context is additive. Voice remains available if lookup fails.
+    }
   }
 
   instructions += VOICE_ADDENDUM;
@@ -586,6 +638,8 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
           type: "realtime",
           model,
           instructions,
+          tools: ORA_REALTIME_TOOL_DEFINITIONS,
+          tool_choice: "auto",
           audio: {
             output: { voice },
             input: {
@@ -672,6 +726,114 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     await cancelReservation();
     res.status(502).json({ error: "Voice conversation failed to start. Please try again." });
   }
+});
+
+const realtimeToolBodySchema = z.object({
+  realtimeSessionId: z.string().uuid(),
+  callId: z.string().min(1).max(200),
+  name: z.enum(ORA_REALTIME_TOOL_NAMES),
+  argumentsJson: z.string().max(20_000).default("{}"),
+  context: z
+    .object({
+      oraProjectId: z.number().int().positive().nullable().optional(),
+      conversationId: z
+        .union([z.string().max(120), z.number().int().positive()])
+        .nullable()
+        .optional(),
+      language: z.string().max(20).optional(),
+      history: z
+        .array(
+          z.object({
+            role: z.enum(["user", "assistant"]),
+            content: z.string().max(4000),
+          }),
+        )
+        .max(20)
+        .optional(),
+      documentRefs: z.array(z.string().uuid()).max(5).optional(),
+      activeArtifact: z
+        .object({
+          assetId: z.number().int().positive(),
+          fileName: z.string().min(1).max(300),
+          format: z.enum(["csv", "xlsx", "docx", "pdf", "pptx"]),
+        })
+        .nullable()
+        .optional(),
+    })
+    .default({}),
+});
+
+/**
+ * POST /api/public-ai/realtime/tool
+ *
+ * Authenticated bridge between the client-owned Realtime WebRTC channel and
+ * Ora's existing server tools. The session heartbeat verifies ownership and
+ * charges elapsed voice time before every call. Tool failures are returned as
+ * safe function output so the live conversation remains open.
+ */
+router.post("/public-ai/realtime/tool", oraRealtimeSessionTickLimiter, async (req, res) => {
+  const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+  if (!sessionToken) {
+    res.status(401).json({ error: "No active session." });
+    return;
+  }
+  const oraSession = validateSession(sessionToken);
+  if (!oraSession) {
+    res.status(401).json({ error: "Session expired." });
+    return;
+  }
+  const parsed = realtimeToolBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid realtime tool request." });
+    return;
+  }
+
+  const authed = await resolveAuthedOraUser(req);
+  const tier = authed?.tier ?? "anonymous";
+  const usageKey = deriveUsageKey(authed, sessionToken, req);
+  let heartbeat: Awaited<ReturnType<typeof heartbeatRealtimeSession>>;
+  try {
+    heartbeat = await heartbeatRealtimeSession(parsed.data.realtimeSessionId, usageKey, tier);
+  } catch (err) {
+    logger.warn(
+      { component: "ora-realtime-tool", err },
+      "Realtime tool ownership check failed closed",
+    );
+    res.status(503).json({ error: "Voice tools are temporarily unavailable." });
+    return;
+  }
+  if (heartbeat.status === "not_found") {
+    res.status(404).json({ error: "Voice session not found." });
+    return;
+  }
+  if (heartbeat.ended) {
+    res.status(409).json({ error: "Voice session has ended.", ended: true });
+    return;
+  }
+
+  const toolName: OraRealtimeToolName = parsed.data.name;
+  const { executeOraRealtimeFunctionCall } = await import("../../lib/public-ai/realtime-tools");
+  const result = await executeOraRealtimeFunctionCall(
+    {
+      callId: parsed.data.callId,
+      name: toolName,
+      argumentsJson: parsed.data.argumentsJson,
+    },
+    {
+      userId: authed?.userId ?? null,
+      tier,
+      oraSessionId: oraSession.sessionId,
+      oraProjectId: parsed.data.context.oraProjectId,
+      conversationId: parsed.data.context.conversationId,
+      language: parsed.data.context.language,
+      history: parsed.data.context.history,
+      documentRefs: parsed.data.context.documentRefs,
+      activeArtifact: parsed.data.context.activeArtifact,
+    },
+  );
+
+  res.setHeader("Cache-Control", "no-store");
+  res.json(result);
 });
 
 const tickBodySchema = z.object({

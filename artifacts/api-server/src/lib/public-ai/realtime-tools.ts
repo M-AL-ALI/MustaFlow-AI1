@@ -1,0 +1,566 @@
+import { eq } from "drizzle-orm";
+import {
+  ORA_ACTIVITY_TEXT,
+  oraActivityStep,
+  type FileFormat,
+  type OraRealtimeFunctionCall,
+  type OraRealtimeToolBridgeResponse,
+  type OraRealtimeToolName,
+  type OraRealtimeToolWrittenResult,
+} from "@workspace/ora-contracts";
+import { db, oraRepoSessionsTable } from "@workspace/db";
+import { logger } from "../logger";
+import { persistOraAsset, getNextVersionLineageFromAssetId } from "../ora-assets";
+import { loadBrandKit } from "../brand-kit-loader";
+import { generateImage, isImageProviderConfigured } from "../image-provider";
+import { buildOraImageGenerationProfile } from "./image-quality";
+import { isKillSwitchActive } from "./ora-kill-switches";
+import { consumeOraQuota, refundOraQuota, type OraQuotaKind } from "./ora-usage";
+import {
+  buildCarriedDocumentContext,
+  resolveCarriedFileMeta,
+  type CarriedFileMeta,
+} from "./carried-docs";
+import { classifyEditIntent, isRevisionIntent } from "./edit-intent-classifier";
+import { generateFileFromPrompt } from "./file-builder";
+import { relinkDurableFileContextBestEffort } from "./file-context-store";
+import { resolveNamedEditTarget } from "./multi-file-planner";
+import {
+  REPO_GUIDANCE_ADDENDUM,
+  resolveOraRepoSessionForRequest,
+  runRepoInvestigation,
+} from "./repo-analyst";
+import { diffCommit, listFiles, readCommits, readFile, searchRepo } from "./repo-read-tools";
+import { materializeRepoWorkspace } from "./repo-workspace";
+import { runOraWebSearch } from "./web-search";
+import { classifyIntent, CLASSIFIER_FALLBACK } from "./classifier";
+import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  openAiModelForOraRoute,
+  runCandidateChain,
+  selectOraModelRoute,
+  type ModelCandidate,
+} from "./model-router";
+import { createChatCompletion } from "../ai-providers";
+import { REALTIME_TOOL_ACTIVITY } from "./realtime-tool-definitions";
+
+export {
+  ORA_REALTIME_TOOL_DEFINITIONS,
+  assertRealtimeToolSurface,
+  realtimeToolActivity,
+  type RealtimeToolDefinition,
+} from "./realtime-tool-definitions";
+
+export interface OraRealtimeToolExecutionContext {
+  userId: string | null;
+  tier: string;
+  oraSessionId: string;
+  oraProjectId?: number | null;
+  conversationId?: number | string | null;
+  language?: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  documentRefs?: string[];
+  activeArtifact?: { assetId: number; fileName: string; format: FileFormat } | null;
+}
+
+interface ToolExecution {
+  output: string;
+  writtenResult?: OraRealtimeToolWrittenResult;
+}
+
+export type OraRealtimeToolExecutor = (
+  args: Record<string, unknown>,
+  context: OraRealtimeToolExecutionContext,
+) => Promise<ToolExecution>;
+
+export type OraRealtimeToolExecutors = Record<OraRealtimeToolName, OraRealtimeToolExecutor>;
+
+function readString(args: Record<string, unknown>, key: string, max: number): string {
+  return typeof args[key] === "string" ? args[key].trim().slice(0, max) : "";
+}
+
+function readPositiveInt(
+  args: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  max: number,
+): number {
+  const value = typeof args[key] === "number" ? Math.floor(args[key]) : fallback;
+  return Number.isFinite(value) ? Math.max(1, Math.min(value, max)) : fallback;
+}
+
+function parseArguments(argumentsJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(argumentsJson) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function safeOutput(value: string, max = 40_000): string {
+  const clean = value
+    .replace(/[A-Za-z]:\\(?:[^\\\s]+\\)+/g, "")
+    .replace(/\/(?:home|Users|var|tmp)\/[^\s]+/g, "")
+    .trim();
+  return clean.slice(0, max) || "The tool completed without a text result.";
+}
+
+function safeFailure(tool: OraRealtimeToolName): OraRealtimeToolBridgeResponse {
+  const activityTool = REALTIME_TOOL_ACTIVITY[tool];
+  return {
+    ok: false,
+    output: ORA_ACTIVITY_TEXT[activityTool].fail,
+    activity: oraActivityStep(activityTool, "fail"),
+    recoverable: true,
+  };
+}
+
+async function resolveProjectId(context: OraRealtimeToolExecutionContext): Promise<number | null> {
+  if (!context.userId || typeof context.oraProjectId !== "number") return null;
+  const { checkOraProjectWritable } = await import("./ora-projects");
+  const check = await checkOraProjectWritable(context.userId, context.oraProjectId);
+  return check.ok ? context.oraProjectId : null;
+}
+
+async function repoAccess(args: Record<string, unknown>, context: OraRealtimeToolExecutionContext) {
+  if (!context.userId) return null;
+  const requestedRepo = readString(args, "repo", 250) || undefined;
+  const message =
+    readString(args, "question", 8000) || readString(args, "query", 4000) || requestedRepo || "";
+  const resolved = await resolveOraRepoSessionForRequest({
+    userId: context.userId,
+    message,
+    requestedRepo,
+  });
+  if (!resolved.token || !resolved.session) return null;
+  return { token: resolved.token, session: resolved.session };
+}
+
+async function executeRepoRead(
+  name: "list_files" | "read_file" | "search_repo" | "read_commits" | "diff",
+  args: Record<string, unknown>,
+  context: OraRealtimeToolExecutionContext,
+): Promise<ToolExecution> {
+  const access = await repoAccess(args, context);
+  if (!access) {
+    return {
+      output:
+        "GitHub is already supported, but I could not resolve a repository. Ask the user to name or select it; do not ask for a pasted URL.",
+    };
+  }
+
+  const { token, session } = access;
+  let result: { ok: boolean; content: string };
+  if (name === "read_commits") {
+    result = await readCommits(
+      token,
+      session.owner,
+      session.repo,
+      readPositiveInt(args, "limit", 10, 30),
+    );
+  } else if (name === "diff") {
+    result = await diffCommit(token, session.owner, session.repo, readString(args, "sha", 100));
+  } else {
+    const workspace = await materializeRepoWorkspace({
+      sessionId: session.id,
+      owner: session.owner,
+      repo: session.repo,
+      ref: session.ref,
+      token,
+    });
+    await db
+      .update(oraRepoSessionsTable)
+      .set({
+        fileCount: workspace.files.length,
+        totalBytes: workspace.totalBytes,
+        lastUsedAt: new Date(),
+      })
+      .where(eq(oraRepoSessionsTable.id, session.id))
+      .catch(() => {});
+    if (name === "list_files") {
+      result = listFiles(workspace, readString(args, "path", 500));
+    } else if (name === "read_file") {
+      result = await readFile(
+        workspace,
+        readString(args, "path", 500),
+        readPositiveInt(args, "startLine", 1, 1_000_000),
+        readPositiveInt(args, "endLine", 400, 1_000_000),
+      );
+    } else {
+      result = await searchRepo(workspace, readString(args, "query", 200));
+    }
+  }
+  return {
+    output: result.ok
+      ? result.content
+      : "That repository read did not come back. Continue honestly without inventing results.",
+  };
+}
+
+async function repoCandidates(message: string, tier: string): Promise<ModelCandidate[]> {
+  const classifier = await classifyIntent(message).catch(() => CLASSIFIER_FALLBACK);
+  const planTier = normalizeOraPlanTier(tier);
+  const routeTier = classifier.intent === "simple_faq" ? "fast" : "premium";
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  return selectOraModelRoute({
+    tier: routeTier,
+    subscriptionTier: planTier,
+    topic: "technical",
+    intent: classifier.intent,
+    confidence: classifier.confidence,
+    multilingual: false,
+    available,
+    openCircuits,
+    openaiModel: openAiModelForOraRoute(routeTier, planTier),
+  });
+}
+
+async function executeRepoAnalysis(
+  args: Record<string, unknown>,
+  context: OraRealtimeToolExecutionContext,
+): Promise<ToolExecution> {
+  if (!context.userId) {
+    return { output: "Repository analysis is available after the user signs in." };
+  }
+  const question = readString(args, "question", 8000);
+  if (!question) return { output: "Ask what the user wants checked in the repository." };
+  const requestedRepo = readString(args, "repo", 250);
+  if (requestedRepo) {
+    await resolveOraRepoSessionForRequest({
+      userId: context.userId,
+      message: question,
+      requestedRepo,
+    });
+  }
+  const candidates = await repoCandidates(question, context.tier);
+  const investigation = await runRepoInvestigation({
+    userId: context.userId,
+    message: question,
+    candidates,
+    onStatus: () => {},
+  });
+  if (!investigation || investigation.stepsRun === 0) {
+    return {
+      output:
+        investigation?.contextBlock ??
+        "I could not resolve the connected repository. Ask for its name or selection, not a URL.",
+    };
+  }
+
+  const chain = await runCandidateChain(candidates, async (candidate) => {
+    const completion = await createChatCompletion({
+      provider: candidate.provider,
+      model: candidate.model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Write a concise but complete professional read-only repository report from the supplied evidence. Never claim to have changed code. Never reveal providers, model ids, stack traces, or absolute server paths.",
+        },
+        {
+          role: "user",
+          content: `${question}\n\n${investigation.contextBlock}${REPO_GUIDANCE_ADDENDUM}`,
+        },
+      ],
+      response_format: { type: "text" },
+      max_completion_tokens: 2200,
+    });
+    const report = completion.choices[0]?.message?.content?.trim() ?? "";
+    if (!report) throw new Error("empty repository report");
+    return report;
+  });
+  return {
+    output: chain.result,
+    writtenResult: { content: chain.result },
+  };
+}
+
+async function executeFileGeneration(
+  args: Record<string, unknown>,
+  context: OraRealtimeToolExecutionContext,
+): Promise<ToolExecution> {
+  const prompt = readString(args, "prompt", 8000);
+  const format = readString(args, "format", 10) as FileFormat;
+  if (!prompt || !["csv", "xlsx", "docx", "pdf", "pptx"].includes(format)) {
+    return { output: "A complete file prompt and supported format are required." };
+  }
+
+  const projectId = await resolveProjectId(context);
+  const documentRefs = (context.documentRefs ?? []).slice(-5);
+  let activeAssetBuffer: Buffer | null = null;
+  let activeAssetFileName: string | null = null;
+  let activeAssetContextText = "";
+  const active = context.activeArtifact;
+
+  if (active && context.userId && active.format === format) {
+    try {
+      const { getOraAssetBytes, getOraAssetMeta } = await import("../ora-assets");
+      const [bytes, meta] = await Promise.all([
+        getOraAssetBytes(active.assetId, context.userId),
+        getOraAssetMeta(active.assetId, context.userId),
+      ]);
+      if (bytes && meta && isRevisionIntent(classifyEditIntent(prompt))) {
+        activeAssetBuffer = bytes;
+        activeAssetFileName = meta.fileName;
+        if (format === "docx" || format === "pptx") {
+          const { extractText } = await import("./file-extract");
+          activeAssetContextText = (await extractText(bytes, format)).slice(0, 8000);
+        }
+      }
+    } catch {
+      activeAssetBuffer = null;
+      activeAssetFileName = null;
+    }
+  }
+
+  const carriedDocs = await buildCarriedDocumentContext(
+    documentRefs,
+    context.oraSessionId,
+    prompt,
+    context.userId,
+  );
+  const carriedFileMeta: CarriedFileMeta[] =
+    documentRefs.length > 0
+      ? await resolveCarriedFileMeta(documentRefs, context.oraSessionId, context.userId)
+      : [];
+  let filePrompt = carriedDocs ? `${prompt}\n\n${carriedDocs}` : prompt;
+  if (activeAssetFileName && activeAssetContextText) {
+    filePrompt += `\n\n[ACTIVE WORKING FILE — REVISION TARGET]\nThe user wants to revise ${activeAssetFileName}. Apply only the requested changes and preserve everything else.\n"""\n${activeAssetContextText}\n"""\n[END ACTIVE WORKING FILE]`;
+  }
+
+  const { tryApplyLayoutPreservingFileEdit } = await import("./office-layout-edit");
+  const layoutEdit = await tryApplyLayoutPreservingFileEdit({
+    message: prompt,
+    format,
+    documentRefs,
+    sessionId: context.oraSessionId,
+    userId: context.userId,
+    subscriptionTier: context.tier,
+    preferredFileRef: resolveNamedEditTarget(prompt, carriedFileMeta),
+    activeAssetBuffer,
+    activeAssetFileName,
+  });
+  const brandKit = context.userId
+    ? await loadBrandKit(context.userId, projectId).catch(() => null)
+    : null;
+  const result =
+    layoutEdit ??
+    (await generateFileFromPrompt(
+      filePrompt,
+      format,
+      context.history ?? [],
+      context.language,
+      carriedDocs.length > 0 || activeAssetContextText.length > 0,
+      context.tier,
+      brandKit,
+    ));
+
+  let assetId: number | null = null;
+  if (context.userId) {
+    const lineage =
+      active && layoutEdit
+        ? await getNextVersionLineageFromAssetId(context.userId, active.assetId)
+        : null;
+    assetId = await persistOraAsset({
+      userId: context.userId,
+      oraProjectId: projectId,
+      kind: "file",
+      fileName: result.fileName,
+      mimeType: result.mimeType,
+      format,
+      prompt,
+      base64: result.fileData,
+      ...(lineage ?? {}),
+      sourceFileRef: result.editedFileRef ?? null,
+      editSummary:
+        layoutEdit && result.editQuality?.changes?.length
+          ? result.editQuality.changes.join("; ").slice(0, 300)
+          : null,
+    });
+    if (assetId && result.editedFileRef) {
+      relinkDurableFileContextBestEffort({
+        fileRef: result.editedFileRef,
+        sessionId: context.oraSessionId,
+        userId: context.userId,
+        assetId,
+      });
+    }
+  }
+
+  return {
+    output: `The ${format.toUpperCase()} file is ready. Briefly explain what was created or changed and tell the user it is in the chat.`,
+    writtenResult: {
+      content: result.reply,
+      generatedFile: {
+        fileName: result.fileName,
+        fileData: result.fileData,
+        mimeType: result.mimeType,
+        format,
+        ...(assetId ? { assetId } : {}),
+        ...(result.editQuality ? { editQuality: result.editQuality } : {}),
+      },
+    },
+  };
+}
+
+async function executeImageGeneration(
+  args: Record<string, unknown>,
+  context: OraRealtimeToolExecutionContext,
+): Promise<ToolExecution> {
+  if (!context.userId) return { output: "Image generation is available after signing in." };
+  if (!isImageProviderConfigured()) {
+    return { output: "Image generation is temporarily unavailable. Continue the conversation." };
+  }
+  const prompt = readString(args, "prompt", 4000);
+  if (!prompt) return { output: "A complete image brief is required." };
+  const profile = buildOraImageGenerationProfile({
+    prompt,
+    subscriptionTier: context.tier,
+  });
+  const result = await generateImage({
+    prompt: profile.prompt,
+    quality: profile.quality,
+    aspectRatio: profile.aspectRatio,
+    style: profile.style,
+    subscriptionTier: context.tier,
+  });
+
+  let imageId: number | null = null;
+  try {
+    const parsed = result.openaiUrl.startsWith("data:")
+      ? result.openaiUrl.match(/^data:([^;,]+);base64,(.+)$/s)
+      : null;
+    let mimeType = parsed?.[1] ?? "image/png";
+    let base64 = parsed?.[2] ?? "";
+    if (!base64) {
+      const response = await fetch(result.openaiUrl);
+      if (response.ok) {
+        mimeType = response.headers.get("content-type") ?? mimeType;
+        base64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+      }
+    }
+    if (base64) {
+      const ext = mimeType.split("/")[1]?.split("+")[0] ?? "png";
+      imageId = await persistOraAsset({
+        userId: context.userId,
+        oraProjectId: await resolveProjectId(context),
+        kind: "image",
+        fileName: `ora-image-${Date.now()}.${ext}`,
+        mimeType,
+        format: ext,
+        prompt: profile.originalPrompt,
+        base64,
+      });
+    }
+  } catch (err) {
+    logger.warn({ component: "ora-realtime-tool", err }, "Voice image persistence failed");
+  }
+
+  return {
+    output: "The image is ready in the chat. Briefly describe it without reading any URL.",
+    writtenResult: {
+      content: "Here is the image you created with Ora.",
+      imageUrl: result.openaiUrl,
+      ...(imageId ? { imageId } : {}),
+      imageMeta: {
+        kind: profile.kind,
+        aspectRatio: profile.aspectRatio,
+        style: profile.style,
+        quality: profile.quality,
+      },
+    },
+  };
+}
+
+const DEFAULT_EXECUTORS: OraRealtimeToolExecutors = {
+  web_search: async (args, context) => {
+    if (!context.userId) return { output: "Live web search is available after signing in." };
+    const query = readString(args, "query", 4000);
+    const result = await runOraWebSearch({
+      query,
+      history: context.history,
+      language: context.language,
+      subscriptionTier: context.tier,
+    });
+    return {
+      output: result.reply,
+      writtenResult: { content: result.reply, sources: result.sources },
+    };
+  },
+  list_files: (args, context) => executeRepoRead("list_files", args, context),
+  read_file: (args, context) => executeRepoRead("read_file", args, context),
+  search_repo: (args, context) => executeRepoRead("search_repo", args, context),
+  read_commits: (args, context) => executeRepoRead("read_commits", args, context),
+  diff: (args, context) => executeRepoRead("diff", args, context),
+  generate_file: executeFileGeneration,
+  generate_image: executeImageGeneration,
+  analyze_repo: executeRepoAnalysis,
+};
+
+function quotaKindForTool(name: OraRealtimeToolName): OraQuotaKind | null {
+  if (name === "generate_file") return "message";
+  if (name === "generate_image") return "image";
+  return null;
+}
+
+/**
+ * Execute one normalized realtime function call. Tool errors become a safe,
+ * recoverable output for the model; they never terminate the live session.
+ * Tests can inject executors without importing provider or database machinery.
+ */
+export async function executeOraRealtimeFunctionCall(
+  call: OraRealtimeFunctionCall,
+  context: OraRealtimeToolExecutionContext,
+  executors: OraRealtimeToolExecutors = DEFAULT_EXECUTORS,
+): Promise<OraRealtimeToolBridgeResponse> {
+  const activityTool = REALTIME_TOOL_ACTIVITY[call.name];
+  const args = parseArguments(call.argumentsJson);
+  let quotaKind: OraQuotaKind | null = null;
+  let quotaReserved = false;
+
+  try {
+    if (
+      (call.name === "web_search" && isKillSwitchActive("web_search")) ||
+      (call.name === "generate_file" && isKillSwitchActive("file_generation")) ||
+      (call.name === "generate_image" && isKillSwitchActive("all"))
+    ) {
+      return safeFailure(call.name);
+    }
+
+    quotaKind = quotaKindForTool(call.name);
+    if (quotaKind && context.userId) {
+      const quota = await consumeOraQuota(context.userId, context.tier, quotaKind);
+      if (!quota.allowed) {
+        return {
+          ok: false,
+          output: `That ${quotaKind === "image" ? "image" : "file"} limit is reached for now. Continue by voice without claiming the tool ran.`,
+          activity: oraActivityStep(activityTool, "fail"),
+          recoverable: true,
+        };
+      }
+      quotaReserved = true;
+    }
+
+    const result = await executors[call.name](args, context);
+    return {
+      ok: true,
+      output: safeOutput(result.output),
+      activity: oraActivityStep(activityTool, "ok"),
+      ...(result.writtenResult ? { writtenResult: result.writtenResult } : {}),
+      recoverable: true,
+    };
+  } catch (err) {
+    if (quotaReserved && quotaKind && context.userId) {
+      await refundOraQuota(context.userId, quotaKind);
+    }
+    logger.warn(
+      { component: "ora-realtime-tool", tool: call.name, err },
+      "Realtime tool execution failed safely",
+    );
+    return safeFailure(call.name);
+  }
+}

@@ -216,6 +216,7 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     if (!started) return false;
     const lastPc = pcInstances[pcInstances.length - 1];
     await act(async () => {
+      if (lastPc.dc) lastPc.dc.readyState = "open";
       lastPc.dc?.onopen?.();
     });
     return true;
@@ -242,6 +243,82 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     expect(hook.result.current.networkQuality).toBe("good");
     expect(hook.result.current.fallbackReason).toBeNull();
     expect(hook.result.current.error).toBeNull();
+  });
+
+  it("executes a realtime function call, mirrors its written result, and resumes the model", async () => {
+    const onToolWrittenResult = vi.fn();
+    vi.mocked(authFetch).mockImplementation(async (url: string) => {
+      if (String(url).includes("/session")) return mintResponse();
+      if (String(url).includes("/realtime/tool")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            output: "Search complete.",
+            activity: { tool: "web-search", phase: "ok", text: "Search complete." },
+            writtenResult: {
+              content: "Current information with sources.",
+              sources: [{ title: "Source", url: "https://example.com" }],
+            },
+            recoverable: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return okResponse();
+    });
+    const hook = renderHook(() =>
+      useOraRealtimeVoice({
+        onUserTranscript: vi.fn(),
+        onAssistantTranscript: vi.fn(),
+        onToolWrittenResult,
+      }),
+    );
+    await connectHook(hook);
+    const dc = pcInstances[0].dc!;
+
+    await act(async () => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.done",
+          response: {
+            output: [
+              {
+                type: "function_call",
+                call_id: "call_search",
+                name: "web_search",
+                arguments: '{"query":"latest Ora news"}',
+              },
+            ],
+          },
+        }),
+      });
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    });
+
+    const toolCall = vi
+      .mocked(authFetch)
+      .mock.calls.find((call) => String(call[0]).includes("/realtime/tool"));
+    expect(toolCall).toBeDefined();
+    expect(JSON.parse((toolCall?.[1] as RequestInit).body as string)).toMatchObject({
+      callId: "call_search",
+      name: "web_search",
+      argumentsJson: '{"query":"latest Ora news"}',
+    });
+    expect(onToolWrittenResult).toHaveBeenCalledWith({
+      content: "Current information with sources.",
+      sources: [{ title: "Source", url: "https://example.com" }],
+    });
+    const sent = dc.send.mock.calls.map(([raw]) => JSON.parse(String(raw)) as { type: string });
+    expect(sent).toContainEqual({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "call_search",
+        output: "Search complete.",
+      },
+    });
+    expect(sent).toContainEqual({ type: "response.create" });
+    expect(hook.result.current.fallbackReason).toBeNull();
   });
 
   // ─── Single auto-reconnect on first ICE drop ──────────────────────────────

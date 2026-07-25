@@ -9,6 +9,7 @@ import type {
   OraFileCitation,
   OraFileAgentPreview,
   OraActivityStep,
+  OraRealtimeToolWrittenResult,
 } from "@workspace/ora-contracts";
 import {
   oraActivityStep,
@@ -276,6 +277,8 @@ export interface OraRealtimeContext {
    * lower-authority realtime conversation items, never as system instructions.
    */
   history?: { role: "user" | "assistant"; content: string }[];
+  /** Uploaded-file refs available to the realtime file tool. */
+  documentRefs?: string[];
 }
 
 export interface UseOraChatReturn {
@@ -338,6 +341,8 @@ export interface UseOraChatReturn {
    * the race-safe debounced server save). No-op for blank content.
    */
   appendVoiceMessage: (role: "user" | "assistant", content: string) => void;
+  /** Mirror a rich voice-tool result into the normal persisted chat thread. */
+  appendVoiceToolResult: (result: OraRealtimeToolWrittenResult) => void;
   /**
    * Snapshot the current chat context (temporary mode, saved-memory opt-in,
    * active Ora project, conversation, and language) for minting a realtime
@@ -3030,6 +3035,31 @@ export function useOraChat(): UseOraChatReturn {
     [isSignedIn, saveToServer],
   );
 
+  const appendVoiceToolResult = useCallback(
+    (result: OraRealtimeToolWrittenResult) => {
+      const content = result.content.trim();
+      if (!content && !result.generatedFile && !result.imageUrl) return;
+      setMessages((prev) => {
+        const next: OraMessage[] = [
+          ...prev,
+          {
+            role: "assistant",
+            content: content || "Ora finished the requested tool.",
+            ...(result.sources ? { sources: result.sources } : {}),
+            ...(result.generatedFile ? { generatedFile: result.generatedFile } : {}),
+            ...(result.imageUrl ? { imageUrl: result.imageUrl } : {}),
+            ...(result.imageId ? { imageId: result.imageId } : {}),
+            ...(result.imageMeta ? { imageMeta: result.imageMeta } : {}),
+          },
+        ];
+        storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
+        return next;
+      });
+    },
+    [isSignedIn, saveToServer],
+  );
+
   // Snapshot the live chat context for a realtime "Talk to Ora" session. This
   // mirrors how the `/chat` request body is assembled (see sendMessage) so the
   // realtime mint endpoint receives the exact same temporary/memory/project/
@@ -3047,6 +3077,7 @@ export function useOraChat(): UseOraChatReturn {
       oraProjectId: typeof oraProjectId === "number" ? oraProjectId : null,
       conversationId: typeof currentConvId === "number" ? currentConvId : null,
       timeZone: clientTimeZone(),
+      documentRefs: documentRefsRef.current.slice(-5),
     };
     if (language && language !== "auto") {
       ctx.language = language;
@@ -3110,6 +3141,7 @@ export function useOraChat(): UseOraChatReturn {
     setTemporary,
     retryLastMessage,
     appendVoiceMessage,
+    appendVoiceToolResult,
     getRealtimeContext,
   };
 }

@@ -71,6 +71,7 @@ import {
   getAskBeforeSensitive,
 } from "@/lib/ora-memory-settings";
 import { cn } from "@/lib/utils";
+import type { OraRealtimeToolWrittenResult } from "@workspace/ora-contracts";
 import type {
   UseOraChatReturn,
   UploadState,
@@ -556,6 +557,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     temporary,
     setTemporary,
     appendVoiceMessage,
+    appendVoiceToolResult,
     getRealtimeContext,
   } = chat;
 
@@ -755,6 +757,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const languageRef = useRef(language);
   const sendMessageRef = useRef(sendMessage);
   const appendVoiceMessageRef = useRef(appendVoiceMessage);
+  const appendVoiceToolResultRef = useRef(appendVoiceToolResult);
   const getRealtimeContextRef = useRef(getRealtimeContext);
 
   voiceConvActiveRef.current = voiceConvActive;
@@ -762,6 +765,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   languageRef.current = language;
   sendMessageRef.current = sendMessage;
   appendVoiceMessageRef.current = appendVoiceMessage;
+  appendVoiceToolResultRef.current = appendVoiceToolResult;
   getRealtimeContextRef.current = getRealtimeContext;
 
   const handleVoiceTranscript = useCallback((text: string) => {
@@ -809,6 +813,17 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const handleRealtimeAssistantTranscript = useCallback((text: string) => {
     appendVoiceMessageRef.current("assistant", text);
   }, []);
+  const handleRealtimeToolResult = useCallback((result: OraRealtimeToolWrittenResult) => {
+    appendVoiceToolResultRef.current(result);
+    const file = result.generatedFile;
+    if (file?.assetId) {
+      setActiveArtifactRef({
+        assetId: file.assetId,
+        fileName: file.fileName,
+        format: file.format,
+      });
+    }
+  }, []);
   // Late realtime failure (the connection dropped after start() already
   // succeeded). The start()-false branch in handleEnterVoiceConvMode only covers
   // failures BEFORE the session is established, so without this the user would be
@@ -826,6 +841,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const realtime = useOraRealtimeVoice({
     onUserTranscript: handleRealtimeUserTranscript,
     onAssistantTranscript: handleRealtimeAssistantTranscript,
+    onToolWrittenResult: handleRealtimeToolResult,
     onFallback: handleRealtimeFallback,
   });
   const realtimeRef = useRef(realtime);
@@ -1288,7 +1304,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     setVoiceConvActive(true);
     voiceConvActiveRef.current = true;
 
-    const ctx = { ...getRealtimeContextRef.current() };
+    const ctx = {
+      ...getRealtimeContextRef.current(),
+      ...(activeArtifactRef ? { activeArtifact: activeArtifactRef } : {}),
+    };
     void realtimeRef.current.start(ctx).then((ok) => {
       // The user may have already exited while the connection was negotiating.
       if (!voiceConvActiveRef.current) return;
@@ -1301,7 +1320,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
         void voiceRef.current.prepareVoicePlayback();
       }
     });
-  }, [messages]);
+  }, [activeArtifactRef, messages]);
 
   const handleExitVoiceConvMode = useCallback(() => {
     setVoiceConvActive(false);
@@ -1642,31 +1661,36 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
       {!hasMessages &&
         (isFull ? (
           /* Full layout: centered greeting that fills the available space */
-          <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-4 py-8">
-            <div className="w-full max-w-3xl mx-auto text-center">
-              <div className="flex justify-center mb-5">
-                <DynamicAtom state={atomState} size={52} accentColor={oraAccentColor(tier)} />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                Hi, I&apos;m <span className="text-[hsl(var(--ora-accent-hsl))]">Ora</span>
-              </h1>
-              <p className="text-sm text-muted-foreground mt-2.5 max-w-md mx-auto leading-relaxed">
-                Ask anything, think things through, or get work done — planning, strategy, files,
-                images, and more, all in one chat.
-              </p>
-              <div className="mt-7 flex flex-wrap justify-center gap-2">
-                {EXAMPLE_CHIPS.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => handleChip(chip)}
-                    className="text-xs px-3.5 py-2 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(var(--ora-accent-hsl)/0.5)] hover:bg-[hsl(var(--ora-accent-hsl)/0.07)] transition-all"
-                  >
-                    {chip}
-                  </button>
-                ))}
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 sm:py-8">
+            <div className="w-full max-w-2xl mx-auto text-left">
+              <div className="flex items-center gap-3">
+                <DynamicAtom state={atomState} size={36} accentColor={oraAccentColor(tier)} />
+                <div>
+                  <h1 className="text-xl font-semibold">
+                    <span className="text-[hsl(var(--ora-accent-hsl))]">Ora</span>
+                  </h1>
+                  <p className="text-sm text-muted-foreground">What can I help you work through?</p>
+                </div>
               </div>
               <OraHomeRecents />
+              <section
+                className="mt-6 border-t border-border/60 pt-5"
+                aria-label="Start a new chat"
+              >
+                <h2 className="mb-3 text-sm font-semibold">Start something new</h2>
+                <div className="flex flex-wrap gap-2">
+                  {EXAMPLE_CHIPS.map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => handleChip(chip)}
+                      className="text-xs px-3.5 py-2 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(var(--ora-accent-hsl)/0.5)] hover:bg-[hsl(var(--ora-accent-hsl)/0.07)] transition-all"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
           </div>
         ) : (

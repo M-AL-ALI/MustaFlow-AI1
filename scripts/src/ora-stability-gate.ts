@@ -171,19 +171,23 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
   },
   {
     id: "talk-to-ora",
-    title: "Talk to Ora realtime voice, settle window, focus, reconnect, and tier time budget",
+    title:
+      "Talk to Ora realtime voice, shared text-tool parity, narration, artifact mirroring, reconnect, and tier time budget",
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /realtime/i,
+      /realtime-tools/i,
+      /onToolWrittenResult/i,
       /voice/i,
       /webrtc/i,
       /use-ora-realtime/i,
       /useOraRealtimeVoiceNative/i,
+      /ora-mobile-reconnect/i,
     ],
     manualWebsite:
-      "Run 10+ voice turns, pause mid-sentence, interrupt mid-answer, and verify tier-time behavior.",
+      "Run 10+ voice turns, pause mid-sentence, interrupt mid-answer, and verify tier-time behavior. During the same call, trigger current web search, read-only connected-repo inspection, full repo analysis, file generation/revision, and image generation. Confirm Ora briefly narrates each tool with the shared activity wording, speaks the grounded result, and mirrors sources/reports/files/images into the text thread. Simulate a network blip and confirm the six-attempt recovery ladder reconnects without ending the call; force a tool failure and confirm Ora explains it safely and keeps listening.",
     manualMobile:
-      "Run the same 10+ turn voice test on TestFlight after any native hook/API change.",
+      "On the new TestFlight build, repeat the website voice-tool, written-artifact, safe-failure, 10+ turn, barge-in, budget, and reconnect checks. Confirm the same tools and shared narration are available and GitHub remains strictly read-only.",
   },
   {
     id: "image-generation-editing",
@@ -486,7 +490,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
   {
     id: "fresh-start-on-return",
     title:
-      "Fresh start on return: shared five-minute idle gate plus project-aware recent conversations on website and mobile",
+      "Fresh start on return and tidy Ora home: shared five-minute idle gate plus prominent project-aware recents on website and mobile",
     ownerSurfaces: ["website", "mobile"],
     fileHints: [
       /ora-contracts\/src\/index\.ts$/i,
@@ -497,14 +501,14 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /ora-fresh-start/i,
     ],
     manualWebsite:
-      "Signed in on /ora: open a saved conversation, leave/reload within five minutes and confirm the same conversation resumes. Leave for more than five minutes, then return/reload and confirm Ora opens a blank new-conversation home with exactly five newest recents plus Show more. Open a recent and confirm history is intact. Repeat on /ora/projects/:id and confirm the project route remains selected. Signed-out behavior must be unchanged.",
+      "Signed in on /ora: open a saved conversation, leave/reload within five minutes and confirm the same conversation resumes. Leave for more than five minutes, then return/reload and confirm Ora opens a tidy new-conversation home where exactly five newest recents are visible before starter prompts and Show more expands the history. Open a recent and confirm history is intact. Repeat on /ora/projects/:id and confirm the project route remains selected. Signed-out behavior must be unchanged.",
     manualMobile:
-      "On the new TestFlight build: open a saved conversation, background for under five minutes and confirm it stays open. Background for over five minutes and confirm Ora returns to a blank home with five recents plus Show more. Select a recent and confirm its history loads. Kill/relaunch after five minutes and confirm the same fresh home behavior; verify the active project scope remains intact and no history is deleted.",
+      "On the new TestFlight build: open a saved conversation, background for under five minutes and confirm it stays open. Background for over five minutes and confirm Ora returns to a tidy home where five recents appear before starter prompts and Show more expands the history. Select a recent and confirm its history loads. Kill/relaunch after five minutes and confirm the same fresh home behavior; verify the active project scope remains intact and no history is deleted.",
   },
   {
     id: "github-repo-analysis",
     title:
-      "GitHub repo analysis (READ-ONLY): OAuth connect, repo picker, sandboxed tarball workspace, 4 read tools, live narration, guidance report",
+      "GitHub repo analysis (READ-ONLY): OAuth connect, repo resolution, sandboxed workspace, 5 read tools, live narration, guidance report",
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /repo-github-auth/i,
@@ -563,6 +567,7 @@ const API_SEARCH = [
 ].join(" ");
 
 const API_REALTIME = [
+  "src/lib/public-ai/__tests__/ora-realtime-tools.test.ts",
   "src/routes/public-ai/__tests__/realtime-session.test.ts",
   "src/routes/public-ai/__tests__/voice-session.test.ts",
 ].join(" ");

@@ -76,6 +76,17 @@ describe("Ora mobile fresh-start lifecycle wiring", () => {
     expect(recents).toContain('{expanded ? "Show less" : "Show more"}');
   });
 
+  it("puts recents before starter prompts in the compact home hierarchy", () => {
+    const recentsPosition = screen.indexOf("<OraHomeRecents");
+    const startersPosition = screen.indexOf("Start something new", recentsPosition);
+
+    expect(recentsPosition).toBeGreaterThan(-1);
+    expect(startersPosition).toBeGreaterThan(recentsPosition);
+    expect(screen).toContain("What can I help you work through?");
+    expect(screen).not.toContain("Hi, I'm Ora");
+    expect(recents).toContain("fontSize: 14");
+  });
+
   it("leaves signed-out launch behavior and project scope untouched", () => {
     expect(screen).toContain("if (!isLoaded || !isSignedIn) return;");
     expect(screen).toContain("setActiveProjectId(detail.projectId ?? null);");

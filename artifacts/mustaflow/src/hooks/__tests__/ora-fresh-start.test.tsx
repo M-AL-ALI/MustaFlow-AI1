@@ -126,6 +126,7 @@ describe("Ora fresh-start home recents", () => {
 describe("Ora fresh-start website wiring", () => {
   const provider = read("../use-ora-conversations.tsx");
   const chat = read("../use-ora-chat.ts");
+  const panel = read("../../components/ora-panel.tsx");
 
   it("gates both local and server restoration while preserving project-route precedence", () => {
     expect(provider).toContain("idleGatedOraConversationId(getStoredCurrentId())");
@@ -145,5 +146,16 @@ describe("Ora fresh-start website wiring", () => {
 
   it("loads the endpoint's maximum page so Show more exposes the available history", () => {
     expect(provider).toContain("/api/ora/conversations?limit=100");
+  });
+
+  it("puts recents before starter prompts in the compact home hierarchy", () => {
+    const recents = panel.indexOf("<OraHomeRecents />");
+    const starters = panel.indexOf('aria-label="Start a new chat"', recents);
+
+    expect(recents).toBeGreaterThan(-1);
+    expect(starters).toBeGreaterThan(recents);
+    expect(panel).toContain("What can I help you work through?");
+    expect(panel).toContain("Start something new");
+    expect(panel).not.toContain("Hi, I&apos;m Ora");
   });
 });

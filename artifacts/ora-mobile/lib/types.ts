@@ -35,6 +35,9 @@ export type {
   OraActivityTool,
   OraActivityPhase,
   OraActivityStep,
+  OraRealtimeActiveArtifact,
+  OraRealtimeToolBridgeResponse,
+  OraRealtimeToolWrittenResult,
 } from "@workspace/ora-contracts";
 
 import type {
@@ -213,6 +216,10 @@ export interface RealtimeSessionContext {
    * ("marine"). The raw provider voice id is never sent from the device.
    */
   voicePreset?: VoicePreset;
+  /** Uploaded-file refs available to realtime file creation/revision tools. */
+  documentRefs?: string[];
+  /** Current generated/edited file target for voice revisions. */
+  activeArtifact?: import("@workspace/ora-contracts").OraRealtimeActiveArtifact | null;
 }
 
 /**

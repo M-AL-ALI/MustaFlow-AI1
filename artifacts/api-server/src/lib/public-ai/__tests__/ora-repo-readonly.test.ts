@@ -86,6 +86,52 @@ describe("pasted GitHub URL parsing (auto-attach)", () => {
   });
 });
 
+describe("connected repository context", () => {
+  it("never asks for a pasted URL once GitHub is connected", async () => {
+    const { CONNECTED_REPO_SELECTION_GUIDANCE, REPO_GUIDANCE_ADDENDUM } =
+      await import("../repo-analyst");
+
+    expect(REPO_GUIDANCE_ADDENDUM).toMatch(/already connected and resolved/i);
+    expect(REPO_GUIDANCE_ADDENDUM).toMatch(/never ask[\s\S]*paste[\s\S]*URL/i);
+    expect(CONNECTED_REPO_SELECTION_GUIDANCE).toMatch(/already connected/i);
+    expect(CONNECTED_REPO_SELECTION_GUIDANCE).toMatch(/name or select/i);
+    expect(CONNECTED_REPO_SELECTION_GUIDANCE).toMatch(/never ask[\s\S]*paste[\s\S]*URL/i);
+  });
+
+  it("resolves a named owned repo without treating substrings as repo mentions", async () => {
+    const { findConnectedRepoForRequest } = await import("../repo-analyst");
+    const repos = [
+      {
+        fullName: "M-AL-ALI/MustaFlow-AI1",
+        owner: "M-AL-ALI",
+        name: "MustaFlow-AI1",
+        private: true,
+        defaultBranch: "main",
+        description: null,
+        pushedAt: null,
+      },
+      {
+        fullName: "M-AL-ALI/app",
+        owner: "M-AL-ALI",
+        name: "app",
+        private: true,
+        defaultBranch: "main",
+        description: null,
+        pushedAt: null,
+      },
+    ];
+
+    expect(
+      findConnectedRepoForRequest(
+        repos,
+        "Read package.json in MustaFlow-AI1 and tell me what it does.",
+      )?.fullName,
+    ).toBe("M-AL-ALI/MustaFlow-AI1");
+    expect(findConnectedRepoForRequest(repos, "I am happy with this answer.")).toBeNull();
+    expect(findConnectedRepoForRequest(repos, "", "M-AL-ALI/app")?.name).toBe("app");
+  });
+});
+
 describe("OAuth state HMAC", () => {
   it("round-trips a signed state and rejects tampering", () => {
     const state = signOraOAuthState("user_123", "mobile");
@@ -113,7 +159,13 @@ describe("pure-JS tarball extraction (no system tar dependency)", () => {
     await fs.writeFile(path.join(repoDir, "src", "app.ts"), "export const x = 1;\n");
     await fs.writeFile(path.join(repoDir, "logo.png"), Buffer.from([137, 80, 78, 71]));
     await fs.writeFile(path.join(repoDir, "node_modules", "junk", "index.js"), "junk\n");
-    await fs.symlink("/etc/passwd", path.join(repoDir, "evil-link"));
+    let symlinkCreated = true;
+    try {
+      await fs.symlink("/etc/passwd", path.join(repoDir, "evil-link"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      symlinkCreated = false;
+    }
     const longDir = "a-quite-long-directory-name-segment-for-pax/".repeat(3);
     await fs.mkdir(path.join(repoDir, longDir), { recursive: true });
     await fs.writeFile(path.join(repoDir, longDir, "deep.txt"), "deep pax path\n");
@@ -129,7 +181,9 @@ describe("pure-JS tarball extraction (no system tar dependency)", () => {
       "export const x = 1;\n",
     );
     expect(await fs.readFile(path.join(dest, longDir, "deep.txt"), "utf8")).toBe("deep pax path\n");
-    await expect(fs.lstat(path.join(dest, "evil-link"))).rejects.toThrow();
+    if (symlinkCreated) {
+      await expect(fs.lstat(path.join(dest, "evil-link"))).rejects.toThrow();
+    }
     await expect(fs.stat(path.join(dest, "logo.png"))).rejects.toThrow();
     await expect(fs.stat(path.join(dest, "node_modules"))).rejects.toThrow();
   });

@@ -36,7 +36,7 @@ export function OraHomeRecents({
   return (
     <View
       accessibilityLabel="Recent conversations"
-      style={{ width: "100%", maxWidth: 560, marginTop: 28 }}
+      style={{ width: "100%", maxWidth: 560, marginTop: 18 }}
     >
       <View
         style={{
@@ -50,7 +50,7 @@ export function OraHomeRecents({
         <Text
           style={{
             color: colors.foreground,
-            fontSize: 12,
+            fontSize: 14,
             fontFamily: "Inter_600SemiBold",
           }}
         >
@@ -74,7 +74,7 @@ export function OraHomeRecents({
                 alignItems: "flex-start",
                 gap: 10,
                 paddingHorizontal: 4,
-                paddingVertical: 12,
+                paddingVertical: 10,
                 borderTopWidth: index === 0 ? 0 : 1,
                 borderColor: colors.border,
                 backgroundColor: pressed ? colors.accent : "transparent",

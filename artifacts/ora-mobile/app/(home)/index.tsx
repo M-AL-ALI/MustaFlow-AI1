@@ -200,6 +200,7 @@ import type {
   OraMode,
   OraPendingClarification,
   OraProjectSummary,
+  OraRealtimeToolWrittenResult,
   OraSession,
 } from "@/lib/types";
 // Shared activity-trace wording (tiny zod-free helpers) — identical copy to web.
@@ -1162,6 +1163,34 @@ export default function OraChatScreen() {
     [persist, scrollToEnd],
   );
 
+  const appendRealtimeToolResult = useCallback(
+    (result: OraRealtimeToolWrittenResult) => {
+      const msg: OraMessage = {
+        id: uid(),
+        role: "assistant",
+        content: result.content.trim() || "Ora finished the requested tool.",
+        ...(result.sources ? { sources: result.sources } : {}),
+        ...(result.generatedFile ? { generatedFile: result.generatedFile } : {}),
+        ...(result.imageUrl ? { imageUrl: result.imageUrl } : {}),
+        ...(result.imageId ? { imageId: result.imageId } : {}),
+        ...(result.imageMeta ? { imageMeta: result.imageMeta } : {}),
+      };
+      const nextMsgs = [...messagesRef.current, msg];
+      messagesRef.current = nextMsgs;
+      setMessages(nextMsgs);
+      if (result.generatedFile?.assetId) {
+        setActiveArtifactRef({
+          assetId: result.generatedFile.assetId,
+          fileName: result.generatedFile.fileName,
+          format: result.generatedFile.format,
+        });
+      }
+      void persist(nextMsgs, temporaryRef.current);
+      scrollToEnd();
+    },
+    [persist, scrollToEnd],
+  );
+
   // Flip from the realtime transport back to the legacy transcribe -> chat -> tts
   // loop when a live session drops mid-call, surfacing a visible warning. Only
   // acts while Talk mode is still on.
@@ -1180,6 +1209,7 @@ export default function OraChatScreen() {
   const realtimeVoice = useOraRealtimeVoiceNative({
     onUserTranscript: (t) => appendRealtimeTurn("user", t),
     onAssistantTranscript: (t) => appendRealtimeTurn("assistant", t),
+    onToolWrittenResult: appendRealtimeToolResult,
     onFallback: handleRealtimeFallback,
   });
   realtimeVoiceRef.current = realtimeVoice;
@@ -2508,6 +2538,8 @@ export default function OraChatScreen() {
           conversationId,
           message: lastUser?.content,
           history: recent,
+          documentRefs: documentRefsRef.current.slice(-5),
+          activeArtifact: activeArtifactRef,
           focusMode: focusModeRef.current,
           voicePreset: voicePresetRef.current,
         })
@@ -2559,7 +2591,7 @@ export default function OraChatScreen() {
       if (recordingRef.current) void stopRecordingRef.current();
       scheduleTalkRestart(300);
     }
-  }, [conversationId, language, scheduleTalkRestart, speakingId]);
+  }, [activeArtifactRef, conversationId, language, scheduleTalkRestart, speakingId]);
 
   const toggleTalkMode = useCallback(() => {
     const next = !talkMode;
@@ -3329,73 +3361,37 @@ export default function OraChatScreen() {
             <View
               style={{
                 flex: 1,
-                justifyContent: "center",
+                justifyContent: "flex-start",
                 alignItems: "center",
                 paddingHorizontal: 24,
+                paddingTop: 8,
               }}
             >
-              <OraAtom size={52} accentColor={tierAccent} animated style={{ marginBottom: 20 }} />
+              <OraAtom size={36} accentColor={tierAccent} animated style={{ marginBottom: 10 }} />
               <Text
                 style={{
                   color: c.foreground,
                   fontFamily: "Inter_700Bold",
-                  fontSize: 24,
-                  letterSpacing: -0.6,
+                  fontSize: 20,
+                  letterSpacing: 0,
                   textAlign: "center",
                 }}
               >
-                Hi, I&apos;m <Text style={{ color: tierAccent }}>Ora</Text>
+                <Text style={{ color: tierAccent }}>Ora</Text>
               </Text>
               <Text
                 style={{
                   color: c.mutedForeground,
                   fontFamily: "Inter_400Regular",
                   fontSize: 14,
-                  lineHeight: 23,
+                  lineHeight: 20,
                   textAlign: "center",
-                  marginTop: 10,
+                  marginTop: 4,
                   maxWidth: 448,
                 }}
               >
-                Ask anything, think things through, or get work done — planning, strategy, files,
-                images, and more, all in one chat.
+                What can I help you work through?
               </Text>
-              <View
-                style={{
-                  flexDirection: "row",
-                  flexWrap: "wrap",
-                  gap: 8,
-                  justifyContent: "center",
-                  marginTop: 28,
-                }}
-              >
-                {EXAMPLE_CHIPS.map((chip) => (
-                  <Pressable
-                    key={chip}
-                    onPress={() => {
-                      if (!sending) void sendMessage(chip, null);
-                    }}
-                    style={{
-                      paddingHorizontal: 14,
-                      paddingVertical: 8,
-                      borderRadius: 999,
-                      borderWidth: 1,
-                      borderColor: c.border + "99",
-                      backgroundColor: "transparent",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: c.mutedForeground,
-                        fontSize: 12,
-                        fontFamily: "Inter_400Regular",
-                      }}
-                    >
-                      {chip}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
               {isSignedIn ? (
                 <OraHomeRecents
                   conversations={conversations}
@@ -3404,6 +3400,62 @@ export default function OraChatScreen() {
                   onSelect={loadConversation}
                 />
               ) : null}
+              <View
+                style={{
+                  width: "100%",
+                  maxWidth: 560,
+                  marginTop: 20,
+                  borderTopWidth: 1,
+                  borderTopColor: c.border,
+                  paddingTop: 16,
+                }}
+              >
+                <Text
+                  style={{
+                    color: c.foreground,
+                    fontSize: 14,
+                    fontFamily: "Inter_600SemiBold",
+                    marginBottom: 10,
+                  }}
+                >
+                  Start something new
+                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    justifyContent: "flex-start",
+                  }}
+                >
+                  {EXAMPLE_CHIPS.map((chip) => (
+                    <Pressable
+                      key={chip}
+                      onPress={() => {
+                        if (!sending) void sendMessage(chip, null);
+                      }}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        borderColor: c.border + "99",
+                        backgroundColor: "transparent",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: c.mutedForeground,
+                          fontSize: 12,
+                          fontFamily: "Inter_400Regular",
+                        }}
+                      >
+                        {chip}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
             </View>
           }
           renderItem={({ item }) => (

@@ -758,6 +758,146 @@ export interface GeneratedFile {
 }
 
 /**
+ * Realtime function tools exposed to "Talk to Ora". This is the complete
+ * voice-side capability surface: one search tool, five read-only repository
+ * tools, and the existing Ora file/image/report engines. Keep this list shared
+ * so the API, website, mobile app, and safety tests cannot drift.
+ */
+export const ORA_REALTIME_TOOL_NAMES = [
+  "web_search",
+  "list_files",
+  "read_file",
+  "search_repo",
+  "read_commits",
+  "diff",
+  "generate_file",
+  "generate_image",
+  "analyze_repo",
+] as const;
+
+export type OraRealtimeToolName = (typeof ORA_REALTIME_TOOL_NAMES)[number];
+
+/** Shared web/native recovery policy for one continuous Talk to Ora session. */
+export const ORA_REALTIME_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000] as const;
+export const ORA_REALTIME_RECONNECT_MAX_ATTEMPTS = 6;
+
+/** Selected read-only GitHub repository carried into a live voice session. */
+export interface OraRealtimeRepoContext {
+  owner: string;
+  repo: string;
+  fullName: string;
+  defaultBranch?: string;
+}
+
+/** The active file revision target carried into a live voice session. */
+export interface OraRealtimeActiveArtifact {
+  assetId: number;
+  fileName: string;
+  format: FileFormat;
+}
+
+/**
+ * A durable written result produced while voice is active. The spoken reply can
+ * stay concise while this richer payload is inserted into the normal chat
+ * thread for reading, copying, downloading, or later revision.
+ */
+export interface OraRealtimeToolWrittenResult {
+  content: string;
+  sources?: OraSource[];
+  generatedFile?: GeneratedFile;
+  imageUrl?: string;
+  imageId?: number;
+  imageMeta?: { kind: string; aspectRatio: string; style: string; quality: string };
+}
+
+/** Privacy-safe response from the authenticated realtime function-call bridge. */
+export interface OraRealtimeToolBridgeResponse {
+  ok: boolean;
+  /** Tool output returned to the realtime model as function_call_output. */
+  output: string;
+  /** Shared branded activity copy; never contains provider/model/path internals. */
+  activity: OraActivityStep;
+  /** Optional rich result mirrored into the visible chat thread. */
+  writtenResult?: OraRealtimeToolWrittenResult;
+  /** True means the live session should continue even when `ok` is false. */
+  recoverable: true;
+}
+
+/** Normalized function call emitted by the GA Realtime data channel. */
+export interface OraRealtimeFunctionCall {
+  callId: string;
+  name: OraRealtimeToolName;
+  argumentsJson: string;
+}
+
+function isOraRealtimeToolName(value: unknown): value is OraRealtimeToolName {
+  return (
+    typeof value === "string" && (ORA_REALTIME_TOOL_NAMES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Parse GA function-call completion event shapes. Realtime clients use this one
+ * helper so browser and native never disagree about event names or fields.
+ * Malformed/unknown calls return null and cannot break the live session.
+ */
+export function parseOraRealtimeFunctionCallEvent(value: unknown): OraRealtimeFunctionCall | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as Record<string, unknown>;
+
+  if (event.type === "response.function_call_arguments.done") {
+    const callId =
+      typeof event.call_id === "string"
+        ? event.call_id
+        : typeof event.item_id === "string"
+          ? event.item_id
+          : "";
+    const name = event.name;
+    const argumentsJson = typeof event.arguments === "string" ? event.arguments : "{}";
+    if (!callId || !isOraRealtimeToolName(name)) return null;
+    return { callId, name, argumentsJson };
+  }
+
+  if (event.type === "response.output_item.done") {
+    const item =
+      event.item && typeof event.item === "object" ? (event.item as Record<string, unknown>) : null;
+    if (!item || item.type !== "function_call") return null;
+    const callId =
+      typeof item.call_id === "string" ? item.call_id : typeof item.id === "string" ? item.id : "";
+    const name = item.name;
+    const argumentsJson = typeof item.arguments === "string" ? item.arguments : "{}";
+    if (!callId || !isOraRealtimeToolName(name)) return null;
+    return { callId, name, argumentsJson };
+  }
+
+  if (event.type === "response.done") {
+    const response =
+      event.response && typeof event.response === "object"
+        ? (event.response as Record<string, unknown>)
+        : null;
+    const output = response && Array.isArray(response.output) ? response.output : [];
+    for (const rawItem of output) {
+      const item =
+        rawItem && typeof rawItem === "object" ? (rawItem as Record<string, unknown>) : null;
+      if (!item || item.type !== "function_call") continue;
+      const callId =
+        typeof item.call_id === "string"
+          ? item.call_id
+          : typeof item.id === "string"
+            ? item.id
+            : "";
+      const name = item.name;
+      const argumentsJson = typeof item.arguments === "string" ? item.arguments : "{}";
+      if (callId && isOraRealtimeToolName(name)) {
+        return { callId, name, argumentsJson };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * The full persistable Ora message data (input side of `oraMessageSchema`),
  * shared by web and mobile so both render an identical message model. Client
  * runtimes layer their own ephemeral fields (id, pending, streaming, ...) on

@@ -33,9 +33,9 @@ export function OraHomeRecents() {
   );
 
   return (
-    <section className="mx-auto mt-8 w-full max-w-xl text-left" aria-label="Recent conversations">
-      <div className="mb-2 flex items-center justify-between px-1">
-        <h2 className="text-xs font-semibold text-foreground">Recent conversations</h2>
+    <section className="mt-5 w-full text-left" aria-label="Recent conversations">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">Recent conversations</h2>
         <span className="text-[11px] text-muted-foreground">{allRecent.length}</span>
       </div>
       <div className="divide-y divide-border/60 border-y border-border/60">
@@ -47,7 +47,7 @@ export function OraHomeRecents() {
               key={conversation.id}
               type="button"
               onClick={() => conversationsContext.selectConversation(conversation.id)}
-              className="flex w-full items-start gap-3 px-1 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex w-full items-start gap-3 px-1 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={`Open conversation ${conversation.title || "Untitled"}`}
             >
               {projectName ? (

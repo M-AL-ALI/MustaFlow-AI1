@@ -31,6 +31,16 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { authFetch } from "@/lib/api-fetch";
+import {
+  ORA_ACTIVITY_TEXT,
+  ORA_REALTIME_RECONNECT_BACKOFF_MS,
+  ORA_REALTIME_RECONNECT_MAX_ATTEMPTS,
+  parseOraRealtimeFunctionCallEvent,
+  type OraRealtimeActiveArtifact,
+  type OraRealtimeFunctionCall,
+  type OraRealtimeToolBridgeResponse,
+  type OraRealtimeToolWrittenResult,
+} from "@workspace/ora-contracts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,7 +59,7 @@ export type RealtimeVoiceState =
  * Derived connection-quality signal for the live-voice UI dot:
  * - "good": connected and healthy
  * - "degraded": connected but showing instability
- * - "reconnecting": the single automatic recovery attempt is in flight
+ * - "reconnecting": the automatic recovery ladder is in flight
  * - "legacy": realtime gave up; the legacy transcribe -> chat -> tts loop is active
  */
 export type NetworkQuality = "good" | "degraded" | "reconnecting" | "legacy";
@@ -90,6 +100,10 @@ export interface RealtimeStartContext {
    * the mint or placed in the system instructions.
    */
   history?: { role: "user" | "assistant"; content: string }[];
+  /** Uploaded-file refs available to voice-side file creation/revision tools. */
+  documentRefs?: string[];
+  /** Current generated/edited artifact, when the user is revising it by voice. */
+  activeArtifact?: OraRealtimeActiveArtifact | null;
   /**
    * Speaker-focus mode for this session. "focused" (default) makes the server
    * stop auto-responding so the client only replies to transcripts that clear the
@@ -110,6 +124,8 @@ export interface UseOraRealtimeVoiceOptions {
   onUserTranscript: (text: string) => void;
   /** Called once per finalized ASSISTANT turn (already trimmed). */
   onAssistantTranscript: (text: string) => void;
+  /** Rich tool output mirrored into the normal text thread. */
+  onToolWrittenResult?: (result: OraRealtimeToolWrittenResult) => void;
   /**
    * Called when realtime drops AFTER a session was already established (e.g. the
    * ICE connection fails mid-call). The initial start() failure is reported via
@@ -150,8 +166,8 @@ export interface UseOraRealtimeVoiceReturn {
    * Begin a realtime session. Resolves true when connected, false when the
    * session could not start (in which case fallbackReason is set). Must be
    * called from inside a user gesture so audio autoplay is unlocked. The optional
-   * `isReconnect` flag marks the single automatic recovery attempt so it does not
-   * reset the one-attempt budget.
+   * `isReconnect` marks an automatic recovery attempt so it does not reset the
+   * shared reconnect budget.
    */
   start: (ctx: RealtimeStartContext, opts?: { isReconnect?: boolean }) => Promise<boolean>;
   /** End the session and release the mic, peer connection, and audio element. */
@@ -161,8 +177,8 @@ export interface UseOraRealtimeVoiceReturn {
   /** Toggle muting of Ora's spoken audio (does not stop the mic). */
   toggleMute: () => void;
   /**
-   * Manual recovery from the legacy-fallback state: reset the single-attempt
-   * reconnect budget and rebuild the realtime session from the last context.
+   * Manual recovery from the legacy-fallback state: reset the reconnect budget
+   * and rebuild the realtime session from the last context.
    */
   retry: () => void;
 }
@@ -171,6 +187,7 @@ export interface UseOraRealtimeVoiceReturn {
 
 const OPENAI_REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const MINT_URL = "/api/public-ai/realtime/session";
+const TOOL_URL = "/api/public-ai/realtime/tool";
 const HEARTBEAT_URL = "/api/public-ai/realtime/heartbeat";
 const END_URL = "/api/public-ai/realtime/end";
 const CLIENT_DIAG_URL = "/api/public-ai/realtime/client-diag";
@@ -206,10 +223,6 @@ const OUTPUT_STOP_DEBOUNCE_MS = 600;
 // delays (ms) before firing, capped at the last value. The ladder resets to the
 // first step after ANY successful (re)connect, so a long call survives many
 // independent drops across the full per-plan time budget.
-const RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000];
-// Maximum consecutive reconnect attempts (with no intervening success) before
-// giving up on realtime and dropping to the legacy voice loop.
-const RECONNECT_MAX_ATTEMPTS = 6;
 // Diagnostics ring buffer size — the last N connection events, kept in memory only
 // to derive UI state / optional debug logs. Never sent to a server.
 const DIAG_RING_SIZE = 20;
@@ -937,6 +950,8 @@ export function useOraRealtimeVoice(
   onUserRef.current = options.onUserTranscript;
   const onAssistantRef = useRef(options.onAssistantTranscript);
   onAssistantRef.current = options.onAssistantTranscript;
+  const onToolWrittenResultRef = useRef(options.onToolWrittenResult);
+  onToolWrittenResultRef.current = options.onToolWrittenResult;
   const onFallbackRef = useRef(options.onFallback);
   onFallbackRef.current = options.onFallback;
 
@@ -950,6 +965,7 @@ export function useOraRealtimeVoice(
   // duration the heartbeat/end report; the server clock stays authoritative).
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const realtimeSessionIdRef = useRef<string | null>(null);
+  const handledToolCallsRef = useRef(new Set<string>());
   const sessionStartedAtRef = useRef(0);
   const sdpAbortRef = useRef<AbortController | null>(null);
   // Accumulators for the in-flight turn's final transcript text. The GA API may
@@ -970,7 +986,7 @@ export function useOraRealtimeVoice(
   const networkQualityRef = useRef<NetworkQuality>("good");
   // Reconnect budget: counts consecutive automatic recovery attempts since the
   // last successful (re)connect. Reset to 0 on any successful connect, a fresh
-  // (non-reconnect) start(), or a manual retry(); at RECONNECT_MAX_ATTEMPTS the
+  // (non-reconnect) start(), or a manual retry(); at the shared attempt cap the
   // ladder gives up and drops to legacy.
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1158,6 +1174,7 @@ export function useOraRealtimeVoice(
 
   const fullTeardown = useCallback(() => {
     activeRef.current = false;
+    handledToolCallsRef.current.clear();
     clearDurationTimer();
     clearHeartbeatTimer();
     clearBargeInTimer();
@@ -1293,7 +1310,7 @@ export function useOraRealtimeVoice(
   // Schedule the next automatic reconnect attempt after a mid-call drop, using the
   // backoff ladder. Each drop (or a failed attempt) advances one step; a successful
   // (re)connect resets the ladder (in start()'s connected path). Only once
-  // RECONNECT_MAX_ATTEMPTS consecutive attempts fail with no success in between do
+  // Only after the shared number of consecutive attempts fail with no success do
   // we drop to the legacy fallback, so a flaky link can be recovered again and
   // again for the full time budget.
   const scheduleReconnect = useCallback(() => {
@@ -1302,16 +1319,19 @@ export function useOraRealtimeVoice(
       enterLegacyFallback("Live voice connection dropped. Using basic voice mode.");
       return;
     }
-    if (reconnectAttemptsRef.current >= RECONNECT_MAX_ATTEMPTS) {
+    if (reconnectAttemptsRef.current >= ORA_REALTIME_RECONNECT_MAX_ATTEMPTS) {
       enterLegacyFallback("Live voice reconnect failed. Using basic voice mode.");
       return;
     }
     const attempt = reconnectAttemptsRef.current;
     reconnectAttemptsRef.current = attempt + 1;
-    const delayMs = RECONNECT_BACKOFF_MS[Math.min(attempt, RECONNECT_BACKOFF_MS.length - 1)];
+    const delayMs =
+      ORA_REALTIME_RECONNECT_BACKOFF_MS[
+        Math.min(attempt, ORA_REALTIME_RECONNECT_BACKOFF_MS.length - 1)
+      ];
     recordDiag("reconnect_scheduled", {
       attempt: attempt + 1,
-      max: RECONNECT_MAX_ATTEMPTS,
+      max: ORA_REALTIME_RECONNECT_MAX_ATTEMPTS,
       delayMs,
     });
     applyNetworkQuality("reconnecting");
@@ -1352,14 +1372,14 @@ export function useOraRealtimeVoice(
       reportServerDiag("connection_drop");
       applyNetworkQuality("degraded");
       // Tear down the broken session but keep the caller in the realtime UI while
-      // the single reconnect attempt runs.
+      // the reconnect ladder runs.
       fullTeardown();
       scheduleReconnect();
     },
     [recordDiag, reportServerDiag, applyNetworkQuality, fullTeardown, scheduleReconnect],
   );
 
-  // Manual recovery from the legacy-fallback state: reset the one-attempt budget
+  // Manual recovery from the legacy-fallback state: reset the reconnect budget
   // and rebuild the realtime session from the last known context.
   const retry = useCallback(() => {
     const ctx = lastCtxRef.current;
@@ -1790,6 +1810,79 @@ export function useOraRealtimeVoice(
   }, []);
 
   // ── Data-channel event handling ──────────────────────────────────────────
+  const executeRealtimeTool = useCallback(
+    async (call: OraRealtimeFunctionCall) => {
+      if (!activeRef.current || handledToolCallsRef.current.has(call.callId)) return;
+      handledToolCallsRef.current.add(call.callId);
+      const realtimeSessionId = realtimeSessionIdRef.current;
+      if (!realtimeSessionId) return;
+
+      if (thinkingWatchdogRef.current) {
+        clearTimeout(thinkingWatchdogRef.current);
+        thinkingWatchdogRef.current = null;
+      }
+      if (activeRef.current) setState("thinking");
+      logVoiceDiag("tool_call_started", { tool: call.name });
+
+      const ctx = lastCtxRef.current;
+      let result: OraRealtimeToolBridgeResponse;
+      try {
+        const response = await authFetch(TOOL_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            realtimeSessionId,
+            callId: call.callId,
+            name: call.name,
+            argumentsJson: call.argumentsJson,
+            context: {
+              oraProjectId: ctx?.oraProjectId ?? null,
+              conversationId: ctx?.conversationId ?? null,
+              language: ctx?.language,
+              history: ctx?.history,
+              documentRefs: ctx?.documentRefs,
+              activeArtifact: ctx?.activeArtifact ?? null,
+            },
+          }),
+        });
+        if (!response.ok) throw new Error("tool bridge unavailable");
+        result = (await response.json()) as OraRealtimeToolBridgeResponse;
+      } catch {
+        const tool =
+          call.name === "web_search"
+            ? "web-search"
+            : call.name === "generate_file"
+              ? "file-generation"
+              : call.name === "generate_image"
+                ? "image-generation"
+                : "repo-analysis";
+        result = {
+          ok: false,
+          output:
+            "That tool did not come back. Tell the user briefly and continue from what you know without inventing a result.",
+          activity: { tool, phase: "fail", text: ORA_ACTIVITY_TEXT[tool].fail },
+          recoverable: true,
+        };
+      }
+
+      if (!activeRef.current) return;
+      if (result.writtenResult) onToolWrittenResultRef.current?.(result.writtenResult);
+      sendEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: call.callId,
+          output: result.output,
+        },
+      });
+      sendEvent({ type: "response.create" });
+      logVoiceDiag(result.ok ? "tool_call_completed" : "tool_call_failed_safe", {
+        tool: call.name,
+      });
+    },
+    [sendEvent],
+  );
+
   const handleServerEvent = useCallback(
     (raw: string) => {
       let evt: { type?: string; [k: string]: unknown };
@@ -1802,6 +1895,12 @@ export function useOraRealtimeVoice(
       if (!type) return;
 
       switch (type) {
+        case "response.function_call_arguments.done":
+        case "response.output_item.done": {
+          const call = parseOraRealtimeFunctionCallEvent(evt);
+          if (call) void executeRealtimeTool(call);
+          break;
+        }
         // ── User speech / input transcription ──────────────────────────────
         case "input_audio_buffer.speech_started":
           speechActiveRef.current = true;
@@ -2251,6 +2350,8 @@ export function useOraRealtimeVoice(
         }
 
         case "response.done": {
+          const toolCall = parseOraRealtimeFunctionCallEvent(evt);
+          if (toolCall) void executeRealtimeTool(toolCall);
           const doneAt = Date.now();
           const t = turnTimingRef.current;
           assistantResponseActiveRef.current = false;
@@ -2286,7 +2387,7 @@ export function useOraRealtimeVoice(
           // silent-audio failure nor reset the counter.
           const responseStatus = (evt.response as { status?: string } | undefined)?.status;
           const responseCompletedNormally =
-            responseStatus !== "cancelled" && responseStatus !== "failed";
+            !toolCall && responseStatus !== "cancelled" && responseStatus !== "failed";
           const audioDeliveredThisResponse = audioStartedForResponseRef.current;
           const audioRecoveredThisResponse = audioResumeAttemptedForResponseRef.current;
           stopAudioLivenessTracking();
@@ -2321,7 +2422,7 @@ export function useOraRealtimeVoice(
             assistantTextRef.current = "";
             setInterimAssistantTranscript("");
           }
-          if (activeRef.current) setState("listening");
+          if (activeRef.current && !toolCall) setState("listening");
           break;
         }
 
@@ -2376,6 +2477,7 @@ export function useOraRealtimeVoice(
       startAudioLivenessTracking,
       stopAudioLivenessTracking,
       scheduleSettledResponse,
+      executeRealtimeTool,
     ],
   );
 
@@ -2574,7 +2676,7 @@ export function useOraRealtimeVoice(
             return;
           }
           if ((st === "failed" || st === "disconnected") && activeRef.current) {
-            // Mid-call drop: run the single auto-reconnect, then legacy fallback.
+            // Mid-call drop: run the shared recovery ladder before legacy fallback.
             // (start() already resolved true, so the caller is in the realtime UI;
             // the start()-false path cannot cover a mid-call drop.)
             handleConnectionDrop(`ice_${st}`);
