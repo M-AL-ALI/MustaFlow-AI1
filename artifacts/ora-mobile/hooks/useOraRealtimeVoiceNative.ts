@@ -54,10 +54,14 @@ import {
   ApiRequestError,
 } from "@/lib/api";
 import {
+  buildOraRealtimeToolNarrationEvent,
   ORA_ACTIVITY_TEXT,
   ORA_REALTIME_RECONNECT_BACKOFF_MS,
   ORA_REALTIME_RECONNECT_MAX_ATTEMPTS,
+  ORA_REALTIME_TOOL_NARRATION_TIMEOUT_MS,
   parseOraRealtimeFunctionCallEvent,
+  parseOraRealtimeToolNarrationCallId,
+  oraRealtimeToolActivity,
   type OraRealtimeActiveArtifact,
   type OraRealtimeFunctionCall,
   type OraRealtimeToolBridgeResponse,
@@ -801,6 +805,12 @@ interface TurnTiming {
   outputCycles: number;
 }
 
+interface ToolNarrationWaiter {
+  callId: string;
+  timer: ReturnType<typeof setTimeout>;
+  resolve: () => void;
+}
+
 function newTurnTiming(): TurnTiming {
   return {
     speechStartedAt: 0,
@@ -956,6 +966,8 @@ export function useOraRealtimeVoiceNative(
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const realtimeSessionIdRef = useRef<string | null>(null);
   const handledToolCallsRef = useRef(new Set<string>());
+  const toolCallQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const toolNarrationWaiterRef = useRef<ToolNarrationWaiter | null>(null);
   const sessionStartedAtRef = useRef(0);
   const sdpAbortRef = useRef<AbortController | null>(null);
   const userTextRef = useRef("");
@@ -980,6 +992,8 @@ export function useOraRealtimeVoiceNative(
   // ladder gives up and drops to legacy.
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the user wants Talk to Ora to remain active across reconnects.
+  const reconnectAllowedRef = useRef(false);
   // reconnectConsumedRef: one-shot latch so the backoff timer and a NetInfo
   // reachability-restored event can never both fire the same reconnect.
   const reconnectConsumedRef = useRef(false);
@@ -1111,6 +1125,15 @@ export function useOraRealtimeVoiceNative(
     pendingBargeInRef.current = false;
   }, []);
 
+  const finishToolNarration = useCallback((callId?: string): boolean => {
+    const waiter = toolNarrationWaiterRef.current;
+    if (!waiter || (callId && waiter.callId !== callId)) return false;
+    clearTimeout(waiter.timer);
+    toolNarrationWaiterRef.current = null;
+    waiter.resolve();
+    return true;
+  }, []);
+
   // ── Diagnostics ring buffer + derived connection-quality helpers ────────────
   // recordDiag appends to a bounded in-memory ring (last DIAG_RING_SIZE events).
   // The ring is used ONLY to derive UI state / debug logs and is never uploaded;
@@ -1172,6 +1195,8 @@ export function useOraRealtimeVoiceNative(
   const fullTeardown = useCallback(() => {
     activeRef.current = false;
     handledToolCallsRef.current.clear();
+    toolCallQueueRef.current = Promise.resolve();
+    finishToolNarration();
     // Invalidate any in-flight start(): its captured generation no longer matches.
     startGenerationRef.current += 1;
     clearDurationTimer();
@@ -1263,7 +1288,13 @@ export function useOraRealtimeVoiceNative(
       streamRef.current = null;
     }
     remoteTrackRef.current = null;
-  }, [clearDurationTimer, clearHeartbeatTimer, clearBargeInTimer, finalizeSession]);
+  }, [
+    clearDurationTimer,
+    clearHeartbeatTimer,
+    clearBargeInTimer,
+    finalizeSession,
+    finishToolNarration,
+  ]);
 
   // start() is defined below but the reconnect helpers need to call it, so it is
   // reached through a ref to break the declaration cycle.
@@ -1273,6 +1304,7 @@ export function useOraRealtimeVoiceNative(
   // loop. The dot goes grey ("legacy"); the caller shows the Retry button.
   const enterLegacyFallback = useCallback(
     (reason: string) => {
+      reconnectAllowedRef.current = false;
       recordDiag("legacy_fallback", { reason });
       reportServerDiag("legacy_fallback");
       fullTeardown();
@@ -1293,6 +1325,7 @@ export function useOraRealtimeVoiceNative(
   // we drop to legacy, so a flaky link recovers again and again for the full budget.
   const scheduleReconnect = useCallback(
     (reason: string) => {
+      if (!reconnectAllowedRef.current) return;
       const ctx = lastCtxRef.current;
       if (!ctx) {
         enterLegacyFallback(reason);
@@ -1322,6 +1355,7 @@ export function useOraRealtimeVoiceNative(
       setState("connecting");
 
       const fire = () => {
+        if (!reconnectAllowedRef.current) return;
         if (reconnectConsumedRef.current) return;
         reconnectConsumedRef.current = true;
         pendingReconnectFireRef.current = null;
@@ -1331,6 +1365,7 @@ export function useOraRealtimeVoiceNative(
         }
         recordDiag("reconnect_firing", { attempt: attempt + 1 });
         void startRef.current?.(ctx, { isReconnect: true }).then((result) => {
+          if (!reconnectAllowedRef.current) return;
           if (result?.started) {
             recordDiag("reconnect_succeeded");
             reconnectAttemptsRef.current = 0;
@@ -1374,6 +1409,7 @@ export function useOraRealtimeVoiceNative(
 
   const stop = useCallback(() => {
     if (!activeRef.current && state === "idle") return;
+    reconnectAllowedRef.current = false;
     fullTeardown();
     setInterimUserTranscript("");
     setInterimAssistantTranscript("");
@@ -1443,6 +1479,7 @@ export function useOraRealtimeVoiceNative(
       // Metering outage — fall back to the legacy loop (text + TTS is metered by
       // Ora chat quotas, not the realtime budget) instead of stranding the user.
       const reason = "Live voice is temporarily unavailable. Using basic voice mode.";
+      reconnectAllowedRef.current = false;
       fullTeardown();
       setInterimUserTranscript("");
       setInterimAssistantTranscript("");
@@ -1455,6 +1492,7 @@ export function useOraRealtimeVoiceNative(
 
     // Budget exhausted — end gracefully with the reset time. Do NOT fall back
     // (that would bypass the per-plan voice cap).
+    reconnectAllowedRef.current = false;
     fullTeardown();
     setInterimUserTranscript("");
     setInterimAssistantTranscript("");
@@ -1468,16 +1506,34 @@ export function useOraRealtimeVoiceNative(
     setState("ended");
   }, [fullTeardown]);
 
-  const sendEvent = useCallback((event: Record<string, unknown>) => {
+  const sendEvent = useCallback((event: Record<string, unknown>): boolean => {
     const dc = dcRef.current;
     if (dc && dc.readyState === "open") {
       try {
         dc.send(JSON.stringify(event));
+        return true;
       } catch {
         /* best-effort control channel */
       }
     }
+    return false;
   }, []);
+
+  const requestToolNarration = useCallback(
+    (call: OraRealtimeFunctionCall): Promise<void> => {
+      finishToolNarration();
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          finishToolNarration(call.callId);
+        }, ORA_REALTIME_TOOL_NARRATION_TIMEOUT_MS);
+        toolNarrationWaiterRef.current = { callId: call.callId, timer, resolve };
+        if (!sendEvent(buildOraRealtimeToolNarrationEvent(call.callId, call.name))) {
+          finishToolNarration(call.callId);
+        }
+      });
+    },
+    [finishToolNarration, sendEvent],
+  );
 
   // ── Audio-liveness recovery (mirrors the website hook) ────────────────────
   // Stop all per-response audio-liveness timers (silent-start watchdog + stall
@@ -1813,57 +1869,85 @@ export function useOraRealtimeVoiceNative(
 
   // ── Data-channel event handling (identical to the web transport) ──────────
   const runRealtimeToolCall = useCallback(
-    async (call: OraRealtimeFunctionCall) => {
-      if (!activeRef.current || handledToolCallsRef.current.has(call.callId)) return;
+    (call: OraRealtimeFunctionCall): Promise<void> => {
+      if (!activeRef.current || handledToolCallsRef.current.has(call.callId)) {
+        return Promise.resolve();
+      }
       handledToolCallsRef.current.add(call.callId);
-      const realtimeSessionId = realtimeSessionIdRef.current;
-      const context = lastCtxRef.current;
-      if (!realtimeSessionId || !context) return;
 
-      if (thinkingWatchdogRef.current) {
-        clearTimeout(thinkingWatchdogRef.current);
-        thinkingWatchdogRef.current = null;
-      }
-      if (activeRef.current) setState("thinking");
-      recordDiag("tool_call.started", { tool: call.name });
+      const run = async () => {
+        if (!activeRef.current) return;
+        const realtimeSessionId = realtimeSessionIdRef.current;
+        const context = lastCtxRef.current;
+        if (!realtimeSessionId || !context) return;
 
-      let result: OraRealtimeToolBridgeResponse;
-      try {
-        result = await executeRealtimeTool(realtimeSessionId, call, context);
-      } catch {
-        const tool =
-          call.name === "web_search"
-            ? "web-search"
-            : call.name === "generate_file"
-              ? "file-generation"
-              : call.name === "generate_image"
-                ? "image-generation"
-                : "repo-analysis";
-        result = {
-          ok: false,
-          output:
-            "That tool did not come back. Tell the user briefly and continue from what you know without inventing a result.",
-          activity: { tool, phase: "fail", text: ORA_ACTIVITY_TEXT[tool].fail },
-          recoverable: true,
-        };
-      }
+        if (thinkingWatchdogRef.current) {
+          clearTimeout(thinkingWatchdogRef.current);
+          thinkingWatchdogRef.current = null;
+        }
+        setState("thinking");
+        recordDiag("tool_call.started", { tool: call.name });
 
-      if (!activeRef.current) return;
-      if (result.writtenResult) onToolWrittenResultRef.current?.(result.writtenResult);
-      sendEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "function_call_output",
-          call_id: call.callId,
-          output: result.output,
-        },
-      });
-      sendEvent({ type: "response.create" });
-      recordDiag(result.ok ? "tool_call.completed" : "tool_call.failed_safe", {
-        tool: call.name,
-      });
+        const narrationPromise = requestToolNarration(call);
+        const resultPromise = (async (): Promise<OraRealtimeToolBridgeResponse> => {
+          try {
+            return await executeRealtimeTool(realtimeSessionId, call, context);
+          } catch {
+            const tool = oraRealtimeToolActivity(call.name);
+            return {
+              ok: false,
+              output:
+                "That tool did not come back. Tell the user briefly and continue from what you know without inventing a result.",
+              activity: { tool, phase: "fail", text: ORA_ACTIVITY_TEXT[tool].fail },
+              recoverable: true,
+            };
+          }
+        })();
+
+        const result = await resultPromise;
+        await narrationPromise;
+        if (
+          !activeRef.current ||
+          realtimeSessionIdRef.current !== realtimeSessionId ||
+          !reconnectAllowedRef.current
+        ) {
+          return;
+        }
+
+        const generatedFile = result.writtenResult?.generatedFile;
+        if (generatedFile?.assetId != null) {
+          const latest = lastCtxRef.current;
+          if (latest) {
+            lastCtxRef.current = {
+              ...latest,
+              activeArtifact: {
+                assetId: generatedFile.assetId,
+                fileName: generatedFile.fileName,
+                format: generatedFile.format,
+              },
+            };
+          }
+        }
+        if (result.writtenResult) onToolWrittenResultRef.current?.(result.writtenResult);
+        sendEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: call.callId,
+            output: result.output,
+          },
+        });
+        sendEvent({ type: "response.create" });
+        recordDiag(result.ok ? "tool_call.completed" : "tool_call.failed_safe", {
+          tool: call.name,
+        });
+      };
+
+      const queued = toolCallQueueRef.current.then(run, run);
+      toolCallQueueRef.current = queued.catch(() => {});
+      return queued;
     },
-    [sendEvent],
+    [requestToolNarration, sendEvent],
   );
 
   const handleServerEvent = useCallback(
@@ -2166,6 +2250,7 @@ export function useOraRealtimeVoiceNative(
         case "response.output_audio_transcript.delta":
         case "response.output_text.delta":
         case "response.text.delta": {
+          if (toolNarrationWaiterRef.current) break;
           const delta = typeof evt.delta === "string" ? evt.delta : "";
           if (delta) {
             assistantSpeakingRef.current = true;
@@ -2189,6 +2274,11 @@ export function useOraRealtimeVoiceNative(
         case "response.output_audio_transcript.done":
         case "response.output_text.done":
         case "response.text.done": {
+          if (toolNarrationWaiterRef.current) {
+            assistantTextRef.current = "";
+            setInterimAssistantTranscript("");
+            break;
+          }
           const finalText =
             (typeof evt.transcript === "string" && evt.transcript) ||
             (typeof evt.text === "string" && evt.text) ||
@@ -2335,6 +2425,33 @@ export function useOraRealtimeVoiceNative(
         }
 
         case "response.done": {
+          const narrationCallId = parseOraRealtimeToolNarrationCallId(evt);
+          if (narrationCallId) {
+            assistantResponseActiveRef.current = false;
+            assistantSpeakingRef.current = false;
+            clearBargeInTimer();
+            if (outputStopDebounceRef.current) {
+              clearTimeout(outputStopDebounceRef.current);
+              outputStopDebounceRef.current = null;
+            }
+            if (thinkingWatchdogRef.current) {
+              clearTimeout(thinkingWatchdogRef.current);
+              thinkingWatchdogRef.current = null;
+            }
+            if (speakingWatchdogRef.current) {
+              clearTimeout(speakingWatchdogRef.current);
+              speakingWatchdogRef.current = null;
+            }
+            stopAudioLivenessTracking();
+            audioStartedForResponseRef.current = false;
+            audioResumeAttemptedForResponseRef.current = false;
+            activeResponseIdRef.current = null;
+            assistantTextRef.current = "";
+            setInterimAssistantTranscript("");
+            finishToolNarration(narrationCallId);
+            if (activeRef.current) setState("thinking");
+            break;
+          }
           const toolCall = parseOraRealtimeFunctionCallEvent(evt);
           if (toolCall) void runRealtimeToolCall(toolCall);
           const doneAt = Date.now();
@@ -2414,6 +2531,7 @@ export function useOraRealtimeVoiceNative(
         }
 
         case "error": {
+          finishToolNarration();
           const message =
             (typeof evt.error === "object" &&
               evt.error &&
@@ -2466,6 +2584,7 @@ export function useOraRealtimeVoiceNative(
       stopAudioLivenessTracking,
       scheduleSettledResponse,
       runRealtimeToolCall,
+      finishToolNarration,
     ],
   );
 
@@ -2483,6 +2602,7 @@ export function useOraRealtimeVoiceNative(
       // clears any prior instability/quality state. A reconnect keeps the running
       // attempt count so the backoff ladder can advance toward its cap.
       if (!isReconnect) {
+        reconnectAllowedRef.current = true;
         reconnectAttemptsRef.current = 0;
         reconnectConsumedRef.current = false;
         setConnectionIssue(false);
@@ -2491,6 +2611,7 @@ export function useOraRealtimeVoiceNative(
       }
       const mod = loadWebRTC();
       if (!isSupported || !mod) {
+        reconnectAllowedRef.current = false;
         const reason = "Live voice isn't available on this app version. Using basic voice mode.";
         setState("unsupported");
         setFallbackReason(reason);
@@ -2589,6 +2710,7 @@ export function useOraRealtimeVoiceNative(
             resetsAt?: string | null;
           };
           if (err.status === 429 && eb.limitType === "realtime_voice_minutes") {
+            reconnectAllowedRef.current = false;
             logVoiceDiag("realtime_over_limit", { limit_type: eb.limitType });
             setOverLimit({
               message:
@@ -2602,6 +2724,7 @@ export function useOraRealtimeVoiceNative(
             return { started: false, reason: null, overLimit: true };
           }
           if (err.status === 409 && eb.limitType === "realtime_voice_concurrent") {
+            reconnectAllowedRef.current = false;
             logVoiceDiag("realtime_concurrent", { limit_type: eb.limitType });
             setOverLimit({
               message:
@@ -2615,6 +2738,7 @@ export function useOraRealtimeVoiceNative(
             return { started: false, reason: null, overLimit: true };
           }
         }
+        if (!isReconnect) reconnectAllowedRef.current = false;
         setState("idle");
         const reason =
           err instanceof ApiRequestError &&
@@ -2633,6 +2757,7 @@ export function useOraRealtimeVoiceNative(
 
       if (!mint.value) {
         activeRef.current = false;
+        if (!isReconnect) reconnectAllowedRef.current = false;
         setState("idle");
         const reason = "Live voice failed to start. Using basic voice mode.";
         setFallbackReason(reason);
@@ -2669,12 +2794,14 @@ export function useOraRealtimeVoiceNative(
         activeRef.current = false;
         const name = (err as { name?: string } | null)?.name ?? "";
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          reconnectAllowedRef.current = false;
           const reason =
             "Microphone access denied. Enable microphone permission in Settings, then try again.";
           setState("permission_denied");
           setError(reason);
           return { started: false, reason };
         }
+        if (!isReconnect) reconnectAllowedRef.current = false;
         const reason = "No microphone available. Using basic voice mode.";
         setState("idle");
         setFallbackReason(reason);
@@ -2830,6 +2957,7 @@ export function useOraRealtimeVoiceNative(
             releaseLocal(stream, activePc);
             return { started: false, reason: null };
           }
+          if (!isReconnect) reconnectAllowedRef.current = false;
           fullTeardown();
           setState("idle");
           const reason = "Live voice failed to connect. Using basic voice mode.";
@@ -2885,6 +3013,7 @@ export function useOraRealtimeVoiceNative(
               }
               if (nextVal <= 0) {
                 clearDurationTimer();
+                reconnectAllowedRef.current = false;
                 fullTeardown();
                 setInterimUserTranscript("");
                 setInterimAssistantTranscript("");
@@ -2918,6 +3047,7 @@ export function useOraRealtimeVoiceNative(
           releaseLocal(stream, pc);
           return { started: false, reason: null };
         }
+        if (!isReconnect) reconnectAllowedRef.current = false;
         fullTeardown();
         setState("idle");
         const reason = "Live voice failed to start. Using basic voice mode.";
@@ -2947,6 +3077,7 @@ export function useOraRealtimeVoiceNative(
   const retry = useCallback(() => {
     const ctx = lastCtxRef.current;
     if (!ctx) return;
+    reconnectAllowedRef.current = true;
     recordDiag("manual_retry");
     reconnectAttemptsRef.current = 0;
     reconnectConsumedRef.current = false;
@@ -2979,6 +3110,7 @@ export function useOraRealtimeVoiceNative(
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
+      reconnectAllowedRef.current = false;
       fullTeardown();
     };
   }, [fullTeardown]);

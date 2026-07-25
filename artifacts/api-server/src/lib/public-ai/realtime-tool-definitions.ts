@@ -1,6 +1,7 @@
 import {
-  ORA_ACTIVITY_TEXT,
+  ORA_REALTIME_TOOL_ACTIVITY,
   ORA_REALTIME_TOOL_NAMES,
+  oraRealtimeToolActivity,
   type OraActivityTool,
   type OraRealtimeToolName,
 } from "@workspace/ora-contracts";
@@ -12,21 +13,11 @@ export interface RealtimeToolDefinition {
   parameters: Record<string, unknown>;
 }
 
-export const REALTIME_TOOL_ACTIVITY: Record<OraRealtimeToolName, OraActivityTool> = {
-  web_search: "web-search",
-  list_files: "repo-analysis",
-  read_file: "repo-analysis",
-  search_repo: "repo-analysis",
-  read_commits: "repo-analysis",
-  diff: "repo-analysis",
-  generate_file: "file-generation",
-  generate_image: "image-generation",
-  analyze_repo: "repo-analysis",
-};
+export const REALTIME_TOOL_ACTIVITY = ORA_REALTIME_TOOL_ACTIVITY;
 
 function toolDescription(name: OraRealtimeToolName, description: string): string {
-  const activity = REALTIME_TOOL_ACTIVITY[name];
-  return `${description} Before calling this function, briefly say "${ORA_ACTIVITY_TEXT[activity].start}" in the user's language so there is no dead air.`;
+  const activity = oraRealtimeToolActivity(name);
+  return `${description} The client narrates ${activity} activity automatically; call the function without adding a separate status preamble.`;
 }
 
 const objectSchema = (

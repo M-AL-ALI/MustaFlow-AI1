@@ -6,6 +6,7 @@ process.env.DATABASE_URL =
 
 const workspace = await import("../repo-workspace");
 const readTools = await import("../repo-read-tools");
+const githubAuth = await import("../repo-github-auth");
 
 let nextSessionId = 70_000;
 const usedSessions: number[] = [];
@@ -87,6 +88,85 @@ describe("lazy GitHub API repository workspace", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("/git/trees/main?recursive=1");
     expect(calls[0]).not.toContain("/tarball");
+  });
+
+  it("completes a truncated tree by readable subtrees without descending into media", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes("/git/trees/main?recursive=1")) {
+          return treeResponse([{ path: "package.json", sha: "partial1", size: 20 }], true);
+        }
+        if (url.endsWith("/git/trees/main")) {
+          return treeResponse([
+            { path: "package.json", sha: "root0001", size: 120 },
+            { path: "src", sha: "src00001", size: 0, type: "tree" },
+            { path: "attached_assets", sha: "media001", size: 0, type: "tree" },
+          ]);
+        }
+        if (url.includes("/git/trees/src00001?recursive=1")) {
+          return treeResponse([{ path: "incomplete.ts", sha: "partial2", size: 20 }], true);
+        }
+        if (url.endsWith("/git/trees/src00001")) {
+          return treeResponse([
+            { path: "index.ts", sha: "source01", size: 80 },
+            { path: "lib", sha: "lib00001", size: 0, type: "tree" },
+          ]);
+        }
+        if (url.includes("/git/trees/lib00001?recursive=1")) {
+          return treeResponse([{ path: "util.ts", sha: "source02", size: 90 }]);
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const ws = await materialize(sessionId());
+
+    expect(ws.source).toBe("github_api");
+    expect(ws.truncated).toBe(false);
+    expect(ws.files.map((file) => file.path)).toEqual([
+      "package.json",
+      "src/index.ts",
+      "src/lib/util.ts",
+    ]);
+    expect(calls.some((url) => url.includes("media001"))).toBe(false);
+    expect(calls.some((url) => url.includes("/tarball"))).toBe(false);
+  });
+
+  it("paginates connected repositories until the account list is exhausted", async () => {
+    const calls: string[] = [];
+    const apiRepo = (index: number) => ({
+      full_name: `owner/repo-${index}`,
+      name: `repo-${index}`,
+      owner: { login: "owner" },
+      private: index % 2 === 0,
+      default_branch: "main",
+      description: null,
+      pushed_at: "2026-07-25T00:00:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        calls.push(url);
+        const page = Number(new URL(url).searchParams.get("page"));
+        if (page === 1) return Response.json(Array.from({ length: 100 }, (_, i) => apiRepo(i)));
+        if (page === 2) {
+          return Response.json(Array.from({ length: 100 }, (_, i) => apiRepo(i + 100)));
+        }
+        if (page === 3) return Response.json([apiRepo(200)]);
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const repos = await githubAuth.listGithubRepos("test-token");
+
+    expect(repos).toHaveLength(201);
+    expect(repos[200]?.fullName).toBe("owner/repo-200");
+    expect(calls.some((url) => url.includes("page=3"))).toBe(true);
   });
 
   it("filters skipped directories, binaries, and oversized blobs from tree metadata", () => {

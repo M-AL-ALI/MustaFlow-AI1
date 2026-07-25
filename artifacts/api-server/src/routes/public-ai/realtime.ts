@@ -19,11 +19,7 @@
 import { createHash } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
-import {
-  ORA_ACTIVITY_TEXT,
-  ORA_REALTIME_TOOL_NAMES,
-  type OraRealtimeToolName,
-} from "@workspace/ora-contracts";
+import { ORA_REALTIME_TOOL_NAMES, type OraRealtimeToolName } from "@workspace/ora-contracts";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraRealtimeSessionLimiter, oraRealtimeSessionTickLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
@@ -182,12 +178,8 @@ const VOICE_ADDENDUM =
   "\n\n## Live tools and spoken narration\n" +
   "You have Ora's real tools. Use them whenever the same request in text chat would " +
   "need search, repository reading, a file, an image, or a repository investigation. " +
-  "Before each function call, speak one short natural status sentence in the user's " +
-  "language so there is no dead air. Use the same meaning as these shared Ora lines: " +
-  `"${ORA_ACTIVITY_TEXT["web-search"].start}", ` +
-  `"${ORA_ACTIVITY_TEXT["repo-analysis"].start}", ` +
-  `"${ORA_ACTIVITY_TEXT["file-generation"].start}", and ` +
-  `"${ORA_ACTIVITY_TEXT["image-generation"].start}". ` +
+  "Tool activity is narrated automatically by the client in the user's language, so " +
+  "do not add a separate pre-call status sentence or repeat the activity narration. " +
   "After the tool result arrives, continue naturally and summarize it aloud. If a tool " +
   "fails, say so plainly and continue; never end the live session for a recoverable tool " +
   "failure. Never speak raw URLs, provider names, model ids, stack traces, secrets, or " +

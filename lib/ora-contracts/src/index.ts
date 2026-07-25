@@ -777,6 +777,83 @@ export const ORA_REALTIME_TOOL_NAMES = [
 
 export type OraRealtimeToolName = (typeof ORA_REALTIME_TOOL_NAMES)[number];
 
+/** Shared activity category for each realtime function tool. */
+export const ORA_REALTIME_TOOL_ACTIVITY: Record<OraRealtimeToolName, OraActivityTool> = {
+  web_search: "web-search",
+  list_files: "repo-analysis",
+  read_file: "repo-analysis",
+  search_repo: "repo-analysis",
+  read_commits: "repo-analysis",
+  diff: "repo-analysis",
+  generate_file: "file-generation",
+  generate_image: "image-generation",
+  analyze_repo: "repo-analysis",
+};
+
+export function oraRealtimeToolActivity(name: OraRealtimeToolName): OraActivityTool {
+  return ORA_REALTIME_TOOL_ACTIVITY[name];
+}
+
+/** Metadata marker used for out-of-band spoken tool narration responses. */
+export const ORA_REALTIME_TOOL_NARRATION_PURPOSE = "ora_tool_narration";
+export const ORA_REALTIME_TOOL_NARRATION_TIMEOUT_MS = 4_000;
+
+/**
+ * Build a short, out-of-band audio response before a realtime tool runs.
+ * It uses the shared activity wording, cannot call another tool, and does not
+ * pollute the user's conversation history.
+ */
+export function buildOraRealtimeToolNarrationEvent(
+  callId: string,
+  toolName: OraRealtimeToolName,
+): Record<string, unknown> {
+  const text = ORA_ACTIVITY_TEXT[oraRealtimeToolActivity(toolName)].start;
+  return {
+    type: "response.create",
+    response: {
+      conversation: "none",
+      output_modalities: ["audio"],
+      tools: [],
+      tool_choice: "none",
+      max_output_tokens: 64,
+      metadata: {
+        purpose: ORA_REALTIME_TOOL_NARRATION_PURPOSE,
+        tool_call_id: callId,
+      },
+      input: [
+        {
+          type: "message",
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: `Say exactly this one short status sentence and nothing else: "${text}"`,
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+/** Return the tool call id only for Ora's out-of-band narration responses. */
+export function parseOraRealtimeToolNarrationCallId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as Record<string, unknown>;
+  const response =
+    event.response && typeof event.response === "object"
+      ? (event.response as Record<string, unknown>)
+      : null;
+  const metadata =
+    response?.metadata && typeof response.metadata === "object"
+      ? (response.metadata as Record<string, unknown>)
+      : null;
+  if (metadata?.purpose !== ORA_REALTIME_TOOL_NARRATION_PURPOSE) return null;
+  return typeof metadata.tool_call_id === "string" && metadata.tool_call_id
+    ? metadata.tool_call_id
+    : null;
+}
+
 /** Shared web/native recovery policy for one continuous Talk to Ora session. */
 export const ORA_REALTIME_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000] as const;
 export const ORA_REALTIME_RECONNECT_MAX_ATTEMPTS = 6;

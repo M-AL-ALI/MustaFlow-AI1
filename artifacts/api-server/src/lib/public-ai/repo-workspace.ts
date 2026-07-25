@@ -209,7 +209,6 @@ export function filterRepoTreeEntries(
   let truncated = treeWasTruncated;
 
   for (const entry of entries) {
-    if (entry.type !== "blob") continue;
     const relPath = normalizedRepoPath(entry.path);
     const bytes = Math.max(0, entry.size ?? 0);
     if (!relPath) {
@@ -220,6 +219,7 @@ export function filterRepoTreeEntries(
       retainLargestSkips(skipped, { path: relPath, bytes, reason: "skipped_directory" });
       continue;
     }
+    if (entry.type !== "blob") continue;
     if (isBinaryPath(relPath)) {
       retainLargestSkips(skipped, { path: relPath, bytes, reason: "binary" });
       continue;
@@ -827,6 +827,9 @@ export async function materializeRepoWorkspace(args: MaterializeArgs): Promise<R
         args.owner,
         args.repo,
         args.ref || args.defaultBranch || "HEAD",
+        {
+          shouldDescend: (treePath) => !isSkippedPath(treePath),
+        },
       );
       const apiWorkspace = createApiWorkspace(args, key, tree);
       workspaces.set(key, apiWorkspace);

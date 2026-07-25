@@ -252,7 +252,7 @@ export async function listGithubRepos(token: string): Promise<OraGithubRepoSumma
     pushed_at: string | null;
   };
   const out: OraGithubRepoSummary[] = [];
-  for (let page = 1; page <= 2; page++) {
+  for (let page = 1; ; page += 1) {
     const repos = await githubGet<ApiRepo[]>(
       token,
       `/user/repos?per_page=100&sort=pushed&page=${page}`,
@@ -298,15 +298,24 @@ export interface OraRepoTree {
   entries: OraRepoTreeEntry[];
 }
 
+export interface FetchRepoTreeOptions {
+  /** Skip known-unreadable directory trees before issuing child API requests. */
+  shouldDescend?: (path: string) => boolean;
+}
+
 /**
  * Fetches repository metadata only. The recursive tree contains paths, blob
  * SHAs, and sizes; it never downloads file bodies or a repository archive.
+ * GitHub can truncate a large recursive response. In that case, walk individual
+ * subtrees until every readable path is represented rather than silently losing
+ * files or falling back to a full repository download.
  */
 export async function fetchRepoTree(
   token: string,
   owner: string,
   repo: string,
   ref: string,
+  options: FetchRepoTreeOptions = {},
 ): Promise<OraRepoTree> {
   type ApiTree = {
     sha: string;
@@ -318,26 +327,66 @@ export async function fetchRepoTree(
       size?: number;
     }>;
   };
+  const basePath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`;
   const treeRef = ref.trim() || "HEAD";
-  const apiPath =
-    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}` +
-    `/git/trees/${encodeURIComponent(treeRef)}?recursive=1`;
-  const tree = await githubGet<ApiTree>(token, apiPath);
+  const getTree = (treeish: string, recursive: boolean) =>
+    githubGet<ApiTree>(
+      token,
+      `${basePath}/${encodeURIComponent(treeish)}${recursive ? "?recursive=1" : ""}`,
+    );
+  const toEntries = (tree: ApiTree, prefix = ""): OraRepoTreeEntry[] =>
+    (tree.tree ?? []).flatMap((entry) => {
+      if (!entry.path || !entry.type || !entry.sha) return [];
+      const fullPath = prefix ? `${prefix}/${entry.path}` : entry.path;
+      return [
+        {
+          path: fullPath,
+          type: entry.type,
+          sha: entry.sha,
+          size: entry.size,
+        },
+      ];
+    });
+
+  const tree = await getTree(treeRef, true);
+  if (!tree.truncated) {
+    return {
+      sha: tree.sha,
+      truncated: false,
+      entries: toEntries(tree),
+    };
+  }
+
+  const entries = new Map<string, OraRepoTreeEntry>();
+  const retain = (entry: OraRepoTreeEntry) => {
+    entries.set(`${entry.type}:${entry.path}`, entry);
+  };
+  // A truncated recursive response is still valid for every entry it contains.
+  // Keep that evidence, then let the segmented walk fill gaps and overwrite any
+  // duplicate paths with the authoritative direct-subtree metadata.
+  for (const entry of toEntries(tree)) retain(entry);
+  const expand = async (treeish: string, prefix: string): Promise<void> => {
+    const direct = await getTree(treeish, false);
+    if (direct.truncated) {
+      throw new Error("GitHub returned an incomplete repository directory listing.");
+    }
+    for (const entry of toEntries(direct, prefix)) {
+      retain(entry);
+      if (entry.type !== "tree" || options.shouldDescend?.(entry.path) === false) continue;
+      const child = await getTree(entry.sha, true);
+      if (child.truncated) {
+        await expand(entry.sha, entry.path);
+      } else {
+        for (const descendant of toEntries(child, entry.path)) retain(descendant);
+      }
+    }
+  };
+
+  await expand(treeRef, "");
   return {
     sha: tree.sha,
-    truncated: Boolean(tree.truncated),
-    entries: (tree.tree ?? []).flatMap((entry) =>
-      entry.path && entry.type && entry.sha
-        ? [
-            {
-              path: entry.path,
-              type: entry.type,
-              sha: entry.sha,
-              size: entry.size,
-            },
-          ]
-        : [],
-    ),
+    truncated: false,
+    entries: [...entries.values()],
   };
 }
 

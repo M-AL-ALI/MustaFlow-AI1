@@ -185,9 +185,9 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /ora-mobile-reconnect/i,
     ],
     manualWebsite:
-      "Run 10+ voice turns, pause mid-sentence, interrupt mid-answer, and verify tier-time behavior. During the same call, trigger current web search, read-only connected-repo inspection, full repo analysis, file generation/revision, and image generation. Confirm Ora briefly narrates each tool with the shared activity wording, speaks the grounded result, and mirrors sources/reports/files/images into the text thread. Simulate a network blip and confirm the six-attempt recovery ladder reconnects without ending the call; force a tool failure and confirm Ora explains it safely and keeps listening.",
+      "Run 10+ voice turns, pause mid-sentence, interrupt mid-answer, and verify tier-time behavior. During the same call, trigger current web search, read-only connected-repo inspection, full repo analysis, generate a file, then revise that exact generated file without leaving Talk mode, and generate an image. Confirm Ora speaks the shared activity wording before each tool result, mirrors sources/reports/files/images into the text thread, and never turns narration into a chat message. Simulate a network blip and confirm the six-attempt recovery ladder reconnects; press End while reconnecting and confirm the call never restarts. Force a tool failure and confirm Ora explains it safely and keeps listening.",
     manualMobile:
-      "On the new TestFlight build, repeat the website voice-tool, written-artifact, safe-failure, 10+ turn, barge-in, budget, and reconnect checks. Confirm the same tools and shared narration are available and GitHub remains strictly read-only.",
+      "On the new TestFlight build, repeat the website voice-tool, same-call file generation/revision, written-artifact, safe-failure, 10+ turn, barge-in, budget, reconnect, and End-during-reconnect checks. Confirm the same tools and shared narration are available and GitHub remains strictly read-only.",
   },
   {
     id: "image-generation-editing",
@@ -524,7 +524,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /startup-migrations/i,
     ],
     manualWebsite:
-      "Connect GitHub, select M-AL-ALI/MustaFlow-AI1 without pasting its URL, then ask Ora to list artifacts/, read a named source file, search for resolveFinalOraRoute, and find bugs. Confirm useful results arrive despite the large attached_assets media, evidence cites real file:line locations, narration stays live, and no full-repository download or generic size failure appears. Trigger a read failure and confirm Ora says no code was analyzed instead of inventing findings. Verify Ora never offers write, commit, push, or patch tools.",
+      "Connect GitHub, select M-AL-ALI/MustaFlow-AI1 without pasting its URL, then ask Ora to list artifacts/, read a named source file, search for resolveFinalOraRoute, and find bugs. Confirm useful results arrive even when GitHub marks the initial recursive tree truncated and despite the large attached_assets media; evidence must cite real file:line locations, narration stays live, and no full-repository download or generic size failure appears. Trigger a read failure and confirm Ora says no code was analyzed instead of inventing findings. Verify Ora never offers write, commit, push, or patch tools.",
     manualMobile:
       "On TestFlight, connect GitHub and select M-AL-ALI/MustaFlow-AI1 without pasting a URL. Ask Ora to list, read, search, and analyze the repo; confirm the read-only chip, live narration, and file:line evidence match the website despite attached_assets media. Verify a failed read explicitly says no code was analyzed and no write, commit, push, or patch action is offered.",
   },

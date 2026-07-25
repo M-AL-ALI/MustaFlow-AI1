@@ -34,6 +34,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { ORA_REALTIME_TOOL_NARRATION_PURPOSE } from "@workspace/ora-contracts";
 import { useOraRealtimeVoice, type RealtimeStartContext } from "../use-ora-realtime-voice";
 
 // ─── Mock @/lib/api-fetch ─────────────────────────────────────────────────────
@@ -229,6 +230,24 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     });
   }
 
+  async function finishNarration(dc: FakeDataChannel, callId: string) {
+    await act(async () => {
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.done",
+          response: {
+            metadata: {
+              purpose: ORA_REALTIME_TOOL_NARRATION_PURPOSE,
+              tool_call_id: callId,
+            },
+          },
+        }),
+      });
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    });
+  }
+
   // ─── Baseline ────────────────────────────────────────────────────────────
 
   it("starts successfully and reaches 'listening' with networkQuality 'good'", async () => {
@@ -294,6 +313,25 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
       });
       for (let index = 0; index < 6; index += 1) await Promise.resolve();
     });
+    const narrationEvent = dc.send.mock.calls
+      .map(([raw]) => JSON.parse(String(raw)) as Record<string, unknown>)
+      .find(
+        (event) =>
+          (event.response as { metadata?: { purpose?: string } } | undefined)?.metadata?.purpose ===
+          ORA_REALTIME_TOOL_NARRATION_PURPOSE,
+      );
+    expect(narrationEvent).toMatchObject({
+      type: "response.create",
+      response: {
+        conversation: "none",
+        output_modalities: ["audio"],
+        tools: [],
+        tool_choice: "none",
+      },
+    });
+    expect(onToolWrittenResult).not.toHaveBeenCalled();
+
+    await finishNarration(dc, "call_search");
 
     const toolCall = vi
       .mocked(authFetch)
@@ -321,6 +359,120 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     expect(hook.result.current.fallbackReason).toBeNull();
   });
 
+  it("uses a voice-generated file as the active artifact for the next voice revision", async () => {
+    let toolResultIndex = 0;
+    vi.mocked(authFetch).mockImplementation(async (url: string) => {
+      if (String(url).includes("/session")) return mintResponse();
+      if (String(url).includes("/realtime/tool")) {
+        toolResultIndex += 1;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            output: toolResultIndex === 1 ? "File ready." : "Revision ready.",
+            activity: { tool: "file-generation", phase: "ok", text: "File ready." },
+            writtenResult:
+              toolResultIndex === 1
+                ? {
+                    content: "Here is your proposal.",
+                    generatedFile: {
+                      assetId: 321,
+                      fileName: "proposal.docx",
+                      mimeType:
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      format: "docx",
+                    },
+                  }
+                : { content: "The proposal was revised." },
+            recoverable: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return okResponse();
+    });
+    const hook = renderHook(() =>
+      useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn() }),
+    );
+    await connectHook(hook);
+    const dc = pcInstances[0].dc!;
+
+    await act(async () => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_generate",
+            name: "generate_file",
+            arguments: '{"prompt":"Create a proposal","format":"docx"}',
+          },
+        }),
+      });
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    });
+    await finishNarration(dc, "call_generate");
+
+    await act(async () => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_revise",
+            name: "generate_file",
+            arguments: '{"prompt":"Make the headings blue","format":"docx"}',
+          },
+        }),
+      });
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    });
+    await finishNarration(dc, "call_revise");
+
+    const toolCalls = vi
+      .mocked(authFetch)
+      .mock.calls.filter((call) => String(call[0]).includes("/realtime/tool"));
+    expect(toolCalls).toHaveLength(2);
+    expect(JSON.parse((toolCalls[1]?.[1] as RequestInit).body as string)).toMatchObject({
+      callId: "call_revise",
+      context: {
+        activeArtifact: {
+          assetId: 321,
+          fileName: "proposal.docx",
+          format: "docx",
+        },
+      },
+    });
+  });
+
+  it("does not resurrect a start that resolves after the user ends Talk to Ora", async () => {
+    let resolveMint: ((response: Response) => void) | null = null;
+    const deferredMint = new Promise<Response>((resolve) => {
+      resolveMint = resolve;
+    });
+    vi.mocked(authFetch).mockImplementation(async (url: string) => {
+      if (String(url).includes("/session")) return deferredMint;
+      return okResponse();
+    });
+    const hook = renderHook(() =>
+      useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn() }),
+    );
+
+    let startPromise: Promise<boolean> | null = null;
+    act(() => {
+      startPromise = hook.result.current.start(DEFAULT_CTX);
+    });
+    act(() => {
+      hook.result.current.stop();
+    });
+    resolveMint?.(mintResponse());
+    await act(async () => {
+      expect(await startPromise).toBe(false);
+    });
+
+    expect(pcInstances).toHaveLength(0);
+    expect(hook.result.current.state).toBe("ended");
+  });
+
   // ─── Single auto-reconnect on first ICE drop ──────────────────────────────
 
   it("schedules a reconnect on first ICE drop — networkQuality becomes 'reconnecting'", async () => {
@@ -337,6 +489,30 @@ describe("useOraRealtimeVoice — reconnect state machine", () => {
     expect(hook.result.current.networkQuality).toBe("reconnecting");
     // fallbackReason must be null — we have not given up yet.
     expect(hook.result.current.fallbackReason).toBeNull();
+  });
+
+  it("cancels the reconnect ladder when the user ends the call", async () => {
+    const hook = renderHook(() =>
+      useOraRealtimeVoice({ onUserTranscript: vi.fn(), onAssistantTranscript: vi.fn() }),
+    );
+    await connectHook(hook);
+    const initialMints = vi
+      .mocked(authFetch)
+      .mock.calls.filter((call) => String(call[0]).includes("/session")).length;
+
+    act(() => {
+      pcInstances[0].simulateIceFailed();
+    });
+    act(() => {
+      hook.result.current.stop();
+    });
+    await advanceMs(FULL_LADDER_MS);
+
+    const finalMints = vi
+      .mocked(authFetch)
+      .mock.calls.filter((call) => String(call[0]).includes("/session")).length;
+    expect(finalMints).toBe(initialMints);
+    expect(hook.result.current.state).toBe("ended");
   });
 
   it("fires exactly ONE mint for the auto-reconnect after the first backoff step (2 s) elapses", async () => {

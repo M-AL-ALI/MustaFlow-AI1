@@ -2,6 +2,15 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Fix: Ora voice parity hardening and complete lazy repository reads (2026-07-25)
+
+Post-release verification found four edge cases in the otherwise-complete Talk to Ora and lazy GitHub work: a file generated during a live call was not carried into the next spoken revision, the website could let a late asynchronous start/reconnect outlive an explicit End action, tool narration depended on prompt compliance instead of the realtime protocol, and GitHub's truncated recursive-tree response could silently omit source paths. Connected-account repository discovery also stopped after 200 repositories.
+
+- **Website + mobile voice:** realtime tool calls are serialized, voice-generated assets immediately become the active revision target, and tool output waits for a short out-of-band audio narration generated from the shared activity wording. Narration cannot call tools or enter chat history; timeout/error paths continue safely.
+- **Connection lifecycle:** web start attempts now have the same generation guard as mobile and clean up only their own microphone/peer/audio resources. Both clients carry explicit reconnect intent through timers, online/NetInfo acceleration, retry, budget end, fallback, unmount, and End, so an ended call cannot restart.
+- **GitHub lazy API:** repository discovery paginates to exhaustion. A truncated recursive tree is completed by segmented subtree reads, while skipped media directories such as `attached_assets` are never descended into and no archive is downloaded.
+- **Tests/gate:** the existing registered realtime and repository suites now execute protocol narration, same-call generate-then-revise, stop-during-reconnect/start races, truncated-tree completion, media-subtree pruning, and repository pagination.
+
 ## Fix: repo snapshot extraction no longer needs the system `tar` binary (2026-07-24)
 
 Production incident: pasting a repo URL attached the session correctly, but the snapshot fetch failed ("Could not fetch … — answering without repo access") AND the SSE stream died ("Stream ended without a done event"). Root cause is one bug with two faces: `repo-workspace.ts` spawned the system `tar` binary, which is absent from the minimal deployment container — and when `spawn` fails, writing to the dead child's stdin raises an `error` event with no listener, an unhandled stream error that can take down the server mid-request (killing the stream before its `done` frame).

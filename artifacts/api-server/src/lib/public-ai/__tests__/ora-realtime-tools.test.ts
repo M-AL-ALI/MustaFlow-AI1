@@ -5,8 +5,11 @@ import {
   ORA_ACTIVITY_TEXT,
   ORA_REALTIME_RECONNECT_BACKOFF_MS,
   ORA_REALTIME_RECONNECT_MAX_ATTEMPTS,
+  ORA_REALTIME_TOOL_NARRATION_PURPOSE,
   ORA_REALTIME_TOOL_NAMES,
+  buildOraRealtimeToolNarrationEvent,
   parseOraRealtimeFunctionCallEvent,
+  parseOraRealtimeToolNarrationCallId,
   type OraRealtimeToolName,
 } from "@workspace/ora-contracts";
 import type { OraRealtimeToolExecutionContext, OraRealtimeToolExecutors } from "../realtime-tools";
@@ -60,10 +63,13 @@ describe("Ora realtime tool surface", () => {
     );
   });
 
-  it("uses the shared activity narration for every function description", () => {
+  it("leaves narration to the deterministic client protocol without duplicate preambles", () => {
     for (const definition of ORA_REALTIME_TOOL_DEFINITIONS) {
-      const activity = realtimeToolActivity(definition.name);
-      expect(definition.description).toContain(ORA_ACTIVITY_TEXT[activity].start);
+      expect(realtimeToolActivity(definition.name)).toBeTruthy();
+      expect(definition.description).toContain("activity automatically");
+      expect(definition.description).not.toContain(
+        ORA_ACTIVITY_TEXT[realtimeToolActivity(definition.name)].start,
+      );
       expect(definition.parameters).toMatchObject({
         type: "object",
         additionalProperties: false,
@@ -94,6 +100,37 @@ describe("Ora realtime tool surface", () => {
 });
 
 describe("Ora realtime function-call protocol", () => {
+  it("builds deterministic out-of-band audio narration from shared activity copy", () => {
+    const event = buildOraRealtimeToolNarrationEvent("call_search", "web_search");
+
+    expect(event).toMatchObject({
+      type: "response.create",
+      response: {
+        conversation: "none",
+        output_modalities: ["audio"],
+        tools: [],
+        tool_choice: "none",
+        metadata: {
+          purpose: ORA_REALTIME_TOOL_NARRATION_PURPOSE,
+          tool_call_id: "call_search",
+        },
+      },
+    });
+    expect(JSON.stringify(event)).toContain(ORA_ACTIVITY_TEXT["web-search"].start);
+    expect(
+      parseOraRealtimeToolNarrationCallId({
+        type: "response.done",
+        response: {
+          metadata: {
+            purpose: ORA_REALTIME_TOOL_NARRATION_PURPOSE,
+            tool_call_id: "call_search",
+          },
+        },
+      }),
+    ).toBe("call_search");
+    expect(parseOraRealtimeToolNarrationCallId({ type: "response.done", response: {} })).toBeNull();
+  });
+
   it("normalizes every supported completion event, including response.done", () => {
     const expected = {
       callId: "call_123",
