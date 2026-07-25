@@ -37,7 +37,8 @@ describe("read-only tool surface", () => {
   });
 
   it("enforces sane workspace limits", () => {
-    expect(REPO_WORKSPACE_LIMITS.maxTarballBytes).toBeLessThanOrEqual(100 * 1024 * 1024);
+    expect(REPO_WORKSPACE_LIMITS.maxExtractedBytes).toBeLessThanOrEqual(256 * 1024 * 1024);
+    expect(REPO_WORKSPACE_LIMITS.maxFileBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
     expect(REPO_WORKSPACE_LIMITS.maxFiles).toBeLessThanOrEqual(20_000);
     expect(REPO_WORKSPACE_LIMITS.ttlMs).toBeGreaterThan(0);
   });
@@ -165,10 +166,16 @@ describe("pure-JS tarball extraction (no system tar dependency)", () => {
     const stage = await fs.mkdtemp(path.join(os.tmpdir(), "ora-tarfix-"));
     const repoDir = path.join(stage, "owner-repo-abc123");
     await fs.mkdir(path.join(repoDir, "src"), { recursive: true });
+    await fs.mkdir(path.join(repoDir, "attached_assets"), { recursive: true });
     await fs.mkdir(path.join(repoDir, "node_modules", "junk"), { recursive: true });
     await fs.writeFile(path.join(repoDir, "README.md"), "hello ora\n");
     await fs.writeFile(path.join(repoDir, "src", "app.ts"), "export const x = 1;\n");
+    await fs.writeFile(
+      path.join(repoDir, "src", "oversized.txt"),
+      Buffer.alloc(REPO_WORKSPACE_LIMITS.maxFileBytes + 1, 65),
+    );
     await fs.writeFile(path.join(repoDir, "logo.png"), Buffer.from([137, 80, 78, 71]));
+    await fs.writeFile(path.join(repoDir, "attached_assets", "recording.mp4"), "ignored media");
     await fs.writeFile(path.join(repoDir, "node_modules", "junk", "index.js"), "junk\n");
     let symlinkCreated = true;
     try {
@@ -185,7 +192,7 @@ describe("pure-JS tarball extraction (no system tar dependency)", () => {
 
     const dest = await fs.mkdtemp(path.join(os.tmpdir(), "ora-tarout-"));
     const gz = await fs.readFile(tarPath);
-    await extractTarGz([gz], dest);
+    const summary = await extractTarGz([gz], dest);
 
     expect(await fs.readFile(path.join(dest, "README.md"), "utf8")).toBe("hello ora\n");
     expect(await fs.readFile(path.join(dest, "src", "app.ts"), "utf8")).toBe(
@@ -196,7 +203,27 @@ describe("pure-JS tarball extraction (no system tar dependency)", () => {
       await expect(fs.lstat(path.join(dest, "evil-link"))).rejects.toThrow();
     }
     await expect(fs.stat(path.join(dest, "logo.png"))).rejects.toThrow();
+    await expect(fs.stat(path.join(dest, "attached_assets"))).rejects.toThrow();
     await expect(fs.stat(path.join(dest, "node_modules"))).rejects.toThrow();
+    await expect(fs.stat(path.join(dest, "src", "oversized.txt"))).rejects.toThrow();
+    expect(summary.retainedFiles).toBe(3);
+    expect(summary.retainedBytes).toBe(
+      Buffer.byteLength("hello ora\n") +
+        Buffer.byteLength("export const x = 1;\n") +
+        Buffer.byteLength("deep pax path\n"),
+    );
+    expect(summary.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "attached_assets/recording.mp4",
+          reason: "skipped_directory",
+        }),
+        expect.objectContaining({
+          path: "src/oversized.txt",
+          reason: "oversized_file",
+        }),
+      ]),
+    );
   });
 
   it("rejects corrupt input instead of hanging", async () => {

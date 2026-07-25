@@ -35,7 +35,7 @@ import {
   runRepoInvestigation,
 } from "./repo-analyst";
 import { diffCommit, listFiles, readCommits, readFile, searchRepo } from "./repo-read-tools";
-import { materializeRepoWorkspace } from "./repo-workspace";
+import { materializeRepoWorkspace, safeRepoWorkspaceFailure } from "./repo-workspace";
 import { runOraWebSearch } from "./web-search";
 import { classifyIntent, CLASSIFIER_FALLBACK } from "./classifier";
 import {
@@ -169,13 +169,21 @@ async function executeRepoRead(
   } else if (name === "diff") {
     result = await diffCommit(token, session.owner, session.repo, readString(args, "sha", 100));
   } else {
-    const workspace = await materializeRepoWorkspace({
-      sessionId: session.id,
-      owner: session.owner,
-      repo: session.repo,
-      ref: session.ref,
-      token,
-    });
+    let workspace: Awaited<ReturnType<typeof materializeRepoWorkspace>>;
+    try {
+      workspace = await materializeRepoWorkspace({
+        sessionId: session.id,
+        owner: session.owner,
+        repo: session.repo,
+        ref: session.ref,
+        defaultBranch: session.defaultBranch,
+        token,
+      });
+    } catch (error) {
+      return {
+        output: `${safeRepoWorkspaceFailure(error)} Continue honestly without inventing findings.`,
+      };
+    }
     await db
       .update(oraRepoSessionsTable)
       .set({
@@ -201,7 +209,7 @@ async function executeRepoRead(
   return {
     output: result.ok
       ? result.content
-      : "That repository read did not come back. Continue honestly without inventing results.",
+      : `${result.content} Continue honestly without inventing results.`,
   };
 }
 
