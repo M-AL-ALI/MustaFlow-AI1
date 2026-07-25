@@ -1,3 +1,4 @@
+- [EAS build #55 activity-trace](eas-build-55-trace.md) — build d88e492e queued 2026-07-25; autoIncrement:false pin pattern; final GitHub HEAD 21a22366.
 - [Ora isolation rule](ora-isolation-rule.md) / [builder isolation](ora-builder-isolation.md) / [builder separation](ora-builder-separation.md) — permanent: zero Builder relationship/handoff on ANY Ora surface; only scope='user' knowledge; enforced by ora-isolation.test.ts.
 - [Ora credit/quota isolation](ora-credit-quota-isolation.md) / [superuser allowlist](superuser-allowlist.md) — Ora metered by quotas not Builder credits; every balance/role/plan gate must consult isSuperuser.
 - [Ora benchmark prompt constraints](ora-benchmark-prompt-constraints.md) / [response-quality lever](ora-response-quality-runtime-lever.md) — QA tests require exact prompt strings; quality = system prompt + addendum; evaluateOraResponseQuality is TEST-ONLY.
