@@ -39,7 +39,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
   .agents/memory \
-  artifacts/ora-mobile/app.json \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true
 
