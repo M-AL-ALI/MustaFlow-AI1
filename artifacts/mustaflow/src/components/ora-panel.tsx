@@ -59,6 +59,7 @@ import { OraFileCitationsChip } from "@/components/ora/ora-file-citations-chip";
 import { OraFileAgentPreviewCard } from "@/components/ora/ora-file-agent-preview-card";
 import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
 import { OraActivityTrace } from "@/components/ora/ora-activity-trace";
+import { OraHomeRecents } from "@/components/ora/ora-home-recents";
 import { currentOraActivityStep } from "@/lib/ora-activity";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
@@ -1665,6 +1666,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   </button>
                 ))}
               </div>
+              <OraHomeRecents />
             </div>
           </div>
         ) : (

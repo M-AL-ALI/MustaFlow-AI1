@@ -44,15 +44,16 @@ describe("read-only tool surface", () => {
 });
 
 describe("path traversal guards", () => {
-  const root = "/tmp/ora-ws-root";
+  const root = path.resolve(os.tmpdir(), "ora-ws-root");
   it("rejects .. traversal and absolute escapes", () => {
     expect(resolveWorkspacePath(root, "../etc/passwd")).toBeNull();
     expect(resolveWorkspacePath(root, "a/../../etc/passwd")).toBeNull();
     expect(resolveWorkspacePath(root, "src/../../../root")).toBeNull();
   });
   it("accepts normal repo-relative paths (leading slash stripped)", () => {
-    expect(resolveWorkspacePath(root, "src/index.ts")).toBe(`${root}/src/index.ts`);
-    expect(resolveWorkspacePath(root, "/src/index.ts")).toBe(`${root}/src/index.ts`);
+    const expected = path.join(root, "src", "index.ts");
+    expect(resolveWorkspacePath(root, "src/index.ts")).toBe(expected);
+    expect(resolveWorkspacePath(root, "/src/index.ts")).toBe(expected);
   });
   it("classifies binaries by extension", () => {
     expect(isBinaryPath("logo.png")).toBe(true);

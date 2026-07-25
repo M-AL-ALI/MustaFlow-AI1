@@ -38,6 +38,73 @@ export const LEGAL_SECTIONS = [
 
 export type LegalSection = (typeof LEGAL_SECTIONS)[number];
 
+/* Fresh-start-on-return
+ * Shared policy for the website and mobile Ora clients. Conversation history
+ * and the server-synced lastConversationId remain durable; this policy only
+ * decides whether a client should auto-open that saved conversation.
+ */
+
+/** Return within this window to keep the currently selected conversation. */
+export const IDLE_RESET_MS = 5 * 60 * 1000;
+
+/** Visible clients refresh this timestamp often enough to survive abrupt exits. */
+export const ORA_ACTIVE_HEARTBEAT_MS = 30 * 1000;
+
+/** Shared storage key (localStorage on web, AsyncStorage on mobile). */
+export const ORA_LAST_ACTIVE_AT_STORAGE_KEY = "ora:last-active-at";
+
+/** Number of recent conversations shown before the user expands the home list. */
+export const ORA_HOME_RECENT_LIMIT = 5;
+
+/** Whether a saved conversation may auto-resume at `nowMs`. */
+export function shouldResumeOraConversation(
+  lastActiveAt: number | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (
+    typeof lastActiveAt !== "number" ||
+    !Number.isFinite(lastActiveAt) ||
+    lastActiveAt <= 0 ||
+    !Number.isFinite(nowMs)
+  ) {
+    return false;
+  }
+  // A backwards clock adjustment should not unexpectedly discard the user's
+  // place. Clamp negative elapsed time to zero and allow the short resume.
+  const elapsedMs = Math.max(0, nowMs - lastActiveAt);
+  return elapsedMs <= IDLE_RESET_MS;
+}
+
+export interface OraHomeRecentConversationLike {
+  id: number;
+  projectId: number | null;
+  lastMessageAt: string;
+  archivedAt?: string | null;
+}
+
+/**
+ * Return active conversations newest-first. A project home is scoped to that
+ * project; standalone Ora may show recents from every project.
+ */
+export function sortOraHomeRecentConversations<T extends OraHomeRecentConversationLike>(
+  conversations: readonly T[],
+  activeProjectId: number | null,
+): T[] {
+  return conversations
+    .filter(
+      (conversation) =>
+        conversation.archivedAt == null &&
+        (activeProjectId == null || conversation.projectId === activeProjectId),
+    )
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.lastMessageAt);
+      const rightTime = Date.parse(right.lastMessageAt);
+      const safeLeft = Number.isFinite(leftTime) ? leftTime : 0;
+      const safeRight = Number.isFinite(rightTime) ? rightTime : 0;
+      return safeRight - safeLeft || right.id - left.id;
+    });
+}
+
 /**
  * Shared Ora message + chat contracts.
  *
@@ -95,10 +162,7 @@ export interface OraActivityEvent extends OraActivityStep {
 }
 
 /** Default copy per tool + phase — the branded, user-friendly voice. */
-export const ORA_ACTIVITY_TEXT: Record<
-  OraActivityTool,
-  Record<OraActivityPhase, string>
-> = {
+export const ORA_ACTIVITY_TEXT: Record<OraActivityTool, Record<OraActivityPhase, string>> = {
   "web-search": {
     start: "Searching the web…",
     ok: "Search complete",

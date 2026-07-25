@@ -20,6 +20,7 @@ import {
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
+import { markOraActive } from "@/lib/ora-idle-reset";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { getReferenceSavedMemories, getReferenceChatHistory } from "@/lib/ora-memory-settings";
 import {
@@ -1788,6 +1789,7 @@ export function useOraChat(): UseOraChatReturn {
       opts?: { truncateTo?: number; editedFrom?: boolean; forceSearch?: boolean },
     ) => {
       if (!content.trim() || isLoading) return;
+      if (isSignedIn) markOraActive();
 
       const currentAttachment = attachedFile;
       const baseMessages =

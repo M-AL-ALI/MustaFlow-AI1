@@ -97,6 +97,7 @@ import { canViewFileInApp, GeneratedFileViewer } from "@/components/ora/Generate
 import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";
 import { ImagePreviewModal } from "@/components/ora/ImagePreviewModal";
 import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
+import { OraHomeRecents } from "@/components/ora/OraHomeRecents";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
 import { OraThemeToggle } from "@/components/ora/OraThemeToggle";
 import { OraVoiceOrb } from "@/components/ora/OraVoiceOrb";
@@ -183,6 +184,7 @@ import {
 } from "@/lib/memory-settings";
 import { setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredVoicePreset } from "@/lib/voice-preset";
+import { markOraActive, readOraLastActiveAt } from "@/lib/ora-idle-reset";
 import type {
   Attachment,
   ChatRequest,
@@ -202,11 +204,13 @@ import type {
 } from "@/lib/types";
 // Shared activity-trace wording (tiny zod-free helpers) — identical copy to web.
 import {
+  ORA_ACTIVE_HEARTBEAT_MS,
   oraActivityStep,
   oraAnalyzingDatasetText,
   oraReadingFileText,
   parseOraActivityStep,
   ORA_ANALYZING_IMAGE_TEXT,
+  shouldResumeOraConversation,
 } from "@workspace/ora-contracts";
 import type { OraActivityRowStep } from "@/components/ora/OraThinkingRow";
 
@@ -666,6 +670,10 @@ export default function OraChatScreen() {
   const [uploading, setUploading] = useState(false);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const lastActiveRestoreAttemptedRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
+  const backgroundedAtRef = useRef<number | null>(null);
+  const isSignedInRef = useRef(isSignedIn);
+  isSignedInRef.current = isSignedIn;
   const [showConversations, setShowConversations] = useState(false);
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
@@ -1220,6 +1228,7 @@ export default function OraChatScreen() {
       opts?: { truncateTo?: number; forceSearch?: boolean },
     ) => {
       if ((!text && !attch) || sending) return;
+      if (isSignedInRef.current) void markOraActive();
 
       // Capture this turn's temporary state so a toggle mid-send can't change
       // whether the resulting transcript is persisted.
@@ -1777,8 +1786,6 @@ export default function OraChatScreen() {
   // from a settled bubble that has not re-rendered.
   const persistRef = useRef(persist);
   persistRef.current = persist;
-  const isSignedInRef = useRef(isSignedIn);
-  isSignedInRef.current = isSignedIn;
   const handleSaveMemory = useCallback(async (message: OraMessage) => {
     // Never write memory from an anonymous or temporary chat.
     if (!isSignedInRef.current || temporaryRef.current) return;
@@ -2411,6 +2418,15 @@ export default function OraChatScreen() {
     storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
   }, [stopRealtimeForContextSwitch]);
 
+  const resetToFreshHomeAfterIdle = useCallback(() => {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setSending(false);
+    setStreamStatus(null);
+    setStreamActivity(null);
+    newChat();
+  }, [newChat]);
+
   // Toggle temporary mode. Either direction starts a clean conversation so
   // temporary and saved turns never mix in one thread (mirrors the website).
   const toggleTemporary = useCallback(() => {
@@ -2656,6 +2672,7 @@ export default function OraChatScreen() {
 
   const loadConversation = useCallback(
     async (id: number) => {
+      if (isSignedInRef.current) void markOraActive();
       setShowConversations(false);
       // Switching to a different saved conversation must stop a live realtime
       // session bound to the old thread, or its transcripts persist to the wrong
@@ -2701,6 +2718,50 @@ export default function OraChatScreen() {
     },
     [scrollToEnd, stopRealtimeForContextSwitch],
   );
+
+  // Keep a durable last-active timestamp so both foreground returns and a full
+  // app relaunch use the same five-minute rule. This listener only changes what
+  // auto-opens; newChat deliberately leaves saved history and server settings
+  // untouched.
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+
+    appStateRef.current = AppState.currentState;
+    const heartbeat = setInterval(() => {
+      if (AppState.currentState === "active") void markOraActive();
+    }, ORA_ACTIVE_HEARTBEAT_MS);
+
+    const sub = AppState.addEventListener("change", (next) => {
+      const previous = appStateRef.current;
+      appStateRef.current = next;
+
+      if (next === "background") {
+        const backgroundedAt = Date.now();
+        backgroundedAtRef.current = backgroundedAt;
+        void markOraActive(backgroundedAt);
+        return;
+      }
+
+      if (next !== "active" || previous !== "background") return;
+
+      void readOraLastActiveAt()
+        .then((storedAt) => {
+          const lastActiveAt = storedAt ?? backgroundedAtRef.current;
+          if (!shouldResumeOraConversation(lastActiveAt)) {
+            resetToFreshHomeAfterIdle();
+          }
+        })
+        .finally(() => {
+          backgroundedAtRef.current = null;
+          void markOraActive();
+        });
+    });
+
+    return () => {
+      clearInterval(heartbeat);
+      sub.remove();
+    };
+  }, [isLoaded, isSignedIn, resetToFreshHomeAfterIdle]);
 
   const removeConversation = useCallback(
     async (id: number) => {
@@ -2760,23 +2821,50 @@ export default function OraChatScreen() {
   }, []);
 
   // ── Drawer → chat bridge ──────────────────────────────────────────────────
-  // On a clean signed-in launch, restore the last active Ora conversation saved
-  // by the website/mobile settings endpoint. Explicit drawer/project selections
-  // still win because pendingConversationId is handled below.
+  // On a clean signed-in launch, load the home recents and restore the saved
+  // conversation only when the durable last-active timestamp is within the
+  // shared grace window. A missing/stale timestamp lands on home without
+  // deleting the saved lastConversationId. Explicit selections still win.
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
     if (lastActiveRestoreAttemptedRef.current) return;
     if (pendingConversationId != null || conversationId != null || messagesRef.current.length > 0)
       return;
     lastActiveRestoreAttemptedRef.current = true;
-    void getOraUserSettings()
-      .then((settings) => {
-        if (settings.lastConversationId != null) {
-          void loadConversation(settings.lastConversationId);
-        }
-      })
-      .catch(() => {});
-  }, [conversationId, isLoaded, isSignedIn, loadConversation, pendingConversationId]);
+    void (async () => {
+      const [, lastActiveAt, settings] = await Promise.all([
+        refreshChatLists(),
+        readOraLastActiveAt(),
+        getOraUserSettings().catch(() => null),
+      ]);
+
+      if (
+        pendingConversationId != null ||
+        conversationIdRef.current != null ||
+        messagesRef.current.length > 0
+      ) {
+        return;
+      }
+
+      if (!shouldResumeOraConversation(lastActiveAt)) {
+        resetToFreshHomeAfterIdle();
+        void markOraActive();
+        return;
+      }
+
+      if (settings?.lastConversationId != null) {
+        void loadConversation(settings.lastConversationId);
+      }
+      void markOraActive();
+    })();
+  }, [
+    isLoaded,
+    isSignedIn,
+    loadConversation,
+    pendingConversationId,
+    refreshChatLists,
+    resetToFreshHomeAfterIdle,
+  ]);
 
   // When the sidebar taps a conversation, load it here and clear the pending id.
   useEffect(() => {
@@ -3308,6 +3396,14 @@ export default function OraChatScreen() {
                   </Pressable>
                 ))}
               </View>
+              {isSignedIn ? (
+                <OraHomeRecents
+                  conversations={conversations}
+                  projects={projects}
+                  activeProjectId={activeProjectId}
+                  onSelect={loadConversation}
+                />
+              ) : null}
             </View>
           }
           renderItem={({ item }) => (

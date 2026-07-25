@@ -484,6 +484,24 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       "Repeat the same web-search / file-generation / image-generation / repo-analysis prompts on the current TestFlight build: the thinking row must show the identical wording to the website with reanimated fade-in/fade-out per step, clear on the first streamed token, and show the honest failure line (muted red) when a tool fails while Ora continues to answer. Row is pure JS — ships with the next build, no native rebuild required.",
   },
   {
+    id: "fresh-start-on-return",
+    title:
+      "Fresh start on return: shared five-minute idle gate plus project-aware recent conversations on website and mobile",
+    ownerSurfaces: ["website", "mobile"],
+    fileHints: [
+      /ora-contracts\/src\/index\.ts$/i,
+      /ora-idle-reset/i,
+      /ora-home-recents/i,
+      /OraHomeRecents/i,
+      /use-ora-conversations/i,
+      /ora-fresh-start/i,
+    ],
+    manualWebsite:
+      "Signed in on /ora: open a saved conversation, leave/reload within five minutes and confirm the same conversation resumes. Leave for more than five minutes, then return/reload and confirm Ora opens a blank new-conversation home with exactly five newest recents plus Show more. Open a recent and confirm history is intact. Repeat on /ora/projects/:id and confirm the project route remains selected. Signed-out behavior must be unchanged.",
+    manualMobile:
+      "On the new TestFlight build: open a saved conversation, background for under five minutes and confirm it stays open. Background for over five minutes and confirm Ora returns to a blank home with five recents plus Show more. Select a recent and confirm its history loads. Kill/relaunch after five minutes and confirm the same fresh home behavior; verify the active project scope remains intact and no history is deleted.",
+  },
+  {
     id: "github-repo-analysis",
     title:
       "GitHub repo analysis (READ-ONLY): OAuth connect, repo picker, sandboxed tarball workspace, 4 read tools, live narration, guidance report",
@@ -612,6 +630,7 @@ const WEB_ORA_UI = [
   "src/components/ora/__tests__/ora-used-files-wiring.test.ts",
   "src/hooks/__tests__/ora-activity-trace.test.ts",
   "src/hooks/__tests__/ora-clarification-wiring.test.ts",
+  "src/hooks/__tests__/ora-fresh-start.test.tsx",
   "src/lib/__tests__/blocker-fixes-b39.test.ts",
   "src/pages/__tests__/billing-plan-cards.test.ts",
   "src/pages/__tests__/brand-kit-wiring.test.ts",
@@ -652,6 +671,7 @@ const MOBILE_LIB_CRITICAL = [
   "lib/__tests__/generate-file-wiring.test.ts",
   "lib/__tests__/live-voice-privacy.test.ts",
   "lib/__tests__/ora-activity-wiring.test.ts",
+  "lib/__tests__/ora-fresh-start-wiring.test.ts",
   "lib/__tests__/ora-memory-scope-wiring.test.ts",
   "lib/__tests__/ora-mobile-parity.test.ts",
   "lib/__tests__/ora-session-recovery.test.ts",
