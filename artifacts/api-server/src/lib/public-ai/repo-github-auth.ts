@@ -192,6 +192,26 @@ export async function deleteOraGithubConnection(userId: string): Promise<void> {
 
 // ── Read-only GitHub REST helpers ────────────────────────────────────────────
 
+export class OraGithubApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly rateLimited: boolean,
+  ) {
+    super(message);
+    this.name = "OraGithubApiError";
+  }
+}
+
+function githubApiFailure(path: string, res: Response): OraGithubApiError {
+  const rateLimited =
+    res.status === 429 || (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0");
+  const detail = rateLimited
+    ? "GitHub API rate limit reached; retry shortly"
+    : `GitHub API request failed with HTTP ${res.status}`;
+  return new OraGithubApiError(`${detail} (${path})`, res.status, rateLimited);
+}
+
 async function githubGet<T>(token: string, path: string): Promise<T> {
   const res = await fetch(`${GITHUB_API}${path}`, {
     headers: {
@@ -202,7 +222,7 @@ async function githubGet<T>(token: string, path: string): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new Error(`GitHub API ${path} failed: HTTP ${res.status}`);
+    throw githubApiFailure(path, res);
   }
   return (await res.json()) as T;
 }
@@ -265,6 +285,104 @@ export async function fetchRepoMeta(
   return { defaultBranch: meta.default_branch, private: meta.private, sizeKb: meta.size };
 }
 
+export interface OraRepoTreeEntry {
+  path: string;
+  type: "blob" | "tree" | "commit";
+  sha: string;
+  size?: number;
+}
+
+export interface OraRepoTree {
+  sha: string;
+  truncated: boolean;
+  entries: OraRepoTreeEntry[];
+}
+
+/**
+ * Fetches repository metadata only. The recursive tree contains paths, blob
+ * SHAs, and sizes; it never downloads file bodies or a repository archive.
+ */
+export async function fetchRepoTree(
+  token: string,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<OraRepoTree> {
+  type ApiTree = {
+    sha: string;
+    truncated?: boolean;
+    tree?: Array<{
+      path?: string;
+      type?: "blob" | "tree" | "commit";
+      sha?: string;
+      size?: number;
+    }>;
+  };
+  const treeRef = ref.trim() || "HEAD";
+  const apiPath =
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}` +
+    `/git/trees/${encodeURIComponent(treeRef)}?recursive=1`;
+  const tree = await githubGet<ApiTree>(token, apiPath);
+  return {
+    sha: tree.sha,
+    truncated: Boolean(tree.truncated),
+    entries: (tree.tree ?? []).flatMap((entry) =>
+      entry.path && entry.type && entry.sha
+        ? [
+            {
+              path: entry.path,
+              type: entry.type,
+              sha: entry.sha,
+              size: entry.size,
+            },
+          ]
+        : [],
+    ),
+  };
+}
+
+export async function fetchRepoBlob(
+  token: string,
+  owner: string,
+  repo: string,
+  sha: string,
+): Promise<Buffer> {
+  if (!/^[0-9a-fA-F]{4,64}$/.test(sha)) throw new Error("invalid blob sha");
+  const apiPath =
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}` +
+    `/git/blobs/${encodeURIComponent(sha)}`;
+  const blob = await githubGet<{ encoding?: string; content?: string }>(token, apiPath);
+  if (blob.encoding !== "base64" || typeof blob.content !== "string") {
+    throw new Error("GitHub returned an unsupported blob encoding");
+  }
+  return Buffer.from(blob.content.replace(/\s+/g, ""), "base64");
+}
+
+export async function searchRepoCodePaths(
+  token: string,
+  owner: string,
+  repo: string,
+  query: string,
+  limit: number,
+): Promise<string[]> {
+  const capped = Math.max(1, Math.min(limit, 100));
+  const params = new URLSearchParams({
+    q: `${query} repo:${owner}/${repo}`,
+    per_page: String(capped),
+  });
+  const apiPath = `/search/code?${params.toString()}`;
+  const result = await githubGet<{ items?: Array<{ path?: string }> }>(token, apiPath);
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const item of result.items ?? []) {
+    if (!item.path || seen.has(item.path)) continue;
+    seen.add(item.path);
+    paths.push(item.path);
+    if (paths.length >= capped) break;
+  }
+  return paths;
+}
+
 export interface OraRepoCommit {
   sha: string;
   message: string;
@@ -315,7 +433,7 @@ export async function fetchCommitDiff(
       },
     },
   );
-  if (!res.ok) throw new Error(`GitHub diff for ${sha} failed: HTTP ${res.status}`);
+  if (!res.ok) throw githubApiFailure(`/repos/${owner}/${repo}/commits/${sha}`, res);
   const text = await res.text();
   return text.length > DIFF_CHAR_CAP
     ? `${text.slice(0, DIFF_CHAR_CAP)}\n… [diff truncated at ${DIFF_CHAR_CAP} chars]`

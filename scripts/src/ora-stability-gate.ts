@@ -508,12 +508,13 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
   {
     id: "github-repo-analysis",
     title:
-      "GitHub repo analysis (READ-ONLY): OAuth connect, repo resolution, sandboxed workspace, 5 read tools, live narration, guidance report",
+      "GitHub repo analysis (READ-ONLY): connected-repo resolution, lazy tree/blob reads, bounded search fallback, 5 read tools, live narration",
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /repo-github-auth/i,
       /repo-workspace/i,
       /repo-read-tools/i,
+      /repo-lazy-api/i,
       /repo-analyst/i,
       /ora-github/i,
       /ora-github-repo/i,
@@ -523,15 +524,16 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /startup-migrations/i,
     ],
     manualWebsite:
-      "In Ora Settings → GitHub, click Connect GitHub and authorize (2 clicks, no token pasting). In a chat, open the + menu → Analyze GitHub repo, pick a repo from the dropdown, and confirm the 'Analyzing: owner/repo (read-only)' chip appears. Ask 'find bugs in this repo' and confirm live narration ('Fetching snapshot… Reading file… Searching for…') streams before the answer, findings cite file:line, and the reply ends with a 'How to apply this fix' section containing a paste-ready Replit/agent block plus self-code steps. Click × on the chip and confirm repo context stops. Verify Ora NEVER claims to have written/committed/pushed anything. Production readiness: ora_github_connections and ora_repo_sessions are created automatically at server boot (runStartupMigrations, no manual migration required) — covered by startup-migrations-parity.test.ts, which drops the tables and proves the boot runner recreates them.",
+      "Connect GitHub, select M-AL-ALI/MustaFlow-AI1 without pasting its URL, then ask Ora to list artifacts/, read a named source file, search for resolveFinalOraRoute, and find bugs. Confirm useful results arrive despite the large attached_assets media, evidence cites real file:line locations, narration stays live, and no full-repository download or generic size failure appears. Trigger a read failure and confirm Ora says no code was analyzed instead of inventing findings. Verify Ora never offers write, commit, push, or patch tools.",
     manualMobile:
-      "In Settings → GitHub, tap Connect GitHub, authorize in the in-app browser, and confirm 'Connected as <login>' after returning. In chat, open the + menu → Analyze GitHub repo, pick a repo, confirm the read-only chip above the composer, ask a repo question, and confirm the thinking row shows the live narration statuses and the answer matches website behavior (file:line findings + paste-ready fix block). Detach via the chip's ×.",
+      "On TestFlight, connect GitHub and select M-AL-ALI/MustaFlow-AI1 without pasting a URL. Ask Ora to list, read, search, and analyze the repo; confirm the read-only chip, live narration, and file:line evidence match the website despite attached_assets media. Verify a failed read explicitly says no code was analyzed and no write, commit, push, or patch action is offered.",
   },
 ];
 
 const API_PUBLIC_AI_CORE = [
   "src/lib/public-ai/__tests__/current-datetime-block.test.ts",
   "src/lib/public-ai/__tests__/ora-activity-events.test.ts",
+  "src/lib/public-ai/__tests__/repo-lazy-api.test.ts",
   "src/lib/public-ai/__tests__/ora-repo-readonly.test.ts",
   "src/lib/public-ai/__tests__/model-router.test.ts",
   "src/lib/public-ai/__tests__/multi-file-intelligence.test.ts",
