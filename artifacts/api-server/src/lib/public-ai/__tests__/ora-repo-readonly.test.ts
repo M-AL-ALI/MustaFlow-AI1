@@ -99,7 +99,8 @@ describe("connected repository context", () => {
   });
 
   it("resolves a named owned repo without treating substrings as repo mentions", async () => {
-    const { findConnectedRepoForRequest } = await import("../repo-analyst");
+    const { findConnectedRepoForRequest, shouldSearchConnectedRepos } =
+      await import("../repo-analyst");
     const repos = [
       {
         fullName: "M-AL-ALI/MustaFlow-AI1",
@@ -129,6 +130,16 @@ describe("connected repository context", () => {
     ).toBe("M-AL-ALI/MustaFlow-AI1");
     expect(findConnectedRepoForRequest(repos, "I am happy with this answer.")).toBeNull();
     expect(findConnectedRepoForRequest(repos, "", "M-AL-ALI/app")?.name).toBe("app");
+
+    const current = { owner: "M-AL-ALI", repo: "app" };
+    expect(
+      shouldSearchConnectedRepos("Analyze the repo MustaFlow-AI1 instead.", undefined, current),
+    ).toBe(true);
+    expect(shouldSearchConnectedRepos("", "M-AL-ALI/MustaFlow-AI1", current)).toBe(true);
+    expect(shouldSearchConnectedRepos("", "M-AL-ALI/app", current)).toBe(false);
+    expect(shouldSearchConnectedRepos("I am happy with this answer.", undefined, current)).toBe(
+      false,
+    );
   });
 });
 

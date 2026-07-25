@@ -228,6 +228,21 @@ function normalizeRepoMention(value: string): string {
     .toLowerCase();
 }
 
+export function shouldSearchConnectedRepos(
+  message: string,
+  requestedRepo: string | undefined,
+  current: Pick<OraRepoSessionRow, "owner" | "repo"> | null,
+): boolean {
+  if (requestedRepo) {
+    if (!current) return true;
+    const normalizedRequest = normalizeRepoMention(requestedRepo);
+    return ![current.repo, `${current.owner}/${current.repo}`]
+      .map(normalizeRepoMention)
+      .includes(normalizedRequest);
+  }
+  return isRepositoryRequest(message);
+}
+
 function containsRepoMention(message: string, value: string): boolean {
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:^|[^a-z0-9._-])${escaped}(?=$|[^a-z0-9._-])`, "i").test(message);
@@ -284,17 +299,15 @@ export async function resolveOraRepoSessionForRequest(input: {
   const fromUrl = message
     ? await attachRepoFromMessage(input.userId, token, message, existing)
     : existing;
+  const pastedRepoUrl = parseGithubRepoUrl(message);
   if (
     fromUrl &&
-    (!input.requestedRepo ||
-      [fromUrl.repo, `${fromUrl.owner}/${fromUrl.repo}`]
-        .map(normalizeRepoMention)
-        .includes(normalizeRepoMention(input.requestedRepo)))
+    (pastedRepoUrl || !shouldSearchConnectedRepos(message, input.requestedRepo, fromUrl))
   ) {
     return { connected: true, token, session: fromUrl };
   }
 
-  if (!input.requestedRepo && (!message || !isRepositoryRequest(message))) {
+  if (!shouldSearchConnectedRepos(message, input.requestedRepo, fromUrl)) {
     return { connected: true, token, session: fromUrl };
   }
 
