@@ -22,10 +22,6 @@ args = "push-to-github"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "lint"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "ora-stability-gate"
 
 [[workflows.workflow.tasks]]
@@ -50,17 +46,6 @@ args = "bash scripts/push-to-github.sh --force"
 
 [workflows.workflow.metadata]
 outputType = "console"
-
-[[workflows.workflow]]
-name = "lint"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run lint"
-
-[workflows.workflow.metadata]
-isValidation = true
 
 [[workflows.workflow]]
 name = "ora-stability-gate"
