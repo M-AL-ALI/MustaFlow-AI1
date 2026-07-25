@@ -3,6 +3,12 @@ import { useLocation } from "wouter";
 import { authFetch } from "@/lib/api-fetch";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { useToast } from "@/hooks/use-toast";
+import { ORA_ACTIVE_HEARTBEAT_MS, shouldResumeOraConversation } from "@workspace/ora-contracts";
+import {
+  idleGatedOraConversationId,
+  markOraActive,
+  readOraLastActiveAt,
+} from "@/lib/ora-idle-reset";
 import {
   resolveScopeProjectId,
   shouldDeselectMovedConversation,
@@ -79,8 +85,12 @@ export function OraConversationsProvider({
   const { toast } = useToast();
   const [projects, setProjects] = useState<OraProjectSummary[]>([]);
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
+  // Decide once, before any heartbeat can update the timestamp. The saved
+  // conversation id remains in sessionStorage when stale; we only decline to
+  // auto-open it.
+  const resumeOnMountRef = useRef(shouldResumeOraConversation(readOraLastActiveAt()));
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(() =>
-    getStoredPendingProjectId() != null ? null : getStoredCurrentId(),
+    getStoredPendingProjectId() != null ? null : idleGatedOraConversationId(getStoredCurrentId()),
   );
   const [loading, setLoading] = useState(true);
 
@@ -96,6 +106,51 @@ export function OraConversationsProvider({
   const creatingPromiseRef = useRef<Promise<number | null> | null>(null);
   // Track whether we've synced last-active from server settings on mount.
   const lastActiveSyncedRef = useRef(false);
+  const hiddenAtRef = useRef<number | null>(null);
+
+  // Keep one durable "last active" clock for reloads and tab returns. The
+  // initial resume decision above is already frozen before this heartbeat runs.
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    const recordActive = () => markOraActive();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        const now = Date.now();
+        hiddenAtRef.current = now;
+        markOraActive(now);
+        return;
+      }
+
+      const lastActiveAt = hiddenAtRef.current ?? readOraLastActiveAt();
+      hiddenAtRef.current = null;
+      if (!shouldResumeOraConversation(lastActiveAt)) {
+        // Preserve sessionStorage + server lastConversationId. This changes only
+        // the selected UI state and keeps project routes intact.
+        currentIdRef.current = null;
+        pendingProjectIdRef.current = undefined;
+        setCurrentConversationId(null);
+      }
+      markOraActive();
+    };
+    const handlePageHide = () => {
+      const now = Date.now();
+      hiddenAtRef.current = now;
+      markOraActive(now);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === "visible") recordActive();
+    }, ORA_ACTIVE_HEARTBEAT_MS);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.clearInterval(heartbeat);
+    };
+  }, [isSignedIn]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) {
@@ -106,7 +161,7 @@ export function OraConversationsProvider({
     }
     try {
       const [convRes, projRes] = await Promise.all([
-        authFetch(`${BASE}/api/ora/conversations`),
+        authFetch(`${BASE}/api/ora/conversations?limit=100`),
         authFetch(`${BASE}/api/ora/projects`),
       ]);
       if (convRes.ok) {
@@ -115,11 +170,23 @@ export function OraConversationsProvider({
           hasMore?: boolean;
         };
         setConversations(data.conversations);
-        // If the stored current id no longer exists, drop it.
+        const selected =
+          currentIdRef.current == null
+            ? null
+            : data.conversations.find((conversation) => conversation.id === currentIdRef.current);
+        // A hard project deep link is authoritative. Do not auto-open a stored
+        // conversation from another project, and do not erase that stored id:
+        // it may be resumed later from its own route.
         if (
-          currentIdRef.current != null &&
-          !data.conversations.some((c) => c.id === currentIdRef.current)
+          selected &&
+          activeProjectIdRef.current != null &&
+          selected.projectId !== activeProjectIdRef.current
         ) {
+          currentIdRef.current = null;
+          setCurrentConversationId(null);
+        } else if (currentIdRef.current != null && !selected) {
+          // The stored conversation no longer exists.
+          currentIdRef.current = null;
           setCurrentConversationId(null);
           storeCurrentId(null);
         }
@@ -146,6 +213,9 @@ export function OraConversationsProvider({
     if (!isSignedIn) return;
     if (lastActiveSyncedRef.current) return;
     lastActiveSyncedRef.current = true;
+    // A stale/missing local activity timestamp intentionally lands on home.
+    // Keep the server's lastConversationId saved, but do not auto-open it.
+    if (!resumeOnMountRef.current) return;
     // Only apply if there's no locally-stored id already.
     if (currentIdRef.current != null) return;
     void (async () => {
@@ -158,7 +228,12 @@ export function OraConversationsProvider({
         if (currentIdRef.current != null) return; // user already selected something
         // Confirm the id still exists in the loaded list.
         setConversations((prev) => {
-          if (prev.some((c) => c.id === lastId)) {
+          const savedConversation = prev.find((conversation) => conversation.id === lastId);
+          if (
+            savedConversation &&
+            (activeProjectIdRef.current == null ||
+              savedConversation.projectId === activeProjectIdRef.current)
+          ) {
             setCurrentConversationId(lastId);
             storeCurrentId(lastId);
           }
@@ -223,6 +298,7 @@ export function OraConversationsProvider({
 
   const selectConversation = useCallback(
     (id: number | null) => {
+      markOraActive();
       // Selecting an existing conversation clears any pending new-chat scope.
       pendingProjectIdRef.current = undefined;
       setCurrentConversationId(id);
@@ -242,6 +318,7 @@ export function OraConversationsProvider({
   );
 
   const newConversation = useCallback((projectId?: number | null) => {
+    markOraActive();
     // `projectId` may be a number (scope to it), null (explicit standalone) or
     // undefined (defer to the active project route). Preserve the distinction —
     // do NOT coalesce undefined→null, or a project-scoped "New conversation"

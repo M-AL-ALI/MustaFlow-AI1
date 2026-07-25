@@ -448,11 +448,14 @@ describe("Ora mobile parity — conversation history v2 completion", () => {
     );
   });
 
-  it("mobile restores the server-synced last active conversation on clean launch", () => {
+  it("mobile gates the server-synced conversation behind the shared idle window", () => {
     expect(index).toContain("lastActiveRestoreAttemptedRef");
     expect(index).toContain("getOraUserSettings()");
+    expect(index).toContain("readOraLastActiveAt()");
+    expect(index).toContain("shouldResumeOraConversation(lastActiveAt)");
     expect(index).toContain("settings.lastConversationId");
     expect(index).toContain("void loadConversation(settings.lastConversationId)");
+    expect(index).toContain("resetToFreshHomeAfterIdle()");
   });
 
   it("mobile History exposes archived conversations with restore and permanent delete", () => {
