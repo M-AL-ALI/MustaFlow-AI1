@@ -2,6 +2,15 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Fix: repo snapshot extraction no longer needs the system `tar` binary (2026-07-24)
+
+Production incident: pasting a repo URL attached the session correctly, but the snapshot fetch failed ("Could not fetch … — answering without repo access") AND the SSE stream died ("Stream ended without a done event"). Root cause is one bug with two faces: `repo-workspace.ts` spawned the system `tar` binary, which is absent from the minimal deployment container — and when `spawn` fails, writing to the dead child's stdin raises an `error` event with no listener, an unhandled stream error that can take down the server mid-request (killing the stream before its `done` frame).
+
+- **repo-workspace.ts:** extraction rewritten in pure JS — built-in `zlib.createGunzip` plus a minimal streaming ustar/pax parser (`TarGzEntryExtractor`, exported `extractTarGz`). No child process, no environment dependency, nothing to crash. Strips the tarball root dir, handles pax extended headers and GNU longnames (long paths), writes ONLY regular files passing the sandbox guards, never materializes symlinks/hardlinks/devices, and enforces size caps during extraction.
+- **repo-analyst.ts:** the failure narration now includes the underlying error reason (truncated) so production issues are diagnosable from the chat UI alone.
+- **Tests:** 2 new functional tests — a real `tar czf` fixture (incl. pax long path, symlink, binary, node_modules) is extracted by the pure-JS code and every skip guard asserted; corrupt input rejects instead of hanging. Suite now 14 tests.
+- Server-side fix: applies to website and mobile simultaneously (both talk to the same engine).
+
 ## Feat: pasted GitHub URL auto-attaches the repo for analysis (2026-07-24)
 
 Live-usage finding: after connecting GitHub, the natural user move is to paste a repo URL into chat — but only the + menu picker created a repo session, so a pasted URL fell through to the web-search route and produced a useless "I'll search for it" reply.

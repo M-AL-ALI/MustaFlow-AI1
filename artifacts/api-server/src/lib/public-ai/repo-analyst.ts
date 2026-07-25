@@ -224,7 +224,8 @@ export async function runRepoInvestigation(
     });
   } catch (err) {
     logger.warn({ err, repoFullName }, "ora-repo: materialize failed");
-    args.onStatus(`Could not fetch ${repoFullName} — answering without repo access.`);
+    const reason = ((err as Error).message ?? "unknown error").slice(0, 90);
+    args.onStatus(`Could not fetch ${repoFullName} (${reason}) — answering without repo access.`);
     return {
       contextBlock: `[Repository analysis unavailable: the snapshot of ${repoFullName} could not be fetched (${(err as Error).message}). Tell the user plainly that the repository could not be read right now and suggest retrying.]`,
       repoFullName,
