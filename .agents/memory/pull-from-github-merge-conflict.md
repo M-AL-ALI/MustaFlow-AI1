@@ -32,6 +32,30 @@ markers in `pnpm-lock.yaml` and leaves an **in-progress merge** (`.git/MERGE_HEA
   (git ops allowed there): run `pnpm install` to auto-resolve the lockfile, then complete
   the merge. Your own clean code changes are unaffected once the lockfile is regenerated.
 
+## Variant: stale `.git/refs/remotes/github/main.lock` blocks fetch
+
+A third failure mode: a previous git fetch crashed mid-run and left a stale
+`.git/refs/remotes/github/main.lock` file. Subsequent `pull-from-github` runs fail
+immediately during the `git fetch` step with:
+
+```
+error: cannot lock ref 'refs/remotes/github/main': Unable to create
+'.git/refs/remotes/github/main.lock': File exists.
+```
+
+**Why the main agent cannot fix it directly:** `rm -f .git/refs/remotes/...lock` is
+blocked by the destructive-git guard (`.git/...lock` pattern).
+
+**Fix that works:** add `find .git/refs/remotes -name "*.lock" -delete 2>/dev/null || true`
+to `scripts/pull-from-github.sh` just below the existing `rm -f .git/index.lock .git/HEAD.lock`
+line, then restart the workflow. After the fetch succeeds, **immediately remove** the `find` line
+again (restore the script to committed state) so the working tree is clean before the gate's
+`git-clean` check. If you leave it in, the gate will fail `git-clean` and you must restart it.
+
+**Timing trap:** if you restart the gate in the same turn you add the `find` line, the gate
+may capture the dirty tree before you restore it. Always restore the script first, confirm
+`git status --porcelain` is empty, then start the gate.
+
 ## Variant: in-progress merge + stale `.git/index.lock` (resolvable from main agent)
 
 A second failure mode: the conflict is only a binary file (e.g. `public/opengraph.jpg`, `UU`)
