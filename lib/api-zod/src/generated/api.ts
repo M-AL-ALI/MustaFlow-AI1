@@ -4057,6 +4057,8 @@ export const GetMyPreferencesResponse = zod.object({
   "dismissedOnboarding": zod.boolean(),
   "preferredMode": zod.enum(['builder', 'developer', 'ora']).nullish(),
   "voiceLang": zod.string().nullish().describe('BCP-47 language tag for speech recognition (null = auto-detect from browser)'),
+  "builderAccess": zod.boolean().describe('Whether the authenticated user may access AI Builder.'),
+  "containerLayerConfigured": zod.boolean().describe('Whether live cloud container features are available.'),
   "updatedAt": zod.coerce.date()
 })
 
@@ -4075,6 +4077,8 @@ export const UpdateMyPreferencesResponse = zod.object({
   "dismissedOnboarding": zod.boolean(),
   "preferredMode": zod.enum(['builder', 'developer', 'ora']).nullish(),
   "voiceLang": zod.string().nullish().describe('BCP-47 language tag for speech recognition (null = auto-detect from browser)'),
+  "builderAccess": zod.boolean().describe('Whether the authenticated user may access AI Builder.'),
+  "containerLayerConfigured": zod.boolean().describe('Whether live cloud container features are available.'),
   "updatedAt": zod.coerce.date()
 })
 

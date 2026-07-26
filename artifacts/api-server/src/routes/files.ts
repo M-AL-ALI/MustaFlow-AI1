@@ -3,9 +3,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db, projectFilesTable, projectsTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
-import { isBinaryMime } from "../lib/binary-mime";
-import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
-import { VISUAL_EDIT_SCRIPT } from "../lib/visualEditScript";
+
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
 import { writeFileToContainer } from "../lib/container";
