@@ -113,3 +113,4 @@
 - [File-gen per-attempt timeout](file-gen-attempt-timeout.md) — wrap createChatCompletion in Promise.race(70s) so the fallback chain finishes inside any browser's 300 s cutoff.
 - [configureWorkflow phantom slot count](configureworkflow-phantom-count.md) — removeWorkflow clears live list but not slot counter; phantom clears after 2-3 commits trigger system restarts.
 - [Branch merge via push-to-github abort removal](branch-merge-abort-removal.md) — when push-to-github.sh has `git merge --abort` blocking a merge commit, remove that line temporarily, complete the push, then restore the file.
+- [Activity-visibility controller pattern](activity-visibility-controller.md) — scheduleClear/notifyVisible defers first-token clear; tests must call notifyVisible() before scheduleClear() to arm the timer.
