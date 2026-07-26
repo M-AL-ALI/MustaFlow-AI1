@@ -41,13 +41,33 @@ export type CheckProfile = {
   checks: CheckSpec[];
 };
 
+export const DEFERRED_CONTAINER_CHECK_MESSAGE =
+  "deferred: live-server infrastructure unavailable; container execution was not attempted";
+
+export const PARTIAL_VALIDATION_WARNING =
+  "Validation was partial because live-server infrastructure is unavailable; container-dependent checks were deferred.";
+
+export function isContainerRequiredCheck(check: CheckSpec): boolean {
+  return check.runner === "container";
+}
+
+export function isDeferredCheckResult(result: { message?: string | null }): boolean {
+  return result.message?.startsWith("deferred:") ?? false;
+}
+
+export function failedChecksEligibleForRepair<
+  T extends { passed: boolean; message?: string | null },
+>(checks: T[]): T[] {
+  return checks.filter((check) => !check.passed && !isDeferredCheckResult(check));
+}
+
 export function checksForLiveServerCapability(
   checks: CheckSpec[],
   liveServerAvailable: boolean,
 ): CheckSpec[] {
   if (liveServerAvailable) return checks;
   return checks.map((check) =>
-    check.id === "server-start" ? { ...check, required: false } : check,
+    isContainerRequiredCheck(check) ? { ...check, required: false } : check,
   );
 }
 

@@ -105,7 +105,13 @@ import {
 } from "./architect";
 import { encryptionService } from "./encryption";
 import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
-import { CHECK_PROFILES, resolveStackId } from "./check-profiles";
+import {
+  CHECK_PROFILES,
+  PARTIAL_VALIDATION_WARNING,
+  failedChecksEligibleForRepair,
+  isDeferredCheckResult,
+  resolveStackId,
+} from "./check-profiles";
 import { isContainerLayerConfigured } from "./container";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
 
@@ -1992,6 +1998,7 @@ export async function runJob(input: JobInput): Promise<void> {
     | "passed_with_warnings"
     | "failed"
     | "completed_with_errors" = "passed";
+  let validationWasPartial = false;
   // Collects ALL check results (required + non-required) from the agent loop.
   // Populated in the build/refine paths regardless of correctionFailed status.
   // Used after the repair loop to detect non-required failures → passed_with_warnings.
@@ -2107,6 +2114,8 @@ export async function runJob(input: JobInput): Promise<void> {
         .where(eq(agentTasksTable.id, taskId));
       return;
     }
+    const projectHasLiveServer = (): boolean =>
+      isContainerLayerConfigured() && Boolean(project.containerId);
 
     const [
       { context: rawKnowledgeContext, applied: knowledgeApplied },
@@ -2707,11 +2716,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: input.planContext ?? null,
                   existingFiles: [],
-                  containerId:
-                    isContainerLayerConfigured() && project.containerId
-                      ? project.containerId
-                      : null,
-                  liveServerAvailable: isContainerLayerConfigured() && Boolean(project.containerId),
+                  containerId: projectHasLiveServer() ? project.containerId : null,
+                  liveServerAvailable: projectHasLiveServer(),
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -2974,9 +2980,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           // Defer final status — the repair loop (after build/refine blocks) will
           // attempt targeted TypeScript fixes before committing with an error status.
           const agentBuildChecks = result.report.agentLoop?.checkResults ?? [];
-          _pendingRepairChecks = agentBuildChecks
-            .filter((c) => !c.passed)
-            .map((c) => ({ label: c.label, output: c.message ?? "" }));
+          _pendingRepairChecks = failedChecksEligibleForRepair(agentBuildChecks).map((c) => ({
+            label: c.label,
+            output: c.message ?? "",
+          }));
           _pendingRepairChangedPaths = (result.files ?? []).map((f) => f.path);
           result.correctionFailed = false;
         }
@@ -3242,11 +3249,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: input.planContext ?? null,
                   existingFiles,
-                  containerId:
-                    isContainerLayerConfigured() && project.containerId
-                      ? project.containerId
-                      : null,
-                  liveServerAvailable: isContainerLayerConfigured() && Boolean(project.containerId),
+                  containerId: projectHasLiveServer() ? project.containerId : null,
+                  liveServerAvailable: projectHasLiveServer(),
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -3519,9 +3523,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           // Defer final status — the repair loop (after build/refine blocks) will
           // attempt targeted TypeScript fixes before committing with an error status.
           const agentRefineChecks = refineResult.report.agentLoop?.checkResults ?? [];
-          _pendingRepairChecks = agentRefineChecks
-            .filter((c) => !c.passed)
-            .map((c) => ({ label: c.label, output: c.message ?? "" }));
+          _pendingRepairChecks = failedChecksEligibleForRepair(agentRefineChecks).map((c) => ({
+            label: c.label,
+            output: c.message ?? "",
+          }));
           _pendingRepairChangedPaths = refineResult.changedFiles.map((f) => f.path);
           refineResult.correctionFailed = false;
         }
@@ -3570,9 +3575,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 knowledgeContext: knowledgeContext || undefined,
                 planContext: input.planContext ?? null,
                 existingFiles,
-                containerId:
-                  isContainerLayerConfigured() && project.containerId ? project.containerId : null,
-                liveServerAvailable: isContainerLayerConfigured() && Boolean(project.containerId),
+                containerId: projectHasLiveServer() ? project.containerId : null,
+                liveServerAvailable: projectHasLiveServer(),
                 policyStrictness:
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
@@ -3953,7 +3957,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               knowledgeContext: undefined,
               planContext: null,
               existingFiles: filesForRepair,
-              containerId: project.containerId,
+              containerId: projectHasLiveServer() ? project.containerId : null,
+              liveServerAvailable: projectHasLiveServer(),
               policyStrictness:
                 (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                 null,
@@ -4005,9 +4010,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 `TypeScript errors repaired on attempt ${repairAttempt}.`,
               );
             } else {
-              const newFailed = repairLoopResult.loopReport.checkResults
-                .filter((c) => !c.passed)
-                .map((c) => ({ label: c.label, output: c.message }));
+              const newFailed = failedChecksEligibleForRepair(
+                repairLoopResult.loopReport.checkResults,
+              ).map((c) => ({ label: c.label, output: c.message }));
               if (newFailed.length > 0) currentFailedChecks = newFailed;
               currentChangedPaths =
                 repairChangedPaths.length > 0 ? repairChangedPaths : currentChangedPaths;
@@ -4077,22 +4082,31 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         );
         const checkProfile = CHECK_PROFILES[stackId];
         if (checkProfile) {
+          const deferredChecks = _allAgentCheckResults.filter(isDeferredCheckResult);
           const nonRequiredFailed = _allAgentCheckResults.filter(
             (c) =>
               !c.passed &&
+              !isDeferredCheckResult(c) &&
               checkProfile.checks.some((spec) => spec.id === c.id && spec.required === false),
           );
-          if (nonRequiredFailed.length > 0) {
+          validationWasPartial = deferredChecks.length > 0;
+          if (validationWasPartial || nonRequiredFailed.length > 0) {
             versionValidationStatus = "passed_with_warnings";
-            report.warningChecks = nonRequiredFailed.map((c) => ({
+            report.warningChecks = [...nonRequiredFailed, ...deferredChecks].map((c) => ({
               id: c.id,
               label: c.label,
               message: (c.message ?? "").slice(0, 500),
             }));
-            report.warnings = [
-              `Non-blocking validation checks failed: ${nonRequiredFailed.map((c) => c.label).join(", ")}. Preview is available but the build is not fully clean.`,
-              ...(report.warnings ?? []),
-            ];
+            const validationWarnings = [...(report.warnings ?? [])];
+            if (validationWasPartial && !validationWarnings.includes(PARTIAL_VALIDATION_WARNING)) {
+              validationWarnings.unshift(PARTIAL_VALIDATION_WARNING);
+            }
+            if (nonRequiredFailed.length > 0) {
+              validationWarnings.unshift(
+                `Non-blocking validation checks failed: ${nonRequiredFailed.map((c) => c.label).join(", ")}. Preview is available but the build is not fully clean.`,
+              );
+            }
+            report.warnings = validationWarnings;
           }
         }
       }
@@ -5698,9 +5712,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         "completed",
         versionValidationStatus === "completed_with_errors"
           ? "Build complete — TypeScript repair exhausted. Preview may have issues. Review the report for details."
-          : versionValidationStatus === "passed_with_warnings"
-            ? "Build completed with warnings — preview is available but validation is not fully clean."
-            : "Task completed.",
+          : validationWasPartial
+            ? "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred."
+            : versionValidationStatus === "passed_with_warnings"
+              ? "Build completed with warnings — preview is available but validation is not fully clean."
+              : "Task completed.",
       );
 
       // Notify project owner of build completion (fire-and-forget)

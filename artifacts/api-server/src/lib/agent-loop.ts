@@ -43,7 +43,11 @@ import {
 import { logger } from "./logger";
 import {
   CHECK_PROFILES,
+  DEFERRED_CONTAINER_CHECK_MESSAGE,
+  PARTIAL_VALIDATION_WARNING,
   checksForLiveServerCapability,
+  isContainerRequiredCheck,
+  isDeferredCheckResult,
   resolveStackId,
   type CheckSpec,
   type StackId,
@@ -2107,11 +2111,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     id: liveServerAvailable ? (input.containerId ?? null) : null,
     installed: false,
   };
-  if (!liveServerAvailable && baseProfile.checks.some((check) => check.id === "server-start")) {
+  const deferredContainerChecks = !liveServerAvailable
+    ? baseProfile.checks.filter(isContainerRequiredCheck)
+    : [];
+  if (deferredContainerChecks.length > 0) {
     await safeEvent(
       input.onEvent,
       "check_deferred",
-      "Server startup (healthz) deferred because live cloud-server infrastructure is unavailable. Continuing non-runtime validation.",
+      `${deferredContainerChecks.map((check) => check.label).join(", ")} deferred because live cloud-server infrastructure is unavailable. Continuing container-free validation.`,
     );
   }
 
@@ -3052,18 +3059,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         containerState,
         profile.installCmd,
       );
-      await safeEvent(
-        input.onEvent,
-        "check_result",
-        JSON.stringify(
-          turnChecks.map((c) => ({
-            id: c.id,
-            label: c.label,
-            passed: c.passed,
-            message: (c.message ?? "").slice(0, 200),
-          })),
-        ),
-      );
+      const completedTurnChecks = turnChecks.filter((check) => !isDeferredCheckResult(check));
+      if (completedTurnChecks.length > 0) {
+        await safeEvent(
+          input.onEvent,
+          "check_result",
+          JSON.stringify(
+            completedTurnChecks.map((check) => ({
+              id: check.id,
+              label: check.label,
+              passed: check.passed,
+              message: (check.message ?? "").slice(0, 200),
+            })),
+          ),
+        );
+      }
       const turnFailed = profile.checks.filter(
         (c) => c.required && !turnChecks.find((r) => r.id === c.id)?.passed,
       );
@@ -3138,9 +3148,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         for (const c of profile.checks) {
           checkConsecutiveFails.delete(c.id);
         }
+        const deferredChecks = turnChecks.filter(isDeferredCheckResult);
         messages.push({
           role: "system",
-          content: "[auto-check] all required checks passing. You may call finalize.",
+          content:
+            deferredChecks.length > 0
+              ? `[auto-check] available checks passed. Container-dependent checks deferred: ${deferredChecks.map((check) => check.id).join(", ")}. You may call finalize with partial validation.`
+              : "[auto-check] all required checks passing. You may call finalize.",
         });
       }
       // Reset turn-level path accumulator for the next turn.
@@ -3254,18 +3268,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     containerState,
     profile.installCmd,
   );
-  await safeEvent(
-    input.onEvent,
-    "check_result",
-    JSON.stringify(
-      checkRun.map((c) => ({
-        id: c.id,
-        label: c.label,
-        passed: c.passed,
-        message: (c.message ?? "").slice(0, 200),
-      })),
-    ),
-  );
+  const completedCheckRun = checkRun.filter((check) => !isDeferredCheckResult(check));
+  if (completedCheckRun.length > 0) {
+    await safeEvent(
+      input.onEvent,
+      "check_result",
+      JSON.stringify(
+        completedCheckRun.map((check) => ({
+          id: check.id,
+          label: check.label,
+          passed: check.passed,
+          message: (check.message ?? "").slice(0, 200),
+        })),
+      ),
+    );
+  }
   checkResults.push(...checkRun);
   const requiredFailed = profile.checks.some(
     (c) => c.required && !checkRun.find((r) => r.id === c.id)?.passed,
@@ -7276,7 +7293,7 @@ async function runCheckProfile(
   // a container and one isn't attached yet, provision it now (graceful no-op
   // if Fly isn't configured).
   const needsContainer =
-    input.liveServerAvailable !== false && checks.some((c) => c.runner !== "inprocess");
+    input.liveServerAvailable !== false && checks.some(isContainerRequiredCheck);
   let effectiveContainerId =
     input.liveServerAvailable === false ? null : (containerState?.id ?? input.containerId ?? null);
   if (needsContainer && !effectiveContainerId && !input.signal.aborted) {
@@ -7368,13 +7385,13 @@ async function runCheckProfile(
       });
       continue;
     }
-    if (c.id === "server-start" && input.liveServerAvailable === false) {
+    if (isContainerRequiredCheck(c) && input.liveServerAvailable === false) {
       out.push({
         id: c.id,
         label: c.label,
         passed: true,
         durationMs: 0,
-        message: "deferred: live cloud-server infrastructure unavailable",
+        message: DEFERRED_CONTAINER_CHECK_MESSAGE,
       });
       continue;
     }
@@ -7503,15 +7520,26 @@ function mergeUserResults(run: E2eRunSummary, userResults: E2eScenarioResult[]):
 }
 
 function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskReport {
+  const deferredChecks = result.loopReport.checkResults.filter(isDeferredCheckResult);
+  const completedChecks = result.loopReport.checkResults.filter(
+    (check) => !isDeferredCheckResult(check),
+  );
   const checkSummary =
     result.loopReport.checkResults.length === 0
       ? undefined
       : result.loopReport.checkResults
-          .map((c) => `${c.passed ? "PASS" : "FAIL"} ${c.id}`)
+          .map((check) =>
+            isDeferredCheckResult(check)
+              ? `DEFERRED ${check.id}`
+              : `${check.passed ? "PASS" : "FAIL"} ${check.id}`,
+          )
           .join(", ");
-  const failed = result.loopReport.checkResults.filter((c) => !c.passed).map((c) => c.id);
-  const passed = result.loopReport.checkResults.filter((c) => c.passed).length;
+  const failed = completedChecks.filter((check) => !check.passed).map((check) => check.id);
+  const passed = completedChecks.filter((check) => check.passed).length;
   const warnings = [...result.warnings];
+  if (deferredChecks.length > 0) {
+    warnings.push(PARTIAL_VALIDATION_WARNING);
+  }
   if (result.loopReport.terminationReason !== "finalized") {
     warnings.push(`Agent loop terminated: ${result.loopReport.terminationReason}`);
   }
@@ -7529,22 +7557,25 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
       passed,
       warnings: 0,
       failed: failed.length,
-      skipped: 0,
+      skipped: deferredChecks.length,
       failedChecks: failed,
-      warnChecks: [],
+      warnChecks: deferredChecks.map((check) => check.id),
     },
-    syntaxValid: !result.checksFailed,
+    syntaxValid: deferredChecks.length > 0 ? undefined : !result.checksFailed,
     // Stash the full loop report on validationReport so the existing UI surfaces it,
     // and on a side channel via `summary` for now. Frontend can later read the raw
     // loopReport via the typed extension below.
-    validationReport: {
-      initialIssues: failed,
-      fixupAttempted: result.loopReport.toolCalls.some(
-        (t) => t.tool === "write_file" || t.tool === "apply_patch",
-      ),
-      remainingIssues: failed,
-      passed: !result.checksFailed,
-    },
+    validationReport:
+      deferredChecks.length > 0
+        ? null
+        : {
+            initialIssues: failed,
+            fixupAttempted: result.loopReport.toolCalls.some(
+              (t) => t.tool === "write_file" || t.tool === "apply_patch",
+            ),
+            remainingIssues: failed,
+            passed: !result.checksFailed,
+          },
     agentLoop: result.loopReport,
     e2eResults: result.loopReport.e2eResults ?? null,
     assets:

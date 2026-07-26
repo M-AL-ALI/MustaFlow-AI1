@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REMOTE_URL="https://github.com/M-AL-ALI/MustaFlow-AI1.git"
-BRANCH="main"
+BRANCH="codex/builder-wave3-1-check-deferral"
 ARG="${1:-}"
 
 # ── Commit any staged changes before pushing ──────────────────────────────────
@@ -38,6 +38,10 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  artifacts/api-server/src/lib/agent-loop.ts \
+  artifacts/api-server/src/lib/builder-wave3-stack-agent.test.ts \
+  artifacts/api-server/src/lib/check-profiles.ts \
+  artifacts/api-server/src/lib/jobs.ts \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
