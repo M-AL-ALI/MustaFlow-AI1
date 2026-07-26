@@ -85,7 +85,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { createActivityVisibilityController } from "../../lib/activity-visibility";
+import {
+  createActivityVisibilityController,
+  shouldShowOraActivityRow,
+} from "../../lib/activity-visibility";
 
 import { Markdown } from "@/components/Markdown";
 import {
@@ -3125,7 +3128,11 @@ export default function OraChatScreen() {
         (m.content ?? "").trim().length === 0
       ),
   );
-  const showThinkingRow = sending && !streamingWithContent;
+  const showThinkingRow = shouldShowOraActivityRow({
+    sending,
+    streamingWithContent,
+    hasActivity: streamActivity !== null,
+  });
 
   // The most recent settled assistant message is the only one eligible for the
   // Regenerate action (mirrors ChatGPT, which only regenerates the last reply).
@@ -3354,7 +3361,9 @@ export default function OraChatScreen() {
           ref={listRef}
           data={visibleMessages}
           keyExtractor={(m) => m.id}
-          extraData={`${speakingId ?? ""}|${tierAccent}`}
+          extraData={`${speakingId ?? ""}|${tierAccent}|${sending}|${streamStatus ?? ""}|${
+            streamActivity?.id ?? ""
+          }:${streamActivity?.phase ?? ""}|${showThinkingRow}`}
           removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={{
             paddingHorizontal: 16,

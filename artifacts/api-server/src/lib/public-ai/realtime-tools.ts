@@ -5,6 +5,7 @@ import {
   type OraRealtimeFunctionCall,
   type OraRealtimeToolBridgeResponse,
   type OraRealtimeToolName,
+  type OraRealtimeToolResultCode,
   type OraRealtimeToolWrittenResult,
 } from "@workspace/ora-contracts";
 import { db, oraRepoSessionsTable, type OraRepoSessionRow } from "@workspace/db";
@@ -51,6 +52,7 @@ import { REALTIME_TOOL_ACTIVITY } from "./realtime-tool-definitions";
 export {
   ORA_REALTIME_TOOL_DEFINITIONS,
   assertRealtimeToolSurface,
+  realtimeToolDefinitionsForClient,
   realtimeToolActivity,
   type RealtimeToolDefinition,
 } from "./realtime-tool-definitions";
@@ -67,10 +69,18 @@ export interface OraRealtimeToolExecutionContext {
   activeArtifact?: { assetId: number; fileName: string; format: FileFormat } | null;
 }
 
-interface ToolExecution {
-  output: string;
-  writtenResult?: OraRealtimeToolWrittenResult;
-}
+type ToolExecution =
+  | {
+      ok: true;
+      output: string;
+      writtenResult?: OraRealtimeToolWrittenResult;
+    }
+  | {
+      ok: false;
+      code: Exclude<OraRealtimeToolResultCode, "ok">;
+      output: string;
+      recoverable: true;
+    };
 
 export type OraRealtimeToolExecutor = (
   args: Record<string, unknown>,
@@ -78,6 +88,17 @@ export type OraRealtimeToolExecutor = (
 ) => Promise<ToolExecution>;
 
 export type OraRealtimeToolExecutors = Record<OraRealtimeToolName, OraRealtimeToolExecutor>;
+
+function toolSuccess(output: string, writtenResult?: OraRealtimeToolWrittenResult): ToolExecution {
+  return { ok: true, output, ...(writtenResult ? { writtenResult } : {}) };
+}
+
+function toolFailure(
+  code: Exclude<OraRealtimeToolResultCode, "ok">,
+  output: string,
+): ToolExecution {
+  return { ok: false, code, output, recoverable: true };
+}
 
 function readString(args: Record<string, unknown>, key: string, max: number): string {
   return typeof args[key] === "string" ? args[key].trim().slice(0, max) : "";
@@ -112,10 +133,14 @@ function safeOutput(value: string, max = 40_000): string {
   return clean.slice(0, max) || "The tool completed without a text result.";
 }
 
-function safeFailure(tool: OraRealtimeToolName): OraRealtimeToolBridgeResponse {
+function safeFailure(
+  tool: OraRealtimeToolName,
+  code: Exclude<OraRealtimeToolResultCode, "ok"> = "tool_failed",
+): OraRealtimeToolBridgeResponse {
   const activityTool = REALTIME_TOOL_ACTIVITY[tool];
   return {
     ok: false,
+    code,
     output:
       "This tool encountered an error and could not complete. Acknowledge the failure briefly and continue from what you know. Do not claim the tool returned a result.",
     activity: oraActivityStep(activityTool, "fail"),
@@ -161,19 +186,19 @@ async function executeRepoRead(
 ): Promise<ToolExecution> {
   const access = await repoAccess(args, context);
   if (access.status === "no_user") {
-    return { output: "Repository access requires signing in first." };
+    return toolFailure("not_signed_in", "Repository access requires signing in first.");
   }
   if (access.status === "not_connected") {
-    return {
-      output:
-        "GitHub is not connected for this account. The user can connect it in Settings to enable repository tools.",
-    };
+    return toolFailure(
+      "github_not_connected",
+      "GitHub is not connected for this account. The user can connect it in Settings to enable repository tools.",
+    );
   }
   if (access.status === "no_repo") {
-    return {
-      output:
-        "GitHub is connected, but no repository has been selected. Ask the user to name or select a repository; do not ask for a pasted URL.",
-    };
+    return toolFailure(
+      "repo_not_resolved",
+      "GitHub is connected, but no repository has been selected. Ask the user to name or select a repository; do not ask for a pasted URL.",
+    );
   }
 
   const { token, session } = access;
@@ -199,9 +224,10 @@ async function executeRepoRead(
         token,
       });
     } catch (error) {
-      return {
-        output: `${safeRepoWorkspaceFailure(error)} Continue honestly without inventing findings.`,
-      };
+      return toolFailure(
+        "repo_read_failed",
+        `${safeRepoWorkspaceFailure(error)} Continue honestly without inventing findings.`,
+      );
     }
     await db
       .update(oraRepoSessionsTable)
@@ -225,11 +251,12 @@ async function executeRepoRead(
       result = await searchRepo(workspace, readString(args, "query", 200));
     }
   }
-  return {
-    output: result.ok
-      ? result.content
-      : `${result.content} Continue honestly without inventing results.`,
-  };
+  return result.ok
+    ? toolSuccess(result.content)
+    : toolFailure(
+        "repo_read_failed",
+        `${result.content} Continue honestly without inventing results.`,
+      );
 }
 
 async function repoCandidates(message: string, tier: string): Promise<ModelCandidate[]> {
@@ -255,10 +282,15 @@ async function executeRepoAnalysis(
   context: OraRealtimeToolExecutionContext,
 ): Promise<ToolExecution> {
   if (!context.userId) {
-    return { output: "Repository analysis is available after the user signs in." };
+    return toolFailure(
+      "not_signed_in",
+      "Repository analysis is available after the user signs in.",
+    );
   }
   const question = readString(args, "question", 8000);
-  if (!question) return { output: "Ask what the user wants checked in the repository." };
+  if (!question) {
+    return toolFailure("invalid_arguments", "Ask what the user wants checked in the repository.");
+  }
   const candidates = await repoCandidates(question, context.tier);
   const investigation = await runRepoInvestigation({
     userId: context.userId,
@@ -267,11 +299,11 @@ async function executeRepoAnalysis(
     onStatus: () => {},
   });
   if (!investigation || investigation.stepsRun === 0) {
-    return {
-      output:
-        investigation?.contextBlock ??
-        "I could not resolve the connected repository. Ask for its name or selection, not a URL.",
-    };
+    return toolFailure(
+      "no_code_analyzed",
+      investigation?.contextBlock ??
+        "No repository code was analyzed because the connected repository could not be resolved. Ask for its name or selection, not a URL.",
+    );
   }
 
   const chain = await runCandidateChain(candidates, async (candidate) => {
@@ -296,10 +328,7 @@ async function executeRepoAnalysis(
     if (!report) throw new Error("empty repository report");
     return report;
   });
-  return {
-    output: chain.result,
-    writtenResult: { content: chain.result },
-  };
+  return toolSuccess(chain.result, { content: chain.result });
 }
 
 async function executeFileGeneration(
@@ -309,7 +338,10 @@ async function executeFileGeneration(
   const prompt = readString(args, "prompt", 8000);
   const format = readString(args, "format", 10) as FileFormat;
   if (!prompt || !["csv", "xlsx", "docx", "pdf", "pptx"].includes(format)) {
-    return { output: "A complete file prompt and supported format are required." };
+    return toolFailure(
+      "invalid_arguments",
+      "A complete file prompt and supported format are required.",
+    );
   }
 
   const projectId = await resolveProjectId(context);
@@ -441,9 +473,9 @@ async function executeFileGeneration(
     }
   }
 
-  return {
-    output: `The ${format.toUpperCase()} file is ready. Briefly explain what was created or changed and tell the user it is in the chat.`,
-    writtenResult: {
+  return toolSuccess(
+    `The ${format.toUpperCase()} file is ready. Briefly explain what was created or changed and tell the user it is in the chat.`,
+    {
       content: result.reply,
       ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
       generatedFile: {
@@ -455,19 +487,24 @@ async function executeFileGeneration(
         ...(result.editQuality ? { editQuality: result.editQuality } : {}),
       },
     },
-  };
+  );
 }
 
 async function executeImageGeneration(
   args: Record<string, unknown>,
   context: OraRealtimeToolExecutionContext,
 ): Promise<ToolExecution> {
-  if (!context.userId) return { output: "Image generation is available after signing in." };
+  if (!context.userId) {
+    return toolFailure("not_signed_in", "Image generation is available after signing in.");
+  }
   if (!isImageProviderConfigured()) {
-    return { output: "Image generation is temporarily unavailable. Continue the conversation." };
+    return toolFailure(
+      "temporarily_unavailable",
+      "Image generation is temporarily unavailable. Continue the conversation.",
+    );
   }
   const prompt = readString(args, "prompt", 4000);
-  if (!prompt) return { output: "A complete image brief is required." };
+  if (!prompt) return toolFailure("invalid_arguments", "A complete image brief is required.");
   const profile = buildOraImageGenerationProfile({
     prompt,
     subscriptionTier: context.tier,
@@ -511,9 +548,9 @@ async function executeImageGeneration(
     logger.warn({ component: "ora-realtime-tool", err }, "Voice image persistence failed");
   }
 
-  return {
-    output: "The image is ready in the chat. Briefly describe it without reading any URL.",
-    writtenResult: {
+  return toolSuccess(
+    "The image is ready in the chat. Briefly describe it without reading any URL.",
+    {
       content: "Here is the image you created with Ora.",
       imageUrl: result.openaiUrl,
       ...(imageId ? { imageId } : {}),
@@ -524,23 +561,23 @@ async function executeImageGeneration(
         quality: profile.quality,
       },
     },
-  };
+  );
 }
 
 const DEFAULT_EXECUTORS: OraRealtimeToolExecutors = {
   web_search: async (args, context) => {
-    if (!context.userId) return { output: "Live web search is available after signing in." };
+    if (!context.userId) {
+      return toolFailure("not_signed_in", "Live web search is available after signing in.");
+    }
     const query = readString(args, "query", 4000);
+    if (!query) return toolFailure("invalid_arguments", "A complete search question is required.");
     const result = await runOraWebSearch({
       query,
       history: context.history,
       language: context.language,
       subscriptionTier: context.tier,
     });
-    return {
-      output: result.reply,
-      writtenResult: { content: result.reply, sources: result.sources },
-    };
+    return toolSuccess(result.reply, { content: result.reply, sources: result.sources });
   },
   list_files: (args, context) => executeRepoRead("list_files", args, context),
   read_file: (args, context) => executeRepoRead("read_file", args, context),
@@ -556,6 +593,17 @@ function quotaKindForTool(name: OraRealtimeToolName): OraQuotaKind | null {
   if (name === "generate_file") return "message";
   if (name === "generate_image") return "image";
   return null;
+}
+
+async function refundReservedQuotaSafely(userId: string, quotaKind: OraQuotaKind): Promise<void> {
+  try {
+    await refundOraQuota(userId, quotaKind);
+  } catch (err) {
+    logger.warn(
+      { component: "ora-realtime-tool", quotaKind, err },
+      "Realtime tool quota refund failed",
+    );
+  }
 }
 
 /**
@@ -588,6 +636,7 @@ export async function executeOraRealtimeFunctionCall(
       if (!quota.allowed) {
         return {
           ok: false,
+          code: "quota_reached",
           output: `That ${quotaKind === "image" ? "image" : "file"} limit is reached for now. Continue by voice without claiming the tool ran.`,
           activity: oraActivityStep(activityTool, "fail"),
           recoverable: true,
@@ -597,8 +646,22 @@ export async function executeOraRealtimeFunctionCall(
     }
 
     const result = await executors[call.name](args, context);
+    if (!result.ok) {
+      if (quotaReserved && quotaKind && context.userId) {
+        await refundReservedQuotaSafely(context.userId, quotaKind);
+        quotaReserved = false;
+      }
+      return {
+        ok: false,
+        code: result.code,
+        output: safeOutput(result.output),
+        activity: oraActivityStep(activityTool, "fail"),
+        recoverable: true,
+      };
+    }
     return {
       ok: true,
+      code: "ok",
       output: safeOutput(result.output),
       activity: oraActivityStep(activityTool, "ok"),
       ...(result.writtenResult ? { writtenResult: result.writtenResult } : {}),
@@ -606,7 +669,7 @@ export async function executeOraRealtimeFunctionCall(
     };
   } catch (err) {
     if (quotaReserved && quotaKind && context.userId) {
-      await refundOraQuota(context.userId, quotaKind);
+      await refundReservedQuotaSafely(context.userId, quotaKind);
     }
     logger.warn(
       { component: "ora-realtime-tool", tool: call.name, err },

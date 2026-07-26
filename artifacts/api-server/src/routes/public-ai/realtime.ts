@@ -19,7 +19,11 @@
 import { createHash } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
-import { ORA_REALTIME_TOOL_NAMES, type OraRealtimeToolName } from "@workspace/ora-contracts";
+import {
+  ORA_REALTIME_TOOL_NAMES,
+  oraRealtimeClientNarratesTools,
+  type OraRealtimeToolName,
+} from "@workspace/ora-contracts";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraRealtimeSessionLimiter, oraRealtimeSessionTickLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
@@ -35,14 +39,10 @@ import {
   REALTIME_HEARTBEAT_INTERVAL_SECONDS,
 } from "../../lib/public-ai/ora-realtime-usage";
 import {
-  ORA_REALTIME_TOOL_DEFINITIONS,
   assertRealtimeToolSurface,
+  realtimeToolDefinitionsForClient,
 } from "../../lib/public-ai/realtime-tool-definitions";
-import {
-  resolveOraRepoSessionForRequest,
-  hasOraRepoSignal,
-  hasActiveOraRepoSession,
-} from "../../lib/public-ai/repo-analyst";
+import { resolveOraRepoSessionForRequest } from "../../lib/public-ai/repo-analyst";
 import { buildSystemPrompt, buildProfileContext, buildMemoryContext } from "./chat";
 
 const router = Router();
@@ -198,7 +198,7 @@ function buildVoiceToolAddendum(clientHasNarration: boolean): string {
       ? "Tool activity is narrated automatically by the client in the user's language, so " +
         "do not add a separate pre-call status sentence or repeat the activity narration. "
       : "Before calling a tool, say a brief natural status sentence in the user's language " +
-        "(for example, \"Let me search that.\" or \"One moment while I look at the repo.\") " +
+        '(for example, "Let me search that." or "One moment while I look at the repo.") ' +
         "so the user knows you are on it. ") +
     "After the tool result arrives, continue naturally and summarize it aloud. If a tool " +
     "fails, say so plainly and continue; never end the live session for a recoverable tool " +
@@ -466,39 +466,31 @@ async function buildRealtimeInstructions(opts: {
       }
     }
 
-    // Resolve GitHub context lazily — only when the session message contains a
-    // repo signal (keyword heuristic) OR the user already has an active repo
-    // session row. This avoids a DB round-trip for every voice mint by users
-    // who have never connected GitHub. Both helpers are cheap: signal check is
-    // pure string ops; hasActiveOraRepoSession is a single SELECT. Failures are
-    // best-effort and never block voice.
-    const messageHint = message?.trim() ?? "";
-    const shouldResolveRepo =
-      hasOraRepoSignal(messageHint) ||
-      (await hasActiveOraRepoSession(authed.userId).catch(() => false));
-    if (shouldResolveRepo) {
-      try {
-        const repo = await resolveOraRepoSessionForRequest({
-          userId: authed.userId,
-          message,
-        });
-        if (repo.connected && repo.session) {
-          instructions +=
-            "\n\n## Connected GitHub repository (read-only)\n" +
-            `The selected repository is ${repo.session.owner}/${repo.session.repo}. ` +
-            "Use the repository tools directly. Never ask the user to paste its URL. " +
-            "You may read, search, inspect commits, and analyze it, but you can never " +
-            "write, edit, commit, push, or open a pull request.";
-        } else if (repo.connected) {
-          instructions +=
-            "\n\n## Connected GitHub account (read-only)\n" +
-            "GitHub is already connected. If the user names a repository, pass that " +
-            "name to the repository tool so the server can resolve it. If no repository " +
-            "can be resolved, ask them to name or select one; never ask for a pasted URL.";
-        }
-      } catch {
-        // Connected-repo context is additive. Voice remains available if lookup fails.
+    // Always resolve the lightweight connected-account/active-session context
+    // at mint time. A user may ask about GitHub only after Talk mode starts, so
+    // gating this lookup on the initial message caused Ora to forget an already
+    // connected account and ask for a pasted URL.
+    try {
+      const repo = await resolveOraRepoSessionForRequest({
+        userId: authed.userId,
+        message,
+      });
+      if (repo.connected && repo.session) {
+        instructions +=
+          "\n\n## Connected GitHub repository (read-only)\n" +
+          `The selected repository is ${repo.session.owner}/${repo.session.repo}. ` +
+          "Use the repository tools directly. Never ask the user to paste its URL. " +
+          "You may read, search, inspect commits, and analyze it, but you can never " +
+          "write, edit, commit, push, or open a pull request.";
+      } else if (repo.connected) {
+        instructions +=
+          "\n\n## Connected GitHub account (read-only)\n" +
+          "GitHub is already connected. If the user names a repository, pass that " +
+          "name to the repository tool so the server can resolve it. If no repository " +
+          "can be resolved, ask them to name or select one; never ask for a pasted URL.";
       }
+    } catch {
+      // Connected-repo context is additive. Voice remains available if lookup fails.
     }
   }
 
@@ -653,8 +645,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     }
   };
 
-  const clientHasNarration =
-    (parsed.data.clientCapabilities?.realtimeToolNarration ?? 0) >= 1;
+  const clientHasNarration = oraRealtimeClientNarratesTools(parsed.data.clientCapabilities);
   const instructions = await buildRealtimeInstructions({
     authed,
     language: parsed.data.language,
@@ -680,7 +671,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
           type: "realtime",
           model,
           instructions,
-          tools: ORA_REALTIME_TOOL_DEFINITIONS,
+          tools: realtimeToolDefinitionsForClient(clientHasNarration),
           tool_choice: "auto",
           audio: {
             output: { voice },

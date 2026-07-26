@@ -18,8 +18,12 @@ process.env.DATABASE_URL ??= "postgresql://placeholder:placeholder@127.0.0.1:543
 process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??= "http://127.0.0.1:9/v1";
 process.env.AI_INTEGRATIONS_OPENAI_API_KEY ??= "test-placeholder";
 
-const { ORA_REALTIME_TOOL_DEFINITIONS, executeOraRealtimeFunctionCall, realtimeToolActivity } =
-  await import("../realtime-tools");
+const {
+  ORA_REALTIME_TOOL_DEFINITIONS,
+  executeOraRealtimeFunctionCall,
+  realtimeToolActivity,
+  realtimeToolDefinitionsForClient,
+} = await import("../realtime-tools");
 
 const CONTEXT: OraRealtimeToolExecutionContext = {
   userId: null,
@@ -34,7 +38,9 @@ function executors(
   return Object.fromEntries(
     ORA_REALTIME_TOOL_NAMES.map((name) => [
       name,
-      name === selected ? implementation : vi.fn(async () => ({ output: `unused ${name}` })),
+      name === selected
+        ? implementation
+        : vi.fn(async () => ({ ok: true as const, output: `unused ${name}` })),
     ]),
   ) as OraRealtimeToolExecutors;
 }
@@ -74,6 +80,15 @@ describe("Ora realtime tool surface", () => {
         type: "object",
         additionalProperties: false,
       });
+    }
+  });
+
+  it("gives legacy clients one model-side preamble without contradicting the session prompt", () => {
+    const legacyDefinitions = realtimeToolDefinitionsForClient(false);
+    for (const definition of legacyDefinitions) {
+      expect(definition.description).toContain("speak one short natural status sentence");
+      expect(definition.description).not.toContain("client narrates");
+      expect(definition.description).not.toContain("without adding a separate status preamble");
     }
   });
 
@@ -186,6 +201,7 @@ describe("Ora realtime function-call protocol", () => {
 
   it("executes a simulated function call and returns rich written output", async () => {
     const execute = vi.fn(async (args: Record<string, unknown>) => ({
+      ok: true as const,
       output: `Verified: ${String(args.query)}`,
       writtenResult: {
         content: "Verified current information.",
@@ -207,6 +223,7 @@ describe("Ora realtime function-call protocol", () => {
     expect(execute).toHaveBeenCalledWith({ query: "current status" }, CONTEXT);
     expect(result).toMatchObject({
       ok: true,
+      code: "ok",
       output: "Verified: current status",
       recoverable: true,
       activity: { tool: "web-search", phase: "ok" },
@@ -214,6 +231,33 @@ describe("Ora realtime function-call protocol", () => {
         content: "Verified current information.",
         usedFiles: [{ name: "budget.xlsx", role: "source_data" }],
       },
+    });
+  });
+
+  it("preserves a semantic executor failure instead of reporting a green completion", async () => {
+    const execute = vi.fn(async () => ({
+      ok: false as const,
+      code: "repo_not_resolved" as const,
+      output:
+        "GitHub is connected, but no repository was resolved. Ask the user to name or select it.",
+      recoverable: true as const,
+    }));
+
+    const result = await executeOraRealtimeFunctionCall(
+      {
+        callId: "call_repo_missing",
+        name: "list_files",
+        argumentsJson: "{}",
+      },
+      CONTEXT,
+      executors("list_files", execute),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "repo_not_resolved",
+      recoverable: true,
+      activity: { tool: "repo-analysis", phase: "fail" },
     });
   });
 

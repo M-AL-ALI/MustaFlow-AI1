@@ -100,7 +100,7 @@ describe("connected repository context", () => {
   });
 
   it("resolves a named owned repo without treating substrings as repo mentions", async () => {
-    const { findConnectedRepoForRequest, shouldSearchConnectedRepos } =
+    const { findConnectedRepoForRequest, hasOraRepoSignal, shouldSearchConnectedRepos } =
       await import("../repo-analyst");
     const repos = [
       {
@@ -131,6 +131,24 @@ describe("connected repository context", () => {
     ).toBe("M-AL-ALI/MustaFlow-AI1");
     expect(findConnectedRepoForRequest(repos, "I am happy with this answer.")).toBeNull();
     expect(findConnectedRepoForRequest(repos, "", "M-AL-ALI/app")?.name).toBe("app");
+    expect(
+      findConnectedRepoForRequest(repos, "Analyze MustaFlow AI for release risks.")?.fullName,
+    ).toBe("M-AL-ALI/MustaFlow-AI1");
+    expect(findConnectedRepoForRequest(repos, "", "M AL ALI / MustaFlow AI")?.fullName).toBe(
+      "M-AL-ALI/MustaFlow-AI1",
+    );
+
+    const onlyRepo = repos.slice(0, 1);
+    expect(findConnectedRepoForRequest(onlyRepo, "Find bugs in my app.")?.fullName).toBe(
+      "M-AL-ALI/MustaFlow-AI1",
+    );
+    expect(findConnectedRepoForRequest(onlyRepo, "", "this repo")?.fullName).toBe(
+      "M-AL-ALI/MustaFlow-AI1",
+    );
+
+    expect(hasOraRepoSignal("Create a quarterly report.")).toBe(false);
+    expect(hasOraRepoSignal("Find bugs in my app.")).toBe(true);
+    expect(hasOraRepoSignal("Review M-AL-ALI/MustaFlow-AI1.")).toBe(true);
 
     const current = { owner: "M-AL-ALI", repo: "app" };
     expect(

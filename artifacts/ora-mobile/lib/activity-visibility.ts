@@ -14,6 +14,14 @@
 
 export const ACTIVITY_MIN_SHOW_MS = 200;
 
+export function shouldShowOraActivityRow(input: {
+  sending: boolean;
+  streamingWithContent: boolean;
+  hasActivity: boolean;
+}): boolean {
+  return input.sending && (!input.streamingWithContent || input.hasActivity);
+}
+
 export interface ActivityVisibilityController {
   /**
    * Record that a new activity step just became visible. Cancels any pending
@@ -38,10 +46,8 @@ export function createActivityVisibilityController(opts?: {
 }): ActivityVisibilityController {
   const minShowMs = opts?.minShowMs ?? ACTIVITY_MIN_SHOW_MS;
   const now = opts?.now ?? (() => Date.now());
-  const schedule =
-    opts?.schedule ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
-  const cancel =
-    opts?.cancel ?? ((id: ReturnType<typeof setTimeout>) => clearTimeout(id));
+  const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const cancel = opts?.cancel ?? ((id: ReturnType<typeof setTimeout>) => clearTimeout(id));
 
   let minShowUntil = 0;
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;

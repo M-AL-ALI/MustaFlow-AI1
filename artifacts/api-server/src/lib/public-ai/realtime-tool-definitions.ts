@@ -20,6 +20,22 @@ function toolDescription(name: OraRealtimeToolName, description: string): string
   return `${description} The client narrates ${activity} activity automatically; call the function without adding a separate status preamble.`;
 }
 
+const CLIENT_NARRATION_SENTENCE =
+  / The client narrates [a-z-]+ activity automatically; call the function without adding a separate status preamble\.$/;
+
+export function realtimeToolDefinitionsForClient(
+  clientNarrates: boolean,
+): readonly RealtimeToolDefinition[] {
+  if (clientNarrates) return ORA_REALTIME_TOOL_DEFINITIONS;
+  return ORA_REALTIME_TOOL_DEFINITIONS.map((definition) => ({
+    ...definition,
+    description: definition.description.replace(
+      CLIENT_NARRATION_SENTENCE,
+      " Before calling this function, speak one short natural status sentence so the user never hears dead air.",
+    ),
+  }));
+}
+
 const objectSchema = (
   properties: Record<string, unknown>,
   required: string[] = [],

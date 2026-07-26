@@ -867,6 +867,24 @@ export function parseOraRealtimeToolNarrationCallId(value: unknown): string | nu
 export const ORA_REALTIME_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000] as const;
 export const ORA_REALTIME_RECONNECT_MAX_ATTEMPTS = 6;
 
+export interface OraRealtimeClientCapabilities {
+  realtimeFunctionBridge?: number;
+  realtimeToolNarration?: number;
+}
+
+export const ORA_REALTIME_CURRENT_CLIENT_CAPABILITIES: Readonly<
+  Required<OraRealtimeClientCapabilities>
+> = {
+  realtimeFunctionBridge: 1,
+  realtimeToolNarration: 1,
+};
+
+export function oraRealtimeClientNarratesTools(
+  capabilities: OraRealtimeClientCapabilities | null | undefined,
+): boolean {
+  return (capabilities?.realtimeToolNarration ?? 0) >= 1;
+}
+
 /** Selected read-only GitHub repository carried into a live voice session. */
 export interface OraRealtimeRepoContext {
   owner: string;
@@ -900,6 +918,8 @@ export interface OraRealtimeToolWrittenResult {
 /** Privacy-safe response from the authenticated realtime function-call bridge. */
 export interface OraRealtimeToolBridgeResponse {
   ok: boolean;
+  /** Stable privacy-safe outcome code for UI, telemetry, and retry decisions. */
+  code?: OraRealtimeToolResultCode;
   /** Tool output returned to the realtime model as function_call_output. */
   output: string;
   /** Shared branded activity copy; never contains provider/model/path internals. */
@@ -909,6 +929,21 @@ export interface OraRealtimeToolBridgeResponse {
   /** True means the live session should continue even when `ok` is false. */
   recoverable: true;
 }
+
+export const ORA_REALTIME_TOOL_RESULT_CODES = [
+  "ok",
+  "invalid_arguments",
+  "not_signed_in",
+  "github_not_connected",
+  "repo_not_resolved",
+  "no_code_analyzed",
+  "repo_read_failed",
+  "temporarily_unavailable",
+  "quota_reached",
+  "tool_failed",
+] as const;
+
+export type OraRealtimeToolResultCode = (typeof ORA_REALTIME_TOOL_RESULT_CODES)[number];
 
 /** Normalized function call emitted by the GA Realtime data channel. */
 export interface OraRealtimeFunctionCall {
