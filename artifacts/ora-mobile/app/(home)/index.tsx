@@ -1332,10 +1332,10 @@ export default function OraChatScreen() {
             };
           } else if (attch.kind === "dataset") {
             pushActivity(
-              oraActivityStep("file-reading", "start", oraAnalyzingDatasetText(attch.filename)),
+              oraActivityStep("dataset-analysis", "start", oraAnalyzingDatasetText(attch.filename)),
             );
             const { result } = await analyzeDataset(attch.ref, prompt, history);
-            pushActivity(oraActivityStep("file-reading", "ok"));
+            pushActivity(oraActivityStep("dataset-analysis", "ok"));
             const profile = result.datasetProfile;
             const summary =
               typeof result.summary === "string" && result.summary.trim()

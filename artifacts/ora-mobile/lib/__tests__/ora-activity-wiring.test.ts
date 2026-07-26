@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   ORA_ACTIVITY_TEXT,
   oraActivityStep,
+  oraActivityText,
   oraActivityToolForRoutedTool,
   parseOraActivityStep,
 } from "@workspace/ora-contracts";
@@ -47,6 +48,9 @@ describe("Mobile Ora — activity event parsing (shared parser)", () => {
     expect(ORA_ACTIVITY_TEXT["web-search"].start).toBe("Searching the web…");
     expect(oraActivityStep("file-generation", "start").text).toBe("Generating your file…");
     expect(oraActivityToolForRoutedTool("search")).toBe("web-search");
+    expect(oraActivityText("dataset-analysis", "start")).toBe("Analyzing your data…");
+    expect(oraActivityToolForRoutedTool("dataset_analysis")).toBe("dataset-analysis");
+    expect(oraActivityToolForRoutedTool("unknown_tool")).toBeNull();
   });
 });
 
@@ -96,10 +100,17 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
     expect(body).toContain("setStreamActivity(null);");
   });
 
-  it("narrates attachment reading with the shared name-aware wording", () => {
+  it("narrates attachment and dataset reading with the shared name-aware wording", () => {
     expect(index).toContain("ORA_ANALYZING_IMAGE_TEXT");
     expect(index).toContain("oraAnalyzingDatasetText(attch.filename)");
     expect(index).toContain("oraReadingFileText(attch.filename)");
+    const datasetHelper = "oraAnalyzingDatasetText(attch.filename)";
+    const datasetIndex = index.indexOf(datasetHelper);
+    expect(datasetIndex).toBeGreaterThan(-1);
+    expect(index.slice(datasetIndex - 120, datasetIndex + datasetHelper.length)).toContain(
+      '"dataset-analysis"',
+    );
+    expect(index).toContain('oraActivityStep("dataset-analysis", "ok")');
   });
 
   it("applies server-reported terminal steps from /chat fallbacks", () => {

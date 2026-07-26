@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { oraActivityStep, ORA_ACTIVITY_TEXT } from "@workspace/ora-contracts";
+import {
+  oraActivityStep,
+  oraActivityText,
+  oraActivityToolForRoutedTool,
+  ORA_ACTIVITY_TEXT,
+} from "@workspace/ora-contracts";
 import {
   clearedOraActivity,
   currentOraActivityStep,
@@ -92,6 +97,14 @@ describe("Ora activity trace — reducer", () => {
   });
 });
 
+describe("Ora activity trace — dataset analysis contract", () => {
+  it("uses first-class shared copy and maps the routed dataset tool", () => {
+    expect(oraActivityText("dataset-analysis", "start")).toBe("Analyzing your data…");
+    expect(oraActivityToolForRoutedTool("dataset_analysis")).toBe("dataset-analysis");
+    expect(oraActivityToolForRoutedTool("unknown_tool")).toBeNull();
+  });
+});
+
 describe("Ora activity trace — hook wiring (use-ora-chat.ts)", () => {
   const hook = read("../use-ora-chat.ts");
 
@@ -112,7 +125,7 @@ describe("Ora activity trace — hook wiring (use-ora-chat.ts)", () => {
 
   it("synthesizes the start step from the specialist-tool bounce signal", () => {
     expect(hook).toContain("oraActivityToolForRoutedTool(data.tool)");
-    expect(hook).toContain("onActivity?.(oraActivityStep(bouncedTool, \"start\"));");
+    expect(hook).toContain('onActivity?.(oraActivityStep(bouncedTool, "start"));');
   });
 
   it("applies server-reported terminal steps from the /chat JSON response", () => {
@@ -120,10 +133,17 @@ describe("Ora activity trace — hook wiring (use-ora-chat.ts)", () => {
     expect(hook).toContain("applyServerActivity(data);");
   });
 
-  it("narrates file reading with the shared name-aware wording", () => {
+  it("narrates file and dataset reading with the shared name-aware wording", () => {
     expect(hook).toContain("ORA_ANALYZING_IMAGE_TEXT");
     expect(hook).toContain("oraAnalyzingDatasetText(currentAttachment.filename)");
     expect(hook).toContain("oraReadingFileText(currentAttachment.filename)");
+    const datasetHelper = "oraAnalyzingDatasetText(currentAttachment.filename)";
+    const datasetIndex = hook.indexOf(datasetHelper);
+    expect(datasetIndex).toBeGreaterThan(-1);
+    expect(hook.slice(datasetIndex - 120, datasetIndex + datasetHelper.length)).toContain(
+      '"dataset-analysis"',
+    );
+    expect(hook).toContain('oraActivityStep("dataset-analysis", "ok")');
   });
 
   it("starts a fresh trace per turn and fails the in-flight step on errors", () => {
