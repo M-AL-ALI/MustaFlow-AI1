@@ -61,8 +61,10 @@ const metering = vi.hoisted(() => ({
 const repoContext = vi.hoisted(() => ({
   resolve: vi.fn(),
   investigate: vi.fn(),
-  hasSignal: vi.fn(),
-  hasSession: vi.fn(),
+}));
+
+const toolBridge = vi.hoisted(() => ({
+  execute: vi.fn(),
 }));
 
 // ─── Mocks (hoisted before router import) ─────────────────────────────────────
@@ -111,8 +113,10 @@ vi.mock("../../../lib/public-ai/repo-analyst", () => ({
   REPO_GUIDANCE_ADDENDUM: "",
   resolveOraRepoSessionForRequest: repoContext.resolve,
   runRepoInvestigation: repoContext.investigate,
-  hasOraRepoSignal: repoContext.hasSignal,
-  hasActiveOraRepoSession: repoContext.hasSession,
+}));
+
+vi.mock("../../../lib/public-ai/realtime-tools", () => ({
+  executeOraRealtimeFunctionCall: toolBridge.execute,
 }));
 
 // The metering service is mocked so the route is the unit under test. Keep the
@@ -251,17 +255,12 @@ beforeEach(() => {
   metering.getRealtimeUsage.mockReset();
   repoContext.resolve.mockReset();
   repoContext.investigate.mockReset();
-  repoContext.hasSignal.mockReset();
-  repoContext.hasSession.mockReset();
+  toolBridge.execute.mockReset();
   repoContext.resolve.mockResolvedValue({
     connected: false,
     token: null,
     session: null,
   });
-  // Default: no repo signal in the message, no active repo session.
-  // Both must be false so non-repo tests skip the DB round-trip entirely.
-  repoContext.hasSignal.mockReturnValue(false);
-  repoContext.hasSession.mockResolvedValue(false);
   metering.startRealtimeSession.mockResolvedValue({
     status: "ok",
     sessionId: "00000000-0000-4000-8000-000000000000",
@@ -446,6 +445,11 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(body.session.tools.map((tool) => tool.name).join(" ")).not.toMatch(
       /\b(?:write_file|commit_change|push|create_pr|mutate|delete_file|apply_patch)\b/i,
     );
+    expect(body.session.instructions).toContain("Before calling a tool, say a brief natural");
+    for (const tool of body.session.tools) {
+      expect(tool.description).toContain("speak one short natural status sentence");
+      expect(tool.description).not.toContain("client narrates");
+    }
     expect(body.session.audio.output.voice).toBe("marin");
     expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
     // interrupt_response defaults FALSE: the client hooks own barge-in via a
@@ -457,6 +461,28 @@ describe("Talk to Ora realtime — anonymous mint", () => {
       create_response: true,
       interrupt_response: false,
     });
+  });
+  it("capable clients get exactly one client-owned narration protocol", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({
+        clientCapabilities: {
+          realtimeFunctionBridge: 1,
+          realtimeToolNarration: 1,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.instructions).toContain("narrated automatically by the client");
+    expect(body.session.instructions).not.toContain(
+      "Before calling a tool, say a brief natural status",
+    );
+    for (const tool of body.session.tools) {
+      expect(tool.description).toContain("client narrates");
+      expect(tool.description).toContain("without adding a separate status preamble");
+    }
   });
 
   it("server VAD env override uses explicit conservative timing; interrupt stays client-owned", async () => {
@@ -678,9 +704,6 @@ describe("Talk to Ora realtime — signed-in reservation + context injection", (
 
   it("injects an already-selected repository and never asks for its URL", async () => {
     signIn("core");
-    // Signal that the user already has an active repo session so the lazy
-    // guard passes and resolveOraRepoSessionForRequest is called.
-    repoContext.hasSession.mockResolvedValue(true);
     repoContext.resolve.mockResolvedValue({
       connected: true,
       token: "encrypted-test-token",
@@ -718,6 +741,29 @@ describe("Talk to Ora realtime — signed-in reservation + context injection", (
     expect(body.session.instructions).toContain(
       "you can never write, edit, commit, push, or open a pull request",
     );
+  });
+
+  it("remembers a connected GitHub account even when Talk starts before the repo question", async () => {
+    signIn("core");
+    repoContext.resolve.mockResolvedValue({
+      connected: true,
+      token: "encrypted-test-token",
+      session: null,
+    });
+
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(repoContext.resolve).toHaveBeenCalledWith({
+      userId: "user_123",
+      message: undefined,
+    });
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.instructions).toContain("GitHub is already connected.");
+    expect(body.session.instructions).toContain("never ask for a pasted URL");
   });
 });
 
@@ -1317,5 +1363,79 @@ describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
       expect(src).toContain('type: "conversation.item.delete", item_id: evt.item_id');
       expect(src).toContain('focusMode === "focused" && typeof evt.item_id === "string"');
     }
+  });
+});
+
+describe("Talk to Ora realtime - authenticated function bridge", () => {
+  it("executes an owned-session tool call and returns a safe recoverable result", async () => {
+    vi.mocked(resolveAuthedOraUser).mockResolvedValue({
+      userId: "user_tool",
+      tier: "core",
+      isPaid: true,
+    });
+    metering.heartbeatRealtimeSession.mockResolvedValue({
+      status: "active",
+      remainingSeconds: 3596,
+      chargedSeconds: 4,
+      limitSeconds: 3600,
+      resetsAt: null,
+      ended: false,
+    });
+    toolBridge.execute.mockResolvedValue({
+      ok: false,
+      code: "repo_not_resolved",
+      output: "GitHub is connected, but no repository was resolved.",
+      activity: {
+        tool: "repo-analysis",
+        phase: "fail",
+        text: "Repository analysis failed.",
+      },
+      recoverable: true,
+    });
+
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/tool")
+      .set("Cookie", freshCookie())
+      .send({
+        realtimeSessionId: "11111111-1111-4111-8111-111111111111",
+        callId: "call_repo",
+        name: "list_files",
+        argumentsJson: '{"repo":"MustaFlow AI"}',
+        context: {
+          language: "en",
+          conversationId: 42,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: false,
+      code: "repo_not_resolved",
+      output: "GitHub is connected, but no repository was resolved.",
+      activity: {
+        tool: "repo-analysis",
+        phase: "fail",
+        text: "Repository analysis failed.",
+      },
+      recoverable: true,
+    });
+    expect(metering.heartbeatRealtimeSession).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      "user_tool",
+      "core",
+    );
+    expect(toolBridge.execute).toHaveBeenCalledWith(
+      {
+        callId: "call_repo",
+        name: "list_files",
+        argumentsJson: '{"repo":"MustaFlow AI"}',
+      },
+      expect.objectContaining({
+        userId: "user_tool",
+        tier: "core",
+        conversationId: 42,
+        language: "en",
+      }),
+    );
   });
 });

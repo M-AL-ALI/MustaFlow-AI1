@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createActivityVisibilityController,
   ACTIVITY_MIN_SHOW_MS,
+  shouldShowOraActivityRow,
 } from "../activity-visibility";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -132,6 +133,37 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
 });
 
 describe("Mobile Ora — activity visibility controller behaviour", () => {
+  it("keeps the row rendered when activity and the first token land in one batch", () => {
+    vi.useFakeTimers();
+    const ctrl = createActivityVisibilityController();
+    let hasActivity = true;
+
+    ctrl.notifyVisible();
+    ctrl.scheduleClear(() => {
+      hasActivity = false;
+    });
+
+    expect(
+      shouldShowOraActivityRow({
+        sending: true,
+        streamingWithContent: true,
+        hasActivity,
+      }),
+    ).toBe(true);
+
+    vi.advanceTimersByTime(ACTIVITY_MIN_SHOW_MS);
+
+    expect(
+      shouldShowOraActivityRow({
+        sending: true,
+        streamingWithContent: true,
+        hasActivity,
+      }),
+    ).toBe(false);
+    ctrl.dispose();
+    vi.useRealTimers();
+  });
+
   it("notifyVisible cancels an armed scheduleClear so the row stays visible", () => {
     vi.useFakeTimers();
     const ctrl = createActivityVisibilityController();
@@ -207,6 +239,13 @@ describe("Mobile Ora — first-token SSE ordering contract (source assertions)",
     expect(setStatePos).toBeGreaterThan(-1);
     expect(notifyPos).toBeLessThan(setStatePos);
   });
+
+  it("keeps the footer mounted while an activity step is completing", () => {
+    expect(index).toContain("shouldShowOraActivityRow({");
+    expect(index).toContain("hasActivity: streamActivity !== null");
+    expect(index).toContain("streamActivity?.id");
+    expect(index).toContain("streamActivity?.phase");
+  });
 });
 
 describe("Mobile Ora — OraThinkingRow fade lifecycle", () => {
@@ -215,6 +254,7 @@ describe("Mobile Ora — OraThinkingRow fade lifecycle", () => {
   it("fades the activity label in and out with reanimated", () => {
     expect(row).toContain("entering={FadeIn.duration(220)}");
     expect(row).toContain("exiting={FadeOut.duration(180)}");
+    expect(row).toContain("<Animated.View");
     // Keyed by step id + phase so a new step (or a terminal update) remounts.
     expect(row).toContain("key={`${activity.id}:${activity.phase}`}");
   });

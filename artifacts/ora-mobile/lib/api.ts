@@ -2,6 +2,7 @@ import { getAuthToken, requireAuthToken, TokenUnavailableError } from "./auth-cl
 // Shared activity-trace helpers (tiny hand-rolled functions, zod-free) so the
 // mobile trace shows byte-identical wording to the website.
 import {
+  ORA_REALTIME_CURRENT_CLIENT_CAPABILITIES,
   oraActivityStep,
   oraActivityToolForRoutedTool,
   parseOraActivityStep,
@@ -384,10 +385,7 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
       message: ctx.message,
       focusMode: ctx.focusMode,
       voicePreset: ctx.voicePreset,
-      clientCapabilities: {
-        realtimeFunctionBridge: 1,
-        realtimeToolNarration: 1,
-      },
+      clientCapabilities: ORA_REALTIME_CURRENT_CLIENT_CAPABILITIES,
     }),
   });
 }

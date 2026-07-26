@@ -107,18 +107,8 @@ export async function getActiveRepoSession(userId: string): Promise<OraRepoSessi
   return rows[0] ?? null;
 }
 
-const GITHUB_REPO_SIGNAL_WORDS = [
-  "github",
-  "repo",
-  "repository",
-  "commit",
-  "branch",
-  "pull request",
-  "merge",
-  "diff",
-  "clone",
-  "codebase",
-];
+const GITHUB_REPO_SIGNAL_PATTERN =
+  /\b(?:github|repos?|repository|commits?|branches?|pull\s+requests?|merge|diff|codebase|source\s+code)\b|\b(?:find\s+bugs?\s+(?:in\s+)?|(?:analy[sz]e|inspect|review)\s+)(?:my|the|this)\s+(?:app|code|project)\b/i;
 
 /**
  * True when the message contains vocabulary that suggests the user wants
@@ -127,8 +117,7 @@ const GITHUB_REPO_SIGNAL_WORDS = [
  */
 export function hasOraRepoSignal(message: string): boolean {
   if (!message) return false;
-  const lower = message.toLowerCase();
-  if (GITHUB_REPO_SIGNAL_WORDS.some((w) => lower.includes(w))) return true;
+  if (GITHUB_REPO_SIGNAL_PATTERN.test(message)) return true;
   return /\b[\w-]+\/[\w-]+\b/.test(message);
 }
 
@@ -264,6 +253,18 @@ function normalizeRepoMention(value: string): string {
     .toLowerCase();
 }
 
+function canonicalRepoKey(value: string): string {
+  return normalizeRepoMention(value)
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function canonicalRepoBase(value: string): string {
+  return canonicalRepoKey(value).replace(/\d+$/, "");
+}
+
 export function shouldSearchConnectedRepos(
   message: string,
   requestedRepo: string | undefined,
@@ -297,6 +298,21 @@ export function findConnectedRepoForRequest(
       return explicit === full || explicit === name;
     });
     if (exact.length === 1) return exact[0]!;
+
+    const explicitKey = canonicalRepoKey(explicit);
+    const explicitBase = canonicalRepoBase(explicit);
+    const canonical = repos.filter((repo) => {
+      const fullKey = canonicalRepoKey(repo.fullName);
+      const fullBase = canonicalRepoBase(repo.fullName);
+      const nameKey = canonicalRepoKey(repo.name);
+      const nameBase = canonicalRepoBase(repo.name);
+      return (
+        explicitKey === fullKey ||
+        explicitKey === nameKey ||
+        (explicitBase.length >= 5 && (explicitBase === fullBase || explicitBase === nameBase))
+      );
+    });
+    if (canonical.length === 1) return canonical[0]!;
   }
 
   const haystack = message.toLowerCase();
@@ -308,7 +324,25 @@ export function findConnectedRepoForRequest(
       (name.length >= 3 && containsRepoMention(haystack, name))
     );
   });
-  return mentioned.length === 1 ? mentioned[0]! : null;
+  if (mentioned.length === 1) return mentioned[0]!;
+
+  const canonicalMessage = canonicalRepoKey(message);
+  const canonicalMentioned = repos.filter((repo) => {
+    const fullKey = canonicalRepoKey(repo.fullName);
+    const nameKey = canonicalRepoKey(repo.name);
+    const nameBase = canonicalRepoBase(repo.name);
+    return (
+      (fullKey.length >= 5 && canonicalMessage.includes(fullKey)) ||
+      (nameKey.length >= 5 && canonicalMessage.includes(nameKey)) ||
+      (nameBase.length >= 5 && canonicalMessage.includes(nameBase))
+    );
+  });
+  if (canonicalMentioned.length === 1) return canonicalMentioned[0]!;
+
+  if (repos.length === 1 && (Boolean(requestedRepo) || isRepositoryRequest(message))) {
+    return repos[0]!;
+  }
+  return null;
 }
 
 export interface ResolvedOraRepoSession {

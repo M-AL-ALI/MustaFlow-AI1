@@ -34,6 +34,7 @@ import { authFetch } from "@/lib/api-fetch";
 import {
   buildOraRealtimeToolNarrationEvent,
   ORA_ACTIVITY_TEXT,
+  ORA_REALTIME_CURRENT_CLIENT_CAPABILITIES,
   ORA_REALTIME_RECONNECT_BACKOFF_MS,
   ORA_REALTIME_RECONNECT_MAX_ATTEMPTS,
   ORA_REALTIME_TOOL_NARRATION_TIMEOUT_MS,
@@ -2741,10 +2742,7 @@ export function useOraRealtimeVoice(
             message: ctx.message,
             focusMode,
             voicePreset,
-            clientCapabilities: {
-              realtimeFunctionBridge: 1,
-              realtimeToolNarration: 1,
-            },
+            clientCapabilities: ORA_REALTIME_CURRENT_CLIENT_CAPABILITIES,
           }),
         });
         if (!isCurrent()) return false;

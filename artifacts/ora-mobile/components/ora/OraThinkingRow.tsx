@@ -76,7 +76,10 @@ export function OraThinkingRow({
   const activityColor = activity?.phase === "fail" ? "#f87171" : c.mutedForeground;
 
   return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+    <Animated.View
+      exiting={FadeOut.duration(180)}
+      style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}
+    >
       <OraAtom size={24} accentColor={accentColor} animated style={{ marginTop: 2 }} />
       <View style={{ gap: 4, paddingTop: 2 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -104,6 +107,6 @@ export function OraThinkingRow({
           )
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 }
