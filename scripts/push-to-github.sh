@@ -39,17 +39,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
-  artifacts/api-server/src/lib/container.ts \
-  artifacts/api-server/src/lib/container-capability.test.ts \
-  artifacts/api-server/src/lib/jobs.ts \
-  artifacts/api-server/src/lib/livePreviewProxy.ts \
-  artifacts/api-server/src/lib/preview-architecture.test.ts \
-  artifacts/api-server/src/lib/provisioning.ts \
-  artifacts/api-server/src/routes/preferences.ts \
-  artifacts/api-server/src/routes/projects.ts \
-  artifacts/api-server/src/tests/builder-access.test.ts \
-  artifacts/mustaflow/src/pages/projects/\[id\].tsx \
-  artifacts/mustaflow/src/pages/projects/components/container-capability-ui.test.tsx \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
