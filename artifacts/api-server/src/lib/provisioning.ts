@@ -29,7 +29,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, projectsTable, secretsTable } from "@workspace/db";
 import { logger } from "./logger";
-import { createContainer } from "./container";
+import { createContainer, isContainerLayerConfigured } from "./container";
 import { ensureContainerLogTailer } from "./container-logs";
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
@@ -404,9 +404,9 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       .where(eq(projectsTable.id, projectId));
 
     // Pre-flight: both providers must be configured for full agentic provisioning.
-    if (!process.env.FLY_API_TOKEN || !process.env.NEON_API_KEY) {
+    if (!isContainerLayerConfigured() || !process.env.NEON_API_KEY) {
       const missing: string[] = [];
-      if (!process.env.FLY_API_TOKEN) missing.push("FLY_API_TOKEN");
+      if (!isContainerLayerConfigured()) missing.push("FLY_API_TOKEN");
       if (!process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
       logger.info(
         { projectId, missing },

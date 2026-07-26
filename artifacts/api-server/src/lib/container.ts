@@ -72,7 +72,7 @@ function _imageForRuntime(runtime?: string | null): string {
 /** Auto-stop after this many seconds of inactivity */
 const IDLE_SECONDS = 600; // 10 minutes
 
-function isConfigured(): boolean {
+export function isContainerLayerConfigured(): boolean {
   return FLY_TOKEN.length > 0;
 }
 
@@ -100,7 +100,7 @@ let _containerSubsystemStatus: "ok" | "unconfigured" | "error" | null = null;
  * never blocks server startup indefinitely.
  */
 export async function runContainerSelfCheck(): Promise<"ok" | "unconfigured" | "error"> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     logger.warn(
       "container subsystem: unconfigured — FLY_API_TOKEN is not set. Container features disabled.",
     );
@@ -292,7 +292,7 @@ export async function createContainer(
   stack?: string | null,
   extraEnv?: Record<string, string>,
 ): Promise<ContainerInfo | { error: string } | null> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — container creation skipped");
     return null;
   }
@@ -388,7 +388,7 @@ export async function createContainer(
  * Start (or wake) an existing Fly.io machine.
  */
 export async function startContainer(machineId: string, projectId: number): Promise<boolean> {
-  if (!isConfigured()) return false;
+  if (!isContainerLayerConfigured()) return false;
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/start`, { method: "POST" });
     const ok = res.ok;
@@ -409,7 +409,7 @@ export async function startContainer(machineId: string, projectId: number): Prom
  * Stop a running Fly.io machine (puts it into hibernation).
  */
 export async function stopContainer(machineId: string, projectId: number): Promise<boolean> {
-  if (!isConfigured()) return false;
+  if (!isContainerLayerConfigured()) return false;
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/stop`, { method: "POST" });
     const ok = res.ok;
@@ -427,7 +427,7 @@ export async function stopContainer(machineId: string, projectId: number): Promi
  * Destroy a Fly.io machine permanently.
  */
 export async function destroyContainer(machineId: string, projectId: number): Promise<boolean> {
-  if (!isConfigured()) return false;
+  if (!isContainerLayerConfigured()) return false;
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}?force=true`, {
       method: "DELETE",
@@ -447,7 +447,7 @@ export async function destroyContainer(machineId: string, projectId: number): Pr
  * Get the current status of a Fly.io machine.
  */
 export async function getContainerStatus(machineId: string): Promise<ContainerStatus> {
-  if (!isConfigured()) return "stopped";
+  if (!isContainerLayerConfigured()) return "stopped";
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`);
     if (res.status === 404) return "stopped";
@@ -497,7 +497,7 @@ export async function execInContainer(
    *  Fly machine's writable layer is reset on each stop/start cycle. */
   machineWoken: boolean;
 }> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     throw new ContainerUnavailableError(
       "Container exec is not available: FLY_API_TOKEN is not configured. " +
         "Provision the project or add FLY_API_TOKEN to the environment.",
@@ -783,7 +783,7 @@ export async function writeFileToContainer(
   content: string,
   projectId: number,
 ): Promise<boolean> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     throw new ContainerUnavailableError(
       "writeFileToContainer: FLY_API_TOKEN is not configured. " +
         "Cannot sync files to a container without Fly.io credentials.",
@@ -821,7 +821,7 @@ export async function syncFilesToContainer(
   files: Array<{ path: string; content: string }>,
   throwIfUnconfigured = false,
 ): Promise<void> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     if (throwIfUnconfigured) {
       throw new ContainerUnavailableError(
         "syncFilesToContainer: FLY_API_TOKEN is not configured. " +
@@ -844,7 +844,7 @@ export async function syncFilesToContainer(
  * Call once at server startup.
  */
 export async function ensureFlyApp(): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isContainerLayerConfigured()) return;
   try {
     const res = await flyFetch(`/apps/${FLY_APP}`);
     if (res.status === 404) {
@@ -868,7 +868,7 @@ export async function updateContainerEnv(
   projectId: number,
   extraEnv: Record<string, string>,
 ): Promise<boolean> {
-  if (!isConfigured()) return false;
+  if (!isContainerLayerConfigured()) return false;
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`, {
       method: "PATCH",
@@ -904,7 +904,7 @@ export async function restartContainerWithSecrets(
   projectId: number,
   envVars: Record<string, string>,
 ): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isContainerLayerConfigured()) return;
 
   const [project] = await db
     .select({
@@ -959,7 +959,7 @@ export async function ensureContainerAwake(
   containerUrl: string | null,
   timeoutSeconds = 30,
 ): Promise<{ ok: boolean; message?: string }> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     throw new ContainerUnavailableError(
       "ensureContainerAwake: FLY_API_TOKEN is not configured. " +
         "Cannot wake a container without Fly.io credentials.",
@@ -1062,7 +1062,7 @@ export async function provisionContainer(
   files: Array<{ path: string; content: string }>,
   extraEnv?: Record<string, string>,
 ): Promise<ContainerInfo | null> {
-  if (!isConfigured()) return null;
+  if (!isContainerLayerConfigured()) return null;
 
   // Load current container state (including stack for image selection)
   const [project] = await db
@@ -1240,7 +1240,7 @@ export async function createProductionContainer(
   runtime?: string | null,
   opts?: { region?: string | null; deploymentType?: string | null },
 ): Promise<ProdContainerInfo | null> {
-  if (!isConfigured()) {
+  if (!isContainerLayerConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — prod container creation skipped");
     return null;
   }
@@ -1369,7 +1369,7 @@ export async function deployProductionContainer(
   files: Array<{ path: string; content: string }>,
   envVars: Record<string, string>,
 ): Promise<ProdContainerInfo | null> {
-  if (!isConfigured()) return null;
+  if (!isContainerLayerConfigured()) return null;
 
   await writeLog(projectId, "system", "Starting blue/green production deploy…");
 
@@ -1484,7 +1484,7 @@ export async function patchMachineAutostop(
   projectId: number,
   autostop: "stop" | "off",
 ): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isContainerLayerConfigured()) return;
   try {
     // GET current machine config so we can merge the autostop change.
     const getRes = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`);
@@ -1578,7 +1578,7 @@ export async function startContainerHealthServer(
   machineId: string,
   projectId: number,
 ): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isContainerLayerConfigured()) return;
   const nodeOneLiner =
     "require('http').createServer(function(q,r){r.writeHead(200);r.end('ok')}).listen(parseInt(process.env.PORT)||3000)";
   const cmd = [
@@ -1655,7 +1655,7 @@ export async function stopContainerHealthServer(
   machineId: string,
   _projectId: number,
 ): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isContainerLayerConfigured()) return;
   try {
     await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
       method: "POST",

@@ -106,6 +106,7 @@ import {
 import { encryptionService } from "./encryption";
 import { CONTAINER_NOT_PROVISIONED, DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 import { CHECK_PROFILES, resolveStackId } from "./check-profiles";
+import { isContainerLayerConfigured } from "./container";
 
 /**
  * Pre-build gate for agentic projects.
@@ -137,6 +138,20 @@ async function runAgenticPreflightGate(
   containerUrl: string | null,
   builderMode?: string | null,
 ): Promise<{ ok: boolean; message?: string }> {
+  if (!isContainerLayerConfigured()) {
+    if (containerId) {
+      await db
+        .update(projectsTable)
+        .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })
+        .where(eq(projectsTable.id, projectId));
+      logger.info(
+        { projectId, taskId, staleContainerId: containerId },
+        "Cleared stale task container because the container layer is disabled",
+      );
+    }
+    return { ok: true };
+  }
+
   // ── 0. Hard-fail: agentic project with no container ──────────────────────
   // builderMode='agentic' means a container should exist, but provisioning
   // has not completed yet. Running the agent loop against a phantom container
@@ -2442,7 +2457,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             if (refreshed) Object.assign(project, refreshed);
 
             // Full-stack upgrade: kick off container + DB provisioning in background.
-            if (detectedStack === "node-api" && !project.containerId) {
+            if (
+              detectedStack === "node-api" &&
+              !project.containerId &&
+              isContainerLayerConfigured()
+            ) {
               const { enqueueProvisionProjectJob } = await import("./provisioning");
               enqueueProvisionProjectJob(projectId);
               logger.info({ taskId, projectId }, "Provisioning job enqueued for stack upgrade");
