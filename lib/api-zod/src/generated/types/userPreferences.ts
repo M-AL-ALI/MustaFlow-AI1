@@ -13,5 +13,9 @@ export interface UserPreferences {
   preferredMode?: UserPreferencesPreferredMode;
   /** BCP-47 language tag for speech recognition (null = auto-detect from browser) */
   voiceLang?: string | null;
+  /** Whether the authenticated user may access AI Builder. */
+  builderAccess: boolean;
+  /** Whether live cloud container features are available. */
+  containerLayerConfigured: boolean;
   updatedAt: Date;
 }

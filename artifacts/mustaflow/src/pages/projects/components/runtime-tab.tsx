@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { LiveServerRequired } from "./live-server-required";
 import {
   Server,
   Database,
@@ -191,8 +192,16 @@ const ENV_NEXT: Record<string, string> = {
 
 // ─── RuntimeTab ───────────────────────────────────────────────────────────────
 
-export function RuntimeTab({ projectId }: { projectId: number }) {
+export function RuntimeTab({
+  projectId,
+  containerLayerConfigured,
+}: {
+  projectId: number;
+  containerLayerConfigured: boolean;
+}) {
   const [activeSection, setActiveSection] = useState<"addons" | "jobs" | "environments">("addons");
+
+  if (!containerLayerConfigured) return <LiveServerRequired />;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

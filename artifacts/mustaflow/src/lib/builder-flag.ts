@@ -4,3 +4,7 @@
 // saved preference is the builder land on mode-select instead of /projects.
 // Flip this to true (in one place) once the build experience is ready.
 export const BUILDER_ENABLED = false;
+
+export function resolveBuilderAccess(serverAccess: boolean | null | undefined): boolean {
+  return serverAccess ?? BUILDER_ENABLED;
+}

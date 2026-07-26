@@ -9,7 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
 import { AuthStateProvider } from "@/lib/auth-state-context";
 import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
-import { BUILDER_ENABLED } from "@/lib/builder-flag";
+import { resolveBuilderAccess } from "@/lib/builder-flag";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import {
@@ -398,12 +398,12 @@ function SmartSignedInRedirect() {
   //   "developer"→ legacy value, treated as AI Builder
   //   null/unset → first-run mode chooser
   const mode = prefsQuery.data?.preferredMode ?? null;
+  const builderAccess = resolveBuilderAccess(prefsQuery.data?.builderAccess);
   if (mode === "ora") return <Redirect to="/ora" />;
-  // Builder is gated behind BUILDER_ENABLED. While off, returning users whose
-  // saved preference is the builder land on the mode chooser (which shows the
-  // builder as "coming soon") rather than a locked /projects dashboard.
+  // Builder access is server-controlled per user. The local false default is
+  // used if preferences fail to load.
   if (mode === "builder" || mode === "developer")
-    return <Redirect to={BUILDER_ENABLED ? "/projects" : "/mode-select"} />;
+    return <Redirect to={builderAccess ? "/projects" : "/mode-select"} />;
   return <Redirect to="/mode-select" />;
 }
 
@@ -424,10 +424,16 @@ function BuilderComingSoonRedirect() {
   return null;
 }
 
-// Builder route guard — renders children only when BUILDER_ENABLED is true.
-// While the builder is off, every builder-only route bounces to mode-select.
+// Builder route guard — waits for the authenticated user's server-side access
+// decision so an ineligible user never sees a flash of builder content.
 function BuilderGuard({ children }: { children: React.ReactNode }) {
-  if (!BUILDER_ENABLED) return <BuilderComingSoonRedirect />;
+  const prefsQuery = useGetMyPreferences({
+    query: { queryKey: ["/api/me/preferences"] },
+  });
+  if (prefsQuery.isPending) return null;
+  if (!resolveBuilderAccess(prefsQuery.data?.builderAccess)) {
+    return <BuilderComingSoonRedirect />;
+  }
   return <>{children}</>;
 }
 

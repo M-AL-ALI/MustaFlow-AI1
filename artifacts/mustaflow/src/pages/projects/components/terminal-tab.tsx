@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal, Power, PowerOff, Loader2, AlertCircle, RefreshCw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { LiveServerRequired } from "./live-server-required";
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -12,6 +13,7 @@ type TerminalTabProps = {
   onStartContainer: () => void;
   onStopContainer: () => void;
   isStarting: boolean;
+  containerLayerConfigured: boolean;
 };
 
 type LogLine = {
@@ -29,6 +31,7 @@ export function TerminalTab({
   onStartContainer,
   onStopContainer,
   isStarting,
+  containerLayerConfigured,
 }: TerminalTabProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -119,6 +122,10 @@ export function TerminalTab({
 
   // Auto-connect when container is running
   useEffect(() => {
+    if (!containerLayerConfigured) {
+      disconnect();
+      return;
+    }
     if (containerStatus === "running") {
       connect();
     } else {
@@ -127,7 +134,7 @@ export function TerminalTab({
     return () => {
       // Don't disconnect on unmount to keep session alive while switching tabs
     };
-  }, [containerStatus, connect, disconnect]);
+  }, [containerStatus, connect, disconnect, containerLayerConfigured]);
 
   const sendCommand = useCallback(() => {
     const cmd = inputValue.trim();
@@ -153,6 +160,8 @@ export function TerminalTab({
   const clearTerminal = useCallback(() => {
     setLines([]);
   }, []);
+
+  if (!containerLayerConfigured) return <LiveServerRequired />;
 
   // Container not running — show status panel
   if (containerStatus !== "running") {

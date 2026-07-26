@@ -8690,7 +8690,8 @@ components:
 
     UserPreferences:
       type: object
-      required: [userId, dismissedOnboarding, updatedAt]
+      required:
+        [userId, dismissedOnboarding, builderAccess, containerLayerConfigured, updatedAt]
       properties:
         userId: { type: string }
         dismissedOnboarding: { type: boolean }
@@ -8702,6 +8703,12 @@ components:
           type: string
           nullable: true
           description: BCP-47 language tag for speech recognition (null = auto-detect from browser)
+        builderAccess:
+          type: boolean
+          description: Whether the authenticated user may access AI Builder.
+        containerLayerConfigured:
+          type: boolean
+          description: Whether live cloud container features are available.
         updatedAt: { type: string, format: date-time }
 
     UpdatePreferencesBody:

@@ -1239,6 +1239,7 @@ export default function ProjectWorkspacePage() {
   const { mutate: updatePreferences } = useUpdateMyPreferences();
   // True when the API confirms dismissal OR the local optimistic state is set.
   const onboardingDismissed = userPreferences?.dismissedOnboarding ?? onboardingDismissedLocal;
+  const containerLayerConfigured = userPreferences?.containerLayerConfigured ?? false;
   // Tracks whether onboarding was ever activated for this project (set when versions === 0 on
   // first load). Prevents the checklist from appearing on existing projects that already have builds.
   const [onboardingStarted, setOnboardingStarted] = useState(() => {
@@ -1390,6 +1391,7 @@ export default function ProjectWorkspacePage() {
 
   // Poll container status when starting
   useEffect(() => {
+    if (!containerLayerConfigured) return;
     if (containerStatus === "starting" || containerStarting) {
       if (containerPollRef.current) return;
       containerPollRef.current = setInterval(() => {
@@ -1421,9 +1423,10 @@ export default function ProjectWorkspacePage() {
         containerPollRef.current = null;
       }
     };
-  }, [containerStatus, containerStarting, projectId]);
+  }, [containerStatus, containerStarting, projectId, containerLayerConfigured]);
 
   const handleStartContainer = useCallback(() => {
+    if (!containerLayerConfigured) return;
     setContainerStarting(true);
     setContainerStatus("starting");
     startContainer(projectId)
@@ -1433,16 +1436,17 @@ export default function ProjectWorkspacePage() {
         if (data.containerUrl) setContainerUrl(data.containerUrl);
       })
       .catch(() => setContainerStatus("error"));
-  }, [projectId]);
+  }, [projectId, containerLayerConfigured]);
 
   const handleStopContainer = useCallback(() => {
+    if (!containerLayerConfigured) return;
     stopContainer(projectId)
       .then(() => {
         setContainerStatus("hibernated");
         setContainerStarting(false);
       })
       .catch(() => {});
-  }, [projectId]);
+  }, [projectId, containerLayerConfigured]);
   // ── End container state ────────────────────────────────────────────────────
 
   // ── Provisioning state (Task #738 + #988) ──────────────────────────────────
@@ -4826,6 +4830,7 @@ export default function ProjectWorkspacePage() {
                 initialFileId={selectedCodeFileId}
                 initialLine={selectedCodeFileLine}
                 containerStatus={containerStatus}
+                containerLayerConfigured={containerLayerConfigured}
                 containerUrl={containerUrl}
                 onHtmlFileSaved={handleHtmlFileSaved}
                 onSnippetInsert={(prompt) => {
@@ -4843,6 +4848,7 @@ export default function ProjectWorkspacePage() {
                 onStartContainer={handleStartContainer}
                 onStopContainer={handleStopContainer}
                 isStarting={containerStarting}
+                containerLayerConfigured={containerLayerConfigured}
               />
             )}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
@@ -4955,7 +4961,12 @@ export default function ProjectWorkspacePage() {
               />
             )}
             {activeTab === "database" && <DatabaseTab projectId={projectId} />}
-            {activeTab === "runtime" && <RuntimeTab projectId={projectId} />}
+            {activeTab === "runtime" && (
+              <RuntimeTab
+                projectId={projectId}
+                containerLayerConfigured={containerLayerConfigured}
+              />
+            )}
             {activeTab === "git" && <GithubTab projectId={projectId} />}
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}

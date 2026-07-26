@@ -9,6 +9,9 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, userPreferencesTable } from "@workspace/db";
+import { getClerkUserById } from "../lib/clerk-users";
+import { hasBuilderAccess, isBuilderOpenToAll } from "../lib/builder-access";
+import { isContainerLayerConfigured } from "../lib/container";
 
 const router: IRouter = Router();
 
@@ -25,6 +28,16 @@ async function getOrCreatePreferences(userId: string) {
   return created!;
 }
 
+async function preferenceCapabilities(userId: string) {
+  const builderAccess = isBuilderOpenToAll()
+    ? true
+    : hasBuilderAccess((await getClerkUserById(userId))?.email);
+  return {
+    builderAccess,
+    containerLayerConfigured: isContainerLayerConfigured(),
+  };
+}
+
 router.get("/me/preferences", async (req, res): Promise<void> => {
   const userId = req.userId;
   if (!userId) {
@@ -32,13 +45,17 @@ router.get("/me/preferences", async (req, res): Promise<void> => {
     return;
   }
 
-  const prefs = await getOrCreatePreferences(userId);
+  const [prefs, capabilities] = await Promise.all([
+    getOrCreatePreferences(userId),
+    preferenceCapabilities(userId),
+  ]);
   res.json({
     userId: prefs.userId,
     dismissedOnboarding: prefs.dismissedOnboarding,
     preferredMode: prefs.preferredMode ?? null,
     voiceLang: prefs.voiceLang ?? null,
     autoReadReplies: prefs.autoReadReplies,
+    ...capabilities,
     updatedAt: prefs.updatedAt,
   });
 });
@@ -86,12 +103,14 @@ router.patch("/me/preferences", async (req, res): Promise<void> => {
     })
     .returning();
 
+  const capabilities = await preferenceCapabilities(userId);
   res.json({
     userId: updated!.userId,
     dismissedOnboarding: updated!.dismissedOnboarding,
     preferredMode: updated!.preferredMode ?? null,
     voiceLang: updated!.voiceLang ?? null,
     autoReadReplies: updated!.autoReadReplies,
+    ...capabilities,
     updatedAt: updated!.updatedAt,
   });
 });

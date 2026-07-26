@@ -2,13 +2,14 @@ import React, { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import {
   useUpdateMyPreferences,
+  useGetMyPreferences,
   getGetMyPreferencesQueryKey,
   ApiError,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { BUILDER_ENABLED } from "@/lib/builder-flag";
+import { resolveBuilderAccess } from "@/lib/builder-flag";
 import {
   Sparkles,
   MessageCircle,
@@ -42,6 +43,10 @@ export default function ModeSelectPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updatePreferences = useUpdateMyPreferences();
+  const preferencesQuery = useGetMyPreferences({
+    query: { queryKey: getGetMyPreferencesQueryKey() },
+  });
+  const builderAccess = resolveBuilderAccess(preferencesQuery.data?.builderAccess);
 
   const [oraxHosts, setOraxHosts] = useState<OraxHostBrief[]>([]);
   const [oraxHostsLoading, setOraxHostsLoading] = useState(true);
@@ -56,7 +61,7 @@ export default function ModeSelectPage() {
 
   async function handleSelect(mode: "builder" | "ora") {
     if (selecting) return;
-    if (mode === "builder" && !BUILDER_ENABLED) return;
+    if (mode === "builder" && !builderAccess) return;
     setSelecting(mode);
 
     const dest = mode === "builder" ? "/projects" : "/ora";
@@ -160,7 +165,7 @@ export default function ModeSelectPage() {
             glowColor="shadow-primary/10"
             selecting={selecting}
             onSelect={() => void handleSelect("builder")}
-            comingSoon={!BUILDER_ENABLED}
+            comingSoon={!builderAccess}
           />
 
           {/* Ora */}

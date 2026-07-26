@@ -17,6 +17,7 @@ import {
   Minus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LiveServerRequired } from "./live-server-required";
 
 type DebugStatus = "idle" | "connecting" | "running" | "paused" | "stopped" | "error";
 
@@ -52,6 +53,7 @@ interface DebuggerPanelProps {
   containerStatus?: string;
   onJumpToLine?: (fileId: number, line: number) => void;
   files?: Array<{ id: number; path: string }>;
+  containerLayerConfigured: boolean;
 }
 
 function VariableRow({ variable, depth = 0 }: { variable: Variable; depth?: number }) {
@@ -146,6 +148,7 @@ export function DebuggerPanel({
   containerStatus,
   onJumpToLine,
   files: _files = [],
+  containerLayerConfigured,
 }: DebuggerPanelProps) {
   const [status, setStatus] = useState<DebugStatus>("idle");
   const [breakpoints, setBreakpoints] = useState<Breakpoint[]>([]);
@@ -284,6 +287,8 @@ export function DebuggerPanel({
     stopped: "Stopped",
     error: "Error",
   };
+
+  if (!containerLayerConfigured) return <LiveServerRequired />;
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-background text-foreground">

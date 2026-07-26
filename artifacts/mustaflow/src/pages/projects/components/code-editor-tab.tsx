@@ -787,6 +787,7 @@ export function CodeEditorTab({
   onHtmlFileSaved,
   onSnippetInsert,
   containerStatus,
+  containerLayerConfigured,
 }: {
   projectId: number;
   initialFileId?: number | null;
@@ -794,6 +795,7 @@ export function CodeEditorTab({
   onHtmlFileSaved?: () => void;
   onSnippetInsert?: (prompt: string) => void;
   containerStatus?: string;
+  containerLayerConfigured: boolean;
   containerUrl?: string | null;
 }) {
   const { toast } = useToast();
@@ -1873,6 +1875,7 @@ export function CodeEditorTab({
               <DebuggerPanel
                 projectId={projectId}
                 containerStatus={containerStatus}
+                containerLayerConfigured={containerLayerConfigured}
                 onJumpToLine={(fileId, line) => {
                   if (fileId) switchToFile(fileId, line);
                   else if (editorRef.current) {
