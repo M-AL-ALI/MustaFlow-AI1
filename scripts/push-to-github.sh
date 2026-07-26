@@ -39,8 +39,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
-  artifacts/api-server/src/lib/agent-loop.ts \
-  artifacts/api-server/src/lib/agent-loop.container-tool-deferral.test.ts \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
