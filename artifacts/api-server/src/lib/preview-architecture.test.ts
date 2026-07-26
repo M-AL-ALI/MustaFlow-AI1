@@ -172,7 +172,7 @@ describe("Preview Architecture Fix regression coverage", () => {
   });
 
   it("falls back to project_files when the Fly container layer is unavailable", () => {
-    expect(containerSource).toContain("export function isContainerLayerConfigured");
+    expect(containerSource).toContain("export async function isContainerLayerConfigured");
     expect(livePreviewProxySource).toContain("serveProjectFilesPreview");
     expect(livePreviewProxySource).toContain("Cleared stale preview container");
     expect(projectFilesPreviewSource).toContain("Static preview — live server starting soon");

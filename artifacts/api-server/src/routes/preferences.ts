@@ -34,7 +34,7 @@ async function preferenceCapabilities(userId: string) {
     : hasBuilderAccess((await getClerkUserById(userId))?.email);
   return {
     builderAccess,
-    containerLayerConfigured: isContainerLayerConfigured(),
+    containerLayerConfigured: await isContainerLayerConfigured(),
   };
 }
 

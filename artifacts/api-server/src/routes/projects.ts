@@ -228,6 +228,8 @@ router.post("/projects", async (req, res): Promise<void> => {
     requestedStack: projectInput.stack,
     isMobilePlatform,
   });
+  const containerLayerOperational =
+    (requestedBuilderMode ?? "agentic") === "agentic" ? await isContainerLayerConfigured() : false;
 
   const [project] = await db
     .insert(projectsTable)
@@ -251,7 +253,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       // flashing "Your project is being set up" before the job runs.
       provisioningStatus:
         (requestedBuilderMode ?? "agentic") === "agentic" &&
-        isContainerLayerConfigured() &&
+        containerLayerOperational &&
         Boolean(process.env.NEON_API_KEY)
           ? "provisioning"
           : "idle",
@@ -1271,9 +1273,9 @@ export default function HomeScreen() {
   // static-legacy projects remain idle and never incur provisioning costs.
   // Fire and forget: the response returns immediately and the workspace UI
   // polls `provisioningStatus` to surface progress.
-  // Only enqueue provisioning when tokens are present; otherwise the
+  // Only enqueue provisioning when the Fly layer is operational and Neon is configured; otherwise
   // project was already stamped 'idle' above and no job is needed.
-  if (project.builderMode === "agentic" && isContainerLayerConfigured() && process.env.NEON_API_KEY) {
+  if (project.builderMode === "agentic" && containerLayerOperational && process.env.NEON_API_KEY) {
     enqueueProvisionProjectJob(project.id);
   }
 

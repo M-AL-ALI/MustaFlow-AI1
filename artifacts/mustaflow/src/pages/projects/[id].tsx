@@ -264,6 +264,14 @@ function ReportCard({
   onViewHistory?: () => void;
   onSendMessage?: (text: string) => void;
 }) {
+  const partialValidationMessage =
+    (report.checkRunsSummary?.skipped ?? 0) > 0
+      ? (report.warnings.find((warning) =>
+          warning.toLowerCase().includes("validation was partial"),
+        ) ??
+        "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred.")
+      : null;
+
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">
@@ -481,6 +489,12 @@ function ReportCard({
                 </button>
               )}
           </div>
+          {partialValidationMessage && (
+            <div className="mt-1 pl-5 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-400/90">
+              <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>{partialValidationMessage}</span>
+            </div>
+          )}
           {((report.checkRunsSummary.failedChecks?.length ?? 0) > 0 ||
             (report.checkRunsSummary.warnChecks?.length ?? 0) > 0) && (
             <div className="flex flex-wrap gap-1 mt-1 pl-5">

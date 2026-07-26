@@ -29,7 +29,11 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, projectsTable, secretsTable } from "@workspace/db";
 import { logger } from "./logger";
-import { createContainer, isContainerLayerConfigured } from "./container";
+import {
+  createContainer,
+  hasContainerLayerCredentials,
+  isContainerLayerConfigured,
+} from "./container";
 import { ensureContainerLogTailer } from "./container-logs";
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
@@ -403,10 +407,11 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       })
       .where(eq(projectsTable.id, projectId));
 
-    // Pre-flight: both providers must be configured for full agentic provisioning.
-    if (!isContainerLayerConfigured() || !process.env.NEON_API_KEY) {
+    // Pre-flight: both providers must be operational/configured for full agentic provisioning.
+    const containerLayerOperational = await isContainerLayerConfigured();
+    if (!containerLayerOperational || !process.env.NEON_API_KEY) {
       const missing: string[] = [];
-      if (!isContainerLayerConfigured()) missing.push("FLY_API_TOKEN");
+      if (!containerLayerOperational) missing.push("Fly container layer");
       if (!process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
       logger.info(
         { projectId, missing },
@@ -424,7 +429,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       // environment where FLY_API_TOKEN was configured.  With Fly absent the
       // stored machine ID points to nothing real, which would leave the preview
       // proxy spinning forever on the cold-start page.
-      if (!isContainerLayerConfigured() && project.containerId) {
+      if (!hasContainerLayerCredentials() && project.containerId) {
         await db
           .update(projectsTable)
           .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })

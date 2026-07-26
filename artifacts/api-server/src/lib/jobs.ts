@@ -112,7 +112,7 @@ import {
   isDeferredCheckResult,
   resolveStackId,
 } from "./check-profiles";
-import { isContainerLayerConfigured } from "./container";
+import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./container";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
 
 /**
@@ -145,8 +145,9 @@ async function runAgenticPreflightGate(
   containerUrl: string | null,
   builderMode?: string | null,
 ): Promise<{ ok: boolean; message?: string }> {
-  if (!isContainerLayerConfigured()) {
-    if (containerId) {
+  const containerLayerOperational = await isContainerLayerConfigured();
+  if (!containerLayerOperational) {
+    if (!hasContainerLayerCredentials() && containerId) {
       await db
         .update(projectsTable)
         .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })
@@ -154,6 +155,13 @@ async function runAgenticPreflightGate(
       logger.info(
         { projectId, taskId, staleContainerId: containerId },
         "Cleared stale task container because the container layer is disabled",
+      );
+    }
+    if (builderMode === "agentic") {
+      await emitEvent(
+        taskId,
+        "live_server_deferred",
+        "Live cloud-server infrastructure is unavailable for this project. Continuing with file and non-runtime validation; container-dependent checks are deferred.",
       );
     }
     return { ok: true };
@@ -2114,8 +2122,9 @@ export async function runJob(input: JobInput): Promise<void> {
         .where(eq(agentTasksTable.id, taskId));
       return;
     }
+    const containerLayerOperational = await isContainerLayerConfigured();
     const projectHasLiveServer = (): boolean =>
-      isContainerLayerConfigured() && Boolean(project.containerId);
+      containerLayerOperational && Boolean(project.containerId);
 
     const [
       { context: rawKnowledgeContext, applied: knowledgeApplied },
@@ -2500,11 +2509,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             if (refreshed) Object.assign(project, refreshed);
 
             // Full-stack upgrade: kick off container + DB provisioning in background.
-            if (
-              detectedStack === "node-api" &&
-              !project.containerId &&
-              isContainerLayerConfigured()
-            ) {
+            if (detectedStack === "node-api" && !project.containerId && containerLayerOperational) {
               const { enqueueProvisionProjectJob } = await import("./provisioning");
               enqueueProvisionProjectJob(projectId);
               logger.info({ taskId, projectId }, "Provisioning job enqueued for stack upgrade");

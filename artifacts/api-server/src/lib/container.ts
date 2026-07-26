@@ -20,6 +20,7 @@
 
 import { db, projectsTable, containerLogsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { lookup } from "node:dns/promises";
 import { logger } from "./logger";
 import { ContainerUnavailableError } from "./errors";
 
@@ -36,6 +37,9 @@ const FLY_TOKEN = process.env.FLY_API_TOKEN ?? "";
 const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? "personal";
 const FLY_REGION = process.env.FLY_REGION ?? "iad";
+const FLY_PROXY_HOSTNAME = `${FLY_APP}.fly.dev`;
+const CONTAINER_CAPABILITY_CACHE_MS = 60_000;
+const CONTAINER_CAPABILITY_PROBE_TIMEOUT_MS = 3_000;
 
 /** Default container image — Node.js 22 LTS. Python stacks override this. */
 const DEFAULT_NODE_IMAGE = "node:22-alpine";
@@ -77,12 +81,99 @@ function isConfigured(): boolean {
 }
 
 /**
- * Returns true when the Fly.io container layer is configured (FLY_API_TOKEN is
- * set).  Use this to gate agentic-preview and container-sync paths without
- * coupling callers to env-var checks directly.
+ * Raw credential-presence check for lifecycle cleanup only. This does not mean
+ * the Fly container layer is operational.
  */
-export function isContainerLayerConfigured(): boolean {
+export function hasContainerLayerCredentials(): boolean {
   return isConfigured();
+}
+
+let containerCapabilityCache: { value: boolean; expiresAt: number } | null = null;
+let containerCapabilityProbeInFlight: Promise<boolean> | null = null;
+
+function settleWithin(
+  operation: Promise<boolean>,
+  timeoutMs: number,
+  onTimeout?: () => void,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      finish(false);
+    }, timeoutMs);
+    operation.then(finish, () => finish(false));
+  });
+}
+
+async function probeFlyControlPlane(): Promise<boolean> {
+  const controller = new AbortController();
+  return settleWithin(
+    fetch(`${FLY_API_BASE}/apps/${encodeURIComponent(FLY_APP)}/machines`, {
+      method: "GET",
+      headers: flyHeaders(),
+      signal: controller.signal,
+    }).then((response) => response.ok),
+    CONTAINER_CAPABILITY_PROBE_TIMEOUT_MS,
+    () => controller.abort(),
+  );
+}
+
+async function probeFlyProxyHostname(): Promise<boolean> {
+  return settleWithin(
+    lookup(FLY_PROXY_HOSTNAME).then(() => true),
+    CONTAINER_CAPABILITY_PROBE_TIMEOUT_MS,
+  );
+}
+
+async function probeContainerLayerOperational(): Promise<boolean> {
+  if (!isConfigured()) return false;
+  const [controlPlaneReachable, proxyHostnameResolves] = await Promise.all([
+    probeFlyControlPlane(),
+    probeFlyProxyHostname(),
+  ]);
+  return controlPlaneReachable && proxyHostnameResolves;
+}
+
+/**
+ * Returns true only when the authenticated Fly control plane is reachable and
+ * the public proxy hostname resolves. The read-only result is cached for one
+ * minute, including failures, so preferences and Builder jobs fail closed
+ * without repeatedly probing Fly.
+ */
+export async function isContainerLayerConfigured(): Promise<boolean> {
+  const now = Date.now();
+  if (containerCapabilityCache && containerCapabilityCache.expiresAt > now) {
+    return containerCapabilityCache.value;
+  }
+  if (containerCapabilityProbeInFlight) return containerCapabilityProbeInFlight;
+
+  const probe = probeContainerLayerOperational();
+  containerCapabilityProbeInFlight = probe;
+  try {
+    const value = await probe;
+    containerCapabilityCache = {
+      value,
+      expiresAt: Date.now() + CONTAINER_CAPABILITY_CACHE_MS,
+    };
+    return value;
+  } catch {
+    containerCapabilityCache = {
+      value: false,
+      expiresAt: Date.now() + CONTAINER_CAPABILITY_CACHE_MS,
+    };
+    return false;
+  } finally {
+    if (containerCapabilityProbeInFlight === probe) {
+      containerCapabilityProbeInFlight = null;
+    }
+  }
 }
 
 // ─── Container subsystem self-check ──────────────────────────────────────────
@@ -96,10 +187,12 @@ let _containerSubsystemStatus: "ok" | "unconfigured" | "error" | null = null;
  *
  * Probe strategy:
  *   1. If FLY_API_TOKEN is absent → "unconfigured" (graceful no-op).
- *   2. List machines in the app. If the API call fails → "error".
- *   3. If any machine is in "started" state, call the `/exec` endpoint with
+ *   2. Require the authenticated control plane and public proxy DNS to pass
+ *      the cached operational capability probe.
+ *   3. List machines in the app. If the API call fails → "error".
+ *   4. If any machine is in "started" state, call the `/exec` endpoint with
  *      `echo OK` to exercise the actual exec path. Failure → "error".
- *   4. If no started machines exist (e.g. fresh deploy with no projects yet),
+ *   5. If no started machines exist (e.g. fresh deploy with no projects yet),
  *      API reachability alone is verified and "ok" is returned with a note.
  *
  * The result is cached in-process. The health endpoint reads it without an
@@ -135,7 +228,13 @@ export async function runContainerSelfCheck(): Promise<"ok" | "unconfigured" | "
     });
 
     const result = await Promise.race([
-      _runContainerProbe().finally(() => clearTimeout(timeoutHandle)),
+      (async () => {
+        if (!(await isContainerLayerConfigured())) {
+          logger.warn("container subsystem: ERROR — Fly control plane or proxy DNS is unavailable");
+          return "error" as const;
+        }
+        return _runContainerProbe();
+      })().finally(() => clearTimeout(timeoutHandle)),
       timeoutPromise,
     ]);
     _containerSubsystemStatus = result;

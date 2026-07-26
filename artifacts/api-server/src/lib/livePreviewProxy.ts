@@ -25,7 +25,11 @@ import { and, eq } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
 import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
-import { isContainerLayerConfigured, provisionContainer } from "./container";
+import {
+  hasContainerLayerCredentials,
+  isContainerLayerConfigured,
+  provisionContainer,
+} from "./container";
 import { getContainerSecretMap } from "./container-secrets";
 import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
@@ -136,7 +140,7 @@ export async function loadPreviewProject(projectId: number): Promise<PreviewProj
     .where(eq(projectsTable.id, projectId));
   if (!project) return null;
 
-  if (!isContainerLayerConfigured() && project.containerId) {
+  if (!hasContainerLayerCredentials() && project.containerId) {
     await db
       .update(projectsTable)
       .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })
@@ -347,7 +351,12 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
               .catch((fallbackErr: unknown) => {
                 logger.warn({ err: fallbackErr, projectId }, "Preview DB fallback failed");
                 try {
-                  sendHtml(expressResponse, 502, PROXY_UNAVAILABLE_HTML(projectId), "proxy-unavailable");
+                  sendHtml(
+                    expressResponse,
+                    502,
+                    PROXY_UNAVAILABLE_HTML(projectId),
+                    "proxy-unavailable",
+                  );
                 } catch {
                   /* swallow */
                 }
@@ -388,7 +397,7 @@ export async function handleLivePreviewHttp(
   project: PreviewProject,
 ): Promise<void> {
   // Container layer not configured in this environment — serve files from DB.
-  if (!isContainerLayerConfigured()) {
+  if (!(await isContainerLayerConfigured())) {
     await serveProjectFilesPreview(
       res,
       project.id,
