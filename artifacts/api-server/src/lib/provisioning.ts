@@ -424,10 +424,10 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       // environment where FLY_API_TOKEN was configured.  With Fly absent the
       // stored machine ID points to nothing real, which would leave the preview
       // proxy spinning forever on the cold-start page.
-      if (!process.env.FLY_API_TOKEN && project.containerId) {
+      if (!isContainerLayerConfigured() && project.containerId) {
         await db
           .update(projectsTable)
-          .set({ containerId: null, containerUrl: null, containerStatus: "idle" })
+          .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })
           .where(eq(projectsTable.id, projectId))
           .catch(() => {
             /* best-effort */

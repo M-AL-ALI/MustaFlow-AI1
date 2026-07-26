@@ -673,6 +673,8 @@ export function PreviewTab({
   // HMR session. Skip the restart in that case.
   const isAgentic = project.builderMode === "agentic";
   const containerLive = containerStatus === "running" && !!containerUrl;
+  const webContainerLive =
+    isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
   const wcRestartRef = useRef(wc.restart);
   wcRestartRef.current = wc.restart;
   const prevBuildStatusRef = useRef(project.status);
@@ -913,8 +915,6 @@ export function PreviewTab({
   // at the WC-provided URL (no sandbox needed — WC handles its own isolation).
   // For static-html projects, the existing DB-served preview route is used.
   const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => {
-    const webContainerLive =
-      isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
     const src = webContainerLive ? wc.previewUrl! : previewSrc;
     return (
       <iframe
@@ -1693,8 +1693,6 @@ export function PreviewTab({
 
         {/* Runtime mode badge — shows which preview engine is active */}
         {(() => {
-          const webContainerLive =
-            isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
           const containerRunning = isAgentic && containerStatus === "running" && !!containerUrl;
           let label: string;
           let subtitle: string;
@@ -1941,37 +1939,39 @@ export function PreviewTab({
           )}
         </div>
       )}
-      {containerStatus && ["starting", "hibernated"].includes(containerStatus) && (
-        <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b bg-primary/8 border-primary/15 text-primary text-xs">
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          <span className="flex-1">
-            {containerStatus === "hibernated"
-              ? "Container hibernated — wake it to resume the live preview."
-              : "Waking up your project container… this takes 20–30 seconds."}
-          </span>
-          {containerStatus === "hibernated" && onStartContainer && (
-            <button
-              onClick={onStartContainer}
-              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-colors"
-            >
-              Wake
-            </button>
-          )}
-          {containerStatus === "starting" && (
-            <div className="flex items-center gap-1 shrink-0">
-              {(["starting", "running"] as const).map((stage) => (
-                <span
-                  key={stage}
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    containerStatus === stage ? "bg-primary animate-pulse" : "bg-primary/20",
-                  )}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {!webContainerLive &&
+        containerStatus &&
+        ["starting", "hibernated"].includes(containerStatus) && (
+          <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b bg-primary/8 border-primary/15 text-primary text-xs">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <span className="flex-1">
+              {containerStatus === "hibernated"
+                ? "Container hibernated — wake it to resume the live preview."
+                : "Waking up your project container… this takes 20–30 seconds."}
+            </span>
+            {containerStatus === "hibernated" && onStartContainer && (
+              <button
+                onClick={onStartContainer}
+                className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-colors"
+              >
+                Wake
+              </button>
+            )}
+            {containerStatus === "starting" && (
+              <div className="flex items-center gap-1 shrink-0">
+                {(["starting", "running"] as const).map((stage) => (
+                  <span
+                    key={stage}
+                    className={cn(
+                      "w-1.5 h-1.5 rounded-full",
+                      containerStatus === stage ? "bg-primary animate-pulse" : "bg-primary/20",
+                    )}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
       {/* WebContainer boot status banner — only for react-vite projects */}
       {isReactVite && wc.status !== "ready" && wc.status !== "idle" && (
