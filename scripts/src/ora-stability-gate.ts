@@ -183,6 +183,8 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /use-ora-realtime/i,
       /useOraRealtimeVoiceNative/i,
       /ora-mobile-reconnect/i,
+      /clientCapabilities/i,
+      /hasOraRepoSignal/i,
     ],
     manualWebsite:
       "Run 10+ voice turns, pause mid-sentence, interrupt mid-answer, and verify tier-time behavior. During the same call, trigger current web search, read-only connected-repo inspection, full repo analysis, generate a file, then revise that exact generated file without leaving Talk mode, and generate an image. Confirm Ora speaks the shared activity wording before each tool result, mirrors sources/reports/files/images into the text thread, and never turns narration into a chat message. Simulate a network blip and confirm the six-attempt recovery ladder reconnects; press End while reconnecting and confirm the call never restarts. Force a tool failure and confirm Ora explains it safely and keeps listening.",
@@ -481,6 +483,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /lib\/ora-activity\.ts$/i,
       /ora-activity-wiring\.test\.ts$/i,
       /OraThinkingRow/i,
+      /activity-visibility/i,
     ],
     manualWebsite:
       "Send prompts that trigger web search, file generation, image generation, CSV/XLSX dataset analysis, and (with a connected repo) repo analysis. While each runs, the loading row must show the live activity line ('Searching the web…', 'Generating your file…', 'Creating your image…', 'Analyzing <dataset>…', 'Reading <file>…') fading in, replaced with a fade-out when the next step starts, and clearing on the first answer token. Force a search failure (offline/kill switch) and confirm the honest 'Web search failed — answering from what I know' line appears and Ora still answers. Verify no provider names, model ids, or server paths ever appear in the activity text.",

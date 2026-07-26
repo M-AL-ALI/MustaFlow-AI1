@@ -38,7 +38,11 @@ import {
   ORA_REALTIME_TOOL_DEFINITIONS,
   assertRealtimeToolSurface,
 } from "../../lib/public-ai/realtime-tool-definitions";
-import { resolveOraRepoSessionForRequest } from "../../lib/public-ai/repo-analyst";
+import {
+  resolveOraRepoSessionForRequest,
+  hasOraRepoSignal,
+  hasActiveOraRepoSession,
+} from "../../lib/public-ai/repo-analyst";
 import { buildSystemPrompt, buildProfileContext, buildMemoryContext } from "./chat";
 
 const router = Router();
@@ -144,7 +148,7 @@ function voiceLabelForPreset(preset: VoicePresetKey | null): string {
  * prompt. Voice answers must be short and plain — never markdown — and the model
  * must yield gracefully when the user barges in.
  */
-const VOICE_ADDENDUM =
+const VOICE_ADDENDUM_BASE =
   "\n\n## Voice conversation mode\n" +
   "You are speaking out loud in a live, two-way voice conversation. Keep replies " +
   "short, natural, and conversational — usually a sentence or two, the way a person " +
@@ -174,17 +178,35 @@ const VOICE_ADDENDUM =
   "what to remember. Your spoken audio and the visible transcript must always use the " +
   "same language. If the user selected a reply language, speak entirely in that " +
   "language. If the language is Auto, follow the user's latest spoken language. Do " +
-  "not default to English when the selected language or the user's speech is non-English." +
-  "\n\n## Live tools and spoken narration\n" +
-  "You have Ora's real tools. Use them whenever the same request in text chat would " +
-  "need search, repository reading, a file, an image, or a repository investigation. " +
-  "Tool activity is narrated automatically by the client in the user's language, so " +
-  "do not add a separate pre-call status sentence or repeat the activity narration. " +
-  "After the tool result arrives, continue naturally and summarize it aloud. If a tool " +
-  "fails, say so plainly and continue; never end the live session for a recoverable tool " +
-  "failure. Never speak raw URLs, provider names, model ids, stack traces, secrets, or " +
-  "absolute filesystem paths. GitHub tools are strictly read-only: never claim to write, " +
-  "edit, commit, push, open a pull request, or change repository content.";
+  "not default to English when the selected language or the user's speech is non-English.";
+
+/**
+ * Build the "Live tools and spoken narration" section of the voice addendum.
+ *
+ * When the client signals clientCapabilities.realtimeToolNarration >= 1 it
+ * narrates tool activity itself (speaking the shared activity wording before
+ * calling the tool). Older clients that do not send this capability get a
+ * model-side narration instruction so the user still hears a brief status
+ * sentence before each tool runs.
+ */
+function buildVoiceToolAddendum(clientHasNarration: boolean): string {
+  return (
+    "\n\n## Live tools and spoken narration\n" +
+    "You have Ora's real tools. Use them whenever the same request in text chat would " +
+    "need search, repository reading, a file, an image, or a repository investigation. " +
+    (clientHasNarration
+      ? "Tool activity is narrated automatically by the client in the user's language, so " +
+        "do not add a separate pre-call status sentence or repeat the activity narration. "
+      : "Before calling a tool, say a brief natural status sentence in the user's language " +
+        "(for example, \"Let me search that.\" or \"One moment while I look at the repo.\") " +
+        "so the user knows you are on it. ") +
+    "After the tool result arrives, continue naturally and summarize it aloud. If a tool " +
+    "fails, say so plainly and continue; never end the live session for a recoverable tool " +
+    "failure. Never speak raw URLs, provider names, model ids, stack traces, secrets, or " +
+    "absolute filesystem paths. GitHub tools are strictly read-only: never claim to write, " +
+    "edit, commit, push, open a pull request, or change repository content."
+  );
+}
 
 const bodySchema = z.object({
   language: z.string().max(20).optional(),
@@ -217,6 +239,18 @@ const bodySchema = z.object({
   // rank saved-memory recall. There is no "message" at the start of a voice
   // session, so memory recall is skipped entirely when this is absent.
   message: z.string().max(4000).optional(),
+  // Advertised client capabilities for this voice session. Version-numbered
+  // integers; absent means "capability not supported" (treated as 0).
+  //   realtimeFunctionBridge: 1 = client handles function_call events via the
+  //     bridge loop (no longer falls back to legacy tool handling).
+  //   realtimeToolNarration: 1 = client narrates tool activity aloud before
+  //     calling a tool, so the model must not add a separate status sentence.
+  clientCapabilities: z
+    .object({
+      realtimeFunctionBridge: z.number().int().nonnegative().optional(),
+      realtimeToolNarration: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 function clientIpForKey(req: Request): string {
@@ -381,6 +415,10 @@ async function buildRealtimeInstructions(opts: {
   referenceSavedMemories?: boolean;
   oraProjectId?: number | null;
   message?: string;
+  /** True when the client signals realtimeToolNarration >= 1 (speaks activity
+   *  wording itself before calling tools). Selects the model-side narration
+   *  branch in buildVoiceToolAddendum. */
+  clientHasNarration?: boolean;
 }): Promise<string> {
   const {
     authed,
@@ -391,6 +429,7 @@ async function buildRealtimeInstructions(opts: {
     referenceSavedMemories,
     oraProjectId,
     message,
+    clientHasNarration,
   } = opts;
 
   // Realtime instructions are minted ONCE at session start, so the date block is
@@ -427,35 +466,43 @@ async function buildRealtimeInstructions(opts: {
       }
     }
 
-    // Resolve GitHub context server-side so a connected/selected repository is
-    // authoritative and the model never asks the user to paste a URL it already
-    // has. A named repo in the recent message can also resolve from the connected
-    // account without a URL. Failures are best-effort and never block voice.
-    try {
-      const repo = await resolveOraRepoSessionForRequest({
-        userId: authed.userId,
-        message,
-      });
-      if (repo.connected && repo.session) {
-        instructions +=
-          "\n\n## Connected GitHub repository (read-only)\n" +
-          `The selected repository is ${repo.session.owner}/${repo.session.repo}. ` +
-          "Use the repository tools directly. Never ask the user to paste its URL. " +
-          "You may read, search, inspect commits, and analyze it, but you can never " +
-          "write, edit, commit, push, or open a pull request.";
-      } else if (repo.connected) {
-        instructions +=
-          "\n\n## Connected GitHub account (read-only)\n" +
-          "GitHub is already connected. If the user names a repository, pass that " +
-          "name to the repository tool so the server can resolve it. If no repository " +
-          "can be resolved, ask them to name or select one; never ask for a pasted URL.";
+    // Resolve GitHub context lazily — only when the session message contains a
+    // repo signal (keyword heuristic) OR the user already has an active repo
+    // session row. This avoids a DB round-trip for every voice mint by users
+    // who have never connected GitHub. Both helpers are cheap: signal check is
+    // pure string ops; hasActiveOraRepoSession is a single SELECT. Failures are
+    // best-effort and never block voice.
+    const messageHint = message?.trim() ?? "";
+    const shouldResolveRepo =
+      hasOraRepoSignal(messageHint) ||
+      (await hasActiveOraRepoSession(authed.userId).catch(() => false));
+    if (shouldResolveRepo) {
+      try {
+        const repo = await resolveOraRepoSessionForRequest({
+          userId: authed.userId,
+          message,
+        });
+        if (repo.connected && repo.session) {
+          instructions +=
+            "\n\n## Connected GitHub repository (read-only)\n" +
+            `The selected repository is ${repo.session.owner}/${repo.session.repo}. ` +
+            "Use the repository tools directly. Never ask the user to paste its URL. " +
+            "You may read, search, inspect commits, and analyze it, but you can never " +
+            "write, edit, commit, push, or open a pull request.";
+        } else if (repo.connected) {
+          instructions +=
+            "\n\n## Connected GitHub account (read-only)\n" +
+            "GitHub is already connected. If the user names a repository, pass that " +
+            "name to the repository tool so the server can resolve it. If no repository " +
+            "can be resolved, ask them to name or select one; never ask for a pasted URL.";
+        }
+      } catch {
+        // Connected-repo context is additive. Voice remains available if lookup fails.
       }
-    } catch {
-      // Connected-repo context is additive. Voice remains available if lookup fails.
     }
   }
 
-  instructions += VOICE_ADDENDUM;
+  instructions += VOICE_ADDENDUM_BASE + buildVoiceToolAddendum(clientHasNarration ?? false);
   return instructions;
 }
 
@@ -606,6 +653,8 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     }
   };
 
+  const clientHasNarration =
+    (parsed.data.clientCapabilities?.realtimeToolNarration ?? 0) >= 1;
   const instructions = await buildRealtimeInstructions({
     authed,
     language: parsed.data.language,
@@ -615,6 +664,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     referenceSavedMemories: parsed.data.referenceSavedMemories,
     oraProjectId: parsed.data.oraProjectId,
     message: parsed.data.message,
+    clientHasNarration,
   });
 
   // ── Mint the ephemeral client secret (GA Realtime shape) ───────────────────

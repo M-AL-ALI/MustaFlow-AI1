@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createActivityVisibilityController,
+  ACTIVITY_MIN_SHOW_MS,
+} from "../activity-visibility";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -92,12 +96,15 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
     expect(index).toContain("if (streamedContent.length === 0) pushActivity(step);");
   });
 
-  it("clears the trace on the first real answer token", () => {
+  it("clears the trace on the first real answer token via deferred scheduleClear", () => {
     const idx = index.indexOf("if (streamedContent.length === 0) {");
     expect(idx).toBeGreaterThan(-1);
-    const body = index.slice(idx, idx + 220);
+    // The clear is now deferred through scheduleClear so an activity step that
+    // arrives in the same XHR burst has ACTIVITY_MIN_SHOW_MS to paint before
+    // being cleared. Expand the slice window to cover the full deferred call.
+    const body = index.slice(idx, idx + 700);
     expect(body).toContain("setStreamStatus(null);");
-    expect(body).toContain("setStreamActivity(null);");
+    expect(body).toContain("scheduleClear(");
   });
 
   it("narrates attachment and dataset reading with the shared name-aware wording", () => {
@@ -121,6 +128,84 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
 
   it("renders the activity step through OraThinkingRow", () => {
     expect(index).toContain("activity={streamActivity}");
+  });
+});
+
+describe("Mobile Ora — activity visibility controller behaviour", () => {
+  it("notifyVisible cancels an armed scheduleClear so the row stays visible", () => {
+    vi.useFakeTimers();
+    const ctrl = createActivityVisibilityController();
+    let cleared = false;
+    // Simulate real ordering: activity step shown, then first token arrives.
+    ctrl.notifyVisible();
+    ctrl.scheduleClear(() => {
+      cleared = true;
+    });
+    // A second activity step arriving before the timer fires cancels the clear.
+    ctrl.notifyVisible();
+    vi.runAllTimers();
+    expect(cleared).toBe(false);
+    vi.useRealTimers();
+    ctrl.dispose();
+  });
+
+  it("scheduleClear fires after ACTIVITY_MIN_SHOW_MS when not interrupted", () => {
+    vi.useFakeTimers();
+    const ctrl = createActivityVisibilityController();
+    let cleared = false;
+    // Simulate real ordering: activity step shown first, then first token arrives.
+    ctrl.notifyVisible();
+    ctrl.scheduleClear(() => {
+      cleared = true;
+    });
+    vi.advanceTimersByTime(ACTIVITY_MIN_SHOW_MS - 1);
+    expect(cleared).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(cleared).toBe(true);
+    vi.useRealTimers();
+    ctrl.dispose();
+  });
+
+  it("dispose cancels an armed scheduleClear so unmounted screens never call setState", () => {
+    vi.useFakeTimers();
+    const ctrl = createActivityVisibilityController();
+    let cleared = false;
+    // Simulate real ordering: activity step shown, then first token arrives.
+    ctrl.notifyVisible();
+    ctrl.scheduleClear(() => {
+      cleared = true;
+    });
+    ctrl.dispose();
+    vi.runAllTimers();
+    expect(cleared).toBe(false);
+    vi.useRealTimers();
+  });
+});
+
+describe("Mobile Ora — first-token SSE ordering contract (source assertions)", () => {
+  const index = read("../../app/(home)/index.tsx");
+
+  it("uses scheduleClear (not a direct setStreamActivity null) on the first token", () => {
+    // Finds the FIRST occurrence of the condition, which is the token-path guard.
+    const idx = index.indexOf("if (streamedContent.length === 0) {");
+    expect(idx).toBeGreaterThan(-1);
+    const body = index.slice(idx, idx + 700);
+    expect(body).toContain("scheduleClear(");
+    // The raw direct call must not appear within the first-token branch.
+    expect(body).not.toContain("setStreamActivity(null);\n");
+  });
+
+  it("pushActivity calls notifyVisible before updating state", () => {
+    const pushIdx = index.indexOf("const pushActivity = useCallback(");
+    expect(pushIdx).toBeGreaterThan(-1);
+    const body = index.slice(pushIdx, pushIdx + 400);
+    expect(body).toContain("notifyVisible()");
+    // Ordering check: notifyVisible must precede the setStreamActivity updater.
+    const notifyPos = body.indexOf("notifyVisible()");
+    const setStatePos = body.indexOf("setStreamActivity(");
+    expect(notifyPos).toBeGreaterThan(-1);
+    expect(setStatePos).toBeGreaterThan(-1);
+    expect(notifyPos).toBeLessThan(setStatePos);
   });
 });
 

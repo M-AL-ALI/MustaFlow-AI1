@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import {
-  ORA_ACTIVITY_TEXT,
   oraActivityStep,
   type FileFormat,
   type OraRealtimeFunctionCall,
@@ -8,7 +7,7 @@ import {
   type OraRealtimeToolName,
   type OraRealtimeToolWrittenResult,
 } from "@workspace/ora-contracts";
-import { db, oraRepoSessionsTable } from "@workspace/db";
+import { db, oraRepoSessionsTable, type OraRepoSessionRow } from "@workspace/db";
 import { logger } from "../logger";
 import {
   persistOraAsset,
@@ -117,11 +116,18 @@ function safeFailure(tool: OraRealtimeToolName): OraRealtimeToolBridgeResponse {
   const activityTool = REALTIME_TOOL_ACTIVITY[tool];
   return {
     ok: false,
-    output: ORA_ACTIVITY_TEXT[activityTool].fail,
+    output:
+      "This tool encountered an error and could not complete. Acknowledge the failure briefly and continue from what you know. Do not claim the tool returned a result.",
     activity: oraActivityStep(activityTool, "fail"),
     recoverable: true,
   };
 }
+
+type RepoAccessResult =
+  | { status: "no_user" }
+  | { status: "not_connected" }
+  | { status: "no_repo" }
+  | { status: "ok"; token: string; session: OraRepoSessionRow };
 
 async function resolveProjectId(context: OraRealtimeToolExecutionContext): Promise<number | null> {
   if (!context.userId || typeof context.oraProjectId !== "number") return null;
@@ -130,8 +136,11 @@ async function resolveProjectId(context: OraRealtimeToolExecutionContext): Promi
   return check.ok ? context.oraProjectId : null;
 }
 
-async function repoAccess(args: Record<string, unknown>, context: OraRealtimeToolExecutionContext) {
-  if (!context.userId) return null;
+async function repoAccess(
+  args: Record<string, unknown>,
+  context: OraRealtimeToolExecutionContext,
+): Promise<RepoAccessResult> {
+  if (!context.userId) return { status: "no_user" };
   const requestedRepo = readString(args, "repo", 250) || undefined;
   const message =
     readString(args, "question", 8000) || readString(args, "query", 4000) || requestedRepo || "";
@@ -140,8 +149,9 @@ async function repoAccess(args: Record<string, unknown>, context: OraRealtimeToo
     message,
     requestedRepo,
   });
-  if (!resolved.token || !resolved.session) return null;
-  return { token: resolved.token, session: resolved.session };
+  if (!resolved.connected) return { status: "not_connected" };
+  if (!resolved.token || !resolved.session) return { status: "no_repo" };
+  return { status: "ok", token: resolved.token, session: resolved.session };
 }
 
 async function executeRepoRead(
@@ -150,10 +160,19 @@ async function executeRepoRead(
   context: OraRealtimeToolExecutionContext,
 ): Promise<ToolExecution> {
   const access = await repoAccess(args, context);
-  if (!access) {
+  if (access.status === "no_user") {
+    return { output: "Repository access requires signing in first." };
+  }
+  if (access.status === "not_connected") {
     return {
       output:
-        "GitHub is already supported, but I could not resolve a repository. Ask the user to name or select it; do not ask for a pasted URL.",
+        "GitHub is not connected for this account. The user can connect it in Settings to enable repository tools.",
+    };
+  }
+  if (access.status === "no_repo") {
+    return {
+      output:
+        "GitHub is connected, but no repository has been selected. Ask the user to name or select a repository; do not ask for a pasted URL.",
     };
   }
 
@@ -240,14 +259,6 @@ async function executeRepoAnalysis(
   }
   const question = readString(args, "question", 8000);
   if (!question) return { output: "Ask what the user wants checked in the repository." };
-  const requestedRepo = readString(args, "repo", 250);
-  if (requestedRepo) {
-    await resolveOraRepoSessionForRequest({
-      userId: context.userId,
-      message: question,
-      requestedRepo,
-    });
-  }
   const candidates = await repoCandidates(question, context.tier);
   const investigation = await runRepoInvestigation({
     userId: context.userId,

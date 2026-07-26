@@ -237,7 +237,7 @@ describe("Ora realtime function-call protocol", () => {
     expect(result.ok).toBe(false);
     expect(result.recoverable).toBe(true);
     expect(result.activity).toMatchObject({ tool: "repo-analysis", phase: "fail" });
-    expect(result.output).toBe(ORA_ACTIVITY_TEXT["repo-analysis"].fail);
+    expect(result.output).toContain("encountered an error");
     expect(result.output).not.toMatch(/provider|model|stack|[A-Za-z]:\\|\/home\//i);
   });
 });

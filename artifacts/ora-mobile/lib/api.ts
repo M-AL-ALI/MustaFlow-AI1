@@ -384,6 +384,10 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
       message: ctx.message,
       focusMode: ctx.focusMode,
       voicePreset: ctx.voicePreset,
+      clientCapabilities: {
+        realtimeFunctionBridge: 1,
+        realtimeToolNarration: 1,
+      },
     }),
   });
 }

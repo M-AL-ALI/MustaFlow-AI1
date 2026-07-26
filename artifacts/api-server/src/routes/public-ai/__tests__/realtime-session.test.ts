@@ -61,6 +61,8 @@ const metering = vi.hoisted(() => ({
 const repoContext = vi.hoisted(() => ({
   resolve: vi.fn(),
   investigate: vi.fn(),
+  hasSignal: vi.fn(),
+  hasSession: vi.fn(),
 }));
 
 // ─── Mocks (hoisted before router import) ─────────────────────────────────────
@@ -109,6 +111,8 @@ vi.mock("../../../lib/public-ai/repo-analyst", () => ({
   REPO_GUIDANCE_ADDENDUM: "",
   resolveOraRepoSessionForRequest: repoContext.resolve,
   runRepoInvestigation: repoContext.investigate,
+  hasOraRepoSignal: repoContext.hasSignal,
+  hasActiveOraRepoSession: repoContext.hasSession,
 }));
 
 // The metering service is mocked so the route is the unit under test. Keep the
@@ -247,11 +251,17 @@ beforeEach(() => {
   metering.getRealtimeUsage.mockReset();
   repoContext.resolve.mockReset();
   repoContext.investigate.mockReset();
+  repoContext.hasSignal.mockReset();
+  repoContext.hasSession.mockReset();
   repoContext.resolve.mockResolvedValue({
     connected: false,
     token: null,
     session: null,
   });
+  // Default: no repo signal in the message, no active repo session.
+  // Both must be false so non-repo tests skip the DB round-trip entirely.
+  repoContext.hasSignal.mockReturnValue(false);
+  repoContext.hasSession.mockResolvedValue(false);
   metering.startRealtimeSession.mockResolvedValue({
     status: "ok",
     sessionId: "00000000-0000-4000-8000-000000000000",
@@ -668,6 +678,9 @@ describe("Talk to Ora realtime — signed-in reservation + context injection", (
 
   it("injects an already-selected repository and never asks for its URL", async () => {
     signIn("core");
+    // Signal that the user already has an active repo session so the lazy
+    // guard passes and resolveOraRepoSessionForRequest is called.
+    repoContext.hasSession.mockResolvedValue(true);
     repoContext.resolve.mockResolvedValue({
       connected: true,
       token: "encrypted-test-token",

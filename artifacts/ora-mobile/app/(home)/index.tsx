@@ -85,6 +85,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { createActivityVisibilityController } from "../../lib/activity-visibility";
 
 import { Markdown } from "@/components/Markdown";
 import {
@@ -649,11 +650,16 @@ export default function OraChatScreen() {
   // fade-in/fade-out lifecycle. One living step, cleared on first token.
   const [streamActivity, setStreamActivity] = useState<OraActivityRowStep | null>(null);
   const activityIdRef = useRef(0);
+  // Minimum-show controller: ensures an activity label has at least
+  // ACTIVITY_MIN_SHOW_MS to paint before being cleared by the first token
+  // when both arrive in the same XHR readyState=3 burst.
+  const activityVisibilityRef = useRef(createActivityVisibilityController());
   // Fold an incoming shared-shape step into the single-row trace: a terminal
   // ok/fail updates the in-progress step in place (same id — the row
   // crossfades); anything else becomes a NEW keyed step (fade out old, fade
   // in new). Mirrors the website reducer in mustaflow/src/lib/ora-activity.ts.
   const pushActivity = useCallback((step: OraActivityStep) => {
+    activityVisibilityRef.current.notifyVisible();
     setStreamActivity((prev) => {
       if (step.phase !== "start" && prev && prev.tool === step.tool && prev.phase === "start") {
         return { ...prev, phase: step.phase, text: step.text };
@@ -661,6 +667,12 @@ export default function OraChatScreen() {
       activityIdRef.current += 1;
       return { id: activityIdRef.current, tool: step.tool, text: step.text, phase: step.phase };
     });
+  }, []);
+  useEffect(() => {
+    const ctrl = activityVisibilityRef.current;
+    return () => {
+      ctrl.dispose();
+    };
   }, []);
   const [sessionSyncError, setSessionSyncError] = useState<"token_unavailable" | null>(null);
   const [messages, setMessages] = useState<OraMessage[]>([]);
@@ -1467,7 +1479,10 @@ export default function OraChatScreen() {
                 // activity frames are ignored below).
                 if (streamedContent.length === 0) {
                   setStreamStatus(null);
-                  setStreamActivity(null);
+                  // Deferred clear: if an activity step arrived in the same XHR
+                  // burst, scheduleClear waits for ACTIVITY_MIN_SHOW_MS before
+                  // calling setStreamActivity(null) so the label has time to paint.
+                  activityVisibilityRef.current.scheduleClear(() => setStreamActivity(null));
                 }
                 streamedContent += delta;
                 const content = streamedContent;

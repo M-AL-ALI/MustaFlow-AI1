@@ -1911,6 +1911,20 @@ export function useOraRealtimeVoiceNative(
           realtimeSessionIdRef.current !== realtimeSessionId ||
           !reconnectAllowedRef.current
         ) {
+          // Best-effort: if the session id still matches, close the orphaned
+          // function_call_output so the model's context is not left dangling.
+          // When the id differs, a new session owns the data channel and we must
+          // never inject a stale call_id into it.
+          if (realtimeSessionIdRef.current === realtimeSessionId) {
+            sendEvent({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: call.callId,
+                output: result.output,
+              },
+            });
+          }
           return;
         }
 

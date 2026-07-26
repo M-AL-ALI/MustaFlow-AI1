@@ -107,6 +107,41 @@ export async function getActiveRepoSession(userId: string): Promise<OraRepoSessi
   return rows[0] ?? null;
 }
 
+const GITHUB_REPO_SIGNAL_WORDS = [
+  "github",
+  "repo",
+  "repository",
+  "commit",
+  "branch",
+  "pull request",
+  "merge",
+  "diff",
+  "clone",
+  "codebase",
+];
+
+/**
+ * True when the message contains vocabulary that suggests the user wants
+ * GitHub repository access. Used as a cheap heuristic to skip the full
+ * resolveOraRepoSessionForRequest call when there is no signal.
+ */
+export function hasOraRepoSignal(message: string): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  if (GITHUB_REPO_SIGNAL_WORDS.some((w) => lower.includes(w))) return true;
+  return /\b[\w-]+\/[\w-]+\b/.test(message);
+}
+
+/**
+ * True when the user already has an active repo session row. One cheap DB
+ * select — only the session id is fetched. Used to gate the full
+ * resolveOraRepoSessionForRequest call at voice-session mint time.
+ */
+export async function hasActiveOraRepoSession(userId: string): Promise<boolean> {
+  const session = await getActiveRepoSession(userId).catch(() => null);
+  return session !== null;
+}
+
 // GitHub UI paths that look like owner names but never are repositories.
 const NON_REPO_OWNERS = new Set([
   "orgs",
