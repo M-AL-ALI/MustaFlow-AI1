@@ -76,6 +76,15 @@ function isConfigured(): boolean {
   return FLY_TOKEN.length > 0;
 }
 
+/**
+ * Returns true when the Fly.io container layer is configured (FLY_API_TOKEN is
+ * set).  Use this to gate agentic-preview and container-sync paths without
+ * coupling callers to env-var checks directly.
+ */
+export function isContainerLayerConfigured(): boolean {
+  return isConfigured();
+}
+
 // ─── Container subsystem self-check ──────────────────────────────────────────
 
 /** Cached result of the startup connectivity probe. null = not yet run. */

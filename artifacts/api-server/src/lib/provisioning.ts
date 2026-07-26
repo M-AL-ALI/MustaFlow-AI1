@@ -419,6 +419,25 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
         .catch(() => {
           /* best-effort */
         });
+
+      // Clear any stale containerId that may have been stamped in a previous
+      // environment where FLY_API_TOKEN was configured.  With Fly absent the
+      // stored machine ID points to nothing real, which would leave the preview
+      // proxy spinning forever on the cold-start page.
+      if (!process.env.FLY_API_TOKEN && project.containerId) {
+        await db
+          .update(projectsTable)
+          .set({ containerId: null, containerUrl: null, containerStatus: "idle" })
+          .where(eq(projectsTable.id, projectId))
+          .catch(() => {
+            /* best-effort */
+          });
+        logger.info(
+          { projectId },
+          "Cleared stale containerId — FLY_API_TOKEN not configured in this environment",
+        );
+      }
+
       return;
     }
 

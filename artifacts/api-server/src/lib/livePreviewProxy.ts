@@ -25,8 +25,9 @@ import { and, eq } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
 import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
-import { provisionContainer } from "./container";
+import { provisionContainer, isContainerLayerConfigured } from "./container";
 import { getContainerSecretMap } from "./container-secrets";
+import { isClientRenderableStack, serveProjectFilesPreview } from "./project-files-preview";
 import { logger } from "./logger";
 
 /**
@@ -349,9 +350,20 @@ export async function handleLivePreviewHttp(
   next: NextFunction,
   project: PreviewProject,
 ): Promise<void> {
-  // No container ever provisioned → kick off provisioning and show cold-start.
+  // No container ever provisioned — route based on whether Fly is available.
   if (!project.containerId || !project.containerUrl) {
-    wakeContainer(project.id);
+    if (!isContainerLayerConfigured()) {
+      // Fly not configured in this environment.  Server-stack projects cannot
+      // run in the browser so serve a DB-snapshot fallback with a banner.
+      // react-vite / static stacks are handled client-side by WebContainer —
+      // fall through to COLD_START_HTML so the frontend knows to boot one.
+      if (!isClientRenderableStack(project.stack)) {
+        await serveProjectFilesPreview(res, project.id, project.stack);
+        return;
+      }
+    } else {
+      wakeContainer(project.id);
+    }
     sendHtml(res, 503, COLD_START_HTML(project.id), "container-starting");
     return;
   }
