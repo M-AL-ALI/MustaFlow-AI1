@@ -2466,6 +2466,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       result: {
         ok: boolean;
         observation: string | unknown;
+        deferred?: boolean;
         noTruncate?: boolean;
         imageBase64?: string;
         imageMimeType?: string;
@@ -2540,7 +2541,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // render each invocation as a collapsible step with args + truncated
       // output. Skip for tools that already have richer dedicated events
       // (file_diff, command_output, creative previews) to avoid double-render.
-      if (shouldEmitToolCallEvent(callName)) {
+      if (!result.deferred && shouldEmitToolCallEvent(callName)) {
         try {
           const payload = JSON.stringify(
             buildToolCallEventPayload(
@@ -2557,13 +2558,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
       }
 
-      if (result.ok) {
-        consecutiveErrors = 0;
-      } else {
-        if (lastError === observation) consecutiveErrors++;
-        else consecutiveErrors = 1;
-        lastError = observation;
-      }
+      ({ lastError, consecutiveErrors } = applyToolResultToRepeatedErrorState(
+        { lastError, consecutiveErrors },
+        result,
+        observation,
+      ));
 
       if (callName === "report_progress") {
         await safeEvent(input.onEvent, "narration", String(parsed.message ?? "").slice(0, 220));
@@ -2707,6 +2706,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               .then((r) => ({
                 ok: r.ok,
                 observation: r.observation,
+                deferred: r.deferred,
                 noTruncate: r.noTruncate,
                 imageBase64: r.imageBase64,
                 imageMimeType: r.imageMimeType,
@@ -2850,7 +2850,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
 
       // Task #743: stream a structured `tool_call` event (serial path).
-      if (shouldEmitToolCallEvent(name)) {
+      if (!result.deferred && shouldEmitToolCallEvent(name)) {
         try {
           const payload = JSON.stringify(
             buildToolCallEventPayload(
@@ -2867,13 +2867,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
       }
 
-      if (result.ok) {
-        consecutiveErrors = 0;
-      } else {
-        if (lastError === observation) consecutiveErrors++;
-        else consecutiveErrors = 1;
-        lastError = observation;
-      }
+      ({ lastError, consecutiveErrors } = applyToolResultToRepeatedErrorState(
+        { lastError, consecutiveErrors },
+        result,
+        observation,
+      ));
 
       // Emit narration for high-signal tools
       if (name === "report_progress") {
@@ -2888,7 +2886,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           "generating_code",
           `${name.replace("_", " ")} → ${_mutPathSerial}`.slice(0, 220),
         );
-      } else if (name === "run_command") {
+      } else if (name === "run_command" && !result.deferred) {
         await safeEvent(
           input.onEvent,
           "narration",
@@ -4167,6 +4165,46 @@ export interface ToolCtx {
   loopWallClockMs: number;
 }
 
+export interface ToolExecutionResult {
+  ok: boolean;
+  observation: string;
+  /**
+   * Infrastructure deferrals are honest, non-failing outcomes. They are
+   * returned to the model so it can adapt, but are excluded from repeated-error
+   * accounting and user-facing per-tool events.
+   */
+  deferred?: boolean;
+  /** Process exit code — populated for run_command / pkg_install / run_e2e. */
+  exitCode?: number;
+  noTruncate?: boolean;
+  imageBase64?: string;
+  imageMimeType?: string;
+}
+
+export interface RepeatedToolErrorState {
+  lastError: string;
+  consecutiveErrors: number;
+}
+
+/**
+ * Preserve the existing repeated-error semantics for genuine failures while
+ * treating infrastructure deferrals as neither success nor failure.
+ */
+export function applyToolResultToRepeatedErrorState(
+  state: RepeatedToolErrorState,
+  result: Pick<ToolExecutionResult, "ok" | "deferred">,
+  observation: string,
+): RepeatedToolErrorState {
+  if (result.deferred) return state;
+  if (result.ok) {
+    return { lastError: state.lastError, consecutiveErrors: 0 };
+  }
+  return {
+    lastError: observation,
+    consecutiveErrors: state.lastError === observation ? state.consecutiveErrors + 1 : 1,
+  };
+}
+
 /**
  * Estimate the on-disk byte count of all screenshots in an E2E summary by
  * decoding base64 length back to bytes (length * 3/4, minus padding). Used
@@ -4476,21 +4514,60 @@ async function execWithTimeout(
   }
 }
 
-/** Provision a container on demand for stacks that need a shell. No-op if Fly isn't configured. */
-async function ensureContainerProvisioned(ctx: ToolCtx): Promise<{ ok: boolean; reason?: string }> {
+const CONTAINER_TOOL_DEFERRED_REASON =
+  "Live-server infrastructure is unavailable, so this operation was deferred. Continue with file editing and container-free validation.";
+const CONTAINER_PROVISIONING_FAILED_REASON = "container provisioning failed";
+
+type ContainerProvisioningResult =
+  | { ok: true; deferred?: false; reason?: never }
+  | { ok: true; deferred: true; reason: string }
+  | { ok: false; deferred?: false; reason: string };
+
+/**
+ * Provision a container on demand only when the cached operational capability
+ * probe says the layer is usable. Capability checks are read-only and cached
+ * by container.ts; an unavailable layer is a deferral, not an application
+ * failure.
+ */
+async function ensureContainerProvisioned(ctx: ToolCtx): Promise<ContainerProvisioningResult> {
   if (ctx.containerState.id) return { ok: true };
   try {
-    const { provisionContainer } = await import("./container");
+    const { isContainerLayerConfigured, provisionContainer } = await import("./container");
+    if (!(await isContainerLayerConfigured())) {
+      return { ok: true, deferred: true, reason: CONTAINER_TOOL_DEFERRED_REASON };
+    }
     const files = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
     const info = await provisionContainer(ctx.input.projectId, files);
     if (!info?.containerId) {
-      return { ok: false, reason: "container provider not configured (FLY_API_TOKEN unset)" };
+      return { ok: false, reason: CONTAINER_PROVISIONING_FAILED_REASON };
     }
     ctx.containerState.id = info.containerId;
     return { ok: true };
-  } catch (err) {
-    return { ok: false, reason: String((err as Error).message ?? err).slice(0, 200) };
+  } catch {
+    logger.warn({ projectId: ctx.input.projectId }, "agent-loop: container provisioning failed");
+    return { ok: false, reason: CONTAINER_PROVISIONING_FAILED_REASON };
   }
+}
+
+async function prepareContainerTool(
+  ctx: ToolCtx,
+  operation: string,
+): Promise<ToolExecutionResult | null> {
+  const provision = await ensureContainerProvisioned(ctx);
+  if (provision.deferred) {
+    return {
+      ok: true,
+      deferred: true,
+      observation: `DEFERRED: ${operation} requires live-server infrastructure. ${provision.reason}`,
+    };
+  }
+  if (!provision.ok) {
+    return {
+      ok: false,
+      observation: `ERROR: ${CONTAINER_PROVISIONING_FAILED_REASON}.`,
+    };
+  }
+  return null;
 }
 
 /** Run the stack's install command exactly once per loop, lazily on first shell use. */
@@ -4777,15 +4854,7 @@ function maybeChargeSenseBatch(ctx: ToolCtx): void {
   }
 }
 
-export async function executeTool(ctx: ToolCtx): Promise<{
-  ok: boolean;
-  observation: string;
-  /** Process exit code — populated for run_command / pkg_install / run_e2e. Null for informational tools. */
-  exitCode?: number;
-  noTruncate?: boolean;
-  imageBase64?: string;
-  imageMimeType?: string;
-}> {
+export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
     return { ok: false, observation: "ERROR: aborted by user" };
@@ -5263,13 +5332,8 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       }
       // On-demand container provisioning
       if (!containerState.id) {
-        const prov = await ensureContainerProvisioned(ctx);
-        if (!prov.ok) {
-          return {
-            ok: false,
-            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
-          };
-        }
+        const unavailable = await prepareContainerTool(ctx, "Shell command execution");
+        if (unavailable) return unavailable;
       }
       // Human-in-the-loop approval gate — opt-in via requireCommandApproval.
       // Runs BEFORE ensureInstalled so no side-effects occur on rejection.
@@ -5523,13 +5587,8 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         };
       }
       if (!containerState.id) {
-        const prov = await ensureContainerProvisioned(ctx);
-        if (!prov.ok) {
-          return {
-            ok: false,
-            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
-          };
-        }
+        const unavailable = await prepareContainerTool(ctx, `Workflow "${name}"`);
+        if (unavailable) return unavailable;
       }
       await ensureInstalled(ctx, input.signal, step);
       try {
@@ -5640,13 +5699,8 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         };
       }
       if (!containerState.id) {
-        const prov = await ensureContainerProvisioned(ctx);
-        if (!prov.ok) {
-          return {
-            ok: false,
-            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
-          };
-        }
+        const unavailable = await prepareContainerTool(ctx, "Package installation");
+        if (unavailable) return unavailable;
       }
 
       // Human-in-the-loop approval gate — opt-in via requireCommandApproval
@@ -5964,13 +6018,8 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         };
       }
       if (!containerState.id) {
-        const prov = await ensureContainerProvisioned(ctx);
-        if (!prov.ok) {
-          return {
-            ok: false,
-            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
-          };
-        }
+        const unavailable = await prepareContainerTool(ctx, "Test execution");
+        if (unavailable) return unavailable;
       }
 
       // ── Command resolution (priority order) ──────────────────────────────
@@ -6378,13 +6427,8 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       // On-demand container provisioning so the model can call this even
       // before any run_command has booted a container.
       if (!ctx.containerState.id) {
-        const ensured = await ensureContainerProvisioned(ctx);
-        if (!ensured.ok) {
-          return {
-            ok: false,
-            observation: `ERROR: read_diagnostics needs a container — ${ensured.reason ?? "unavailable"}`,
-          };
-        }
+        const unavailable = await prepareContainerTool(ctx, "Runtime diagnostics");
+        if (unavailable) return unavailable;
       }
       await safeEvent(input.onEvent, "read_diagnostics", `Diagnostics → ${path}`);
       const r = await readDiagnostics({
@@ -6657,13 +6701,8 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           ? decision.argv.map((tok) => (tok === "--save" ? "--save-dev" : tok))
           : decision.argv;
       if (!containerState.id) {
-        const prov = await ensureContainerProvisioned(ctx);
-        if (!prov.ok) {
-          return {
-            ok: false,
-            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
-          };
-        }
+        const unavailable = await prepareContainerTool(ctx, "Package installation");
+        if (unavailable) return unavailable;
       }
       await safeEvent(
         input.onEvent,
@@ -7414,7 +7453,7 @@ async function runCheckProfile(
         label: c.label,
         passed: false,
         durationMs: 0,
-        message: "skipped: no container available (FLY_API_TOKEN unset?)",
+        message: "skipped: no live container available",
       });
       continue;
     }
