@@ -420,6 +420,39 @@ const BACKEND_SIGNALS = [
   "subscription",
 ];
 
+const BACKEND_NEGATION_PATTERNS = [
+  /\bno\s+(?:sql\s+)?database(?:s)?\b/g,
+  /\bwithout\s+(?:a\s+)?(?:sql\s+)?database(?:s)?\b/g,
+  /\bno\s+(?:user\s+)?authentication\b/g,
+  /\bwithout\s+(?:user\s+)?authentication\b/g,
+  /\bno\s+auth\b/g,
+  /\bwithout\s+auth\b/g,
+  /\bno\s+(?:user\s+)?login\b/g,
+  /\bwithout\s+(?:a\s+)?(?:user\s+)?login\b/g,
+  /\bno\s+backend\b/g,
+  /\bwithout\s+(?:a\s+)?backend\b/g,
+  /\bno\s+external\s+apis?\b/g,
+  /\bwithout\s+external\s+apis?\b/g,
+];
+
+function promptForBackendDetection(lowerPrompt: string): {
+  prompt: string;
+  frontendOnly: boolean;
+  backendNegated: boolean;
+} {
+  const frontendOnly =
+    /\bfrontend[- ]only\b/.test(lowerPrompt) || /\bclient[- ]side[- ]only\b/.test(lowerPrompt);
+  let prompt = lowerPrompt;
+  let backendNegated = false;
+  for (const pattern of BACKEND_NEGATION_PATTERNS) {
+    prompt = prompt.replace(pattern, () => {
+      backendNegated = true;
+      return " ";
+    });
+  }
+  return { prompt, frontendOnly, backendNegated };
+}
+
 /**
  * Keyword signals that suggest a React SPA (no dedicated backend).
  */
@@ -458,6 +491,7 @@ const REACT_SIGNALS = [
  */
 export async function detectRequiredStack(prompt: string, devMode = false): Promise<StackId> {
   const lower = prompt.toLowerCase();
+  const backendIntent = promptForBackendDetection(lower);
 
   // Mobile intent always wins — a user asking for "an app like Uber" or
   // "a fitness tracking mobile app" should get a real native app, not a web page.
@@ -493,11 +527,17 @@ export async function detectRequiredStack(prompt: string, devMode = false): Prom
     return "python-flask";
   }
 
-  if (BACKEND_SIGNALS.some((s) => lower.includes(s))) {
+  if (
+    !backendIntent.frontendOnly &&
+    BACKEND_SIGNALS.some((s) => backendIntent.prompt.includes(s))
+  ) {
     return "node-api";
   }
   if (REACT_SIGNALS.some((s) => lower.includes(s))) {
     return "react-vite";
+  }
+  if (backendIntent.frontendOnly || backendIntent.backendNegated) {
+    return devMode ? "react-vite" : "static-html";
   }
 
   // Unclear from keywords — ask the model. Keep it cheap: 20 output tokens max.
@@ -519,6 +559,7 @@ export async function detectRequiredStack(prompt: string, devMode = false): Prom
           content:
             "Classify this request into exactly one category. Reply with a single word only.\n" +
             devModeNote +
+            "Explicit negative requirements are authoritative: phrases such as no database, no authentication, no backend, no external APIs, frontend-only, or client-side-only must not be classified as fullstack.\n" +
             "Categories:\n" +
             "  mobile    — native phone/tablet app: something you'd install from the App Store or Play Store\n" +
             "  slides    — slide deck, presentation, or pitch deck (Reveal.js)\n" +

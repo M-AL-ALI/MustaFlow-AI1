@@ -41,7 +41,13 @@ import {
   type E2eScenario,
 } from "./checks/e2e-runner";
 import { logger } from "./logger";
-import { CHECK_PROFILES, resolveStackId, type CheckSpec, type StackId } from "./check-profiles";
+import {
+  CHECK_PROFILES,
+  checksForLiveServerCapability,
+  resolveStackId,
+  type CheckSpec,
+  type StackId,
+} from "./check-profiles";
 import { scanMissingDeps, addMissingToDeps } from "./dep-scanner";
 import {
   DEFAULT_POLICY_STRICTNESS,
@@ -93,6 +99,8 @@ export interface AgentLoopInput {
   existingFiles: BuilderFile[];
   /** Fly.io machine id, when the project has a provisioned container. */
   containerId?: string | null;
+  /** Whether this run has an operational project live-server environment. */
+  liveServerAvailable?: boolean;
   /** Project policy strictness (safe|standard|permissive). Defaults to "standard". */
   policyStrictness?: PolicyStrictness | null;
   /** Owning task id — used to tag audit rows. */
@@ -1530,6 +1538,10 @@ function buildSystemPrompt(
   const isMobile = stack === "mobile-cross";
   const isDeveloperMode = input.projectMode === "developer";
   const strictness = input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
+  const liveServerCapabilityNote =
+    input.liveServerAvailable === false
+      ? "Live cloud-server infrastructure is unavailable for this run. Generate the requested architecture, but do not attempt container commands and do not treat server startup or /healthz as a finalization requirement. Continue every available file, syntax, structure, and other non-runtime validation."
+      : "";
 
   // In Developer Mode every project is a real server process inside a Linux
   // container — static-html is never a valid target.  If the stack still reads
@@ -1679,6 +1691,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
       : `You are MustaFlow's agentic app builder. Your job is to ${input.mode === "build" ? "create" : "refine"} a working ${stack} application that satisfies the user's request.`,
     "",
     platformNote,
+    liveServerCapabilityNote,
     "",
     "## What you are",
     "You are a tool-using agent, not a chatbot. Every turn you either call a tool (taking a real action with real consequences) or finish the task. You do not produce text descriptions of code — you write the code.",
@@ -1911,7 +1924,12 @@ function guessMime(path: string): string {
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const stack = resolveStackId(input.projectKind, input.projectFormat, input.stack);
-  const profile = CHECK_PROFILES[stack];
+  const baseProfile = CHECK_PROFILES[stack];
+  const liveServerAvailable = input.liveServerAvailable !== false;
+  const profile = {
+    ...baseProfile,
+    checks: checksForLiveServerCapability(baseProfile.checks, liveServerAvailable),
+  };
   const workspace = new FileWorkspace(input.existingFiles);
   workspace.primeInitial(input.existingFiles);
 
@@ -2085,7 +2103,17 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   }
 
   const model = MODEL_FOR_MODE[input.agentMode] ?? "gpt-5-mini";
-  const containerState = { id: input.containerId ?? null, installed: false };
+  const containerState = {
+    id: liveServerAvailable ? (input.containerId ?? null) : null,
+    installed: false,
+  };
+  if (!liveServerAvailable && baseProfile.checks.some((check) => check.id === "server-start")) {
+    await safeEvent(
+      input.onEvent,
+      "check_deferred",
+      "Server startup (healthz) deferred because live cloud-server infrastructure is unavailable. Continuing non-runtime validation.",
+    );
+  }
 
   // Task #542: discover MCP server tools at loop start so the model can call
   // them as `mcp__<server>__<tool>` alongside built-ins. Best-effort — if
@@ -7247,8 +7275,10 @@ async function runCheckProfile(
   // On-demand container provisioning for the check runner. If any check needs
   // a container and one isn't attached yet, provision it now (graceful no-op
   // if Fly isn't configured).
-  const needsContainer = checks.some((c) => c.runner !== "inprocess");
-  let effectiveContainerId = containerState?.id ?? input.containerId ?? null;
+  const needsContainer =
+    input.liveServerAvailable !== false && checks.some((c) => c.runner !== "inprocess");
+  let effectiveContainerId =
+    input.liveServerAvailable === false ? null : (containerState?.id ?? input.containerId ?? null);
   if (needsContainer && !effectiveContainerId && !input.signal.aborted) {
     try {
       const { provisionContainer } = await import("./container");
@@ -7335,6 +7365,16 @@ async function runCheckProfile(
         passed: false,
         durationMs: 0,
         message: "aborted",
+      });
+      continue;
+    }
+    if (c.id === "server-start" && input.liveServerAvailable === false) {
+      out.push({
+        id: c.id,
+        label: c.label,
+        passed: true,
+        durationMs: 0,
+        message: "deferred: live cloud-server infrastructure unavailable",
       });
       continue;
     }

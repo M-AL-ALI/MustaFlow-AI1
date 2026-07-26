@@ -74,6 +74,9 @@ export const projectsTable = pgTable(
     // python-fastapi = Python + FastAPI
     // Immutable after creation — duplicate the project to change stack.
     stack: text("stack").notNull().default("react-vite"),
+    // True when the user explicitly selected the stack at project creation.
+    // False preserves automatic architecture selection for callers that omit it.
+    stackLocked: boolean("stack_locked").notNull().default(false),
     // defaultAgent: user's preferred visible executor for this project.
     // "planning" = Planner, "main" = Main Agent. "task" is legacy compatibility.
     defaultAgent: text("default_agent").notNull().default("main"),

@@ -104,15 +104,16 @@ import {
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
 import { encryptionService } from "./encryption";
-import { CONTAINER_NOT_PROVISIONED, DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
+import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 import { CHECK_PROFILES, resolveStackId } from "./check-profiles";
 import { isContainerLayerConfigured } from "./container";
+import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
 
 /**
  * Pre-build gate for agentic projects.
  *
- * 1. Hard-fail guard — if builderMode is 'agentic' and containerId is null,
- *    the container has not been provisioned yet; the agent must not run.
+ * 1. Capability guard — if builderMode is 'agentic' and containerId is null,
+ *    runtime-only validation is deferred while the agent continues file work.
  *
  * 2. Container wake check — if the project has a containerId, wake it and
  *    wait up to 30 seconds for it to respond. Emits a narration event so the
@@ -126,7 +127,7 @@ import { isContainerLayerConfigured } from "./container";
  *    run a `SELECT 1` with 3-retry exponential back-off (1 s, 2 s, 4 s) to
  *    confirm the database is reachable before the agent loop starts.
  *
- * Returns { ok: false, message } when any check fails so the caller can
+ * Returns { ok: false, message } when an available runtime check fails so the caller can
  * emit a "failed" event and abort the task instead of crashing mid-loop.
  * Returns { ok: true } when the project has no container (e.g. static-html)
  * or when FLY_API_TOKEN / NEON_API_KEY are not configured (dev-mode).
@@ -152,13 +153,17 @@ async function runAgenticPreflightGate(
     return { ok: true };
   }
 
-  // ── 0. Hard-fail: agentic project with no container ──────────────────────
+  // ── 0. Capability gap: agentic project with no container ────────────────
   // builderMode='agentic' means a container should exist, but provisioning
-  // has not completed yet. Running the agent loop against a phantom container
-  // would silently no-op every file write.
+  // is an infrastructure capability gap, not an application failure. The loop
+  // writes to project_files and defers runtime-only checks without repair turns.
   if (builderMode === "agentic" && !containerId) {
-    await emitEvent(taskId, "container_unavailable", CONTAINER_NOT_PROVISIONED);
-    return { ok: false, message: CONTAINER_NOT_PROVISIONED };
+    await emitEvent(
+      taskId,
+      "live_server_deferred",
+      "Live cloud-server infrastructure is unavailable for this project. Continuing with file and non-runtime validation; server startup and healthz are deferred.",
+    );
+    return { ok: true };
   }
 
   // ── 0b. Preflight heartbeat ───────────────────────────────────────────────
@@ -2348,7 +2353,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // build we classify the prompt and pick the correct architecture — the
       // user never has to choose. Priority: mobile > full-stack > react > static.
       let resolvedIsMobile = isMobileProject;
-      if (kind === "build" && !isMobileProject) {
+      if (
+        shouldAutoDetectStack({
+          jobKind: kind,
+          isMobileProject,
+          stackLocked: project.stackLocked,
+        })
+      ) {
         try {
           await emitEvent(
             taskId,
@@ -2359,6 +2370,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const detectedStack = await detectRequiredStack(userPrompt, isDevMode);
           const stackChanged = detectedStack !== resolvedProjectStack;
           const becomesMobile = detectedStack === "mobile-cross";
+          const detectedProjectStack = becomesMobile ? "react-vite" : detectedStack;
+          const detectedProjectFormat =
+            detectedStack === "react-vite" ? "react-vite" : "static-html";
+          const previousProjectStack = resolvedProjectStack;
+          const previousProjectFormat = resolvedProjectFormat;
 
           if (stackChanged || becomesMobile) {
             logger.info(
@@ -2440,14 +2456,32 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   ),
                 );
             } else {
-              const newFormat = detectedStack === "react-vite" ? "react-vite" : "static-html";
               await db
                 .update(projectsTable)
-                .set({ stack: detectedStack, projectFormat: newFormat })
+                .set({ stack: detectedStack, projectFormat: detectedProjectFormat })
                 .where(eq(projectsTable.id, projectId));
               resolvedProjectStack = detectedStack;
-              resolvedProjectFormat = newFormat;
+              resolvedProjectFormat = detectedProjectFormat;
             }
+
+            await emitEvent(
+              taskId,
+              "architecture_changed",
+              architectureChangeMessage({
+                previousStack: previousProjectStack,
+                previousFormat: previousProjectFormat,
+                nextStack: detectedProjectStack,
+                nextFormat: detectedProjectFormat,
+              }),
+              undefined,
+              {
+                source: "auto-detection",
+                previousStack: previousProjectStack,
+                previousFormat: previousProjectFormat,
+                nextStack: detectedProjectStack,
+                nextFormat: detectedProjectFormat,
+              },
+            );
 
             // Reload project row so downstream code has fresh containerId etc.
             const [refreshed] = await db
@@ -2673,7 +2707,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: input.planContext ?? null,
                   existingFiles: [],
-                  containerId: project.containerId ?? null,
+                  containerId:
+                    isContainerLayerConfigured() && project.containerId
+                      ? project.containerId
+                      : null,
+                  liveServerAvailable: isContainerLayerConfigured() && Boolean(project.containerId),
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -3204,7 +3242,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: input.planContext ?? null,
                   existingFiles,
-                  containerId: project.containerId ?? null,
+                  containerId:
+                    isContainerLayerConfigured() && project.containerId
+                      ? project.containerId
+                      : null,
+                  liveServerAvailable: isContainerLayerConfigured() && Boolean(project.containerId),
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -3528,7 +3570,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 knowledgeContext: knowledgeContext || undefined,
                 planContext: input.planContext ?? null,
                 existingFiles,
-                containerId: project.containerId ?? null,
+                containerId:
+                  isContainerLayerConfigured() && project.containerId ? project.containerId : null,
+                liveServerAvailable: isContainerLayerConfigured() && Boolean(project.containerId),
                 policyStrictness:
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,

@@ -2046,6 +2046,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // Builder architecture selection lock.
+  {
+    name: "migrate-builder-stack-lock",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE projects ADD COLUMN IF NOT EXISTS stack_locked BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+    },
+  },
+
   // ── migrate-task-agent-mode ─────────────────────────────────────────────────
   {
     name: "migrate-task-agent-mode",

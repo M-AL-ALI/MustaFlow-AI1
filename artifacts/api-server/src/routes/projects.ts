@@ -30,6 +30,7 @@ import {
   getRollingAverageMs,
 } from "../lib/provisioning";
 import { isContainerLayerConfigured } from "../lib/container";
+import { resolveInitialStackSelection } from "../lib/stack-selection";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -219,15 +220,14 @@ router.post("/projects", async (req, res): Promise<void> => {
 
   // Resolve stack — mobile projects don't use the stack system; web defaults to react-vite.
   const isMobilePlatform = platform !== "web";
-  const resolvedStack: string = isMobilePlatform
-    ? "react-vite"
-    : (projectInput.stack ?? "react-vite");
-
-  // projectFormat is only "react-vite" for the react-vite stack.
-  // All other stacks (including nextjs, node-api, python-*) use the server's native tooling,
-  // so they don't go through the browser WebContainer flow.
-  const projectFormat =
-    resolvedStack === "react-vite" && !isMobilePlatform ? "react-vite" : "static-html";
+  const {
+    stack: resolvedStack,
+    projectFormat,
+    stackLocked,
+  } = resolveInitialStackSelection({
+    requestedStack: projectInput.stack,
+    isMobilePlatform,
+  });
 
   const [project] = await db
     .insert(projectsTable)
@@ -240,6 +240,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       platform,
       projectFormat,
       stack: resolvedStack,
+      stackLocked,
       // Task #738 — agentic projects get a real Fly container + Neon Postgres.
       // The frontend mode selector explicitly sets builderMode; default to
       // "agentic" when not provided (preserves backwards compatibility).

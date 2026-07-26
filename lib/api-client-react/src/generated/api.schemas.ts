@@ -617,6 +617,8 @@ export interface Project {
   projectFormat?: ProjectProjectFormat;
   /** Technology stack chosen at project creation. Immutable — duplicate the project to change stack. */
   stack?: ProjectStack;
+  /** True when the user explicitly selected the technology stack at project creation. False keeps first-build automatic architecture detection available. */
+  stackLocked?: boolean;
   /** Which database engine is provisioned for this project. none = no DB. */
   dbProvider?: ProjectDbProvider;
   /** Current database lifecycle state. */

@@ -41,6 +41,16 @@ export type CheckProfile = {
   checks: CheckSpec[];
 };
 
+export function checksForLiveServerCapability(
+  checks: CheckSpec[],
+  liveServerAvailable: boolean,
+): CheckSpec[] {
+  if (liveServerAvailable) return checks;
+  return checks.map((check) =>
+    check.id === "server-start" ? { ...check, required: false } : check,
+  );
+}
+
 const FIVE_MIN = 5 * 60_000;
 const TWO_MIN = 2 * 60_000;
 const ONE_MIN = 60_000;

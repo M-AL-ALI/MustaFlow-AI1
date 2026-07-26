@@ -4951,6 +4951,9 @@ components:
           type: string
           enum: [react-vite, nextjs, node-api, python-flask, python-fastapi, go-gin]
           description: "Technology stack chosen at project creation. Immutable — duplicate the project to change stack."
+        stackLocked:
+          type: boolean
+          description: "True when the user explicitly selected the technology stack at project creation. False keeps first-build automatic architecture detection available."
         dbProvider:
           type: string
           enum: [none, postgres, sqlite]
