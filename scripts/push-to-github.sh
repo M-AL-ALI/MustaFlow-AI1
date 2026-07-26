@@ -41,8 +41,7 @@ git add \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
-  artifacts/api-server/src/routes/files.ts \
-  lib/api-zod/src/generated/api.ts 2>/dev/null || true
+  .replit 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
