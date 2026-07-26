@@ -14,6 +14,13 @@ const versionsSource = readSource("artifacts/api-server/src/routes/versions.ts")
 const filesSource = readSource("artifacts/api-server/src/routes/files.ts");
 const previewEnvSource = readSource("artifacts/api-server/src/routes/preview-env.ts");
 const livePreviewProxySource = readSource("artifacts/api-server/src/lib/livePreviewProxy.ts");
+const projectFilesPreviewSource = readSource(
+  "artifacts/api-server/src/lib/project-files-preview.ts",
+);
+const containerSource = readSource("artifacts/api-server/src/lib/container.ts");
+const previewTabSource = readSource(
+  "artifacts/mustaflow/src/pages/projects/components/preview-tab.tsx",
+);
 const builderSource = readSource("artifacts/api-server/src/lib/builder.ts");
 const agentLoopSource = readSource("artifacts/api-server/src/lib/agent-loop.ts");
 
@@ -161,6 +168,21 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(livePreviewProxySource).toContain("isFlyProxyReachable");
     expect(livePreviewProxySource).not.toContain(
       "Deploy to production to test agentic app previews",
+    );
+  });
+
+  it("falls back to project_files when the Fly container layer is unavailable", () => {
+    expect(containerSource).toContain("export function isContainerLayerConfigured");
+    expect(livePreviewProxySource).toContain("serveProjectFilesPreview");
+    expect(livePreviewProxySource).toContain("Cleared stale preview container");
+    expect(projectFilesPreviewSource).toContain("Static preview — live server starting soon");
+    expect(projectFilesPreviewSource).toContain("showStaticBanner");
+  });
+
+  it("prefers WebContainer for React/Vite unless Fly is genuinely live", () => {
+    expect(previewTabSource).toContain("isReactVite && !containerLive");
+    expect(previewTabSource).toContain(
+      "const src = webContainerLive ? wc.previewUrl! : previewSrc",
     );
   });
 

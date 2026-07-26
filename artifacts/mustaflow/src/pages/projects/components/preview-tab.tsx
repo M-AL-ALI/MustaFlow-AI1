@@ -913,11 +913,12 @@ export function PreviewTab({
   // at the WC-provided URL (no sandbox needed — WC handles its own isolation).
   // For static-html projects, the existing DB-served preview route is used.
   const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => {
-    const wcLive = isReactVite && wc.status === "ready" && wc.previewUrl != null;
-    const src = wcLive ? wc.previewUrl! : previewSrc;
+    const webContainerLive =
+      isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
+    const src = webContainerLive ? wc.previewUrl! : previewSrc;
     return (
       <iframe
-        key={wcLive ? `wc-${device}-${wc.previewUrl}` : `src-${device}-${iframeKey}`}
+        key={webContainerLive ? `wc-${device}-${wc.previewUrl}` : `src-${device}-${iframeKey}`}
         ref={iframeRef}
         src={src}
         title="App preview"
@@ -925,7 +926,7 @@ export function PreviewTab({
         className={cn("w-full border-0", extraClass)}
         style={extraStyle}
         sandbox={
-          wcLive
+          webContainerLive
             ? "allow-scripts allow-forms allow-popups allow-same-origin allow-modals"
             : "allow-scripts allow-forms allow-popups"
         }
@@ -1692,7 +1693,8 @@ export function PreviewTab({
 
         {/* Runtime mode badge — shows which preview engine is active */}
         {(() => {
-          const wcLive = isReactVite && wc.status === "ready" && wc.previewUrl != null;
+          const webContainerLive =
+            isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
           const containerRunning = isAgentic && containerStatus === "running" && !!containerUrl;
           let label: string;
           let subtitle: string;
@@ -1701,7 +1703,7 @@ export function PreviewTab({
             label = "Full App Preview — Container";
             subtitle = "Live container; backend routes and server logs available";
             badgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/25";
-          } else if (wcLive) {
+          } else if (webContainerLive) {
             label = "Quick Preview — WebContainer";
             subtitle = "In-browser sandbox; some Node.js APIs unavailable";
             badgeClass = "bg-violet-500/15 text-violet-400 border-violet-500/25";

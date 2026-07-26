@@ -17,6 +17,7 @@ import {
   loadPreviewProject,
   userCanPreviewProject,
 } from "../lib/livePreviewProxy";
+import { serveProjectFilesPreview } from "../lib/project-files-preview";
 
 const router: IRouter = Router();
 
@@ -643,68 +644,13 @@ router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<voi
   }
 
   // ─── Legacy: serve files from the project_files table ────────────────────
-  const project = {
-    id: previewProject.id,
-    status: previewProject.status,
-    ownerId: previewProject.ownerId,
-    organizationId: previewProject.organizationId,
-  };
   const splat = req.params.splat;
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
-
-  const [row] = await db
-    .select()
-    .from(projectFilesTable)
-    .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, filePath)));
-
-  if (!row) {
-    // Fallback to index.html so single-page-app routes resolve correctly
-    const [fallback] = await db
-      .select()
-      .from(projectFilesTable)
-      .where(
-        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")),
-      );
-    if (!fallback) {
-      res
-        .status(404)
-        .type("text/html")
-        .send(
-          `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">No preview yet</h1><p>Generate your app from the chat to see it here.</p></body></html>`,
-        );
-      return;
-    }
-    // Inject mock flag for owner preview (never for published apps)
-    const isOwnerPreview = project.status !== "published";
-    res
-      .type("text/html")
-      .setHeader("Cache-Control", "no-store, must-revalidate")
-      .send(
-        injectBridge(
-          fallback.content,
-          isOwnerPreview ? `${MOCK_FLAG_SCRIPT}${VISUAL_EDIT_SCRIPT}` : "",
-        ),
-      );
-    return;
-  }
-
-  const mime = row.mimeType || guessMime(row.path);
-  const isHtml = mime === "text/html" || row.path.endsWith(".html");
-  const isOwnerPreview = project.status !== "published";
-  res.type(mime).setHeader("Cache-Control", "no-store, must-revalidate");
-  if (isBinaryMime(mime)) {
-    res.end(Buffer.from(row.content, "base64"));
-  } else {
-    res.send(
-      isHtml
-        ? injectBridge(
-            row.content,
-            isOwnerPreview ? `${MOCK_FLAG_SCRIPT}${VISUAL_EDIT_SCRIPT}` : "",
-          )
-        : row.content,
-    );
-  }
+  await serveProjectFilesPreview(res, projectId, filePath, {
+    projectStatus: previewProject.status,
+    showStaticBanner: previewProject.builderMode === "agentic",
+  });
 });
 
 router.post(

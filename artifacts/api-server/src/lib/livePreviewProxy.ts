@@ -25,10 +25,10 @@ import { and, eq } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
 import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
-import { provisionContainer, isContainerLayerConfigured } from "./container";
+import { isContainerLayerConfigured, provisionContainer } from "./container";
 import { getContainerSecretMap } from "./container-secrets";
-import { isClientRenderableStack, serveProjectFilesPreview } from "./project-files-preview";
 import { logger } from "./logger";
+import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 
 /**
  * The Fly proxy app hostname derived from the same env var used in container.ts.
@@ -134,7 +134,21 @@ export async function loadPreviewProject(projectId: number): Promise<PreviewProj
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
-  return project ?? null;
+  if (!project) return null;
+
+  if (!isContainerLayerConfigured() && project.containerId) {
+    await db
+      .update(projectsTable)
+      .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })
+      .where(eq(projectsTable.id, projectId));
+    logger.info(
+      { projectId, staleContainerId: project.containerId },
+      "Cleared stale preview container because the container layer is disabled",
+    );
+    return { ...project, containerId: null, containerUrl: null, containerStatus: "stopped" };
+  }
+
+  return project;
 }
 
 /** Confirm the requester is allowed to preview an unpublished project. */
@@ -315,16 +329,39 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
       ) {
         try {
           const isEnvError = (err as NodeJS.ErrnoException).code === "ENOTFOUND";
+          if (isEnvError) {
+            const expressResponse = maybeRes as Response;
+            void loadPreviewProject(projectId)
+              .then((p) =>
+                serveProjectFilesPreview(
+                  expressResponse,
+                  projectId,
+                  previewFilePathFromUrl(expressReq.originalUrl ?? req.url),
+                  {
+                    projectStatus: p?.status ?? "draft",
+                    showStaticBanner: true,
+                    previewState: "static-fallback",
+                  },
+                ),
+              )
+              .catch((fallbackErr: unknown) => {
+                logger.warn({ err: fallbackErr, projectId }, "Preview DB fallback failed");
+                try {
+                  sendHtml(expressResponse, 502, PROXY_UNAVAILABLE_HTML(projectId), "proxy-unavailable");
+                } catch {
+                  /* swallow */
+                }
+              });
+            return;
+          }
           sendHtml(
             maybeRes as Response,
             502,
-            isEnvError
-              ? PROXY_UNAVAILABLE_HTML(projectId)
-              : ERROR_HTML(
-                  projectId,
-                  "Couldn't reach the dev server inside the container. It may still be starting or have crashed — check the logs and retry.",
-                ),
-            isEnvError ? "proxy-unavailable" : "server-unreachable",
+            ERROR_HTML(
+              projectId,
+              "Couldn't reach the dev server inside the container. It may still be starting or have crashed — check the logs and retry.",
+            ),
+            "server-unreachable",
           );
         } catch {
           /* swallow */
@@ -350,20 +387,20 @@ export async function handleLivePreviewHttp(
   next: NextFunction,
   project: PreviewProject,
 ): Promise<void> {
-  // No container ever provisioned — route based on whether Fly is available.
+  // Container layer not configured in this environment — serve files from DB.
+  if (!isContainerLayerConfigured()) {
+    await serveProjectFilesPreview(
+      res,
+      project.id,
+      previewFilePathFromUrl(req.originalUrl ?? req.url),
+      { projectStatus: project.status, showStaticBanner: true, previewState: "static-fallback" },
+    );
+    return;
+  }
+
+  // No container provisioned yet — wake (best-effort) and show cold-start page.
   if (!project.containerId || !project.containerUrl) {
-    if (!isContainerLayerConfigured()) {
-      // Fly not configured in this environment.  Server-stack projects cannot
-      // run in the browser so serve a DB-snapshot fallback with a banner.
-      // react-vite / static stacks are handled client-side by WebContainer —
-      // fall through to COLD_START_HTML so the frontend knows to boot one.
-      if (!isClientRenderableStack(project.stack)) {
-        await serveProjectFilesPreview(res, project.id, project.stack);
-        return;
-      }
-    } else {
-      wakeContainer(project.id);
-    }
+    wakeContainer(project.id);
     sendHtml(res, 503, COLD_START_HTML(project.id), "container-starting");
     return;
   }
@@ -397,7 +434,12 @@ export async function handleLivePreviewHttp(
   // 503 would trigger the COLD_START_HTML auto-refresh meta tag.
   const reachable = await isFlyProxyReachable();
   if (!reachable) {
-    sendHtml(res, 502, PROXY_UNAVAILABLE_HTML(project.id), "proxy-unavailable");
+    await serveProjectFilesPreview(
+      res,
+      project.id,
+      previewFilePathFromUrl(req.originalUrl ?? req.url),
+      { projectStatus: project.status, showStaticBanner: true, previewState: "static-fallback" },
+    );
     return;
   }
 

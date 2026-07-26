@@ -40,7 +40,16 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
-  scripts/push-to-github.sh 2>/dev/null || true
+  scripts/push-to-github.sh \
+  artifacts/api-server/src/lib/container.ts \
+  artifacts/api-server/src/lib/jobs.ts \
+  artifacts/api-server/src/lib/livePreviewProxy.ts \
+  artifacts/api-server/src/lib/preview-architecture.test.ts \
+  artifacts/api-server/src/lib/project-files-preview.ts \
+  artifacts/api-server/src/lib/provisioning.ts \
+  artifacts/api-server/src/routes/files.ts \
+  artifacts/api-server/src/routes/projects.ts \
+  artifacts/mustaflow/src/pages/projects/components/preview-tab.tsx 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then

@@ -29,6 +29,7 @@ import {
   provisionPreviewDb,
   getRollingAverageMs,
 } from "../lib/provisioning";
+import { isContainerLayerConfigured } from "../lib/container";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -249,7 +250,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       // flashing "Your project is being set up" before the job runs.
       provisioningStatus:
         (requestedBuilderMode ?? "agentic") === "agentic" &&
-        Boolean(process.env.FLY_API_TOKEN) &&
+        isContainerLayerConfigured() &&
         Boolean(process.env.NEON_API_KEY)
           ? "provisioning"
           : "idle",
@@ -1271,7 +1272,7 @@ export default function HomeScreen() {
   // polls `provisioningStatus` to surface progress.
   // Only enqueue provisioning when tokens are present; otherwise the
   // project was already stamped 'idle' above and no job is needed.
-  if (project.builderMode === "agentic" && process.env.FLY_API_TOKEN && process.env.NEON_API_KEY) {
+  if (project.builderMode === "agentic" && isContainerLayerConfigured() && process.env.NEON_API_KEY) {
     enqueueProvisionProjectJob(project.id);
   }
 
