@@ -663,29 +663,13 @@ export function PreviewTab({
     return `/api/projects/${project.id}/preview${path}${sep}t=${iframeKey}`;
   })();
 
-  // After a build completes for a react-vite project, resync the WC with fresh files.
-  // We detect build completion via project.status transitioning away from "building".
-  // Use a ref for the restart fn to keep the effect deps stable (avoids re-running on every render).
-  //
-  // Task #743: agentic-mode projects with a running container already get fresh
-  // code via Vite HMR over the proxied container URL — restarting the WC (or
-  // bumping the iframe cache-buster) would cause a full reload and break the
-  // HMR session. Skip the restart in that case.
+  // Backend file events are content-aware and coalesced by useWebContainer.
+  // Build completion must not reboot the browser runtime: source edits belong
+  // to Vite HMR, while dependency/config changes trigger their precise actions.
   const isAgentic = project.builderMode === "agentic";
   const containerLive = containerStatus === "running" && !!containerUrl;
   const webContainerLive =
     isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
-  const wcRestartRef = useRef(wc.restart);
-  wcRestartRef.current = wc.restart;
-  const prevBuildStatusRef = useRef(project.status);
-  useEffect(() => {
-    const prev = prevBuildStatusRef.current;
-    prevBuildStatusRef.current = project.status;
-    if (isAgentic && containerLive) return;
-    if (isReactVite && prev === "building" && project.status !== "building" && hasFiles) {
-      wcRestartRef.current();
-    }
-  }, [project.status, isReactVite, hasFiles, isAgentic, containerLive]);
 
   // Detect agentic preview failure class from the backend header. A 502 can mean
   // either the Fly proxy is unreachable or the app server crashed; keep those

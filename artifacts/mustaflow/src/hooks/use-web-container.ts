@@ -2,6 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { WebContainer, FileSystemTree } from "@webcontainer/api";
 import { getProjectAllFileContent } from "@workspace/api-client-react";
 import type { ProjectFilesChangedPayload } from "@/lib/event-types";
+import {
+  hashWebContainerContent,
+  isDevServerConfigPath,
+  isPackageDependencyPath,
+  WebContainerSyncController,
+} from "./web-container-sync";
 
 export type WebContainerStatus =
   | "idle"
@@ -69,15 +75,6 @@ let _wcBootPromise: Promise<WebContainer> | null = null;
 // unchanged (dependencies are already in node_modules from the previous mount).
 const _installHashCache = new Map<number, string>();
 
-/** Simple djb2-style hash — good enough to detect package.json drift. */
-function hashString(s: string): string {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) + h) ^ s.charCodeAt(i);
-  }
-  return (h >>> 0).toString(36);
-}
-
 async function acquireWebContainer(): Promise<WebContainer> {
   if (_wcInstance) return _wcInstance;
   if (_wcBootPromise) {
@@ -135,8 +132,8 @@ export function useWebContainer({
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<WebContainerLog[]>([]);
 
-  const wcRef = useRef<WebContainer | null>(null);
   const devProcessRef = useRef<{ kill: () => void } | null>(null);
+  const syncControllerRef = useRef<WebContainerSyncController | null>(null);
   const mountedRef = useRef(true);
   const projectIdRef = useRef(projectId);
   const serverReadyListenerRef = useRef<(() => void) | null>(null);
@@ -145,6 +142,8 @@ export function useWebContainer({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      syncControllerRef.current?.dispose();
+      syncControllerRef.current = null;
       devProcessRef.current?.kill();
       devProcessRef.current = null;
     };
@@ -159,6 +158,8 @@ export function useWebContainer({
     async (pid: number) => {
       if (!isSupported || !enabled) return;
 
+      syncControllerRef.current?.dispose();
+      syncControllerRef.current = null;
       setStatus("booting");
       setError(null);
       setPreviewUrl(null);
@@ -168,7 +169,6 @@ export function useWebContainer({
         addLog("[WC] Booting WebContainer…");
         const wc = await acquireWebContainer();
         if (!mountedRef.current || projectIdRef.current !== pid) return;
-        wcRef.current = wc;
 
         // Fetch all project files with content in one shot
         addLog("[WC] Fetching project files…");
@@ -199,6 +199,97 @@ export function useWebContainer({
         });
         serverReadyListenerRef.current = unlisten;
 
+        const waitForServerReady = (): Promise<void> =>
+          new Promise<void>((resolve) => {
+            let stopListening = (): void => {};
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              stopListening();
+              resolve();
+            };
+            const timer = setTimeout(finish, 30_000);
+            stopListening = wc.on("server-ready", finish);
+          });
+
+        const syncController = new WebContainerSyncController({
+          writeFile: async (path, content) => {
+            const segments = path.split("/");
+            if (segments.length > 1) {
+              await wc.fs.mkdir(segments.slice(0, -1).join("/"), { recursive: true });
+            }
+            await wc.fs.writeFile(path, content);
+          },
+          removeFile: async (path) => {
+            await wc.fs.rm(path);
+          },
+          installDependencies: async (changedFiles) => {
+            addLog("[WC] Dependency manifest changed — running npm install once…");
+            try {
+              const installProcess = await wc.spawn("npm", ["install"]);
+              installProcess.output.pipeTo(
+                new WritableStream({
+                  write(chunk: string) {
+                    addLog(chunk);
+                  },
+                }),
+              );
+              const exitCode = await installProcess.exit;
+              if (!mountedRef.current || projectIdRef.current !== pid) return false;
+              if (exitCode !== 0) {
+                addLog("[WC] npm install failed — keeping the current dev server running.");
+                return false;
+              }
+
+              const packageJson = changedFiles.find((file) => file.path === "package.json");
+              if (packageJson?.content !== undefined) {
+                _installHashCache.set(pid, hashWebContainerContent(packageJson.content));
+              }
+              return true;
+            } catch (err) {
+              addLog(
+                `[WC] npm install error — keeping the current dev server running: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+              return false;
+            }
+          },
+          restartDevServer: async () => {
+            devProcessRef.current?.kill();
+            devProcessRef.current = null;
+            if (!mountedRef.current || projectIdRef.current !== pid) return;
+
+            setStatus("starting");
+            addLog("[WC] Dev-server config changed — restarting once…");
+            try {
+              const ready = waitForServerReady();
+              const devProcess = await wc.spawn("npm", ["run", "dev"]);
+              devProcessRef.current = devProcess;
+              devProcess.output.pipeTo(
+                new WritableStream({
+                  write(chunk: string) {
+                    addLog(chunk);
+                  },
+                }),
+              );
+              await ready;
+            } catch (err) {
+              setStatus("error");
+              addLog(
+                `[WC] Dev server restart failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+          },
+          warn: addLog,
+        });
+        syncController.seed(files);
+        syncControllerRef.current = syncController;
+
         // Kill any existing dev process
         devProcessRef.current?.kill();
         devProcessRef.current = null;
@@ -206,7 +297,7 @@ export function useWebContainer({
         // Package install caching: hash the package.json to skip npm install
         // when dependencies haven't changed since the last successful boot.
         const pkgFile = files.find((f) => f.path === "package.json");
-        const pkgHash = pkgFile ? hashString(pkgFile.content) : "";
+        const pkgHash = pkgFile ? hashWebContainerContent(pkgFile.content) : "";
         const cachedHash = _installHashCache.get(pid);
         const installNeeded = !pkgHash || pkgHash !== cachedHash;
 
@@ -261,150 +352,26 @@ export function useWebContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, enabled, isSupported]);
 
-  // Listen for file-saved events from the code editor and sync to the running WC FS
+  // Code-editor saves and backend SSE payloads share one content-aware queue.
+  // Duplicate task/project events and generation bursts are coalesced before
+  // touching the virtual FS, so ordinary source updates remain HMR-only.
   const syncFile = useCallback(async (path: string, content: string) => {
-    const wc = wcRef.current;
-    if (!wc) return;
-    try {
-      const segments = path.split("/");
-      if (segments.length > 1) {
-        const dir = segments.slice(0, -1).join("/");
-        await wc.fs.mkdir(dir, { recursive: true });
-      }
-      await wc.fs.writeFile(path, content);
-    } catch {
-      // Non-fatal: Vite HMR will handle retry on next hot-update
-    }
+    await syncControllerRef.current?.enqueue({
+      projectId: projectIdRef.current,
+      operationType: "manual-save",
+      changedPaths: [path],
+      removedPaths: [],
+      files: { [path]: content },
+      requiresInstall: isPackageDependencyPath(path),
+      requiresRestart: isDevServerConfigPath(path),
+    });
   }, []);
 
-  /**
-   * Sync a batch of backend-written files into the WebContainer FS.
-   * Called from PreviewTab when a project_files_changed SSE event arrives.
-   * - Writes all changed files (creating parent dirs as needed).
-   * - Removes deleted files (best-effort, non-fatal).
-   * - Re-runs npm install + restart when package.json changes.
-   * - Restarts dev server (no install) when vite.config/tsconfig/.env changes.
-   * - Otherwise Vite HMR picks up changes without a restart.
-   */
   const syncFromBackend = useCallback(
     async (payload: ProjectFilesChangedPayload): Promise<void> => {
-      const wc = wcRef.current;
-      if (!wc) return;
-
-      // Write all changed files
-      for (const [path, content] of Object.entries(payload.files)) {
-        try {
-          const segments = path.split("/");
-          if (segments.length > 1) {
-            const dir = segments.slice(0, -1).join("/");
-            await wc.fs.mkdir(dir, { recursive: true });
-          }
-          await wc.fs.writeFile(path, content);
-        } catch {
-          // Non-fatal: continue with remaining files
-        }
-      }
-
-      // Remove deleted files (best-effort)
-      for (const path of payload.removedPaths) {
-        try {
-          await wc.fs.rm(path);
-        } catch {
-          // Non-fatal: file may already not exist
-        }
-      }
-
-      // Helper: resolves when WC emits "server-ready" (or after 30 s timeout).
-      // Additive to the boot-flow serverReadyListenerRef — does not interfere with it.
-      const waitForServerReady = (): Promise<void> =>
-        new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, 30_000);
-          const unlisten = wc.on("server-ready", () => {
-            clearTimeout(timer);
-            unlisten();
-            resolve();
-          });
-        });
-
-      if (payload.requiresInstall) {
-        // Kill dev server, reinstall, restart
-        devProcessRef.current?.kill();
-        devProcessRef.current = null;
-        if (!mountedRef.current) return;
-        setStatus("installing");
-        addLog("[WC] package.json changed — running npm install…");
-        try {
-          const installProcess = await wc.spawn("npm", ["install"]);
-          installProcess.output.pipeTo(
-            new WritableStream({
-              write(chunk: string) {
-                addLog(chunk);
-              },
-            }),
-          );
-          const exitCode = await installProcess.exit;
-          if (!mountedRef.current) return;
-          if (exitCode !== 0) {
-            addLog("[WC] npm install failed — dev server not restarted");
-            setStatus("error");
-            return;
-          }
-          const pkgContent = payload.files["package.json"];
-          if (pkgContent) _installHashCache.set(projectIdRef.current, hashString(pkgContent));
-        } catch (err) {
-          addLog(`[WC] npm install error: ${err instanceof Error ? err.message : String(err)}`);
-          return;
-        }
-        if (!mountedRef.current) return;
-        setStatus("starting");
-        addLog("[WC] Restarting dev server…");
-        try {
-          const devProcess = await wc.spawn("npm", ["run", "dev"]);
-          devProcessRef.current = devProcess;
-          devProcess.output.pipeTo(
-            new WritableStream({
-              write(chunk: string) {
-                addLog(chunk);
-              },
-            }),
-          );
-          // Await server-ready so callers (e.g. refreshTrigger effect) delay iframe
-          // reload until the new server is actually serving requests.
-          await waitForServerReady();
-        } catch (err) {
-          addLog(
-            `[WC] Dev server restart failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      } else if (payload.requiresRestart) {
-        // Config changed — kill and restart without reinstalling
-        devProcessRef.current?.kill();
-        devProcessRef.current = null;
-        if (!mountedRef.current) return;
-        setStatus("starting");
-        addLog("[WC] Config file changed — restarting dev server…");
-        try {
-          const devProcess = await wc.spawn("npm", ["run", "dev"]);
-          devProcessRef.current = devProcess;
-          devProcess.output.pipeTo(
-            new WritableStream({
-              write(chunk: string) {
-                addLog(chunk);
-              },
-            }),
-          );
-          // Await server-ready so callers delay iframe reload until the server is up.
-          await waitForServerReady();
-        } catch (err) {
-          addLog(
-            `[WC] Dev server restart failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-      // If neither requiresInstall nor requiresRestart, Vite HMR picks up the
-      // FS writes automatically — no explicit restart needed.
+      await syncControllerRef.current?.enqueue(payload);
     },
-    [addLog],
+    [],
   );
 
   useEffect(() => {

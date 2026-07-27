@@ -41,6 +41,10 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
+  artifacts/mustaflow/src/hooks/__tests__/web-container-sync.test.ts \
+  artifacts/mustaflow/src/hooks/web-container-sync.ts \
+  artifacts/mustaflow/src/hooks/use-web-container.ts \
+  artifacts/mustaflow/src/pages/projects/components/preview-tab.tsx \
   scripts/push-to-github.sh \
   .replit 2>/dev/null || true
 
