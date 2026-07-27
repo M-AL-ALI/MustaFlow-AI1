@@ -39,6 +39,28 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  artifacts/api-server/src/lib/agent-loop.ts \
+  artifacts/api-server/src/lib/builder-task-completion.ts \
+  artifacts/api-server/src/lib/builder-wave7b-completion-honesty.test.ts \
+  artifacts/api-server/src/lib/jobs.ts \
+  artifacts/api-server/src/lib/reviewer-context.ts \
+  artifacts/api-server/src/lib/startup-migrations.ts \
+  artifacts/api-server/src/lib/subagent.ts \
+  artifacts/mustaflow/src/components/agent-thinking-bubble.tsx \
+  artifacts/mustaflow/src/lib/builder-completion.test.ts \
+  artifacts/mustaflow/src/lib/builder-completion.ts \
+  artifacts/mustaflow/src/pages/projects/components/activity-stream.tsx \
+  artifacts/mustaflow/src/pages/projects/components/chat-history.tsx \
+  artifacts/mustaflow/src/pages/projects/components/zero-agent-panel.tsx \
+  lib/api-client-react/src/generated/api.schemas.ts \
+  lib/api-spec/openapi.yaml \
+  lib/api-zod/src/generated/api.ts \
+  lib/api-zod/src/generated/types/agentLoopData.ts \
+  lib/api-zod/src/generated/types/agentLoopDataCompletionKind.ts \
+  lib/api-zod/src/generated/types/agentTask.ts \
+  lib/api-zod/src/generated/types/agentTaskCompletionKind.ts \
+  lib/api-zod/src/generated/types/index.ts \
+  lib/db/src/schema/tasks.ts \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \

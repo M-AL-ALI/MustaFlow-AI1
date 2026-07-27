@@ -32,7 +32,12 @@ import type {
 } from "openai/resources/chat/completions";
 import type { AgentMode } from "./ai";
 import type { BuilderFile, BuilderResult, Blueprint, ConversationTurn } from "./builder";
-import type { TaskReport, E2eRunSummary, E2eScenarioResult } from "@workspace/db";
+import type {
+  AgentTaskCompletionKind,
+  TaskReport,
+  E2eRunSummary,
+  E2eScenarioResult,
+} from "@workspace/db";
 import {
   runE2eScenarios,
   runUserSpecs,
@@ -207,6 +212,7 @@ export type AgentLoopReport = {
     | "check-blocked"
     | "rate_limited"
     | "container-unavailable";
+  completionKind: AgentTaskCompletionKind;
   toolCalls: ToolCallRecord[];
   commandsRun: CommandRecord[];
   checkResults: CheckResultRecord[];
@@ -241,6 +247,33 @@ export type AgentLoopReport = {
     description?: string;
   }>;
 };
+
+export function completionKindForTerminationReason(
+  reason: AgentLoopReport["terminationReason"],
+): AgentTaskCompletionKind {
+  switch (reason) {
+    case "finalized":
+      return "finalized";
+    case "step-cap":
+      return "step_cap";
+    case "wall-clock":
+      return "wall_clock";
+    case "repeated-error":
+      return "repeated_error";
+    case "model-stopped":
+      return "model_stopped";
+    case "aborted":
+      return "aborted";
+    case "checks-failed":
+      return "checks_failed";
+    case "check-blocked":
+      return "check_blocked";
+    case "rate_limited":
+      return "rate_limited";
+    case "container-unavailable":
+      return "container_unavailable";
+  }
+}
 
 export type AgentLoopResult = {
   files: BuilderFile[];
@@ -3289,6 +3322,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         totalToolCalls: toolCalls.length,
         totalTokens,
         terminationReason,
+        completionKind: completionKindForTerminationReason(terminationReason),
         toolCalls,
         commandsRun,
         checkResults,
@@ -3598,6 +3632,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       totalToolCalls: toolCalls.length,
       totalTokens,
       terminationReason,
+      completionKind: completionKindForTerminationReason(terminationReason),
       toolCalls,
       commandsRun,
       checkResults,

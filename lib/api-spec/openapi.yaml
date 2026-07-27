@@ -8070,6 +8070,23 @@ components:
               canceled,
               discarded,
             ]
+        completionKind:
+          type: ["string", "null"]
+          enum:
+            [
+              finalized,
+              step_cap,
+              wall_clock,
+              repeated_error,
+              model_stopped,
+              aborted,
+              checks_failed,
+              check_blocked,
+              rate_limited,
+              container_unavailable,
+              null,
+            ]
+          description: "First-class agent-loop completion outcome. Null for legacy or non-agentic tasks."
         agentIdentity:
           type: string
           enum: [planning, task, main]
@@ -10658,6 +10675,21 @@ components:
         totalToolCalls: { type: integer }
         totalTokens: { type: integer }
         terminationReason: { type: string }
+        completionKind:
+          type: string
+          enum:
+            [
+              finalized,
+              step_cap,
+              wall_clock,
+              repeated_error,
+              model_stopped,
+              aborted,
+              checks_failed,
+              check_blocked,
+              rate_limited,
+              container_unavailable,
+            ]
         toolCalls:
           type: array
           items:

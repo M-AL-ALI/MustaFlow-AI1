@@ -20,6 +20,18 @@ export type TestResult = {
   durationMs: number;
 };
 
+export type AgentTaskCompletionKind =
+  | "finalized"
+  | "step_cap"
+  | "wall_clock"
+  | "repeated_error"
+  | "model_stopped"
+  | "aborted"
+  | "checks_failed"
+  | "check_blocked"
+  | "rate_limited"
+  | "container_unavailable";
+
 export type TaskReport = {
   userRequest: string;
   blueprint?: Record<string, unknown> | null;
@@ -223,6 +235,7 @@ export type TaskReport = {
     totalToolCalls: number;
     totalTokens: number;
     terminationReason: string;
+    completionKind: AgentTaskCompletionKind;
     toolCalls: Array<{
       step: number;
       tool: string;
@@ -413,6 +426,9 @@ export const agentTasksTable = pgTable(
     title: text("title").notNull(),
     kind: text("kind").notNull().default("main"),
     status: text("status").notNull().default("queued"),
+    // First-class agent-loop outcome. Nullable for legacy rows and non-agentic
+    // tasks; null means unknown and must never be interpreted as finalized.
+    completionKind: text("completion_kind").$type<AgentTaskCompletionKind>(),
     // agentIdentity: visible executor for this task.
     // "planning" = Planner, "main" = Main Agent. "task" is retained only for
     // legacy staging rows so old apply/discard flows remain readable.

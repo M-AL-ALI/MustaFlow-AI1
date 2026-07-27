@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
+import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -89,6 +90,11 @@ type TaskReport = {
   previewUpdated: boolean;
   warnings: string[];
   warningChecks?: Array<{ id: string; label: string; message: string }>;
+  agentLoop?: {
+    completionKind?: string | null;
+    terminationReason?: string;
+    skillsLoaded?: string[];
+  } | null;
   integrationsNeeded?: Array<{
     name: string;
     why: string;
@@ -179,9 +185,6 @@ type TaskReport = {
       networkFailures: Array<{ url: string; status: number | null; message: string }>;
       screenshotBase64?: string | null;
     }>;
-  } | null;
-  agentLoop?: {
-    skillsLoaded?: string[];
   } | null;
   /** Downloadable assets the agent explicitly presented to the user (Task #531). */
   assets?: Array<{
@@ -3244,6 +3247,7 @@ function TaskReviewCard({
   const [discarded, setDiscarded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
+  const completionKind = report.agentLoop?.completionKind;
   // Apply step index driven by backend narration events (not a timer).
   const [applyStartedAt, setApplyStartedAt] = useState<number | null>(null);
   const { dismissed: dismissedTips, dismiss: dismissTip, reset: resetTips } = useDismissedTips();
@@ -3500,7 +3504,10 @@ function TaskReviewCard({
           <div className="flex items-center gap-2 text-amber-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="text-[10px] font-semibold">
-              Build completed with warnings — preview available, validation not clean
+              {getBuilderCompletionMessage(
+                completionKind,
+                "Build completed with warnings — preview available, validation not clean",
+              )}
             </span>
           </div>
           <div className="mt-1 space-y-0.5">
@@ -3521,7 +3528,10 @@ function TaskReviewCard({
         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-amber-500/10 border-b border-amber-500/30 text-amber-400">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           <span className="text-[10px] font-semibold">
-            Build complete — TypeScript errors remain
+            {getBuilderCompletionMessage(
+              completionKind,
+              "Build complete — TypeScript errors remain",
+            )}
           </span>
           {report.repairLoop && (
             <span className="text-[9px] text-amber-400/70 ml-1">

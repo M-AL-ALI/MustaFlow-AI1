@@ -1464,6 +1464,26 @@ export const AgentTaskStatus = {
 } as const;
 
 /**
+ * First-class agent-loop completion outcome. Null for legacy or non-agentic tasks.
+ * @nullable
+ */
+export type AgentTaskCompletionKind = typeof AgentTaskCompletionKind[keyof typeof AgentTaskCompletionKind] | null;
+
+
+export const AgentTaskCompletionKind = {
+  finalized: 'finalized',
+  step_cap: 'step_cap',
+  wall_clock: 'wall_clock',
+  repeated_error: 'repeated_error',
+  model_stopped: 'model_stopped',
+  aborted: 'aborted',
+  checks_failed: 'checks_failed',
+  check_blocked: 'check_blocked',
+  rate_limited: 'rate_limited',
+  container_unavailable: 'container_unavailable',
+} as const;
+
+/**
  * Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.
  */
 export type AgentTaskAgentIdentity = typeof AgentTaskAgentIdentity[keyof typeof AgentTaskAgentIdentity];
@@ -1565,6 +1585,11 @@ export interface AgentTask {
   title: string;
   kind: AgentTaskKind;
   status: AgentTaskStatus;
+  /**
+     * First-class agent-loop completion outcome. Null for legacy or non-agentic tasks.
+     * @nullable
+     */
+  completionKind?: AgentTaskCompletionKind;
   /** Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility. */
   agentIdentity?: AgentTaskAgentIdentity;
   /**
@@ -4106,12 +4131,29 @@ export interface AgentLoopCheckResult {
   message: string;
 }
 
+export type AgentLoopDataCompletionKind = typeof AgentLoopDataCompletionKind[keyof typeof AgentLoopDataCompletionKind];
+
+
+export const AgentLoopDataCompletionKind = {
+  finalized: 'finalized',
+  step_cap: 'step_cap',
+  wall_clock: 'wall_clock',
+  repeated_error: 'repeated_error',
+  model_stopped: 'model_stopped',
+  aborted: 'aborted',
+  checks_failed: 'checks_failed',
+  check_blocked: 'check_blocked',
+  rate_limited: 'rate_limited',
+  container_unavailable: 'container_unavailable',
+} as const;
+
 export interface AgentLoopData {
   stack: string;
   steps: number;
   totalToolCalls: number;
   totalTokens: number;
   terminationReason: string;
+  completionKind?: AgentLoopDataCompletionKind;
   toolCalls: AgentLoopToolCall[];
   commandsRun: AgentLoopCommand[];
   checkResults: AgentLoopCheckResult[];

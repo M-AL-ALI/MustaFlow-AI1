@@ -21,6 +21,7 @@ import {
   userSubscriptionsTable,
   projectActivityTable,
   notificationsTable,
+  type AgentTaskCompletionKind,
   type TaskReport,
   type FileSnapshotEntry,
   type CvePatchStatus,
@@ -114,6 +115,35 @@ import {
 } from "./check-profiles";
 import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./container";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
+import { buildAgentTaskTerminalUpdate } from "./builder-task-completion";
+
+export function builderCompletionMessage(
+  completionKind: AgentTaskCompletionKind,
+  finalizedMessage: string,
+): string {
+  switch (completionKind) {
+    case "step_cap":
+      return "Completed at the step limit — you can continue with a follow-up prompt.";
+    case "wall_clock":
+      return "Completed at the time limit — you can continue with a follow-up prompt.";
+    case "repeated_error":
+      return "Stopped after repeated errors — try a different approach or follow-up prompt.";
+    case "model_stopped":
+      return "Stopped before finalization — you can continue with a follow-up prompt.";
+    case "aborted":
+      return "Cancelled.";
+    case "checks_failed":
+      return "Completed with validation errors — review the report before continuing.";
+    case "check_blocked":
+      return "Stopped because required checks could not pass — review the report.";
+    case "rate_limited":
+      return "Stopped because the tool rate limit was reached — try again later.";
+    case "container_unavailable":
+      return "Completed with live-server validation unavailable.";
+    case "finalized":
+      return finalizedMessage;
+  }
+}
 
 /**
  * Pre-build gate for agentic projects.
@@ -769,6 +799,61 @@ async function emitEvent(
   } catch (err) {
     logger.warn({ err, taskId, eventType }, "Failed to emit task event");
   }
+}
+
+async function finalizeAgentTaskWithEvent(input: {
+  taskId: number;
+  completionKind: AgentTaskCompletionKind;
+  currentStep: number;
+  message: string;
+}): Promise<boolean> {
+  const completedAt = new Date();
+  const terminalTaskUpdate = buildAgentTaskTerminalUpdate({
+    completionKind: input.completionKind,
+    finalStepCount: input.currentStep,
+    completedAt,
+  });
+  const terminalEvent = await db.transaction(async (tx) => {
+    const [updatedTask] = await tx
+      .update(agentTasksTable)
+      .set(terminalTaskUpdate)
+      .where(
+        and(
+          eq(agentTasksTable.id, input.taskId),
+          // A cancel that wins this race remains authoritative.
+          inArray(agentTasksTable.status, ["building", "planning"]),
+        ),
+      )
+      .returning({ id: agentTasksTable.id });
+
+    if (!updatedTask) return null;
+
+    const [event] = await tx
+      .insert(taskEventsTable)
+      .values({
+        taskId: input.taskId,
+        eventType: "completed",
+        message: input.message,
+        filePath: null,
+        data: null,
+        createdAt: completedAt,
+      })
+      .returning();
+    return event ?? null;
+  });
+
+  if (!terminalEvent) return false;
+
+  publishTaskEvent({
+    id: terminalEvent.id,
+    taskId: terminalEvent.taskId,
+    eventType: terminalEvent.eventType,
+    message: terminalEvent.message,
+    filePath: terminalEvent.filePath ?? null,
+    data: (terminalEvent.data as Record<string, unknown> | undefined) ?? undefined,
+    createdAt: terminalEvent.createdAt,
+  });
+  return true;
 }
 
 /**
@@ -4429,6 +4514,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               result: assistantSummary,
               report,
               stagingSnapshot: stagingData,
+              completionKind: report.agentLoop?.completionKind ?? "finalized",
+              currentStep: report.agentLoop?.steps ?? null,
               completedAt: sql`now()`,
               tokenCount: flushedTokenCount,
             })
@@ -4516,6 +4603,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             result: assistantSummary,
             report,
             stagingSnapshot: stagingData,
+            completionKind: report.agentLoop?.completionKind ?? "finalized",
+            currentStep: report.agentLoop?.steps ?? null,
             completedAt: sql`now()`,
             tokenCount: flushedTokenCount,
           })
@@ -5161,13 +5250,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End architect review ──────────────────────────────────────────────
 
+      const completionKind = report.agentLoop?.completionKind ?? "finalized";
+      const finalStepCount = report.agentLoop?.steps ?? 0;
       await db
         .update(agentTasksTable)
         .set({
-          status: "completed",
           result: assistantSummary,
           report,
-          completedAt: sql`now()`,
+          completionKind,
+          currentStep: finalStepCount,
           tokenCount: flushTokenCount(taskId),
         })
         .where(
@@ -5223,8 +5314,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         });
       }
 
-      // Fire-and-forget code-smell scan — runs after task is already "completed"
-      // so it never delays pipeline completion or the user-facing response.
+      // Fire-and-forget code-smell scan runs after the generation result is
+      // persisted, so it never delays pipeline completion or the user-facing response.
       if (filesToSmellScan.length > 0) {
         setImmediate(() => {
           try {
@@ -5712,17 +5803,31 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End Browser QA ─────────────────────────────────────────────────────
 
-      await emitEvent(
-        taskId,
-        "completed",
+      const finalizedCompletionMessage =
         versionValidationStatus === "completed_with_errors"
           ? "Build complete — TypeScript repair exhausted. Preview may have issues. Review the report for details."
           : validationWasPartial
             ? "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred."
             : versionValidationStatus === "passed_with_warnings"
               ? "Build completed with warnings — preview is available but validation is not fully clean."
-              : "Task completed.",
+              : "Task completed.";
+      const completionMessage = builderCompletionMessage(
+        completionKind,
+        finalizedCompletionMessage,
       );
+      const taskCompleted = await finalizeAgentTaskWithEvent({
+        taskId,
+        completionKind,
+        currentStep: finalStepCount,
+        message: completionMessage,
+      });
+      if (!taskCompleted) {
+        logger.info(
+          { taskId, projectId },
+          "Skipped terminal completion event because task was no longer active",
+        );
+        return;
+      }
 
       // Notify project owner of build completion (fire-and-forget)
       if (project.ownerId) {
@@ -5731,8 +5836,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           .values({
             recipientId: project.ownerId,
             type: "build_complete",
-            title: `${kind === "build" ? "Build" : "Refine"} completed`,
-            body: `Your ${agentMode} ${kind} on "${project.name}" finished successfully.`,
+            title:
+              completionKind === "finalized"
+                ? `${kind === "build" ? "Build" : "Refine"} completed`
+                : builderCompletionMessage(completionKind, "Task completed."),
+            body:
+              completionKind === "finalized"
+                ? `Your ${agentMode} ${kind} on "${project.name}" finished successfully.`
+                : `${project.name}: ${completionMessage}`,
             actorId: project.ownerId,
             resourceType: "build",
             resourceId: String(taskId),

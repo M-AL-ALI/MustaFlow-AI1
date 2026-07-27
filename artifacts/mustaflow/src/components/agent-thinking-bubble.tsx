@@ -1,4 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
+import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useListTasks,
@@ -2044,6 +2045,10 @@ export function AgentThinkingBubble({
     | undefined;
   const versionId = completedReport?.versionId ?? null;
   const knowledgeApplied = completedReport?.knowledgeApplied ?? [];
+  const completionText = getBuilderCompletionMessage(
+    completedTask?.completionKind,
+    completedReport?.completedWithErrors ? "Build complete — errors found" : "Build complete",
+  );
 
   const { data: versions } = useListVersions(projectId, {
     query: {
@@ -2189,9 +2194,7 @@ export function AgentThinkingBubble({
             )}
           >
             {isDone
-              ? completedReport?.completedWithErrors
-                ? "Build complete — errors found"
-                : "Build complete"
+              ? completionText
               : isCancelled
                 ? "Cancelled"
                 : isFailed

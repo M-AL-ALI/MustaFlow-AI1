@@ -7,6 +7,7 @@
  */
 import type { AgentLoopCheckResult } from './agentLoopCheckResult';
 import type { AgentLoopCommand } from './agentLoopCommand';
+import type { AgentLoopDataCompletionKind } from './agentLoopDataCompletionKind';
 import type { AgentLoopToolCall } from './agentLoopToolCall';
 
 export interface AgentLoopData {
@@ -15,6 +16,7 @@ export interface AgentLoopData {
   totalToolCalls: number;
   totalTokens: number;
   terminationReason: string;
+  completionKind?: AgentLoopDataCompletionKind;
   toolCalls: AgentLoopToolCall[];
   commandsRun: AgentLoopCommand[];
   checkResults: AgentLoopCheckResult[];

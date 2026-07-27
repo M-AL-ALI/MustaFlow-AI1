@@ -26,6 +26,7 @@ import { logger } from "./logger";
 import { publishTaskEvent } from "./event-bus";
 import { deductCreditsAtomic } from "../routes/credits";
 import { runArchitectReview, type ArchitectInput, type ArchitectResponse } from "./architect";
+import { buildReviewerWorkspaceContext } from "./reviewer-context";
 import { runE2eScenarios, defaultSmokeScenarios, type E2eScenario } from "./checks/e2e-runner";
 import {
   FileWorkspace,
@@ -450,20 +451,23 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
 
   try {
     if (role === "reviewer") {
+      const reviewerContext = {
+        ...buildReviewerWorkspaceContext({
+          existingFiles: parentCtx.input.existingFiles,
+          workspace: parentCtx.workspace,
+        }),
+        ...(opts.reviewer ?? {}),
+      };
       const r = await runReviewer({
         parentInput: parentCtx.input,
         taskId: nz(taskId),
         brief,
-        diff: opts.reviewer?.diff ?? {
-          filesAdded: [],
-          filesModified: parentCtx.workspace.list(),
-          filesRemoved: [],
-        },
-        commandsRun: opts.reviewer?.commandsRun,
-        fileExcerpts: opts.reviewer?.fileExcerpts,
-        assistantSummary: opts.reviewer?.assistantSummary,
-        planContext: opts.reviewer?.planContext,
-        knownWarnings: opts.reviewer?.knownWarnings,
+        diff: reviewerContext.diff,
+        commandsRun: reviewerContext.commandsRun,
+        fileExcerpts: reviewerContext.fileExcerpts,
+        assistantSummary: reviewerContext.assistantSummary,
+        planContext: reviewerContext.planContext,
+        knownWarnings: reviewerContext.knownWarnings,
       });
       emitSubagentEvent(
         taskId,

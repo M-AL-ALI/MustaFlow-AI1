@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AgentTaskAgentIdentity } from './agentTaskAgentIdentity';
+import type { AgentTaskCompletionKind } from './agentTaskCompletionKind';
 import type { AgentTaskKind } from './agentTaskKind';
 import type { AgentTaskReport } from './agentTaskReport';
 import type { AgentTaskRunMode } from './agentTaskRunMode';
@@ -18,6 +19,11 @@ export interface AgentTask {
   title: string;
   kind: AgentTaskKind;
   status: AgentTaskStatus;
+  /**
+     * First-class agent-loop completion outcome. Null for legacy or non-agentic tasks.
+     * @nullable
+     */
+  completionKind?: AgentTaskCompletionKind;
   /** Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility. */
   agentIdentity?: AgentTaskAgentIdentity;
   /**

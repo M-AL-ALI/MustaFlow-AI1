@@ -28,6 +28,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -244,13 +245,21 @@ interface Props {
   projectId: number;
   taskId: number;
   taskStatus?: string;
+  completionKind?: string | null;
   agentIdentity?: string;
   onDismiss: () => void;
 }
 
 // ─── ActivityStream ───────────────────────────────────────────────────────────
 
-export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, onDismiss }: Props) {
+export function ActivityStream({
+  projectId,
+  taskId,
+  taskStatus,
+  completionKind,
+  agentIdentity,
+  onDismiss,
+}: Props) {
   const pillRowRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -263,6 +272,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
   const isNeedsReview = taskStatus === "needs_review" || taskStatus === "needs_fix";
+  const completionText = getBuilderCompletionMessage(completionKind);
 
   // Auto-scroll pill row to the right as new events arrive
   useEffect(() => {
@@ -312,7 +322,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
   const statusText = isNeedsReview
     ? "Review required"
     : isDone
-      ? "Build complete"
+      ? completionText
       : isFailed
         ? "Build failed"
         : (lastEvent?.message ?? "Initializing…");
@@ -514,7 +524,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
  * inside the chat scroll area. Connects via SSE so every event appears
  * the instant the agent emits it — no polling delay.
  */
-export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
+export function InlineLiveActivity({ projectId, taskId, completionKind, onDismiss }: Props) {
   const pillRowRef = useRef<HTMLDivElement>(null);
 
   const { events } = useTaskEventStream(projectId, taskId);
@@ -523,6 +533,7 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
+  const completionText = getBuilderCompletionMessage(completionKind);
 
   // Auto-scroll pill row right
   useEffect(() => {
@@ -614,7 +625,7 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
           )}
         >
           {isDone
-            ? "Build complete"
+            ? completionText
             : isFailed
               ? "Build failed"
               : (lastEvent?.message ?? "Working…")}

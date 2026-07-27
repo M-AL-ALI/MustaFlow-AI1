@@ -17,6 +17,7 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { PlanCard, type StructuredPlan } from "./plan-card";
@@ -45,6 +46,7 @@ const MODE_STORAGE_KEY = "mustaflow_zero_agent_mode";
 type ZeroTask = {
   id: number;
   status: string;
+  completionKind?: string | null;
   userRequest: string;
   createdAt: string;
 };
@@ -1087,6 +1089,7 @@ export function ZeroAgentPanel({
                       ? (planPayload.taskId as number | undefined)
                       : undefined;
                   const task = taskId ? taskById.get(taskId) : undefined;
+                  const completionText = getBuilderCompletionMessage(task?.completionKind);
 
                   return (
                     <div
@@ -1115,8 +1118,8 @@ export function ZeroAgentPanel({
                           content={
                             msg.content ||
                             ((planPayload as { report?: { summary?: string } }).report?.summary
-                              ? `Build complete. ${(planPayload as { report: { summary: string } }).report.summary}`
-                              : "Build complete.")
+                              ? `${completionText}. ${(planPayload as { report: { summary: string } }).report.summary}`
+                              : `${completionText}.`)
                           }
                         />
                       ) : isTaskQueued ? null : msg.content ? (
