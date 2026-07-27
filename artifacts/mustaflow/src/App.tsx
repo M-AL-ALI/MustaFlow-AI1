@@ -10,6 +10,11 @@ import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/r
 import { AuthStateProvider } from "@/lib/auth-state-context";
 import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
 import { resolveBuilderAccess } from "@/lib/builder-flag";
+import {
+  clearBuilderIsolationReload,
+  reloadForBuilderIsolation,
+  shouldReloadForBuilderIsolation,
+} from "@/lib/builder-isolation";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import {
@@ -430,6 +435,19 @@ function BuilderGuard({ children }: { children: React.ReactNode }) {
   const prefsQuery = useGetMyPreferences({
     query: { queryKey: ["/api/me/preferences"] },
   });
+  const isolationReloadRequired = shouldReloadForBuilderIsolation(window);
+
+  useEffect(() => {
+    if (isolationReloadRequired) {
+      reloadForBuilderIsolation(window);
+      return;
+    }
+    clearBuilderIsolationReload(window);
+  }, [isolationReloadRequired]);
+
+  // A client-side transition cannot gain COOP/COEP. Hold Builder content until
+  // the one-time document reload reaches the header-scoped /projects route.
+  if (isolationReloadRequired) return null;
   if (prefsQuery.isPending) return null;
   if (!resolveBuilderAccess(prefsQuery.data?.builderAccess)) {
     return <BuilderComingSoonRedirect />;

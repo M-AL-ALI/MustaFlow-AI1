@@ -22,12 +22,56 @@ if (!basePath) {
   throw new Error("BASE_PATH environment variable is required but was not provided.");
 }
 
+const crossOriginIsolationHeaders = {
+  // Required for SharedArrayBuffer (WebContainers).
+  // "credentialless" allows cross-origin resources without opt-in CORP headers,
+  // which is necessary for Clerk and other third-party scripts to keep working.
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "credentialless",
+};
+
+function isBuilderIsolationPath(url = ""): boolean {
+  const pathname = url.split(/[?#]/, 1)[0] ?? "";
+  return (
+    pathname === "/projects" ||
+    pathname.startsWith("/projects/") ||
+    pathname.startsWith("/assets/")
+  );
+}
+
+const builderIsolationPreviewHeaders = {
+  name: "builder-isolation-preview-headers",
+  configurePreviewServer(server: {
+    middlewares: {
+      use: (
+        middleware: (
+          request: { url?: string },
+          response: { setHeader: (name: string, value: string) => void },
+          next: () => void,
+        ) => void,
+      ) => void;
+    };
+  }) {
+    server.middlewares.use((request, response, next) => {
+      if (isBuilderIsolationPath(request.url)) {
+        for (const [name, value] of Object.entries(
+          crossOriginIsolationHeaders,
+        )) {
+          response.setHeader(name, value);
+        }
+      }
+      next();
+    });
+  },
+};
+
 export default defineConfig({
   base: basePath,
   plugins: [
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
+    builderIsolationPreviewHeaders,
     ...(process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined
       ? [
           await import("@replit/vite-plugin-cartographer").then((m) =>
@@ -80,17 +124,14 @@ export default defineConfig({
     fs: {
       strict: true,
     },
-    headers: {
-      // Required for SharedArrayBuffer (WebContainers).
-      // "credentialless" allows cross-origin resources without opt-in CORP headers,
-      // which is necessary for Clerk and other third-party scripts to keep working.
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "credentialless",
-    },
+    headers: crossOriginIsolationHeaders,
   },
   preview: {
     port,
     host: "0.0.0.0",
     allowedHosts: true,
+    headers: {},
+    // Vite preview serves the production bundle during local release checks.
+    // The plugin above matches Replit's production path-scoped headers.
   },
 });

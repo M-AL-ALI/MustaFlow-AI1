@@ -41,8 +41,14 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
+  .replit \
+  artifacts/mustaflow/src/App.tsx \
+  artifacts/mustaflow/src/hooks/__tests__/use-web-container.test.tsx \
+  artifacts/mustaflow/src/lib/__tests__/builder-isolation.test.ts \
+  artifacts/mustaflow/src/lib/builder-isolation.ts \
+  artifacts/mustaflow/vite.config.ts \
   scripts/push-to-github.sh \
-  .replit 2>/dev/null || true
+  2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then

@@ -4,6 +4,39 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 router = "application"
 deploymentTarget = "autoscale"
 
+# Builder workspace documents must be cross-origin isolated so browser
+# WebContainers can use SharedArrayBuffer. Keep these rules scoped away from
+# /api so published user snapshots retain their existing embedding behavior.
+[[deployment.responseHeaders]]
+path = "/projects"
+name = "Cross-Origin-Opener-Policy"
+value = "same-origin"
+
+[[deployment.responseHeaders]]
+path = "/projects"
+name = "Cross-Origin-Embedder-Policy"
+value = "credentialless"
+
+[[deployment.responseHeaders]]
+path = "/projects/*"
+name = "Cross-Origin-Opener-Policy"
+value = "same-origin"
+
+[[deployment.responseHeaders]]
+path = "/projects/*"
+name = "Cross-Origin-Embedder-Policy"
+value = "credentialless"
+
+[[deployment.responseHeaders]]
+path = "/assets/*"
+name = "Cross-Origin-Opener-Policy"
+value = "same-origin"
+
+[[deployment.responseHeaders]]
+path = "/assets/*"
+name = "Cross-Origin-Embedder-Policy"
+value = "credentialless"
+
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
