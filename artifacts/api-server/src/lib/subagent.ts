@@ -178,6 +178,49 @@ interface ReviewerOpts {
   knownWarnings?: string[];
 }
 
+export interface ReviewerPayloadStats {
+  excerptCount: number;
+  totalExcerptChars: number;
+  filesAdded: number;
+  filesModified: number;
+  filesRemoved: number;
+}
+
+function reviewerPayloadStats(input: {
+  diff: ArchitectInput["diff"];
+  fileExcerpts?: ArchitectInput["fileExcerpts"];
+}): ReviewerPayloadStats {
+  return {
+    excerptCount: input.fileExcerpts?.length ?? 0,
+    totalExcerptChars:
+      input.fileExcerpts?.reduce((total, excerpt) => total + excerpt.content.length, 0) ?? 0,
+    filesAdded: input.diff.filesAdded.length,
+    filesModified: input.diff.filesModified.length,
+    filesRemoved: input.diff.filesRemoved.length,
+  };
+}
+
+function hasReviewerPayload(stats: ReviewerPayloadStats): boolean {
+  return (
+    stats.excerptCount > 0 ||
+    stats.filesAdded > 0 ||
+    stats.filesModified > 0 ||
+    stats.filesRemoved > 0
+  );
+}
+
+function reviewerPayloadStatsLine(stats: ReviewerPayloadStats): string {
+  return `reviewerPayloadStats=${JSON.stringify(stats)}`;
+}
+
+function emptyReviewerObservation(stats: ReviewerPayloadStats): string {
+  return [
+    reviewerPayloadStatsLine(stats),
+    "REVIEW_DEFERRED: There are no changed files or file excerpts to review yet.",
+    "Write the files before requesting review, then request the reviewer again.",
+  ].join("\n");
+}
+
 async function runReviewer(
   opts: ReviewerOpts,
 ): Promise<{ ok: boolean; observation: string; review?: ArchitectResponse & { model: string } }> {
@@ -434,12 +477,42 @@ export interface DispatchResult {
   toolCalls?: ToolCallRecord[];
   review?: ArchitectResponse & { model: string };
   e2eSummary?: E2eRunSummary;
+  reviewerPayloadStats?: ReviewerPayloadStats;
 }
 
 export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResult> {
   const { role, brief, parentCtx } = opts;
   const taskId = parentCtx.input.taskId;
   emitSubagentEvent(taskId, parentCtx.input.projectId, "started", role, brief.slice(0, 160));
+
+  const reviewerContext =
+    role === "reviewer"
+      ? {
+          ...buildReviewerWorkspaceContext({
+            existingFiles: parentCtx.input.existingFiles,
+            workspace: parentCtx.workspace,
+          }),
+          ...(opts.reviewer ?? {}),
+        }
+      : null;
+  const reviewerStats = reviewerContext ? reviewerPayloadStats(reviewerContext) : null;
+  if (reviewerContext && reviewerStats && !hasReviewerPayload(reviewerStats)) {
+    emitSubagentEvent(
+      taskId,
+      parentCtx.input.projectId,
+      "done",
+      role,
+      "deferred: no files to review",
+      { deferred: true, reviewerPayloadStats: reviewerStats },
+    );
+    return {
+      ok: true,
+      observation: emptyReviewerObservation(reviewerStats),
+      role,
+      creditsCharged: 0,
+      reviewerPayloadStats: reviewerStats,
+    };
+  }
 
   const charge = opts.skipCredits
     ? ({ ok: true, charged: 0 } as const)
@@ -450,14 +523,7 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
   }
 
   try {
-    if (role === "reviewer") {
-      const reviewerContext = {
-        ...buildReviewerWorkspaceContext({
-          existingFiles: parentCtx.input.existingFiles,
-          workspace: parentCtx.workspace,
-        }),
-        ...(opts.reviewer ?? {}),
-      };
+    if (role === "reviewer" && reviewerContext && reviewerStats) {
       const r = await runReviewer({
         parentInput: parentCtx.input,
         taskId: nz(taskId),
@@ -475,14 +541,19 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
         "done",
         role,
         r.review ? `verdict ${r.review.verdict}` : "done",
-        { verdict: r.review?.verdict, findings: r.review?.findings.length ?? 0 },
+        {
+          verdict: r.review?.verdict,
+          findings: r.review?.findings.length ?? 0,
+          reviewerPayloadStats: reviewerStats,
+        },
       );
       return {
         ok: r.ok,
-        observation: r.observation,
+        observation: `${reviewerPayloadStatsLine(reviewerStats)}\n${r.observation}`,
         role,
         creditsCharged: charge.charged,
         review: r.review,
+        reviewerPayloadStats: reviewerStats,
       };
     }
     if (role === "tester") {
@@ -552,6 +623,24 @@ export async function dispatchReviewerStandalone(args: {
   const role: SubagentRole = "reviewer";
   const taskId = args.input.taskId;
   emitSubagentEvent(taskId, args.input.projectId, "started", role, args.brief.slice(0, 160));
+  const reviewerStats = reviewerPayloadStats(args.reviewer);
+  if (!hasReviewerPayload(reviewerStats)) {
+    emitSubagentEvent(
+      taskId,
+      args.input.projectId,
+      "done",
+      role,
+      "deferred: no files to review",
+      { deferred: true, reviewerPayloadStats: reviewerStats },
+    );
+    return {
+      ok: true,
+      observation: emptyReviewerObservation(reviewerStats),
+      role,
+      creditsCharged: 0,
+      reviewerPayloadStats: reviewerStats,
+    };
+  }
   const charge = args.skipCredits
     ? ({ ok: true, charged: 0 } as const)
     : await chargeRoleCredits(args.input, role, taskId);
@@ -577,14 +666,19 @@ export async function dispatchReviewerStandalone(args: {
       "done",
       role,
       r.review ? `verdict ${r.review.verdict}` : "done",
-      { verdict: r.review?.verdict, findings: r.review?.findings.length ?? 0 },
+      {
+        verdict: r.review?.verdict,
+        findings: r.review?.findings.length ?? 0,
+        reviewerPayloadStats: reviewerStats,
+      },
     );
     return {
       ok: r.ok,
-      observation: r.observation,
+      observation: `${reviewerPayloadStatsLine(reviewerStats)}\n${r.observation}`,
       role,
       creditsCharged: charge.charged,
       review: r.review,
+      reviewerPayloadStats: reviewerStats,
     };
   } catch (err) {
     const msg = String((err as Error).message ?? err);

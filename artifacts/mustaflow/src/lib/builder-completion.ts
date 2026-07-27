@@ -43,3 +43,36 @@ export function getBuilderCompletionMessage(
       return finalizedMessage;
   }
 }
+
+export function getBuilderTaskQueueLabel(
+  status: string,
+  completionKind: string | null | undefined,
+): string {
+  if (status !== "completed") return status;
+
+  switch (completionKind as BuilderCompletionKind | null | undefined) {
+    case "step_cap":
+      return "Completed at limit";
+    case "wall_clock":
+      return "Completed at time limit";
+    case "repeated_error":
+    case "model_stopped":
+      return "Stopped";
+    case "aborted":
+      return "Cancelled";
+    case "checks_failed":
+      return "Completed with errors";
+    case "check_blocked":
+      return "Blocked";
+    case "rate_limited":
+      return "Rate limited";
+    case "container_unavailable":
+      return "Completed partially";
+    case "finalized":
+      return "Completed";
+    case null:
+    case undefined:
+    default:
+      return status;
+  }
+}

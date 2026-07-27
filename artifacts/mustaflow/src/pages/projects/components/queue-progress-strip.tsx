@@ -11,6 +11,7 @@ import {
   Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getBuilderTaskQueueLabel } from "@/lib/builder-completion";
 
 type TaskStatus =
   | "queued"
@@ -33,6 +34,7 @@ interface BatchTask {
   status: TaskStatus;
   prompt: string | null;
   queueIndex: number | null;
+  completionKind?: string | null;
 }
 
 interface BatchState {
@@ -253,7 +255,9 @@ export function QueueProgressStrip({
                   ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "text-primary",
                 )}
               >
-                {task.status === "building" || task.status === "planning" ? "running" : task.status}
+                {task.status === "building" || task.status === "planning"
+                  ? "running"
+                  : getBuilderTaskQueueLabel(task.status, task.completionKind)}
               </span>
             </div>
           ))}

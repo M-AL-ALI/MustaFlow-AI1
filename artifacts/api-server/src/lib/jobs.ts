@@ -115,35 +115,11 @@ import {
 } from "./check-profiles";
 import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./container";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
-import { buildAgentTaskTerminalUpdate } from "./builder-task-completion";
-
-export function builderCompletionMessage(
-  completionKind: AgentTaskCompletionKind,
-  finalizedMessage: string,
-): string {
-  switch (completionKind) {
-    case "step_cap":
-      return "Completed at the step limit — you can continue with a follow-up prompt.";
-    case "wall_clock":
-      return "Completed at the time limit — you can continue with a follow-up prompt.";
-    case "repeated_error":
-      return "Stopped after repeated errors — try a different approach or follow-up prompt.";
-    case "model_stopped":
-      return "Stopped before finalization — you can continue with a follow-up prompt.";
-    case "aborted":
-      return "Cancelled.";
-    case "checks_failed":
-      return "Completed with validation errors — review the report before continuing.";
-    case "check_blocked":
-      return "Stopped because required checks could not pass — review the report.";
-    case "rate_limited":
-      return "Stopped because the tool rate limit was reached — try again later.";
-    case "container_unavailable":
-      return "Completed with live-server validation unavailable.";
-    case "finalized":
-      return finalizedMessage;
-  }
-}
+import {
+  buildAgentTaskTerminalUpdate,
+  builderCompletionMessage,
+  builderPersistedCompletionSummary,
+} from "./builder-task-completion";
 
 /**
  * Pre-build gate for agentic projects.
@@ -5252,10 +5228,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       const completionKind = report.agentLoop?.completionKind ?? "finalized";
       const finalStepCount = report.agentLoop?.steps ?? 0;
+      const persistedAssistantSummary = builderPersistedCompletionSummary(
+        completionKind,
+        assistantSummary,
+      );
       await db
         .update(agentTasksTable)
         .set({
-          result: assistantSummary,
+          result: persistedAssistantSummary,
           report,
           completionKind,
           currentStep: finalStepCount,
@@ -6010,7 +5990,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       await db.insert(chatMessagesTable).values({
         projectId,
         role: "system",
-        content: assistantSummary,
+        content: persistedAssistantSummary,
         agentMode,
         planMode: false,
         origin: jobOrigin,

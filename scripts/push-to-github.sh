@@ -39,6 +39,16 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
+  artifacts/api-server/src/lib/agent-loop.ts \
+  artifacts/api-server/src/lib/builder-task-completion.ts \
+  artifacts/api-server/src/lib/builder-wave7b-completion-honesty.test.ts \
+  artifacts/api-server/src/lib/jobs.ts \
+  artifacts/api-server/src/lib/subagent.ts \
+  artifacts/api-server/src/routes/project-activity.ts \
+  artifacts/mustaflow/src/lib/builder-completion.test.ts \
+  artifacts/mustaflow/src/lib/builder-completion.ts \
+  artifacts/mustaflow/src/pages/projects/components/activity-log-tab.test.tsx \
+  artifacts/mustaflow/src/pages/projects/components/queue-progress-strip.tsx \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \

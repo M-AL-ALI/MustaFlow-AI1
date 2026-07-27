@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { and, eq, desc } from "drizzle-orm";
-import { db, projectActivityTable } from "@workspace/db";
+import { and, eq, desc, inArray } from "drizzle-orm";
+import { agentTasksTable, db, projectActivityTable, taskEventsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 
 // Express v5 types params as string | string[] — extract the scalar value.
@@ -20,12 +20,63 @@ router.get(
     const conditions = [eq(projectActivityTable.projectId, projectId)];
     if (eventType) conditions.push(eq(projectActivityTable.eventType, eventType));
 
-    const rows = await db
+    const projectRows = await db
       .select()
       .from(projectActivityTable)
       .where(and(...conditions))
       .orderBy(desc(projectActivityTable.createdAt))
       .limit(limit);
+
+    const includeTaskEvents =
+      eventType === undefined || eventType === "build" || eventType === "build_failed";
+    const persistedTaskEvents = includeTaskEvents
+      ? await db
+          .select({
+            id: taskEventsTable.id,
+            taskId: taskEventsTable.taskId,
+            eventType: taskEventsTable.eventType,
+            message: taskEventsTable.message,
+            data: taskEventsTable.data,
+            createdAt: taskEventsTable.createdAt,
+          })
+          .from(taskEventsTable)
+          .innerJoin(agentTasksTable, eq(agentTasksTable.id, taskEventsTable.taskId))
+          .where(
+            and(
+              eq(agentTasksTable.projectId, projectId),
+              eq(agentTasksTable.status, "completed"),
+              inArray(taskEventsTable.eventType, ["completed", "failed"]),
+            ),
+          )
+          .orderBy(desc(taskEventsTable.createdAt))
+          .limit(limit)
+      : [];
+
+    const taskRows = persistedTaskEvents
+      .map((event) => {
+        const mappedEventType = event.eventType === "failed" ? "build_failed" : "build";
+        return {
+          id: -event.id,
+          projectId,
+          actorId: null,
+          actorName: "Agent Zero",
+          actorAvatar: null,
+          eventType: mappedEventType,
+          summary: event.message,
+          metadata: {
+            ...(event.data ?? {}),
+            source: "task_event",
+            taskId: event.taskId,
+            taskEventType: event.eventType,
+          },
+          createdAt: event.createdAt,
+        };
+      })
+      .filter((event) => eventType === undefined || event.eventType === eventType);
+
+    const rows = [...projectRows, ...taskRows]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
 
     res.json(rows);
   },
