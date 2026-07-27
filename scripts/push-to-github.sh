@@ -39,11 +39,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
-  artifacts/mustaflow/public/builder-coi-sw.js \
-  artifacts/mustaflow/src/App.tsx \
-  artifacts/mustaflow/src/lib/builder-isolation.ts \
-  artifacts/mustaflow/src/lib/__tests__/builder-isolation.test.ts \
-  artifacts/mustaflow/vite.config.ts \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
