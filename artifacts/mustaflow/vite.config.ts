@@ -33,9 +33,7 @@ const crossOriginIsolationHeaders = {
 function isBuilderIsolationPath(url = ""): boolean {
   const pathname = url.split(/[?#]/, 1)[0] ?? "";
   return (
-    pathname === "/projects" ||
-    pathname.startsWith("/projects/") ||
-    pathname.startsWith("/assets/")
+    pathname === "/projects" || pathname.startsWith("/projects/") || pathname.startsWith("/assets/")
   );
 }
 
@@ -53,10 +51,11 @@ const builderIsolationPreviewHeaders = {
     };
   }) {
     server.middlewares.use((request, response, next) => {
-      if (isBuilderIsolationPath(request.url)) {
-        for (const [name, value] of Object.entries(
-          crossOriginIsolationHeaders,
-        )) {
+      // Wave 5.1 local verification disables these headers so the built
+      // production bundle must become isolated through builder-coi-sw.js alone.
+      const previewHeadersEnabled = process.env.BUILDER_PREVIEW_ISOLATION_HEADERS !== "0";
+      if (previewHeadersEnabled && isBuilderIsolationPath(request.url)) {
+        for (const [name, value] of Object.entries(crossOriginIsolationHeaders)) {
           response.setHeader(name, value);
         }
       }

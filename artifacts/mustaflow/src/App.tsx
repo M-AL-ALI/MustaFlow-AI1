@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { syncThemeDom, getStoredTheme } from "@/lib/theme";
 import { setVoiceLang } from "@/hooks/use-voice-input";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
@@ -10,11 +10,7 @@ import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/r
 import { AuthStateProvider } from "@/lib/auth-state-context";
 import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
 import { resolveBuilderAccess } from "@/lib/builder-flag";
-import {
-  clearBuilderIsolationReload,
-  reloadForBuilderIsolation,
-  shouldReloadForBuilderIsolation,
-} from "@/lib/builder-isolation";
+import { prepareBuilderIsolation } from "@/lib/builder-isolation";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import {
@@ -435,19 +431,27 @@ function BuilderGuard({ children }: { children: React.ReactNode }) {
   const prefsQuery = useGetMyPreferences({
     query: { queryKey: ["/api/me/preferences"] },
   });
-  const isolationReloadRequired = shouldReloadForBuilderIsolation(window);
+  const [isolationReady, setIsolationReady] = useState(window.crossOriginIsolated);
+  const isolationStartedRef = useRef(false);
 
   useEffect(() => {
-    if (isolationReloadRequired) {
-      reloadForBuilderIsolation(window);
-      return;
-    }
-    clearBuilderIsolationReload(window);
-  }, [isolationReloadRequired]);
+    if (isolationStartedRef.current) return;
+    isolationStartedRef.current = true;
 
-  // A client-side transition cannot gain COOP/COEP. Hold Builder content until
-  // the one-time document reload reaches the header-scoped /projects route.
-  if (isolationReloadRequired) return null;
+    let serviceWorkers: ServiceWorkerContainer | undefined;
+    try {
+      serviceWorkers = "serviceWorker" in navigator ? navigator.serviceWorker : undefined;
+    } catch {
+      // Browser privacy settings can block even reading the API.
+    }
+    void prepareBuilderIsolation(window, serviceWorkers).then((outcome) => {
+      if (outcome === "ready") setIsolationReady(true);
+    });
+  }, []);
+
+  // Hold Builder content while the root worker activates and performs the
+  // single document reload. Registration failure settles into today's fallback.
+  if (!isolationReady) return null;
   if (prefsQuery.isPending) return null;
   if (!resolveBuilderAccess(prefsQuery.data?.builderAccess)) {
     return <BuilderComingSoonRedirect />;
