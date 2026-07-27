@@ -2,7 +2,7 @@
  * Agentic builder loop — Replit-Agent-style tool calling.
  *
  * Replaces the single-shot JSON-mode prompt with an iterative model loop that
- * picks tools (read_file, write_file, list_files, search, run_command,
+ * picks tools (read_file, write_files, write_file, list_files, search, run_command,
  * apply_patch, report_progress, finalize), observes results, and continues
  * until the configured checks pass or a safety limit is hit.
  *
@@ -409,6 +409,8 @@ function getFoundationRepairNarration(checkId: string, label: string, failCount:
 }
 
 const MAX_FILE_BYTES = 64_000;
+export const MAX_BATCH_WRITE_FILES = 8;
+export const MAX_BATCH_WRITE_BYTES = 192_000;
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
   lite: "gpt-5-nano",
@@ -702,7 +704,7 @@ export const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "write_file",
       description:
-        "Create or overwrite a project file with full new content. Use this for both new files and full rewrites.",
+        "Create or overwrite one project file with full new content. Use write_files instead when scaffolding several complete files; keep this tool for one-file writes and rewrites.",
       parameters: {
         type: "object",
         properties: {
@@ -714,6 +716,39 @@ export const TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ["path", "content"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_files",
+      description:
+        "Create or overwrite several complete project files in one bounded batch. Prefer batches of 4-8 files for a new scaffold. The result reports each file separately. If continuationRequired is true, immediately call write_files again with the original entries named in remainingPaths; files are never silently truncated.",
+      parameters: {
+        type: "object",
+        properties: {
+          files: {
+            type: "array",
+            minItems: 1,
+            maxItems: 16,
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                content: { type: "string" },
+                mime_type: {
+                  type: "string",
+                  description: "Optional, inferred from extension if absent.",
+                },
+              },
+              required: ["path", "content"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["files"],
         additionalProperties: false,
       },
     },
@@ -1561,9 +1596,9 @@ function buildSystemPrompt(
         ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}).
 
 ## How the live preview works
-write_file and apply_patch write directly to the container's filesystem — the same filesystem your dev server is watching. The full chain is automatic:
+write_files, write_file, and apply_patch write directly to the container's filesystem — the same filesystem your dev server is watching. The full chain is automatic:
 
-  1. You call write_file / apply_patch
+  1. You call write_files / write_file / apply_patch
   2. The dev server's filesystem watcher detects the change instantly
   3. The dev server pushes a hot-reload signal (HMR / WebSocket / SSE) to the preview iframe
   4. The preview refreshes — usually without a full page reload
@@ -1714,7 +1749,8 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     "- Use tools iteratively. Each turn, decide the next best action.",
     "- Search before you guess — use list_files or search to find the right file rather than assuming paths.",
     "- Before creating something new — a component, route, table, or service — search the project first to confirm it does not already exist. Duplicate entities cause cascading conflicts that are expensive to untangle.",
-    "- Make small, focused changes. Prefer apply_patch for surgical edits, write_file for new/rewritten files.",
+    "- Make small, focused changes. Prefer apply_patch for surgical edits and write_file for one-file rewrites.",
+    "- When scaffolding several complete files, prefer write_files in batches of 4-8 files. If it returns continuationRequired=true, immediately resend the original entries named in remainingPaths in the next write_files call. This is the normal bounded continuation path, not an error.",
     "- After meaningful edits, run the checks for this stack to verify your work. Fix failures, then re-run.",
     "- Call `finalize` only after all required checks pass. Provide a short, accurate summary.",
     "",
@@ -1737,7 +1773,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     "- All file paths are sandboxed to the project root — no `..`, no absolute paths.",
     "",
     "## Output discipline",
-    "- Never describe code in chat — write it with write_file / apply_patch.",
+    "- Never describe code in chat — write it with write_files / write_file / apply_patch.",
     "- `report_progress` is for ONE short sentence between major steps, not for explanations.",
     "- Avoid emojis in generated files and narration — use lucide icons in HTML output instead.",
     "",
@@ -2008,7 +2044,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let finalSummary = "";
   let finalWarnings: string[] = [];
   let finalized = false;
-  // Count of file-mutation tool calls (write_file / apply_patch / delete_file)
+  // Count of files targeted by mutation tools (write_files / write_file / apply_patch / delete_file)
   // across all turns. Used to enforce the refine-mode "must edit something" gate.
   let totalMutations = 0;
   // Separate counter for "finalize blocked because 0 mutations" events.
@@ -2073,7 +2109,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       : "";
   const refineReminder =
     input.mode === "refine" && seedManifest.length > 0
-      ? "\n\nIMPORTANT: This is a REFINE run. You MUST call write_file or apply_patch to edit at least one file before calling finalize. Do NOT call finalize immediately — read the relevant files first, then make the changes."
+      ? "\n\nIMPORTANT: This is a REFINE run. You MUST call write_files, write_file, or apply_patch to edit at least one file before calling finalize. Do NOT call finalize immediately — read the relevant files first, then make the changes."
       : "";
   messages.push({
     role: "user",
@@ -2430,6 +2466,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       "run_tests",
       "finalize",
       "write_file",
+      "write_files",
       "apply_patch",
       "delete_file",
       "generate_image",
@@ -2568,17 +2605,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         await safeEvent(input.onEvent, "narration", String(parsed.message ?? "").slice(0, 220));
       } else if (
         callName === "write_file" ||
+        callName === "write_files" ||
         callName === "apply_patch" ||
         callName === "delete_file"
       ) {
         mutatedThisTurn = true;
-        totalMutations++;
-        const _mutPath = String(parsed.path ?? "");
-        if (_mutPath) mutatedPathsThisTurn.push(_mutPath);
+        const mutationPaths = mutationPathsForTool(callName, parsed);
+        totalMutations += mutationPaths.length;
+        mutatedPathsThisTurn.push(...mutationPaths);
         await safeEvent(
           input.onEvent,
           "generating_code",
-          `${callName.replace("_", " ")} → ${String(parsed.path ?? "")}`.slice(0, 220),
+          callName === "write_files"
+            ? `write files → ${mutationPaths.length} files`
+            : `${callName.replace("_", " ")} → ${mutationPaths[0] ?? ""}`.slice(0, 220),
         );
       } else if (callName === "run_command") {
         await safeEvent(
@@ -2876,15 +2916,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Emit narration for high-signal tools
       if (name === "report_progress") {
         await safeEvent(input.onEvent, "narration", String(parsed.message ?? "").slice(0, 220));
-      } else if (name === "write_file" || name === "apply_patch" || name === "delete_file") {
+      } else if (
+        name === "write_file" ||
+        name === "write_files" ||
+        name === "apply_patch" ||
+        name === "delete_file"
+      ) {
         mutatedThisTurn = true;
-        totalMutations++;
-        const _mutPathSerial = String(parsed.path ?? "");
-        if (_mutPathSerial) mutatedPathsThisTurn.push(_mutPathSerial);
+        const mutationPaths = mutationPathsForTool(name, parsed);
+        totalMutations += mutationPaths.length;
+        mutatedPathsThisTurn.push(...mutationPaths);
         await safeEvent(
           input.onEvent,
           "generating_code",
-          `${name.replace("_", " ")} → ${_mutPathSerial}`.slice(0, 220),
+          name === "write_files"
+            ? `write files → ${mutationPaths.length} files`
+            : `${name.replace("_", " ")} → ${mutationPaths[0] ?? ""}`.slice(0, 220),
         );
       } else if (name === "run_command" && !result.deferred) {
         await safeEvent(
@@ -2945,7 +2992,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           lastError = "";
           const noMutMsg =
             "BLOCKED: You have not written or modified any files yet. " +
-            "You MUST call write_file or apply_patch to make at least one concrete change before calling finalize. " +
+            "You MUST call write_files, write_file, or apply_patch to make at least one concrete change before calling finalize. " +
             "Read the existing files first if needed, then write or patch the file(s) that implement the user's request.";
           messages[messages.length - 1] = {
             role: "tool",
@@ -3487,7 +3534,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             fixToolReqs.some(
               (c) =>
                 c.type === "function" &&
-                ["write_file", "apply_patch", "delete_file"].includes(c.function.name),
+                ["write_file", "write_files", "apply_patch", "delete_file"].includes(
+                  c.function.name,
+                ),
             )
           ) {
             const reRun = await runE2eScenarios({
@@ -3671,6 +3720,7 @@ const SECRET_PATTERNS: RegExp[] = [
  */
 export const TOOL_CALL_DEDICATED_EVENTS: ReadonlySet<string> = new Set([
   "write_file",
+  "write_files",
   "apply_patch",
   "delete_file",
   "run_command",
@@ -3684,6 +3734,24 @@ export const TOOL_CALL_DEDICATED_EVENTS: ReadonlySet<string> = new Set([
 
 export function shouldEmitToolCallEvent(toolName: string): boolean {
   return !TOOL_CALL_DEDICATED_EVENTS.has(toolName);
+}
+
+function mutationPathsForTool(toolName: string, args: Record<string, unknown>): string[] {
+  if (toolName === "write_files") {
+    if (!Array.isArray(args.files)) return [];
+    return args.files
+      .map((entry) =>
+        entry && typeof entry === "object"
+          ? sanitizePath((entry as Record<string, unknown>).path)
+          : null,
+      )
+      .filter((path): path is string => Boolean(path));
+  }
+  if (toolName === "write_file" || toolName === "apply_patch" || toolName === "delete_file") {
+    const path = sanitizePath(args.path);
+    return path ? [path] : [];
+  }
+  return [];
 }
 
 export type ToolCallEventPayload = {
@@ -4088,6 +4156,16 @@ function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
     if (k === "content" || k === "new_text") {
       const s = typeof v === "string" ? v : JSON.stringify(v);
       out[k] = s.length > 200 ? `${s.slice(0, 200)}… (${s.length} chars)` : s;
+    } else if (k === "files" && Array.isArray(v)) {
+      out[k] = v.map((entry) => {
+        const file = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+        const content = typeof file.content === "string" ? file.content : "";
+        return {
+          path: typeof file.path === "string" ? file.path : "(invalid path)",
+          content: `[${content.length} chars]`,
+          ...(typeof file.mime_type === "string" ? { mime_type: file.mime_type } : {}),
+        };
+      });
     } else {
       out[k] = v;
     }
@@ -4854,6 +4932,146 @@ function maybeChargeSenseBatch(ctx: ToolCtx): void {
   }
 }
 
+async function executeSingleFileWrite(
+  ctx: ToolCtx,
+  rawArgs: Record<string, unknown>,
+): Promise<ToolExecutionResult> {
+  const { workspace, input, containerState } = ctx;
+  const path = sanitizePath(rawArgs.path);
+  if (!path) return { ok: false, observation: "ERROR: invalid path" };
+  const content = typeof rawArgs.content === "string" ? rawArgs.content : "";
+  if (content.length === 0) {
+    return {
+      ok: false,
+      observation:
+        "ERROR: content is empty — provide the actual file content. " +
+        "If the file is large, write it in smaller sections using apply_patch, " +
+        "or split it into multiple files.",
+    };
+  }
+  if (content.length > MAX_FILE_BYTES * 4) {
+    return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
+  }
+  const mime = typeof rawArgs.mime_type === "string" ? rawArgs.mime_type : undefined;
+  const prior = workspace.read(path)?.content ?? "";
+  workspace.write(path, content, mime);
+  void invalidateEmbeddingSafe(input.projectId, path);
+  void emitFileDiffEvent(input.onEvent, input.projectId, {
+    path,
+    op: "write",
+    before: prior,
+    after: content,
+  });
+  if (containerState.id) {
+    const { writeFileToContainer } = await import("./container");
+    let syncFailed = false;
+    let syncErrDetail = "";
+    try {
+      const synced = await writeFileToContainer(containerState.id, path, content, input.projectId);
+      if (!synced) {
+        syncFailed = true;
+        syncErrDetail = "container exec returned non-zero exit";
+      }
+    } catch (err) {
+      if (err instanceof ContainerUnavailableError) throw err;
+      syncFailed = true;
+      syncErrDetail = err instanceof Error ? err.message.slice(0, 120) : "unknown error";
+      logger.warn({ err, path }, "agent-loop: container write failed");
+    }
+    if (syncFailed) {
+      return {
+        ok: false,
+        observation:
+          `BLOCKED: workspace save succeeded but container sync FAILED for "${path}" — ${syncErrDetail}. ` +
+          "The dev server does NOT have this change. Retry this file before continuing.",
+      };
+    }
+  } else if (input.projectMode === "developer") {
+    const { DEVELOPER_MODE_RUNTIME_NOT_READY } = await import("./errors");
+    throw new ContainerUnavailableError(DEVELOPER_MODE_RUNTIME_NOT_READY);
+  }
+  return { ok: true, observation: `wrote ${path} (${content.length} bytes)` };
+}
+
+type BatchWriteResult = {
+  path: string;
+  ok: boolean;
+  bytes: number;
+  message: string;
+};
+
+/**
+ * Execute one bounded scaffold batch. Entries beyond the file/byte budget are
+ * reported as a continuation instead of being silently dropped. The model can
+ * resend those original entries in its next write_files call.
+ */
+export async function executeBatchFileWrite(
+  ctx: ToolCtx,
+  rawFiles: unknown,
+): Promise<ToolExecutionResult> {
+  if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
+    return { ok: false, observation: "ERROR: files must be a non-empty array" };
+  }
+
+  const results: BatchWriteResult[] = [];
+  const remainingPaths: string[] = [];
+  let processed = 0;
+  let usedBytes = 0;
+
+  for (let index = 0; index < rawFiles.length; index += 1) {
+    const raw = rawFiles[index];
+    const entry =
+      raw && typeof raw === "object" ? (raw as Record<string, unknown>) : Object.create(null);
+    const displayPath = typeof entry.path === "string" ? entry.path : `(entry ${index + 1})`;
+    const content = typeof entry.content === "string" ? entry.content : "";
+    const bytes = Buffer.byteLength(content, "utf8");
+
+    if (
+      processed >= MAX_BATCH_WRITE_FILES ||
+      (processed > 0 && usedBytes + bytes > MAX_BATCH_WRITE_BYTES)
+    ) {
+      remainingPaths.push(displayPath);
+      continue;
+    }
+    if (bytes > MAX_BATCH_WRITE_BYTES) {
+      results.push({
+        path: displayPath,
+        ok: false,
+        bytes,
+        message: `file exceeds the ${MAX_BATCH_WRITE_BYTES}-byte batch bound; use write_file`,
+      });
+      processed += 1;
+      continue;
+    }
+
+    processed += 1;
+    usedBytes += bytes;
+    const result = await executeSingleFileWrite(ctx, entry);
+    results.push({
+      path: displayPath,
+      ok: result.ok,
+      bytes,
+      message: result.observation,
+    });
+  }
+
+  const failed = results.filter((result) => !result.ok).length;
+  return {
+    ok: failed === 0,
+    observation: JSON.stringify({
+      written: results.filter((result) => result.ok).length,
+      failed,
+      results,
+      continuationRequired: remainingPaths.length > 0,
+      remainingPaths,
+      limits: {
+        maxFiles: MAX_BATCH_WRITE_FILES,
+        maxBytes: MAX_BATCH_WRITE_BYTES,
+      },
+    }),
+  };
+}
+
 export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
@@ -5012,78 +5230,10 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       return { ok: true, observation: header + body };
     }
     case "write_file": {
-      const path = sanitizePath(args.path);
-      if (!path) return { ok: false, observation: "ERROR: invalid path" };
-      const content = typeof args.content === "string" ? args.content : "";
-      if (content.length === 0) {
-        return {
-          ok: false,
-          observation:
-            "ERROR: content is empty — provide the actual file content. " +
-            "If the file is large, write it in smaller sections using apply_patch, " +
-            "or split it into multiple files.",
-        };
-      }
-      if (content.length > MAX_FILE_BYTES * 4) {
-        return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
-      }
-      const mime = typeof args.mime_type === "string" ? args.mime_type : undefined;
-      const prior = workspace.read(path)?.content ?? "";
-      workspace.write(path, content, mime);
-      void invalidateEmbeddingSafe(input.projectId, path);
-      // Task #733: emit a file_diff event so the chat bubble can render an
-      // inline diff. Stripped of secrets, capped to 8KB inside the emitter.
-      void emitFileDiffEvent(input.onEvent, input.projectId, {
-        path,
-        op: "write",
-        before: prior,
-        after: content,
-      });
-      if (containerState.id) {
-        const { writeFileToContainer } = await import("./container");
-        // Verify container sync: if writeFileToContainer returns false or throws
-        // (non-ContainerUnavailableError), the dev server won't see the change.
-        // Return ok:false with a diagnostic so consecutiveErrors increments and
-        // the loop terminates instead of looping blindly on stale-file errors.
-        let syncFailed = false;
-        let syncErrDetail = "";
-        try {
-          const synced = await writeFileToContainer(
-            containerState.id,
-            path,
-            content,
-            input.projectId,
-          );
-          if (!synced) {
-            syncFailed = true;
-            syncErrDetail = "container exec returned non-zero exit";
-          }
-        } catch (err) {
-          if (err instanceof ContainerUnavailableError) throw err;
-          syncFailed = true;
-          syncErrDetail = err instanceof Error ? err.message.slice(0, 120) : "unknown error";
-          logger.warn({ err, path }, "agent-loop: container write failed");
-        }
-        if (syncFailed) {
-          return {
-            ok: false,
-            observation:
-              `BLOCKED: write_file workspace save succeeded but container sync FAILED for "${path}" — ${syncErrDetail}. ` +
-              `The dev server does NOT have this change. Do NOT keep editing other files. ` +
-              `Options: (1) retry writing this file, (2) run_command ["cat","/app/${path}"] to verify current container state, ` +
-              `(3) run_command ["ls","/app"] to inspect container layout, then re-attempt.`,
-          };
-        }
-      } else if (input.projectMode === "developer") {
-        // Developer Mode requires a live container for every file write.
-        // A missing containerState.id means the container was never provisioned
-        // or the session started before provisioning completed. Throw so the
-        // outer loop catch surfaces a visible error instead of silently writing
-        // to an in-memory workspace that will never reach the real container.
-        const { DEVELOPER_MODE_RUNTIME_NOT_READY } = await import("./errors");
-        throw new ContainerUnavailableError(DEVELOPER_MODE_RUNTIME_NOT_READY);
-      }
-      return { ok: true, observation: `wrote ${path} (${content.length} bytes)` };
+      return executeSingleFileWrite(ctx, args);
+    }
+    case "write_files": {
+      return executeBatchFileWrite(ctx, args.files);
     }
     case "apply_patch": {
       const path = sanitizePath(args.path);
@@ -7610,7 +7760,8 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
         : {
             initialIssues: failed,
             fixupAttempted: result.loopReport.toolCalls.some(
-              (t) => t.tool === "write_file" || t.tool === "apply_patch",
+              (t) =>
+                t.tool === "write_files" || t.tool === "write_file" || t.tool === "apply_patch",
             ),
             remainingIssues: failed,
             passed: !result.checksFailed,
