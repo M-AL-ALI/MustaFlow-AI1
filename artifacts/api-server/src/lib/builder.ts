@@ -8,6 +8,7 @@ import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
 import type { TestPlan } from "./checks/playwright-runner";
+import { runPlanningBrain } from "./planning-brain";
 
 /**
  * Sanitises an AI-generated summary so the chat always shows human-readable
@@ -33,7 +34,7 @@ function cleanSummary(raw: string | undefined | null, fallback: string): string 
 }
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
-  lite: "gpt-5-mini",
+  lite: "gpt-5-nano",
   eco: "gpt-5-mini",
   power: "gpt-5.4",
   pro: "gpt-5.4",
@@ -467,26 +468,24 @@ function scanFilesForCdnIssues(files: BuilderFile[]): NonNullable<TaskReport["se
  * Inject this outline as a constraint into the main generation prompt to reduce
  * hallucinated or redundant file splits.
  */
-async function runProPlanMicroCall(projectName: string, userPrompt: string): Promise<string> {
+async function runProPlanMicroCall(
+  projectName: string,
+  userPrompt: string,
+  agentMode: AgentMode = "pro",
+  deepReasoning = false,
+): Promise<string> {
   try {
-    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider, model: routedModel } = resolveStageProvider("build", "eco", "gpt-5-mini");
-    const response = await createChatCompletion({
-      provider,
-      model: routedModel,
-      max_completion_tokens: 300,
-      messages: [
-        {
-          role: "system",
-          content:
-            'You are a web app file planner. Output ONLY valid JSON with no prose: {"files": [{"path": string, "responsibility": string}]}. List every file the app needs with one sentence explaining its responsibility.',
-        },
-        { role: "user", content: `Project: "${projectName}". Request: ${userPrompt}` },
-      ],
-      response_format: { type: "json_object" },
+    const parsed = await runPlanningBrain<{
+      files?: Array<{ path: string; responsibility: string }>;
+    }>({
+      entryPoint: "pro_micro",
+      mode: agentMode,
+      deepReasoning,
+      systemPrompt:
+        'You are a web app file planner. Output ONLY valid JSON with no prose: {"files": [{"path": string, "responsibility": string}]}. List every file the app needs with one sentence explaining its responsibility.',
+      messages: [{ role: "user", content: `Project: "${projectName}". Request: ${userPrompt}` }],
+      maxCompletionTokens: 600,
     });
-    const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
-    const parsed = JSON.parse(raw) as { files?: Array<{ path: string; responsibility: string }> };
     if (!Array.isArray(parsed.files) || parsed.files.length === 0) return "";
     const outline = parsed.files.map((f) => `- ${f.path}: ${f.responsibility}`).join("\n");
     return `## Planned File Structure (follow this exactly — do not add or remove files without good reason)\n${outline}`;
@@ -1605,7 +1604,7 @@ export async function analyzeImagesToLayout(
   try {
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
     // Route via the existing "plan" stage at agentMode=lite — cheap, vision-capable.
-    const { provider, model } = resolveStageProvider("plan", "lite", "gpt-5-mini");
+    const { provider, model } = resolveStageProvider("plan", "lite", "gpt-5-nano");
 
     const parts: Array<
       { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
@@ -6703,6 +6702,7 @@ export async function runPlanPipeline(args: {
   currentFiles?: BuilderFile[];
   /** Distilled summary of earlier conversation turns — gives the planner long-range context. */
   conversationSummary?: string;
+  deepReasoning?: boolean;
 }): Promise<{
   summary: string;
   plan: Record<string, unknown> | null;
@@ -6717,6 +6717,7 @@ export async function runPlanPipeline(args: {
     conversationHistory,
     currentFiles,
     conversationSummary,
+    deepReasoning = false,
   } = args;
 
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
@@ -6748,15 +6749,14 @@ export async function runPlanPipeline(args: {
   // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
   try {
-    plan = await callWithRetry(
-      messages,
-      modelFor(agentMode),
-      8000,
-      "plan",
-      undefined,
-      "plan",
-      agentMode,
-    );
+    plan = await runPlanningBrain<Record<string, unknown>>({
+      entryPoint: "planning_agent",
+      mode: agentMode,
+      deepReasoning,
+      systemPrompt: planPrompt,
+      messages: messages.slice(1),
+      maxCompletionTokens: 8000,
+    });
 
     // Retry once if required new fields are missing
     if (plan && !validatePlanResponse(plan)) {
@@ -6770,15 +6770,14 @@ export async function runPlanPipeline(args: {
         content:
           "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
       });
-      plan = await callWithRetry(
-        messages,
-        modelFor(agentMode),
-        8000,
-        "plan-retry",
-        undefined,
-        "plan",
-        agentMode,
-      );
+      plan = await runPlanningBrain<Record<string, unknown>>({
+        entryPoint: "planning_agent",
+        mode: agentMode,
+        deepReasoning,
+        systemPrompt: planPrompt,
+        messages: messages.slice(1),
+        maxCompletionTokens: 8000,
+      });
     }
   } catch {
     plan = null;
@@ -8710,8 +8709,9 @@ export async function runPlanDecomposePipeline(args: {
   projectKind: string;
   plan: Record<string, unknown>;
   agentMode: AgentMode;
+  deepReasoning?: boolean;
 }): Promise<PlanDecomposeResult> {
-  const { projectName, projectKind, plan, agentMode } = args;
+  const { projectName, projectKind, plan, agentMode, deepReasoning = false } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: PLAN_DECOMPOSE_SYSTEM_PROMPT },
@@ -8726,15 +8726,14 @@ export async function runPlanDecomposePipeline(args: {
   ];
 
   try {
-    const result = await callWithRetry(
-      messages,
-      modelFor(agentMode),
-      4000,
-      "plan-decompose",
-      undefined,
-      "plan",
-      agentMode,
-    );
+    const result = await runPlanningBrain<Record<string, unknown>>({
+      entryPoint: "decompose",
+      mode: agentMode,
+      deepReasoning,
+      systemPrompt: PLAN_DECOMPOSE_SYSTEM_PROMPT,
+      messages: messages.slice(1),
+      maxCompletionTokens: 4000,
+    });
 
     const steps = Array.isArray(result.steps) ? (result.steps as PlanBuildStep[]) : [];
     const totalEstimatedSeconds =

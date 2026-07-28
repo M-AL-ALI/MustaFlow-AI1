@@ -19,18 +19,41 @@ export type BuilderSendIntentOptions = {
 
 export function shouldDeferComposerClearForCreditGate({
   agentMode,
+  deepReasoning = false,
   isLikelyConverse,
   creditConfirmed,
 }: {
   agentMode: string;
+  deepReasoning?: boolean;
   isLikelyConverse: boolean;
   creditConfirmed: boolean;
 }): boolean {
   return (
-    (agentMode === "power" || agentMode === "pro") &&
+    (deepReasoning || agentMode === "power" || agentMode === "pro") &&
     !isLikelyConverse &&
     !creditConfirmed
   );
+}
+
+export const BUILDER_CREDIT_COST = {
+  lite: 1,
+  eco: 2,
+  power: 5,
+  pro: 10,
+} as const;
+
+export const DEEP_BUILDER_CREDIT_COST = {
+  eco: 3,
+  power: 7,
+  pro: 13,
+} as const;
+
+export function builderCreditCost(
+  mode: keyof typeof BUILDER_CREDIT_COST,
+  deepReasoning = false,
+): number {
+  if (deepReasoning && mode !== "lite") return DEEP_BUILDER_CREDIT_COST[mode];
+  return BUILDER_CREDIT_COST[mode];
 }
 
 /**

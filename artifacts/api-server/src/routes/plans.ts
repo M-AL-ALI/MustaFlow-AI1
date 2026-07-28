@@ -68,6 +68,7 @@ router.get(
 const DecomposeBody = z.object({
   plan: z.record(z.unknown()),
   agentMode: z.enum(["lite", "eco", "power", "pro"]).default("eco"),
+  deepReasoning: z.boolean().optional().default(false),
 });
 
 router.post(
@@ -84,7 +85,7 @@ router.post(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const { plan, agentMode } = parsed.data;
+    const { plan, agentMode, deepReasoning } = parsed.data;
 
     const [project] = await db
       .select({ name: projectsTable.name, kind: projectsTable.kind })
@@ -101,6 +102,7 @@ router.post(
         projectKind: project.kind,
         plan,
         agentMode: agentMode as AgentMode,
+        deepReasoning,
       });
       res.json(result);
     } catch (err) {

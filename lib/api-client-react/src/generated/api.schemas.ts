@@ -1345,6 +1345,8 @@ export interface ChatMessageInput {
   content: string;
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
+  /** Runs the deepest unified planning pass before building. Available for eco, power, and pro; rejected for lite. */
+  deepReasoning?: boolean;
   background?: boolean;
   /** Optional visible executor override. New work should use planning or main; task is legacy compatibility only. */
   agentIdentity?: ChatMessageInputAgentIdentity;

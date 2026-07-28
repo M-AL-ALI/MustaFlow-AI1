@@ -188,6 +188,7 @@ import { ProvisioningProgress } from "./components/provisioning-progress";
 import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
 import {
+  builderCreditCost,
   mapIntentToSendOptions,
   shouldDeferComposerClearForCreditGate,
 } from "@/lib/builder-followup-submit";
@@ -1076,11 +1077,27 @@ export default function ProjectWorkspacePage() {
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [_batchTotalCount, setBatchTotalCount] = useState(0);
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
-  const [agentMode, setAgentMode] = useState<AgentMode>("power");
+  const [agentMode, setAgentMode] = useState<AgentMode>("eco");
+  const [deepReasoning, setDeepReasoning] = useState(false);
+  const agentModeInitializedRef = useRef(false);
+  useEffect(() => {
+    if (agentModeInitializedRef.current) return;
+    const savedMode = project?.agentMode;
+    if (
+      savedMode === "lite" ||
+      savedMode === "eco" ||
+      savedMode === "power" ||
+      savedMode === "pro"
+    ) {
+      setAgentMode(savedMode);
+      agentModeInitializedRef.current = true;
+    }
+  }, [project?.agentMode]);
   const [subscriptionTier, setSubscriptionTier] = useState<"free" | "core" | "wave">("free");
   const [showCreditConfirm, setShowCreditConfirm] = useState<{
     mode: string;
     cost: number;
+    deepReasoning: boolean;
   } | null>(null);
   const pendingCreditConfirmRef = useRef<(() => void) | null>(null);
   const creditConfirmedRef = useRef(false);
@@ -2144,6 +2161,7 @@ export default function ProjectWorkspacePage() {
             content,
             agentMode: effectiveMode,
             planMode: effectivePlanMode,
+            deepReasoning: effectiveMode === "lite" ? false : deepReasoning,
             background: opts?.background ?? runInBackground,
             agentIdentity: opts?.agentIdentity ?? agentIdentity,
             ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
@@ -2198,7 +2216,16 @@ export default function ProjectWorkspacePage() {
         },
       );
     },
-    [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient, agentIdentity],
+    [
+      projectId,
+      agentMode,
+      planMode,
+      deepReasoning,
+      runInBackground,
+      sendMessage,
+      queryClient,
+      agentIdentity,
+    ],
   );
 
   const send = useCallback(
@@ -2260,11 +2287,12 @@ export default function ProjectWorkspacePage() {
       // messages so casual questions aren't gated behind a dialog.
       // Use creditConfirmedRef (a stable ref) to bypass the dialog on the
       // second call so we avoid any stale-closure issues with useCallback.
-      const CREDIT_COST: Record<string, number> = { lite: 1, eco: 2, power: 5, pro: 10 };
-      const modeCost = CREDIT_COST[effectiveMode] ?? 0;
+      const effectiveDeepReasoning = effectiveMode === "lite" ? false : deepReasoning;
+      const modeCost = builderCreditCost(effectiveMode, effectiveDeepReasoning);
       if (
         shouldDeferComposerClearForCreditGate({
           agentMode: effectiveMode,
+          deepReasoning: effectiveDeepReasoning,
           isLikelyConverse,
           creditConfirmed: creditConfirmedRef.current,
         })
@@ -2275,7 +2303,11 @@ export default function ProjectWorkspacePage() {
           creditConfirmedRef.current = true;
           send(content, opts);
         };
-        setShowCreditConfirm({ mode: effectiveMode, cost: modeCost });
+        setShowCreditConfirm({
+          mode: effectiveMode,
+          cost: modeCost,
+          deepReasoning: effectiveDeepReasoning,
+        });
         return;
       }
       // Reset bypass flag so the next independent build shows the dialog again
@@ -2340,6 +2372,7 @@ export default function ProjectWorkspacePage() {
         content,
         agentMode: effectiveMode,
         planMode: effectivePlanMode,
+        deepReasoning: effectiveDeepReasoning,
         background: false,
         agentIdentity: opts?.agentIdentity ?? agentIdentity,
         idempotencyKey,
@@ -2659,7 +2692,16 @@ export default function ProjectWorkspacePage() {
         }
       })();
     },
-    [projectId, agentMode, planMode, runInBackground, sendRegular, queryClient, agentIdentity],
+    [
+      projectId,
+      agentMode,
+      planMode,
+      deepReasoning,
+      runInBackground,
+      sendRegular,
+      queryClient,
+      agentIdentity,
+    ],
   );
 
   const cancelTask = useCancelTask();
@@ -4391,7 +4433,13 @@ export default function ProjectWorkspacePage() {
                     <QueueComposer
                       projectId={projectId}
                       agentMode={agentMode}
-                      onAgentModeChange={setAgentMode}
+                      onAgentModeChange={(mode) => {
+                        agentModeInitializedRef.current = true;
+                        setAgentMode(mode);
+                        if (mode === "lite") setDeepReasoning(false);
+                      }}
+                      deepReasoning={deepReasoning}
+                      onDeepReasoningChange={setDeepReasoning}
                       subscriptionTier={subscriptionTier}
                       planMode={planMode}
                       onPlanModeChange={setPlanMode}
@@ -5105,15 +5153,24 @@ export default function ProjectWorkspacePage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Confirm {showCreditConfirm?.mode === "pro" ? "Pro" : "Power"} build
+              Confirm{" "}
+              {showCreditConfirm?.deepReasoning
+                ? "Deep Reasoning"
+                : showCreditConfirm?.mode === "pro"
+                  ? "Pro"
+                  : "Power"}{" "}
+              build
             </AlertDialogTitle>
             <AlertDialogDescription>
               This build uses{" "}
               <span className="font-semibold text-foreground">
                 {showCreditConfirm?.cost} credit{(showCreditConfirm?.cost ?? 0) !== 1 ? "s" : ""}
               </span>{" "}
-              ({showCreditConfirm?.mode === "pro" ? "Pro" : "Power"} mode). Your balance will be
-              updated after the build completes. Continue?
+              (
+              {showCreditConfirm?.deepReasoning
+                ? `${showCreditConfirm.mode} mode with Deep Reasoning`
+                : `${showCreditConfirm?.mode === "pro" ? "Pro" : "Power"} mode`}
+              ). Your balance will be updated after the build completes. Continue?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

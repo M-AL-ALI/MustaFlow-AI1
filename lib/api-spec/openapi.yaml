@@ -7811,6 +7811,10 @@ components:
           type: string
           enum: [lite, eco, power, pro]
         planMode: { type: boolean }
+        deepReasoning:
+          type: boolean
+          default: false
+          description: "Runs the deepest unified planning pass before building. Available for eco, power, and pro; rejected for lite."
         plan:
           type: ["object", "null"]
           additionalProperties: true

@@ -4698,8 +4698,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-builder-task-completion-kind",
     async run(client) {
       await client.query("BEGIN");
+      await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS completion_kind TEXT`);
+      await client.query("COMMIT");
+    },
+  },
+  {
+    name: "migrate-builder-task-deep-reasoning",
+    async run(client) {
+      await client.query("BEGIN");
       await client.query(
-        `ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS completion_kind TEXT`,
+        `ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS deep_reasoning BOOLEAN NOT NULL DEFAULT FALSE`,
       );
       await client.query("COMMIT");
     },

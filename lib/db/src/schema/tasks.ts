@@ -466,6 +466,7 @@ export const agentTasksTable = pgTable(
     // mode the user intended, even if project.agentMode changes before the task drains.
     // Nullable: NULL means "read from project.agentMode at execution time" (legacy rows).
     taskAgentMode: text("task_agent_mode"),
+    deepReasoning: boolean("deep_reasoning").notNull().default(false),
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     discardedAt: timestamp("discarded_at", { withTimezone: true }),

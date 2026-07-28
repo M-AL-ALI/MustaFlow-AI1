@@ -157,6 +157,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     origin,
     idempotencyKey,
     brainstormContext,
+    deepReasoning: requestedDeepReasoning,
   } = parsed.data;
   let { content } = parsed.data;
 
@@ -181,6 +182,11 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     idempotencyStore.set(idempotencyKey, { status: "in-flight", timestamp: Date.now() });
   }
   const mode = agentMode as AgentMode;
+  if (mode === "lite" && requestedDeepReasoning) {
+    res.status(400).json({ error: "Deep Reasoning is not available in Lite mode." });
+    return;
+  }
+  const deepReasoning = Boolean(requestedDeepReasoning);
   const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
   const imageAttachments = attachments.filter(
     (a) => a.kind === "image" && typeof a.url === "string",
@@ -626,6 +632,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           mimeType: f.mimeType,
         })),
         conversationSummary,
+        deepReasoning,
       });
 
       const planPageCount = Array.isArray(
@@ -775,7 +782,11 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind === "build" ? "build" : "refine",
         mode as Parameters<typeof creditCostFor>[0],
       );
-      const cost = creditCostFor(mode as Parameters<typeof creditCostFor>[0], resolvedProvider);
+      const cost = creditCostFor(
+        mode as Parameters<typeof creditCostFor>[0],
+        resolvedProvider,
+        deepReasoning,
+      );
       const credits = await getOrCreateCredits(project.ownerId);
       if (CREDITS_ENFORCEMENT_ENABLED && credits.balance < cost) {
         res.status(402).json({
@@ -811,6 +822,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         wallClockCapMs,
         creditsReserved: reservedCredits,
         taskAgentMode: mode,
+        deepReasoning,
         hasBrainstormContext,
         brainstormTurnCount: hasBrainstormContext
           ? (brainstormContext as Array<{ role: string; content: string }>).length
@@ -850,6 +862,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind,
         userPrompt: userPromptWithContext,
         agentMode: mode,
+        deepReasoning,
         agentIdentity: resolvedAgentIdentity,
         origin: messageOrigin,
         conversationHistory,
@@ -866,6 +879,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind,
         userPrompt: userPromptWithContext,
         agentMode: mode,
+        deepReasoning,
         agentIdentity: resolvedAgentIdentity,
         origin: messageOrigin,
         conversationHistory,

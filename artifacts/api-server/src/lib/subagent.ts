@@ -319,7 +319,9 @@ async function runReviewer(
   };
 }
 
-export function subagentDispatchOutcomeLabel(result: Pick<DispatchResult, "ok" | "review">): string {
+export function subagentDispatchOutcomeLabel(
+  result: Pick<DispatchResult, "ok" | "review">,
+): string {
   if (
     result.ok &&
     result.review &&
@@ -752,14 +754,11 @@ export async function dispatchReviewerStandalone(args: {
       reviewerPayloadStats: reviewerStats,
       reviewerAssembledPromptStats,
     });
-    emitSubagentEvent(
-      taskId,
-      args.input.projectId,
-      "done",
-      role,
-      "deferred: no files to review",
-      { deferred: true, reviewerPayloadStats: reviewerStats, reviewerAssembledPromptStats },
-    );
+    emitSubagentEvent(taskId, args.input.projectId, "done", role, "deferred: no files to review", {
+      deferred: true,
+      reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
+    });
     return {
       ok: true,
       observation: emptyReviewerObservation(reviewerStats),
@@ -986,26 +985,22 @@ async function planSubtasksLLM(
   goal: string,
   maxSubtasks: number,
 ): Promise<PlannedSubtask[]> {
-  const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-  const { provider, model } = resolveStageProvider("plan", parentCtx.input.agentMode, "gpt-5-mini");
+  const { runPlanningBrain } = await import("./planning-brain");
   const sys = `You break a goal into ${maxSubtasks} or fewer ISOLATED subtasks for specialist subagents.
 Roles available: designer (media), explorer (read-only investigation), tester (E2E), reviewer (architect review).
 Each subtask must be safely runnable in a workspace clone without coordinating with the others.
 Output strict JSON: { "subtasks": [{ "id": "t1", "title": "...", "brief": "...", "role": "...", "depends_on": [] }, ...] }`;
   const userPrompt = `GOAL:\n${goal.slice(0, 2000)}\n\nCurrent workspace has ${parentCtx.workspace.list().length} files. Return JSON only.`;
   try {
-    const response = await createChatCompletion({
-      provider,
-      model,
-      messages: [
-        { role: "system", content: sys },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
+    const parsed = await runPlanningBrain<PlannerResponse>({
+      entryPoint: "plan_subtasks",
+      mode: parentCtx.input.agentMode,
+      deepReasoning: parentCtx.input.deepReasoning,
+      systemPrompt: sys,
+      messages: [{ role: "user", content: userPrompt }],
+      maxCompletionTokens: 1600,
       signal: parentCtx.input.signal,
     });
-    const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
-    const parsed = JSON.parse(raw) as PlannerResponse;
     if (!parsed || !Array.isArray(parsed.subtasks)) return [];
     return normalizePlan(parsed, maxSubtasks);
   } catch (err) {

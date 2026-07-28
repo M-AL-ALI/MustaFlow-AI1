@@ -706,6 +706,8 @@ export interface JobInput {
   kind: JobKind;
   userPrompt: string;
   agentMode: AgentMode;
+  /** Fixed-price deepest up-front planning pass selected by the user. */
+  deepReasoning?: boolean;
   /** Which visible executor handles this task. New work uses planning or main; task is legacy. */
   agentIdentity?: AgentIdentity;
   /** Source surface that created the task. Mirrors chat_messages.origin. */
@@ -1764,7 +1766,8 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     agentMode:
       (nextTask.taskAgentMode as AgentMode | null | undefined) ??
       (project.agentMode as AgentMode) ??
-      "power",
+      "eco",
+    deepReasoning: nextTask.deepReasoning ?? false,
     // Preserve the agentIdentity and execution context that were set when this
     // batch task was originally enqueued (Task #item-1).
     agentIdentity: (nextTask.agentIdentity as AgentIdentity | undefined) ?? undefined,
@@ -1884,7 +1887,8 @@ export async function drainNextProjectTask(
     agentMode:
       (nextTask.taskAgentMode as AgentMode | null | undefined) ??
       (project.agentMode as AgentMode) ??
-      "power",
+      "eco",
+    deepReasoning: nextTask.deepReasoning ?? false,
     agentIdentity: (nextTask.agentIdentity as AgentIdentity | undefined) ?? undefined,
     origin: nextTask.origin ?? null,
     imageAttachments: drainedImageAttachments,
@@ -2337,7 +2341,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
     const buildStageForCost = input.kind === "refine" ? "refine" : "build";
     const { provider: costProvider } = resolveStageProvider(buildStageForCost, agentMode);
-    const creditCost = creditCostFor(agentMode, costProvider);
+    const creditCost = creditCostFor(agentMode, costProvider, input.deepReasoning);
     const creditsAlreadyReserved =
       input.runMode === "background" ||
       (await db
@@ -2698,6 +2702,29 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           : "Generating app blueprint and code with AI…",
         );
 
+        let effectivePlanContext = input.planContext ?? null;
+        if ((input.deepReasoning || agentMode === "pro") && agentMode !== "lite") {
+          await emitEvent(
+            taskId,
+            "planning",
+            input.deepReasoning
+              ? "Running Deep Reasoning planning passâ€¦"
+              : "Micro-planning build steps (Pro mode)â€¦",
+          );
+          try {
+            const { runUpfrontBuildPlan } = await import("./planning-brain");
+            effectivePlanContext = await runUpfrontBuildPlan({
+              mode: agentMode,
+              deepReasoning: Boolean(input.deepReasoning),
+              projectName: project.name,
+              userPrompt,
+              signal,
+            });
+          } catch (err) {
+            logger.warn({ err, taskId }, "Deep Reasoning planning pass failed; continuing build");
+          }
+        }
+
         const stackBuildArgs = {
           projectName: project.name,
           projectKind: project.kind,
@@ -2705,7 +2732,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           agentMode,
           conversationHistory,
           knowledgeContext: knowledgeContext || undefined,
-          planContext: input.planContext ?? null,
+          planContext: effectivePlanContext,
           conversationSummary,
           imageAttachments,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
@@ -2779,9 +2806,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   projectMode: project.projectMode ?? null,
                   userPrompt,
                   agentMode,
+                  deepReasoning: input.deepReasoning,
                   conversationHistory,
                   knowledgeContext: knowledgeContext || undefined,
-                  planContext: input.planContext ?? null,
+                  planContext: effectivePlanContext,
                   existingFiles: [],
                   containerId: projectHasLiveServer() ? project.containerId : null,
                   liveServerAvailable: projectHasLiveServer(),
@@ -2900,7 +2928,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           conversationHistory,
                           knowledgeContext: knowledgeContext || undefined,
                           databaseContext,
-                          planContext: input.planContext ?? null,
+                          planContext: effectivePlanContext,
                           conversationSummary,
                           imageAttachments,
                           onEvent: async (type, message) => emitEvent(taskId, type, message),
@@ -2924,7 +2952,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                     conversationHistory,
                                     knowledgeContext: knowledgeContext || undefined,
                                     databaseContext,
-                                    planContext: input.planContext ?? null,
+                                    planContext: effectivePlanContext,
                                     conversationSummary,
                                     imageAttachments,
                                     builderMode: project.builderMode,
@@ -2964,7 +2992,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             agentMode: buildEscalationMode,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
-            planContext: input.planContext ?? null,
+            planContext: effectivePlanContext,
             conversationSummary,
             imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
@@ -2985,7 +3013,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       conversationHistory,
                       knowledgeContext: knowledgeContext || undefined,
                       databaseContext,
-                      planContext: input.planContext ?? null,
+                      planContext: effectivePlanContext,
                       conversationSummary,
                       imageAttachments,
                       signal,
@@ -3009,7 +3037,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                 knowledgeContext: knowledgeContext || undefined,
                                 imageAttachments,
                                 databaseContext,
-                                planContext: input.planContext ?? null,
+                                planContext: effectivePlanContext,
                                 conversationSummary,
                                 builderMode: project.builderMode,
                                 onEvent: async (type: string, message: string) =>
@@ -3234,6 +3262,29 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           : "Applying change request with AI…",
         );
 
+        let effectiveRefinePlanContext = input.planContext ?? null;
+        if ((input.deepReasoning || agentMode === "pro") && agentMode !== "lite") {
+          await emitEvent(
+            taskId,
+            "planning",
+            input.deepReasoning
+              ? "Running Deep Reasoning planning passâ€¦"
+              : "Micro-planning change steps (Pro mode)â€¦",
+          );
+          try {
+            const { runUpfrontBuildPlan } = await import("./planning-brain");
+            effectiveRefinePlanContext = await runUpfrontBuildPlan({
+              mode: agentMode,
+              deepReasoning: Boolean(input.deepReasoning),
+              projectName: project.name,
+              userPrompt,
+              signal,
+            });
+          } catch (err) {
+            logger.warn({ err, taskId }, "Deep Reasoning planning pass failed; continuing change");
+          }
+        }
+
         const stackRefineArgs = {
           projectName: project.name,
           projectKind: project.kind,
@@ -3243,7 +3294,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           conversationHistory,
           knowledgeContext: knowledgeContext || undefined,
           unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-          planContext: input.planContext ?? null,
+          planContext: effectiveRefinePlanContext,
           conversationSummary,
           imageAttachments,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
@@ -3314,7 +3365,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   agentMode,
                   conversationHistory,
                   knowledgeContext: knowledgeContext || undefined,
-                  planContext: input.planContext ?? null,
+                  planContext: effectiveRefinePlanContext,
                   existingFiles,
                   containerId: projectHasLiveServer() ? project.containerId : null,
                   liveServerAvailable: projectHasLiveServer(),
@@ -3437,7 +3488,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           databaseContext,
                           unchangedFilesHint:
                             unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                          planContext: input.planContext ?? null,
+                          planContext: effectiveRefinePlanContext,
                           conversationSummary,
                           imageAttachments,
                           onEvent: async (type, message) => emitEvent(taskId, type, message),
@@ -3466,7 +3517,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                       unchangedFilesHint.length > 0
                                         ? unchangedFilesHint
                                         : undefined,
-                                    planContext: input.planContext ?? null,
+                                    planContext: effectiveRefinePlanContext,
                                     conversationSummary,
                                     imageAttachments,
                                     builderMode: project.builderMode,
@@ -3506,7 +3557,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
             unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-            planContext: input.planContext ?? null,
+            planContext: effectiveRefinePlanContext,
             conversationSummary,
             imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
@@ -3529,7 +3580,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       databaseContext,
                       unchangedFilesHint:
                         unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                      planContext: input.planContext ?? null,
+                      planContext: effectiveRefinePlanContext,
                       conversationSummary,
                       imageAttachments,
                     })
@@ -3554,7 +3605,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                 databaseContext,
                                 unchangedFilesHint:
                                   unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                                planContext: input.planContext ?? null,
+                                planContext: effectiveRefinePlanContext,
                                 conversationSummary,
                                 imageAttachments,
                                 builderMode: project.builderMode,
@@ -3638,9 +3689,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 projectMode: project.projectMode ?? null,
                 userPrompt: stricterPrompt,
                 agentMode,
+                deepReasoning: input.deepReasoning,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
-                planContext: input.planContext ?? null,
+                planContext: effectiveRefinePlanContext,
                 existingFiles,
                 containerId: projectHasLiveServer() ? project.containerId : null,
                 liveServerAvailable: projectHasLiveServer(),
@@ -3775,7 +3827,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                             databaseContext,
                             unchangedFilesHint:
                               unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                            planContext: input.planContext ?? null,
+                            planContext: effectiveRefinePlanContext,
                             conversationSummary,
                             imageAttachments,
                             onEvent: async (type, message) => emitEvent(taskId, type, message),
@@ -3804,7 +3856,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                         unchangedFilesHint.length > 0
                                           ? unchangedFilesHint
                                           : undefined,
-                                      planContext: input.planContext ?? null,
+                                      planContext: effectiveRefinePlanContext,
                                       conversationSummary,
                                       imageAttachments,
                                       builderMode: project.builderMode,
@@ -5063,6 +5115,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 stack: project.stack ?? null,
                 userPrompt,
                 agentMode,
+                deepReasoning: input.deepReasoning,
                 planContext: input.planContext ?? null,
                 existingFiles: [],
                 taskId,
@@ -6754,7 +6807,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   const agentMode =
     (task.taskAgentMode as AgentMode | null | undefined) ??
     (project.agentMode as AgentMode) ??
-    "power";
+    "eco";
   const taskOrigin = typeof task.origin === "string" && task.origin.length > 0 ? task.origin : null;
 
   // ── SAST gate (before any files are written or synced) ─────────────────
@@ -7298,7 +7351,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   if (project.ownerId && task.creditsReserved === null) {
     const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
     const { provider: costProvider } = resolveStageProvider("refine", agentMode);
-    const creditCost = creditCostFor(agentMode, costProvider);
+    const creditCost = creditCostFor(agentMode, costProvider, task.deepReasoning ?? false);
     void deductCreditsAtomic(project.ownerId, creditCost, {
       type: "refine",
       description: `Staged review apply - Task #${taskId}, project ${projectId}`,

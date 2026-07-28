@@ -101,6 +101,8 @@ export interface AgentLoopInput {
   stack: string | null;
   userPrompt: string;
   agentMode: AgentMode;
+  /** Enables the deepest unified planning pass before building. Never available in Lite. */
+  deepReasoning?: boolean;
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   planContext?: Record<string, unknown> | null;
