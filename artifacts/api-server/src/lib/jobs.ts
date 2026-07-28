@@ -119,6 +119,7 @@ import {
   buildAgentTaskTerminalUpdate,
   builderCompletionMessage,
   builderPersistedCompletionSummary,
+  builderValidationAwareCompletionSummary,
 } from "./builder-task-completion";
 
 /**
@@ -5220,9 +5221,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       const completionKind = report.agentLoop?.completionKind ?? "finalized";
       const finalStepCount = report.agentLoop?.steps ?? 0;
-      const persistedAssistantSummary = builderPersistedCompletionSummary(
-        completionKind,
-        assistantSummary,
+      const persistedAssistantSummary = builderValidationAwareCompletionSummary(
+        builderPersistedCompletionSummary(completionKind, assistantSummary),
+        versionValidationStatus,
+        PARTIAL_VALIDATION_WARNING,
       );
       await db
         .update(agentTasksTable)

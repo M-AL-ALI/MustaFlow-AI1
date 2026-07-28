@@ -52,6 +52,7 @@ import {
   buildAgentTaskTerminalUpdate,
   builderCompletionMessage,
   builderPersistedCompletionSummary,
+  builderValidationAwareCompletionSummary,
 } from "./builder-task-completion.js";
 import { buildReviewerWorkspaceContext } from "./reviewer-context.js";
 import {
@@ -127,6 +128,28 @@ describe("Builder Wave 7B completion honesty", () => {
 
     const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
     expect(jobsSource).toContain("result: persistedAssistantSummary");
+    expect(jobsSource).toContain("content: persistedAssistantSummary");
+  });
+
+  it("discloses deferred validation in chat for passed-with-warnings builds", () => {
+    const warning =
+      "Validation was partial because live-server infrastructure is unavailable; container-dependent checks were deferred.";
+    const optimisticSummary = "The Daily Inspiration app is fully scaffolded.";
+
+    expect(
+      builderValidationAwareCompletionSummary(
+        optimisticSummary,
+        "passed_with_warnings",
+        warning,
+      ),
+    ).toBe(`${optimisticSummary} ${warning}`);
+    expect(
+      builderValidationAwareCompletionSummary(optimisticSummary, "passed", warning),
+    ).toBe(optimisticSummary);
+
+    const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    expect(jobsSource).toContain("builderValidationAwareCompletionSummary(");
+    expect(jobsSource).toContain("PARTIAL_VALIDATION_WARNING");
     expect(jobsSource).toContain("content: persistedAssistantSummary");
   });
 

@@ -45,6 +45,19 @@ export function builderPersistedCompletionSummary(
   return summary ? `${summary} — ${outcome}` : completionMessage;
 }
 
+export function builderValidationAwareCompletionSummary(
+  summary: string,
+  validationStatus: string | null,
+  validationWarning: string,
+): string {
+  if (validationStatus !== "passed_with_warnings" || summary.includes(validationWarning)) {
+    return summary;
+  }
+
+  const trimmedSummary = summary.trim();
+  return trimmedSummary ? `${trimmedSummary} ${validationWarning}` : validationWarning;
+}
+
 export function buildAgentTaskTerminalUpdate(input: {
   completionKind: AgentTaskCompletionKind;
   finalStepCount: number;
