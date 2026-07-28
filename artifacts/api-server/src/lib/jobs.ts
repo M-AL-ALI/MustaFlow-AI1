@@ -121,6 +121,14 @@ import {
   builderPersistedCompletionSummary,
   builderValidationAwareCompletionSummary,
 } from "./builder-task-completion";
+import {
+  buildPreviewRepairObservation,
+  collectPreviewRuntimeObservation,
+  previewSelfHealEnabled,
+  resolvePreviewSelfHealBudget,
+} from "./preview-self-heal";
+import { runHeadlessQA, type QAResult, type QAStepEventData } from "./headless-qa";
+import type { AgentLoopReport } from "./agent-loop";
 
 /**
  * Pre-build gate for agentic projects.
@@ -865,6 +873,82 @@ function emitFilesChangedEvent(
   } catch (err) {
     logger.warn({ err, taskId }, "project_files_changed emit failed (non-fatal)");
   }
+}
+
+async function runBoundedHeadlessQA(input: {
+  files: FileSnapshotEntry[];
+  onEvent: (type: string, message: string, data?: QAStepEventData) => Promise<void>;
+  signal: AbortSignal;
+  targetUrl?: string | null;
+  timeoutMs?: number;
+}): Promise<{ result: QAResult | null; timedOut: boolean }> {
+  const qaAbortController = new AbortController();
+  let timedOut = false;
+  const relayAbort = (): void => qaAbortController.abort();
+  input.signal.addEventListener("abort", relayAbort, { once: true });
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    qaAbortController.abort();
+  }, input.timeoutMs ?? 60_000);
+
+  try {
+    const result = await runHeadlessQA(input.files, input.onEvent, qaAbortController.signal, {
+      targetUrl: input.targetUrl,
+    });
+    if (input.signal.aborted) throw new Error("Build cancelled");
+    return timedOut ? { result: null, timedOut: true } : { result, timedOut: false };
+  } finally {
+    clearTimeout(timeoutHandle);
+    input.signal.removeEventListener("abort", relayAbort);
+  }
+}
+
+function mergePreviewRepairLoopReport(
+  base: NonNullable<TaskReport["agentLoop"]>,
+  repair: AgentLoopReport,
+  repaired: boolean,
+): NonNullable<TaskReport["agentLoop"]> {
+  const stepOffset = base.steps;
+  const sumCounters = <T extends Record<string, number>>(
+    first: T | undefined,
+    second: T | undefined,
+  ): T | undefined => {
+    if (!first && !second) return undefined;
+    const merged = { ...(first ?? {}), ...(second ?? {}) } as T;
+    for (const key of new Set([...Object.keys(first ?? {}), ...Object.keys(second ?? {})]) as Set<
+      keyof T
+    >) {
+      merged[key] = ((first?.[key] ?? 0) + (second?.[key] ?? 0)) as T[keyof T];
+    }
+    return merged;
+  };
+
+  return {
+    ...base,
+    steps: base.steps + repair.steps,
+    stepCap: base.stepCap ?? base.steps + repair.stepCap,
+    wallClockElapsedMs: (base.wallClockElapsedMs ?? 0) + repair.wallClockElapsedMs,
+    wallClockBudgetMs: base.wallClockBudgetMs ?? repair.wallClockBudgetMs,
+    totalToolCalls: base.totalToolCalls + repair.totalToolCalls,
+    totalTokens: base.totalTokens + repair.totalTokens,
+    terminationReason: repaired ? base.terminationReason : "checks-failed",
+    completionKind: repaired ? base.completionKind : "checks_failed",
+    toolCalls: [
+      ...base.toolCalls,
+      ...repair.toolCalls.map((call) => ({ ...call, step: call.step + stepOffset })),
+    ],
+    commandsRun: [
+      ...base.commandsRun,
+      ...repair.commandsRun.map((command) => ({
+        ...command,
+        step: command.step + stepOffset,
+      })),
+    ],
+    checkResults: [...base.checkResults, ...repair.checkResults],
+    skillsLoaded: [...new Set([...(base.skillsLoaded ?? []), ...repair.skillsLoaded])],
+    senseCalls: sumCounters(base.senseCalls, repair.senseCalls),
+    creativeCalls: sumCounters(base.creativeCalls, repair.creativeCalls),
+  };
 }
 
 // ── Preview reachability verification ─────────────────────────────────────────
@@ -2088,6 +2172,12 @@ export async function runJob(input: JobInput): Promise<void> {
   // falling back to "completed_with_errors".
   let _pendingRepairChecks: Array<{ label: string; output: string }> = [];
   let _pendingRepairChangedPaths: string[] = [];
+  // Post-boot QA is run once before completion so its result can drive the
+  // single bounded preview self-heal pass. The later persistence block reuses
+  // this result instead of launching a second, independent repair path.
+  let _preCompletionQAResult: import("./headless-qa").QAResult | null = null;
+  let _preCompletionQARan = false;
+  let _preCompletionQATimedOut = false;
   // Keepalive handle — cleared in the outer finally block.
   let stopContainerKeepalive: (() => void) | null = null;
   // Machine ID whose autostop was patched to "off" — restored in the outer finally.
@@ -4776,7 +4866,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         "Saving a rollback checkpoint and refreshing the preview.",
       );
       await emitEvent(taskId, "saving_version", "Saving version rollback point…");
-      const snapshot = await snapshotFilesForVersion(projectId);
+      let snapshot = await snapshotFilesForVersion(projectId);
 
       // Fetch the most recent plan snapshot to annotate this version
       const planSnapshot = await loadLatestPlanSnapshot(projectId);
@@ -4935,6 +5025,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // For container-backed projects, first sync the durable DB file set into
       // /app and restart the runtime; only mark previewUpdated after health passes.
       // Static projects serve from the DB and are always reachable.
+      const previewBootStartedAt = new Date();
       if (project.containerId || project.containerUrl) {
         const allRuntimeFileRows = await db
           .select({ path: projectFilesTable.path, content: projectFilesTable.content })
@@ -4977,8 +5068,368 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End preview reachability verification ────────────────────────────────
 
+      // One bounded post-boot repair cycle. This is intentionally placed after
+      // the real preview sync so Zero sees runtime evidence, not just static
+      // validators. Verification can update the cached QA result but can never
+      // launch a second repair.
+      {
+        const qaEligible =
+          resolvedProjectStack === "static-html" || resolvedProjectStack === "react-vite";
+        const qaOnEvent = async (
+          type: string,
+          message: string,
+          data?: QAStepEventData,
+        ): Promise<void> => {
+          await emitEvent(taskId, type, message, undefined, data ? { ...data } : undefined);
+        };
+
+        if (qaEligible) {
+          _preCompletionQARan = true;
+          try {
+            const qaRun = await runBoundedHeadlessQA({
+              files: snapshot,
+              onEvent: qaOnEvent,
+              signal,
+              targetUrl: project.containerUrl,
+            });
+            _preCompletionQAResult = qaRun.result;
+            _preCompletionQATimedOut = qaRun.timedOut;
+            if (qaRun.timedOut) {
+              await emitEvent(taskId, "qa_timeout", "Self-test timed out.");
+            }
+          } catch (qaError) {
+            if (signal.aborted) throw qaError;
+            _preCompletionQARan = false;
+            logger.warn(
+              { err: qaError, projectId, taskId },
+              "Post-boot browser QA failed before self-heal (non-fatal)",
+            );
+          }
+        }
+
+        const initialObservation = await collectPreviewRuntimeObservation({
+          projectId,
+          since: previewBootStartedAt,
+          previewUpdated: report.previewUpdated === true,
+          previewSyncFailed: report.previewSyncFailed === true,
+          qaErrors: _preCompletionQAResult?.errors ?? [],
+        });
+
+        if (initialObservation.issues.length > 0) {
+          const baseLoopReport = report.agentLoop;
+          const stepCap = baseLoopReport?.stepCap ?? baseLoopReport?.steps ?? 0;
+          const wallClockBudgetMs =
+            baseLoopReport?.wallClockBudgetMs ?? input.wallClockCapMs ?? 20 * 60_000;
+          const budget = resolvePreviewSelfHealBudget({
+            stepsUsed: baseLoopReport?.steps ?? 0,
+            stepCap,
+            taskElapsedMs: Date.now() - jobStartTime,
+            wallClockBudgetMs,
+          });
+          const enabled = previewSelfHealEnabled();
+          const skippedReason = !enabled
+            ? "disabled"
+            : !baseLoopReport
+              ? "no_agent_loop"
+              : !budget.canAttempt
+                ? "no_budget"
+                : null;
+
+          if (skippedReason) {
+            report.previewSelfHeal = {
+              detectedIssues: initialObservation.issues,
+              attempted: false,
+              repaired: false,
+              filesChanged: [],
+              stepsUsed: 0,
+              stepBudget: budget.stepBudget,
+              wallClockBudgetMs: budget.wallClockBudgetMs,
+              remainingIssues: initialObservation.issues,
+              skippedReason,
+            };
+          } else {
+            await emitEvent(
+              taskId,
+              "qa_step",
+              "Runtime issue detected - Zero is making one repair pass",
+              undefined,
+              {
+                kind: "qa_tape_step",
+                phase: "repair",
+                status: "running",
+              },
+            );
+            await emitEvent(
+              taskId,
+              "narration",
+              `Preview runtime issue detected - using ${budget.stepBudget} remaining step${budget.stepBudget === 1 ? "" : "s"} for one automatic repair.`,
+            );
+
+            const { runAgentLoop: runPreviewRepairAgentLoop } = await import("./agent-loop");
+            const filesBeforeRepair = await loadFiles(projectId);
+            let repairLoopResult: Awaited<ReturnType<typeof runPreviewRepairAgentLoop>> | null =
+              null;
+            try {
+              repairLoopResult = await runPreviewRepairAgentLoop({
+                mode: "refine",
+                projectId,
+                projectName: project.name,
+                projectKind: project.kind,
+                projectFormat: resolvedProjectFormat,
+                stack: resolvedProjectStack,
+                projectMode: project.projectMode ?? null,
+                userPrompt: buildPreviewRepairObservation(initialObservation),
+                agentMode,
+                deepReasoning: false,
+                conversationHistory: [],
+                knowledgeContext: undefined,
+                planContext: null,
+                existingFiles: filesBeforeRepair,
+                containerId: projectHasLiveServer() ? project.containerId : null,
+                liveServerAvailable: projectHasLiveServer(),
+                policyStrictness:
+                  (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                  null,
+                requireCommandApproval: project.requireCommandApproval ?? false,
+                onBeforeRiskyOp: async (reason: string) => {
+                  try {
+                    const checkpointFiles = await snapshotFilesForVersion(projectId);
+                    await db.insert(projectVersionsTable).values({
+                      projectId,
+                      label: `Checkpoint: ${reason.slice(0, 60)}`,
+                      note: `Auto-checkpoint before preview repair: ${reason}`,
+                      changelogEntry: `Auto-checkpoint before preview repair: ${reason.slice(0, 80)}`,
+                      filesSnapshot: checkpointFiles,
+                    });
+                  } catch (checkpointError) {
+                    logger.warn(
+                      { err: checkpointError, projectId, taskId },
+                      "Preview self-heal checkpoint failed (non-fatal)",
+                    );
+                  }
+                },
+                taskId,
+                maxSteps: budget.stepBudget,
+                wallClockMs: budget.wallClockBudgetMs,
+                previewUrl: project.containerUrl ?? null,
+                e2eEnabled: false,
+                onEvent: async (type, message) => emitEvent(taskId, type, message),
+                signal,
+              });
+            } catch (repairError) {
+              if (signal.aborted) throw repairError;
+              logger.warn(
+                { err: repairError, projectId, taskId },
+                "Preview self-heal agent pass failed (non-fatal)",
+              );
+            }
+
+            let appliedChangedFiles: BuilderFile[] = [];
+            let appliedRemovedPaths: string[] = [];
+            let verificationObservation = initialObservation;
+            let repaired = false;
+
+            if (repairLoopResult) {
+              const repairSecretScan = scanForSecrets(repairLoopResult.changedFiles);
+              appliedChangedFiles = repairSecretScan.files;
+              appliedRemovedPaths = repairLoopResult.removedPaths;
+              if (repairSecretScan.findings.length > 0) {
+                report.warnings = [
+                  ...(report.warnings ?? []),
+                  ...repairSecretScan.findings.map(
+                    (finding) =>
+                      `Preview repair secrets scan: ${finding.category} detected in ${finding.file} and redacted before saving.`,
+                  ),
+                ];
+              }
+
+              if (appliedChangedFiles.length > 0) {
+                await writeFiles(projectId, appliedChangedFiles, false);
+              }
+              if (appliedRemovedPaths.length > 0) {
+                await deleteFiles(projectId, appliedRemovedPaths);
+              }
+              if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
+                emitFilesChangedEvent(
+                  taskId,
+                  projectId,
+                  appliedChangedFiles,
+                  appliedRemovedPaths,
+                  "refine",
+                );
+                for (const file of appliedChangedFiles) {
+                  await emitEvent(taskId, "editing_files", `Repairing ${file.path}`, file.path);
+                }
+
+                const smellScanByPath = new Map(
+                  filesToSmellScan.map((file) => [file.path, file] as const),
+                );
+                for (const path of appliedRemovedPaths) smellScanByPath.delete(path);
+                for (const file of appliedChangedFiles) smellScanByPath.set(file.path, file);
+                filesToSmellScan = [...smellScanByPath.values()];
+
+                if (diffSummary) {
+                  const beforePaths = new Set(filesBeforeRepair.map((file) => file.path));
+                  diffSummary.filesAdded = [
+                    ...new Set([
+                      ...diffSummary.filesAdded,
+                      ...appliedChangedFiles
+                        .filter((file) => !beforePaths.has(file.path))
+                        .map((file) => file.path),
+                    ]),
+                  ];
+                  diffSummary.filesModified = [
+                    ...new Set([
+                      ...diffSummary.filesModified,
+                      ...appliedChangedFiles
+                        .filter((file) => beforePaths.has(file.path))
+                        .map((file) => file.path),
+                    ]),
+                  ];
+                  diffSummary.filesRemoved = [
+                    ...new Set([...diffSummary.filesRemoved, ...appliedRemovedPaths]),
+                  ];
+                }
+
+                snapshot = await snapshotFilesForVersion(projectId);
+                const verificationStartedAt = new Date();
+                if (project.containerId || project.containerUrl) {
+                  const runtimePreviewResult = await syncAgenticPreviewRuntime({
+                    projectId,
+                    taskId,
+                    containerId: project.containerId,
+                    containerStatus: report.previewUpdated ? "running" : project.containerStatus,
+                    containerUrl: project.containerUrl,
+                    stack: resolvedProjectStack,
+                    signal,
+                    files: snapshot.map((file) => ({
+                      path: file.path,
+                      content: file.content,
+                    })),
+                    removedPaths: appliedRemovedPaths,
+                    packageManifestChanged:
+                      appliedChangedFiles.some((file) => isRuntimeManifestPath(file.path)) ||
+                      appliedRemovedPaths.some(isRuntimeManifestPath),
+                  });
+                  report.previewUpdated = runtimePreviewResult.previewUpdated;
+                  report.previewSyncQueued =
+                    runtimePreviewResult.previewSyncQueued || report.previewSyncQueued === true;
+                  report.previewSyncFailed = runtimePreviewResult.previewSyncFailed;
+                  if (runtimePreviewResult.warnings.length > 0) {
+                    report.warnings = [
+                      ...(report.warnings ?? []),
+                      ...runtimePreviewResult.warnings,
+                    ];
+                  }
+                } else {
+                  report.previewUpdated = true;
+                  report.previewSyncFailed = false;
+                }
+
+                if (qaEligible) {
+                  const verificationQA = await runBoundedHeadlessQA({
+                    files: snapshot,
+                    onEvent: qaOnEvent,
+                    signal,
+                    targetUrl: project.containerUrl,
+                  });
+                  _preCompletionQARan = true;
+                  _preCompletionQAResult = verificationQA.result;
+                  _preCompletionQATimedOut = verificationQA.timedOut;
+                  if (verificationQA.timedOut) {
+                    await emitEvent(taskId, "qa_timeout", "Repair verification timed out.");
+                  }
+                }
+
+                verificationObservation = await collectPreviewRuntimeObservation({
+                  projectId,
+                  since: verificationStartedAt,
+                  previewUpdated: report.previewUpdated === true,
+                  previewSyncFailed: report.previewSyncFailed === true,
+                  qaErrors: _preCompletionQAResult?.errors ?? [],
+                });
+                repaired =
+                  !repairLoopResult.checksFailed &&
+                  !_preCompletionQATimedOut &&
+                  verificationObservation.issues.length === 0;
+              }
+
+              report.agentLoop = mergePreviewRepairLoopReport(
+                baseLoopReport!,
+                repairLoopResult.loopReport,
+                repaired,
+              );
+            }
+
+            report.previewSelfHeal = {
+              detectedIssues: initialObservation.issues,
+              attempted: true,
+              repaired,
+              filesChanged: [
+                ...appliedChangedFiles.map((file) => file.path),
+                ...appliedRemovedPaths,
+              ],
+              stepsUsed: repairLoopResult?.loopReport.steps ?? 0,
+              stepBudget: budget.stepBudget,
+              wallClockBudgetMs: budget.wallClockBudgetMs,
+              remainingIssues: verificationObservation.issues,
+              skippedReason: null,
+            };
+
+            if (repaired) {
+              await emitEvent(taskId, "qa_step", "Runtime repair verified", undefined, {
+                kind: "qa_tape_step",
+                phase: "repair",
+                status: "passed",
+              });
+              await emitEvent(taskId, "narration", "Runtime repair merged into the preview.");
+            }
+          }
+
+          if (!report.previewSelfHeal?.repaired) {
+            const unresolvedCount = report.previewSelfHeal?.remainingIssues.length ?? 0;
+            const previewWarning =
+              report.previewSelfHeal?.attempted === true
+                ? `Automatic preview repair ran once, but ${unresolvedCount || "the"} runtime issue${unresolvedCount === 1 ? "" : "s"} remain.`
+                : `Preview runtime issues were detected, but automatic repair was not run (${report.previewSelfHeal?.skippedReason ?? "unavailable"}).`;
+            versionValidationStatus = "completed_with_errors";
+            report.completedWithErrors = true;
+            report.warnings = [previewWarning, ...(report.warnings ?? [])];
+            assistantSummary = `${assistantSummary}\n\nPreview validation warning: ${previewWarning}`;
+            if (report.agentLoop) {
+              report.agentLoop = {
+                ...report.agentLoop,
+                terminationReason: "checks-failed",
+                completionKind: "checks_failed",
+              };
+            }
+            await emitEvent(
+              taskId,
+              "qa_step",
+              "Runtime issue remains after the single repair allowance",
+              undefined,
+              {
+                kind: "qa_tape_step",
+                phase: "repair",
+                status: "failed",
+              },
+            );
+          }
+
+          if (version?.id) {
+            await db
+              .update(projectVersionsTable)
+              .set({
+                filesSnapshot: snapshot,
+                validationStatus: versionValidationStatus,
+              })
+              .where(eq(projectVersionsTable.id, version.id));
+          }
+        }
+      }
+
       // ── Synchronous Drizzle migration (before task completion) ─────────────
-      // Delegated to runPostWriteMigrationSync — see function definition below
+      // Delegated to runPostWriteMigrationSync — see function definition below.
       // applyTaskAgentStaging. Handles container wake, file sync, npm install,
       // and migration execution for any Drizzle files in this build set.
       {
@@ -5670,133 +6121,66 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       if (isQaEligible) {
         try {
-          const { runHeadlessQA } = await import("./headless-qa");
-
           const qaOnEvent = async (
             type: string,
             message: string,
-            data?: import("./headless-qa").QAStepEventData,
+            data?: QAStepEventData,
           ): Promise<void> => {
             await emitEvent(taskId, type, message, undefined, data ? { ...data } : undefined);
           };
 
-          let qaResult: import("./headless-qa").QAResult | null = null;
-          let qaTimedOut = false;
-
-          const qaAbortController = new AbortController();
-          const qaTimeoutHandle = setTimeout(() => qaAbortController.abort(), 60_000);
-
-          try {
-            qaResult = await Promise.race([
-              runHeadlessQA(snapshot, qaOnEvent, qaAbortController.signal),
-              new Promise<never>((_, reject) =>
-                qaAbortController.signal.addEventListener("abort", () =>
-                  reject(new Error("QA_TIMEOUT")),
-                ),
-              ),
-            ]);
-          } catch (raceErr) {
-            if ((raceErr as Error).message === "QA_TIMEOUT") {
-              qaTimedOut = true;
+          let qaResult = _preCompletionQAResult;
+          let qaTimedOut = _preCompletionQATimedOut;
+          if (!_preCompletionQARan) {
+            const qaRun = await runBoundedHeadlessQA({
+              files: snapshot,
+              onEvent: qaOnEvent,
+              signal,
+              targetUrl: project.containerUrl,
+            });
+            qaResult = qaRun.result;
+            qaTimedOut = qaRun.timedOut;
+            if (qaTimedOut) {
               await emitEvent(taskId, "qa_timeout", "Self-test timed out.");
-              // Persist timeout outcome so Checks tab and activity feed are consistent.
-              const timeoutEntry = {
-                passed: false,
-                errors: [] as string[],
-                stepsRun: 0,
-                timedOut: true,
-                ranAt: new Date().toISOString(),
-              };
-              void db
-                .update(agentTasksTable)
-                .set({ report: { ...report, qaResult: timeoutEntry } })
-                .where(eq(agentTasksTable.id, taskId))
-                .catch((err: unknown) =>
-                  logger.warn({ err, taskId }, "Failed to patch task report with qa timeout"),
-                );
-              void db
-                .insert(projectActivityTable)
-                .values({
-                  projectId,
-                  eventType: "qa_completed",
-                  summary: "Self-test timed out",
-                  metadata: {
-                    passed: false,
-                    errors: [],
-                    stepsRun: 0,
-                    timedOut: true,
-                    taskId,
-                    ranAt: timeoutEntry.ranAt,
-                  },
-                })
-                .catch((err: unknown) =>
-                  logger.warn(
-                    { err, projectId, taskId },
-                    "Failed to write qa_completed (timeout) activity",
-                  ),
-                );
-            } else {
-              throw raceErr;
             }
-          } finally {
-            clearTimeout(qaTimeoutHandle);
           }
 
-          if (!qaTimedOut && qaResult) {
-            // Auto-fix on failure — one retry cap
-            if (!qaResult.passed && qaResult.errors.length > 0) {
-              await emitEvent(
+          const ranAt = new Date().toISOString();
+          if (qaTimedOut) {
+            const timeoutEntry = {
+              passed: false,
+              errors: [] as string[],
+              stepsRun: 0,
+              timedOut: true,
+              ranAt,
+            };
+            report.qaResult = timeoutEntry;
+            await db
+              .update(agentTasksTable)
+              .set({ report: { ...report, qaResult: timeoutEntry } })
+              .where(eq(agentTasksTable.id, taskId));
+            await db.insert(projectActivityTable).values({
+              projectId,
+              eventType: "qa_completed",
+              summary: "Self-test timed out",
+              metadata: {
+                passed: false,
+                errors: [],
+                stepsRun: 0,
+                timedOut: true,
                 taskId,
-                "qa_step",
-                `Repairing ${qaResult.errors.length} browser issue(s)`,
-                undefined,
-                {
-                  kind: "qa_tape_step",
-                  phase: "repair",
-                  status: "running",
-                },
-              );
-              const currentFiles = await loadFiles(projectId);
-              const fixPrompt = [
-                "Fix the following JavaScript errors detected by the headless browser QA pass:",
-                ...qaResult.errors.map((e, i) => `${i + 1}. ${e}`),
-              ].join("\n");
-              try {
-                const fixResult = await runRefinePipeline({
-                  projectName: project.name ?? "app",
-                  projectKind: project.kind ?? "web",
-                  userPrompt: fixPrompt,
-                  agentMode,
-                  existingFiles: currentFiles,
-                  onEvent: qaOnEvent,
-                });
-                if (fixResult && fixResult.changedFiles.length > 0) {
-                  await writeFiles(projectId, fixResult.changedFiles, false);
-                  emitFilesChangedEvent(
-                    taskId,
-                    projectId,
-                    fixResult.changedFiles,
-                    fixResult.removedPaths,
-                    "refine",
-                  );
-                  if (fixResult.removedPaths.length > 0) {
-                    await deleteFiles(projectId, fixResult.removedPaths);
-                  }
-                  const reloadedFiles = await snapshotFilesForVersion(projectId);
-                  const retryResult = await runHeadlessQA(reloadedFiles, qaOnEvent);
-                  qaResult = retryResult;
-                }
-              } catch (fixErr) {
-                logger.warn({ err: fixErr, projectId, taskId }, "QA auto-fix failed (non-fatal)");
-              }
-            }
-
-            const fixedCount = qaResult.errors.length;
+                ranAt,
+              },
+            });
+          } else if (qaResult) {
+            const remainingCount = qaResult.errors.length;
             const qaDoneMsg = qaResult.passed
               ? `All tests passed (${qaResult.stepsRun} steps)`
-              : fixedCount === 0
+              : remainingCount === 0
                 ? "No issues found"
-                : `${fixedCount} issue(s) remain after auto-fix`;
+                : report.previewSelfHeal?.attempted
+                  ? `${remainingCount} issue(s) remain after the single repair pass`
+                  : `${remainingCount} browser issue(s) found`;
             await emitEvent(taskId, "qa_done", qaDoneMsg);
 
             const qaResultEntry = {
@@ -5804,35 +6188,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               errors: qaResult.errors,
               stepsRun: qaResult.stepsRun,
               timedOut: false,
-              ranAt: new Date().toISOString(),
+              ranAt,
             };
-
-            // Patch the task report with qaResult so the Checks tab can read it.
-            void db
+            report.qaResult = qaResultEntry;
+            await db
               .update(agentTasksTable)
               .set({ report: { ...report, qaResult: qaResultEntry } })
-              .where(eq(agentTasksTable.id, taskId))
-              .catch((err: unknown) =>
-                logger.warn({ err, taskId }, "Failed to patch task report with qaResult"),
-              );
-
-            void db
-              .insert(projectActivityTable)
-              .values({
-                projectId,
-                eventType: "qa_completed",
-                summary: qaDoneMsg,
-                metadata: {
-                  passed: qaResult.passed,
-                  errors: qaResult.errors,
-                  stepsRun: qaResult.stepsRun,
-                  taskId,
-                  ranAt: qaResultEntry.ranAt,
-                },
-              })
-              .catch((err: unknown) =>
-                logger.warn({ err, projectId, taskId }, "Failed to write qa_completed activity"),
-              );
+              .where(eq(agentTasksTable.id, taskId));
+            await db.insert(projectActivityTable).values({
+              projectId,
+              eventType: "qa_completed",
+              summary: qaDoneMsg,
+              metadata: {
+                passed: qaResult.passed,
+                errors: qaResult.errors,
+                stepsRun: qaResult.stepsRun,
+                taskId,
+                ranAt,
+              },
+            });
           }
         } catch (qaErr) {
           logger.warn({ err: qaErr, projectId, taskId }, "Browser QA pass failed (non-fatal)");
@@ -5842,7 +6216,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       const finalizedCompletionMessage =
         versionValidationStatus === "completed_with_errors"
-          ? "Build complete — TypeScript repair exhausted. Preview may have issues. Review the report for details."
+          ? "Build completed with unresolved validation or preview errors. Review the report for details."
           : validationWasPartial
             ? "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred."
             : versionValidationStatus === "passed_with_warnings"

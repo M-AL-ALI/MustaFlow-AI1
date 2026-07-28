@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const qaMocks = vi.hoisted(() => {
   const button = {
@@ -16,12 +16,20 @@ const qaMocks = vi.hoisted(() => {
     count: vi.fn(async () => 0),
     nth: vi.fn(),
   };
+  const root = {
+    first: vi.fn(),
+    innerText: vi.fn(async () => "A working app"),
+    locator: vi.fn(() => ({ count: vi.fn(async () => 2) })),
+    boundingBox: vi.fn(async () => ({ width: 100, height: 100 })),
+  };
+  root.first.mockReturnValue(root);
   const page = {
     on: vi.fn(),
     goto: vi.fn(async () => undefined),
     screenshot: vi.fn(async () => Buffer.from("frame")),
     waitForTimeout: vi.fn(async () => undefined),
     locator: vi.fn((selector: string) => {
+      if (selector === "#root, body") return root;
       if (selector.startsWith("button")) {
         return { count: vi.fn(async () => 1), nth: vi.fn(() => button) };
       }
@@ -37,6 +45,7 @@ const qaMocks = vi.hoisted(() => {
     button,
     input,
     page,
+    root,
     browser,
     launch: vi.fn(async () => browser),
   };
@@ -51,6 +60,10 @@ vi.mock("playwright", () => ({
 import { runHeadlessQA, type QAStepEventData } from "./headless-qa";
 
 describe("headless QA tape", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("streams readable actions and bounded take_screenshot frames", async () => {
     const events: Array<{ type: string; message: string; data?: QAStepEventData }> = [];
 
@@ -84,5 +97,34 @@ describe("headless QA tape", () => {
     expect(screenshots.every((shot) => shot.bytes <= 160 * 1024)).toBe(true);
     expect(qaMocks.button.click).toHaveBeenCalledOnce();
     expect(qaMocks.input.fill).toHaveBeenCalledWith("buy milk", { timeout: 2_000 });
+  });
+
+  it("uses the booted preview URL and reports a blank page as runtime evidence", async () => {
+    qaMocks.root.innerText.mockResolvedValueOnce("");
+    qaMocks.root.locator
+      .mockReturnValueOnce({ count: vi.fn(async () => 0) })
+      .mockReturnValueOnce({ count: vi.fn(async () => 0) });
+    qaMocks.root.boundingBox.mockResolvedValueOnce({ width: 0, height: 0 });
+    const events: Array<{ type: string; message: string }> = [];
+
+    const result = await runHeadlessQA(
+      [],
+      async (type, message) => {
+        events.push({ type, message });
+      },
+      undefined,
+      { targetUrl: "https://preview.example.test" },
+    );
+
+    expect(qaMocks.page.goto).toHaveBeenCalledWith("https://preview.example.test", {
+      waitUntil: "domcontentloaded",
+      timeout: 15_000,
+    });
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain("Preview rendered a blank page");
+    expect(events).toContainEqual({
+      type: "qa_step",
+      message: "Error: Preview rendered a blank page",
+    });
   });
 });

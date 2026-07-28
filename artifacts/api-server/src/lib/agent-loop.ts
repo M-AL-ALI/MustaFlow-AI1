@@ -128,6 +128,11 @@ export interface AgentLoopInput {
    * Clamped to [60_000, 30 * 60_000].
    */
   wallClockMs?: number;
+  /**
+   * Per-run tool-call cap. Used by the post-preview self-heal pass so it can
+   * consume only the original task's unused steps. Never raises the global cap.
+   */
+  maxSteps?: number;
   /** Live preview URL for the project (container proxy or static preview). Used for E2E. */
   previewUrl?: string | null;
   /** Per-project Playwright E2E enablement. Defaults true. */
@@ -207,6 +212,9 @@ export type CheckResultRecord = {
 export type AgentLoopReport = {
   stack: StackId;
   steps: number;
+  stepCap: number;
+  wallClockElapsedMs: number;
+  wallClockBudgetMs: number;
   totalToolCalls: number;
   totalTokens: number;
   terminationReason:
@@ -1612,6 +1620,8 @@ function buildSystemPrompt(
   stack: StackId,
   profile: { checks: CheckSpec[] },
   skillsIndex: string,
+  stepCap: number,
+  wallClockMs: number,
 ) {
   const checkList = profile.checks.map((c) => `  • ${c.id} (${c.label})`).join("\n");
   const isStatic = stack === "static-html";
@@ -1807,8 +1817,8 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     checkList,
     "",
     "## Safety limits (will be enforced)",
-    `- Maximum ${STEP_CAP} tool-calling steps.`,
-    `- Maximum ${Math.round(WALL_CLOCK_MS / 60000)} minutes wall-clock.`,
+    `- Maximum ${stepCap} tool-calling steps.`,
+    `- Maximum ${Math.round(wallClockMs / 60000)} minutes wall-clock.`,
     `- After ${REPEATED_ERROR_CAP} consecutive failures of the same operation, the loop aborts.`,
     `- Policy strictness for this project: ${strictness}.`,
     "- `run_command` accepts argv arrays only and runs in a disposable temp snapshot with a scrubbed environment. It allows Node/npm/npx and bounded read-only file utilities; raw shells and every other executable are rejected.",
@@ -2074,6 +2084,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     typeof input.wallClockMs === "number" && Number.isFinite(input.wallClockMs)
       ? Math.min(30 * 60_000, Math.max(60_000, Math.floor(input.wallClockMs)))
       : WALL_CLOCK_MS;
+  const stepCap =
+    typeof input.maxSteps === "number" && Number.isFinite(input.maxSteps)
+      ? Math.min(STEP_CAP, Math.max(1, Math.floor(input.maxSteps)))
+      : STEP_CAP;
   let lastError = "";
   let consecutiveErrors = 0;
   // Per-path consecutive check-failure counts. Tracks how many consecutive
@@ -2103,7 +2117,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const loadedSkills = new Map<string, SkillManifest>();
 
   const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(input, stack, profile, skillsIndex) },
+    {
+      role: "system",
+      content: buildSystemPrompt(input, stack, profile, skillsIndex, stepCap, wallClockMs),
+    },
   ];
 
   // Seed context: current file manifest + unread feedback items (Task #546).
@@ -2238,7 +2255,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let visionTurnsRemaining = 0;
   let step = 0;
 
-  for (step = 1; step <= STEP_CAP; step++) {
+  for (step = 1; step <= stepCap; step++) {
     if (input.signal.aborted) {
       terminationReason = "aborted";
       break;
@@ -2273,10 +2290,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         break;
       }
     }
-    // Total tool-call cap (not just LLM turns). STEP_CAP is the budget for the
+    // Total tool-call cap (not just LLM turns). stepCap is the budget for the
     // entire run measured in tool calls so a single turn that emits many calls
     // cannot exceed the safety budget.
-    if (toolCalls.length >= STEP_CAP) {
+    if (toolCalls.length >= stepCap) {
       terminationReason = "step-cap";
       break;
     }
@@ -2333,7 +2350,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       "loop:step",
       JSON.stringify({
         stepIndex: toolCalls.length + 1,
-        stepCap: STEP_CAP,
+        stepCap,
         wallClockElapsedMs: Date.now() - startedAt,
         wallClockBudgetMs: wallClockMs,
         toolName: toolCalls[toolCalls.length - 1]?.tool ?? null,
@@ -2696,7 +2713,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         visionTurnsRemaining = 1;
       }
 
-      if (toolCalls.length >= STEP_CAP && callName !== "finalize") {
+      if (toolCalls.length >= stepCap && callName !== "finalize") {
         terminationReason = "step-cap";
         return { terminate: true, observation };
       }
@@ -2728,12 +2745,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
 
       // Pre-execution budget clamps: never start more parallel calls than the
-      // remaining STEP_CAP or hourly rate-limit budget allows. Without these
+      // remaining step or hourly rate-limit budget allows. Without these
       // pre-checks a single LLM response emitting many parallel-safe calls could
       // fire side effects past either cap before handleToolResult observes it.
       if (batch.length > 0) {
-        // 1) STEP_CAP clamp
-        const remainingBudget = Math.max(0, STEP_CAP - toolCalls.length);
+        // 1) Per-run step cap
+        const remainingBudget = Math.max(0, stepCap - toolCalls.length);
         if (remainingBudget === 0) {
           terminationReason = "step-cap";
           stepFinalized = true;
@@ -3014,7 +3031,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Enforce tool-call cap mid-turn — stop immediately if we hit the budget
       // partway through a multi-tool-call response.
-      if (toolCalls.length >= STEP_CAP && name !== "finalize") {
+      if (toolCalls.length >= stepCap && name !== "finalize") {
         terminationReason = "step-cap";
         stepFinalized = true; // borrow flag to break the outer for-loop too
         break;
@@ -3254,7 +3271,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   }
 
   // If the loop exited via the for-condition without break, it's a step-cap exhaustion.
-  if (step > STEP_CAP && terminationReason === "model-stopped" && !finalized) {
+  if (step > stepCap && terminationReason === "model-stopped" && !finalized) {
     terminationReason = "step-cap";
   }
 
@@ -3331,7 +3348,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       checksFailed: true,
       loopReport: {
         stack,
-        steps: Math.min(toolCalls.length, STEP_CAP),
+        steps: Math.min(toolCalls.length, stepCap),
+        stepCap,
+        wallClockElapsedMs: Date.now() - startedAt,
+        wallClockBudgetMs: wallClockMs,
         totalToolCalls: toolCalls.length,
         totalTokens,
         terminationReason,
@@ -3424,7 +3444,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     await safeEvent(input.onEvent, "narration", repairNote);
   }
 
-  if (!STEP_CAP_REACHED(toolCalls.length) && terminationReason === "model-stopped" && finalized) {
+  if (
+    !stepCapReached(toolCalls.length, stepCap) &&
+    terminationReason === "model-stopped" &&
+    finalized
+  ) {
     // keep finalized
   }
 
@@ -3532,7 +3556,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           }
           for (const call of fixToolReqs.slice(0, 8)) {
             if (call.type !== "function") continue;
-            if (toolCalls.length >= STEP_CAP) break;
+            if (toolCalls.length >= stepCap) break;
             let parsed: Record<string, unknown> = {};
             try {
               parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
@@ -3643,7 +3667,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     checksFailed: requiredFailed,
     loopReport: {
       stack,
-      steps: Math.min(toolCalls.length, STEP_CAP),
+      steps: Math.min(toolCalls.length, stepCap),
+      stepCap,
+      wallClockElapsedMs: Date.now() - startedAt,
+      wallClockBudgetMs: wallClockMs,
       totalToolCalls: toolCalls.length,
       totalTokens,
       terminationReason,
@@ -3660,8 +3687,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   };
 }
 
-function STEP_CAP_REACHED(n: number): boolean {
-  return n >= STEP_CAP;
+function stepCapReached(count: number, stepCap: number): boolean {
+  return count >= stepCap;
 }
 
 async function safeEvent(fn: AgentLoopEvent, type: string, msg: string): Promise<void> {

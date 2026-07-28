@@ -32,6 +32,11 @@ export type QAEventCallback = (
   data?: QAStepEventData,
 ) => void | Promise<void>;
 
+export type QAOptions = {
+  /** When set, exercise the real, already-booted preview instead of a local snapshot server. */
+  targetUrl?: string | null;
+};
+
 const QA_INPUT_VALUE = "buy milk";
 const MAX_SCREENSHOTS = 3;
 const MAX_SCREENSHOT_BYTES = 160 * 1024;
@@ -112,35 +117,43 @@ export async function runHeadlessQA(
   projectFiles: FileSnapshotEntry[],
   onEvent: QAEventCallback,
   signal?: AbortSignal,
+  options?: QAOptions,
 ): Promise<QAResult> {
+  const requestedTargetUrl = options?.targetUrl?.trim() || null;
   const indexFile = projectFiles.find((file) => file.path === "index.html");
-  if (!indexFile) {
+  if (!requestedTargetUrl && !indexFile) {
     logger.info("headless-qa: no index.html - skipping");
     return { passed: true, errors: [], stepsRun: 0 };
   }
 
-  const port = await findFreePort();
-  const fileMap = new Map(projectFiles.map((file) => [file.path, file]));
-  const server = http.createServer((req, res) => {
-    let urlPath = (req.url ?? "/").split("?")[0] ?? "/";
-    if (urlPath === "/" || urlPath === "") urlPath = "index.html";
-    else urlPath = urlPath.replace(/^\/+/, "");
+  let server: http.Server | null = null;
+  let navigationUrl = requestedTargetUrl;
+  if (!navigationUrl) {
+    const port = await findFreePort();
+    const localIndex = indexFile!;
+    const fileMap = new Map(projectFiles.map((file) => [file.path, file]));
+    server = http.createServer((req, res) => {
+      let urlPath = (req.url ?? "/").split("?")[0] ?? "/";
+      if (urlPath === "/" || urlPath === "") urlPath = "index.html";
+      else urlPath = urlPath.replace(/^\/+/, "");
 
-    const file = fileMap.get(urlPath);
-    res.setHeader("Cache-Control", "no-cache");
-    if (file) {
-      res.setHeader("Content-Type", file.mimeType || "text/plain");
-      res.end(file.content);
-    } else {
-      res.setHeader("Content-Type", "text/html");
-      res.end(indexFile.content);
-    }
-  });
+      const file = fileMap.get(urlPath);
+      res.setHeader("Cache-Control", "no-cache");
+      if (file) {
+        res.setHeader("Content-Type", file.mimeType || "text/plain");
+        res.end(file.content);
+      } else {
+        res.setHeader("Content-Type", "text/html");
+        res.end(localIndex.content);
+      }
+    });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", resolve);
-  });
+    await new Promise<void>((resolve, reject) => {
+      server!.once("error", reject);
+      server!.listen(port, "127.0.0.1", resolve);
+    });
+    navigationUrl = `http://127.0.0.1:${port}/`;
+  }
 
   const errors: string[] = [];
   const emittedErrors = new Set<string>();
@@ -219,10 +232,40 @@ export async function runHeadlessQA(
     await emitStep("Opening the app", "navigation", "running");
     stepsRun += 1;
     try {
-      await page.goto(`http://127.0.0.1:${port}/`, {
-        waitUntil: "networkidle",
+      const response = await page.goto(navigationUrl!, {
+        waitUntil: "domcontentloaded",
         timeout: 15_000,
       });
+      await page.waitForTimeout(300);
+      if (response && response.status() >= 500) {
+        await recordError(`Preview returned HTTP ${response.status()}`, "navigation", true);
+      }
+      const root = page.locator("#root, body").first();
+      const [rootText, meaningfulElements, childElements, rootBox] = await Promise.all([
+        root.innerText().catch(() => ""),
+        root
+          .locator("button, input, textarea, a, img, svg, canvas, video, iframe, [role]")
+          .count()
+          .catch(() => 0),
+        root
+          .locator(":scope > *")
+          .count()
+          .catch(() => 0),
+        root.boundingBox().catch(() => null),
+      ]);
+      const rendered = {
+        textLength: rootText.replace(/\s+/g, "").length,
+        meaningfulElements,
+        childElements,
+        visibleArea: Math.max(0, (rootBox?.width ?? 0) * (rootBox?.height ?? 0)),
+      };
+      if (
+        rendered.textLength === 0 &&
+        rendered.meaningfulElements === 0 &&
+        (rendered.childElements === 0 || rendered.visibleArea === 0)
+      ) {
+        await recordError("Preview rendered a blank page", "navigation", true);
+      }
       const screenshot = await captureKeyStep(page, "App opened", screenshotBudget);
       await emitStep("Opened the app", "navigation", "passed", screenshot);
     } catch (error) {
@@ -339,7 +382,9 @@ export async function runHeadlessQA(
     }
   } finally {
     signal?.removeEventListener("abort", abortHandler);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
   }
 
   return { passed: errors.length === 0, errors, stepsRun };
