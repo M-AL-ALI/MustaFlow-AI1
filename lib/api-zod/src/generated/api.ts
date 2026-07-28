@@ -1371,6 +1371,7 @@ export const SendMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
+  "deepReasoning": zod.boolean().optional().default(false).describe('Runs the deepest unified planning pass before building. Available for eco, power, and pro; rejected for lite.'),
   "background": zod.boolean().optional(),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.'),

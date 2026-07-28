@@ -166,6 +166,8 @@ interface QueueComposerProps {
   projectId: number;
   agentMode: AgentMode;
   onAgentModeChange: (mode: AgentMode) => void;
+  deepReasoning: boolean;
+  onDeepReasoningChange: (enabled: boolean) => void;
   subscriptionTier?: "free" | "core" | "wave";
   planMode: boolean;
   onPlanModeChange: (v: boolean) => void;
@@ -219,6 +221,8 @@ export function QueueComposer({
   projectId,
   agentMode,
   onAgentModeChange,
+  deepReasoning,
+  onDeepReasoningChange,
   subscriptionTier: _subscriptionTier = "free",
   planMode,
   onPlanModeChange,
@@ -1971,14 +1975,41 @@ export function QueueComposer({
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  disabled={agentMode === "lite"}
+                  onClick={() => onDeepReasoningChange(!deepReasoning)}
+                  aria-pressed={deepReasoning}
+                  title={
+                    agentMode === "lite"
+                      ? "Deep Reasoning is available in Eco, Power, and Pro"
+                      : `Deep Reasoning: ${deepReasoning ? "on" : "off"}`
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase transition-colors",
+                    deepReasoning
+                      ? "border-violet-400/60 bg-violet-500/20 text-violet-200"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                    agentMode === "lite" && "cursor-not-allowed opacity-40",
+                  )}
+                >
+                  <Sparkles className="h-2.5 w-2.5" />
+                  Deep
+                </button>
                 <span className="text-[9px] text-muted-foreground/50 pr-0.5">
-                  {agentMode === "lite"
-                    ? "1 credit · minimal correct change"
-                    : agentMode === "eco"
-                      ? "2 credits · clean typed code"
+                  {deepReasoning
+                    ? agentMode === "eco"
+                      ? "3 credits · deepest planning"
                       : agentMode === "power"
-                        ? "5 credits · production-ready TypeScript"
-                        : "10 credits · security-first strict mode"}
+                        ? "7 credits · deepest planning"
+                        : "13 credits · deepest planning"
+                    : agentMode === "lite"
+                      ? "1 credit · minimal correct change"
+                      : agentMode === "eco"
+                        ? "2 credits · clean typed code"
+                        : agentMode === "power"
+                          ? "5 credits · production-ready TypeScript"
+                          : "10 credits · security-first strict mode"}
                 </span>
               </div>
               {queueingBehind ? (

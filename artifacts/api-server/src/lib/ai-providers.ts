@@ -247,7 +247,20 @@ const BASE_COST: Record<AgentMode, number> = {
   pro: 10,
 };
 
-export function creditCostFor(mode: AgentMode, provider: Provider = "openai"): number {
+export const DEEP_REASONING_CREDIT_COST: Readonly<Partial<Record<AgentMode, number>>> = {
+  eco: 3,
+  power: 7,
+  pro: 13,
+};
+
+export function creditCostFor(
+  mode: AgentMode,
+  provider: Provider = "openai",
+  deepReasoning = false,
+): number {
+  if (deepReasoning && mode !== "lite") {
+    return DEEP_REASONING_CREDIT_COST[mode] ?? BASE_COST[mode];
+  }
   const base = BASE_COST[mode] ?? 1;
   const adjusted = Math.round(base * (PROVIDER_COST_MULTIPLIER[provider] ?? 1));
   return Math.max(1, adjusted);
@@ -274,6 +287,8 @@ export interface CreateChatCompletionParams {
    * Ignored by all other providers.
    */
   disableThinking?: boolean;
+  /** OpenAI reasoning effort. Used only for Pro + Deep Builder planning. */
+  reasoning_effort?: "low" | "medium" | "high";
 }
 
 /**
@@ -319,6 +334,7 @@ export async function createChatCompletion(
               tool_choice: params.tool_choice,
               response_format: params.response_format,
               max_completion_tokens: params.max_completion_tokens,
+              reasoning_effort: params.reasoning_effort,
             },
             { signal: params.signal },
           );

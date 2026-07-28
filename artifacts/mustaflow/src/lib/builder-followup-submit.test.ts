@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
+  builderCreditCost,
   mapIntentToSendOptions,
   resolveBuilderComposerIntent,
   shouldDeferComposerClearForCreditGate,
 } from "./builder-followup-submit";
+
+describe("Deep Reasoning pricing", () => {
+  it("uses the fixed price table and gates Eco before sending", () => {
+    expect(builderCreditCost("lite", false)).toBe(1);
+    expect(builderCreditCost("eco", true)).toBe(3);
+    expect(builderCreditCost("power", true)).toBe(7);
+    expect(builderCreditCost("pro", true)).toBe(13);
+    expect(
+      shouldDeferComposerClearForCreditGate({
+        agentMode: "eco",
+        deepReasoning: true,
+        isLikelyConverse: false,
+        creditConfirmed: false,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("shouldDeferComposerClearForCreditGate", () => {
   it("defers clearing only for unconfirmed Power and Pro builds", () => {
