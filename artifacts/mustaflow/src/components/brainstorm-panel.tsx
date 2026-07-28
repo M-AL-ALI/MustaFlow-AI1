@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { authFetch } from "@/lib/api-fetch";
 
 interface Message {
   role: "user" | "assistant";
@@ -32,7 +33,7 @@ interface BrainstormPanelProps {
    * the AI opening message) so the caller can forward it to the builder as
    * supplementary context.
    */
-  onResolved?: (prompt: string, messages: Message[]) => void;
+  onResolved?: (prompt: string, messages: Message[], action: "plan" | "build") => void;
   /**
    * When provided the conversation is persisted to localStorage keyed by this
    * project ID so re-opening the panel restores the thread.
@@ -117,15 +118,9 @@ export function BrainstormPanel({
   const [input, setInput] = useState(initialInput ?? "");
   const [buildIntent, setBuildIntent] = useState(initialState.buildIntent);
   const [pulseIntent, setPulseIntent] = useState(false);
-  const [resolvedSpec, setResolvedSpec] = useState<{
-    name: string;
-    prompt: string;
-    kind: "web" | "mobile-cross";
-  } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const nameRef = useRef<HTMLSpanElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -172,7 +167,6 @@ export function BrainstormPanel({
   const handleStartFresh = useCallback(() => {
     setMessages([OPENING_MESSAGE]);
     setBuildIntent(false);
-    setResolvedSpec(null);
     setInput("");
     if (effectiveKey) clearPersistedState(effectiveKey);
   }, [effectiveKey]);
@@ -191,6 +185,8 @@ export function BrainstormPanel({
       {
         data: {
           messages: [...chatMessages, { role: "user", content: text }],
+          ...(projectId ? { projectId } : {}),
+          beginnerMode: mode !== "developer",
         },
       },
       {
@@ -209,7 +205,7 @@ export function BrainstormPanel({
         },
       },
     );
-  }, [input, chatMutation, messages]);
+  }, [input, chatMutation, messages, projectId, mode]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -218,74 +214,126 @@ export function BrainstormPanel({
     }
   };
 
-  const handleBuildIt = useCallback(() => {
-    if (resolveMutation.isPending || chatMutation.isPending) return;
-    const chatMessages = messages.filter((m) => !isOpeningMessage(m));
-    resolveMutation.mutate(
-      { data: { messages: chatMessages } },
-      {
-        onSuccess: (data) => {
-          setResolvedSpec(data);
-        },
-        onError: () => {
-          toast({
-            title: "Something went wrong",
-            description: "Could not resolve your project spec — try again.",
-            variant: "destructive",
-          });
-        },
-      },
-    );
-  }, [resolveMutation, chatMutation.isPending, messages, toast]);
+  const handoffResolvedSpec = useCallback(
+    (data: {
+      name: string;
+      prompt: string;
+      kind: "web" | "mobile-cross";
+      action: "plan" | "build";
+      brainstormContext: Message[];
+    }) => {
+      if (onResolved) {
+        if (effectiveKey) clearPersistedState(effectiveKey);
+        onResolved(data.prompt, data.brainstormContext, data.action);
+        onClose();
+        return;
+      }
 
-  const handleCreateProject = useCallback(() => {
-    if (!resolvedSpec || isCreating) return;
-    const name = (nameRef.current?.textContent ?? "").trim() || resolvedSpec.name;
-    setIsCreating(true);
-    const brainstormMessages = messages.filter((m) => m !== OPENING_MESSAGE);
-    createProject.mutate(
-      {
-        data: {
-          name,
-          description: resolvedSpec.prompt,
-          kind: resolvedSpec.kind,
-          initialPrompt: resolvedSpec.prompt,
-          ...(mode ? { mode } : {}),
-          ...(brainstormMessages.length > 0 ? { brainstormContext: brainstormMessages } : {}),
+      setIsCreating(true);
+      createProject.mutate(
+        {
+          data: {
+            name: data.name,
+            description: data.prompt,
+            kind: data.kind,
+            ...(mode ? { mode } : {}),
+          },
         },
-      },
-      {
-        onSuccess: (project) => {
-          if (effectiveKey) clearPersistedState(effectiveKey);
-          void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-          if (onCreated) {
-            onCreated(project.id);
-          } else {
-            setLocation(`/projects/${project.id}`);
-          }
+        {
+          onSuccess: async (project) => {
+            try {
+              const response = await authFetch(`/api/projects/${project.id}/messages`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                  content: data.prompt,
+                  agentMode: "eco",
+                  planMode: data.action === "plan",
+                  background: false,
+                  agentIdentity: data.action === "plan" ? "planning" : "main",
+                  agentIntent: data.action,
+                  brainstormContext: data.brainstormContext,
+                }),
+              });
+              if (!response.ok) throw new Error("Brainstorm handoff failed");
+              if (effectiveKey) clearPersistedState(effectiveKey);
+              void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+              if (onCreated) {
+                onCreated(project.id);
+              } else {
+                setLocation(`/projects/${project.id}`);
+              }
+            } catch {
+              toast({
+                title: "Project created, but the handoff failed",
+                description: "Open the project and retry your plan or build request.",
+                variant: "destructive",
+              });
+              setLocation(`/projects/${project.id}`);
+            }
+          },
+          onError: () => {
+            toast({
+              title: "Something went wrong",
+              description: "Could not create your project — try again.",
+              variant: "destructive",
+            });
+            setIsCreating(false);
+          },
         },
-        onError: () => {
-          toast({
-            title: "Something went wrong",
-            description: "Could not create your project — try again.",
-            variant: "destructive",
-          });
-          setIsCreating(false);
+      );
+    },
+    [
+      createProject,
+      effectiveKey,
+      mode,
+      onClose,
+      onCreated,
+      onResolved,
+      queryClient,
+      setLocation,
+      toast,
+    ],
+  );
+
+  const handleExit = useCallback(
+    (action: "plan" | "build") => {
+      if (resolveMutation.isPending || chatMutation.isPending) return;
+      const chatMessages = messages.filter((m) => !isOpeningMessage(m));
+      resolveMutation.mutate(
+        {
+          data: {
+            messages: chatMessages,
+            action,
+            ...(projectId ? { projectId } : {}),
+            beginnerMode: mode !== "developer",
+          },
         },
-      },
-    );
-  }, [
-    resolvedSpec,
-    isCreating,
-    createProject,
-    queryClient,
-    setLocation,
-    toast,
-    mode,
-    onCreated,
-    effectiveKey,
-    messages,
-  ]);
+        {
+          onSuccess: (data) => {
+            handoffResolvedSpec(data);
+          },
+          onError: () => {
+            toast({
+              title: "Something went wrong",
+              description: "Could not resolve your project spec — try again.",
+              variant: "destructive",
+            });
+          },
+        },
+      );
+    },
+    [
+      resolveMutation,
+      chatMutation.isPending,
+      messages,
+      projectId,
+      mode,
+      handoffResolvedSpec,
+      toast,
+    ],
+  );
 
   return (
     <div
@@ -354,117 +402,65 @@ export function BrainstormPanel({
           )}
         </div>
 
-        {/* Resolved spec + create / use-prompt form */}
-        {resolvedSpec && (
-          <div className="px-4 py-3 border-t border-border bg-muted/20 space-y-3">
-            {onResolved ? (
-              <>
-                <p className="text-xs text-muted-foreground line-clamp-3">{resolvedSpec.prompt}</p>
-                <button
-                  onClick={() => {
-                    if (effectiveKey) clearPersistedState(effectiveKey);
-                    const chatMessages = messages.filter((m) => !isOpeningMessage(m));
-                    onResolved(resolvedSpec.prompt, chatMessages);
-                    onClose();
-                  }}
-                  className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors px-3 py-2 text-sm font-medium"
-                >
-                  Use this prompt
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="text-xs text-muted-foreground">
-                  Project name:{" "}
-                  <span
-                    ref={nameRef}
-                    contentEditable
-                    suppressContentEditableWarning
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        (e.currentTarget as HTMLElement).blur();
-                      }
-                    }}
-                    className="font-semibold text-foreground border-b border-dashed border-border outline-none focus:border-primary px-0.5"
-                  >
-                    {resolvedSpec.name}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground line-clamp-2">{resolvedSpec.prompt}</p>
-                <button
-                  onClick={handleCreateProject}
-                  disabled={isCreating}
-                  className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium"
-                >
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Creating project...
-                    </>
-                  ) : (
-                    "Create project"
-                  )}
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Build it button */}
-        {showBuildButton && !resolvedSpec && (
-          <div className="px-4 pb-2 pt-1 border-t border-border">
+        {/* Brainstorm exits — the following plan/build request is the billable handoff. */}
+        {showBuildButton && (
+          <div className="grid grid-cols-2 gap-2 px-4 pb-2 pt-2 border-t border-border">
             <button
-              onClick={handleBuildIt}
-              disabled={resolveMutation.isPending || isFetching}
+              onClick={() => handleExit("plan")}
+              disabled={resolveMutation.isPending || isFetching || isCreating}
+              className="flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium"
+            >
+              Turn into plan
+            </button>
+            <button
+              onClick={() => handleExit("build")}
+              disabled={resolveMutation.isPending || isFetching || isCreating}
               className={cn(
-                "w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium",
+                "flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium",
                 pulseIntent && "animate-pulse",
               )}
             >
-              {resolveMutation.isPending ? (
+              {resolveMutation.isPending || isCreating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Preparing project...
+                  Preparing…
                 </>
               ) : (
-                "Build it"
+                "Build this"
               )}
             </button>
           </div>
         )}
 
-        {/* Input bar — hidden once resolved */}
-        {!resolvedSpec && (
-          <div className="flex items-end gap-2 px-3 pb-3 pt-2 border-t border-border">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Tell me more..."
-              rows={1}
-              disabled={isFetching}
-              className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[28px] max-h-[72px] overflow-y-auto"
-            />
-            <button
-              onClick={sendMessage}
-              disabled={isFetching || !input.trim()}
-              className={cn(
-                "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
-                input.trim()
-                  ? "bg-foreground text-background hover:bg-foreground/80"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {isFetching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <ArrowUp className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-        )}
+        {/* Input bar */}
+        <div className="flex items-end gap-2 px-3 pb-3 pt-2 border-t border-border">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Tell me more..."
+            rows={1}
+            disabled={isFetching}
+            className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[28px] max-h-[72px] overflow-y-auto"
+          />
+          <button
+            onClick={sendMessage}
+            disabled={isFetching || !input.trim()}
+            className={cn(
+              "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
+              input.trim()
+                ? "bg-foreground text-background hover:bg-foreground/80"
+                : "bg-muted text-muted-foreground cursor-not-allowed",
+            )}
+          >
+            {isFetching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowUp className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

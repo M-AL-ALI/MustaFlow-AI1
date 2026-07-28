@@ -6498,7 +6498,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BrainstormChatInput"
+              $ref: "#/components/schemas/BrainstormResolveInput"
       responses:
         "200":
           description: Resolved project name, prompt, and kind
@@ -7196,6 +7196,25 @@ components:
           items:
             $ref: "#/components/schemas/BrainstormMessage"
           maxItems: 30
+        projectId:
+          type: integer
+          minimum: 1
+          description: "Optional current Builder project. When present, Brainstorm loads that project's files, latest plan, and page map."
+        beginnerMode:
+          type: boolean
+          default: false
+          description: "Use the beginner Guided Refinement questioning style."
+
+    BrainstormResolveInput:
+      allOf:
+        - $ref: "#/components/schemas/BrainstormChatInput"
+        - type: object
+          required: [action]
+          properties:
+            action:
+              type: string
+              enum: [plan, build]
+              description: "Billable destination selected by the user after free brainstorming."
 
     BrainstormChatOutput:
       type: object
@@ -7208,7 +7227,7 @@ components:
 
     BrainstormResolveOutput:
       type: object
-      required: [name, prompt, kind]
+      required: [name, prompt, kind, action, brainstormContext]
       properties:
         name:
           type: string
@@ -7219,6 +7238,14 @@ components:
         kind:
           type: string
           enum: [web, mobile-cross]
+        action:
+          type: string
+          enum: [plan, build]
+        brainstormContext:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/BrainstormMessage"
 
     Workspace:
       type: object
@@ -8710,8 +8737,7 @@ components:
 
     UserPreferences:
       type: object
-      required:
-        [userId, dismissedOnboarding, builderAccess, containerLayerConfigured, updatedAt]
+      required: [userId, dismissedOnboarding, builderAccess, containerLayerConfigured, updatedAt]
       properties:
         userId: { type: string }
         dismissedOnboarding: { type: boolean }
@@ -11344,8 +11370,7 @@ components:
         oraProjectId:
           type: integer
           nullable: true
-          description:
-            Ora project space the edited result is filed under in the Ora library
+          description: Ora project space the edited result is filed under in the Ora library
             (Ora-origin edits only). Null or omitted files it under the Personal space.
 
     DeveloperModeRuntimeStatus:

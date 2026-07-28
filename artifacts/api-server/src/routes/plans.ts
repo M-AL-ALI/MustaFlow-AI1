@@ -9,7 +9,8 @@ import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db, planTemplatesTable, chatMessagesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import { runPlanDecomposePipeline, runGuidedRefinementPipeline } from "../lib/builder";
+import { runPlanDecomposePipeline } from "../lib/builder";
+import { loadBrainstormProjectContext, runGuidedBrainstormClarification } from "../lib/brainstorm";
 import type { AgentMode } from "../lib/ai";
 import { logger } from "../lib/logger";
 import { z } from "zod";
@@ -130,7 +131,7 @@ router.post(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const { prompt, agentMode } = parsed.data;
+    const { prompt } = parsed.data;
 
     const [project] = await db
       .select({ name: projectsTable.name, kind: projectsTable.kind })
@@ -142,11 +143,14 @@ router.post(
     }
 
     try {
-      const result = await runGuidedRefinementPipeline({
-        projectName: project.name,
-        projectKind: project.kind,
+      const projectContext = await loadBrainstormProjectContext(projectId, req.userId!);
+      if (!projectContext) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const result = await runGuidedBrainstormClarification({
+        projectContext,
         userPrompt: prompt,
-        agentMode: agentMode as AgentMode,
       });
       res.json(result);
     } catch (err) {

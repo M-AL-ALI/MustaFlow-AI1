@@ -356,10 +356,6 @@ export function QueueComposer({
   const [showPlanHistory, setShowPlanHistory] = useState(false);
   const [showBrainstorm, setShowBrainstorm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const brainstormContextRef = useRef<Array<{
-    role: "user" | "assistant";
-    content: string;
-  }> | null>(null);
 
   const uploadFile = useCallback(
     async (file: File): Promise<{ attachment: ComposerAttachment | null; error?: string }> => {
@@ -1183,8 +1179,6 @@ export function QueueComposer({
     if (variantMode && messages.length === 1) {
       const text = messages[0]!;
       const variantMessages = [text + VARIANT_A_SUFFIX, text + VARIANT_B_SUFFIX];
-      // Clear brainstorm context — it doesn't apply to batch/variant paths
-      brainstormContextRef.current = null;
       setIsSubmitting(true);
       try {
         const res = await authFetch(`/api/projects/${projectId}/queue`, {
@@ -1233,26 +1227,22 @@ export function QueueComposer({
         hasCompletedTask,
         routingAgentIdentity: routingHint?.agentIdentity,
       });
-      const brainstormCtx = brainstormContextRef.current ?? undefined;
       const clearComposer = () => {
         setRows([{ id: crypto.randomUUID(), text: "" }]);
         setAttachments([]);
         setAttachErrors([]);
-        brainstormContextRef.current = null;
         if (onPromptValueChange) onPromptValueChange("");
       };
       onSingleSend(
         text,
         detectedIntent,
         inlineImages.length > 0 ? inlineImages : undefined,
-        brainstormCtx,
+        undefined,
         clearComposer,
       );
       return;
     }
 
-    // Multi-message batch path — brainstorm context doesn't apply here
-    brainstormContextRef.current = null;
     setIsSubmitting(true);
     try {
       const res = await authFetch(`/api/projects/${projectId}/queue`, {
@@ -1391,10 +1381,9 @@ export function QueueComposer({
         <BrainstormPanel
           onClose={() => setShowBrainstorm(false)}
           projectId={projectId}
-          onResolved={(prompt, messages) => {
-            setRows([{ id: crypto.randomUUID(), text: prompt }]);
-            if (onPromptValueChange) onPromptValueChange(prompt);
-            brainstormContextRef.current = messages;
+          onResolved={(prompt, messages, action) => {
+            onSingleSend(prompt, action, undefined, messages);
+            setShowBrainstorm(false);
           }}
         />
       )}

@@ -7267,7 +7267,9 @@ export const BrainstormChatBody = zod.object({
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string().max(brainstormChatBodyMessagesItemContentMax)
-})).max(brainstormChatBodyMessagesMax)
+})).max(brainstormChatBodyMessagesMax),
+  "projectId": zod.number().min(1).optional().describe('Optional current Builder project. When present, Brainstorm loads that project\'s files, latest plan, and page map.'),
+  "beginnerMode": zod.boolean().default(false).describe('Use the beginner Guided Refinement questioning style.')
 })
 
 export const BrainstormChatResponse = zod.object({
@@ -7289,7 +7291,10 @@ export const BrainstormResolveBody = zod.object({
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string().max(brainstormResolveBodyMessagesItemContentMax)
-})).max(brainstormResolveBodyMessagesMax)
+})).max(brainstormResolveBodyMessagesMax),
+  "projectId": zod.number().min(1).optional().describe('Optional current Builder project. When present, Brainstorm loads that project\'s files, latest plan, and page map.'),
+  "beginnerMode": zod.boolean().default(false).describe('Use the beginner Guided Refinement questioning style.'),
+  "action": zod.enum(['plan', 'build']).describe('Billable destination selected by the user after free brainstorming.')
 })
 
 export const brainstormResolveResponseNameMax = 80;
@@ -7301,7 +7306,12 @@ export const brainstormResolveResponsePromptMax = 500;
 export const BrainstormResolveResponse = zod.object({
   "name": zod.string().max(brainstormResolveResponseNameMax),
   "prompt": zod.string().max(brainstormResolveResponsePromptMax),
-  "kind": zod.enum(['web', 'mobile-cross'])
+  "kind": zod.enum(['web', 'mobile-cross']),
+  "action": zod.enum(['plan', 'build']),
+  "brainstormContext": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().max(2000)
+})).max(30)
 })
 
 

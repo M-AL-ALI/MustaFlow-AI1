@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BrainstormResolveOutputKind } from './brainstormResolveOutputKind';
+import type { BrainstormMessage } from './brainstormMessage';
+import type { BrainstormResolveOutputAction } from './brainstormResolveOutputAction';
 
 export interface BrainstormResolveOutput {
   /** @maxLength 80 */
@@ -13,4 +15,7 @@ export interface BrainstormResolveOutput {
   /** @maxLength 500 */
   prompt: string;
   kind: BrainstormResolveOutputKind;
+  action: BrainstormResolveOutputAction;
+  /** @maxItems 30 */
+  brainstormContext: BrainstormMessage[];
 }

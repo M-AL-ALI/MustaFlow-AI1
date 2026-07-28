@@ -238,6 +238,10 @@ export interface BrainstormMessage {
 export interface BrainstormChatInput {
   /** @maxItems 30 */
   messages: BrainstormMessage[];
+  /** Optional current Builder project. When present, Brainstorm loads that project's files, latest plan, and page map. */
+  projectId?: number;
+  /** Use the beginner Guided Refinement questioning style. */
+  beginnerMode?: boolean;
 }
 
 export interface BrainstormChatOutput {
@@ -253,12 +257,33 @@ export const BrainstormResolveOutputKind = {
   'mobile-cross': 'mobile-cross',
 } as const;
 
+export const BrainstormResolveInputAction = {
+  plan: 'plan',
+  build: 'build',
+} as const;
+
+export type BrainstormResolveInputAction = typeof BrainstormResolveInputAction[keyof typeof BrainstormResolveInputAction];
+
+export type BrainstormResolveInput = BrainstormChatInput & {
+  action: BrainstormResolveInputAction;
+};
+
+export const BrainstormResolveOutputAction = {
+  plan: 'plan',
+  build: 'build',
+} as const;
+
+export type BrainstormResolveOutputAction = typeof BrainstormResolveOutputAction[keyof typeof BrainstormResolveOutputAction];
+
 export interface BrainstormResolveOutput {
   /** @maxLength 80 */
   name: string;
   /** @maxLength 500 */
   prompt: string;
   kind: BrainstormResolveOutputKind;
+  action: BrainstormResolveOutputAction;
+  /** @maxItems 30 */
+  brainstormContext: BrainstormMessage[];
 }
 
 export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];

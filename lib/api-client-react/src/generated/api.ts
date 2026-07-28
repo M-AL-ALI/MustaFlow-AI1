@@ -60,6 +60,7 @@ import type {
   BillingPackagesResult,
   BrainstormChatInput,
   BrainstormChatOutput,
+  BrainstormResolveInput,
   BrainstormResolveOutput,
   CancelProjectQueueBatch200,
   ChatExchange,
@@ -20277,7 +20278,7 @@ export const getBrainstormResolveUrl = () => {
 /**
  * @summary Resolve a brainstorm conversation into a structured project spec.
  */
-export const brainstormResolve = async (brainstormChatInput: BrainstormChatInput, options?: RequestInit): Promise<BrainstormResolveOutput> => {
+export const brainstormResolve = async (brainstormResolveInput: BrainstormResolveInput, options?: RequestInit): Promise<BrainstormResolveOutput> => {
 
   return customFetch<BrainstormResolveOutput>(getBrainstormResolveUrl(),
   {
@@ -20285,7 +20286,7 @@ export const brainstormResolve = async (brainstormChatInput: BrainstormChatInput
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      brainstormChatInput,)
+      brainstormResolveInput,)
   }
 );}
 
@@ -20293,8 +20294,8 @@ export const brainstormResolve = async (brainstormChatInput: BrainstormChatInput
 
 
 export const getBrainstormResolveMutationOptions = <TError = ErrorType<ApiError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormChatInput>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormResolveInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormResolveInput>}, TContext> => {
 
 const mutationKey = ['brainstormResolve'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -20306,7 +20307,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof brainstormResolve>>, {data: BodyType<BrainstormChatInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof brainstormResolve>>, {data: BodyType<BrainstormResolveInput>}> = (props) => {
           const {data} = props ?? {};
 
           return  brainstormResolve(data,requestOptions)
@@ -20320,18 +20321,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type BrainstormResolveMutationResult = NonNullable<Awaited<ReturnType<typeof brainstormResolve>>>
-    export type BrainstormResolveMutationBody = BodyType<BrainstormChatInput>
+    export type BrainstormResolveMutationBody = BodyType<BrainstormResolveInput>
     export type BrainstormResolveMutationError = ErrorType<ApiError>
 
     /**
  * @summary Resolve a brainstorm conversation into a structured project spec.
  */
 export const useBrainstormResolve = <TError = ErrorType<ApiError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormResolveInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof brainstormResolve>>,
         TError,
-        {data: BodyType<BrainstormChatInput>},
+        {data: BodyType<BrainstormResolveInput>},
         TContext
       > => {
       return useMutation(getBrainstormResolveMutationOptions(options));

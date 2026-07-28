@@ -10,4 +10,8 @@ import type { BrainstormMessage } from './brainstormMessage';
 export interface BrainstormChatInput {
   /** @maxItems 30 */
   messages: BrainstormMessage[];
+  /** Optional current Builder project. When present, Brainstorm loads that project's files, latest plan, and page map. */
+  projectId?: number;
+  /** Use the beginner Guided Refinement questioning style. */
+  beginnerMode?: boolean;
 }
