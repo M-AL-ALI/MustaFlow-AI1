@@ -43,6 +43,32 @@ const TOUR_STEPS: TourStep[] = [
 const PADDING = 10;
 const TOOLTIP_WIDTH = 280;
 const TOOLTIP_HEIGHT_ESTIMATE = 140;
+const BUILD_ACTIVITY_STATUSES = new Set(["planning", "building", "testing", "completed"]);
+
+interface BuildTourLifecycleOptions {
+  projectId: number;
+  taskStatuses: string[];
+  onComplete: () => void;
+}
+
+export function useCompleteWorkspaceTourOnBuild({
+  projectId,
+  taskStatuses,
+  onComplete,
+}: BuildTourLifecycleOptions) {
+  const hasBuildActivity = taskStatuses.some((status) => BUILD_ACTIVITY_STATUSES.has(status));
+
+  useEffect(() => {
+    if (!hasBuildActivity) return;
+
+    onComplete();
+    try {
+      localStorage.setItem(`mustaflow_tour_seen_${projectId}`, "1");
+    } catch {
+      // Storage can be unavailable in private browsing; closing the tour still succeeds.
+    }
+  }, [hasBuildActivity, onComplete, projectId]);
+}
 
 function getSpotlightRect(el: Element) {
   const r = el.getBoundingClientRect();
@@ -211,6 +237,7 @@ export function WorkspaceTour({ active, onClose, initialStep = 0 }: WorkspaceTou
     <>
       {/* Dimmed overlay with spotlight hole */}
       <div
+        data-testid="workspace-tour-overlay"
         className="fixed inset-0 transition-all duration-300"
         style={{
           zIndex: 10000,
@@ -253,7 +280,8 @@ export function WorkspaceTour({ active, onClose, initialStep = 0 }: WorkspaceTou
           <button
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors shrink-0 p-0.5 rounded"
-            title="Close tour"
+            title="Skip tour"
+            aria-label="Skip tour"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -319,10 +347,11 @@ export function WorkspaceTour({ active, onClose, initialStep = 0 }: WorkspaceTou
         </div>
       </div>
 
-      {/* Click-to-advance on spotlight target area itself */}
+      {/* Transparent target overlay is visual-only; real workspace controls remain clickable. */}
       {sr && (
         <div
-          className="fixed rounded-xl cursor-pointer"
+          data-testid="workspace-tour-target-overlay"
+          className="fixed pointer-events-none rounded-xl"
           style={{
             zIndex: 10000,
             top: sr.y,
@@ -330,11 +359,7 @@ export function WorkspaceTour({ active, onClose, initialStep = 0 }: WorkspaceTou
             width: sr.w,
             height: sr.h,
           }}
-          onClick={() => {
-            if (step < TOUR_STEPS.length - 1) setStep((s) => s + 1);
-            else onClose();
-          }}
-          title="Click to advance"
+          aria-hidden="true"
         />
       )}
     </>

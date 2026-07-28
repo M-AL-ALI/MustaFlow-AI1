@@ -175,7 +175,7 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
-import { WorkspaceTour } from "./components/workspace-tour";
+import { WorkspaceTour, useCompleteWorkspaceTourOnBuild } from "./components/workspace-tour";
 import { MemoryIndicator } from "./components/memory-indicator";
 import { BrandPill } from "./components/brand-pill";
 import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-prompt-cards";
@@ -1295,6 +1295,17 @@ export default function ProjectWorkspacePage() {
   const closeTour = useCallback(() => {
     setTourActive(false);
   }, []);
+
+  const completeTourFromBuild = useCallback(() => {
+    setTourActive(false);
+    setTourSeenOnce(true);
+  }, []);
+
+  useCompleteWorkspaceTourOnBuild({
+    projectId,
+    taskStatuses: tasksForFeed.map((task) => task.status),
+    onComplete: completeTourFromBuild,
+  });
 
   useEffect(() => {
     if (!creditsSuccess) return;
