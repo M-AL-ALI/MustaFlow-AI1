@@ -17,6 +17,22 @@ export type BuilderSendIntentOptions = {
   agentIntent?: BuilderComposerIntent;
 };
 
+export function shouldDeferComposerClearForCreditGate({
+  agentMode,
+  isLikelyConverse,
+  creditConfirmed,
+}: {
+  agentMode: string;
+  isLikelyConverse: boolean;
+  creditConfirmed: boolean;
+}): boolean {
+  return (
+    (agentMode === "power" || agentMode === "pro") &&
+    !isLikelyConverse &&
+    !creditConfirmed
+  );
+}
+
 /**
  * Converts the composer's resolved intent into the options consumed by the
  * workspace send pipeline. Keeping this mapping outside the page prevents a

@@ -187,7 +187,10 @@ import { useToast } from "@/hooks/use-toast";
 import { ProvisioningProgress } from "./components/provisioning-progress";
 import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
-import { mapIntentToSendOptions } from "@/lib/builder-followup-submit";
+import {
+  mapIntentToSendOptions,
+  shouldDeferComposerClearForCreditGate,
+} from "@/lib/builder-followup-submit";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -2225,7 +2228,7 @@ export default function ProjectWorkspacePage() {
           generated?: boolean;
         }>;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
-        clearComposerOnProceed?: boolean;
+        onProceed?: () => void;
       },
     ) => {
       // Allow image-only sends — when no text prompt is given the server injects a default.
@@ -2260,9 +2263,11 @@ export default function ProjectWorkspacePage() {
       const CREDIT_COST: Record<string, number> = { lite: 1, eco: 2, power: 5, pro: 10 };
       const modeCost = CREDIT_COST[effectiveMode] ?? 0;
       if (
-        (effectiveMode === "power" || effectiveMode === "pro") &&
-        !isLikelyConverse &&
-        !creditConfirmedRef.current
+        shouldDeferComposerClearForCreditGate({
+          agentMode: effectiveMode,
+          isLikelyConverse,
+          creditConfirmed: creditConfirmedRef.current,
+        })
       ) {
         pendingCreditConfirmRef.current = () => {
           setShowCreditConfirm(null);
@@ -2278,7 +2283,7 @@ export default function ProjectWorkspacePage() {
 
       // Engage optimistic workspace state only after any credit gate is accepted.
       // A dismissed dialog therefore leaves both the draft and composer idle.
-      if (opts?.clearComposerOnProceed) setPrompt("");
+      opts?.onProceed?.();
       if (!firstWsMsgFiredRef.current) {
         firstWsMsgFiredRef.current = true;
         try {
@@ -4407,7 +4412,13 @@ export default function ProjectWorkspacePage() {
                           ? "Describe a feature or change — I'll plan, build, and test it for you…"
                           : undefined
                       }
-                      onSingleSend={(content, intent, attachments, brainstormContext) => {
+                      onSingleSend={(
+                        content,
+                        intent,
+                        attachments,
+                        brainstormContext,
+                        clearComposer,
+                      ) => {
                         checkUpgradeNudge(content);
                         if (chatScrolledUp) {
                           setChatScrolledUp(false);
@@ -4435,7 +4446,7 @@ export default function ProjectWorkspacePage() {
                           // Images and explicit build/plan intents use the regular task-creating
                           // mutation. Conversational intents keep their existing streamed path.
                           ...mapIntentToSendOptions({ intent, hasImages }),
-                          clearComposerOnProceed: true,
+                          onProceed: clearComposer,
                           ...(brainstormContext && brainstormContext.length > 0
                             ? { brainstormContext }
                             : {}),
