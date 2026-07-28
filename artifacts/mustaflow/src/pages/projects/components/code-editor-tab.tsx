@@ -276,7 +276,7 @@ function SnippetLibraryPanel({ onInsert }: { onInsert: (prompt: string) => void 
                     }}
                     className="w-full text-[11px] py-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors font-medium"
                   >
-                    Send to AI Builder
+                    Send to Nabuflow
                   </button>
                 </div>
               )}
@@ -1828,7 +1828,7 @@ export function CodeEditorTab({
               <SnippetLibraryPanel
                 onInsert={(prompt) => {
                   onSnippetInsert?.(prompt);
-                  toast({ title: "Snippet sent", description: "Check the AI Builder chat below." });
+                  toast({ title: "Snippet sent", description: "Check the Nabuflow chat below." });
                 }}
               />
             </div>

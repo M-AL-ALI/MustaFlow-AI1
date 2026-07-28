@@ -703,7 +703,7 @@ export function VersionTimeline({
         <GitCommit className="h-8 w-8 mx-auto mb-3 opacity-30" />
         <div className="text-sm font-medium mb-1">No saved versions yet</div>
         <div className="text-xs">
-          The AI Builder automatically snapshots a version after each successful build or change.
+          Nabuflow automatically snapshots a version after each successful build or change.
         </div>
       </div>
     );

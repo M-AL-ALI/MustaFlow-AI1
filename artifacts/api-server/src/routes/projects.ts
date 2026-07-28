@@ -1145,7 +1145,7 @@ export default function HomeScreen() {
           ${project.name}
         </Text>
         <Text className="text-gray-400 text-center text-base">
-          Describe your app in the AI Builder below and press Send.
+          Describe your app in Nabuflow below and press Send.
         </Text>
       </View>
     </SafeAreaView>
@@ -1173,7 +1173,7 @@ export default function HomeScreen() {
       </div>
       <h1 class="text-2xl font-bold">${project.name}</h1>
       <p class="text-gray-400 text-sm">
-        Describe your mobile app in the AI Builder to generate the full Expo / React Native code.
+        Describe your mobile app in Nabuflow to generate the full Expo / React Native code.
       </p>
       <div class="text-xs text-gray-600 border border-gray-800 rounded-lg px-3 py-2">
         Mobile preview (web simulation)

@@ -214,7 +214,7 @@ BRAND / LOGO GENERATION:
   - brand/favicon.svg: 32x32 minimal version of the icon
   SVG must use only: rect, circle, ellipse, path, polygon, text. No external resources. Keep files under 3000 chars each.`;
 
-export const BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, beautiful, working web projects from a single user request. You speak no prose in this mode — your only output is valid JSON.
+export const BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, beautiful, working web projects from a single user request. You speak no prose in this mode — your only output is valid JSON.
 
 ${PREVIEW_NOTE}
 
@@ -240,7 +240,7 @@ OUTPUT STRICT JSON matching this exact shape:
 
 The "files" array must contain every file needed. Always include "index.html" as path. CSS/JS files are optional; inline is fine.`;
 
-export const REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE. You receive the current project files and a change request. You modify the affected files and return the FULL updated file contents.
+export const REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE. You receive the current project files and a change request. You modify the affected files and return the FULL updated file contents.
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -306,7 +306,7 @@ Rules:
 // React + Vite builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const REACT_VITE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready React + Vite web applications. Your only output is valid JSON — no prose.
+const REACT_VITE_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, production-ready React + Vite web applications. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - React 18 + TypeScript 5
@@ -388,7 +388,7 @@ OUTPUT STRICT JSON:
 MIME types: .ts/.tsx → "application/typescript", .json → "application/json", .js → "application/javascript", .html → "text/html", .css → "text/css"
 The "files" array MUST include every file in the project. package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and src/index.css are REQUIRED.`;
 
-const REACT_VITE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a React + Vite project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+const REACT_VITE_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a React + Vite project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -4660,7 +4660,7 @@ WIRING RULES for index.html:
 3. Form inputs MUST be focusable and accept typing; submit buttons MUST either validate inline OR carry data-mock.
 4. NEVER leave a visible button without either a handler or a data-mock attribute. A non-responsive button in the preview is a bug.`;
 
-const MOBILE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder. You generate complete, production-ready Expo/React Native projects from a single user request. You output ONLY valid JSON — no prose, no markdown fences.
+const MOBILE_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow mobile builder. You generate complete, production-ready Expo/React Native projects from a single user request. You output ONLY valid JSON — no prose, no markdown fences.
 
 EXPO PROJECT REQUIREMENTS:
 - Expo SDK 52, Expo Router v3, TypeScript, NativeWind v4
@@ -4715,7 +4715,7 @@ OUTPUT STRICT JSON matching this exact shape:
 MIME types: TypeScript/TSX files → "application/typescript", JSON → "application/json", JS → "application/javascript", HTML → "text/html"
 The files array MUST contain app.json, package.json, babel.config.js, tailwind.config.js, app/_layout.tsx, app/index.tsx, and index.html as a minimum. Omitting any of these will fail validation.`;
 
-const MOBILE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder in CHANGE MODE. You receive the current Expo/React Native project files and a change request. You modify the affected files and return the FULL updated file contents.
+const MOBILE_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow mobile builder, in CHANGE MODE. You receive the current Expo/React Native project files and a change request. You modify the affected files and return the FULL updated file contents.
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -4758,7 +4758,7 @@ const MOBILE_PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Planner. You 
 // Next.js 14 App Router builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const NEXTJS_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Next.js 14 App Router applications. Your only output is valid JSON — no prose.
+const NEXTJS_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, production-ready Next.js 14 App Router applications. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Next.js 14 with App Router (src/app/ directory convention)
@@ -4837,7 +4837,7 @@ OUTPUT STRICT JSON:
 MIME types: .ts/.tsx → "application/typescript", .json → "application/json", .js → "application/javascript", .css → "text/css"
 The "files" array MUST include every file. package.json, next.config.js, src/app/layout.tsx, src/app/page.tsx, and src/app/globals.css are REQUIRED.`;
 
-const NEXTJS_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Next.js 14 App Router project. You receive current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+const NEXTJS_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Next.js 14 App Router project. You receive current project files and a change request. Return ONLY files that changed (full new content for each changed file).
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -4870,7 +4870,7 @@ OUTPUT STRICT JSON:
 // Node.js API (Express) builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const NODE_API_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Node.js + Express REST API projects. Your only output is valid JSON — no prose.
+const NODE_API_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, production-ready Node.js + Express REST API projects. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Node.js 22 + TypeScript 5
@@ -4941,7 +4941,7 @@ OUTPUT STRICT JSON:
 MIME types: .ts → "application/typescript", .json → "application/json", .js → "application/javascript"
 The "files" array MUST include every file. package.json, tsconfig.json, src/index.ts, and src/routes/index.ts are REQUIRED.`;
 
-const NODE_API_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Node.js + Express API project. You receive current project files and a change request. Return ONLY files that changed.
+const NODE_API_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Node.js + Express API project. You receive current project files and a change request. Return ONLY files that changed.
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -4970,7 +4970,7 @@ OUTPUT STRICT JSON:
 // Python Flask builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FLASK_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Python Flask projects. Your only output is valid JSON — no prose.
+const FLASK_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, production-ready Python Flask projects. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Python 3.12 + Flask 3.x
@@ -5024,7 +5024,7 @@ OUTPUT STRICT JSON:
 MIME types: .py → "text/x-python", .txt → "text/plain", .html → "text/html", .css → "text/css", .json → "application/json"
 The "files" array MUST include every file. requirements.txt and app.py are REQUIRED.`;
 
-const FLASK_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python Flask project. You receive current project files and a change request. Return ONLY files that changed.
+const FLASK_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Python Flask project. You receive current project files and a change request. Return ONLY files that changed.
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -5053,7 +5053,7 @@ OUTPUT STRICT JSON:
 // Python FastAPI builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FASTAPI_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Python FastAPI projects. Your only output is valid JSON — no prose.
+const FASTAPI_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, production-ready Python FastAPI projects. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Python 3.12 + FastAPI 0.115+
@@ -5109,7 +5109,7 @@ OUTPUT STRICT JSON:
 MIME types: .py → "text/x-python", .txt → "text/plain", .json → "application/json"
 The "files" array MUST include every file. requirements.txt and main.py are REQUIRED.`;
 
-const FASTAPI_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python FastAPI project. You receive current project files and a change request. Return ONLY files that changed.
+const FASTAPI_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Python FastAPI project. You receive current project files and a change request. Return ONLY files that changed.
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -5138,7 +5138,7 @@ OUTPUT STRICT JSON:
 // Go + Gin builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GO_GIN_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Go + Gin web API projects. Your only output is valid JSON — no prose.
+const GO_GIN_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, production-ready Go + Gin web API projects. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Go 1.22
@@ -5200,7 +5200,7 @@ OUTPUT STRICT JSON:
 MIME types: .go → "text/x-go", .mod → "text/plain", .sum → "text/plain", .md → "text/plain", .json → "application/json"
 The "files" array MUST include every file. go.mod, go.sum, and main.go are REQUIRED.`;
 
-const GO_GIN_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Go + Gin project. You receive current project files and a change request. Return ONLY files that changed.
+const GO_GIN_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Go + Gin project. You receive current project files and a change request. Return ONLY files that changed.
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -6822,7 +6822,7 @@ export async function runPlanPipeline(args: {
 // Node.js (Express) builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const NODE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, working Node.js / Express web API projects. Your only output is valid JSON — no prose.
+const NODE_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, working Node.js / Express web API projects. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Node.js (20 or 22 LTS) + Express 4 for the HTTP server
@@ -6866,7 +6866,7 @@ OUTPUT STRICT JSON:
 
 The "files" array MUST include every file in the project. package.json, src/index.js, and index.html are REQUIRED.`;
 
-const NODE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Node.js / Express project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+const NODE_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Node.js / Express project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -6898,7 +6898,7 @@ OUTPUT STRICT JSON:
 // Python (Flask) builder prompts
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PYTHON_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, working Python / Flask web API projects. Your only output is valid JSON — no prose.
+const PYTHON_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, working Python / Flask web API projects. Your only output is valid JSON — no prose.
 
 TECH STACK — use exactly:
 - Python 3.12 + Flask 3 for the HTTP server
@@ -6943,7 +6943,7 @@ OUTPUT STRICT JSON:
 
 The "files" array MUST include every file in the project. requirements.txt, app.py, and index.html are REQUIRED.`;
 
-const PYTHON_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python / Flask project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+const PYTHON_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, in CHANGE MODE for a Python / Flask project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
 
 ${REFINE_BIAS_TO_ACTION}
 
@@ -7834,7 +7834,7 @@ WHAT MUSTAFLOW BUILDS
 WORKSPACE LAYOUT (so you can point users at the right place)
 - Left rail: project sections.
 - Top tab bar: Preview, Files / Code, Canvas, Tools & Files, Page Map, Publishing, Terminal, Logs, Manage.
-- Bottom: the AI Builder chat (where you live). It has a Plan Mode toggle and a Lite / Eco / Power / Pro agent-mode picker.
+- Bottom: the Nabuflow chat (where you live). It has a Plan Mode toggle and a Lite / Eco / Power / Pro agent-mode picker.
 
 AGENT MODES (route to different OpenAI models, different cost in credits)
 - Lite (1 credit) — fastest, smallest model. Quick tweaks, tiny UI changes.
@@ -8757,7 +8757,7 @@ export async function runPlanDecomposePipeline(args: {
 // Slides pipeline — Reveal.js HTML presentation
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SLIDES_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, self-contained Reveal.js HTML slide decks from a single user request.
+const SLIDES_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate complete, self-contained Reveal.js HTML slide decks from a single user request.
 
 CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
 
@@ -8781,7 +8781,7 @@ RULES FOR THE HTML:
 - Use appropriate HTML elements: <h1>/<h2>, <ul>/<li>, <table>, <blockquote>, <code>
 - Make the design visually polished with custom colours or backgrounds where appropriate`;
 
-const SLIDES_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder refining an existing Reveal.js slide deck.
+const SLIDES_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, refining an existing Reveal.js slide deck.
 
 CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
 
@@ -8799,7 +8799,7 @@ Preserve the Reveal.js CDN setup and initialisation.`;
 // Animation pipeline — React + Framer Motion via CDN (single index.html)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ANIMATION_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate self-contained animated web experiences using React and Framer Motion loaded from CDN — no bundler, no npm.
+const ANIMATION_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate self-contained animated web experiences using React and Framer Motion loaded from CDN — no bundler, no npm.
 
 CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
 
@@ -8824,7 +8824,7 @@ RULES FOR THE HTML:
 - Target at least 4–6 distinct animation segments that tell a visual story
 - Inline all styles; do not reference external CSS files`;
 
-const ANIMATION_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder refining an existing animated web experience.
+const ANIMATION_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, refining an existing animated web experience.
 
 CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
 
@@ -8841,7 +8841,7 @@ Apply the user's requested changes while preserving the CDN setup (React, Framer
 // Automation pipeline — Node.js script + cron.json + README.md
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AUTOMATION_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate Node.js automation scripts from a single user request.
+const AUTOMATION_BUILD_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder. You generate Node.js automation scripts from a single user request.
 
 CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
 
@@ -8870,7 +8870,7 @@ RULES:
   - Output: what files/emails/requests are produced
   - Extending: how to customise the script for different data sources or destinations`;
 
-const AUTOMATION_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder refining an existing Node.js automation script.
+const AUTOMATION_REFINE_SYSTEM_PROMPT = `You are Zero, the Nabuflow builder, refining an existing Node.js automation script.
 
 CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
 

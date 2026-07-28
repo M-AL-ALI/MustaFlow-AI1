@@ -471,7 +471,7 @@ export function PreviewTab({
         } else if (json.suggestedPrompt && (onAutoSendPrompt ?? onFixPrompt)) {
           const target = onAutoSendPrompt ?? onFixPrompt!;
           target(json.suggestedPrompt);
-          setVeToast("Sent to AI Builder…");
+          setVeToast("Sent to Nabuflow…");
           setTimeout(() => setVeToast(null), 2500);
         }
       } catch {
@@ -2536,8 +2536,8 @@ export function PreviewTab({
               <h3 className="text-lg font-semibold text-foreground mb-2">No preview yet</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {isMobile
-                  ? "Use the AI Builder below to describe your mobile app. MustaFlow will generate Expo/React Native code and a web preview here."
-                  : "Use the AI Builder below to describe what you want to build. MustaFlow will generate your app and show a live preview here."}
+                  ? "Use Nabuflow below to describe your mobile app. MustaFlow will generate Expo/React Native code and a web preview here."
+                  : "Use Nabuflow below to describe what you want to build. MustaFlow will generate your app and show a live preview here."}
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">
@@ -2561,7 +2561,7 @@ export function PreviewTab({
               </div>
             </div>
             <p className="text-xs text-muted-foreground/60">
-              Type your idea in the AI Builder below and press Enter or click Send
+              Type your idea in Nabuflow below and press Enter or click Send
             </p>
           </div>
         )}

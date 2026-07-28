@@ -1706,7 +1706,7 @@ export function LogsTab({
           )}
           {!isLoading && (!tasks || tasks.length === 0) && mobileBuilds.length === 0 && (
             <div className="text-center py-16 text-muted-foreground text-sm">
-              No builds yet. Send a message to the AI Builder to get started.
+              No builds yet. Send Nabuflow a message to get started.
             </div>
           )}
           {(tasks ?? []).map((task) => (

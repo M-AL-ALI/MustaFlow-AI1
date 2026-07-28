@@ -500,8 +500,8 @@ function OraMemoriesSection() {
             </p>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
               Facts and preferences you want Ora to remember across conversations — your name, your
-              company, how you like things done. They are kept separate from the AI Builder and
-              never influence your builds.
+              company, how you like things done. They are kept separate from Nabuflow and never
+              influence your builds.
             </p>
           </div>
           <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-hover:translate-x-0.5" />

@@ -184,7 +184,7 @@ function ProfileTab() {
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
         Tell Ora about yourself. These details are applied to every Ora conversation to make replies
-        more relevant — they are never shared with the AI Builder.
+        more relevant — they are never shared with Nabuflow.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
@@ -1148,8 +1148,8 @@ function DataControlsTab() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Manage your Ora data. These actions only affect Ora — your AI Builder projects and their
-        data are never touched.
+        Manage your Ora data. These actions only affect Ora — your Nabuflow projects and their data
+        are never touched.
       </p>
       <DangerCard
         title="Clear all saved memories"

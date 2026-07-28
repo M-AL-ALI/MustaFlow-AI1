@@ -187,7 +187,7 @@ async function getMobileReadiness(
     message:
       fileCount > 0
         ? `${fileCount} file(s) ready`
-        : "No files generated yet. Use the AI Builder to create your app first.",
+        : "No files generated yet. Use Nabuflow to create your app first.",
   });
 
   // ── Check 2: EAS_ACCESS_TOKEN secret configured (BLOCKING) ───────────────
@@ -430,7 +430,7 @@ router.get(
       message:
         fileCount > 0
           ? `${fileCount} file(s) ready`
-          : "No files generated yet. Use the AI Builder to create your app.",
+          : "No files generated yet. Use Nabuflow to create your app.",
     });
 
     // ── Check 2: has rollback point (BLOCKING for production) ─────────────────
