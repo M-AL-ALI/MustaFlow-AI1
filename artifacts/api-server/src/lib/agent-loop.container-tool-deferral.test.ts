@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const containerMocks = vi.hoisted(() => ({
   isContainerLayerConfigured: vi.fn(),
@@ -6,6 +6,10 @@ const containerMocks = vi.hoisted(() => ({
   execInContainer: vi.fn(),
   dbInsertValues: vi.fn().mockResolvedValue(undefined),
   dbSelectWhere: vi.fn().mockResolvedValue([]),
+}));
+
+const promptMocks = vi.hoisted(() => ({
+  createPrompt: vi.fn(),
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => ({
@@ -33,6 +37,10 @@ vi.mock("./container", () => ({
   isContainerLayerConfigured: containerMocks.isContainerLayerConfigured,
   provisionContainer: containerMocks.provisionContainer,
   execInContainer: containerMocks.execInContainer,
+}));
+
+vi.mock("./agent-prompts", () => ({
+  createPrompt: promptMocks.createPrompt,
 }));
 
 import {
@@ -85,8 +93,17 @@ function makeToolCtx(name: string, args: Record<string, unknown>): ToolCtx {
 }
 
 describe("Builder Wave 4.1 container-tool deferral", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("ZERO_SANDBOX_SHELL_ENABLED", "false");
+    promptMocks.createPrompt.mockReturnValue({
+      promptId: "prompt-1",
+      promise: Promise.resolve({ canceled: false, response: false }),
+    });
     containerMocks.isContainerLayerConfigured.mockResolvedValue(false);
     containerMocks.provisionContainer.mockResolvedValue(null);
     containerMocks.execInContainer.mockResolvedValue({
@@ -99,8 +116,62 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
     });
   });
 
+  it("runs an allowlisted command in the temp sandbox and streams start/finish events", async () => {
+    vi.stubEnv("ZERO_SANDBOX_SHELL_ENABLED", "true");
+    const ctx = makeToolCtx("run_command", { argv: ["node", "--version"] });
+    const onEvent = vi.fn().mockResolvedValue(undefined);
+    ctx.input.onEvent = onEvent;
+
+    const result = await executeTool(ctx);
+
+    expect(result).toMatchObject({ ok: true, exitCode: 0 });
+    expect(result.observation).toContain("sandbox=temp-workspace");
+    expect(result.observation).toContain(process.version);
+    expect(onEvent.mock.calls.filter(([eventType]) => eventType === "command_output")).toHaveLength(
+      2,
+    );
+    expect(containerMocks.provisionContainer).not.toHaveBeenCalled();
+    expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+  });
+
+  it("blocks run_command completely when the sandbox kill switch is off", async () => {
+    containerMocks.isContainerLayerConfigured.mockResolvedValue(true);
+    const result = await executeTool(makeToolCtx("run_command", { argv: ["pwd"] }));
+
+    expect(result).toMatchObject({ ok: false, exitCode: 126 });
+    expect(result.observation).toContain("ZERO_SANDBOX_SHELL_ENABLED");
+    expect(containerMocks.isContainerLayerConfigured).not.toHaveBeenCalled();
+    expect(containerMocks.provisionContainer).not.toHaveBeenCalled();
+    expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+  });
+
+  it("always asks before destructive or deploy-shaped sandbox commands", async () => {
+    vi.stubEnv("ZERO_SANDBOX_SHELL_ENABLED", "true");
+    const ctx = makeToolCtx("run_command", { argv: ["npm", "run", "deploy"] });
+    ctx.workspace = new FileWorkspace([
+      {
+        path: "package.json",
+        content: JSON.stringify({ scripts: { deploy: "node deploy.js" } }),
+        mimeType: "application/json",
+      },
+      {
+        path: "deploy.js",
+        content: "console.log('must not execute without approval')",
+        mimeType: "text/javascript",
+      },
+    ]);
+    ctx.input.taskId = 91;
+    ctx.input.requireCommandApproval = false;
+
+    const result = await executeTool(ctx);
+
+    expect(promptMocks.createPrompt).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false });
+    expect(result.observation).toContain("rejected by user");
+    expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ["run_command", { argv: ["pwd"] }],
     ["run_workflow", { name: "build" }],
     ["pkg_install", { manager: "npm", pkg: "react" }],
     ["run_tests", {}],
@@ -166,7 +237,7 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
   it("preserves normal tool execution when capability is operational", async () => {
     containerMocks.isContainerLayerConfigured.mockResolvedValue(true);
     containerMocks.provisionContainer.mockResolvedValue({ containerId: "machine-1" });
-    const ctx = makeToolCtx("run_command", { argv: ["pwd"] });
+    const ctx = makeToolCtx("pkg_install", { manager: "npm", pkg: "react" });
 
     const result = await executeTool(ctx);
 
@@ -178,7 +249,7 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
   });
 
   it("returns a ready result immediately for an attached live container", async () => {
-    const ctx = makeToolCtx("run_command", { argv: ["pwd"] });
+    const ctx = makeToolCtx("pkg_install", { manager: "npm", pkg: "react" });
     ctx.containerState.id = "machine-existing";
 
     const result = await executeTool(ctx);

@@ -232,6 +232,10 @@ export type TaskReport = {
   agentLoop?: {
     stack: string;
     steps: number;
+    /** Effective cap for this run (may be lower for a bounded self-heal pass). */
+    stepCap?: number;
+    wallClockElapsedMs?: number;
+    wallClockBudgetMs?: number;
     totalToolCalls: number;
     totalTokens: number;
     terminationReason: string;
@@ -308,6 +312,29 @@ export type TaskReport = {
     stepsRun: number;
     timedOut?: boolean;
     ranAt?: string;
+  } | null;
+  /**
+   * One-shot post-boot runtime repair. `attempted` can only be true once per
+   * task; verification never starts another repair cycle.
+   */
+  previewSelfHeal?: {
+    detectedIssues: Array<{
+      kind: string;
+      source: string;
+      message: string;
+    }>;
+    attempted: boolean;
+    repaired: boolean;
+    filesChanged: string[];
+    stepsUsed: number;
+    stepBudget: number;
+    wallClockBudgetMs: number;
+    remainingIssues: Array<{
+      kind: string;
+      source: string;
+      message: string;
+    }>;
+    skippedReason?: "disabled" | "no_budget" | "no_agent_loop" | null;
   } | null;
   /**
    * Result of the mandatory quality gate that runs after the agent loop

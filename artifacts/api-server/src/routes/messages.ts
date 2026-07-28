@@ -38,6 +38,10 @@ import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
 import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
+import {
+  backgroundPlanStepStatus,
+  shouldStageBackgroundPlanStep,
+} from "../lib/background-plan-step";
 
 const router: IRouter = Router();
 
@@ -219,6 +223,11 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   // synchronously. Only explicit background=true from the client triggers
   // the async background-job path.
   const runInBackground = Boolean(parsed.data.background);
+  const stagedBackgroundPlanStep = shouldStageBackgroundPlanStep({
+    prompt: content,
+    background: runInBackground,
+    planMode: Boolean(planMode),
+  });
 
   // Load current project files — needed for Planning Agent investigation phase
   const currentProjectFiles = await db
@@ -310,6 +319,12 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     // Screenshot-to-code: image attachments unconditionally route to build/refine —
     // skip classifier AND ignore any explicit intent/planMode from the client so the
     // vision model always runs (plan/converse don't support image inputs).
+    resolvedIntent = "build";
+    intentConfidence = 1.0;
+  } else if (stagedBackgroundPlanStep) {
+    // A decomposed plan step is an execution request, not another request to
+    // plan. Pinning the intent also prevents the general classifier from
+    // treating the generated "[Step n/m: ...]" wrapper as conversational text.
     resolvedIntent = "build";
     intentConfidence = 1.0;
   } else if (
@@ -758,8 +773,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     const hasActiveTask = activeTask !== undefined;
 
     // Create a task row to track the work
-    const safeExplicitAgentIdentity: AgentIdentity | undefined =
-      explicitAgentIdentity === "planning" && Boolean(planMode)
+    const safeExplicitAgentIdentity: AgentIdentity | undefined = stagedBackgroundPlanStep
+      ? "task"
+      : explicitAgentIdentity === "planning" && Boolean(planMode)
         ? "planning"
         : explicitAgentIdentity === "main"
           ? "main"
@@ -853,7 +869,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         message: "Task queued — waiting for the current build to finish…",
         filePath: null,
       });
-      assistantContent = `Your request has been queued as Task #${task.id}. It will run automatically when the current build finishes.`;
+      assistantContent = stagedBackgroundPlanStep
+        ? backgroundPlanStepStatus(task.id, "queued")
+        : `Your request has been queued as Task #${task.id}. It will run automatically when the current build finishes.`;
       plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
     } else if (runInBackground) {
       enqueueJob({
@@ -870,7 +888,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         runMode: "background",
         wallClockCapMs: wallClockCapMs ?? undefined,
       });
-      assistantContent = `I've queued this in the background. Task #${task.id} is running and I'll post the report back here when it's done.`;
+      assistantContent = stagedBackgroundPlanStep
+        ? backgroundPlanStepStatus(task.id, "queued")
+        : `I've queued this in the background. Task #${task.id} is running and I'll post the report back here when it's done.`;
       plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
     } else {
       await runJob({

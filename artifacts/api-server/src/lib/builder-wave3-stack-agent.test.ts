@@ -137,7 +137,9 @@ describe("Builder Wave 3 live-server capability", () => {
   });
 
   it("passes per-project live-server capability into every agent loop path", () => {
-    expect(jobsSource.match(/liveServerAvailable:/g)).toHaveLength(4);
+    // Four normal build/refine paths plus the single bounded preview
+    // self-heal pass all receive the same per-project capability.
+    expect(jobsSource.match(/liveServerAvailable:/g)).toHaveLength(5);
     expect(jobsSource).toContain("liveServerAvailable: projectHasLiveServer()");
   });
 });

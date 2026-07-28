@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProjectFilesChangedPayload } from "@/lib/event-types";
-
 export interface TaskStreamEvent {
   id: number;
   taskId: number;
@@ -8,8 +6,8 @@ export interface TaskStreamEvent {
   message: string;
   filePath: string | null;
   createdAt: string | Date;
-  /** Present on project_files_changed events — carries the full file payload. */
-  data?: ProjectFilesChangedPayload;
+  /** Structured data for events such as project_files_changed and qa_step. */
+  data?: unknown;
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
