@@ -71,6 +71,7 @@
 - [KNOWN_PREFIXES guard](known-prefixes-guard.md) / [Zod parse on GET](zod-parse-get-responses.md) — register new /api prefixes or anon gets 404 pre-auth; use safeParse with raw fallback in GET handlers.
 - [Orval operationId collision](orval-operationid-collision.md) / [detectedIntent enum](openapi-detected-intent-enum.md) / [nullable typed-null](openapi-nullable-typed-null.md) — globally unique operationIds; enums must cover every intent; mixed-type JSON fields use nullable:true with no type.
 - [Codegen drift direction](codegen-drift-direction.md) — before committing regenerated clients, check if regen REMOVES a request field routes parse; that = spec gap, restore & flag upstream, don't regen.
+- [Publish branch-not-found](publish-migration-branch-not-found.md) — "Branch with ID … not found" in publish = stale validation branch, not a data conflict; diff schemas read-only, then cancel + republish.
 - [customFetch token getter resilience](customfetch-token-getter-resilience.md) — wrap the auth getter in try/catch or a throwing getToken() kills cookie fallback with no server-side trace.
 - [Anthropic max_tokens](anthropic-max-tokens.md) / [assistant prefill](anthropic-assistant-prefill.md) — model-specific caps or 400s trip the breaker; history must not end with role:"assistant" (bridge user msg).
 - [AI provider circuit breaker isolation](circuit-breaker-provider-isolation.md) — one CircuitBreaker per provider; a shared breaker silently masks cross-provider outages.
