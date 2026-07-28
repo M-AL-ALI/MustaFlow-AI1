@@ -1693,7 +1693,7 @@ export function LogsTab({
               ))}
               {(tasks ?? []).length > 0 && (
                 <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 pt-2 flex items-center gap-1.5">
-                  <Terminal className="h-3 w-3" /> Nabuflow Tasks
+                  <Terminal className="h-3 w-3" /> NabuFlow Tasks
                 </div>
               )}
             </div>
@@ -1706,7 +1706,7 @@ export function LogsTab({
           )}
           {!isLoading && (!tasks || tasks.length === 0) && mobileBuilds.length === 0 && (
             <div className="text-center py-16 text-muted-foreground text-sm">
-              No builds yet. Send Nabuflow a message to get started.
+              No builds yet. Send NabuFlow a message to get started.
             </div>
           )}
           {(tasks ?? []).map((task) => (

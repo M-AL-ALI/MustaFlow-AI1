@@ -5,7 +5,7 @@ const RESOURCES = [
     category: "Getting Started",
     items: [
       {
-        title: "How Nabuflow works",
+        title: "How NabuFlow works",
         icon: Code2,
         desc: "Learn how MustaFlow generates and modifies your app.",
       },

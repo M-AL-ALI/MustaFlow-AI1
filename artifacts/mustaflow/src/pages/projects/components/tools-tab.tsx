@@ -1368,7 +1368,7 @@ export function ToolsTab({
               <div className="w-60 bg-card border-r border-border p-2 overflow-y-auto">
                 {(!files || files.length === 0) && (
                   <div className="text-xs text-muted-foreground p-2">
-                    No files yet. Send Nabuflow a message to generate your app.
+                    No files yet. Send NabuFlow a message to generate your app.
                   </div>
                 )}
                 {files?.map((f) => (
@@ -1469,7 +1469,7 @@ export function ToolsTab({
                 </Button>
                 <div className="col-span-4 text-xs text-muted-foreground">
                   Values are never returned by the API — only a masked preview. Separate test and
-                  production secrets so Nabuflow can target the right environment.
+                  production secrets so NabuFlow can target the right environment.
                 </div>
               </div>
 

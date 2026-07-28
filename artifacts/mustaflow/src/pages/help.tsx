@@ -83,7 +83,7 @@ export function remainingSupportAttachmentSlots(currentCount: number): number {
 const SUPPORT_CATEGORIES = [
   { value: "general", label: "General question" },
   { value: "bug", label: "Bug / something broken" },
-  { value: "builder", label: "Nabuflow or my project" },
+  { value: "builder", label: "NabuFlow or my project" },
   { value: "billing", label: "Billing & credits" },
   { value: "account", label: "Account & sign-in" },
   { value: "other", label: "Other" },

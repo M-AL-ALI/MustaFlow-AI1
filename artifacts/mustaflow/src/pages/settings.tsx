@@ -570,7 +570,7 @@ function ModeSection() {
       <div className="flex items-center gap-3 px-4 py-4 rounded-lg border border-primary/40 bg-primary/5">
         <Sparkles className="h-4 w-4 text-primary shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground">Nabuflow</p>
+          <p className="text-sm font-medium text-foreground">NabuFlow</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             Describe an idea — Agent Zero plans, builds, and deploys it for you.
           </p>

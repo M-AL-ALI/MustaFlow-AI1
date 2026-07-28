@@ -3241,8 +3241,8 @@ export default function ProjectWorkspacePage() {
                 ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
                 : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
-            title={isBusy ? "Nabuflow is working — open chat" : "Nabuflow idle — open chat"}
-            aria-label={isBusy ? "Nabuflow is working" : "Nabuflow idle"}
+            title={isBusy ? "NabuFlow is working — open chat" : "NabuFlow idle — open chat"}
+            aria-label={isBusy ? "NabuFlow is working" : "NabuFlow idle"}
           >
             <AgentIcon size={14} state={isBusy ? "active" : "idle"} />
           </button>
@@ -3520,7 +3520,7 @@ export default function ProjectWorkspacePage() {
               {/* Chat panel header */}
               <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
                 <AgentIcon size={16} state={isBusy ? "active" : "idle"} className="text-primary" />
-                <span className="text-xs font-semibold text-foreground">Nabuflow</span>
+                <span className="text-xs font-semibold text-foreground">NabuFlow</span>
                 <span
                   className={cn(
                     "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",

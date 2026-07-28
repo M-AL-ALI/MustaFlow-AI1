@@ -423,7 +423,7 @@ export default function PricingPage() {
             <h2 className="text-xl font-bold mb-2">What's included in your plan</h2>
             <p className="text-sm text-muted-foreground max-w-lg mx-auto">
               Chatting with Ora is plan-based — pick a plan and use the assistant as much as your
-              plan allows, no per-message math. Building and deploying full apps with Nabuflow uses
+              plan allows, no per-message math. Building and deploying full apps with NabuFlow uses
               credits, so heavier builds cost a little more.
             </p>
           </div>
@@ -455,7 +455,7 @@ export default function PricingPage() {
           </div>
           <div className="border border-border rounded-xl bg-card overflow-hidden">
             <div className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30">
-              Nabuflow — credits per build
+              NabuFlow — credits per build
             </div>
             <div className="divide-y divide-border">
               {[

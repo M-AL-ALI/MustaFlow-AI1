@@ -26,7 +26,7 @@ export default function PrivacyPage() {
           <li>Account information (name, email) provided during sign-up via Clerk.</li>
           <li>Project data: names, descriptions, generated files, and version history.</li>
           <li>API key names (but never API key values — these are encrypted at rest).</li>
-          <li>Chat messages you send to Nabuflow.</li>
+          <li>Chat messages you send to NabuFlow.</li>
           <li>Usage data: build counts, publish events, and Knowledge Vault entries.</li>
         </ul>
       </Section>

@@ -270,7 +270,7 @@ const HOW_IT_WORKS = [
     icon: AgentIcon,
     title: "Zero builds it for you",
     description:
-      "Zero — Nabuflow's builder agent — plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
+      "Zero — NabuFlow's builder agent — plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
   },
   {
     step: "3",
@@ -852,20 +852,20 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Meet Nabuflow */}
+        {/* Meet NabuFlow */}
         <div className="border-t border-border bg-background">
           <div className="max-w-6xl mx-auto px-6 py-20">
             {/* Section header */}
             <div className="text-center mb-14">
               <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
                 <Sparkles className="h-3 w-3" />
-                Meet Nabuflow
+                Meet NabuFlow
               </div>
               <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">
                 A prompt turns into a real, <span className="gradient-text">deployable app.</span>
               </h2>
               <p className="text-muted-foreground max-w-2xl mx-auto text-base leading-relaxed">
-                Nabuflow is MustaFlow AI's fully agentic builder. Describe what you want — mobile or
+                NabuFlow is MustaFlow AI's fully agentic builder. Describe what you want — mobile or
                 web — and Zero, the builder agent, plans, codes, tests, and ships it. No mocks. A
                 real app, live on the internet.
               </p>
@@ -1018,7 +1018,7 @@ export default function HomePage() {
                 {
                   icon: Smartphone,
                   title: "Mobile & web",
-                  desc: "Build native mobile apps (iOS + Android) or full web apps — Nabuflow handles both from a single prompt.",
+                  desc: "Build native mobile apps (iOS + Android) or full web apps — NabuFlow handles both from a single prompt.",
                 },
                 {
                   icon: Globe,

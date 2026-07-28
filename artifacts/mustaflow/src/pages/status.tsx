@@ -54,7 +54,7 @@ const STATUS_COLORS: Record<ComponentStatus, string> = {
 const COMPONENT_ICONS: Record<string, React.ElementType> = {
   API: Server,
   Database: Database,
-  Nabuflow: Server,
+  NabuFlow: Server,
   Containers: Boxes,
   Payments: CreditCard,
   Queue: Activity,
@@ -177,7 +177,7 @@ export default function StatusPage() {
                 {data.components.map((comp) => {
                   const Icon = COMPONENT_ICONS[comp.name] ?? Server;
                   const StatusIcon = STATUS_ICONS[comp.status] ?? AlertTriangle;
-                  const isAgent = comp.name === "Nabuflow";
+                  const isAgent = comp.name === "NabuFlow";
                   return (
                     <div
                       key={comp.name}
