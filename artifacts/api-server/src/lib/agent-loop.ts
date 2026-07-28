@@ -7,16 +7,16 @@
  * until the configured checks pass or a safety limit is hit.
  *
  * Modes:
- *   - In-process (static-html, mobile-cross): tool calls operate on an
- *     in-memory file map; `run_command` only runs the in-process validators
- *     declared in CHECK_PROFILES — there is no shell.
- *   - Container (react-vite, node-api, nextjs, python-flask, python-fastapi):
- *     tool calls are routed to the project's Fly.io container via
- *     execInContainer / writeFileToContainer / syncFilesToContainer.
+ *   - File tools operate on an in-memory project workspace.
+ *   - `run_command` uses a narrow argv-only host sandbox backed by a private
+ *     temp snapshot. The legacy Fly exec path remains behind the shell kill
+ *     switch for incident rollback.
+ *   - Container-backed file sync and package tools continue to use the
+ *     project's Fly.io development container.
  *
  * Safety:
  *   - Step cap (default 25), wall-clock budget (8 min), repeated-error cap (3).
- *   - run_command argv whitelist + path sanitization (sandboxed to /app).
+ *   - run_command argv whitelist + path sanitization in a disposable temp cwd.
  *   - Honours the per-task AbortController passed in from runJob.
  *
  * Credits: charged once per build by runJob — this loop never deducts credits
@@ -83,6 +83,12 @@ import {
   authorSkillDraft,
   type SkillManifest,
 } from "./builder-skills";
+import {
+  createSandboxShellSession,
+  evaluateSandboxCommand,
+  sandboxShellEnabled,
+  type SandboxShellSession,
+} from "./sandbox-shell";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -386,7 +392,7 @@ const CHECK_STRATEGY_HINTS: Record<string, { label: string; isFoundation: boolea
         "STOP — dependency install failed. Do not write more code until install succeeds.",
         "  1. read_file package.json — look for typos, version conflicts, unsupported fields",
         "  2. If 'Killed' / exit 137 / SIGKILL: the container is OOM — remove large optional deps or split the install",
-        "  3. If 'Tracker idealTree already exists': run run_command(['rm', '-f', '/root/.npm/_locks/*']) then retry",
+        "  3. If 'Tracker idealTree already exists': report the stale host lock clearly; run_command cannot touch paths outside its disposable workspace",
         "  4. If 'ENOTFOUND' or 'ETIMEDOUT': the package name may be misspelled or the registry is down — verify the package name",
         "  5. If 'E404': the package does not exist at that version — check the exact name and version on npmjs.com",
         "  Fix the root cause in package.json — the install will re-run automatically on the next check.",
@@ -874,14 +880,14 @@ export const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "run_command",
       description:
-        "Run a shell command inside the project's container (or an in-process validator for static-html / mobile projects). Pass argv as an array; avoid shell metacharacters (;, &, |, redirects, backticks, $()). Destructive ops, raw network tools (curl/wget/nc/ssh), and inline code-eval flags are blocked by policy. For installing dependencies, use `pkg_install` instead — it is faster, structured, and surfaces version conflicts cleanly. Returns combined stdout+stderr (truncated).",
+        "Run a real argv-array command in a disposable temp snapshot of the project. No raw shell strings are accepted. Allowed: node local scripts/checks, npm install/run/test, npx tsc/vitest, and bounded read-only utilities (pwd/ls/cat/head/tail/wc/find/grep). The environment contains no production secrets; output, time, concurrency, and total task shell time are capped. Returns bounded stdout/stderr.",
       parameters: {
         type: "object",
         properties: {
           argv: {
             type: "array",
             items: { type: "string" },
-            description: 'argv array, e.g. ["sh","-lc","npx --yes tsc --noEmit"].',
+            description: 'argv array, e.g. ["npx","tsc","--noEmit"].',
           },
           timeout_ms: { type: "integer" },
         },
@@ -1624,9 +1630,9 @@ function buildSystemPrompt(
   const effectivelyStatic = isStatic && !isDeveloperMode;
 
   const platformNote = effectivelyStatic
-    ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). No npm or build tools — `run_command` is restricted to in-process validators."
+    ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). `run_command` can inspect files or execute a local Node script in a disposable workspace copy; no production secrets are available."
     : isMobile
-      ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` is restricted to in-process structural validators."
+      ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` uses the same disposable, argv-only workspace copy."
       : isDeveloperMode
         ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}).
 
@@ -1681,9 +1687,9 @@ app.get("/api/items", async (req, res) => {
 app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
 \`\`\`
 
-The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. You may run any shell commands (npm/npx/tsc/python/go/etc.) via run_command. To add dependencies, use pkg_install.`
+The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add dependencies, use pkg_install.`
         : ["node-api", "nextjs"].includes(stack)
-          ? `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.
+          ? `This is a ${stack} project. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add new dependencies, prefer pkg_install over raw \`npm install\`.
 
 ## Critical: server must start even without DATABASE_URL
 The preview container injects DATABASE_URL at runtime — but it may not be set during early preview checks before a database is provisioned. Your server MUST start and respond to HTTP requests even when DATABASE_URL is absent.
@@ -1758,7 +1764,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
 - If the server responds → proceed to finalize immediately.
 - Use npx to run binaries that aren't in node_modules (e.g. \`npx tsx src/server/index.ts\`).
 - Never fail a task solely because npm install cannot complete — the server may already be running.`
-          : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
+          : `This is a ${stack} project. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
   return [
     isDeveloperMode
       ? `You are MustaFlow's Developer Mode AI. Your job is to ${input.mode === "build" ? "build" : "update"} a production-quality ${isStatic ? "Node.js/Express" : stack} server application that runs as a live process in a Linux container. The project is always containerized — never produce a raw static HTML bundle without a server.`
@@ -1805,7 +1811,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     `- Maximum ${Math.round(WALL_CLOCK_MS / 60000)} minutes wall-clock.`,
     `- After ${REPEATED_ERROR_CAP} consecutive failures of the same operation, the loop aborts.`,
     `- Policy strictness for this project: ${strictness}.`,
-    "- `run_command` deny-list blocks destructive ops, raw network sockets (curl/wget/nc/ssh), `| sh` pipelines, and inline code-eval flags.",
+    "- `run_command` accepts argv arrays only and runs in a disposable temp snapshot with a scrubbed environment. It allows Node/npm/npx and bounded read-only file utilities; raw shells and every other executable are rejected.",
     "- `pkg_install` is the only sanctioned way to add dependencies (manager + package + optional version).",
     "- All file paths are sandboxed to the project root — no `..`, no absolute paths.",
     "",
@@ -1827,15 +1833,15 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     "- If all tests pass after your fixes, call `finalize` with a summary of what was fixed. If some tests remain failing when the step cap approaches, finalize with a clear report of which tests pass, which remain, and the root cause of the remaining failures.",
     "",
     "## TypeScript-fix loop",
-    '- When your task is to fix TypeScript compilation errors, start by calling `run_command` with `{"command": "npx tsc --noEmit 2>&1 | head -200"}` (or the project\'s typecheck script) to get the full list of type errors.',
+    '- When your task is to fix TypeScript compilation errors, start by calling `run_command` with `{"argv":["npx","tsc","--noEmit"]}` (or `["npm","run","typecheck"]` when package.json defines it).',
     "- Parse the compiler output: each error line has the form `file.ts(line,col): error TSxxxx: message`. Group errors by file to minimise round-trips.",
     "- For each error group: `read_file` the affected file, understand the type mismatch, then `apply_patch` or `write_file` with the fix. Prefer the narrowest change — add a type annotation, cast, or fix the contract rather than widening to `any`.",
-    '- After each fix batch, re-run `run_command {"command": "npx tsc --noEmit 2>&1 | head -200"}` to verify progress. Repeat (run tsc → read errors → patch → run tsc) until the output is empty or the step cap is reached.',
+    '- After each fix batch, re-run `run_command` with `{"argv":["npx","tsc","--noEmit"]}` to verify progress. Repeat (run tsc → read errors → patch → run tsc) until the output is empty or the step cap is reached.',
     "- If no tsconfig.json exists at the root, look for one via `search` before running tsc.",
     "- Finalize with a count of errors fixed and any remaining errors with their root cause.",
     "",
     "## Lint-fix loop",
-    '- When your task is to fix ESLint violations, start by calling `run_command` with `{"command": "npx eslint . --ext .ts,.tsx,.js,.jsx --max-warnings 0 2>&1 | head -300"}` (or the project\'s lint script if one is defined in package.json) to get the full violation list.',
+    '- When your task is to fix ESLint violations, use `run_command` with the project\'s defined lint script, for example `{"argv":["npm","run","lint"]}`.',
     "- Parse the output: each block is `file path\\n  line:col  severity  rule-id  message`. Group violations by file.",
     "- For each file: `read_file` it, understand the violation (check the rule name if unclear), then `apply_patch` or `write_file` with the fix. Prefer code changes over disable comments — only use `// eslint-disable-next-line` when the violation is a false positive or intentional.",
     "- After each fix batch, re-run the lint command to verify progress. Repeat until zero warnings/errors or the step cap is reached.",
@@ -2009,6 +2015,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   };
   const workspace = new FileWorkspace(input.existingFiles);
   workspace.primeInitial(input.existingFiles);
+  const sandboxShell = createSandboxShellSession();
 
   const toolCalls: ToolCallRecord[] = [];
   const commandsRun: CommandRecord[] = [];
@@ -2776,6 +2783,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               creativeBudget,
               creativeCounts,
               presentedAssets,
+              sandboxShell,
               loopStartedAt: startedAt,
               loopWallClockMs: wallClockMs,
               mcpToolsCatalog,
@@ -2842,6 +2850,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           creativeBudget,
           creativeCounts,
           presentedAssets,
+          sandboxShell,
           loopStartedAt: startedAt,
           loopWallClockMs: wallClockMs,
           mcpToolsCatalog,
@@ -3549,6 +3558,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               creativeBudget,
               creativeCounts,
               presentedAssets,
+              sandboxShell,
               loopStartedAt: startedAt,
               loopWallClockMs: wallClockMs,
               mcpToolsCatalog,
@@ -3614,6 +3624,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
   }
 
+  await sandboxShell.dispose();
   const lastE2e = e2eResults[e2eResults.length - 1] ?? null;
   const diff = workspace.diff();
   const allFiles = workspace.all();
@@ -4274,6 +4285,9 @@ export interface ToolCtx {
     mimeType: string;
     description?: string;
   }>;
+  /** Task-scoped, temp-directory shell. Its wall-clock budget is shared by
+   * every run_command call in this loop and it is disposed before return. */
+  sandboxShell?: SandboxShellSession;
   /** Task #532: epoch ms when the loop started + the effective wall-clock cap
    *  for this run. Used by paused tools (user_query/request_secret) to bound
    *  their per-prompt timeout by the loop's remaining budget so a pause can
@@ -4851,7 +4865,7 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
 
     const guidance: Record<string, string> = {
       oom: "The container ran out of memory (SIGKILL/exit 137). Remove large optional dependencies from package.json or split the install into smaller groups.",
-      lock: "A stale npm lock file blocked the install. Use run_command(['rm', '-f', '/root/.npm/_locks/*']) to clear it, then the install will retry automatically.",
+      lock: "A stale npm lock file blocked the container install. Report it clearly so the platform can retry; the isolated run_command workspace cannot alter host lock files.",
       network:
         "The npm registry was unreachable. Check that the package name is spelled correctly. If the name is correct, the registry may be temporarily down — retry in a moment.",
       "package-not-found":
@@ -5508,6 +5522,268 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           ok: r.exitCode === 0,
           exitCode: r.exitCode,
           observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
+        };
+      }
+      // Zero's host-side shell is a deliberately narrower fallback than the
+      // historical Fly exec path. It always runs a validated argv array in a
+      // task-private temp snapshot, never in the API server checkout or the
+      // project's live container tree. The env flag is an instant kill switch;
+      // when disabled, no command execution path is allowed.
+      const sandboxEnabled = sandboxShellEnabled();
+      if (!sandboxEnabled) {
+        const reason = "sandbox shell is disabled by ZERO_SANDBOX_SHELL_ENABLED";
+        commandsRun.push({
+          step,
+          argv,
+          exitCode: 126,
+          durationMs: 0,
+          stdoutPreview: "",
+          stderrPreview: `BLOCKED: ${reason}`,
+        });
+        await writeToolAudit(ctx, {
+          toolName: "run_command",
+          argv,
+          exitCode: 126,
+          durationMs: 0,
+          blocked: true,
+          blockReason: reason,
+          stdoutTail: "",
+          stderrTail: `BLOCKED: ${reason}`,
+        });
+        return {
+          ok: false,
+          exitCode: 126,
+          observation: JSON.stringify({
+            blocked: true,
+            reason,
+            sandbox: "disabled",
+            argv,
+          }),
+        };
+      }
+      if (sandboxEnabled) {
+        const decision = evaluateSandboxCommand(argv, workspace.snapshot());
+        if (!decision.ok) {
+          const reason = decision.reason;
+          commandsRun.push({
+            step,
+            argv,
+            exitCode: 126,
+            durationMs: 0,
+            stdoutPreview: "",
+            stderrPreview: `BLOCKED: ${reason}`,
+          });
+          await writeToolAudit(ctx, {
+            toolName: "run_command",
+            argv,
+            exitCode: 126,
+            durationMs: 0,
+            blocked: true,
+            blockReason: reason,
+            stdoutTail: "",
+            stderrTail: `BLOCKED: ${reason}`,
+          });
+          return {
+            ok: false,
+            exitCode: 126,
+            observation: JSON.stringify({
+              blocked: true,
+              reason,
+              sandbox: "temp-workspace",
+              argv,
+            }),
+          };
+        }
+
+        // Safe/read-only commands remain autonomous. Only a command that the
+        // narrow policy identifies as destructive or deploy-shaped enters the
+        // existing user-approval flow.
+        if (decision.requiresApproval) {
+          const fullCmd = argv.join(" ");
+          if (!input.taskId) {
+            return {
+              ok: false,
+              exitCode: 126,
+              observation:
+                "Command blocked: destructive or deploy-shaped sandbox commands require user approval, but this run has no task prompt channel.",
+            };
+          }
+          if (isE2EAutoApproveEnabled() && isE2ERunCommandSafe(argv)) {
+            logger.info(
+              { projectId: input.projectId, taskId: input.taskId, cmd: fullCmd },
+              "[E2E] Auto-approved sandbox run_command",
+            );
+          } else {
+            const { createPrompt } = await import("./agent-prompts");
+            const remainingMs = Math.max(
+              1_000,
+              ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt),
+            );
+            const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+            const approvalPayload = {
+              question:
+                `Allow the agent to run this ${decision.approvalReason ?? "risky"} command ` +
+                `in its isolated workspace copy?\n\`${fullCmd}\``,
+              kind: "boolean" as const,
+              options: [],
+              allowMultiple: false,
+            };
+            const { promptId, promise } = createPrompt({
+              taskId: input.taskId,
+              projectId: input.projectId,
+              kind: "user_query",
+              payload: approvalPayload,
+              signal: input.signal,
+              timeoutMs: promptTimeoutMs,
+            });
+            await safeEvent(
+              input.onEvent,
+              "agent_prompt",
+              JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+            );
+            const response = await promise;
+            if (response.canceled) {
+              throw new Error("Task terminated while awaiting command approval");
+            }
+            const approved =
+              typeof response.response === "boolean"
+                ? response.response
+                : response.response === "true";
+            if (!approved) {
+              return {
+                ok: false,
+                observation: "Command rejected by user - find an alternative approach",
+              };
+            }
+          }
+        }
+
+        if (decision.requiresApproval && input.onBeforeRiskyOp) {
+          await safeEvent(
+            input.onEvent,
+            "narration",
+            "Saving a checkpoint before the approved command...",
+          );
+          try {
+            await input.onBeforeRiskyOp(`run_command: ${argv.join(" ").slice(0, 80)}`);
+            // eslint-disable-next-line no-empty
+          } catch {}
+        }
+
+        const timeoutMs =
+          typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : undefined;
+        const startedAt = Date.now();
+        const runId = commandRunKey(argv, startedAt);
+        const displayCommand = argv.slice(0, 4).join(" ").slice(0, 100);
+        await emitCommandStartEvent(input.onEvent, { runId, argv, startedAt });
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Running ${displayCommand} in an isolated workspace copy...`,
+        );
+
+        const sandboxSession = ctx.sandboxShell ?? createSandboxShellSession();
+        let result: Awaited<ReturnType<SandboxShellSession["execute"]>>;
+        try {
+          result = await sandboxSession.execute({
+            argv: decision.argv,
+            files: workspace.snapshot(),
+            timeoutMs,
+            signal: input.signal,
+          });
+        } catch (error) {
+          const durationMs = Date.now() - startedAt;
+          const stderr = `Sandbox execution failed: ${(error as Error).message}`;
+          commandsRun.push({
+            step,
+            argv,
+            exitCode: 1,
+            durationMs,
+            stdoutPreview: "",
+            stderrPreview: stderr.slice(0, 400),
+          });
+          await writeToolAudit(ctx, {
+            toolName: "run_command",
+            argv,
+            exitCode: 1,
+            durationMs,
+            blocked: false,
+            blockReason: null,
+            stdoutTail: "",
+            stderrTail: stderr.slice(-400),
+          });
+          await emitCommandFinalEvent(input.onEvent, input.projectId, {
+            runId,
+            argv,
+            exitCode: 1,
+            durationMs,
+            stdout: "",
+            stderr,
+          });
+          await safeEvent(input.onEvent, "narration", `${displayCommand} could not run safely.`);
+          return { ok: false, exitCode: 1, observation: `ERROR: ${stderr}` };
+        } finally {
+          if (!ctx.sandboxShell) {
+            await sandboxSession.dispose().catch(() => {});
+          }
+        }
+
+        const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+        const suffix = result.outputTruncated
+          ? `\n[output truncated at ${sandboxSession.limits.outputBytes} bytes]`
+          : "";
+        const ok = result.exitCode === 0 && !result.timedOut && !result.aborted;
+        commandsRun.push({
+          step,
+          argv,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          stdoutPreview: result.stdout.slice(0, 400),
+          stderrPreview: result.stderr.slice(0, 400),
+        });
+        await writeToolAudit(ctx, {
+          toolName: "run_command",
+          argv,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          blocked: false,
+          blockReason: null,
+          stdoutTail: result.stdout.slice(-400),
+          stderrTail: result.stderr.slice(-400),
+        });
+        await emitCommandFinalEvent(input.onEvent, input.projectId, {
+          runId,
+          argv,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        });
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `${displayCommand} finished with exit ${result.exitCode}.`,
+        );
+        if (result.aborted) {
+          return { ok: false, exitCode: 130, observation: "ERROR: aborted by user" };
+        }
+        if (result.timedOut) {
+          return {
+            ok: false,
+            exitCode: 124,
+            observation:
+              `ERROR: command exceeded its sandbox timeout; ` +
+              `${result.budgetRemainingMs}ms task shell budget remains${suffix}`,
+          };
+        }
+        return {
+          ok,
+          exitCode: result.exitCode,
+          observation:
+            `sandbox=temp-workspace exit=${result.exitCode} ` +
+            `budget_remaining_ms=${result.budgetRemainingMs}\n` +
+            combined.slice(0, MAX_OBSERVATION_CHARS) +
+            suffix,
         };
       }
       // Static / mobile stacks have no container shell
