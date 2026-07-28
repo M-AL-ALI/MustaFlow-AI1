@@ -1,7 +1,32 @@
-import { describe, expect, it } from "vitest";
+import express from "express";
+import request from "supertest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { hasBuilderAccess, isBuilderOpenToAll, parseBuilderAllowlist } from "../lib/builder-access";
+import {
+  BUILDER_ACCESS_DENIED_MESSAGE,
+  createBuilderAccessMiddleware,
+  hasBuilderAccess,
+  isBuilderOpenToAll,
+  parseBuilderAllowlist,
+  type BuilderEmailLookup,
+} from "../lib/builder-access";
+
+function createMiddlewareApp(lookupEmail: BuilderEmailLookup) {
+  const app = express();
+  app.use((req, _res, next) => {
+    req.userId = "user_test";
+    next();
+  });
+  app.post("/builder-mutation", createBuilderAccessMiddleware(lookupEmail), (_req, res) => {
+    res.json({ ok: true });
+  });
+  return app;
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("AI Builder cohort access", () => {
   it("parses comma-separated emails case-insensitively and trims whitespace", () => {
@@ -23,6 +48,80 @@ describe("AI Builder cohort access", () => {
   it("allows every authenticated user when BUILDER_OPEN_TO_ALL is true", () => {
     expect(isBuilderOpenToAll(" TRUE ")).toBe(true);
     expect(hasBuilderAccess(null, { allowlist: "", openToAll: "true" })).toBe(true);
+  });
+
+  it("lets an allowlisted email reach a Builder mutation", async () => {
+    vi.stubEnv("BUILDER_OPEN_TO_ALL", "false");
+    vi.stubEnv("BUILDER_ALLOWLIST", "allowed@example.com");
+    const lookupEmail = vi.fn<BuilderEmailLookup>().mockResolvedValue("ALLOWED@example.com");
+
+    const response = await request(createMiddlewareApp(lookupEmail)).post("/builder-mutation");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ok: true });
+    expect(lookupEmail).toHaveBeenCalledWith("user_test");
+  });
+
+  it("returns a clean 403 for a non-allowlisted email", async () => {
+    vi.stubEnv("BUILDER_OPEN_TO_ALL", "false");
+    vi.stubEnv("BUILDER_ALLOWLIST", "allowed@example.com");
+
+    const response = await request(
+      createMiddlewareApp(async () => "other@example.com"),
+    ).post("/builder-mutation");
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: BUILDER_ACCESS_DENIED_MESSAGE });
+  });
+
+  it("fails closed when Clerk cannot provide an email", async () => {
+    vi.stubEnv("BUILDER_OPEN_TO_ALL", "false");
+    vi.stubEnv("BUILDER_ALLOWLIST", "allowed@example.com");
+
+    const response = await request(createMiddlewareApp(async () => null)).post(
+      "/builder-mutation",
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: BUILDER_ACCESS_DENIED_MESSAGE });
+  });
+
+  it("lets everyone through without an email lookup when BUILDER_OPEN_TO_ALL=true", async () => {
+    vi.stubEnv("BUILDER_OPEN_TO_ALL", "true");
+    vi.stubEnv("BUILDER_ALLOWLIST", "");
+    const lookupEmail = vi.fn<BuilderEmailLookup>().mockResolvedValue(null);
+
+    const response = await request(createMiddlewareApp(lookupEmail)).post("/builder-mutation");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ok: true });
+    expect(lookupEmail).not.toHaveBeenCalled();
+  });
+
+  it("gates Builder mutations while leaving public brainstorm chat unchanged", () => {
+    const routePath = fileURLToPath(new URL("../routes/index.ts", import.meta.url));
+    const routes = readFileSync(routePath, "utf8");
+    const guardedRoutes = [
+      ["post", "/projects"],
+      ["post", "/projects/:id/messages"],
+      ["post", "/projects/:id/messages/stream"],
+      ["post", "/projects/:id/plans/decompose"],
+      ["post", "/projects/:id/plans/clarify"],
+      ["post", "/projects/:id/queue"],
+      ["post", "/projects/:id/queue/resume-paused"],
+      ["delete", "/projects/:id/queue/:batchId"],
+      ["post", "/projects/:id/restore"],
+      ["post", "/projects/:id/checkpoints/:checkpointId/restore"],
+      ["post", "/projects/:id/versions/:versionId/rollback"],
+    ] as const;
+
+    for (const [method, path] of guardedRoutes) {
+      expect(routes).toContain(`router.${method}("${path}", requireBuilderAccess);`);
+    }
+    expect(routes).toContain(
+      'router.post("/brainstorm/resolve", attachUser, requireBuilderAccess, aiBuilderLimiter);',
+    );
+    expect(routes).toContain('router.post("/brainstorm/chat", aiBuilderLimiter);');
   });
 
   it("returns access and live-server capability fields from preferences", () => {
