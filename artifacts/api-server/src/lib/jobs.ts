@@ -2708,8 +2708,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             taskId,
             "planning",
             input.deepReasoning
-              ? "Running Deep Reasoning planning passâ€¦"
-              : "Micro-planning build steps (Pro mode)â€¦",
+              ? "Running Deep Reasoning planning pass..."
+              : "Micro-planning build steps (Pro mode)...",
           );
           try {
             const { runUpfrontBuildPlan } = await import("./planning-brain");
@@ -3268,8 +3268,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             taskId,
             "planning",
             input.deepReasoning
-              ? "Running Deep Reasoning planning passâ€¦"
-              : "Micro-planning change steps (Pro mode)â€¦",
+              ? "Running Deep Reasoning planning pass..."
+              : "Micro-planning change steps (Pro mode)...",
           );
           try {
             const { runUpfrontBuildPlan } = await import("./planning-brain");
