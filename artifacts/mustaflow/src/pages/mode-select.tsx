@@ -154,12 +154,13 @@ export default function ModeSelectPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full max-w-5xl">
-          {/* AI Build Mode */}
+          {/* NabuFlow — AI build product */}
           <ModeCard
             mode="builder"
             icon={Sparkles}
-            title="AI Build Mode"
-            description="Describe an idea in plain language. Zero plans and builds it for you — no code needed."
+            logoSrc={`${import.meta.env.BASE_URL}logos/nabuflow.png`}
+            title="NabuFlow"
+            description="Describe an idea in plain language and NabuFlow's agent Zero builds it into a real, deployable app or website — no code needed."
             accent="from-primary/20 via-primary/5 to-transparent"
             borderHover="hover:border-primary/60"
             glowColor="shadow-primary/10"
@@ -197,6 +198,8 @@ export default function ModeSelectPage() {
 interface ModeCardProps {
   mode: "builder" | "ora" | "orax";
   icon: React.ElementType;
+  /** Product logo image; when set it replaces the lucide icon in the card's icon box. */
+  logoSrc?: string;
   title: string;
   description: string;
   accent: string;
@@ -310,6 +313,7 @@ function OraxCard({ selecting, oraxHosts, oraxHostsLoading, onSelect }: OraxCard
 function ModeCard({
   mode,
   icon: Icon,
+  logoSrc,
   title,
   description,
   accent,
@@ -331,7 +335,11 @@ function ModeCard({
           {/* Icon + badge */}
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center justify-center h-12 w-12 rounded-xl border border-border bg-muted/60">
-              <Icon className="h-6 w-6 text-foreground" />
+              {logoSrc ? (
+                <img src={logoSrc} alt="" className="h-9 w-9 object-contain" />
+              ) : (
+                <Icon className="h-6 w-6 text-foreground" />
+              )}
             </div>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
               <Lock className="h-3 w-3" />
@@ -376,7 +384,11 @@ function ModeCard({
         {/* Icon */}
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center justify-center h-12 w-12 rounded-xl border border-border bg-muted/60 group-hover:border-border/80 transition-colors">
-            <Icon className="h-6 w-6 text-foreground" />
+            {logoSrc ? (
+              <img src={logoSrc} alt="" className="h-9 w-9 object-contain" />
+            ) : (
+              <Icon className="h-6 w-6 text-foreground" />
+            )}
           </div>
           {isSelecting ? (
             <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />

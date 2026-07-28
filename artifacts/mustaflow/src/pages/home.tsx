@@ -861,6 +861,14 @@ export default function HomePage() {
                 <Sparkles className="h-3 w-3" />
                 Meet NabuFlow
               </div>
+              <div className="mb-5">
+                <img
+                  src={`${import.meta.env.BASE_URL}logos/nabuflow.png`}
+                  alt="NabuFlow logo"
+                  className="inline-block h-16 w-auto"
+                  loading="lazy"
+                />
+              </div>
               <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">
                 A prompt turns into a real, <span className="gradient-text">deployable app.</span>
               </h2>

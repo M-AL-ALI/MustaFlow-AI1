@@ -178,6 +178,7 @@ These are permanent, non-negotiable product constraints. Any code, test, or feat
 
 - No emojis in product UI. Use `lucide-react` icons.
 - Original branding only. Do not mention Replit or other third-party brands in user-facing product copy.
+- Brand assets are two-tier and must never be mixed: the MustaFlow COMPANY logo (`artifacts/mustaflow/public/logo.png`, `public/logos/mustaflow.png`, all favicons, `apple-touch-icon.png`, `opengraph.jpg`) is the company identity used in headers, sidebars, browser icons, and the social card. The NabuFlow PRODUCT logo lives only at `public/logos/nabuflow.png` and appears only on the mode-select NabuFlow card and the landing "Meet NabuFlow" section. Never overwrite company logo files with product art, and never point a company-logo slot at a product asset.
 - Landing page remains sidebar-free for visitors.
 - Dark mode is default; light mode is opt-in.
 - Keep all app stacks enabled. Do not hard-code one stack on new projects.
