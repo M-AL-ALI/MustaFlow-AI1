@@ -2225,27 +2225,12 @@ export default function ProjectWorkspacePage() {
           generated?: boolean;
         }>;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
+        clearComposerOnProceed?: boolean;
       },
     ) => {
       // Allow image-only sends — when no text prompt is given the server injects a default.
       const hasImageAttachments = (opts?.attachments ?? []).length > 0;
       if (!content.trim() && !hasImageAttachments) return;
-
-      // Dispatch first-workspace-message event once so the onboarding tour can
-      // detect developer signals from the actual first message the user sends.
-      if (!firstWsMsgFiredRef.current) {
-        firstWsMsgFiredRef.current = true;
-        try {
-          const tourSeen = localStorage.getItem("mf-onboarding-tour-v1-seen");
-          if (!tourSeen) {
-            window.dispatchEvent(
-              new CustomEvent("mf:first-workspace-message", { detail: content }),
-            );
-          }
-        } catch {
-          /* ignore */
-        }
-      }
 
       // Generate a per-send idempotency key so the server can detect duplicate
       // POSTs caused by network blips (client timed out but server processed the
@@ -2253,18 +2238,10 @@ export default function ProjectWorkspacePage() {
       // within this single logical send — a new send always gets a new key.
       const idempotencyKey = crypto.randomUUID();
 
-      lastSentPromptRef.current = content;
-      setPreflightBanner(null);
-      setActiveTaskId(null);
-      chatAtBottomRef.current = true;
-      setPendingBuildStartedAt(new Date());
-      if (opts?.background ?? runInBackground) setBackgroundPanelOpen(true);
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectivePlanMode = opts?.planMode ?? planMode;
       const effectiveBackground = opts?.background ?? runInBackground;
       const effectiveAgentIntent = opts?.agentIntent;
-      pendingIsPlanRef.current = effectivePlanMode;
-      setPendingIsPlan(effectivePlanMode);
       // Local heuristic for display: show conversational indicator when content looks like a
       // question or explicit agentIntent=converse. Does NOT affect server classification.
       const converseKeywords =
@@ -2276,9 +2253,6 @@ export default function ProjectWorkspacePage() {
         effectiveAgentIntent === "review" ||
         effectiveAgentIntent === "explain" ||
         (converseKeywords.test(content.trim()) && !effectivePlanMode);
-      pendingIsConverseRef.current = isLikelyConverse;
-      setPendingIsConverse(isLikelyConverse);
-
       // Credit confirmation for Power/Pro builds — skip for converse-intent
       // messages so casual questions aren't gated behind a dialog.
       // Use creditConfirmedRef (a stable ref) to bypass the dialog on the
@@ -2301,6 +2275,33 @@ export default function ProjectWorkspacePage() {
       }
       // Reset bypass flag so the next independent build shows the dialog again
       creditConfirmedRef.current = false;
+
+      // Engage optimistic workspace state only after any credit gate is accepted.
+      // A dismissed dialog therefore leaves both the draft and composer idle.
+      if (opts?.clearComposerOnProceed) setPrompt("");
+      if (!firstWsMsgFiredRef.current) {
+        firstWsMsgFiredRef.current = true;
+        try {
+          const tourSeen = localStorage.getItem("mf-onboarding-tour-v1-seen");
+          if (!tourSeen) {
+            window.dispatchEvent(
+              new CustomEvent("mf:first-workspace-message", { detail: content }),
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      lastSentPromptRef.current = content;
+      setPreflightBanner(null);
+      setActiveTaskId(null);
+      chatAtBottomRef.current = true;
+      setPendingBuildStartedAt(new Date());
+      if (effectiveBackground) setBackgroundPanelOpen(true);
+      pendingIsPlanRef.current = effectivePlanMode;
+      setPendingIsPlan(effectivePlanMode);
+      pendingIsConverseRef.current = isLikelyConverse;
+      setPendingIsConverse(isLikelyConverse);
 
       // For plan/build or background tasks skip streaming and go straight to the regular path
       if (
@@ -4407,7 +4408,6 @@ export default function ProjectWorkspacePage() {
                           : undefined
                       }
                       onSingleSend={(content, intent, attachments, brainstormContext) => {
-                        setPrompt("");
                         checkUpgradeNudge(content);
                         if (chatScrolledUp) {
                           setChatScrolledUp(false);
@@ -4435,6 +4435,7 @@ export default function ProjectWorkspacePage() {
                           // Images and explicit build/plan intents use the regular task-creating
                           // mutation. Conversational intents keep their existing streamed path.
                           ...mapIntentToSendOptions({ intent, hasImages }),
+                          clearComposerOnProceed: true,
                           ...(brainstormContext && brainstormContext.length > 0
                             ? { brainstormContext }
                             : {}),
