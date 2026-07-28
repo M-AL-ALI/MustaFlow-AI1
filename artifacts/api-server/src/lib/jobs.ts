@@ -128,6 +128,10 @@ import {
   resolvePreviewSelfHealBudget,
 } from "./preview-self-heal";
 import { runHeadlessQA, type QAResult, type QAStepEventData } from "./headless-qa";
+import {
+  backgroundPlanStepStatus,
+  shouldAutoMergeBackgroundPlanStep,
+} from "./background-plan-step";
 import type { AgentLoopReport } from "./agent-loop";
 
 /**
@@ -716,7 +720,7 @@ export interface JobInput {
   agentMode: AgentMode;
   /** Fixed-price deepest up-front planning pass selected by the user. */
   deepReasoning?: boolean;
-  /** Which visible executor handles this task. New work uses planning or main; task is legacy. */
+  /** Which visible executor handles this task. Decomposed background steps use task staging. */
   agentIdentity?: AgentIdentity;
   /** Source surface that created the task. Mirrors chat_messages.origin. */
   origin?: string | null;
@@ -2131,6 +2135,11 @@ export async function runJob(input: JobInput): Promise<void> {
   } = input;
   let { userPrompt, agentMode } = input;
   const agentIdentity: AgentIdentity = input.agentIdentity ?? "main";
+  const autoMergeBackgroundPlanStep = shouldAutoMergeBackgroundPlanStep({
+    prompt: userPrompt,
+    background: input.runMode === "background",
+    agentIdentity,
+  });
   const jobOrigin =
     typeof input.origin === "string" && input.origin.length > 0 ? input.origin : null;
   // Task #665 — image layout analysis. When the user drops in screenshots,
@@ -2277,6 +2286,30 @@ export async function runJob(input: JobInput): Promise<void> {
         })
         .where(eq(agentTasksTable.id, taskId));
       return;
+    }
+    if (autoMergeBackgroundPlanStep) {
+      const startedStatus = backgroundPlanStepStatus(taskId, "started");
+      await emitEvent(taskId, "narration", startedStatus);
+      try {
+        await db.insert(chatMessagesTable).values({
+          projectId,
+          role: "system",
+          content: startedStatus,
+          agentMode,
+          planMode: false,
+          origin: jobOrigin,
+          plan: {
+            kind: "background-plan-step-status",
+            status: "started",
+            taskId,
+          } as unknown as Record<string, unknown>,
+        });
+      } catch (statusErr) {
+        logger.warn(
+          { err: statusErr, projectId, taskId },
+          "Failed to persist background plan-step start status",
+        );
+      }
     }
     const containerLayerOperational = await isContainerLayerConfigured();
     const projectHasLiveServer = (): boolean =>
@@ -4356,8 +4389,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       // ── Legacy staged-review gate ──────────────────────────────────────────
-      // Legacy compatibility: old rows with agentIdentity="task" write to stagingSnapshot
-      // instead of committing directly to project_files.
+      // Task-identity executions write to stagingSnapshot instead of committing
+      // directly to project_files. This retains legacy review compatibility and
+      // gives decomposed background steps a checked auto-merge path.
       // Quality gate (TypeScript, ESLint, smoke test), env-var scan, and a
       // blocking architect review all run here before the final status is set.
       if (agentIdentity === "task") {
@@ -4722,6 +4756,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             tokenCount: flushedTokenCount,
           })
           .where(eq(agentTasksTable.id, taskId));
+
+        if (autoMergeBackgroundPlanStep) {
+          await emitEvent(taskId, "narration", backgroundPlanStepStatus(taskId, "merging"));
+          await applyTaskAgentStaging(taskId, projectId);
+          return;
+        }
 
         await emitEvent(
           taskId,
@@ -6811,7 +6851,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
 /**
  * Apply a staged-review snapshot to the live project files.
- * Called by POST /projects/:id/tasks/:taskId/apply.
+ * Called by POST /projects/:id/tasks/:taskId/apply and by the bounded
+ * background plan-step auto-merge path after its staging checks pass.
  * Fires all post-build hooks: version save, quality audit, knowledge vault,
  * suggestion generation, credit deduction.
  */
@@ -7193,6 +7234,11 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (project.agentMode as AgentMode) ??
     "eco";
   const taskOrigin = typeof task.origin === "string" && task.origin.length > 0 ? task.origin : null;
+  const autoMergedBackgroundPlanStep = shouldAutoMergeBackgroundPlanStep({
+    prompt: userPrompt,
+    background: task.runMode === "background",
+    agentIdentity: task.agentIdentity,
+  });
 
   // ── SAST gate (before any files are written or synced) ─────────────────
   // Run a static security scan on all JS/HTML files in the staging snapshot.
@@ -7519,14 +7565,17 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   void emitEvent(taskId, "narration", "Saving version snapshot…");
   const snapshot = await snapshotFilesForVersion(projectId);
   const planSnapshot = await loadLatestPlanSnapshot(projectId);
-  const changelogEntry = `**Staged Review Apply**\n${(assistantSummary ?? "").slice(0, 180)}`;
+  const changelogTitle = autoMergedBackgroundPlanStep
+    ? "Background Plan Step Merge"
+    : "Staged Review Apply";
+  const changelogEntry = `**${changelogTitle}**\n${(assistantSummary ?? "").slice(0, 180)}`;
   let version: { id: number } | undefined;
   try {
     const inserted = await db
       .insert(projectVersionsTable)
       .values({
         projectId,
-        label: `Apply Task #${taskId}`.slice(0, 200),
+        label: `${autoMergedBackgroundPlanStep ? "Merge" : "Apply"} Task #${taskId}`.slice(0, 200),
         note: (assistantSummary ?? "").slice(0, 200),
         changelogEntry: changelogEntry.slice(0, 500),
         filesSnapshot: snapshot,
@@ -7599,10 +7648,13 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       ),
     );
 
+  const mergedStatus = autoMergedBackgroundPlanStep
+    ? backgroundPlanStepStatus(taskId, "merged")
+    : null;
   await db.insert(chatMessagesTable).values({
     projectId,
     role: "system",
-    content: assistantSummary,
+    content: mergedStatus ? `${mergedStatus}\n\n${assistantSummary}` : assistantSummary,
     agentMode,
     planMode: false,
     origin: taskOrigin,
@@ -7612,9 +7664,13 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       taskId,
       agentIdentity: "task",
       applied: true,
+      ...(autoMergedBackgroundPlanStep ? { backgroundPlanStep: true, autoMerged: true } : {}),
     } as unknown as Record<string, unknown>,
     checkpointId: version?.id ?? null,
   });
+  if (mergedStatus) {
+    await emitEvent(taskId, "completed", mergedStatus);
+  }
 
   if (version?.id) {
     try {
@@ -7718,8 +7774,12 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
 
   // Knowledge vault entry
   void writeKnowledge({
-    title: `Staged review applied: "${userPrompt.slice(0, 60)}"`,
-    content: `User approved and applied staged review output for "${userPrompt.slice(0, 100)}". ${stagingFiles.length} file(s) promoted to live.`,
+    title: autoMergedBackgroundPlanStep
+      ? `Background plan step merged: "${userPrompt.slice(0, 60)}"`
+      : `Staged review applied: "${userPrompt.slice(0, 60)}"`,
+    content: autoMergedBackgroundPlanStep
+      ? `Background plan step passed the staging gate and merged automatically for "${userPrompt.slice(0, 100)}". ${stagingFiles.length} file(s) promoted to live.`
+      : `User approved and applied staged review output for "${userPrompt.slice(0, 100)}". ${stagingFiles.length} file(s) promoted to live.`,
     type: "refine",
     category: "refinement",
     severity: "info",
@@ -7864,6 +7924,7 @@ function serializeJobInput(input: JobInput): Record<string, unknown> {
     kind: input.kind,
     userPrompt: input.userPrompt,
     agentMode: input.agentMode,
+    deepReasoning: input.deepReasoning ?? false,
     agentIdentity: input.agentIdentity ?? null,
     origin: input.origin ?? null,
     planContext: input.planContext ?? null,
