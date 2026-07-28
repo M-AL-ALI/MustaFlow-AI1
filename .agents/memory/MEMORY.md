@@ -117,3 +117,4 @@
 - [Branch merge via push-to-github abort removal](branch-merge-abort-removal.md) — when push-to-github.sh has `git merge --abort` blocking a merge commit, remove that line temporarily, complete the push, then restore the file.
 - [Activity-visibility controller pattern](activity-visibility-controller.md) — scheduleClear/notifyVisible defers first-token clear; tests must call notifyVisible() before scheduleClear() to arm the timer.
 - [Builder preview Fly smoke test](builder-preview-fly-smoke-test.md) — deferred: Fly live-container acceptance path needs real FLY_API_TOKEN; all other preview scenarios covered by 22/22 automated tests.
+- [Ticker marquee testing](ticker-marquee-testing.md) — test with reducedMotion:"no-preference"; assert scroll via bbox sampling; synthetic-hover "pause failed" verdicts are unreliable, not regressions.

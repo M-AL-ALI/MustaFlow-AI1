@@ -42,6 +42,26 @@ const BRANDS: Brand[] = [
     ),
   },
   {
+    id: "nabuflow",
+    label: "NabuFlow — by MustaFlow AI Technology",
+    render: () => (
+      <div className="flex items-center gap-3">
+        <img
+          src={`${import.meta.env.BASE_URL}logos/nabuflow-icon.png`}
+          alt=""
+          aria-hidden="true"
+          className="h-8 w-8 rounded-lg object-contain"
+        />
+        <span className="flex items-baseline gap-2 whitespace-nowrap">
+          <span className="text-2xl font-extrabold tracking-tight text-foreground">NabuFlow</span>
+          <span className="text-sm font-medium text-muted-foreground">
+            — by MustaFlow AI Technology
+          </span>
+        </span>
+      </div>
+    ),
+  },
+  {
     id: "openai",
     label: "OpenAI — AI capabilities",
     render: () => (
