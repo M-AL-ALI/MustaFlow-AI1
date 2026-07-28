@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getBuilderCheckpointLabel,
   getBuilderCompletionMessage,
   getBuilderTaskQueueLabel,
   STEP_CAP_COMPLETION_MESSAGE,
@@ -22,5 +23,21 @@ describe("Builder completion messages", () => {
 
   it("preserves the legacy task queue label when completion kind is null", () => {
     expect(getBuilderTaskQueueLabel("completed", null)).toBe("completed");
+  });
+
+  it("replaces a checkpoint's plain completion sentence with the shared step-cap disclosure", () => {
+    const label =
+      "**Initial React + Vite build**\nInitial build — 17 file(s) generated.\nBuilt 17 files via agentic loop.";
+
+    const honestLabel = getBuilderCheckpointLabel(label, "step_cap");
+
+    expect(honestLabel).toContain(STEP_CAP_COMPLETION_MESSAGE);
+    expect(honestLabel).not.toContain("Built 17 files via agentic loop.");
+  });
+
+  it("leaves finalized and legacy checkpoint labels unchanged", () => {
+    const label = "Initial build — 3 file(s) generated.\nBuilt 3 files via agentic loop.";
+    expect(getBuilderCheckpointLabel(label, "finalized")).toBe(label);
+    expect(getBuilderCheckpointLabel(label, null)).toBe(label);
   });
 });

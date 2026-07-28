@@ -17,7 +17,10 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getBuilderCompletionMessage } from "@/lib/builder-completion";
+import {
+  getBuilderCheckpointLabel,
+  getBuilderCompletionMessage,
+} from "@/lib/builder-completion";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { PlanCard, type StructuredPlan } from "./plan-card";
@@ -322,17 +325,22 @@ function ZeroPlanBubble({
 
 function CheckpointMarker({
   version,
+  completionKind,
   onRollback,
   isRollingBack,
 }: {
   version: ZeroVersion;
+  completionKind?: string | null;
   onRollback: (id: number) => void;
   isRollingBack: boolean;
 }) {
   const ts = version.createdAt
     ? new Date(version.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
-  const label = version.changelogEntry || version.userRequest || `Version #${version.id}`;
+  const label = getBuilderCheckpointLabel(
+    version.changelogEntry || version.userRequest || `Version #${version.id}`,
+    completionKind,
+  );
 
   return (
     <div className="flex items-center gap-2 py-2 px-3">
@@ -1161,6 +1169,7 @@ export function ZeroAgentPanel({
                         <CheckpointMarker
                           key={v.id}
                           version={v}
+                          completionKind={task?.completionKind}
                           onRollback={handleRollback}
                           isRollingBack={rollbackVersion.isPending}
                         />

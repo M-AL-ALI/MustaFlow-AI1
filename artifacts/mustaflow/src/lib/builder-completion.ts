@@ -44,6 +44,25 @@ export function getBuilderCompletionMessage(
   }
 }
 
+export function getBuilderCheckpointLabel(
+  label: string,
+  completionKind: string | null | undefined,
+): string {
+  if (!completionKind || completionKind === "finalized") return label;
+
+  const honestCompletion = getBuilderCompletionMessage(completionKind);
+  const withoutLegacyCompletion = label
+    .replace(/\s*Built \d+ files via agentic loop\.?/gi, "")
+    .trim();
+
+  if (withoutLegacyCompletion.includes(honestCompletion)) {
+    return withoutLegacyCompletion;
+  }
+  return withoutLegacyCompletion
+    ? `${withoutLegacyCompletion}\n${honestCompletion}`
+    : honestCompletion;
+}
+
 export function getBuilderTaskQueueLabel(
   status: string,
   completionKind: string | null | undefined,

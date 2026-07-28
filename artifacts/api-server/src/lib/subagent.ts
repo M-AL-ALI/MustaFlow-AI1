@@ -184,11 +184,14 @@ export interface ReviewerPayloadStats {
   filesAdded: number;
   filesModified: number;
   filesRemoved: number;
+  selectedPaths: string[];
+  missingRequestedPaths: string[];
 }
 
 function reviewerPayloadStats(input: {
   diff: ArchitectInput["diff"];
   fileExcerpts?: ArchitectInput["fileExcerpts"];
+  missingRequestedPaths?: string[];
 }): ReviewerPayloadStats {
   return {
     excerptCount: input.fileExcerpts?.length ?? 0,
@@ -197,6 +200,8 @@ function reviewerPayloadStats(input: {
     filesAdded: input.diff.filesAdded.length,
     filesModified: input.diff.filesModified.length,
     filesRemoved: input.diff.filesRemoved.length,
+    selectedPaths: input.fileExcerpts?.map((excerpt) => excerpt.path) ?? [],
+    missingRequestedPaths: input.missingRequestedPaths ?? [],
   };
 }
 
@@ -491,6 +496,7 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
           ...buildReviewerWorkspaceContext({
             existingFiles: parentCtx.input.existingFiles,
             workspace: parentCtx.workspace,
+            reviewRequest: brief,
           }),
           ...(opts.reviewer ?? {}),
         }

@@ -135,6 +135,8 @@ describe("Builder Wave 7B completion honesty", () => {
           filesAdded: 0,
           filesModified: 0,
           filesRemoved: 0,
+          selectedPaths: [],
+          missingRequestedPaths: [],
         },
       }),
     );
@@ -182,6 +184,8 @@ describe("Builder Wave 7B completion honesty", () => {
       filesAdded: 1,
       filesModified: 1,
       filesRemoved: 0,
+      selectedPaths: ["src/App.tsx", "src/new.ts"],
+      missingRequestedPaths: [],
     });
     expect(result.observation).toContain("reviewerPayloadStats=");
     expect(mocks.architectReview).toHaveBeenCalledWith(

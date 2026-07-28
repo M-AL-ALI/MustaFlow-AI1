@@ -1784,6 +1784,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     "- Before creating something new — a component, route, table, or service — search the project first to confirm it does not already exist. Duplicate entities cause cascading conflicts that are expensive to untangle.",
     "- Make small, focused changes. Prefer apply_patch for surgical edits and write_file for one-file rewrites.",
     "- When scaffolding several complete files, prefer write_files in batches of 4-8 files. If it returns continuationRequired=true, immediately resend the original entries named in remainingPaths in the next write_files call. This is the normal bounded continuation path, not an error.",
+    "- Never include a file with empty content in a write_files batch — every entry must contain the complete real file content, including package.json.",
     "- Request an architect reviewer only after writing files.",
     "- After meaningful edits, run the checks for this stack to verify your work. Fix failures, then re-run.",
     "- Call `finalize` only after all required checks pass. Provide a short, accurate summary.",

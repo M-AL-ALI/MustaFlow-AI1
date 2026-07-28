@@ -8,6 +8,7 @@ type ReviewerWorkspace = {
     changed: ReviewerFile[];
     removed: string[];
   };
+  all?(): ReviewerFile[];
 };
 
 export type ReviewerWorkspaceContext = {
@@ -17,15 +18,120 @@ export type ReviewerWorkspaceContext = {
     filesRemoved: string[];
   };
   fileExcerpts: Array<{ path: string; content: string }>;
+  missingRequestedPaths: string[];
 };
 
 const REVIEWER_MAX_FILE_EXCERPTS = 8;
 const REVIEWER_MAX_EXCERPT_CHARS = 6_000;
 const REVIEWER_MAX_TOTAL_EXCERPT_CHARS = 30_000;
+const REVIEWABLE_PATH_PATTERN =
+  /(?:^|[\s`"'(:,])((?:\.\/)?(?:[\w@.-]+\/)*[\w@.-]+\.(?:tsx?|jsx?|css|scss|sass|less|html?|vue|svelte|json|mdx?|py|rb|go|rs|java|kt|swift|php|cs))(?=$|[\s`"',;:)\]])/gi;
+const SOURCE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".html",
+  ".htm",
+  ".vue",
+  ".svelte",
+]);
+const CONFIG_BASENAMES = new Set([
+  ".gitignore",
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb",
+  "tsconfig.json",
+  "jsconfig.json",
+  "vite.config.ts",
+  "vite.config.js",
+  "tailwind.config.ts",
+  "tailwind.config.js",
+  "postcss.config.js",
+  "postcss.config.cjs",
+  "eslint.config.js",
+  "eslint.config.mjs",
+]);
+const ENTRY_BASENAMES = new Set(["app", "main", "index"]);
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+
+function basename(path: string): string {
+  return normalizePath(path).split("/").pop() ?? "";
+}
+
+function extension(path: string): string {
+  const name = basename(path);
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot) : "";
+}
+
+function basenameWithoutExtension(path: string): string {
+  const name = basename(path);
+  const dot = name.indexOf(".");
+  return dot >= 0 ? name.slice(0, dot) : name;
+}
+
+function extractRequestedPaths(reviewRequest: string | undefined): string[] {
+  if (!reviewRequest) return [];
+  const requested: string[] = [];
+  const seen = new Set<string>();
+  for (const match of reviewRequest.matchAll(REVIEWABLE_PATH_PATTERN)) {
+    const path = match[1]?.replace(/^\.\//, "");
+    if (!path) continue;
+    const normalized = normalizePath(path);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    requested.push(path);
+  }
+  return requested;
+}
+
+function isConfigOrLockfile(path: string): boolean {
+  const name = basename(path);
+  return (
+    CONFIG_BASENAMES.has(name) ||
+    name.endsWith(".lock") ||
+    /^tsconfig(?:\.[\w-]+)?\.json$/.test(name) ||
+    /^(?:vite|tailwind|postcss|eslint)\.config\.[\w]+$/.test(name)
+  );
+}
+
+function sourcePriority(file: ReviewerFile): number {
+  const path = normalizePath(file.path);
+  if (isConfigOrLockfile(path)) return 3;
+  if (path.startsWith("src/")) return 0;
+  if (SOURCE_EXTENSIONS.has(extension(path))) return 1;
+  return 2;
+}
+
+function compareReviewCandidates(a: ReviewerFile, b: ReviewerFile): number {
+  const sourceDelta = sourcePriority(a) - sourcePriority(b);
+  if (sourceDelta !== 0) return sourceDelta;
+
+  const entryDelta =
+    Number(!ENTRY_BASENAMES.has(basenameWithoutExtension(a.path))) -
+    Number(!ENTRY_BASENAMES.has(basenameWithoutExtension(b.path)));
+  if (entryDelta !== 0) return entryDelta;
+
+  const sizeDelta = b.content.length - a.content.length;
+  if (sizeDelta !== 0) return sizeDelta;
+  return normalizePath(a.path).localeCompare(normalizePath(b.path));
+}
 
 export function buildReviewerWorkspaceContext(input: {
   existingFiles: Array<{ path: string }>;
   workspace: ReviewerWorkspace;
+  reviewRequest?: string;
 }): ReviewerWorkspaceContext {
   const workspaceDiff = input.workspace.diff();
   const initialPaths = new Set(input.existingFiles.map((file) => file.path));
@@ -36,9 +142,27 @@ export function buildReviewerWorkspaceContext(input: {
     .filter((file) => initialPaths.has(file.path))
     .map((file) => file.path);
 
+  const requestedPaths = extractRequestedPaths(input.reviewRequest);
+  const allWorkspaceFiles = input.workspace.all?.() ?? workspaceDiff.changed;
+  const availableByPath = new Map(
+    allWorkspaceFiles.map((file) => [normalizePath(file.path), file] as const),
+  );
+  const missingRequestedPaths = requestedPaths.filter(
+    (path) => !availableByPath.has(normalizePath(path)),
+  );
+  const requestedFiles = requestedPaths
+    .map((path) => availableByPath.get(normalizePath(path)))
+    .filter((file): file is ReviewerFile => file !== undefined);
+  const requestedFilePaths = new Set(requestedFiles.map((file) => normalizePath(file.path)));
+  const remainingChangedFiles = workspaceDiff.changed
+    .filter((file) => !requestedFilePaths.has(normalizePath(file.path)))
+    .sort(compareReviewCandidates);
+  const candidates = [...requestedFiles, ...remainingChangedFiles];
+
   let remainingChars = REVIEWER_MAX_TOTAL_EXCERPT_CHARS;
   const fileExcerpts: ReviewerWorkspaceContext["fileExcerpts"] = [];
-  for (const file of workspaceDiff.changed.slice(0, REVIEWER_MAX_FILE_EXCERPTS)) {
+  for (const file of candidates) {
+    if (fileExcerpts.length >= REVIEWER_MAX_FILE_EXCERPTS) break;
     if (remainingChars <= 0) break;
     const content = file.content.slice(0, Math.min(REVIEWER_MAX_EXCERPT_CHARS, remainingChars));
     fileExcerpts.push({ path: file.path, content });
@@ -52,5 +176,6 @@ export function buildReviewerWorkspaceContext(input: {
       filesRemoved: workspaceDiff.removed,
     },
     fileExcerpts,
+    missingRequestedPaths,
   };
 }

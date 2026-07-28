@@ -8,7 +8,19 @@ import {
   resumePausedQueue,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Square, Trash2, ListChecks, Clock, Play, GripVertical, Zap } from "lucide-react";
+import {
+  CheckCircle2,
+  Loader2,
+  Square,
+  Trash2,
+  ListChecks,
+  Clock,
+  Play,
+  GripVertical,
+  Zap,
+} from "lucide-react";
+import { getBuilderTaskQueueLabel } from "@/lib/builder-completion";
+import { selectLingeringCompletedTask } from "@/lib/builder-task-queue";
 import { cn } from "@/lib/utils";
 
 interface TaskQueuePanelProps {
@@ -60,6 +72,7 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
   const activeTaskIsWaiting = activeTask ? WAITING_STATUSES.has(activeTask.status) : false;
   const rawQueuedTasks = tasks.filter((t) => t.status === "queued");
   const pausedTasks = tasks.filter((t) => (t.status as string) === PAUSED_STATUS);
+  const lingeringCompletedTask = selectLingeringCompletedTask(tasks, activeTask != null);
 
   // Apply local ordering optimistically; fall back to server order when localOrder is stale
   const queuedTaskIds = rawQueuedTasks.map((t) => t.id);
@@ -69,10 +82,15 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
       ? localIds.map((id) => rawQueuedTasks.find((t) => t.id === id)!)
       : rawQueuedTasks;
 
-  const hasActivity = activeTask != null || rawQueuedTasks.length > 0 || pausedTasks.length > 0;
+  const hasActivity =
+    activeTask != null ||
+    lingeringCompletedTask != null ||
+    rawQueuedTasks.length > 0 ||
+    pausedTasks.length > 0;
 
   const summaryParts = [
     activeTask ? (activeTaskIsWaiting ? "1 waiting" : "1 active") : null,
+    lingeringCompletedTask ? "1 completed" : null,
     rawQueuedTasks.length > 0 ? `${rawQueuedTasks.length} queued` : null,
     pausedTasks.length > 0 ? `${pausedTasks.length} paused` : null,
   ].filter(Boolean);
@@ -169,6 +187,21 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
                 Stop
               </button>
             )}
+          </div>
+        )}
+
+        {lingeringCompletedTask && (
+          <div className="px-3 py-2 flex items-center gap-2">
+            <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+            <span className="flex-1 text-[11px] text-foreground truncate min-w-0">
+              {lingeringCompletedTask.title}
+            </span>
+            <span className="h-5 px-1.5 rounded-md flex items-center text-[10px] font-medium bg-green-500/10 text-green-400 shrink-0">
+              {getBuilderTaskQueueLabel(
+                lingeringCompletedTask.status,
+                lingeringCompletedTask.completionKind,
+              )}
+            </span>
           </div>
         )}
 
