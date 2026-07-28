@@ -81,14 +81,6 @@ Verdict rubric:
 Be terse. Cite exact file paths when you can. Do not invent files you have not seen.
 Do not rewrite the user's code — only describe what to change. The auto-fix turn (if any) is a separate pipeline.`;
 
-/** Compact a file excerpt for the prompt: keep first ~80 lines / 6 KB. */
-function compactFileExcerpt(content: string): string {
-  const lines = content.split("\n");
-  const head = lines.slice(0, 80).join("\n");
-  if (head.length <= 6000) return head;
-  return head.slice(0, 6000) + "\n…(truncated)";
-}
-
 export interface ArchitectInput {
   userRequest: string;
   agentMode: AgentMode;
@@ -110,15 +102,26 @@ export interface ArchitectInput {
   knownWarnings?: string[];
 }
 
-/**
- * Run a single architect review pass. Always non-throwing — on any error
- * returns a synthetic "pass" verdict with the error surfaced as a low-severity
- * finding so the build completes cleanly. Token usage is bounded by the
- * compact manifest.
- */
-export async function runArchitectReview(
-  input: ArchitectInput,
-): Promise<ArchitectResponse & { model: string }> {
+export interface ReviewerAssembledPromptStats {
+  excerptCount: number;
+  totalExcerptChars: number;
+  excerptBlockChars: number;
+  selectedPaths: string[];
+}
+
+export type ArchitectReviewResult = ArchitectResponse & {
+  model: string;
+  reviewerAssembledPromptStats: ReviewerAssembledPromptStats;
+};
+
+/** Assemble the exact prompt and audit stats used by every architect review. */
+export function assembleArchitectReviewPrompt(input: ArchitectInput): {
+  userMessage: string;
+  reviewerAssembledPromptStats: ReviewerAssembledPromptStats;
+} {
+  const embeddedExcerpts = (input.fileExcerpts ?? [])
+    .slice(0, 8)
+    .map((file) => ({ path: file.path, content: file.content.slice(0, 6_000) }));
   const planSection = input.planContext
     ? `\n\nPLAN (from Plan Mode):\n${JSON.stringify(input.planContext).slice(0, 4000)}`
     : "";
@@ -137,13 +140,10 @@ export async function runArchitectReview(
           .join("\n")}`
       : "";
 
-  const excerptsSection =
-    input.fileExcerpts && input.fileExcerpts.length > 0
-      ? `\n\nFILE EXCERPTS:\n${input.fileExcerpts
-          .slice(0, 8)
-          .map((f) => `--- ${f.path} ---\n${compactFileExcerpt(f.content)}`)
-          .join("\n\n")}`
-      : "";
+  const excerptBlock = embeddedExcerpts
+    .map((file) => `--- ${file.path} ---\n${file.content}`)
+    .join("\n\n");
+  const excerptsSection = excerptBlock ? `\n\nFILE EXCERPTS:\n${excerptBlock}` : "";
 
   const summarySection = input.assistantSummary
     ? `\n\nBUILDER ASSISTANT SUMMARY:\n${input.assistantSummary.slice(0, 1000)}`
@@ -163,6 +163,24 @@ DIFF:
 ${diffSection}${commandsSection}${excerptsSection}${summarySection}${warningsSection}
 
 Now produce your JSON review.`;
+
+  return {
+    userMessage,
+    reviewerAssembledPromptStats: {
+      excerptCount: embeddedExcerpts.length,
+      totalExcerptChars: embeddedExcerpts.reduce(
+        (total, excerpt) => total + excerpt.content.length,
+        0,
+      ),
+      excerptBlockChars: excerptBlock.length,
+      selectedPaths: embeddedExcerpts.map((file) => file.path),
+    },
+  };
+}
+
+/** Run a non-throwing architect review using the assembled prompt above. */
+export async function runArchitectReview(input: ArchitectInput): Promise<ArchitectReviewResult> {
+  const { userMessage, reviewerAssembledPromptStats } = assembleArchitectReviewPrompt(input);
 
   try {
     const { provider, model } = resolveStageProvider("architect", input.agentMode, ARCHITECT_MODEL);
@@ -190,9 +208,10 @@ Now produce your JSON review.`;
         findings: [],
         nextActions: [],
         model: ARCHITECT_MODEL,
+        reviewerAssembledPromptStats,
       };
     }
-    return { ...parsed.data, model: ARCHITECT_MODEL };
+    return { ...parsed.data, model: ARCHITECT_MODEL, reviewerAssembledPromptStats };
   } catch (err) {
     logger.warn({ err }, "Architect review call failed — treating as pass (non-fatal)");
     return {
@@ -201,6 +220,7 @@ Now produce your JSON review.`;
       findings: [],
       nextActions: [],
       model: ARCHITECT_MODEL,
+      reviewerAssembledPromptStats,
     };
   }
 }

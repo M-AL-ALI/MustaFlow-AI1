@@ -21,12 +21,21 @@
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat";
 import type { E2eRunSummary } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { db, projectsTable } from "@workspace/db";
+import { db, projectsTable, taskEventsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { publishTaskEvent } from "./event-bus";
 import { deductCreditsAtomic } from "../routes/credits";
-import { runArchitectReview, type ArchitectInput, type ArchitectResponse } from "./architect";
-import { buildReviewerWorkspaceContext } from "./reviewer-context";
+import {
+  runArchitectReview,
+  type ArchitectInput,
+  type ArchitectReviewResult,
+  type ReviewerAssembledPromptStats,
+} from "./architect";
+import {
+  buildReviewerContextFromFiles,
+  buildReviewerWorkspaceContext,
+  type ReviewerFile,
+} from "./reviewer-context";
 import { runE2eScenarios, defaultSmokeScenarios, type E2eScenario } from "./checks/e2e-runner";
 import {
   FileWorkspace,
@@ -124,6 +133,47 @@ function emitSubagentEvent(
   }
 }
 
+async function persistReviewerContextEvent(input: {
+  taskId: number | null | undefined;
+  reviewPath: "in_loop" | "post_build";
+  reviewerPayloadStats: ReviewerPayloadStats;
+  reviewerAssembledPromptStats: ReviewerAssembledPromptStats;
+}): Promise<void> {
+  if (input.taskId == null) return;
+  try {
+    const [row] = await db
+      .insert(taskEventsTable)
+      .values({
+        taskId: input.taskId,
+        eventType: "review_context",
+        message: `Reviewer context assembled (${input.reviewPath}).`,
+        filePath: null,
+        data: {
+          reviewPath: input.reviewPath,
+          reviewerPayloadStats: input.reviewerPayloadStats,
+          reviewerAssembledPromptStats: input.reviewerAssembledPromptStats,
+        },
+      })
+      .returning();
+    if (row) {
+      publishTaskEvent({
+        id: row.id,
+        taskId: row.taskId,
+        eventType: row.eventType,
+        message: row.message,
+        filePath: row.filePath ?? null,
+        data: (row.data as Record<string, unknown> | undefined) ?? undefined,
+        createdAt: row.createdAt,
+      });
+    }
+  } catch (err) {
+    logger.warn(
+      { err, taskId: input.taskId, reviewPath: input.reviewPath },
+      "Failed to persist reviewer context instrumentation",
+    );
+  }
+}
+
 async function lookupOwnerId(projectId: number): Promise<string | null> {
   try {
     const rows = await db
@@ -218,9 +268,23 @@ function reviewerPayloadStatsLine(stats: ReviewerPayloadStats): string {
   return `reviewerPayloadStats=${JSON.stringify(stats)}`;
 }
 
+function reviewerAssembledPromptStatsLine(stats: ReviewerAssembledPromptStats): string {
+  return `reviewerAssembledPromptStats=${JSON.stringify(stats)}`;
+}
+
+function emptyReviewerAssembledPromptStats(): ReviewerAssembledPromptStats {
+  return {
+    excerptCount: 0,
+    totalExcerptChars: 0,
+    excerptBlockChars: 0,
+    selectedPaths: [],
+  };
+}
+
 function emptyReviewerObservation(stats: ReviewerPayloadStats): string {
   return [
     reviewerPayloadStatsLine(stats),
+    reviewerAssembledPromptStatsLine(emptyReviewerAssembledPromptStats()),
     "REVIEW_DEFERRED: There are no changed files or file excerpts to review yet.",
     "Write the files before requesting review, then request the reviewer again.",
   ].join("\n");
@@ -228,7 +292,7 @@ function emptyReviewerObservation(stats: ReviewerPayloadStats): string {
 
 async function runReviewer(
   opts: ReviewerOpts,
-): Promise<{ ok: boolean; observation: string; review?: ArchitectResponse & { model: string } }> {
+): Promise<{ ok: boolean; observation: string; review: ArchitectReviewResult }> {
   const review = await runArchitectReview({
     userRequest: opts.brief,
     agentMode: opts.parentInput.agentMode,
@@ -480,9 +544,10 @@ export interface DispatchResult {
   role: SubagentRole;
   creditsCharged: number;
   toolCalls?: ToolCallRecord[];
-  review?: ArchitectResponse & { model: string };
+  review?: ArchitectReviewResult;
   e2eSummary?: E2eRunSummary;
   reviewerPayloadStats?: ReviewerPayloadStats;
+  reviewerAssembledPromptStats?: ReviewerAssembledPromptStats;
 }
 
 export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResult> {
@@ -503,13 +568,20 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
       : null;
   const reviewerStats = reviewerContext ? reviewerPayloadStats(reviewerContext) : null;
   if (reviewerContext && reviewerStats && !hasReviewerPayload(reviewerStats)) {
+    const reviewerAssembledPromptStats = emptyReviewerAssembledPromptStats();
+    await persistReviewerContextEvent({
+      taskId,
+      reviewPath: "in_loop",
+      reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
+    });
     emitSubagentEvent(
       taskId,
       parentCtx.input.projectId,
       "done",
       role,
       "deferred: no files to review",
-      { deferred: true, reviewerPayloadStats: reviewerStats },
+      { deferred: true, reviewerPayloadStats: reviewerStats, reviewerAssembledPromptStats },
     );
     return {
       ok: true,
@@ -517,6 +589,7 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
       role,
       creditsCharged: 0,
       reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
     };
   }
 
@@ -541,6 +614,13 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
         planContext: reviewerContext.planContext,
         knownWarnings: reviewerContext.knownWarnings,
       });
+      const reviewerAssembledPromptStats = r.review.reviewerAssembledPromptStats;
+      await persistReviewerContextEvent({
+        taskId,
+        reviewPath: "in_loop",
+        reviewerPayloadStats: reviewerStats,
+        reviewerAssembledPromptStats,
+      });
       emitSubagentEvent(
         taskId,
         parentCtx.input.projectId,
@@ -551,15 +631,21 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
           verdict: r.review?.verdict,
           findings: r.review?.findings.length ?? 0,
           reviewerPayloadStats: reviewerStats,
+          reviewerAssembledPromptStats,
         },
       );
       return {
         ok: r.ok,
-        observation: `${reviewerPayloadStatsLine(reviewerStats)}\n${r.observation}`,
+        observation: [
+          reviewerPayloadStatsLine(reviewerStats),
+          reviewerAssembledPromptStatsLine(reviewerAssembledPromptStats),
+          r.observation,
+        ].join("\n"),
         role,
         creditsCharged: charge.charged,
         review: r.review,
         reviewerPayloadStats: reviewerStats,
+        reviewerAssembledPromptStats,
       };
     }
     if (role === "tester") {
@@ -623,21 +709,41 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
 export async function dispatchReviewerStandalone(args: {
   input: AgentLoopInput;
   brief: string;
-  reviewer: Omit<ReviewerOpts, "parentInput" | "taskId" | "brief">;
+  reviewer: Omit<ReviewerOpts, "parentInput" | "taskId" | "brief" | "fileExcerpts"> & {
+    workspaceFiles: ReviewerFile[];
+  };
   skipCredits?: boolean;
 }): Promise<DispatchResult> {
   const role: SubagentRole = "reviewer";
   const taskId = args.input.taskId;
   emitSubagentEvent(taskId, args.input.projectId, "started", role, args.brief.slice(0, 160));
-  const reviewerStats = reviewerPayloadStats(args.reviewer);
+  const selectedContext = buildReviewerContextFromFiles({
+    diff: args.reviewer.diff,
+    workspaceFiles: args.reviewer.workspaceFiles,
+    reviewRequest: args.brief,
+  });
+  const reviewerContext = {
+    ...args.reviewer,
+    diff: selectedContext.diff,
+    fileExcerpts: selectedContext.fileExcerpts,
+    missingRequestedPaths: selectedContext.missingRequestedPaths,
+  };
+  const reviewerStats = reviewerPayloadStats(reviewerContext);
   if (!hasReviewerPayload(reviewerStats)) {
+    const reviewerAssembledPromptStats = emptyReviewerAssembledPromptStats();
+    await persistReviewerContextEvent({
+      taskId,
+      reviewPath: "post_build",
+      reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
+    });
     emitSubagentEvent(
       taskId,
       args.input.projectId,
       "done",
       role,
       "deferred: no files to review",
-      { deferred: true, reviewerPayloadStats: reviewerStats },
+      { deferred: true, reviewerPayloadStats: reviewerStats, reviewerAssembledPromptStats },
     );
     return {
       ok: true,
@@ -645,6 +751,7 @@ export async function dispatchReviewerStandalone(args: {
       role,
       creditsCharged: 0,
       reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
     };
   }
   const charge = args.skipCredits
@@ -659,12 +766,19 @@ export async function dispatchReviewerStandalone(args: {
       parentInput: args.input,
       taskId: nz(taskId),
       brief: args.brief,
-      diff: args.reviewer.diff,
-      commandsRun: args.reviewer.commandsRun,
-      fileExcerpts: args.reviewer.fileExcerpts,
-      assistantSummary: args.reviewer.assistantSummary,
-      planContext: args.reviewer.planContext,
-      knownWarnings: args.reviewer.knownWarnings,
+      diff: reviewerContext.diff,
+      commandsRun: reviewerContext.commandsRun,
+      fileExcerpts: reviewerContext.fileExcerpts,
+      assistantSummary: reviewerContext.assistantSummary,
+      planContext: reviewerContext.planContext,
+      knownWarnings: reviewerContext.knownWarnings,
+    });
+    const reviewerAssembledPromptStats = r.review.reviewerAssembledPromptStats;
+    await persistReviewerContextEvent({
+      taskId,
+      reviewPath: "post_build",
+      reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
     });
     emitSubagentEvent(
       taskId,
@@ -676,15 +790,21 @@ export async function dispatchReviewerStandalone(args: {
         verdict: r.review?.verdict,
         findings: r.review?.findings.length ?? 0,
         reviewerPayloadStats: reviewerStats,
+        reviewerAssembledPromptStats,
       },
     );
     return {
       ok: r.ok,
-      observation: `${reviewerPayloadStatsLine(reviewerStats)}\n${r.observation}`,
+      observation: [
+        reviewerPayloadStatsLine(reviewerStats),
+        reviewerAssembledPromptStatsLine(reviewerAssembledPromptStats),
+        r.observation,
+      ].join("\n"),
       role,
       creditsCharged: charge.charged,
       review: r.review,
       reviewerPayloadStats: reviewerStats,
+      reviewerAssembledPromptStats,
     };
   } catch (err) {
     const msg = String((err as Error).message ?? err);

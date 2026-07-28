@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 const mocks = vi.hoisted(() => ({
   architectReview: vi.fn(),
   publishTaskEvent: vi.fn(),
+  insertValues: vi.fn(),
+  insertReturning: vi.fn(),
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => ({
@@ -12,6 +14,9 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
 
 vi.mock("@workspace/db", () => ({
   db: {
+    insert: vi.fn(() => ({
+      values: mocks.insertValues,
+    })),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -23,6 +28,7 @@ vi.mock("@workspace/db", () => ({
   toolAuditTable: {},
   agentToolCallsTable: {},
   agentTasksTable: {},
+  taskEventsTable: {},
   projectsTable: {
     id: {},
     ownerId: {},
@@ -44,21 +50,43 @@ vi.mock("./architect", () => ({
 import { completionKindForTerminationReason, FileWorkspace, type ToolCtx } from "./agent-loop.js";
 import {
   buildAgentTaskTerminalUpdate,
+  builderCompletionMessage,
   builderPersistedCompletionSummary,
 } from "./builder-task-completion.js";
 import { buildReviewerWorkspaceContext } from "./reviewer-context.js";
-import { dispatchSubagent } from "./subagent.js";
+import { dispatchReviewerStandalone, dispatchSubagent } from "./subagent.js";
 
 describe("Builder Wave 7B completion honesty", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.architectReview.mockResolvedValue({
-      verdict: "pass",
-      summary: "The scaffold satisfies the request.",
-      findings: [],
-      nextActions: [],
-      model: "test-reviewer",
+    mocks.insertValues.mockReturnValue({
+      returning: mocks.insertReturning,
     });
+    mocks.insertReturning.mockResolvedValue([]);
+    mocks.architectReview.mockImplementation(
+      async (input: { fileExcerpts?: Array<{ path: string; content: string }> }) => {
+      const excerpts = input.fileExcerpts ?? [];
+      const excerptBlock = excerpts
+        .map((file: { path: string; content: string }) => `--- ${file.path} ---\n${file.content}`)
+        .join("\n\n");
+      return {
+        verdict: "pass",
+        summary: "The scaffold satisfies the request.",
+        findings: [],
+        nextActions: [],
+        model: "test-reviewer",
+        reviewerAssembledPromptStats: {
+          excerptCount: excerpts.length,
+          totalExcerptChars: excerpts.reduce(
+            (total: number, excerpt: { content: string }) => total + excerpt.content.length,
+            0,
+          ),
+          excerptBlockChars: excerptBlock.length,
+          selectedPaths: excerpts.map((excerpt: { path: string }) => excerpt.path),
+        },
+        };
+      },
+    );
   });
 
   it("maps finalized and step-cap loop terminations to first-class completion kinds", () => {
@@ -96,6 +124,17 @@ describe("Builder Wave 7B completion honesty", () => {
     const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
     expect(jobsSource).toContain("result: persistedAssistantSummary");
     expect(jobsSource).toContain("content: persistedAssistantSummary");
+  });
+
+  it("uses the shared completion wording for checkpoint notes and changelogs", () => {
+    expect(builderCompletionMessage("step_cap", "Built 16 files via agentic loop.")).toContain(
+      "step limit",
+    );
+
+    const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    expect(jobsSource).toContain("const checkpointSummary = builderCompletionMessage(");
+    expect(jobsSource).toContain("changelogLines.push(checkpointSummary.slice(0, 180))");
+    expect(jobsSource).toContain("note: checkpointSummary.slice(0, 200)");
   });
 
   it("defers an empty reviewer payload without calling or charging the architect", async () => {
@@ -213,6 +252,100 @@ describe("Builder Wave 7B completion honesty", () => {
         message: expect.stringContaining("reviewerPayloadStats"),
       }),
     );
+  });
+
+  it("uses the same source-first excerpts for in-loop and post-build reviews", async () => {
+    const changedFiles = [
+      { path: "package.json", content: "p".repeat(3_000) },
+      { path: "vite.config.ts", content: "v".repeat(3_000) },
+      { path: "src/components/Card.tsx", content: "c".repeat(5_000) },
+      { path: "src/App.tsx", content: "a".repeat(6_000) },
+      { path: "src/main.tsx", content: "m".repeat(4_000) },
+      { path: "src/index.css", content: "i".repeat(4_000) },
+      { path: "src/hooks/useCards.ts", content: "h".repeat(3_000) },
+      { path: "src/components/Form.tsx", content: "f".repeat(3_000) },
+      { path: "src/components/List.tsx", content: "l".repeat(3_000) },
+      { path: "src/types.ts", content: "t".repeat(2_000) },
+      { path: "src/utils.ts", content: "u".repeat(2_000) },
+    ];
+    const workspace = new FileWorkspace([]);
+    workspace.primeInitial([]);
+    for (const file of changedFiles) workspace.write(file.path, file.content);
+    const input = {
+      projectId: 39,
+      taskId: 112,
+      agentMode: "lite",
+      existingFiles: [],
+      projectName: "Review selection",
+      projectKind: "web",
+      userPrompt: "Build a React app.",
+      onEvent: async () => {},
+      signal: new AbortController().signal,
+    };
+    const parentCtx = { input, workspace } as unknown as ToolCtx;
+
+    const inLoop = await dispatchSubagent({
+      role: "reviewer",
+      brief: "Review src/App.tsx and the application source.",
+      parentCtx,
+      skipCredits: true,
+    });
+    const postBuild = await dispatchReviewerStandalone({
+      input: input as never,
+      brief: "Review src/App.tsx and the application source.",
+      reviewer: {
+        diff: {
+          filesAdded: changedFiles.map((file) => file.path),
+          filesModified: [],
+          filesRemoved: [],
+        },
+        workspaceFiles: changedFiles,
+      },
+      skipCredits: true,
+    });
+
+    const inLoopInput = mocks.architectReview.mock.calls[0]?.[0];
+    const postBuildInput = mocks.architectReview.mock.calls[1]?.[0];
+    const inLoopPaths = inLoopInput.fileExcerpts.map((file: { path: string }) => file.path);
+    const postBuildPaths = postBuildInput.fileExcerpts.map((file: { path: string }) => file.path);
+
+    expect(inLoopPaths).toEqual(postBuildPaths);
+    expect(inLoopPaths[0]).toBe("src/App.tsx");
+    expect(inLoopPaths).toContain("src/main.tsx");
+    expect(inLoopPaths).toContain("src/index.css");
+    expect(inLoopPaths).not.toContain("package.json");
+    expect(inLoopPaths).not.toContain("vite.config.ts");
+    expect(inLoop.reviewerAssembledPromptStats).toEqual(
+      expect.objectContaining({
+        excerptCount: inLoop.reviewerPayloadStats?.excerptCount,
+        totalExcerptChars: inLoop.reviewerPayloadStats?.totalExcerptChars,
+        selectedPaths: inLoop.reviewerPayloadStats?.selectedPaths,
+      }),
+    );
+    expect(postBuild.reviewerAssembledPromptStats).toEqual(
+      expect.objectContaining({
+        excerptCount: postBuild.reviewerPayloadStats?.excerptCount,
+        totalExcerptChars: postBuild.reviewerPayloadStats?.totalExcerptChars,
+        selectedPaths: postBuild.reviewerPayloadStats?.selectedPaths,
+      }),
+    );
+    const reviewContextEvents = mocks.insertValues.mock.calls
+      .map(([value]) => value)
+      .filter((value) => value.eventType === "review_context");
+    expect(reviewContextEvents).toHaveLength(2);
+    expect(reviewContextEvents.map((event) => event.data.reviewPath)).toEqual([
+      "in_loop",
+      "post_build",
+    ]);
+    for (const event of reviewContextEvents) {
+      expect(event.data.reviewerAssembledPromptStats).toEqual(
+        expect.objectContaining({
+          excerptCount: event.data.reviewerPayloadStats.excerptCount,
+          totalExcerptChars: event.data.reviewerPayloadStats.totalExcerptChars,
+          selectedPaths: event.data.reviewerPayloadStats.selectedPaths,
+        }),
+      );
+    }
   });
 
   it("caps reviewer excerpts by file count, per-file size, and total size", () => {

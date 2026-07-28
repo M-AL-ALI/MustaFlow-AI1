@@ -1,4 +1,4 @@
-type ReviewerFile = {
+export type ReviewerFile = {
   path: string;
   content: string;
 };
@@ -20,6 +20,8 @@ export type ReviewerWorkspaceContext = {
   fileExcerpts: Array<{ path: string; content: string }>;
   missingRequestedPaths: string[];
 };
+
+export type ReviewerDiff = ReviewerWorkspaceContext["diff"];
 
 const REVIEWER_MAX_FILE_EXCERPTS = 8;
 const REVIEWER_MAX_EXCERPT_CHARS = 6_000;
@@ -128,24 +130,14 @@ function compareReviewCandidates(a: ReviewerFile, b: ReviewerFile): number {
   return normalizePath(a.path).localeCompare(normalizePath(b.path));
 }
 
-export function buildReviewerWorkspaceContext(input: {
-  existingFiles: Array<{ path: string }>;
-  workspace: ReviewerWorkspace;
+export function buildReviewerContextFromFiles(input: {
+  diff: ReviewerDiff;
+  workspaceFiles: ReviewerFile[];
   reviewRequest?: string;
 }): ReviewerWorkspaceContext {
-  const workspaceDiff = input.workspace.diff();
-  const initialPaths = new Set(input.existingFiles.map((file) => file.path));
-  const filesAdded = workspaceDiff.changed
-    .filter((file) => !initialPaths.has(file.path))
-    .map((file) => file.path);
-  const filesModified = workspaceDiff.changed
-    .filter((file) => initialPaths.has(file.path))
-    .map((file) => file.path);
-
   const requestedPaths = extractRequestedPaths(input.reviewRequest);
-  const allWorkspaceFiles = input.workspace.all?.() ?? workspaceDiff.changed;
   const availableByPath = new Map(
-    allWorkspaceFiles.map((file) => [normalizePath(file.path), file] as const),
+    input.workspaceFiles.map((file) => [normalizePath(file.path), file] as const),
   );
   const missingRequestedPaths = requestedPaths.filter(
     (path) => !availableByPath.has(normalizePath(path)),
@@ -154,8 +146,15 @@ export function buildReviewerWorkspaceContext(input: {
     .map((path) => availableByPath.get(normalizePath(path)))
     .filter((file): file is ReviewerFile => file !== undefined);
   const requestedFilePaths = new Set(requestedFiles.map((file) => normalizePath(file.path)));
-  const remainingChangedFiles = workspaceDiff.changed
-    .filter((file) => !requestedFilePaths.has(normalizePath(file.path)))
+  const changedPaths = new Set(
+    [...input.diff.filesAdded, ...input.diff.filesModified].map(normalizePath),
+  );
+  const remainingChangedFiles = input.workspaceFiles
+    .filter(
+      (file) =>
+        changedPaths.has(normalizePath(file.path)) &&
+        !requestedFilePaths.has(normalizePath(file.path)),
+    )
     .sort(compareReviewCandidates);
   const candidates = [...requestedFiles, ...remainingChangedFiles];
 
@@ -170,12 +169,32 @@ export function buildReviewerWorkspaceContext(input: {
   }
 
   return {
-    diff: {
-      filesAdded,
-      filesModified,
-      filesRemoved: workspaceDiff.removed,
-    },
+    diff: input.diff,
     fileExcerpts,
     missingRequestedPaths,
   };
+}
+
+export function buildReviewerWorkspaceContext(input: {
+  existingFiles: Array<{ path: string }>;
+  workspace: ReviewerWorkspace;
+  reviewRequest?: string;
+}): ReviewerWorkspaceContext {
+  const workspaceDiff = input.workspace.diff();
+  const initialPaths = new Set(input.existingFiles.map((file) => normalizePath(file.path)));
+  const diff = {
+    filesAdded: workspaceDiff.changed
+      .filter((file) => !initialPaths.has(normalizePath(file.path)))
+      .map((file) => file.path),
+    filesModified: workspaceDiff.changed
+      .filter((file) => initialPaths.has(normalizePath(file.path)))
+      .map((file) => file.path),
+    filesRemoved: workspaceDiff.removed,
+  };
+
+  return buildReviewerContextFromFiles({
+    diff,
+    workspaceFiles: input.workspace.all?.() ?? workspaceDiff.changed,
+    reviewRequest: input.reviewRequest,
+  });
 }

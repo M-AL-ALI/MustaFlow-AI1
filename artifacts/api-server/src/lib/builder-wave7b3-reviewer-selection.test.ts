@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { buildReviewerWorkspaceContext } from "./reviewer-context";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./ai-providers", () => ({
+  createChatCompletion: vi.fn(),
+  resolveStageProvider: vi.fn(),
+}));
+
+import { assembleArchitectReviewPrompt } from "./architect";
+import {
+  buildReviewerContextFromFiles,
+  buildReviewerWorkspaceContext,
+} from "./reviewer-context";
 
 type TestFile = { path: string; content: string };
 
@@ -67,5 +77,67 @@ describe("Wave 7B-3 reviewer excerpt selection", () => {
 
     expect(context.fileExcerpts[0]?.path).toBe("src/App.tsx");
     expect(context.missingRequestedPaths).toEqual(["src/missing.ts"]);
+  });
+
+  it("keeps selection and assembled-prompt stats directly comparable", () => {
+    const changed = [
+      { path: "package.json", content: "p".repeat(2_000) },
+      { path: "src/App.tsx", content: "a".repeat(6_000) },
+      { path: "src/main.tsx", content: "m".repeat(4_000) },
+      { path: "src/index.css", content: "i".repeat(3_000) },
+    ];
+    const selected = buildReviewerContextFromFiles({
+      diff: {
+        filesAdded: changed.map((file) => file.path),
+        filesModified: [],
+        filesRemoved: [],
+      },
+      workspaceFiles: changed,
+      reviewRequest: "Review src/App.tsx and the application source.",
+    });
+    const assembled = assembleArchitectReviewPrompt({
+      userRequest: "Build a React application.",
+      agentMode: "lite",
+      diff: selected.diff,
+      fileExcerpts: selected.fileExcerpts,
+    });
+
+    expect(assembled.reviewerAssembledPromptStats).toEqual(
+      expect.objectContaining({
+        excerptCount: selected.fileExcerpts.length,
+        totalExcerptChars: selected.fileExcerpts.reduce(
+          (total, excerpt) => total + excerpt.content.length,
+          0,
+        ),
+        selectedPaths: selected.fileExcerpts.map((excerpt) => excerpt.path),
+      }),
+    );
+    expect(assembled.reviewerAssembledPromptStats.excerptBlockChars).toBeGreaterThan(
+      assembled.reviewerAssembledPromptStats.totalExcerptChars,
+    );
+    for (const path of assembled.reviewerAssembledPromptStats.selectedPaths) {
+      expect(assembled.userMessage).toContain(`--- ${path} ---`);
+    }
+  });
+
+  it("records honest zero assembled stats when no files are eligible", () => {
+    const selected = buildReviewerContextFromFiles({
+      diff: { filesAdded: [], filesModified: [], filesRemoved: [] },
+      workspaceFiles: [],
+    });
+    const assembled = assembleArchitectReviewPrompt({
+      userRequest: "Review the build.",
+      agentMode: "lite",
+      diff: selected.diff,
+      fileExcerpts: selected.fileExcerpts,
+    });
+
+    expect(selected.fileExcerpts).toEqual([]);
+    expect(assembled.reviewerAssembledPromptStats).toEqual({
+      excerptCount: 0,
+      totalExcerptChars: 0,
+      excerptBlockChars: 0,
+      selectedPaths: [],
+    });
   });
 });

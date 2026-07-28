@@ -95,3 +95,13 @@ export function getBuilderTaskQueueLabel(
       return status;
   }
 }
+
+export function getBuilderDisplayStepCount(input: {
+  isTerminal: boolean;
+  agentLoopSteps?: number | null;
+  currentStep?: number | null;
+  eventStepCount: number;
+}): number | undefined {
+  if (!input.isTerminal) return input.eventStepCount;
+  return input.agentLoopSteps ?? input.currentStep ?? undefined;
+}

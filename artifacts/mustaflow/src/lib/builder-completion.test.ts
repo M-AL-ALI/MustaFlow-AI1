@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getBuilderCheckpointLabel,
   getBuilderCompletionMessage,
+  getBuilderDisplayStepCount,
   getBuilderTaskQueueLabel,
   STEP_CAP_COMPLETION_MESSAGE,
 } from "./builder-completion";
@@ -39,5 +40,25 @@ describe("Builder completion messages", () => {
     const label = "Initial build — 3 file(s) generated.\nBuilt 3 files via agentic loop.";
     expect(getBuilderCheckpointLabel(label, "finalized")).toBe(label);
     expect(getBuilderCheckpointLabel(label, null)).toBe(label);
+  });
+
+  it("uses the authoritative agent-loop count for a terminal build summary", () => {
+    expect(
+      getBuilderDisplayStepCount({
+        isTerminal: true,
+        agentLoopSteps: 25,
+        eventStepCount: 34,
+      }),
+    ).toBe(25);
+  });
+
+  it("keeps event-count progress while a build is still running", () => {
+    expect(
+      getBuilderDisplayStepCount({
+        isTerminal: false,
+        agentLoopSteps: 25,
+        eventStepCount: 18,
+      }),
+    ).toBe(18);
   });
 });

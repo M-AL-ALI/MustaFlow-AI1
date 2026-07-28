@@ -1,5 +1,8 @@
 import { authFetch } from "@/lib/api-fetch";
-import { getBuilderCompletionMessage } from "@/lib/builder-completion";
+import {
+  getBuilderCompletionMessage,
+  getBuilderDisplayStepCount,
+} from "@/lib/builder-completion";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useListTasks,
@@ -2040,6 +2043,9 @@ export function AgentThinkingBubble({
           maxAttempts: number;
           finalStatus: "passed" | "exhausted";
         } | null;
+        agentLoop?: {
+          steps?: number | null;
+        } | null;
       }
     | null
     | undefined;
@@ -2108,10 +2114,15 @@ export function AgentThinkingBubble({
     "remove_image_background",
     "read_diagnostics",
   ]);
-  const totalStepCount = groups.reduce((sum, g) => {
+  const eventStepCount = groups.reduce((sum, g) => {
     const deduped = dedupeCommandOutputs(g.steps);
     return sum + deduped.filter((s) => STEP_EVENT_TYPES.has(s.eventType)).length;
   }, 0);
+  const totalStepCount = getBuilderDisplayStepCount({
+    isTerminal,
+    agentLoopSteps: completedReport?.agentLoop?.steps,
+    eventStepCount,
+  });
 
   useEffect(() => {
     if (!isTerminal) return;

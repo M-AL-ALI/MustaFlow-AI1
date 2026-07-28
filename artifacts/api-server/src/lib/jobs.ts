@@ -4332,15 +4332,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 argv: c.argv,
                 exitCode: c.exitCode,
               }));
-              const touchedPaths = new Set<string>([
-                ...reviewDiff.filesAdded,
-                ...reviewDiff.filesModified,
-              ]);
-              const fileExcerpts = filesToSmellScan
-                .filter((f: BuilderFile) => touchedPaths.has(f.path))
-                .slice(0, 6)
-                .map((f: BuilderFile) => ({ path: f.path, content: f.content }));
-
               const ARCHITECT_TIMEOUT_MS = 60_000;
               const reviewResult = await Promise.race([
                 (async () => {
@@ -4365,7 +4356,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     reviewer: {
                       diff: reviewDiff,
                       commandsRun,
-                      fileExcerpts,
+                      workspaceFiles: filesToSmellScan.map((file) => ({
+                        path: file.path,
+                        content: file.content,
+                      })),
                       assistantSummary,
                       planContext: input.planContext ?? null,
                       knownWarnings: report.warnings,
@@ -4733,6 +4727,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       // Fetch the most recent plan snapshot to annotate this version
       const planSnapshot = await loadLatestPlanSnapshot(projectId);
+      const checkpointCompletionKind = report.agentLoop?.completionKind ?? "finalized";
+      const checkpointSummary = builderCompletionMessage(
+        checkpointCompletionKind,
+        assistantSummary,
+      );
 
       // Build changelog entry: combine action context with diff summary
       const changelogLines: string[] = [];
@@ -4749,7 +4748,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         if (diffSummary.filesRemoved.length > 0)
           changelogLines.push(`Removed: ${diffSummary.filesRemoved.join(", ")}`);
       }
-      if (assistantSummary) changelogLines.push(assistantSummary.slice(0, 180));
+      if (checkpointSummary) changelogLines.push(checkpointSummary.slice(0, 180));
       const changelogEntry = changelogLines.join("\n");
 
       let version: { id: number } | undefined;
@@ -4759,7 +4758,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           .values({
             projectId,
             label: (nextVersionLabel ?? "").slice(0, 200) || "Refinement",
-            note: (assistantSummary ?? "").slice(0, 200),
+            note: checkpointSummary.slice(0, 200),
             changelogEntry: (changelogEntry ?? "").slice(0, 500),
             filesSnapshot: snapshot,
             planSnapshot: planSnapshot ?? undefined,
@@ -5052,16 +5051,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               argv: c.argv,
               exitCode: c.exitCode,
             }));
-            // Pick a handful of touched files (capped) for citation context.
-            const touchedPaths = new Set<string>([
-              ...reviewDiff.filesAdded,
-              ...reviewDiff.filesModified,
-            ]);
-            const fileExcerpts = filesToSmellScan
-              .filter((f) => touchedPaths.has(f.path))
-              .slice(0, 6)
-              .map((f) => ({ path: f.path, content: f.content }));
-
             const { dispatchReviewerStandalone } = await import("./subagent");
             const dispatchResult = await dispatchReviewerStandalone({
               input: {
@@ -5083,7 +5072,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               reviewer: {
                 diff: reviewDiff,
                 commandsRun,
-                fileExcerpts,
+                workspaceFiles: filesToSmellScan.map((file) => ({
+                  path: file.path,
+                  content: file.content,
+                })),
                 assistantSummary,
                 planContext: input.planContext ?? null,
                 knownWarnings: report.warnings,
