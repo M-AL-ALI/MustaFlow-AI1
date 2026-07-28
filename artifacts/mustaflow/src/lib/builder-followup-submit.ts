@@ -12,6 +12,29 @@ export type BuilderComposerIntent =
 
 type LocalComposerIntent = "converse" | "plan" | "build" | null;
 
+export type BuilderSendIntentOptions = {
+  planMode?: true;
+  agentIntent?: BuilderComposerIntent;
+};
+
+/**
+ * Converts the composer's resolved intent into the options consumed by the
+ * workspace send pipeline. Keeping this mapping outside the page prevents a
+ * valid intent from silently falling through to the streaming classifier.
+ */
+export function mapIntentToSendOptions({
+  intent,
+  hasImages,
+}: {
+  intent: BuilderComposerIntent | undefined;
+  hasImages: boolean;
+}): BuilderSendIntentOptions {
+  if (hasImages) return { agentIntent: "build" };
+  if (!intent) return {};
+  if (intent === "plan") return { planMode: true, agentIntent: "plan" };
+  return { agentIntent: intent };
+}
+
 /**
  * A completed Builder task turns the next Main Agent-routed message into a
  * refine build unless the prompt is explicitly conversational or planning.

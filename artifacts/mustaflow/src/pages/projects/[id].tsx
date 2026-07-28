@@ -187,6 +187,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ProvisioningProgress } from "./components/provisioning-progress";
 import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
+import { mapIntentToSendOptions } from "@/lib/builder-followup-submit";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -4420,30 +4421,9 @@ export default function ProjectWorkspacePage() {
                         if (intent === "plan") setPlanMode(true);
                         send(content, {
                           ...(imageOnly && imageOnly.length > 0 ? { attachments: imageOnly } : {}),
-                          // When images are attached, force build intent so the regular messages
-                          // endpoint is used (vision model support). Streaming does not handle
-                          // image attachments.
-                          ...(hasImages
-                            ? { agentIntent: "build" as const }
-                            : intent === "plan"
-                              ? { planMode: true, agentIntent: "plan" as const }
-                              : intent === "converse"
-                                ? { agentIntent: "converse" as const }
-                                : intent === "debug"
-                                  ? { agentIntent: "debug" as const }
-                                  : intent === "refactor"
-                                    ? { agentIntent: "refactor" as const }
-                                    : intent === "review"
-                                      ? { agentIntent: "review" as const }
-                                      : intent === "explain"
-                                        ? { agentIntent: "explain" as const }
-                                        : intent === "fix_tests"
-                                          ? { agentIntent: "fix_tests" as const }
-                                          : intent === "fix_types"
-                                            ? { agentIntent: "fix_types" as const }
-                                            : intent === "fix_lint"
-                                              ? { agentIntent: "fix_lint" as const }
-                                              : {}),
+                          // Images and explicit build/plan intents use the regular task-creating
+                          // mutation. Conversational intents keep their existing streamed path.
+                          ...mapIntentToSendOptions({ intent, hasImages }),
                           ...(brainstormContext && brainstormContext.length > 0
                             ? { brainstormContext }
                             : {}),
