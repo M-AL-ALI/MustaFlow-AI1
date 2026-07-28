@@ -1365,13 +1365,13 @@ export const SendMessageParams = zod.object({
 })
 
 
-
+export const sendMessageBodyDeepReasoningDefault = false;
 
 export const SendMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
-  "deepReasoning": zod.boolean().optional().default(false).describe('Runs the deepest unified planning pass before building. Available for eco, power, and pro; rejected for lite.'),
+  "deepReasoning": zod.boolean().default(sendMessageBodyDeepReasoningDefault).describe('Runs the deepest unified planning pass before building. Available for eco, power, and pro; rejected for lite.'),
   "background": zod.boolean().optional(),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.'),
@@ -1490,12 +1490,13 @@ export const StreamMessageParams = zod.object({
 })
 
 
-
+export const streamMessageBodyDeepReasoningDefault = false;
 
 export const StreamMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
+  "deepReasoning": zod.boolean().default(streamMessageBodyDeepReasoningDefault).describe('Runs the deepest unified planning pass before building. Available for eco, power, and pro; rejected for lite.'),
   "background": zod.boolean().optional(),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.'),
@@ -7263,6 +7264,7 @@ export const brainstormChatBodyMessagesItemContentMax = 2000;
 export const brainstormChatBodyMessagesMax = 30;
 
 
+export const brainstormChatBodyBeginnerModeDefault = false;
 
 export const BrainstormChatBody = zod.object({
   "messages": zod.array(zod.object({
@@ -7270,7 +7272,7 @@ export const BrainstormChatBody = zod.object({
   "content": zod.string().max(brainstormChatBodyMessagesItemContentMax)
 })).max(brainstormChatBodyMessagesMax),
   "projectId": zod.number().min(1).optional().describe('Optional current Builder project. When present, Brainstorm loads that project\'s files, latest plan, and page map.'),
-  "beginnerMode": zod.boolean().default(false).describe('Use the beginner Guided Refinement questioning style.')
+  "beginnerMode": zod.boolean().default(brainstormChatBodyBeginnerModeDefault).describe('Use the beginner Guided Refinement questioning style.')
 })
 
 export const BrainstormChatResponse = zod.object({
@@ -7282,25 +7284,31 @@ export const BrainstormChatResponse = zod.object({
 /**
  * @summary Resolve a brainstorm conversation into a structured project spec.
  */
-export const brainstormResolveBodyMessagesItemContentMax = 2000;
+export const brainstormResolveBodyOneMessagesItemContentMax = 2000;
 
-export const brainstormResolveBodyMessagesMax = 30;
+export const brainstormResolveBodyOneMessagesMax = 30;
 
 
+export const brainstormResolveBodyOneBeginnerModeDefault = false;
 
 export const BrainstormResolveBody = zod.object({
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
-  "content": zod.string().max(brainstormResolveBodyMessagesItemContentMax)
-})).max(brainstormResolveBodyMessagesMax),
+  "content": zod.string().max(brainstormResolveBodyOneMessagesItemContentMax)
+})).max(brainstormResolveBodyOneMessagesMax),
   "projectId": zod.number().min(1).optional().describe('Optional current Builder project. When present, Brainstorm loads that project\'s files, latest plan, and page map.'),
-  "beginnerMode": zod.boolean().default(false).describe('Use the beginner Guided Refinement questioning style.'),
+  "beginnerMode": zod.boolean().default(brainstormResolveBodyOneBeginnerModeDefault).describe('Use the beginner Guided Refinement questioning style.')
+}).and(zod.object({
   "action": zod.enum(['plan', 'build']).describe('Billable destination selected by the user after free brainstorming.')
-})
+}))
 
 export const brainstormResolveResponseNameMax = 80;
 
 export const brainstormResolveResponsePromptMax = 500;
+
+export const brainstormResolveResponseBrainstormContextItemContentMax = 2000;
+
+export const brainstormResolveResponseBrainstormContextMax = 30;
 
 
 
@@ -7311,8 +7319,8 @@ export const BrainstormResolveResponse = zod.object({
   "action": zod.enum(['plan', 'build']),
   "brainstormContext": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
-  "content": zod.string().max(2000)
-})).max(30)
+  "content": zod.string().max(brainstormResolveResponseBrainstormContextItemContentMax)
+})).max(brainstormResolveResponseBrainstormContextMax)
 })
 
 

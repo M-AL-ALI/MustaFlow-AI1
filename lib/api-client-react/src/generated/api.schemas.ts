@@ -238,11 +238,30 @@ export interface BrainstormMessage {
 export interface BrainstormChatInput {
   /** @maxItems 30 */
   messages: BrainstormMessage[];
-  /** Optional current Builder project. When present, Brainstorm loads that project's files, latest plan, and page map. */
+  /**
+     * Optional current Builder project. When present, Brainstorm loads that project's files, latest plan, and page map.
+     * @minimum 1
+     */
   projectId?: number;
   /** Use the beginner Guided Refinement questioning style. */
   beginnerMode?: boolean;
 }
+
+/**
+ * Billable destination selected by the user after free brainstorming.
+ */
+export type BrainstormResolveInputAction = typeof BrainstormResolveInputAction[keyof typeof BrainstormResolveInputAction];
+
+
+export const BrainstormResolveInputAction = {
+  plan: 'plan',
+  build: 'build',
+} as const;
+
+export type BrainstormResolveInput = BrainstormChatInput & {
+  /** Billable destination selected by the user after free brainstorming. */
+  action: BrainstormResolveInputAction;
+};
 
 export interface BrainstormChatOutput {
   reply: string;
@@ -257,23 +276,13 @@ export const BrainstormResolveOutputKind = {
   'mobile-cross': 'mobile-cross',
 } as const;
 
-export const BrainstormResolveInputAction = {
-  plan: 'plan',
-  build: 'build',
-} as const;
+export type BrainstormResolveOutputAction = typeof BrainstormResolveOutputAction[keyof typeof BrainstormResolveOutputAction];
 
-export type BrainstormResolveInputAction = typeof BrainstormResolveInputAction[keyof typeof BrainstormResolveInputAction];
-
-export type BrainstormResolveInput = BrainstormChatInput & {
-  action: BrainstormResolveInputAction;
-};
 
 export const BrainstormResolveOutputAction = {
   plan: 'plan',
   build: 'build',
 } as const;
-
-export type BrainstormResolveOutputAction = typeof BrainstormResolveOutputAction[keyof typeof BrainstormResolveOutputAction];
 
 export interface BrainstormResolveOutput {
   /** @maxLength 80 */

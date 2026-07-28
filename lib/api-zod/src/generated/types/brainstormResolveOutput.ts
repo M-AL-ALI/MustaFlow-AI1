@@ -5,9 +5,9 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { BrainstormResolveOutputKind } from './brainstormResolveOutputKind';
 import type { BrainstormMessage } from './brainstormMessage';
 import type { BrainstormResolveOutputAction } from './brainstormResolveOutputAction';
+import type { BrainstormResolveOutputKind } from './brainstormResolveOutputKind';
 
 export interface BrainstormResolveOutput {
   /** @maxLength 80 */
