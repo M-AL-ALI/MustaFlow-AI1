@@ -111,9 +111,13 @@ export interface ReviewerAssembledPromptStats {
   selectedPaths: string[];
 }
 
+export type ArchitectReviewExecutionStatus = "structured" | "unparseable" | "failed";
+
 export type ArchitectReviewResult = ArchitectResponse & {
   model: string;
   reviewerAssembledPromptStats: ReviewerAssembledPromptStats;
+  /** Whether the review model returned a usable structured result. */
+  reviewExecutionStatus: ArchitectReviewExecutionStatus;
 };
 
 /** Assemble the exact prompt and audit stats used by every architect review. */
@@ -201,11 +205,26 @@ export async function runArchitectReview(input: ArchitectInput): Promise<Archite
     });
 
     const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
-    const parsed = ArchitectResponseSchema.safeParse(JSON.parse(raw));
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      logger.warn("Architect review returned invalid JSON");
+      return {
+        verdict: "pass",
+        summary: "Architect review produced no structured findings.",
+        findings: [],
+        nextActions: [],
+        model: ARCHITECT_MODEL,
+        reviewerAssembledPromptStats,
+        reviewExecutionStatus: "unparseable",
+      };
+    }
+    const parsed = ArchitectResponseSchema.safeParse(decoded);
     if (!parsed.success) {
       logger.warn(
         { issues: parsed.error.issues.slice(0, 5) },
-        "Architect review returned malformed JSON — treating as pass",
+        "Architect review returned malformed structured output",
       );
       return {
         verdict: "pass",
@@ -214,11 +233,17 @@ export async function runArchitectReview(input: ArchitectInput): Promise<Archite
         nextActions: [],
         model: ARCHITECT_MODEL,
         reviewerAssembledPromptStats,
+        reviewExecutionStatus: "unparseable",
       };
     }
-    return { ...parsed.data, model: ARCHITECT_MODEL, reviewerAssembledPromptStats };
+    return {
+      ...parsed.data,
+      model: ARCHITECT_MODEL,
+      reviewerAssembledPromptStats,
+      reviewExecutionStatus: "structured",
+    };
   } catch (err) {
-    logger.warn({ err }, "Architect review call failed — treating as pass (non-fatal)");
+    logger.warn({ err }, "Architect review call failed (non-fatal)");
     return {
       verdict: "pass",
       summary: "Architect review unavailable — proceeded without second-opinion.",
@@ -226,6 +251,7 @@ export async function runArchitectReview(input: ArchitectInput): Promise<Archite
       nextActions: [],
       model: ARCHITECT_MODEL,
       reviewerAssembledPromptStats,
+      reviewExecutionStatus: "failed",
     };
   }
 }

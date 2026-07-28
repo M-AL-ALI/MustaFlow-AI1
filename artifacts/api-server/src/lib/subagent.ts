@@ -311,10 +311,24 @@ async function runReviewer(
     ...review.findings.slice(0, 6).map((f, i) => `  ${i + 1}. [${f.severity}] ${f.title}`),
   ];
   return {
-    ok: review.verdict === "pass",
+    // A review dispatch succeeded when the model returned a structured
+    // assessment. The verdict evaluates the build; it is not transport status.
+    ok: review.reviewExecutionStatus == null || review.reviewExecutionStatus === "structured",
     observation: lines.join("\n"),
     review,
   };
+}
+
+export function subagentDispatchOutcomeLabel(result: Pick<DispatchResult, "ok" | "review">): string {
+  if (
+    result.ok &&
+    result.review &&
+    (result.review.reviewExecutionStatus == null ||
+      result.review.reviewExecutionStatus === "structured")
+  ) {
+    return `verdict ${result.review.verdict}`;
+  }
+  return result.ok ? "ok" : "failed";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -638,9 +652,9 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
       return {
         ok: r.ok,
         observation: [
+          r.observation,
           reviewerPayloadStatsLine(reviewerStats),
           reviewerAssembledPromptStatsLine(reviewerAssembledPromptStats),
-          r.observation,
         ].join("\n"),
         role,
         creditsCharged: charge.charged,
@@ -797,9 +811,9 @@ export async function dispatchReviewerStandalone(args: {
     return {
       ok: r.ok,
       observation: [
+        r.observation,
         reviewerPayloadStatsLine(reviewerStats),
         reviewerAssembledPromptStatsLine(reviewerAssembledPromptStats),
-        r.observation,
       ].join("\n"),
       role,
       creditsCharged: charge.charged,
@@ -837,7 +851,7 @@ export async function dispatchSubagentFromTool(
   }
   const scenarios = Array.isArray(args.scenarios) ? (args.scenarios as unknown[]) : undefined;
   const result = await dispatchSubagent({ role, brief, parentCtx: ctx, scenarios });
-  const header = `[${role} subagent · ${result.creditsCharged} credits · ${result.ok ? "ok" : "failed"}]`;
+  const header = `[${role} subagent · ${result.creditsCharged} credits · ${subagentDispatchOutcomeLabel(result)}]`;
   return { ok: result.ok, observation: `${header}\n${result.observation}` };
 }
 

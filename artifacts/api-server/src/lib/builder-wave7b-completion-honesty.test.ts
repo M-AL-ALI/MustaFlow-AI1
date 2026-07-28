@@ -54,7 +54,11 @@ import {
   builderPersistedCompletionSummary,
 } from "./builder-task-completion.js";
 import { buildReviewerWorkspaceContext } from "./reviewer-context.js";
-import { dispatchReviewerStandalone, dispatchSubagent } from "./subagent.js";
+import {
+  dispatchReviewerStandalone,
+  dispatchSubagent,
+  dispatchSubagentFromTool,
+} from "./subagent.js";
 
 describe("Builder Wave 7B completion honesty", () => {
   beforeEach(() => {
@@ -256,6 +260,104 @@ describe("Builder Wave 7B completion honesty", () => {
         message: expect.stringContaining("reviewerPayloadStats"),
       }),
     );
+  });
+
+  it("treats a structured partial verdict as a successful review dispatch", async () => {
+    mocks.architectReview.mockResolvedValue({
+      verdict: "partial",
+      summary: "The app is usable with one follow-up improvement.",
+      findings: [
+        {
+          severity: "medium",
+          title: "Add an empty state",
+          detail: "The list needs an empty state.",
+          file: "src/App.tsx",
+        },
+      ],
+      nextActions: ["Add the empty state."],
+      model: "test-reviewer",
+      reviewExecutionStatus: "structured",
+      reviewerAssembledPromptStats: {
+        excerptCount: 1,
+        totalExcerptChars: 30,
+        excerptBlockChars: 50,
+        selectedPaths: ["src/App.tsx"],
+      },
+    });
+    const workspace = new FileWorkspace([]);
+    workspace.primeInitial([]);
+    workspace.write("src/App.tsx", "export default function App(){}");
+    const parentCtx = {
+      input: {
+        projectId: 42,
+        taskId: 118,
+        agentMode: "lite",
+        userPrompt: "Build a small React app.",
+        existingFiles: [],
+      },
+      workspace,
+    } as unknown as ToolCtx;
+
+    const result = await dispatchSubagentFromTool(parentCtx, {
+      role: "reviewer",
+      brief: "Review src/App.tsx.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.observation).toContain("verdict: partial");
+    expect(result.observation).toMatch(/^\[reviewer subagent .* verdict partial\]/);
+    expect(result.observation).not.toContain("failed");
+  });
+
+  it("marks thrown and unparseable reviewer calls as failed dispatches", async () => {
+    const makeContext = () => {
+      const workspace = new FileWorkspace([]);
+      workspace.primeInitial([]);
+      workspace.write("src/App.tsx", "export default function App(){}");
+      return {
+        input: {
+          projectId: 42,
+          taskId: 118,
+          agentMode: "lite",
+          userPrompt: "Build a small React app.",
+          existingFiles: [],
+        },
+        workspace,
+      } as unknown as ToolCtx;
+    };
+
+    mocks.architectReview.mockRejectedValueOnce(new Error("review transport failed"));
+    const thrown = await dispatchSubagent({
+      role: "reviewer",
+      brief: "Review src/App.tsx.",
+      parentCtx: makeContext(),
+      skipCredits: true,
+    });
+    expect(thrown.ok).toBe(false);
+    expect(thrown.review).toBeUndefined();
+
+    mocks.architectReview.mockResolvedValueOnce({
+      verdict: "pass",
+      summary: "Architect review produced no structured findings.",
+      findings: [],
+      nextActions: [],
+      model: "test-reviewer",
+      reviewExecutionStatus: "unparseable",
+      reviewerAssembledPromptStats: {
+        excerptCount: 1,
+        totalExcerptChars: 30,
+        excerptBlockChars: 50,
+        selectedPaths: ["src/App.tsx"],
+      },
+    });
+    const unparseable = await dispatchSubagent({
+      role: "reviewer",
+      brief: "Review src/App.tsx.",
+      parentCtx: makeContext(),
+      skipCredits: true,
+    });
+    expect(unparseable.ok).toBe(false);
+    expect(unparseable.review?.reviewExecutionStatus).toBe("unparseable");
   });
 
   it("uses the same source-first excerpts for in-loop and post-build reviews", async () => {
