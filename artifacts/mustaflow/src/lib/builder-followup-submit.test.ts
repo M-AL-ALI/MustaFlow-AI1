@@ -2,7 +2,48 @@ import { describe, expect, it } from "vitest";
 import {
   mapIntentToSendOptions,
   resolveBuilderComposerIntent,
+  shouldDeferComposerClearForCreditGate,
 } from "./builder-followup-submit";
+
+describe("shouldDeferComposerClearForCreditGate", () => {
+  it("defers clearing only for unconfirmed Power and Pro builds", () => {
+    expect(
+      shouldDeferComposerClearForCreditGate({
+        agentMode: "power",
+        isLikelyConverse: false,
+        creditConfirmed: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferComposerClearForCreditGate({
+        agentMode: "pro",
+        isLikelyConverse: false,
+        creditConfirmed: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferComposerClearForCreditGate({
+        agentMode: "eco",
+        isLikelyConverse: false,
+        creditConfirmed: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferComposerClearForCreditGate({
+        agentMode: "power",
+        isLikelyConverse: true,
+        creditConfirmed: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferComposerClearForCreditGate({
+        agentMode: "power",
+        isLikelyConverse: false,
+        creditConfirmed: true,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("mapIntentToSendOptions", () => {
   it("forwards a text-only build intent to the task-creating send path", () => {

@@ -200,6 +200,7 @@ interface QueueComposerProps {
       | "fix_lint",
     attachments?: ComposerAttachment[],
     brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>,
+    clearComposer?: () => void,
   ) => void;
   onBatchStarted: (batchId: string, totalCount: number) => void;
   promptValue?: string;
@@ -1218,10 +1219,6 @@ export function QueueComposer({
       // Image-only send: text is empty string; server injects the default screenshot prompt.
       const text = messages[0] ?? "";
       const pending = attachments;
-      setRows([{ id: crypto.randomUUID(), text: "" }]);
-      setAttachments([]);
-      setAttachErrors([]);
-      if (onPromptValueChange) onPromptValueChange("");
       // Only inline image attachments go on the message payload. File uploads
       // (CSV/PDF/etc.) live in the project_uploads table and the agent reads
       // them via list_uploads / read_upload tools.
@@ -1237,12 +1234,19 @@ export function QueueComposer({
         routingAgentIdentity: routingHint?.agentIdentity,
       });
       const brainstormCtx = brainstormContextRef.current ?? undefined;
-      brainstormContextRef.current = null;
+      const clearComposer = () => {
+        setRows([{ id: crypto.randomUUID(), text: "" }]);
+        setAttachments([]);
+        setAttachErrors([]);
+        brainstormContextRef.current = null;
+        if (onPromptValueChange) onPromptValueChange("");
+      };
       onSingleSend(
         text,
         detectedIntent,
         inlineImages.length > 0 ? inlineImages : undefined,
         brainstormCtx,
+        clearComposer,
       );
       return;
     }
