@@ -82,7 +82,7 @@ router.get("/status", async (_req, res): Promise<void> => {
   const components: ComponentHealth[] = [
     { name: "API", status: "operational" },
     db,
-    componentFromBreaker("AI Builder", "openai"),
+    componentFromBreaker("Nabuflow", "openai"),
     componentFromBreaker("Containers", "fly-containers"),
     {
       // Preview serving is tied to DB health (snapshots are DB-stored)
@@ -96,7 +96,7 @@ router.get("/status", async (_req, res): Promise<void> => {
       status:
         db.status === "outage"
           ? "outage"
-          : componentFromBreaker("AI Builder", "openai").status === "outage"
+          : componentFromBreaker("Nabuflow", "openai").status === "outage"
             ? "degraded"
             : "operational",
     },

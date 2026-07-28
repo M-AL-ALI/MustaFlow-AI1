@@ -145,15 +145,15 @@ const ORA_BENTO_FEATURES = [
 ] as const;
 
 const ORA_ACCENT: Record<string, { bg: string; border: string; text: string }> = {
-  teal:   { bg: "bg-teal-500/10",   border: "border-teal-500/20",   text: "text-teal-500" },
-  blue:   { bg: "bg-primary/10",    border: "border-primary/20",    text: "text-primary" },
+  teal: { bg: "bg-teal-500/10", border: "border-teal-500/20", text: "text-teal-500" },
+  blue: { bg: "bg-primary/10", border: "border-primary/20", text: "text-primary" },
   purple: { bg: "bg-purple-500/10", border: "border-purple-500/20", text: "text-purple-500" },
-  amber:  { bg: "bg-amber-500/10",  border: "border-amber-500/20",  text: "text-amber-500" },
-  green:  { bg: "bg-green-500/10",  border: "border-green-500/20",  text: "text-green-500" },
-  rose:   { bg: "bg-rose-500/10",   border: "border-rose-500/20",   text: "text-rose-500" },
+  amber: { bg: "bg-amber-500/10", border: "border-amber-500/20", text: "text-amber-500" },
+  green: { bg: "bg-green-500/10", border: "border-green-500/20", text: "text-green-500" },
+  rose: { bg: "bg-rose-500/10", border: "border-rose-500/20", text: "text-rose-500" },
   indigo: { bg: "bg-indigo-500/10", border: "border-indigo-500/20", text: "text-indigo-500" },
   orange: { bg: "bg-orange-500/10", border: "border-orange-500/20", text: "text-orange-500" },
-  cyan:   { bg: "bg-cyan-500/10",   border: "border-cyan-500/20",   text: "text-cyan-500" },
+  cyan: { bg: "bg-cyan-500/10", border: "border-cyan-500/20", text: "text-cyan-500" },
 };
 
 // Capability chips — speak to ideas, not stacks. Each pre-fills the prompt input.
@@ -268,9 +268,9 @@ const HOW_IT_WORKS = [
   {
     step: "2",
     icon: AgentIcon,
-    title: "AI builds it for you",
+    title: "Zero builds it for you",
     description:
-      "MustaFlow AI plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
+      "Zero — Nabuflow's builder agent — plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
   },
   {
     step: "3",
@@ -637,7 +637,8 @@ export default function HomePage() {
                     <span className="gradient-text">Ora</span> — your AI assistant, always on
                   </h2>
                   <p className="text-muted-foreground max-w-2xl mx-auto text-base leading-relaxed">
-                    Ask anything, research the web, generate images, export documents, and talk hands-free. No account. No limits.
+                    Ask anything, research the web, generate images, export documents, and talk
+                    hands-free. No account. No limits.
                   </p>
                 </div>
 
@@ -851,47 +852,107 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Big feature showcase — Meet Your AI Builder */}
+        {/* Meet Nabuflow */}
         <div className="border-t border-border bg-background">
           <div className="max-w-6xl mx-auto px-6 py-20">
-            <div className="text-center mb-12">
+            {/* Section header */}
+            <div className="text-center mb-14">
               <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
                 <Sparkles className="h-3 w-3" />
-                Meet your AI builder
+                Meet Nabuflow
               </div>
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-3">
-                Built for makers, <span className="gradient-text">powered by AI</span>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">
+                A prompt turns into a real, <span className="gradient-text">deployable app.</span>
               </h2>
-              <p className="text-muted-foreground max-w-2xl mx-auto">
-                A side-by-side preview, a chat that builds, and a one-click publish — all in your
-                browser. No installs, no servers to babysit.
+              <p className="text-muted-foreground max-w-2xl mx-auto text-base leading-relaxed">
+                Nabuflow is MustaFlow AI's fully agentic builder. Describe what you want — mobile or
+                web — and Zero, the builder agent, plans, codes, tests, and ships it. No mocks. A
+                real app, live on the internet.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-              {/* Big hero card with mock browser preview */}
+            {/* How it works — 3 steps */}
+            <div className="relative mb-16">
+              <div
+                aria-hidden
+                className="hidden sm:block absolute top-8 left-[calc(33.33%_+_1rem)] right-[calc(33.33%_+_1rem)] h-px bg-border/60"
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                {(
+                  [
+                    {
+                      step: "1",
+                      isAgent: false,
+                      Icon: FileText,
+                      title: "Describe",
+                      desc: "Write what you want in plain language — mobile app, web app, dashboard, or landing page. No jargon required.",
+                    },
+                    {
+                      step: "2",
+                      isAgent: true,
+                      Icon: null,
+                      title: "Build",
+                      desc: "Zero plans the architecture, writes the code, runs tests, and reports every step honestly — no silent failures.",
+                    },
+                    {
+                      step: "3",
+                      isAgent: false,
+                      Icon: Rocket,
+                      title: "Publish",
+                      desc: "One click deploys to a live public URL. Share it, iterate on it, or export the source — it's your app.",
+                    },
+                  ] as const
+                ).map((item) => (
+                  <div
+                    key={item.step}
+                    className="flex flex-col items-center text-center gap-4 relative"
+                  >
+                    <div className="relative z-10">
+                      <div className="w-16 h-16 rounded-2xl bg-card border border-border shadow-sm flex items-center justify-center">
+                        {item.isAgent ? (
+                          <AgentIcon size={28} className="text-primary" />
+                        ) : (
+                          item.Icon && <item.Icon className="h-7 w-7 text-primary" />
+                        )}
+                      </div>
+                      <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shadow-sm">
+                        {item.step}
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-base mb-1">{item.title}</h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Big grid: live preview hero + Zero + Verified Builds */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-6">
+              {/* Hero card — live production preview */}
               <div className="lg:col-span-3 relative rounded-3xl border border-border bg-card overflow-hidden shadow-xl group">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-transparent to-transparent pointer-events-none" />
                 <div className="p-8 sm:p-10">
                   <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                    Infinite Canvas
+                    Live Production Preview
                   </p>
                   <h3 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
-                    Design freely. Refine visually.
+                    What you see is what ships.
                   </h3>
                   <p className="text-sm text-muted-foreground max-w-md leading-relaxed mb-6">
-                    Generate variations side-by-side, tweak with the visual editor, and graduate the
-                    winner straight into your app. No design tools required.
+                    The preview pane shows your app running on a real container — not a screenshot,
+                    not a simulation. Every change Zero makes is reflected live, so you always know
+                    exactly what you're publishing.
                   </p>
                   <Button size="sm" className="gap-1.5 rounded-full" asChild>
                     <Link href="/sign-up">
-                      Try it free
+                      Start building free
                       <ArrowRight className="h-3.5 w-3.5" />
                     </Link>
                   </Button>
                 </div>
                 <div className="px-6 pb-6">
-                  {/* Original mock browser window — no third-party brands */}
                   <div className="rounded-2xl overflow-hidden border border-border bg-background/60 shadow-inner">
                     <div className="flex items-center gap-1.5 px-4 py-2.5 bg-muted/40 border-b border-border">
                       <span className="h-2.5 w-2.5 rounded-full bg-red-400/70" />
@@ -923,29 +984,69 @@ export default function HomePage() {
 
               {/* Side stack */}
               <div className="lg:col-span-2 grid grid-cols-1 gap-5">
+                {/* Zero agent card */}
                 <div className="relative rounded-3xl border border-border bg-gradient-to-br from-primary/15 via-primary/5 to-transparent p-7 overflow-hidden">
                   <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                    Parallel Agents
+                    Meet Zero
                   </p>
-                  <h3 className="text-2xl font-bold tracking-tight mb-2">Move faster</h3>
+                  <h3 className="text-2xl font-bold tracking-tight mb-2">Your builder agent</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    Run multiple agents in parallel — one drafts, one reviews, one tests. Builds in
-                    seconds, not minutes.
+                    Zero is the AI that does the work. It architects, codes, tests, and reports —
+                    all inside one conversation. Ask it to fix a bug, redesign a page, or start from
+                    scratch.
                   </p>
-                  <Zap className="absolute -bottom-4 -right-4 h-32 w-32 text-primary/10" />
+                  <Bot className="absolute -bottom-4 -right-4 h-32 w-32 text-primary/10" />
                 </div>
+                {/* Verified builds card */}
                 <div className="relative rounded-3xl border border-border bg-card p-7 overflow-hidden">
                   <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-                    Knowledge Vault
+                    Verified Builds
                   </p>
-                  <h3 className="text-2xl font-bold tracking-tight mb-2">Learns as you go</h3>
+                  <h3 className="text-2xl font-bold tracking-tight mb-2">No fake "done"</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    Every build teaches MustaFlow something new — your style, your stack, your
-                    preferences.
+                    Every build reports honestly — pass, fail, or warning. Zero never marks a build
+                    complete until it actually runs cleanly.
                   </p>
-                  <BookOpen className="absolute -bottom-4 -right-4 h-28 w-28 text-primary/10" />
+                  <CheckCircle2 className="absolute -bottom-4 -right-4 h-28 w-28 text-primary/10" />
                 </div>
               </div>
+            </div>
+
+            {/* 4-feature strip */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                {
+                  icon: Smartphone,
+                  title: "Mobile & web",
+                  desc: "Build native mobile apps (iOS + Android) or full web apps — Nabuflow handles both from a single prompt.",
+                },
+                {
+                  icon: Globe,
+                  title: "Real deployable output",
+                  desc: "Every project publishes to a live URL. Share it, sell it, or iterate — it's a real app, not a prototype.",
+                },
+                {
+                  icon: ShieldCheck,
+                  title: "Security built in",
+                  desc: "Semgrep SAST and CVE scans run on every build. Findings surface in the Checks tab before you ship.",
+                },
+                {
+                  icon: Zap,
+                  title: "40+ integrations",
+                  desc: "Postgres, Stripe, GitHub, Slack, OpenAI and dozens more — one click to wire them into your build.",
+                },
+              ].map((f) => (
+                <div
+                  key={f.title}
+                  className="rounded-2xl border border-border bg-card p-5 hover:bg-muted/40 transition-colors"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-3">
+                    <f.icon className="h-4 w-4 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-sm mb-1">{f.title}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{f.desc}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>

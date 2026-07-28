@@ -1693,7 +1693,7 @@ export function LogsTab({
               ))}
               {(tasks ?? []).length > 0 && (
                 <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 pt-2 flex items-center gap-1.5">
-                  <Terminal className="h-3 w-3" /> AI Builder Tasks
+                  <Terminal className="h-3 w-3" /> Nabuflow Tasks
                 </div>
               )}
             </div>

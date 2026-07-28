@@ -36,7 +36,7 @@ const MAKER_STEPS: TourStep[] = [
   {
     title: "Create a Project",
     description:
-      "Every app starts as a project. Click the Projects link in the sidebar, then use the New Project button to describe what you want to build. The AI Builder will generate it for you.",
+      "Every app starts as a project. Click the Projects link in the sidebar, then use the New Project button to describe what you want to build. Nabuflow will generate it for you.",
     icon: FolderKanban,
   },
   {

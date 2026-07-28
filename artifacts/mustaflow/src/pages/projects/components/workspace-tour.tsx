@@ -12,7 +12,7 @@ interface TourStep {
 const TOUR_STEPS: TourStep[] = [
   {
     targetSelector: "[data-tour='chat-input']",
-    title: "AI Builder",
+    title: "Nabuflow",
     description:
       "Describe what you want to build here. The AI will generate your app's code in seconds — just write naturally.",
     placement: "top",
