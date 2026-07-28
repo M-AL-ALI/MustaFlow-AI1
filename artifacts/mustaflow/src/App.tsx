@@ -378,8 +378,10 @@ function SignUpPage() {
   );
 }
 
-// Fetches preferredMode and redirects signed-in users to the right dashboard.
-// Shows a minimal spinner while the preferences load to avoid a flash.
+// Shows a spinner while preferences load (warms the cache for the picker),
+// then always lands on the mode-selection page regardless of any saved
+// preferredMode.  The saved preference is kept server-side for analytics
+// but must never be used to auto-skip the picker on sign-in.
 function SmartSignedInRedirect() {
   const prefsQuery = useGetMyPreferences({
     query: { queryKey: ["/api/me/preferences"] },
@@ -393,18 +395,8 @@ function SmartSignedInRedirect() {
     );
   }
 
-  // Route by the user's chosen experience:
-  //   "ora"      → standalone Ora assistant
-  //   "builder"  → AI Builder dashboard
-  //   "developer"→ legacy value, treated as AI Builder
-  //   null/unset → first-run mode chooser
-  const mode = prefsQuery.data?.preferredMode ?? null;
-  const builderAccess = resolveBuilderAccess(prefsQuery.data?.builderAccess);
-  if (mode === "ora") return <Redirect to="/ora" />;
-  // Builder access is server-controlled per user. The local false default is
-  // used if preferences fail to load.
-  if (mode === "builder" || mode === "developer")
-    return <Redirect to={builderAccess ? "/projects" : "/mode-select"} />;
+  // Always show the picker after sign-in — never auto-skip based on a
+  // previously saved preferredMode.
   return <Redirect to="/mode-select" />;
 }
 
