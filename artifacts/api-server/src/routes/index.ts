@@ -112,6 +112,7 @@ import oraxDesktopRouter from "./orax-desktop";
 import { oraxDesktopAuthPublicRouter, oraxDesktopAuthRouter } from "./orax-desktop-auth";
 import oraxProjectsRouter from "./orax-projects";
 import { attachUser } from "../lib/auth";
+import { requireBuilderAccess } from "../lib/builder-access";
 import {
   aiBuilderLimiter,
   publishLimiter,
@@ -154,7 +155,7 @@ router.use(apiDocsRouter); // GET /docs, GET /docs/openapi.yaml (public API refe
 
 // ── Brainstorm (public, AI-powered, rate-limited) ─────────────────────────────
 router.post("/brainstorm/chat", aiBuilderLimiter);
-router.post("/brainstorm/resolve", aiBuilderLimiter);
+router.post("/brainstorm/resolve", attachUser, requireBuilderAccess, aiBuilderLimiter);
 router.use(brainstormRouter);
 
 // ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────
@@ -256,6 +257,19 @@ router.use((req, res, next) => {
 
 // ── Auth wall — all routes below require a valid Clerk session ────────────────
 router.use(attachUser);
+
+// ── AI Builder cohort access ──────────────────────────────────────────────────
+router.post("/projects", requireBuilderAccess);
+router.post("/projects/:id/messages", requireBuilderAccess);
+router.post("/projects/:id/messages/stream", requireBuilderAccess);
+router.post("/projects/:id/plans/decompose", requireBuilderAccess);
+router.post("/projects/:id/plans/clarify", requireBuilderAccess);
+router.post("/projects/:id/queue", requireBuilderAccess);
+router.post("/projects/:id/queue/resume-paused", requireBuilderAccess);
+router.delete("/projects/:id/queue/:batchId", requireBuilderAccess);
+router.post("/projects/:id/restore", requireBuilderAccess);
+router.post("/projects/:id/checkpoints/:checkpointId/restore", requireBuilderAccess);
+router.post("/projects/:id/versions/:versionId/rollback", requireBuilderAccess);
 
 // ── Specific rate limits ──────────────────────────────────────────────────────
 router.post("/projects/:id/messages", aiBuilderLimiter);
