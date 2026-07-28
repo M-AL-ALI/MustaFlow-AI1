@@ -5672,8 +5672,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         try {
           const { runHeadlessQA } = await import("./headless-qa");
 
-          const qaOnEvent = async (type: string, message: string): Promise<void> => {
-            await emitEvent(taskId, type, message);
+          const qaOnEvent = async (
+            type: string,
+            message: string,
+            data?: import("./headless-qa").QAStepEventData,
+          ): Promise<void> => {
+            await emitEvent(taskId, type, message, undefined, data ? { ...data } : undefined);
           };
 
           let qaResult: import("./headless-qa").QAResult | null = null;
@@ -5744,7 +5748,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               await emitEvent(
                 taskId,
                 "qa_step",
-                `Error detected — auto-fixing ${qaResult.errors.length} issue(s)…`,
+                `Repairing ${qaResult.errors.length} browser issue(s)`,
+                undefined,
+                {
+                  kind: "qa_tape_step",
+                  phase: "repair",
+                  status: "running",
+                },
               );
               const currentFiles = await loadFiles(projectId);
               const fixPrompt = [

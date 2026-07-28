@@ -1,8 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
-import {
-  getBuilderCompletionMessage,
-  getBuilderDisplayStepCount,
-} from "@/lib/builder-completion";
+import { getBuilderCompletionMessage, getBuilderDisplayStepCount } from "@/lib/builder-completion";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useListTasks,
@@ -56,12 +53,14 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { collapseQATapeEvents, parseQACardEvent, type QACardPayload } from "@/lib/qa-video-tape";
 
 type StepEvent = {
   id: number;
   eventType: string;
   message: string;
   filePath?: string | null;
+  data?: unknown;
 };
 
 type StepGroup = {
@@ -192,86 +191,16 @@ const STEP_COLOR: Record<string, string> = {
   preview_ready: "text-green-400",
 };
 
-/**
- * Task #785 — Collapse a run of `qa_step` events plus the terminal
- * `qa_done` / `qa_timeout` event into a single synthetic QA card so the
- * live stream shows a live spinner that collapses to a pass/fail chip.
- */
-type QACardPayload = {
-  steps: string[];
-  terminal: "qa_done" | "qa_timeout" | null;
-  terminalMessage: string;
-};
-
-function dedupeQASteps(steps: StepEvent[]): StepEvent[] {
-  const QA_TERMINAL = new Set(["qa_done", "qa_timeout"]);
-  const QA_EVENTS = new Set(["qa_step", "qa_done", "qa_timeout"]);
-  const out: StepEvent[] = [];
-  let qaStartIdx: number | null = null;
-  let qaStepMessages: string[] = [];
-  let qaTerminal: "qa_done" | "qa_timeout" | null = null;
-  let qaTerminalMessage = "";
-  let qaFirstId = -1;
-
-  const flushQA = (): StepEvent | null => {
-    if (qaStartIdx === null) return null;
-    const payload: QACardPayload = {
-      steps: qaStepMessages,
-      terminal: qaTerminal,
-      terminalMessage: qaTerminalMessage,
-    };
-    return { id: qaFirstId, eventType: "qa_card", message: JSON.stringify(payload) };
-  };
-
-  for (const s of steps) {
-    if (!QA_EVENTS.has(s.eventType)) {
-      const card = flushQA();
-      if (card) out.push(card);
-      qaStartIdx = null;
-      qaStepMessages = [];
-      qaTerminal = null;
-      qaTerminalMessage = "";
-      qaFirstId = -1;
-      out.push(s);
-      continue;
-    }
-    if (qaStartIdx === null) {
-      qaStartIdx = out.length;
-      qaFirstId = s.id;
-    }
-    if (s.eventType === "qa_step") {
-      qaStepMessages.push(s.message);
-    } else if (QA_TERMINAL.has(s.eventType)) {
-      qaTerminal = s.eventType as "qa_done" | "qa_timeout";
-      qaTerminalMessage = s.message;
-    }
-  }
-  const card = flushQA();
-  if (card) out.push(card);
-  return out;
-}
-
-function parseQACard(eventType: string, message: string): QACardPayload | null {
-  if (eventType !== "qa_card") return null;
-  if (!message.startsWith("{")) return null;
-  try {
-    const obj = JSON.parse(message) as Partial<QACardPayload>;
-    return {
-      steps: Array.isArray(obj.steps) ? (obj.steps as string[]) : [],
-      terminal: obj.terminal ?? null,
-      terminalMessage: typeof obj.terminalMessage === "string" ? obj.terminalMessage : "",
-    };
-  } catch {
-    return null;
-  }
-}
-
 function QACard({ data, isActive }: { data: QACardPayload; isActive: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(isActive);
   const isDone = data.terminal === "qa_done";
   const isTimeout = data.terminal === "qa_timeout";
   const isPending = data.terminal === null;
   const isPass = isDone && data.terminalMessage.startsWith("All tests passed");
+
+  useEffect(() => {
+    if (isActive) setExpanded(true);
+  }, [isActive]);
 
   return (
     <div className="rounded-md border border-border/40 bg-muted/30 p-1.5 my-0.5 max-w-full">
@@ -312,7 +241,7 @@ function QACard({ data, isActive }: { data: QACardPayload; isActive: boolean }) 
           )}
         >
           {isPending
-            ? (data.steps[data.steps.length - 1] ?? "Running QA…")
+            ? (data.steps[data.steps.length - 1]?.message ?? "Running QA...")
             : data.terminalMessage || (isPass ? "Tests passed" : "Issues found")}
         </span>
         {isPending && isActive && (
@@ -321,10 +250,44 @@ function QACard({ data, isActive }: { data: QACardPayload; isActive: boolean }) 
       </button>
       {expanded && data.steps.length > 0 && (
         <div className="mt-1 ml-5 space-y-0.5 border-l border-border/40 pl-2">
-          {data.steps.map((msg, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-2.5 w-2.5 shrink-0 text-cyan-300/50" />
-              <span className="text-[10px] text-muted-foreground/70">{msg}</span>
+          {data.steps.map((step, index) => (
+            <div key={`${index}-${step.message}`} className="space-y-1 py-0.5">
+              <div className="flex items-center gap-1.5">
+                {step.status === "running" && isPending && index === data.steps.length - 1 ? (
+                  <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin text-cyan-300" />
+                ) : step.status === "failed" ? (
+                  <AlertCircle className="h-2.5 w-2.5 shrink-0 text-red-400" />
+                ) : step.status === "warning" ? (
+                  <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-amber-400" />
+                ) : (
+                  <CheckCircle2 className="h-2.5 w-2.5 shrink-0 text-cyan-300/60" />
+                )}
+                <span
+                  className={cn(
+                    "text-[10px]",
+                    step.status === "failed"
+                      ? "text-red-300"
+                      : step.status === "warning"
+                        ? "text-amber-300"
+                        : "text-muted-foreground/80",
+                  )}
+                >
+                  {step.message}
+                </span>
+              </div>
+              {step.screenshot && (
+                <figure className="ml-4 overflow-hidden rounded border border-border/50 bg-background/60">
+                  <img
+                    src={`data:${step.screenshot.mimeType};base64,${step.screenshot.base64}`}
+                    alt={step.screenshot.label}
+                    className="block max-h-28 w-full object-cover object-top"
+                    loading="lazy"
+                  />
+                  <figcaption className="px-1.5 py-0.5 text-[9px] text-muted-foreground/60">
+                    {step.screenshot.label}
+                  </figcaption>
+                </figure>
+              )}
             </div>
           ))}
         </div>
@@ -1353,7 +1316,7 @@ function FinishedGroupRow({
   const filtered = hideThinking
     ? group.steps.filter((s) => s.eventType !== "thinking")
     : group.steps;
-  const visibleSteps = dedupeQASteps(dedupeCommandOutputs(filtered));
+  const visibleSteps = collapseQATapeEvents(dedupeCommandOutputs(filtered));
 
   return (
     <div className="space-y-1">
@@ -1394,7 +1357,7 @@ function FinishedGroupRow({
             const diff = parseFileDiff(step.eventType, step.message);
             const cmd = parseCommandOutput(step.eventType, step.message);
             const tool = parseToolCall(step.eventType, step.message);
-            const qaCard = parseQACard(step.eventType, step.message);
+            const qaCard = parseQACardEvent(step);
             if (step.eventType === "thinking") {
               return <ThinkingRow key={step.id} text={step.message} isActive={false} />;
             }
@@ -1457,18 +1420,13 @@ function ActiveGroupRow({
   const filtered = hideThinking
     ? group.steps.filter((s) => s.eventType !== "thinking")
     : group.steps;
-  const visibleSteps = dedupeQASteps(dedupeCommandOutputs(filtered));
+  const visibleSteps = collapseQATapeEvents(dedupeCommandOutputs(filtered));
 
   // Separate "thinking" steps from actionable tool steps so we can render
   // the thinking lines alongside the step list rather than inside it.
   const actionSteps = visibleSteps.filter((s) => s.eventType !== "thinking");
   const lastQA =
-    actionSteps.length > 0
-      ? parseQACard(
-          actionSteps[actionSteps.length - 1].eventType,
-          actionSteps[actionSteps.length - 1].message,
-        )
-      : null;
+    actionSteps.length > 0 ? parseQACardEvent(actionSteps[actionSteps.length - 1]) : null;
 
   // Thinking text stays as an inline row beneath the step list.
   const lastThinkingStep = [...visibleSteps].reverse().find((s) => s.eventType === "thinking");

@@ -1,5 +1,5 @@
-import http from "http";
-import net from "net";
+import http from "node:http";
+import net from "node:net";
 import type { FileSnapshotEntry } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -9,206 +9,336 @@ export interface QAResult {
   stepsRun: number;
 }
 
+export type QAStepStatus = "running" | "passed" | "warning" | "failed";
+
+export type QAScreenshotAttachment = {
+  tool: "take_screenshot";
+  mimeType: "image/jpeg";
+  base64: string;
+  bytes: number;
+  label: string;
+};
+
+export type QAStepEventData = {
+  kind: "qa_tape_step";
+  phase: "launch" | "navigation" | "interaction" | "input" | "console" | "repair";
+  status: QAStepStatus;
+  screenshot?: QAScreenshotAttachment;
+};
+
+export type QAEventCallback = (
+  type: string,
+  message: string,
+  data?: QAStepEventData,
+) => void | Promise<void>;
+
+const QA_INPUT_VALUE = "buy milk";
+const MAX_SCREENSHOTS = 3;
+const MAX_SCREENSHOT_BYTES = 160 * 1024;
+const MAX_TOTAL_SCREENSHOT_BYTES = 384 * 1024;
+
+type ScreenshotBudget = {
+  count: number;
+  remainingBytes: number;
+};
+
 async function findFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.on("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const addr = srv.address() as net.AddressInfo;
-      srv.close(() => resolve(addr.port));
+    const server = net.createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address() as net.AddressInfo;
+      server.close(() => resolve(address.port));
     });
   });
 }
 
+function cleanLabel(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+async function readableControlLabel(
+  locator: import("playwright").Locator,
+  fallback: string,
+): Promise<string> {
+  const candidates = await Promise.all([
+    locator.getAttribute("aria-label").catch(() => null),
+    locator.getAttribute("placeholder").catch(() => null),
+    locator.getAttribute("title").catch(() => null),
+    locator.getAttribute("name").catch(() => null),
+    locator.textContent().catch(() => null),
+  ]);
+  return candidates.map(cleanLabel).find(Boolean) ?? fallback;
+}
+
+async function captureKeyStep(
+  page: import("playwright").Page,
+  label: string,
+  budget: ScreenshotBudget,
+): Promise<QAScreenshotAttachment | undefined> {
+  if (budget.count >= MAX_SCREENSHOTS || budget.remainingBytes <= 0) return undefined;
+  try {
+    const buffer = await page.screenshot({
+      type: "jpeg",
+      quality: 45,
+      fullPage: false,
+      animations: "disabled",
+    });
+    if (buffer.byteLength > MAX_SCREENSHOT_BYTES || buffer.byteLength > budget.remainingBytes) {
+      return undefined;
+    }
+    budget.count += 1;
+    budget.remainingBytes -= buffer.byteLength;
+    return {
+      tool: "take_screenshot",
+      mimeType: "image/jpeg",
+      base64: buffer.toString("base64"),
+      bytes: buffer.byteLength,
+      label,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Spin up an in-process HTTP server serving `projectFiles`, then launch a
- * headless Chromium browser against it.  Navigates to the root, clicks
- * visible buttons and fills visible inputs, collects console errors and page
- * errors, then closes both the browser and the HTTP server.
- *
- * The `onEvent` callback is invoked for each step so callers can stream
- * `qa_step` events to the frontend while the EventSource is still open.
- *
- * Returns `{ passed, errors, stepsRun }`.  If no index.html is found the
- * function returns an instant pass so non-HTML projects are silently skipped.
+ * headless Chromium browser against it. The same `qa_step` stream used by the
+ * existing UI receives a human-readable action tape and optional, tightly
+ * bounded take_screenshot attachments for key frames.
  */
 export async function runHeadlessQA(
   projectFiles: FileSnapshotEntry[],
-  onEvent: (type: string, message: string) => void,
+  onEvent: QAEventCallback,
   signal?: AbortSignal,
 ): Promise<QAResult> {
-  const indexFile = projectFiles.find((f) => f.path === "index.html");
+  const indexFile = projectFiles.find((file) => file.path === "index.html");
   if (!indexFile) {
-    logger.info("headless-qa: no index.html — skipping");
+    logger.info("headless-qa: no index.html - skipping");
     return { passed: true, errors: [], stepsRun: 0 };
   }
 
   const port = await findFreePort();
-
-  const fileMap = new Map<string, FileSnapshotEntry>();
-  for (const f of projectFiles) {
-    fileMap.set(f.path, f);
-  }
-
+  const fileMap = new Map(projectFiles.map((file) => [file.path, file]));
   const server = http.createServer((req, res) => {
     let urlPath = (req.url ?? "/").split("?")[0] ?? "/";
     if (urlPath === "/" || urlPath === "") urlPath = "index.html";
     else urlPath = urlPath.replace(/^\/+/, "");
 
     const file = fileMap.get(urlPath);
+    res.setHeader("Cache-Control", "no-cache");
     if (file) {
       res.setHeader("Content-Type", file.mimeType || "text/plain");
-      res.setHeader("Cache-Control", "no-cache");
       res.end(file.content);
     } else {
       res.setHeader("Content-Type", "text/html");
-      res.setHeader("Cache-Control", "no-cache");
       res.end(indexFile.content);
     }
   });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => resolve());
+    server.listen(port, "127.0.0.1", resolve);
   });
 
   const errors: string[] = [];
+  const emittedErrors = new Set<string>();
+  const screenshotBudget: ScreenshotBudget = {
+    count: 0,
+    remainingBytes: MAX_TOTAL_SCREENSHOT_BYTES,
+  };
   let stepsRun = 0;
   let browser: import("playwright").Browser | null = null;
+  let page: import("playwright").Page | null = null;
 
-  // Wire abort signal to close the browser immediately when the caller aborts.
-  const abortHandler = async (): Promise<void> => {
-    try {
-      if (browser) await browser.close();
-    } catch {
-      // best-effort on abort
-    }
+  const emitStep = async (
+    message: string,
+    phase: QAStepEventData["phase"],
+    status: QAStepStatus,
+    screenshot?: QAScreenshotAttachment,
+  ): Promise<void> => {
+    await onEvent("qa_step", message, {
+      kind: "qa_tape_step",
+      phase,
+      status,
+      ...(screenshot ? { screenshot } : {}),
+    });
   };
-  signal?.addEventListener("abort", () => void abortHandler());
+
+  const recordError = async (
+    message: string,
+    phase: QAStepEventData["phase"],
+    withScreenshot = false,
+  ): Promise<void> => {
+    const normalized = message.slice(0, 240);
+    if (!errors.includes(normalized)) errors.push(normalized);
+    if (emittedErrors.has(normalized)) return;
+    emittedErrors.add(normalized);
+    const screenshot =
+      withScreenshot && page ? await captureKeyStep(page, normalized, screenshotBudget) : undefined;
+    await emitStep(`Error: ${normalized}`, phase, "failed", screenshot);
+  };
+
+  const abortHandler = (): void => {
+    void browser?.close().catch(() => {});
+  };
+  signal?.addEventListener("abort", abortHandler, { once: true });
 
   try {
     if (signal?.aborted) throw new Error("QA aborted before start");
 
-    onEvent("qa_step", "Launching QA browser…");
+    await emitStep("Starting the QA browser", "launch", "running");
     const { chromium } = await import("playwright");
     browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
     const context = await browser.newContext({
       javaScriptEnabled: true,
       ignoreHTTPSErrors: true,
+      viewport: { width: 1100, height: 700 },
     });
-    const page = await context.newPage();
+    page = await context.newPage();
 
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        const text = msg.text();
-        if (
-          !text.includes("favicon.ico") &&
-          !text.includes("net::ERR_") &&
-          !text.includes("Failed to load resource")
-        ) {
-          errors.push(`Console: ${text.slice(0, 200)}`);
-        }
+    page.on("console", (message) => {
+      if (message.type() !== "error") return;
+      const text = message.text();
+      if (
+        text.includes("favicon.ico") ||
+        text.includes("net::ERR_") ||
+        text.includes("Failed to load resource")
+      ) {
+        return;
       }
+      const error = `Console: ${text.slice(0, 200)}`;
+      if (!errors.includes(error)) errors.push(error);
     });
-    page.on("pageerror", (err) => {
-      errors.push(`JS error: ${err.message.slice(0, 200)}`);
+    page.on("pageerror", (error) => {
+      const normalized = `JS error: ${error.message.slice(0, 200)}`;
+      if (!errors.includes(normalized)) errors.push(normalized);
     });
 
-    if (signal?.aborted) throw new Error("QA aborted");
-
-    onEvent("qa_step", "Navigating to app…");
-    stepsRun++;
+    await emitStep("Opening the app", "navigation", "running");
+    stepsRun += 1;
     try {
       await page.goto(`http://127.0.0.1:${port}/`, {
         waitUntil: "networkidle",
         timeout: 15_000,
       });
-    } catch (navErr) {
-      errors.push(`Navigation error: ${(navErr as Error).message.slice(0, 120)}`);
+      const screenshot = await captureKeyStep(page, "App opened", screenshotBudget);
+      await emitStep("Opened the app", "navigation", "passed", screenshot);
+    } catch (error) {
+      await recordError(
+        `Navigation failed: ${(error as Error).message.slice(0, 160)}`,
+        "navigation",
+        true,
+      );
     }
 
     if (signal?.aborted) throw new Error("QA aborted");
 
-    onEvent("qa_step", "Clicking primary buttons…");
-    stepsRun++;
-    try {
-      const buttons = page.locator("button:visible");
-      const count = await buttons.count();
-      for (let i = 0; i < Math.min(count, 5); i++) {
-        if (signal?.aborted) break;
-        try {
-          await buttons.nth(i).click({ timeout: 2_000, force: true });
-        } catch {
-          // individual click failures are expected (e.g. disabled, off-screen)
-        }
+    const buttons = page.locator("button:visible");
+    const buttonCount = await buttons.count().catch(() => 0);
+    for (let index = 0; index < Math.min(buttonCount, 5); index += 1) {
+      if (signal?.aborted) break;
+      const button = buttons.nth(index);
+      const label = await readableControlLabel(button, `button ${index + 1}`);
+      if (await button.isDisabled().catch(() => false)) {
+        await emitStep(`Skipped disabled '${label}'`, "interaction", "warning");
+        continue;
       }
-    } catch {
-      // locator failures are non-fatal
+      try {
+        await button.click({ timeout: 2_000, force: true });
+        stepsRun += 1;
+        const screenshot =
+          screenshotBudget.count < 2
+            ? await captureKeyStep(page, `Clicked ${label}`, screenshotBudget)
+            : undefined;
+        await emitStep(`Clicked '${label}'`, "interaction", "passed", screenshot);
+      } catch (error) {
+        await recordError(
+          `Could not click '${label}': ${(error as Error).message.slice(0, 120)}`,
+          "interaction",
+          true,
+        );
+      }
     }
 
     if (signal?.aborted) throw new Error("QA aborted");
 
-    onEvent("qa_step", "Following visible links…");
-    stepsRun++;
-    try {
-      const links = page.locator("a[href]:visible");
-      const linkCount = await links.count();
-      for (let i = 0; i < Math.min(linkCount, 5); i++) {
-        if (signal?.aborted) break;
-        try {
-          const href = await links.nth(i).getAttribute("href");
-          // Only click same-page anchors or relative paths to avoid navigation away
-          if (href && (href.startsWith("#") || href.startsWith("./") || href === "/")) {
-            await links.nth(i).click({ timeout: 2_000, force: true });
-          }
-        } catch {
-          // non-fatal
-        }
+    const links = page.locator("a[href]:visible");
+    const linkCount = await links.count().catch(() => 0);
+    for (let index = 0; index < Math.min(linkCount, 5); index += 1) {
+      if (signal?.aborted) break;
+      const link = links.nth(index);
+      const href = await link.getAttribute("href").catch(() => null);
+      if (!href || (!href.startsWith("#") && !href.startsWith("./") && href !== "/")) {
+        continue;
       }
-    } catch {
-      // locator failures are non-fatal
+      const label = await readableControlLabel(link, href);
+      try {
+        await link.click({ timeout: 2_000, force: true });
+        stepsRun += 1;
+        await emitStep(`Followed '${label}'`, "interaction", "passed");
+      } catch (error) {
+        await recordError(
+          `Could not follow '${label}': ${(error as Error).message.slice(0, 120)}`,
+          "interaction",
+        );
+      }
     }
 
     if (signal?.aborted) throw new Error("QA aborted");
 
-    onEvent("qa_step", "Testing form inputs…");
-    stepsRun++;
-    try {
-      const inputs = page.locator("input:visible, textarea:visible");
-      const inputCount = await inputs.count();
-      for (let i = 0; i < Math.min(inputCount, 3); i++) {
-        if (signal?.aborted) break;
-        try {
-          await inputs.nth(i).fill("test", { timeout: 2_000 });
-        } catch {
-          // non-fatal
-        }
+    const inputs = page.locator(
+      "input:visible:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=submit]), textarea:visible",
+    );
+    const inputCount = await inputs.count().catch(() => 0);
+    for (let index = 0; index < Math.min(inputCount, 3); index += 1) {
+      if (signal?.aborted) break;
+      const input = inputs.nth(index);
+      const label = await readableControlLabel(input, `input ${index + 1}`);
+      try {
+        await input.fill(QA_INPUT_VALUE, { timeout: 2_000 });
+        stepsRun += 1;
+        const screenshot =
+          screenshotBudget.count < MAX_SCREENSHOTS
+            ? await captureKeyStep(page, `Typed into ${label}`, screenshotBudget)
+            : undefined;
+        await emitStep(`Typed '${QA_INPUT_VALUE}' into '${label}'`, "input", "passed", screenshot);
+      } catch (error) {
+        await recordError(
+          `Could not type into '${label}': ${(error as Error).message.slice(0, 120)}`,
+          "input",
+        );
       }
-    } catch {
-      // non-fatal
     }
 
-    onEvent("qa_step", "Checking for console errors…");
-    stepsRun++;
+    await emitStep("Checking the browser console", "console", "running");
+    await page.waitForTimeout(150);
+    stepsRun += 1;
+    if (errors.length === 0) {
+      await emitStep("No browser errors found", "console", "passed");
+    } else {
+      for (const error of [...errors]) {
+        await recordError(error, "console", true);
+      }
+    }
 
     await browser.close();
     browser = null;
-  } catch (err) {
-    const msg = (err as Error).message ?? String(err);
-    if (!msg.startsWith("QA aborted")) {
-      errors.push(`QA runner error: ${msg.slice(0, 200)}`);
+    page = null;
+  } catch (error) {
+    const message = (error as Error).message ?? String(error);
+    if (!message.startsWith("QA aborted")) {
+      await recordError(`QA runner failed: ${message.slice(0, 200)}`, "console");
     }
-    logger.warn({ err }, "headless-qa: runner error (non-fatal)");
+    logger.warn({ err: error }, "headless-qa: runner error (non-fatal)");
     if (browser) {
-      try {
-        await browser.close();
-      } catch {
-        // ignore close error
-      }
+      await browser.close().catch(() => {});
       browser = null;
+      page = null;
     }
   } finally {
+    signal?.removeEventListener("abort", abortHandler);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
