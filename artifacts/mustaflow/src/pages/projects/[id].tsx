@@ -4388,6 +4388,7 @@ export default function ProjectWorkspacePage() {
                       hasFailedBuild={projectIssues.hasFailedBuild}
                       hasContainerError={projectIssues.hasContainerError}
                       hasCodeQuality={projectIssues.hasCodeQuality}
+                      hasCompletedTask={tasksForFeed.some((task) => task.status === "completed")}
                       chatPlaceholder={
                         project?.builderMode === "agentic"
                           ? "Describe a feature or change — I'll plan, build, and test it for you…"

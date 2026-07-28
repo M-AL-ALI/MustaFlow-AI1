@@ -27,7 +27,7 @@ const REVIEWER_MAX_FILE_EXCERPTS = 8;
 const REVIEWER_MAX_EXCERPT_CHARS = 6_000;
 const REVIEWER_MAX_TOTAL_EXCERPT_CHARS = 30_000;
 const REVIEWABLE_PATH_PATTERN =
-  /(?:^|[\s`"'(:,])((?:\.\/)?(?:[\w@.-]+\/)*[\w@.-]+\.(?:tsx?|jsx?|css|scss|sass|less|html?|vue|svelte|json|mdx?|py|rb|go|rs|java|kt|swift|php|cs))(?=$|[\s`"',;:)\]])/gi;
+  /(?:^|[\s`"'(:,])((?:\.\/)?(?:[\w@.-]+\/)*[\w@.-]+\.(?:tsx?|jsx?|css|scss|sass|less|html?|vue|svelte|json|mdx?|py|rb|go|rs|java|kt|swift|php|cs))(?=$|[\s`"',.;:)\]])/gi;
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -139,12 +139,36 @@ export function buildReviewerContextFromFiles(input: {
   const availableByPath = new Map(
     input.workspaceFiles.map((file) => [normalizePath(file.path), file] as const),
   );
-  const missingRequestedPaths = requestedPaths.filter(
-    (path) => !availableByPath.has(normalizePath(path)),
-  );
-  const requestedFiles = requestedPaths
-    .map((path) => availableByPath.get(normalizePath(path)))
-    .filter((file): file is ReviewerFile => file !== undefined);
+  const availableByBasename = new Map<string, ReviewerFile[]>();
+  for (const file of input.workspaceFiles) {
+    const name = basename(file.path);
+    availableByBasename.set(name, [...(availableByBasename.get(name) ?? []), file]);
+  }
+  const resolveRequestedFile = (path: string): ReviewerFile | undefined => {
+    const normalized = normalizePath(path);
+    const exact = availableByPath.get(normalized);
+    if (exact) return exact;
+    if (normalized.includes("/")) return undefined;
+    const basenameMatches = availableByBasename.get(normalized) ?? [];
+    return basenameMatches.length === 1 ? basenameMatches[0] : undefined;
+  };
+  const resolvedRequestedFiles = requestedPaths.map((path) => ({
+    requestedPath: path,
+    file: resolveRequestedFile(path),
+  }));
+  const missingRequestedPaths = resolvedRequestedFiles
+    .filter((entry) => entry.file === undefined)
+    .map((entry) => entry.requestedPath);
+  const seenRequestedFiles = new Set<string>();
+  const requestedFiles = resolvedRequestedFiles
+    .map((entry) => entry.file)
+    .filter((file): file is ReviewerFile => {
+      if (!file) return false;
+      const normalized = normalizePath(file.path);
+      if (seenRequestedFiles.has(normalized)) return false;
+      seenRequestedFiles.add(normalized);
+      return true;
+    });
   const requestedFilePaths = new Set(requestedFiles.map((file) => normalizePath(file.path)));
   const changedPaths = new Set(
     [...input.diff.filesAdded, ...input.diff.filesModified].map(normalizePath),

@@ -294,7 +294,8 @@ async function runReviewer(
   opts: ReviewerOpts,
 ): Promise<{ ok: boolean; observation: string; review: ArchitectReviewResult }> {
   const review = await runArchitectReview({
-    userRequest: opts.brief,
+    userRequest: opts.parentInput.userPrompt,
+    reviewBrief: opts.brief,
     agentMode: opts.parentInput.agentMode,
     planContext: opts.planContext ?? null,
     diff: opts.diff,

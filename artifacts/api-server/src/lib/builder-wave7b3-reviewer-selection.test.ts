@@ -79,6 +79,54 @@ describe("Wave 7B-3 reviewer excerpt selection", () => {
     expect(context.missingRequestedPaths).toEqual(["src/missing.ts"]);
   });
 
+  it("resolves a requested bare filename by a unique workspace basename", () => {
+    const changed = [
+      { path: "src/hooks/useBooks.ts", content: "export const useBooks = () => [];" },
+      { path: "src/App.tsx", content: "export default function App() { return null; }" },
+    ];
+
+    const context = buildReviewerWorkspaceContext({
+      existingFiles: [],
+      workspace: workspace(changed),
+      reviewRequest: "Review useBooks.ts and App.tsx.",
+    });
+
+    expect(context.fileExcerpts.slice(0, 2).map((file) => file.path)).toEqual([
+      "src/hooks/useBooks.ts",
+      "src/App.tsx",
+    ]);
+    expect(context.missingRequestedPaths).toEqual([]);
+  });
+
+  it("leaves an ambiguous bare filename unmatched", () => {
+    const changed = [
+      { path: "src/features/books/Card.tsx", content: "export const Card = () => null;" },
+      { path: "src/features/auth/Card.tsx", content: "export const Card = () => null;" },
+    ];
+
+    const context = buildReviewerWorkspaceContext({
+      existingFiles: [],
+      workspace: workspace(changed),
+      reviewRequest: "Review Card.tsx.",
+    });
+
+    expect(context.missingRequestedPaths).toEqual(["Card.tsx"]);
+  });
+
+  it("keeps a genuinely absent bare filename in missingRequestedPaths", () => {
+    const changed = [
+      { path: "src/App.tsx", content: "export default function App() { return null; }" },
+    ];
+
+    const context = buildReviewerWorkspaceContext({
+      existingFiles: [],
+      workspace: workspace(changed),
+      reviewRequest: "Review MissingPanel.tsx.",
+    });
+
+    expect(context.missingRequestedPaths).toEqual(["MissingPanel.tsx"]);
+  });
+
   it("keeps selection and assembled-prompt stats directly comparable", () => {
     const changed = [
       { path: "package.json", content: "p".repeat(2_000) },

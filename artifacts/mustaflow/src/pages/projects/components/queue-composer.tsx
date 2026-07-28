@@ -46,6 +46,10 @@ import { PlanTemplatesPicker } from "./plan-templates-picker";
 import { PlanHistoryPanel } from "./plan-history";
 import type { StructuredPlan } from "./plan-card";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
+import {
+  resolveBuilderComposerIntent,
+  type BuilderComposerIntent,
+} from "@/lib/builder-followup-submit";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 type AgentType = "planning" | "main";
@@ -206,6 +210,8 @@ interface QueueComposerProps {
   hasFailedBuild?: boolean;
   hasContainerError?: boolean;
   hasCodeQuality?: boolean;
+  /** Whether this project already has a completed Builder task. */
+  hasCompletedTask?: boolean;
 }
 
 export function QueueComposer({
@@ -234,6 +240,7 @@ export function QueueComposer({
   hasFailedBuild = false,
   hasContainerError = false,
   hasCodeQuality = false,
+  hasCompletedTask = false,
 }: QueueComposerProps) {
   const lsKey = `mustaflow_agent_type_${projectId}`;
   const [agentType, setAgentTypeRaw] = useState<AgentType>(() => {
@@ -1223,11 +1230,12 @@ export function QueueComposer({
       );
       // Pass the active developer intent (persisted badge) first; fall back to
       // client-detected intent so the server skips the classifier when possible.
-      const detectedIntent: Parameters<typeof onSingleSend>[1] = activeIntent
-        ? activeIntent
-        : clientIntent === "plan" || clientIntent === "converse"
-          ? clientIntent
-          : undefined;
+      const detectedIntent: Parameters<typeof onSingleSend>[1] = resolveBuilderComposerIntent({
+        activeIntent: activeIntent as BuilderComposerIntent | null,
+        localIntent: clientIntent,
+        hasCompletedTask,
+        routingAgentIdentity: routingHint?.agentIdentity,
+      });
       const brainstormCtx = brainstormContextRef.current ?? undefined;
       brainstormContextRef.current = null;
       onSingleSend(
@@ -1278,6 +1286,8 @@ export function QueueComposer({
     attachments,
     isListening,
     stopVoiceDictation,
+    hasCompletedTask,
+    routingHint?.agentIdentity,
   ]);
 
   const handleKeyDown = useCallback(

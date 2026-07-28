@@ -2,6 +2,9 @@ import { createRoot } from "react-dom/client";
 import * as Sentry from "@sentry/react";
 import App from "./App";
 import "./index.css";
+import { installBuilderChunkRecovery } from "./lib/builder-chunk-recovery";
+
+installBuilderChunkRecovery();
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 if (sentryDsn) {

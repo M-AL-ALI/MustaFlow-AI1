@@ -83,6 +83,8 @@ Do not rewrite the user's code — only describe what to change. The auto-fix tu
 
 export interface ArchitectInput {
   userRequest: string;
+  /** The focused review instruction, kept separate from the originating user request. */
+  reviewBrief?: string;
   agentMode: AgentMode;
   /** Structured plan from Plan Mode, if any. */
   planContext?: Record<string, unknown> | null;
@@ -148,6 +150,9 @@ export function assembleArchitectReviewPrompt(input: ArchitectInput): {
   const summarySection = input.assistantSummary
     ? `\n\nBUILDER ASSISTANT SUMMARY:\n${input.assistantSummary.slice(0, 1000)}`
     : "";
+  const reviewBriefSection = input.reviewBrief
+    ? `REVIEW BRIEF:\n${input.reviewBrief.slice(0, 2000)}\n\n`
+    : "";
 
   const warningsSection =
     input.knownWarnings && input.knownWarnings.length > 0
@@ -157,7 +162,7 @@ export function assembleArchitectReviewPrompt(input: ArchitectInput): {
   const userMessage = `USER REQUEST:
 ${input.userRequest.slice(0, 4000)}
 
-BUILDER AGENT MODE: ${input.agentMode}${planSection}
+${reviewBriefSection}BUILDER AGENT MODE: ${input.agentMode}${planSection}
 
 DIFF:
 ${diffSection}${commandsSection}${excerptsSection}${summarySection}${warningsSection}

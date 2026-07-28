@@ -152,6 +152,7 @@ describe("Builder Wave 7B completion honesty", () => {
         projectId: 37,
         taskId: 111,
         agentMode: "lite",
+        userPrompt: "Build the requested dashboard with a reviewed React scaffold.",
         existingFiles: initialFiles,
       },
       workspace,
@@ -202,6 +203,7 @@ describe("Builder Wave 7B completion honesty", () => {
         projectId: 37,
         taskId: 111,
         agentMode: "lite",
+        userPrompt: "Build the requested dashboard with a reviewed React scaffold.",
         existingFiles: initialFiles,
       },
       workspace,
@@ -229,6 +231,8 @@ describe("Builder Wave 7B completion honesty", () => {
     expect(result.observation).toContain("reviewerPayloadStats=");
     expect(mocks.architectReview).toHaveBeenCalledWith(
       expect.objectContaining({
+        userRequest: "Build the requested dashboard with a reviewed React scaffold.",
+        reviewBrief: "Review the fresh scaffold.",
         diff: {
           filesAdded: ["src/new.ts"],
           filesModified: ["src/App.tsx"],
