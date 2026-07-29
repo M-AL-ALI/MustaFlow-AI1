@@ -211,18 +211,22 @@ export function SlideOutNav() {
 
   return (
     <>
-      {/* Fixed logo button — always visible */}
+      {/* Fixed NabuFlow corner brand — always visible while the drawer is closed. */}
       <button
         onClick={() => setOpen(true)}
-        aria-label="Open navigation"
+        aria-label="Open NabuFlow navigation"
         aria-hidden={open}
         tabIndex={open ? -1 : 0}
+        data-testid="nabuflow-corner-brand"
         className={cn(
-          "fixed top-3 left-3 z-50 h-9 w-9 rounded-xl bg-sidebar border border-border shadow-md flex items-center justify-center hover:bg-muted transition-all",
+          "fixed top-2 left-2 z-50 h-12 w-12 rounded-xl bg-sidebar border border-border shadow-md flex flex-col items-center justify-center gap-0.5 hover:bg-muted transition-all",
           open ? "pointer-events-none opacity-0" : "opacity-100",
         )}
       >
-        <img src={nabuFlowLogoUrl} alt="NabuFlow" className="h-6 w-6 object-contain" />
+        <img src={nabuFlowLogoUrl} alt="" aria-hidden="true" className="h-6 w-6 object-contain" />
+        <span className="text-[8px] font-bold leading-none tracking-tight text-foreground">
+          NabuFlow
+        </span>
       </button>
 
       {/* Backdrop */}

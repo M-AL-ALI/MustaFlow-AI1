@@ -47,3 +47,14 @@ unchanged. Landing, company pages, Ora, and Orax were not changed.
 - ESLint on changed TypeScript/TSX files: pass
 - Production Vite build: pass
 
+## Corner wordmark amendment
+
+The collapsed top-corner navigation trigger now includes both the NabuFlow mark
+and a visible `NabuFlow` wordmark. It remains one compact 48-by-48 control and
+continues to fade out and become non-interactive when the full navigation drawer
+opens.
+
+- `task-2-corner-wordmark.png` — production-shaped project workspace with the
+  combined NabuFlow mark and wordmark visible in the top-left corner.
+- Browser measurement: one corner-brand control at `(8, 8)`, `48 × 48`, with
+  visible text `NabuFlow`.

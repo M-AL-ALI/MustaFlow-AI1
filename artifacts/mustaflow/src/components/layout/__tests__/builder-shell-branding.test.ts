@@ -9,7 +9,9 @@ const source = readFileSync(path.join(directory, "../slide-out-nav.tsx"), "utf8"
 describe("NabuFlow builder shell branding", () => {
   it("uses the dedicated NabuFlow mark and wordmark", () => {
     expect(source).toContain('"/logos/nabuflow-icon.png"');
-    expect(source).toContain('alt="NabuFlow"');
+    expect(source).toContain('data-testid="nabuflow-corner-brand"');
+    expect(source).toContain('aria-label="Open NabuFlow navigation"');
+    expect(source.match(/>\s*NabuFlow\s*<\/span>/g)).toHaveLength(2);
     expect(source).toContain(">NabuFlow</span>");
     expect(source).not.toContain('"/logo.png"');
     expect(source).not.toContain(">MustaFlow</span>");
