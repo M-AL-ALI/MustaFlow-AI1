@@ -174,6 +174,11 @@ import {
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
 import { QATapeInline } from "./components/qa-tape-inline";
 import { InlineBuildResults } from "./components/inline-build-results";
+import {
+  appendNarrationEntry,
+  InlineNarrationStream,
+  type InlineNarrationEntry,
+} from "./components/inline-narration-stream";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -1105,6 +1110,7 @@ export default function ProjectWorkspacePage() {
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [liveQATapeEvents, setLiveQATapeEvents] = useState<QATapeEvent[]>([]);
+  const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
   const [, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
@@ -2008,7 +2014,7 @@ export default function ProjectWorkspacePage() {
     if (chatAtBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, activeTaskId, liveQATapeEvents]);
+  }, [messages, activeTaskId, liveQATapeEvents, liveNarrationEvents]);
 
   // Subscribe to the SSE event stream for the active task. When the server
   // emits "page_map_updated" (guaranteed before "completed"), invalidate the
@@ -2019,6 +2025,7 @@ export default function ProjectWorkspacePage() {
     seenPageMapEventIdsRef.current = new Set();
     setAgentPrompts([]);
     setLiveQATapeEvents([]);
+    setLiveNarrationEvents([]);
     setLiveCodeBuffer("");
     calmFilePathsRef.current = new Set();
     setCalmFileCount(0);
@@ -2051,6 +2058,14 @@ export default function ProjectWorkspacePage() {
               },
             ].sort((left, right) => left.id - right.id);
           });
+        }
+        if (event.eventType === "narration" && event.message) {
+          setLiveNarrationEvents((current) =>
+            appendNarrationEntry(current, {
+              id: event.id,
+              text: event.message ?? "",
+            }),
+          );
         }
         if (event.eventType === "generate_image") {
           const generatedImage = parseZeroGeneratedImageEvent(projectId, {
@@ -4153,14 +4168,17 @@ export default function ProjectWorkspacePage() {
                             | undefined;
                           return payload?.kind === "report" && payload.taskId === activeTaskId;
                         }) && (
-                          <div className="flex justify-start">
-                            <QATapeInline
-                              projectId={projectId}
-                              taskId={activeTaskId}
-                              live
-                              liveEvents={liveQATapeEvents}
-                              className="max-w-[90%] rounded-xl rounded-bl-sm border border-border bg-muted px-3 py-2"
-                            />
+                          <div className="max-w-[90%] space-y-2">
+                            <InlineNarrationStream entries={liveNarrationEvents} live />
+                            <div className="flex justify-start">
+                              <QATapeInline
+                                projectId={projectId}
+                                taskId={activeTaskId}
+                                live
+                                liveEvents={liveQATapeEvents}
+                                className="max-w-full rounded-xl rounded-bl-sm border border-border bg-muted px-3 py-2"
+                              />
+                            </div>
                           </div>
                         )}
 
