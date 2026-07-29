@@ -1204,6 +1204,10 @@ export default function ProjectWorkspacePage() {
 
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [buildRefreshCount, setBuildRefreshCount] = useState(0);
+  const [previewNavigationRequest, setPreviewNavigationRequest] = useState<{
+    path: string;
+    requestId: number;
+  } | null>(null);
   /** Ref holding the most recent ProjectFilesChangedPayload — updated by SSE handler. */
   const filesPayloadRef = useRef<ProjectFilesChangedPayload | null>(null);
   /** Incrementing seq so PreviewTab can react to new payloads even if the ref content changed. */
@@ -4713,6 +4717,7 @@ export default function ProjectWorkspacePage() {
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
                 refreshTrigger={buildRefreshCount}
+                navigationRequest={previewNavigationRequest}
                 filesPayloadRef={filesPayloadRef}
                 filesPayloadSeq={filesPayloadSeq}
                 isTaskStaged={
@@ -4849,7 +4854,12 @@ export default function ProjectWorkspacePage() {
                 isBuilding={project.status === "building"}
                 isSyncingAfterEdit={pageMapSyncing}
                 onSyncCleared={handlePageMapSyncCleared}
-                onSwitchToPreview={() => setActiveTab("preview")}
+                onSwitchToPreview={(path) => {
+                  if (path) {
+                    setPreviewNavigationRequest({ path, requestId: Date.now() });
+                  }
+                  setActiveTab("preview");
+                }}
                 onSwitchToCode={() => setActiveTab("code")}
                 onSwitchToChat={(prefill) => {
                   switchLeftPanel("chat");

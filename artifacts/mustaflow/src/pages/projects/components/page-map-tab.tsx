@@ -39,6 +39,10 @@ import {
   AlertTriangle,
   Sparkles,
   Filter,
+  ArrowUpRight,
+  CircleCheck,
+  ListTree,
+  Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -52,6 +56,12 @@ import {
 } from "./page-detail-panel";
 import { BlocksPanel } from "./blocks-panel";
 import { EdgeDetailPanel, type PageMapEdgeState } from "./edge-detail-panel";
+import {
+  pageCardStatus,
+  pagePurpose,
+  pageRouteFromFilePath,
+  pageRouteIsNavigable,
+} from "./page-map-card-model";
 
 type Platform = "web" | "ios" | "android";
 
@@ -156,6 +166,7 @@ export function PageMapTab({
   onSwitchToChat,
 }: PageMapTabProps) {
   const [platform, setPlatform] = useState<Platform>("web");
+  const [view, setView] = useState<"contents" | "connections">("contents");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "issues" | "built" | "planned">("all");
@@ -166,6 +177,9 @@ export function PageMapTab({
   const viewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1 });
   const queryClient = useQueryClient();
   const syncStartedRef = useRef(false);
+  const seenNodeIdsRef = useRef<Set<string>>(new Set());
+  const freshNodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [freshNodeIds, setFreshNodeIds] = useState<Set<string>>(new Set());
   // IDs of nodes deleted locally but not yet flushed to the server.
   // Effect 1 filters these out so background refetches can't resurrect them.
   const pendingDeletedNodeIdsRef = useRef<Set<string>>(new Set());
@@ -217,7 +231,26 @@ export function PageMapTab({
   // accidentally filter nodes that happen to share an ID on the new platform.
   useEffect(() => {
     pendingDeletedNodeIdsRef.current.clear();
+    seenNodeIdsRef.current.clear();
+    setFreshNodeIds(new Set());
   }, [platform]);
+
+  useEffect(() => {
+    const currentIds = new Set(nodes.map((node) => node.id));
+    const addedIds = nodes
+      .filter((node) => !seenNodeIdsRef.current.has(node.id))
+      .map((node) => node.id);
+    seenNodeIdsRef.current = currentIds;
+    if (addedIds.length === 0) return;
+
+    setFreshNodeIds(new Set(addedIds));
+    if (freshNodeTimerRef.current) clearTimeout(freshNodeTimerRef.current);
+    freshNodeTimerRef.current = setTimeout(() => setFreshNodeIds(new Set()), 900);
+
+    return () => {
+      if (freshNodeTimerRef.current) clearTimeout(freshNodeTimerRef.current);
+    };
+  }, [nodes]);
 
   const platformData = mapResponse?.pageMapData?.[platform];
   const hasNodes = (platformData?.nodes?.length ?? 0) > 0 || nodes.length > 0;
@@ -240,7 +273,7 @@ export function PageMapTab({
   }, [onSwitchToPreview]);
 
   const handlePreviewClick = useCallback((filePath: string) => {
-    onSwitchToPreviewRef.current(filePath);
+    onSwitchToPreviewRef.current(pageRouteFromFilePath(filePath));
   }, []);
 
   // Effect 1: load nodes from server — only when server data or platform changes,
@@ -907,6 +940,51 @@ export function PageMapTab({
     <div className="flex flex-col h-full bg-background overflow-hidden relative">
       {/* Top toolbar */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border bg-card/60 z-10">
+        <div className="mr-2 min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-foreground">Pages</h2>
+            {hasNodes && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                {nodes.length}
+              </span>
+            )}
+          </div>
+          <p className="hidden text-[10px] text-muted-foreground lg:block">
+            A living table of contents for your app
+          </p>
+        </div>
+
+        <div className="flex shrink-0 rounded-lg border border-border bg-muted p-0.5">
+          <button
+            type="button"
+            onClick={() => setView("contents")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+              view === "contents"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ListTree className="h-3 w-3" />
+            Contents
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("connections")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+              view === "connections"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Network className="h-3 w-3" />
+            Connections
+          </button>
+        </div>
+
+        <div className="w-px h-5 bg-border shrink-0" />
+
         {/* Platform switcher */}
         <div className="flex bg-muted border border-border rounded-lg p-0.5 shrink-0">
           {PLATFORMS.map(({ key, label, Icon }) => (
@@ -928,7 +1006,7 @@ export function PageMapTab({
 
         <div className="w-px h-5 bg-border shrink-0" />
 
-        {platform === "web" && (
+        {platform === "web" && view === "connections" && (
           <>
             <Button
               variant="outline"
@@ -1007,6 +1085,18 @@ export function PageMapTab({
           </>
         )}
 
+        {platform === "web" && view === "contents" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-xs text-muted-foreground"
+            onClick={handleAddPage}
+          >
+            <FilePlus className="h-3 w-3" />
+            Add page
+          </Button>
+        )}
+
         {(isBuilding || isSyncingAfterEdit || analyzePageMap.isPending) && (
           <div className="ml-auto flex items-center gap-1.5 text-[11px] text-primary font-medium">
             <span className="relative flex h-2 w-2">
@@ -1014,14 +1104,14 @@ export function PageMapTab({
               <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
             {isSyncingAfterEdit || analyzePageMap.isPending
-              ? "Syncing page map…"
-              : "Updating map after build…"}
+              ? "Refreshing your pages..."
+              : "Adding new pages..."}
           </div>
         )}
       </div>
 
       {/* Health summary — only when there are wiring issues on the active platform */}
-      {platform === "web" && hasNodes && issuesCount > 0 && (
+      {platform === "web" && view === "connections" && hasNodes && issuesCount > 0 && (
         <div className="shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/5 z-10">
           <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
           <span className="text-[11px] text-amber-200">
@@ -1060,6 +1150,17 @@ export function PageMapTab({
             onAnalyze={handleReanalyze}
             isAnalyzing={analyzePageMap.isPending}
             onAddPage={handleAddPage}
+          />
+        ) : view === "contents" ? (
+          <PageContentsView
+            nodes={nodes}
+            freshNodeIds={freshNodeIds}
+            onOpenPreview={(route) => onSwitchToPreview(route)}
+            onOpenDetails={(nodeId) => {
+              setSelectedEdgeId(null);
+              setSelectedNodeId(nodeId);
+              setView("connections");
+            }}
           />
         ) : (
           <ReactFlow
@@ -1106,38 +1207,170 @@ export function PageMapTab({
         )}
 
         {/* Side panel — node or edge, mutually exclusive */}
-        <PageDetailPanel
-          node={selectedEdgeId ? null : selectedNodeState}
-          incoming={selectedIncoming}
-          outgoing={selectedOutgoing}
-          availableTargets={availableTargets}
-          isOrphan={selectedNodeId ? !!connectivity.get(selectedNodeId)?.isOrphan : false}
-          isDeadEnd={selectedNodeId ? !!connectivity.get(selectedNodeId)?.isDeadEnd : false}
-          onClose={() => setSelectedNodeId(null)}
-          onSave={handleDetailSave}
-          onFileOpen={handleFileOpen}
-          onModifyPage={handleModifyPage}
-          onDelete={handleDeleteNode}
-          onJumpToNode={handleJumpToNode}
-          onWireTo={handleWireTo}
-          onUnwire={handleUnwire}
-          onAskAiToWire={handleAskAiToWire}
-          blocksSlot={
-            selectedNode && !selectedNode.planned && selectedNode.filePath ? (
-              <BlocksPanel
-                projectId={projectId}
-                filePath={selectedNode.filePath}
-                onAskAiToAdapt={onSwitchToChat}
-              />
-            ) : null
-          }
-        />
-        <EdgeDetailPanel
-          edge={selectedNodeId ? null : selectedEdgeState}
-          onClose={() => setSelectedEdgeId(null)}
-          onSave={handleEdgeSave}
-          onDelete={handleEdgeDelete}
-        />
+        {view === "connections" && (
+          <>
+            <PageDetailPanel
+              node={selectedEdgeId ? null : selectedNodeState}
+              incoming={selectedIncoming}
+              outgoing={selectedOutgoing}
+              availableTargets={availableTargets}
+              isOrphan={selectedNodeId ? !!connectivity.get(selectedNodeId)?.isOrphan : false}
+              isDeadEnd={selectedNodeId ? !!connectivity.get(selectedNodeId)?.isDeadEnd : false}
+              onClose={() => setSelectedNodeId(null)}
+              onSave={handleDetailSave}
+              onFileOpen={handleFileOpen}
+              onModifyPage={handleModifyPage}
+              onDelete={handleDeleteNode}
+              onJumpToNode={handleJumpToNode}
+              onWireTo={handleWireTo}
+              onUnwire={handleUnwire}
+              onAskAiToWire={handleAskAiToWire}
+              blocksSlot={
+                selectedNode && !selectedNode.planned && selectedNode.filePath ? (
+                  <BlocksPanel
+                    projectId={projectId}
+                    filePath={selectedNode.filePath}
+                    onAskAiToAdapt={onSwitchToChat}
+                  />
+                ) : null
+              }
+            />
+            <EdgeDetailPanel
+              edge={selectedNodeId ? null : selectedEdgeState}
+              onClose={() => setSelectedEdgeId(null)}
+              onSave={handleEdgeSave}
+              onDelete={handleEdgeDelete}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PageContentsView({
+  nodes,
+  freshNodeIds,
+  onOpenPreview,
+  onOpenDetails,
+}: {
+  nodes: Node[];
+  freshNodeIds: Set<string>;
+  onOpenPreview: (route: string) => void;
+  onOpenDetails: (nodeId: string) => void;
+}) {
+  const sortedNodes = [...nodes].sort((left, right) => {
+    const leftData = left.data as PageNodeData;
+    const rightData = right.data as PageNodeData;
+    if (!!leftData.planned !== !!rightData.planned) return leftData.planned ? 1 : -1;
+    const leftRoute = pageRouteFromFilePath(leftData.filePath, leftData.notes);
+    const rightRoute = pageRouteFromFilePath(rightData.filePath, rightData.notes);
+    if (leftRoute === "/" && rightRoute !== "/") return -1;
+    if (rightRoute === "/" && leftRoute !== "/") return 1;
+    return leftRoute.localeCompare(rightRoute);
+  });
+
+  return (
+    <div className="h-full overflow-y-auto px-5 py-6 sm:px-7">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-5 flex items-end justify-between gap-4">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">Your app at a glance</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Open any built page in Preview. Planned and dynamic pages open their details.
+            </p>
+          </div>
+          <span className="text-[11px] text-muted-foreground">
+            {nodes.length} {nodes.length === 1 ? "page" : "pages"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+          {sortedNodes.map((node, index) => {
+            const data = node.data as PageNodeData;
+            const route = pageRouteFromFilePath(data.filePath, data.notes);
+            const routeLabel = data.planned && !data.filePath ? "Not built yet" : route;
+            const status = pageCardStatus(data);
+            const navigable = pageRouteIsNavigable(route, data.planned);
+            const isFresh = freshNodeIds.has(node.id);
+            const statusClass =
+              status === "Ready"
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                : status === "Needs attention"
+                  ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                  : status === "Updating" || status === "New"
+                    ? "bg-primary/10 text-primary border-primary/20"
+                    : "bg-muted text-muted-foreground border-border";
+
+            return (
+              <button
+                key={node.id}
+                type="button"
+                data-testid={`page-map-card-${node.id}`}
+                onClick={() => (navigable ? onOpenPreview(route) : onOpenDetails(node.id))}
+                className={cn(
+                  "group rounded-2xl border border-border bg-card/45 p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-card hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                  isFresh && "animate-in fade-in slide-in-from-bottom-2 duration-500",
+                )}
+                style={
+                  isFresh
+                    ? {
+                        animationDelay: `${Math.min(index * 60, 300)}ms`,
+                        animationFillMode: "both",
+                      }
+                    : undefined
+                }
+                aria-label={
+                  navigable
+                    ? `Open ${data.label} at ${route} in Preview`
+                    : `View details for ${data.label}`
+                }
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/8 text-primary">
+                    {status === "Ready" ? (
+                      <CircleCheck className="h-4 w-4" />
+                    ) : (
+                      <Globe className="h-4 w-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h4 className="truncate text-sm font-semibold text-foreground">
+                          {data.label}
+                        </h4>
+                        <p className="mt-0.5 truncate font-mono text-[11px] text-primary/80">
+                          {routeLabel}
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                          statusClass,
+                        )}
+                      >
+                        {status}
+                      </span>
+                    </div>
+                    <p className="mt-3 line-clamp-2 min-h-8 text-xs leading-relaxed text-muted-foreground">
+                      {pagePurpose(data)}
+                    </p>
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/50 pt-3">
+                      <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] capitalize text-muted-foreground">
+                        {data.pageType === "other" ? "Page" : data.pageType}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary opacity-80 transition-opacity group-hover:opacity-100">
+                        {navigable ? "Open in Preview" : "View details"}
+                        <ArrowUpRight className="h-3 w-3" />
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1158,10 +1391,11 @@ function EmptyState({
         <MapPin className="h-8 w-8 text-primary/60" />
       </div>
       <div>
-        <div className="text-base font-semibold text-foreground">No pages mapped yet</div>
+        <div className="text-base font-semibold text-foreground">
+          Your app&apos;s pages will appear here as Zero builds
+        </div>
         <div className="text-sm text-muted-foreground mt-1 max-w-xs">
-          Analyze your app to discover existing pages, or add placeholder pages to plan your
-          structure first.
+          Start with a page idea in Chat, or map an existing app when you are ready.
         </div>
       </div>
       <div className="flex items-center gap-3">

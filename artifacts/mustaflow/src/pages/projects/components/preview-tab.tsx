@@ -157,6 +157,8 @@ type PreviewTabProps = {
   filesPayloadRef?: React.RefObject<ProjectFilesChangedPayload | null>;
   /** Increments each time a new files payload arrives — triggers the WC sync effect. */
   filesPayloadSeq?: number;
+  /** A page-map card can request a concrete route without coupling to Preview internals. */
+  navigationRequest?: { path: string; requestId: number } | null;
   /**
    * When true the active task is in needs_review / staged state. A banner is shown
    * informing the user that changes are staged and the preview reflects the last live
@@ -197,6 +199,7 @@ export function PreviewTab({
   refreshTrigger,
   filesPayloadRef,
   filesPayloadSeq,
+  navigationRequest,
   isTaskStaged,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
@@ -595,6 +598,18 @@ export function PreviewTab({
     },
     [historyIndex, pathHistory],
   );
+
+  const handledNavigationRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!navigationRequest || handledNavigationRequestRef.current === navigationRequest.requestId) {
+      return;
+    }
+    handledNavigationRequestRef.current = navigationRequest.requestId;
+    navigateTo(navigationRequest.path);
+    // The request ID is the one-shot signal. navigateTo intentionally carries
+    // local history state and must not replay the same external request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigationRequest?.requestId]);
 
   const goBack = useCallback(() => {
     setHistoryIndex((idx) => {
