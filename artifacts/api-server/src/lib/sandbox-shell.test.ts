@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { join, relative } from "node:path";
 import {
   SandboxShellSession,
   buildSandboxEnvironment,
@@ -74,8 +75,15 @@ describe("SandboxShellSession", () => {
     const files: SandboxWorkspaceFile[] = [
       {
         path: "verify.mjs",
-        content:
-          "console.log('sandbox-executed'); console.log('db-secret=' + String(Boolean(process.env.DATABASE_URL))); console.log('x'.repeat(500));",
+        content: [
+          "import { existsSync } from 'node:fs';",
+          "import { relative } from 'node:path';",
+          "const xdg = process.env.XDG_CONFIG_HOME ?? '';",
+          "console.log('sandbox-executed');",
+          "console.log('db-secret=' + String(Boolean(process.env.DATABASE_URL)));",
+          "console.log('xdg-local=' + String(existsSync(xdg) && relative(process.cwd(), xdg) === '.config'));",
+          "console.log('x'.repeat(500));",
+        ].join("\n"),
       },
     ];
 
@@ -90,6 +98,7 @@ describe("SandboxShellSession", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("sandbox-executed");
       expect(result.stdout).toContain("db-secret=false");
+      expect(result.stdout).toContain("xdg-local=true");
       expect(result.stdout).not.toContain("production-secret");
       expect(result.outputTruncated).toBe(true);
       expect(
@@ -102,10 +111,23 @@ describe("SandboxShellSession", () => {
   });
 
   it("builds an allowlist environment instead of inheriting server secrets", () => {
-    const env = buildSandboxEnvironment("C:\\sandbox");
-    expect(env.DATABASE_URL).toBeUndefined();
-    expect(env.OPENAI_API_KEY).toBeUndefined();
-    expect(env.CI).toBe("true");
-    expect(env.HOME).toBe("C:\\sandbox");
+    const root = join(process.cwd(), "sandbox-root");
+    const hostXdgConfig = join(process.cwd(), "host-xdg-config");
+    const previousXdgConfig = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = hostXdgConfig;
+    try {
+      const env = buildSandboxEnvironment(root);
+      expect(env.DATABASE_URL).toBeUndefined();
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.CI).toBe("true");
+      expect(env.HOME).toBe(root);
+      expect(env.XDG_CONFIG_HOME).toBe(join(root, ".config"));
+      expect(relative(root, env.XDG_CONFIG_HOME!)).toBe(".config");
+      expect(env.XDG_CONFIG_HOME).not.toBe(hostXdgConfig);
+      expect(env.XDG_CACHE_HOME).toBeUndefined();
+    } finally {
+      if (previousXdgConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdgConfig;
+    }
   });
 });

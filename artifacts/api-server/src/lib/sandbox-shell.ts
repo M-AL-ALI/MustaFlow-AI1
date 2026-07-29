@@ -491,6 +491,7 @@ export function buildSandboxEnvironment(root: string): NodeJS.ProcessEnv {
     TMPDIR: join(root, ".tmp"),
     TMP: join(root, ".tmp"),
     TEMP: join(root, ".tmp"),
+    XDG_CONFIG_HOME: join(root, ".config"),
     CI: "true",
     NODE_ENV: "test",
     NODE_NO_WARNINGS: "1",
@@ -652,6 +653,7 @@ export class SandboxShellSession {
     this.root = await mkdtemp(join(tmpdir(), TEMP_PREFIX));
     await Promise.all([
       mkdir(join(this.root, ".tmp"), { recursive: true }),
+      mkdir(join(this.root, ".config"), { recursive: true }),
       mkdir(join(this.root, ".npm-cache"), { recursive: true }),
     ]);
     this.cleanupTimer = setTimeout(() => {
