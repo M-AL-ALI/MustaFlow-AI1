@@ -24,7 +24,6 @@ import {
   getListSuggestionsQueryKey,
   useUpdateProject,
 } from "@workspace/api-client-react";
-import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { AgentIcon } from "@/components/agent-icon";
 import { CreditBalancePill } from "@/components/credit-balance-pill";
 import { BILLING_ENABLED } from "@/lib/billing-flag";
@@ -192,6 +191,11 @@ import {
   mapIntentToSendOptions,
   shouldDeferComposerClearForCreditGate,
 } from "@/lib/builder-followup-submit";
+import {
+  calmPhaseForTaskEvent,
+  getCalmBuilderStatus,
+  type CalmBuilderPhase,
+} from "@/lib/builder-calm-status";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -830,26 +834,27 @@ function ApplyEditButton({
   );
 }
 
-const PRIMARY_TABS = [
+const CORE_WORKSPACE_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
+  { label: "Page map", value: "page-map", icon: Globe },
+  { label: "Plan", value: "plan", icon: ListOrdered },
+];
+
+const ADVANCED_TABS = [
   { label: "Code", value: "code", icon: FileCode2 },
   { label: "Recipes", value: "recipes", icon: Puzzle },
   { label: "Publishing", value: "publishing", icon: Rocket },
   { label: "Manage", value: "manage", icon: Settings },
-];
-
-const ADVANCED_TABS = [
   { label: "Terminal", value: "terminal", icon: TerminalSquare },
   { label: "Canvas", value: "canvas", icon: Paintbrush2 },
-  { label: "Page Map", value: "page-map", icon: Globe },
-  { label: "Tools & Files", value: "tools-files", icon: Blocks },
+  { label: "Project setup", value: "tools-files", icon: Blocks },
   { label: "Integrations", value: "integrations", icon: Plug },
   { label: "Checks", value: "checks", icon: ScanSearch },
   { label: "Security", value: "security", icon: ShieldCheck },
-  { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
+  { label: "Saved context", value: "knowledge", icon: BrainCircuit },
   { label: "Database", value: "database", icon: DatabaseZap },
-  { label: "Runtime", value: "runtime", icon: Cpu },
-  { label: "Git", value: "git", icon: Github },
+  { label: "Server", value: "runtime", icon: Cpu },
+  { label: "GitHub", value: "git", icon: Github },
   { label: "Logs", value: "logs", icon: Wrench },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
@@ -859,7 +864,7 @@ const ADVANCED_TABS = [
   { label: "Checkpoints", value: "checkpoints", icon: RotateCcw },
 ];
 
-const WORKSPACE_TABS = [...PRIMARY_TABS, ...ADVANCED_TABS];
+const WORKSPACE_TABS = [...CORE_WORKSPACE_TABS, ...ADVANCED_TABS];
 
 const QUICK_ACTIONS = [
   "Explain how my app works",
@@ -1135,7 +1140,7 @@ export default function ProjectWorkspacePage() {
     versionB: { id: number; userRequest: string; changelogEntry?: string | null };
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
-  const [liveCodeBuffer, setLiveCodeBuffer] = useState("");
+  const [, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
   // preview_ready / preview_sync_failed events independent of any task.
@@ -1211,7 +1216,8 @@ export default function ProjectWorkspacePage() {
       if (urlTab && valid.includes(urlTab)) return urlTab;
     }
     const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
-    return stored && valid.includes(stored) ? stored : "preview";
+    const visibleByDefault = CORE_WORKSPACE_TABS.map((tab) => tab.value);
+    return stored && visibleByDefault.includes(stored) ? stored : "preview";
   });
   const [moreTabsExpanded, setMoreTabsExpanded] = useState<boolean>(() => {
     try {
@@ -1230,15 +1236,10 @@ export default function ProjectWorkspacePage() {
     const parsed = raw ? Number(raw) : NaN;
     return Number.isFinite(parsed) ? parsed : null;
   });
-  const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history" | "saved">(() => {
-    try {
-      const stored = localStorage.getItem(`mustaflow_lpanel_${projectId}`);
-      if (stored === "files" || stored === "history" || stored === "saved") return stored;
-    } catch {
-      // ignore
-    }
-    return "chat";
-  });
+  const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history" | "saved">("chat");
+  const [calmPhase, setCalmPhase] = useState<CalmBuilderPhase>("idle");
+  const [calmFileCount, setCalmFileCount] = useState(0);
+  const calmFilePathsRef = useRef<Set<string>>(new Set());
   const [agentIdentity, setAgentIdentity] = useState<"planning" | "main">(() => {
     const stored = localStorage.getItem(`mustaflow_agent_type_${projectId}`);
     return stored === "planning" ? "planning" : "main";
@@ -1247,7 +1248,7 @@ export default function ProjectWorkspacePage() {
   const [showAllRecent, setShowAllRecent] = useState(false);
   const [visibleMessageWindow, setVisibleMessageWindow] = useState(20);
   const [chatScrolledUp, setChatScrolledUp] = useState(false);
-  const [historyFocusVersionId, setHistoryFocusVersionId] = useState<number | null>(null);
+  const [historyFocusVersionId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
@@ -1723,6 +1724,19 @@ export default function ProjectWorkspacePage() {
   // Combined busy state — true when either the regular mutation or the streaming fetch is active.
   // Declared early so query refetchInterval options can reference it without a forward-reference.
   const isBusy = sendMessage.isPending || isStreaming;
+  const visibleCalmPhase: CalmBuilderPhase = !isBusy
+    ? "idle"
+    : pendingIsConverse
+      ? "answering"
+      : pendingIsPlan
+        ? "planning"
+        : calmPhase === "idle"
+          ? "building"
+          : calmPhase;
+  const calmStatusText = getCalmBuilderStatus({
+    phase: visibleCalmPhase,
+    fileCount: calmFileCount,
+  });
 
   // ── Project issues detection ────────────────────────────────────────────────
   const projectIssues = useProjectIssues(projectId, containerStatus, project?.builderMode);
@@ -1803,6 +1817,12 @@ export default function ProjectWorkspacePage() {
       // ignore
     }
   }, [projectId, leftPanelTab]);
+
+  useEffect(() => {
+    if (!moreTabsExpanded && leftPanelTab !== "chat") {
+      setLeftPanelTab("chat");
+    }
+  }, [leftPanelTab, moreTabsExpanded]);
 
   useEffect(() => {
     try {
@@ -1928,6 +1948,26 @@ export default function ProjectWorkspacePage() {
     return undefined;
   }, [messages]);
 
+  const latestPlan = useMemo<{
+    plan: StructuredPlan;
+    messageId: string | number;
+  } | null>(() => {
+    if (!messages) return null;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!message || message.role !== "assistant" || !message.planMode || !message.plan) continue;
+      const payload = message.plan as ChatPlanPayload;
+      const kind =
+        payload && typeof payload === "object" ? (payload as { kind?: string }).kind : undefined;
+      if (kind === "report" || kind === "error" || kind === "converse") continue;
+      return {
+        plan: payload as StructuredPlan,
+        messageId: message.id,
+      };
+    }
+    return null;
+  }, [messages]);
+
   useEffect(() => {
     if (chatAtBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -1943,6 +1983,8 @@ export default function ProjectWorkspacePage() {
     seenPageMapEventIdsRef.current = new Set();
     setAgentPrompts([]);
     setLiveCodeBuffer("");
+    calmFilePathsRef.current = new Set();
+    setCalmFileCount(0);
     const seenPromptIds = new Set<string>();
     const es = new EventSource(`/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`);
     taskEventSourceRef.current = es;
@@ -1952,7 +1994,27 @@ export default function ProjectWorkspacePage() {
           id: number;
           eventType: string;
           message?: string;
+          data?: {
+            changedPaths?: string[];
+          };
         };
+        const nextCalmPhase = calmPhaseForTaskEvent(event.eventType, event.message);
+        if (nextCalmPhase) setCalmPhase(nextCalmPhase);
+        if (event.eventType === "file_diff" && event.message) {
+          try {
+            const payload = JSON.parse(event.message) as { path?: string };
+            if (payload.path && !calmFilePathsRef.current.has(payload.path)) {
+              calmFilePathsRef.current.add(payload.path);
+              setCalmFileCount(calmFilePathsRef.current.size);
+            }
+          } catch {
+            // The calm status is optional; malformed detail events stay hidden.
+          }
+        }
+        if (event.eventType === "project_files_changed" && event.data?.changedPaths) {
+          for (const path of event.data.changedPaths) calmFilePathsRef.current.add(path);
+          setCalmFileCount(calmFilePathsRef.current.size);
+        }
         if (
           event.eventType === "page_map_updated" &&
           !seenPageMapEventIdsRef.current.has(event.id)
@@ -2101,6 +2163,7 @@ export default function ProjectWorkspacePage() {
     autoAnalyzedRef.current = true;
     pendingIsPlanRef.current = true;
     setPendingIsPlan(true);
+    setCalmPhase("planning");
     sendMessage.mutate(
       {
         id: projectId,
@@ -2115,11 +2178,13 @@ export default function ProjectWorkspacePage() {
         onSuccess: () => {
           pendingIsPlanRef.current = false;
           setPendingIsPlan(false);
+          setCalmPhase("idle");
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
         },
         onError: () => {
           pendingIsPlanRef.current = false;
           setPendingIsPlan(false);
+          setCalmPhase("idle");
         },
       },
     );
@@ -2177,6 +2242,7 @@ export default function ProjectWorkspacePage() {
         {
           onSuccess: (data) => {
             setPendingBuildStartedAt(null);
+            setCalmPhase("idle");
             pendingIsPlanRef.current = false;
             setPendingIsPlan(false);
             pendingIsConverseRef.current = false;
@@ -2208,6 +2274,7 @@ export default function ProjectWorkspacePage() {
           },
           onError: () => {
             setPendingBuildStartedAt(null);
+            setCalmPhase("idle");
             pendingIsPlanRef.current = false;
             setPendingIsPlan(false);
             pendingIsConverseRef.current = false;
@@ -2339,6 +2406,9 @@ export default function ProjectWorkspacePage() {
       setPendingIsPlan(effectivePlanMode);
       pendingIsConverseRef.current = isLikelyConverse;
       setPendingIsConverse(isLikelyConverse);
+      calmFilePathsRef.current = new Set();
+      setCalmFileCount(0);
+      setCalmPhase(isLikelyConverse ? "answering" : effectivePlanMode ? "planning" : "building");
 
       // For plan/build or background tasks skip streaming and go straight to the regular path
       if (
@@ -2960,10 +3030,6 @@ export default function ProjectWorkspacePage() {
     }
     return null;
   }, [tasksForFeed]);
-  const bgActiveCount = backgroundTasks.filter(
-    (t) => !["completed", "failed", "canceled"].includes(t.status),
-  ).length;
-
   if (projectError || (!projectLoading && !project)) {
     const status = getHttpStatus(projectLoadError);
     const isNotFound = status === 404 || (!projectError && !project);
@@ -3073,11 +3139,13 @@ export default function ProjectWorkspacePage() {
       )}
 
       {/* ── Artifact tab strip (Task #544) ── */}
-      <ArtifactTabs
-        projectId={projectId}
-        activeArtifactId={activeArtifactId}
-        onSelect={setActiveArtifactId}
-      />
+      {moreTabsExpanded && (
+        <ArtifactTabs
+          projectId={projectId}
+          activeArtifactId={activeArtifactId}
+          onSelect={setActiveArtifactId}
+        />
+      )}
 
       {/* ── Top bar ── */}
       <div className="border-b border-border bg-card shrink-0 flex items-center gap-2 px-4 h-12 z-20 relative">
@@ -3156,149 +3224,98 @@ export default function ProjectWorkspacePage() {
               </span>
             )}
         </div>
-        <div className="w-px h-5 bg-border shrink-0" />
-        <div className="flex-1 overflow-x-auto min-w-0">
-          <div className="flex items-stretch h-12">
-            {PRIMARY_TABS.map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.value}
-                  onClick={() => setActiveTab(tab.value)}
-                  data-tab={tab.value}
-                  className={cn(
-                    "relative flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
-                    activeTab === tab.value
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-3 w-3 shrink-0" />
-                  {tab.label}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setMoreTabsExpanded((v) => !v)}
-              className={cn(
-                "flex items-center gap-1 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
-                ADVANCED_TABS.some((t) => t.value === activeTab)
-                  ? "border-primary text-foreground"
-                  : moreTabsExpanded
-                    ? "border-muted-foreground/30 text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-              title={moreTabsExpanded ? "Hide advanced tabs" : "Show advanced tabs"}
-            >
-              {moreTabsExpanded || ADVANCED_TABS.some((t) => t.value === activeTab)
-                ? "Less"
-                : "More ···"}
-            </button>
-            {(moreTabsExpanded || ADVANCED_TABS.some((t) => t.value === activeTab)) &&
-              ADVANCED_TABS.filter(
-                (tab) => tab.value !== "analytics" || project.status === "published",
-              ).map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.value}
-                    onClick={() => setActiveTab(tab.value)}
-                    data-tab={tab.value}
-                    className={cn(
-                      "relative flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
-                      activeTab === tab.value
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3 w-3 shrink-0" />
-                    {tab.label}
-                    {tab.value === "page-map" && pageMapSyncing && (
-                      <span className="relative flex h-1.5 w-1.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-                      </span>
-                    )}
-                    {tab.value === "checks" && cveCriticalHighCount > 0 && (
-                      <span className="ml-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[8px] font-bold leading-none inline-flex items-center justify-center">
-                        {cveCriticalHighCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-          </div>
-        </div>
+        <div className="flex-1" />
         <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={() => {
-              setLeftPanelTab("chat");
-              if (isMobileLayout) setChatDrawerOpen(true);
-            }}
+            onClick={() => setMoreTabsExpanded((value) => !value)}
             className={cn(
-              "flex items-center justify-center h-7 w-7 rounded-lg border transition-colors",
-              isBusy
-                ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+              moreTabsExpanded || ADVANCED_TABS.some((tab) => tab.value === activeTab)
+                ? "border-primary/30 bg-primary/5 text-foreground"
                 : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
-            title={isBusy ? "NabuFlow is working — open chat" : "NabuFlow idle — open chat"}
-            aria-label={isBusy ? "NabuFlow is working" : "NabuFlow idle"}
+            aria-expanded={moreTabsExpanded}
           >
-            <AgentIcon size={14} state={isBusy ? "active" : "idle"} />
+            More
+            <ChevronDown
+              className={cn("h-3 w-3 transition-transform", moreTabsExpanded && "rotate-180")}
+            />
           </button>
-          <ConnectionQualityIndicator
-            reconnectAttempt={streamReconnectAttempt}
-            hasError={streamError}
-          />
-          <SubscriptionTierBadge tier={subscriptionTier} />
-          <NotificationsBell />
-          <CreditBalancePill />
-          <button
-            onClick={startTour}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:bg-muted hover:text-foreground transition-colors"
-            title="Take the workspace tour"
-          >
-            <Map style={{ width: 11, height: 11 }} />
-          </button>
-          {/* Zero agent toggle */}
-          <button
-            onClick={() => setZeroPanelOpen((v) => !v)}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
-              zeroPanelOpen
-                ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
-                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-            title={zeroPanelOpen ? "Close Zero agent panel" : "Open Zero agent panel"}
-          >
-            <DynamicAtom size={13} animate={zeroPanelOpen || !!zeroBgTaskId} className="shrink-0" />
-            Zero
-          </button>
-          {/* Zero background-run progress pill */}
-          {zeroBgTaskId !== null && !zeroPanelOpen && (
-            <button
-              onClick={() => {
-                // Keep zeroBgTaskId so ZeroAgentPanel can reattach to the running task
-                setZeroPanelOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-primary/30 bg-primary/8 text-primary text-[10px] font-medium animate-pulse hover:animate-none hover:bg-primary/15 transition-colors"
-              title="Zero is working in the background — click to view"
-            >
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
-              </span>
-              Zero is working… View
-            </button>
+          {moreTabsExpanded && (
+            <>
+              <ConnectionQualityIndicator
+                reconnectAttempt={streamReconnectAttempt}
+                hasError={streamError}
+              />
+              <SubscriptionTierBadge tier={subscriptionTier} />
+              <NotificationsBell />
+              <CreditBalancePill />
+              <button
+                onClick={startTour}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:bg-muted hover:text-foreground transition-colors"
+                title="Take the workspace tour"
+              >
+                <Map style={{ width: 11, height: 11 }} />
+                Tour
+              </button>
+              <button
+                onClick={() => setZeroPanelOpen((value) => !value)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                  zeroPanelOpen
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+                title={zeroPanelOpen ? "Close advanced assistant" : "Open advanced assistant"}
+              >
+                <DynamicAtom
+                  size={13}
+                  animate={zeroPanelOpen || !!zeroBgTaskId}
+                  className="shrink-0"
+                />
+                Advanced
+              </button>
+              <button
+                onClick={() => setActiveTab("publishing")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors"
+              >
+                <Rocket style={{ width: 12, height: 12 }} /> Publish
+              </button>
+            </>
           )}
-          <button
-            onClick={() => setActiveTab("publishing")}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors"
-          >
-            <Rocket style={{ width: 12, height: 12 }} /> Publish
-          </button>
         </div>
       </div>
+
+      {moreTabsExpanded && (
+        <div className="shrink-0 flex items-center gap-1 overflow-x-auto border-b border-border bg-card/60 px-3 h-9">
+          {ADVANCED_TABS.filter(
+            (tab) => tab.value !== "analytics" || project.status === "published",
+          ).map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.value}
+                onClick={() => setActiveTab(tab.value)}
+                data-tab={tab.value}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition-colors",
+                  activeTab === tab.value
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <Icon className="h-3 w-3 shrink-0" />
+                {tab.label}
+                {tab.value === "checks" && cveCriticalHighCount > 0 && (
+                  <span className="min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[8px] font-bold leading-none inline-flex items-center justify-center">
+                    {cveCriticalHighCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── Pre-flight failure banner ── */}
       {preflightBanner &&
@@ -3388,97 +3405,99 @@ export default function ProjectWorkspacePage() {
                 : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
           }
         >
-          {/* Left panel tab bar: Chat | Files | History | Saved | Zero */}
-          <div className="shrink-0 flex border-b border-border bg-card/60">
-            {(["chat", "files", "history", "saved"] as const).map((t) => {
-              const Icon =
-                t === "files"
-                  ? FileCode2
-                  : t === "history"
-                    ? History
-                    : t === "saved"
-                      ? Bookmark
+          {/* Advanced chat-side surfaces stay one click away without crowding the workspace. */}
+          {moreTabsExpanded && (
+            <div className="shrink-0 flex border-b border-border bg-card/60">
+              {(["chat", "files", "history", "saved"] as const).map((t) => {
+                const Icon =
+                  t === "files"
+                    ? FileCode2
+                    : t === "history"
+                      ? History
+                      : t === "saved"
+                        ? Bookmark
+                        : null;
+                const badge =
+                  t === "files" && files.length > 0
+                    ? files.length
+                    : t === "saved" && pendingSuggestionsCount > 0
+                      ? pendingSuggestionsCount
                       : null;
-              const badge =
-                t === "files" && files.length > 0
-                  ? files.length
-                  : t === "saved" && pendingSuggestionsCount > 0
-                    ? pendingSuggestionsCount
-                    : null;
-              return (
-                <button
-                  key={t}
-                  onClick={() => switchLeftPanel(t)}
-                  className={cn(
-                    "flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-medium transition-colors border-b-2",
-                    leftPanelTab === t
-                      ? "border-primary text-foreground bg-primary/5"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t === "chat" ? (
-                    <AgentIcon size={12} state={isBusy ? "active" : "idle"} />
-                  ) : Icon ? (
-                    <Icon className="h-3 w-3" />
-                  ) : null}
-                  {t === "chat"
-                    ? "Chat"
-                    : t === "files"
-                      ? "Files"
-                      : t === "history"
-                        ? "History"
-                        : "Ideas"}
-                  {badge !== null && (
-                    <span
-                      className={cn(
-                        "ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none relative inline-flex items-center justify-center transition-transform",
-                        t === "saved" && suggestionsAnimating && "scale-125",
-                      )}
-                    >
-                      {t === "saved" && suggestionsAnimating && (
-                        <span className="absolute inset-0 rounded-full bg-primary/40 animate-ping" />
-                      )}
-                      {badge}
-                    </span>
-                  )}
-                  {t === "saved" && suggestionsShowNew && (
-                    <span className="text-[9px] text-primary font-bold animate-pulse">New</span>
-                  )}
-                </button>
-              );
-            })}
-            {/* Zero agent entry in left rail */}
-            <button
-              onClick={() => setZeroPanelOpen((v) => !v)}
-              className={cn(
-                "flex items-center justify-center gap-1.5 py-2 px-2.5 text-[11px] font-medium transition-colors border-b-2 shrink-0",
-                zeroPanelOpen || zeroBgTaskId !== null
-                  ? "border-primary text-primary bg-primary/5"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                return (
+                  <button
+                    key={t}
+                    onClick={() => switchLeftPanel(t)}
+                    className={cn(
+                      "flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-medium transition-colors border-b-2",
+                      leftPanelTab === t
+                        ? "border-primary text-foreground bg-primary/5"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {t === "chat" ? (
+                      <AgentIcon size={12} state={isBusy ? "active" : "idle"} />
+                    ) : Icon ? (
+                      <Icon className="h-3 w-3" />
+                    ) : null}
+                    {t === "chat"
+                      ? "Chat"
+                      : t === "files"
+                        ? "Files"
+                        : t === "history"
+                          ? "History"
+                          : "Ideas"}
+                    {badge !== null && (
+                      <span
+                        className={cn(
+                          "ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none relative inline-flex items-center justify-center transition-transform",
+                          t === "saved" && suggestionsAnimating && "scale-125",
+                        )}
+                      >
+                        {t === "saved" && suggestionsAnimating && (
+                          <span className="absolute inset-0 rounded-full bg-primary/40 animate-ping" />
+                        )}
+                        {badge}
+                      </span>
+                    )}
+                    {t === "saved" && suggestionsShowNew && (
+                      <span className="text-[9px] text-primary font-bold animate-pulse">New</span>
+                    )}
+                  </button>
+                );
+              })}
+              {/* Advanced assistant entry in left rail */}
+              <button
+                onClick={() => setZeroPanelOpen((v) => !v)}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 py-2 px-2.5 text-[11px] font-medium transition-colors border-b-2 shrink-0",
+                  zeroPanelOpen || zeroBgTaskId !== null
+                    ? "border-primary text-primary bg-primary/5"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+                title={zeroPanelOpen ? "Close advanced assistant" : "Open advanced assistant"}
+              >
+                <DynamicAtom size={12} animate={zeroPanelOpen || !!zeroBgTaskId} />
+                Advanced
+              </button>
+              {/* Connection quality indicator + close button for mobile drawer */}
+              {isMobileLayout && (
+                <div className="flex items-center gap-1 pr-1 border-b-2 border-transparent">
+                  <ConnectionQualityIndicator
+                    reconnectAttempt={streamReconnectAttempt}
+                    hasError={streamError}
+                  />
+                  <button
+                    onClick={() => setChatDrawerOpen(false)}
+                    className="px-2 py-2 text-muted-foreground hover:text-foreground transition-colors"
+                    title="Close"
+                    aria-label="Close chat drawer"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                  </button>
+                </div>
               )}
-              title={zeroPanelOpen ? "Close Zero agent panel" : "Open Zero agent panel"}
-            >
-              <DynamicAtom size={12} animate={zeroPanelOpen || !!zeroBgTaskId} />
-              Zero
-            </button>
-            {/* Connection quality indicator + close button for mobile drawer */}
-            {isMobileLayout && (
-              <div className="flex items-center gap-1 pr-1 border-b-2 border-transparent">
-                <ConnectionQualityIndicator
-                  reconnectAttempt={streamReconnectAttempt}
-                  hasError={streamError}
-                />
-                <button
-                  onClick={() => setChatDrawerOpen(false)}
-                  className="px-2 py-2 text-muted-foreground hover:text-foreground transition-colors"
-                  title="Close"
-                  aria-label="Close chat drawer"
-                >
-                  <ChevronRight className="h-3.5 w-3.5 rotate-90" />
-                </button>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* ── PLAN SNAPSHOT VIEWER (overlay over chat when viewing a history plan) ── */}
           {viewingHistoryPlan && (
@@ -3518,49 +3537,38 @@ export default function ProjectWorkspacePage() {
           {leftPanelTab === "chat" && (
             <>
               {/* Chat panel header */}
-              <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
+              <div className="shrink-0 px-4 py-3 border-b border-border/50 flex items-center gap-2">
                 <AgentIcon size={16} state={isBusy ? "active" : "idle"} className="text-primary" />
-                <span className="text-xs font-semibold text-foreground">NabuFlow</span>
+                <span className="text-xs font-semibold text-foreground">Chat</span>
                 <span
-                  className={cn(
-                    "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                    isBusy
-                      ? pendingIsConverse
-                        ? "bg-blue-500/15 text-blue-400"
-                        : pendingIsPlan
-                          ? "bg-secondary/15 text-secondary"
-                          : "bg-primary/15 text-primary"
-                      : "bg-green-500/15 text-green-400",
-                  )}
+                  data-testid="calm-builder-status"
+                  aria-live="polite"
+                  className="ml-auto truncate text-[11px] font-medium text-muted-foreground"
                 >
-                  {isBusy
-                    ? pendingIsConverse
-                      ? "Answering…"
-                      : pendingIsPlan
-                        ? "Planning…"
-                        : "Working…"
-                    : "Ready"}
+                  {calmStatusText}
                 </span>
-                <button
-                  onClick={() => setShowChatHistory((v) => !v)}
-                  title={showChatHistory ? "Back to live chat" : "View chat history"}
-                  className={cn(
-                    "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
-                    showChatHistory
-                      ? "bg-primary/10 text-primary border-primary/20"
-                      : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
-                  )}
-                >
-                  <History className="h-3 w-3" />
-                  {showChatHistory ? "Live" : "History"}
-                </button>
+                {moreTabsExpanded && (
+                  <button
+                    onClick={() => setShowChatHistory((value) => !value)}
+                    title={showChatHistory ? "Back to live chat" : "View chat history"}
+                    className={cn(
+                      "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
+                      showChatHistory
+                        ? "bg-primary/10 text-primary border-primary/20"
+                        : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
+                    )}
+                  >
+                    <History className="h-3 w-3" />
+                    {showChatHistory ? "Live" : "History"}
+                  </button>
+                )}
               </div>
 
               {/* Memory indicator — shown when the AI has a conversation summary */}
-              {!showChatHistory && <MemoryIndicator projectId={projectId} />}
+              {!showChatHistory && moreTabsExpanded && <MemoryIndicator projectId={projectId} />}
 
               {/* Brand profile pill — shown when the user has saved a brand profile */}
-              {!showChatHistory && <BrandPill />}
+              {!showChatHistory && moreTabsExpanded && <BrandPill />}
 
               {/* Chat History overlay */}
               {showChatHistory && (
@@ -3742,8 +3750,6 @@ export default function ProjectWorkspacePage() {
                           const isError = payloadKind === "error";
                           const isTaskQueued = payloadKind === "task-queued";
                           const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
-                          const structuredPlan =
-                            isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
                           return (
                             <div
                               key={msg.id}
@@ -3809,6 +3815,7 @@ export default function ProjectWorkspacePage() {
                                     !isReport &&
                                     !isError &&
                                     payloadKind === "converse" &&
+                                    moreTabsExpanded &&
                                     (() => {
                                       const intentLabel = (
                                         planPayload as { intent?: string } | null | undefined
@@ -3994,15 +4001,17 @@ export default function ProjectWorkspacePage() {
                                     />
                                   )}
                                   {isPlanCard && (
-                                    <PlanCard
-                                      plan={structuredPlan}
-                                      projectId={projectId}
-                                      initialAgentMode={agentMode}
-                                      onBuild={runPlanned}
-                                      onAddKey={handleAddKey}
-                                      disabled={isBusy}
-                                      messageId={msg.id}
-                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveTab("plan")}
+                                      className="mt-2 flex w-full items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-left text-[11px] text-foreground transition-colors hover:bg-primary/10"
+                                    >
+                                      <span>Plan ready</span>
+                                      <span className="inline-flex items-center gap-1 font-medium text-primary">
+                                        View plan
+                                        <ChevronRight className="h-3 w-3" />
+                                      </span>
+                                    </button>
                                   )}
                                 </div>
                               )}
@@ -4156,76 +4165,7 @@ export default function ProjectWorkspacePage() {
                         </div>
                       )}
 
-                      {sendMessage.isPending ? (
-                        pendingIsConverse ? (
-                          <TypingIndicator />
-                        ) : pendingFeedTaskId !== null ? (
-                          <AgentThinkingBubble
-                            projectId={projectId}
-                            taskId={pendingFeedTaskId}
-                            startedAt={pendingBuildStartedAt}
-                            onDismiss={() => {}}
-                            isAtBottom={!chatScrolledUp}
-                            onViewHistory={(versionId) => {
-                              setHistoryFocusVersionId(versionId);
-                              switchLeftPanel("history");
-                            }}
-                          />
-                        ) : (
-                          <div className="flex justify-start">
-                            <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                              <div
-                                className={cn(
-                                  "animate-pulse w-1.5 h-1.5 rounded-full",
-                                  pendingIsPlan ? "bg-secondary" : "bg-primary",
-                                )}
-                              />
-                              <span className="text-muted-foreground">
-                                {pendingIsPlan
-                                  ? "Thinking through the plan…"
-                                  : "MustaFlow is working…"}
-                              </span>
-                              <button
-                                onClick={handleStopStream}
-                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                                title="Cancel build"
-                              >
-                                <Square className="w-2.5 h-2.5 fill-current" />
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      ) : activeTaskId !== null ? (
-                        <>
-                          <AgentThinkingBubble
-                            projectId={projectId}
-                            taskId={activeTaskId}
-                            startedAt={pendingBuildStartedAt}
-                            onDismiss={() => setActiveTaskId(null)}
-                            isAtBottom={!chatScrolledUp}
-                            onViewHistory={(versionId) => {
-                              setHistoryFocusVersionId(versionId);
-                              switchLeftPanel("history");
-                            }}
-                          />
-                          {liveCodeBuffer.length > 0 && (
-                            <div className="flex justify-start animate-in fade-in duration-150">
-                              <div className="max-w-[92%] w-full rounded-xl bg-muted/60 border border-border text-[10px] font-mono text-muted-foreground overflow-hidden">
-                                <div className="px-2 py-1 border-b border-border/50 flex items-center gap-1.5">
-                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                                  <span className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground/70">
-                                    Generating — {liveCodeBuffer.length} chars
-                                  </span>
-                                </div>
-                                <pre className="px-2 py-1.5 max-h-24 overflow-hidden leading-relaxed whitespace-pre-wrap break-all">
-                                  {liveCodeBuffer.slice(-400)}
-                                </pre>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : null}
+                      {sendMessage.isPending && pendingIsConverse ? <TypingIndicator /> : null}
                     </div>
                     {chatScrolledUp && (
                       <button
@@ -4249,104 +4189,8 @@ export default function ProjectWorkspacePage() {
                     )}
                   </div>
 
-                  {/* Status bar */}
-                  <div className="shrink-0 border-t border-border/40">
-                    <>
-                      {/* Bottom status bar */}
-                      <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
-                        {isBusy ? (
-                          <>
-                            <span className="relative flex h-1.5 w-1.5 shrink-0">
-                              <span
-                                className={cn(
-                                  "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                                  pendingIsConverse ? "bg-blue-400" : "bg-primary",
-                                )}
-                              />
-                              <span
-                                className={cn(
-                                  "relative inline-flex rounded-full h-1.5 w-1.5",
-                                  pendingIsConverse ? "bg-blue-400" : "bg-primary",
-                                )}
-                              />
-                            </span>
-                            <span
-                              className={cn(
-                                "text-[10px] font-medium",
-                                pendingIsConverse ? "text-blue-400" : "text-primary",
-                              )}
-                            >
-                              {pendingIsConverse
-                                ? "Answering…"
-                                : pendingIsPlan
-                                  ? "Planning…"
-                                  : "Building…"}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                            <span className="text-[10px] text-muted-foreground font-medium">
-                              Ready
-                            </span>
-                          </>
-                        )}
-                        {files.length > 0 && (
-                          <button
-                            onClick={() => switchLeftPanel("files")}
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                          >
-                            {files.length} file{files.length !== 1 ? "s" : ""}
-                          </button>
-                        )}
-                        {versions && versions.length > 0 && (
-                          <button
-                            onClick={() => switchLeftPanel("history")}
-                            className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-                            title="View checkpoint history"
-                          >
-                            {versions.length} checkpoint{versions.length !== 1 ? "s" : ""}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setBackgroundPanelOpen((v) => !v)}
-                          className={cn(
-                            "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors",
-                            bgActiveCount > 0
-                              ? "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
-                              : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:border-border",
-                          )}
-                          title="Background tasks"
-                        >
-                          <Layers2 className="h-2.5 w-2.5" />
-                          {bgActiveCount > 0
-                            ? `${bgActiveCount} running`
-                            : backgroundTasks.length > 0
-                              ? `${backgroundTasks.length} tasks`
-                              : "Tasks"}
-                        </button>
-                        <div className="ml-auto flex items-center gap-1">
-                          <span
-                            className={cn(
-                              "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border",
-                              agentMode === "pro"
-                                ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                                : agentMode === "power"
-                                  ? "bg-primary/10 text-primary border-primary/20"
-                                  : agentMode === "eco"
-                                    ? "bg-green-500/10 text-green-400 border-green-500/20"
-                                    : "bg-muted text-muted-foreground border-border",
-                            )}
-                          >
-                            {agentMode}
-                          </span>
-                        </div>
-                      </div>
-                    </>
-                  </div>
-
                   {/* Quick action chips — collapsed behind a toggle to save vertical space */}
-                  {!isBusy && !activeBatchId && prompt === "" && (
+                  {moreTabsExpanded && !isBusy && !activeBatchId && prompt === "" && (
                     <div className="shrink-0 px-3 pt-2 pb-1">
                       <button
                         type="button"
@@ -4426,7 +4270,9 @@ export default function ProjectWorkspacePage() {
                   )}
 
                   {/* Task queue panel — shows running / queued / paused tasks above composer */}
-                  <TaskQueuePanel projectId={projectId} onStop={handleStopStream} />
+                  {moreTabsExpanded && (
+                    <TaskQueuePanel projectId={projectId} onStop={handleStopStream} />
+                  )}
 
                   {/* Chat / Queue input */}
                   <div data-tour="chat-input">
@@ -4666,6 +4512,38 @@ export default function ProjectWorkspacePage() {
 
         {/* ── RIGHT: Preview / Tab Content ── */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background relative">
+          <div
+            data-testid="workspace-core-tabs"
+            className="hidden md:flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-3 py-2"
+          >
+            {CORE_WORKSPACE_TABS.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setActiveTab(tab.value)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                    activeTab === tab.value
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                  aria-current={activeTab === tab.value ? "page" : undefined}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {tab.label}
+                  {tab.value === "page-map" && pageMapSyncing && (
+                    <span className="relative flex h-1.5 w-1.5" aria-label="Page map updating">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Mobile bottom tab bar */}
           {isMobileLayout && (
             <div
@@ -4674,8 +4552,8 @@ export default function ProjectWorkspacePage() {
             >
               {[
                 { label: "Preview", value: "preview", icon: Monitor },
-                { label: "Files", value: "tools-files", icon: Blocks },
-                { label: "Publish", value: "publishing", icon: Rocket },
+                { label: "Page map", value: "page-map", icon: Globe },
+                { label: "Plan", value: "plan", icon: ListOrdered },
               ].map(({ label, value, icon: Icon }) => (
                 <button
                   key={value}
@@ -4702,7 +4580,7 @@ export default function ProjectWorkspacePage() {
                 )}
               >
                 <MessageSquare className="h-4 w-4" />
-                Build
+                Chat
               </button>
             </div>
           )}
@@ -4889,6 +4767,53 @@ export default function ProjectWorkspacePage() {
                 })()}
                 onJumpToSecrets={() => setActiveTab("tools-files")}
               />
+            )}
+            {activeTab === "plan" && (
+              <div className="h-full overflow-y-auto bg-background px-5 py-6 sm:px-8">
+                <div className="mx-auto max-w-3xl">
+                  <div className="mb-5">
+                    <h2 className="text-lg font-semibold text-foreground">Plan</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Review the next steps, make changes, then build when you are ready.
+                    </p>
+                  </div>
+                  {latestPlan ? (
+                    <PlanCard
+                      plan={latestPlan.plan}
+                      projectId={projectId}
+                      initialAgentMode={agentMode}
+                      modeOverride={agentMode}
+                      showModeSelector={false}
+                      onBuild={runPlanned}
+                      onAddKey={handleAddKey}
+                      disabled={isBusy}
+                      messageId={latestPlan.messageId}
+                    />
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-border bg-card/30 px-6 py-12 text-center">
+                      <ListOrdered className="mx-auto h-7 w-7 text-primary/70" />
+                      <h3 className="mt-4 text-sm font-semibold text-foreground">
+                        Your plan will appear here
+                      </h3>
+                      <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                        Ask for a plan in Chat, and you can review every step here before anything
+                        is built.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          switchLeftPanel("chat");
+                          if (isMobileLayout) setChatDrawerOpen(true);
+                          setTimeout(() => promptInputRef.current?.focus(), 50);
+                        }}
+                        className="mt-5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                      >
+                        Ask for a plan
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
             {activeTab === "code" && (
               <CodeEditorTab

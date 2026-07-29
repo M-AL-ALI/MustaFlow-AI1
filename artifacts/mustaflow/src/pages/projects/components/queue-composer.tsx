@@ -1823,6 +1823,108 @@ export function QueueComposer({
                       Add queued task
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => setAgentType(agentType === "planning" ? "main" : "planning")}
+                    >
+                      <CheckSquare className="mr-2 h-3.5 w-3.5" />
+                      Plan first
+                      {agentType === "planning" && (
+                        <span className="ml-auto text-[10px] text-primary">on</span>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onRunInBackgroundChange(!_runInBackground)}>
+                      <Layers2 className="mr-2 h-3.5 w-3.5" />
+                      Work in background
+                      {_runInBackground && (
+                        <span className="ml-auto text-[10px] text-primary">on</span>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowTemplatePicker(true)}>
+                      <LayoutTemplate className="mr-2 h-3.5 w-3.5" />
+                      Templates
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onVariantModeChange(!variantMode)}>
+                      <Layers2 className="mr-2 h-3.5 w-3.5" />
+                      Generate variants
+                      {variantMode && <span className="ml-auto text-[10px] text-primary">on</span>}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowPlanHistory(true)}>
+                      <Clock className="mr-2 h-3.5 w-3.5" />
+                      Plan history
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setActiveIntent("debug");
+                        const newId = crypto.randomUUID();
+                        setRows([{ id: newId, text: "Debug this error: " }]);
+                        onPromptValueChange?.("Debug this error: ");
+                      }}
+                    >
+                      <Bug className="mr-2 h-3.5 w-3.5" />
+                      Debug project
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setActiveIntent("review");
+                        const newId = crypto.randomUUID();
+                        setRows([{ id: newId, text: "Review my code for " }]);
+                        onPromptValueChange?.("Review my code for ");
+                      }}
+                    >
+                      <CheckSquare className="mr-2 h-3.5 w-3.5" />
+                      Review project
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setActiveIntent("explain");
+                        const newId = crypto.randomUUID();
+                        setRows([{ id: newId, text: "Explain how " }]);
+                        onPromptValueChange?.("Explain how ");
+                      }}
+                    >
+                      <BookOpenIcon className="mr-2 h-3.5 w-3.5" />
+                      Explain project
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setActiveIntent("refactor");
+                        const newId = crypto.randomUUID();
+                        setRows([{ id: newId, text: "Refactor " }]);
+                        onPromptValueChange?.("Refactor ");
+                      }}
+                    >
+                      <Wrench className="mr-2 h-3.5 w-3.5" />
+                      Improve project
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={disabled}
+                      onSelect={() =>
+                        onSingleSend("Fix all failing tests in this project", "fix_tests")
+                      }
+                    >
+                      <FlaskConical className="mr-2 h-3.5 w-3.5" />
+                      Fix tests
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={disabled}
+                      onSelect={() =>
+                        onSingleSend("Fix all TypeScript type errors in this project", "fix_types")
+                      }
+                    >
+                      <Wrench className="mr-2 h-3.5 w-3.5" />
+                      Fix TypeScript
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={disabled}
+                      onSelect={() =>
+                        onSingleSend("Fix all ESLint violations in this project", "fix_lint")
+                      }
+                    >
+                      <CheckSquare className="mr-2 h-3.5 w-3.5" />
+                      Fix lint
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     {(
                       [
                         { mode: "lite", label: "Lite", desc: "Minimal change" },
@@ -1841,63 +1943,6 @@ export function QueueComposer({
                 </DropdownMenu>
               </>
             )}
-            {/* Plan first / Run in background checkboxes */}
-            <button
-              type="button"
-              onClick={() => setAgentType(agentType === "planning" ? "main" : "planning")}
-              title={
-                agentType === "planning"
-                  ? "Plan first is on — AI will show a plan before building"
-                  : "Enable Plan first — AI will show a plan before building"
-              }
-              className={cn(
-                "flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
-                agentType === "planning"
-                  ? "border-blue-500/30 bg-blue-500/10 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "h-3 w-3 rounded-sm border flex items-center justify-center shrink-0",
-                  agentType === "planning"
-                    ? "border-blue-400 bg-blue-500/20"
-                    : "border-muted-foreground/40",
-                )}
-              >
-                {agentType === "planning" && (
-                  <span className="h-1.5 w-1.5 rounded-sm bg-blue-400 block" />
-                )}
-              </span>
-              Plan first
-            </button>
-            <button
-              type="button"
-              onClick={() => onRunInBackgroundChange(!_runInBackground)}
-              title={
-                _runInBackground
-                  ? "Run in background is on — Main Agent will run asynchronously"
-                  : "Enable background — Main Agent will run asynchronously"
-              }
-              className={cn(
-                "flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
-                _runInBackground
-                  ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "h-3 w-3 rounded-sm border flex items-center justify-center shrink-0",
-                  _runInBackground
-                    ? "border-amber-400 bg-amber-500/20"
-                    : "border-muted-foreground/40",
-                )}
-              >
-                {_runInBackground && <span className="h-1.5 w-1.5 rounded-sm bg-amber-400 block" />}
-              </span>
-              Background
-            </button>
             <div className="ml-auto flex items-center gap-2">
               <div className="hidden">
                 {/* Discuss / Brainstorm pill — opens the full BrainstormPanel */}
@@ -2056,7 +2101,68 @@ export function QueueComposer({
         </div>
       </div>
 
-      {!isBusy && (
+      <div data-testid="builder-mode-picker" className="mt-2 px-3 flex items-center gap-2 min-w-0">
+        <span className="text-[10px] font-medium text-muted-foreground shrink-0">Mode</span>
+        <div className="flex bg-background/70 border border-border rounded-lg p-0.5 min-w-0">
+          {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              disabled={isBusy}
+              onClick={() => onAgentModeChange(mode)}
+              aria-pressed={agentMode === mode}
+              className={cn(
+                "px-2 py-1 text-[9px] uppercase font-bold rounded-md transition-colors",
+                agentMode === mode
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+                isBusy && "cursor-not-allowed opacity-50",
+              )}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          data-testid="deep-reasoning-toggle"
+          disabled={agentMode === "lite" || isBusy}
+          onClick={() => onDeepReasoningChange(!deepReasoning)}
+          aria-pressed={deepReasoning}
+          title={
+            agentMode === "lite"
+              ? "Deep Reasoning is available in Eco, Power, and Pro"
+              : `Deep Reasoning: ${deepReasoning ? "on" : "off"}`
+          }
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[9px] font-bold uppercase transition-colors shrink-0",
+            deepReasoning
+              ? "border-primary/60 bg-primary/15 text-primary"
+              : "border-border text-muted-foreground hover:text-foreground",
+            (agentMode === "lite" || isBusy) && "cursor-not-allowed opacity-40",
+          )}
+        >
+          <Sparkles className="h-2.5 w-2.5" />
+          Deep
+        </button>
+        <span className="truncate text-[9px] text-muted-foreground/70">
+          {deepReasoning
+            ? agentMode === "eco"
+              ? "3 credits"
+              : agentMode === "power"
+                ? "7 credits"
+                : "13 credits"
+            : agentMode === "lite"
+              ? "1 credit"
+              : agentMode === "eco"
+                ? "2 credits"
+                : agentMode === "power"
+                  ? "5 credits"
+                  : "10 credits"}
+        </span>
+      </div>
+
+      {!isBusy && issueCount > 0 && (
         <div className="mt-1.5 px-3 flex items-center gap-2 flex-wrap">
           {/* Fix Issues — only when issueCount > 0 */}
           {issueCount > 0 && (
@@ -2142,7 +2248,7 @@ export function QueueComposer({
           {/* Templates — always visible */}
           <button
             onClick={() => setShowTemplatePicker(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
+            className="hidden items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
             title="Start from a pre-built plan template"
           >
             <LayoutTemplate className="h-3 w-3" /> Templates
@@ -2152,7 +2258,7 @@ export function QueueComposer({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
+                className="hidden items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
                 title="More actions"
               >
                 <MoreHorizontal className="h-3 w-3" />

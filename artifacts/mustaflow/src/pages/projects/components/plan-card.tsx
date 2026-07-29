@@ -483,6 +483,8 @@ export function PlanCard({
   readOnly = false,
   messageId,
   onRestorePlan,
+  modeOverride,
+  showModeSelector = true,
 }: {
   plan: StructuredPlan | null;
   projectId: number;
@@ -493,11 +495,14 @@ export function PlanCard({
   readOnly?: boolean;
   messageId?: string | number;
   onRestorePlan?: (plan: StructuredPlan) => void;
+  modeOverride?: AgentMode;
+  showModeSelector?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("structure");
   const [localMode, setLocalMode] = useState<AgentMode>(
     (plan?.recommendedMode as AgentMode | undefined) ?? initialAgentMode,
   );
+  const effectiveMode = modeOverride ?? localMode;
   const [editState, setEditState] = useState<EditState>(() => {
     const base: EditState = {
       goal: plan?.goal ?? "",
@@ -570,8 +575,8 @@ export function PlanCard({
   const estimatedSeconds = plan?.estimatedBuildSeconds ?? 0;
   const creditCost =
     score > 0
-      ? Math.max(1, Math.round(score * CREDIT_MULTIPLIER[localMode]))
-      : CREDIT_MULTIPLIER[localMode];
+      ? Math.max(1, Math.round(score * CREDIT_MULTIPLIER[effectiveMode]))
+      : CREDIT_MULTIPLIER[effectiveMode];
 
   const keysNeeded = plan?.keysNeeded ?? [];
   const missingKeys = keysNeeded.filter((k) => !secretNames.has(k.toLowerCase()));
@@ -1328,7 +1333,7 @@ export function PlanCard({
               </span>
               {score > 0 && (
                 <span className="ml-1 text-muted-foreground/60">
-                  (complexity {score} × {CREDIT_MULTIPLIER[localMode]}×)
+                  (complexity {score} × {CREDIT_MULTIPLIER[effectiveMode]}×)
                 </span>
               )}
             </span>
@@ -1337,7 +1342,7 @@ export function PlanCard({
                 <span className="text-muted-foreground/30">·</span>
                 <span className="text-[10px] text-muted-foreground">
                   ~<span className="font-semibold text-foreground">{estimatedSeconds}s</span> on{" "}
-                  {localMode}
+                  {effectiveMode}
                 </span>
               </>
             )}
@@ -1353,33 +1358,35 @@ export function PlanCard({
           </div>
 
           {/* Mode selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground shrink-0">Mode:</span>
-            <div className="flex bg-muted border border-border rounded-lg p-0.5 gap-0.5">
-              {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+          {showModeSelector && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground shrink-0">Mode:</span>
+              <div className="flex bg-muted border border-border rounded-lg p-0.5 gap-0.5">
+                {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setLocalMode(mode)}
+                    className={cn(
+                      "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
+                      effectiveMode === mode
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+              {effectiveMode !== recommendedMode && (
                 <button
-                  key={mode}
-                  onClick={() => setLocalMode(mode)}
-                  className={cn(
-                    "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
-                    localMode === mode
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
+                  onClick={() => setLocalMode(recommendedMode as AgentMode)}
+                  className="text-[9px] text-primary/70 hover:text-primary transition-colors underline"
                 >
-                  {mode}
+                  use recommended
                 </button>
-              ))}
+              )}
             </div>
-            {localMode !== recommendedMode && (
-              <button
-                onClick={() => setLocalMode(recommendedMode as AgentMode)}
-                className="text-[9px] text-primary/70 hover:text-primary transition-colors underline"
-              >
-                use recommended
-              </button>
-            )}
-          </div>
+          )}
 
           {/* Build actions */}
           <div className="flex gap-2">
@@ -1388,7 +1395,7 @@ export function PlanCard({
               className="flex-1 h-7 text-xs"
               onClick={() => {
                 cancelAndClear();
-                onBuild(constructBuildPrompt(), localMode, false);
+                onBuild(constructBuildPrompt(), effectiveMode, false);
               }}
               disabled={disabled}
             >
@@ -1400,7 +1407,7 @@ export function PlanCard({
               className="flex-1 h-7 text-xs"
               onClick={() => {
                 cancelAndClear();
-                onBuild(constructBuildPrompt(), localMode, true);
+                onBuild(constructBuildPrompt(), effectiveMode, true);
               }}
               disabled={disabled}
             >
@@ -1437,7 +1444,7 @@ export function PlanCard({
         <PlanDecomposeView
           projectId={projectId}
           plan={plan as unknown as Record<string, unknown>}
-          agentMode={localMode}
+          agentMode={effectiveMode}
           onBuildStep={(prompt, mode, background) => {
             setShowDecompose(false);
             cancelAndClear();
