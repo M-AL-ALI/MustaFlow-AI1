@@ -65,4 +65,26 @@ describe("InlineIdeas", () => {
 
     expect(screen.getByText("Finding useful next ideas...")).toBeVisible();
   });
+
+  it("renders an honest post-build fallback row inline", () => {
+    const fallback = idea(3, "Review the latest task");
+    fallback.description =
+      "Check the latest task against the current project before another change.";
+    fallback.prompt =
+      "Review the most recent build task against the current project files. Make one focused improvement only if project evidence supports it.";
+
+    render(
+      <InlineIdeas
+        ideas={[fallback]}
+        onBuild={vi.fn()}
+        onSave={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Review the latest task")).toBeVisible();
+    expect(
+      screen.getByText("Check the latest task against the current project before another change."),
+    ).toBeVisible();
+  });
 });

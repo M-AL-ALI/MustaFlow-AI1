@@ -13,7 +13,6 @@ import {
   secretsTable,
   deploymentLogsTable,
   buildAnalyticsTable,
-  projectSuggestionsTable,
   checkRunsTable,
   appTestRunsTable,
   cveFindingsTable,
@@ -60,6 +59,7 @@ import {
 import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";
+import { generatePostBuildSuggestions } from "./post-build-suggestions";
 import { logger } from "./logger";
 import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
@@ -1663,120 +1663,6 @@ async function maybeEscalateWarnings(projectId: number, currentWarnings: string[
     }
   } catch (err) {
     logger.warn({ err }, "Failed to escalate repeated warnings");
-  }
-}
-
-type PostBuildSuggestion = {
-  title: string;
-  description: string;
-  category: "feature" | "fix" | "improvement" | "idea";
-  prompt: string;
-};
-
-/**
- * Generate 3-5 contextual AI suggestions after a successful or failed build.
- * Uses gpt-5-mini (free background work — no credit deduction).
- * Persists results to project_suggestions so the frontend can poll for them.
- *
- * Called via setImmediate so it never blocks the visible pipeline completion.
- */
-async function generatePostBuildSuggestions(
-  projectId: number,
-  taskId: number,
-  projectName: string,
-  projectKind: string,
-  projectFormat: string,
-  userPrompt: string,
-  assistantSummary: string,
-  filePaths: string[],
-  activeIntegrations: string,
-): Promise<void> {
-  try {
-    const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
-    const platformHint = isMobile
-      ? "React Native / Expo mobile app"
-      : projectFormat === "react-vite"
-        ? "React + Vite web app (TypeScript + Tailwind CSS)"
-        : "static web app (HTML/CSS/JS + Tailwind)";
-
-    const systemPrompt = `You are a senior product/engineering advisor reviewing a just-completed AI-generated ${platformHint} build.
-Based on the build context, generate 3-5 specific, actionable next-step suggestions the user could build or improve next.
-Each suggestion must be concrete and directly relevant to this project — not generic advice.
-
-Categories:
-- feature: a new capability or page to add
-- fix: a bug, UX issue, or missing piece to address  
-- improvement: make existing functionality better, faster, or more polished
-- idea: an experimental or innovative enhancement
-
-OUTPUT STRICT JSON:
-{
-  "suggestions": [
-    { "title": "...", "description": "...", "category": "feature|fix|improvement|idea", "prompt": "..." }
-  ]
-}
-
-Rules:
-- title: 3-6 words max, action-oriented
-- description: one sentence (max 15 words) explaining the value
-- prompt: exact text to feed the refine pipeline — specific and self-contained (30-80 words)
-- Mix categories — don't return all features
-- Vary difficulty — include at least one quick win and one more ambitious idea
-- If active integrations exist, suggest at least one integration-specific improvement`;
-
-    const userContent = `Project: "${projectName}" (${platformHint})
-Last build request: "${userPrompt.slice(0, 200)}"
-Build summary: "${assistantSummary.slice(0, 300)}"
-Files in project: ${filePaths.slice(0, 20).join(", ")}
-${activeIntegrations ? `Active integrations: ${activeIntegrations}` : ""}`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      max_completion_tokens: 1200,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      response_format: { type: "json_object" },
-    });
-
-    const raw = response.choices[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(raw) as { suggestions?: PostBuildSuggestion[] };
-
-    if (!Array.isArray(parsed.suggestions) || parsed.suggestions.length === 0) {
-      logger.warn({ taskId, projectId }, "Post-build suggestion generation returned empty array");
-      return;
-    }
-
-    const validCategories = new Set(["feature", "fix", "improvement", "idea"]);
-    const valid = parsed.suggestions
-      .filter(
-        (s) =>
-          typeof s.title === "string" &&
-          typeof s.description === "string" &&
-          typeof s.category === "string" &&
-          typeof s.prompt === "string" &&
-          validCategories.has(s.category),
-      )
-      .slice(0, 5);
-
-    if (valid.length === 0) return;
-
-    await db.insert(projectSuggestionsTable).values(
-      valid.map((s) => ({
-        projectId,
-        taskId,
-        title: s.title.slice(0, 120),
-        description: s.description.slice(0, 300),
-        category: s.category,
-        prompt: s.prompt.slice(0, 1000),
-        status: "pending" as const,
-      })),
-    );
-
-    logger.info({ taskId, projectId, count: valid.length }, "Post-build suggestions generated");
-  } catch (err) {
-    logger.warn({ err, taskId, projectId }, "Post-build suggestion generation failed (non-fatal)");
   }
 }
 
@@ -6316,17 +6202,17 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       // Generate post-build suggestions in the background (non-blocking)
       setImmediate(() => {
-        void generatePostBuildSuggestions(
+        void generatePostBuildSuggestions({
           projectId,
           taskId,
-          project.name,
-          project.kind,
-          project.projectFormat ?? "static-html",
+          projectName: project.name,
+          projectKind: project.kind,
+          projectFormat: project.projectFormat ?? "static-html",
           userPrompt,
           assistantSummary,
-          snapshot.map((f) => f.path),
-          knowledgeContext ?? "",
-        ).catch((err) => logger.warn({ err, taskId }, "Background suggestion generation failed"));
+          filePaths: snapshot.map((f) => f.path),
+          activeIntegrations: knowledgeContext ?? "",
+        });
       });
 
       // Browser QA now runs BEFORE the "completed" event (see above).
@@ -6769,17 +6655,17 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       // Generate post-build suggestions even on failure — gives the user recovery ideas
       setImmediate(() => {
-        void generatePostBuildSuggestions(
+        void generatePostBuildSuggestions({
           projectId,
           taskId,
-          project.name,
-          project.kind,
-          project.projectFormat ?? "static-html",
+          projectName: project.name,
+          projectKind: project.kind,
+          projectFormat: project.projectFormat ?? "static-html",
           userPrompt,
-          `Build failed: ${message.slice(0, 200)}`,
-          [],
-          "",
-        ).catch((err) => logger.warn({ err, taskId }, "Failure-path suggestion generation failed"));
+          assistantSummary: `Build failed: ${message.slice(0, 200)}`,
+          filePaths: [],
+          activeIntegrations: "",
+        });
       });
 
       // Post a rich error message with suggestions into the chat
@@ -7759,17 +7645,17 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
 
   // Post-build suggestions
   setImmediate(() => {
-    void generatePostBuildSuggestions(
+    void generatePostBuildSuggestions({
       projectId,
       taskId,
-      project.name,
-      project.kind,
-      project.projectFormat ?? "static-html",
+      projectName: project.name,
+      projectKind: project.kind,
+      projectFormat: project.projectFormat ?? "static-html",
       userPrompt,
       assistantSummary,
-      snapshot.map((f) => f.path),
-      "",
-    ).catch((err) => logger.warn({ err, taskId }, "Post-apply suggestion generation failed"));
+      filePaths: snapshot.map((f) => f.path),
+      activeIntegrations: "",
+    });
   });
 
   // Knowledge vault entry
