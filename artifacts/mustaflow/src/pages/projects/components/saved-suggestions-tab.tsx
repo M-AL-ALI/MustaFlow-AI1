@@ -65,7 +65,7 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     mutation: {
       onSuccess: (data) => {
         void queryClient.invalidateQueries({
-          queryKey: getListSuggestionsQueryKey(projectId, {}),
+          queryKey: getListSuggestionsQueryKey(projectId),
         });
         if (data.taskId && onAccepted) {
           onAccepted(data.taskId);
@@ -78,7 +78,7 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     mutation: {
       onSuccess: () => {
         void queryClient.invalidateQueries({
-          queryKey: getListSuggestionsQueryKey(projectId, {}),
+          queryKey: getListSuggestionsQueryKey(projectId),
         });
       },
     },
@@ -88,7 +88,7 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     mutation: {
       onSuccess: () => {
         void queryClient.invalidateQueries({
-          queryKey: getListSuggestionsQueryKey(projectId, {}),
+          queryKey: getListSuggestionsQueryKey(projectId),
         });
       },
     },

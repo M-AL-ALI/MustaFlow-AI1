@@ -10,6 +10,8 @@ import {
   getListSecretsQueryKey,
   getGetProjectQueryKey,
 } from "@workspace/api-client-react";
+import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
+import { ZeroAvatar } from "./zero-avatar";
 
 export type AgentPromptKind = "user_query" | "request_secret" | "suggest_deploy";
 
@@ -25,6 +27,7 @@ interface CommonProps {
   taskId: number;
   prompt: AgentPromptCard;
   onDismiss: (promptId: string) => void;
+  onPublishingActivity?: (update: InlineSurfaceActivityUpdate) => void;
 }
 
 async function respondToPrompt(
@@ -63,12 +66,15 @@ function CardShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 my-2 text-sm">
-      <div className="flex items-start gap-2">
-        <div className="mt-0.5 shrink-0 text-amber-400">{icon}</div>
+    <div className="my-1 py-2 text-sm" data-testid="inline-zero-question">
+      <div className="flex items-start gap-2.5">
+        <ZeroAvatar className="mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <div className="font-medium text-foreground">{title}</div>
+            <div className="flex items-center gap-1.5 font-medium text-foreground">
+              <span className="text-muted-foreground">{icon}</span>
+              {title}
+            </div>
             {onDismiss && (
               <button
                 className="text-muted-foreground hover:text-foreground"
@@ -79,7 +85,7 @@ function CardShell({
               </button>
             )}
           </div>
-          {subtitle && <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>}
+          {subtitle && <div className="mt-0.5 text-xs text-muted-foreground">{subtitle}</div>}
           <div className="mt-2">{children}</div>
         </div>
       </div>
@@ -115,7 +121,7 @@ function UserQueryCardImpl({ projectId, taskId, prompt, onDismiss }: CommonProps
     <CardShell
       icon={<HelpCircle className="h-4 w-4" />}
       title={payload.question}
-      subtitle="The agent is waiting for your answer."
+      subtitle="Zero is waiting for your answer."
       onDismiss={() => finish({ canceled: true, reason: "user_skip" })}
     >
       {payload.kind === "choice" && (
@@ -128,7 +134,7 @@ function UserQueryCardImpl({ projectId, taskId, prompt, onDismiss }: CommonProps
                 disabled={submitting}
                 className={`text-xs rounded-full border px-3 py-1 transition ${
                   active
-                    ? "bg-amber-500/20 border-amber-400/60 text-amber-100"
+                    ? "border-primary/50 bg-primary/10 text-foreground"
                     : "border-border hover:bg-muted"
                 }`}
                 onClick={() => {
@@ -325,7 +331,12 @@ function RequestSecretCardImpl({ projectId, taskId, prompt, onDismiss }: CommonP
   );
 }
 
-function SuggestDeployCardImpl({ projectId, prompt, onDismiss }: CommonProps) {
+function SuggestDeployCardImpl({
+  projectId,
+  prompt,
+  onDismiss,
+  onPublishingActivity,
+}: CommonProps) {
   const payload = prompt.payload as {
     environment?: "testing" | "production";
     note?: string | null;
@@ -338,12 +349,15 @@ function SuggestDeployCardImpl({ projectId, prompt, onDismiss }: CommonProps) {
   const handlePublish = async () => {
     setPublishing(true);
     setError(null);
+    onPublishingActivity?.({ status: "running", label: "Publishing" });
     try {
       const result = await publishProject(projectId);
       setDone(result.publicUrl ?? "Published");
+      onPublishingActivity?.({ status: "completed", label: "Published" });
       void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
     } catch (err) {
       setError((err as Error).message ?? "Publish failed");
+      onPublishingActivity?.({ status: "failed", label: "Publishing needs attention" });
     } finally {
       setPublishing(false);
     }
@@ -394,17 +408,19 @@ export function AgentPromptCardsList({
   taskId,
   prompts,
   onDismiss,
+  onPublishingActivity,
 }: {
   projectId: number;
   taskId: number | null;
   prompts: AgentPromptCard[];
   onDismiss: (promptId: string) => void;
+  onPublishingActivity?: (update: InlineSurfaceActivityUpdate) => void;
 }) {
   if (!taskId || prompts.length === 0) return null;
   return (
     <div className="px-2">
       {prompts.map((p) => {
-        const common = { projectId, taskId, prompt: p, onDismiss };
+        const common = { projectId, taskId, prompt: p, onDismiss, onPublishingActivity };
         if (p.kind === "user_query") return <UserQueryCardImpl key={p.promptId} {...common} />;
         if (p.kind === "request_secret")
           return <RequestSecretCardImpl key={p.promptId} {...common} />;

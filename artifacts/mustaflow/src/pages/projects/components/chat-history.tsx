@@ -9,7 +9,6 @@ import {
   KeyRound,
   ChevronDown,
   ChevronRight,
-  ArrowDown,
   ExternalLink,
   Lightbulb,
   ShieldAlert,
@@ -37,7 +36,12 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
-import { QATapeInline } from "./qa-tape-inline";
+import { InlineBuildResults } from "./inline-build-results";
+import { ZeroAvatar } from "./zero-avatar";
+import { PersistedRunReplay } from "./inline-run-group";
+import { InlineBuilderError } from "./inline-builder-error";
+import { EditAndResend, latestUserMessageId } from "./edit-and-resend";
+import { JumpToLatestButton, nextChatFollowState, scrollChatToLatest } from "./smart-auto-scroll";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -740,9 +744,7 @@ const completedAnimations = new Set<number>();
 export function TypingIndicator() {
   return (
     <div className="flex justify-start items-end gap-2">
-      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/25 flex items-center justify-center shrink-0 text-primary/80">
-        <AgentIcon size={12} state="active" />
-      </div>
+      <ZeroAvatar active />
       <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2.5 flex items-center gap-1">
         {[0, 1, 2].map((i) => (
           <span
@@ -1053,80 +1055,13 @@ function InlineReportCard({
   const testsPending =
     couldHaveTests && (effectiveTestResults === null || effectiveTestResults === undefined);
   return (
-    <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
-      <div className="flex items-center gap-2 font-semibold text-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-        Builder report
-      </div>
-      <div
-        className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}
-      >
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Created</div>
-          <div className="font-semibold text-foreground">{report.filesCreated.length}</div>
-        </div>
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Changed</div>
-          <div className="font-semibold text-foreground">{report.filesChanged.length}</div>
-        </div>
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Removed</div>
-          <div className="font-semibold text-foreground">{report.filesRemoved.length}</div>
-        </div>
-        {(report.filesUnchanged?.length ?? 0) > 0 && (
-          <div className="bg-muted rounded p-1.5">
-            <div className="text-muted-foreground text-[10px] uppercase">Unchanged</div>
-            <div className="font-semibold text-foreground">{report.filesUnchanged!.length}</div>
-          </div>
-        )}
-      </div>
-      {(report.filesCreated.length > 0 ||
-        report.filesChanged.length > 0 ||
-        report.filesRemoved.length > 0) && (
-        <div className="space-y-0.5 pt-0.5 border-t border-border/50">
-          {report.filesCreated.slice(0, 5).map((p) => (
-            <button
-              key={`c-${p}`}
-              onClick={() => onViewFile?.(p)}
-              className={cn(
-                "w-full text-left font-mono text-[10px] text-green-400 truncate flex items-center gap-1 group",
-                onViewFile && "hover:text-green-300 cursor-pointer",
-              )}
-            >
-              <span className="shrink-0">+</span>
-              <span className="truncate">{p}</span>
-              {onViewFile && (
-                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
-              )}
-            </button>
-          ))}
-          {report.filesChanged.slice(0, 5).map((p) => (
-            <button
-              key={`m-${p}`}
-              onClick={() => onViewFile?.(p)}
-              className={cn(
-                "w-full text-left font-mono text-[10px] text-yellow-400 truncate flex items-center gap-1 group",
-                onViewFile && "hover:text-yellow-300 cursor-pointer",
-              )}
-            >
-              <span className="shrink-0">~</span>
-              <span className="truncate">{p}</span>
-              {onViewFile && (
-                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
-              )}
-            </button>
-          ))}
-          {report.filesRemoved.slice(0, 3).map((p) => (
-            <div
-              key={`r-${p}`}
-              className="font-mono text-[10px] text-red-400/70 truncate flex items-center gap-1"
-            >
-              <span className="shrink-0">-</span>
-              <span className="truncate">{p}</span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="mt-2 space-y-1 text-xs">
+      <InlineBuildResults
+        report={report}
+        onViewFile={onViewFile}
+        onSendMessage={onSendMessage}
+        showCheckpoint={false}
+      />
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
         <div className="pt-1 border-t border-border">
           <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
@@ -1314,73 +1249,6 @@ function InlineReportCard({
                 </li>
               ))}
             </ul>
-          )}
-        </div>
-      )}
-      {report.checkRunsSummary && (
-        <div className="pt-1.5 border-t border-border">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
-            <ShieldCheck className="h-3 w-3 shrink-0 text-primary/70" />
-            <span className="font-semibold text-foreground/80">Checks</span>
-            {report.checkRunsSummary.passed > 0 && (
-              <span className="text-green-400">{report.checkRunsSummary.passed} passed</span>
-            )}
-            {report.checkRunsSummary.warnings > 0 && (
-              <span className="text-yellow-400">{report.checkRunsSummary.warnings} warnings</span>
-            )}
-            {report.checkRunsSummary.failed > 0 && (
-              <span className="text-red-400">{report.checkRunsSummary.failed} failed</span>
-            )}
-            {report.checkRunsSummary.skipped > 0 && (
-              <span className="text-muted-foreground/60">
-                {report.checkRunsSummary.skipped} skipped
-              </span>
-            )}
-            {(report.checkRunsSummary.failed > 0 || report.checkRunsSummary.warnings > 0) &&
-              onSendMessage && (
-                <button
-                  onClick={() => {
-                    const allBad = [
-                      ...(report.checkRunsSummary?.failedChecks ?? []),
-                      ...(report.checkRunsSummary?.warnChecks ?? []),
-                    ];
-                    const nameList = allBad.length > 0 ? ` (${allBad.join(", ")})` : "";
-                    onSendMessage(
-                      `Fix all failing check issues in the generated app${nameList} — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.`,
-                    );
-                  }}
-                  className="ml-auto flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
-                >
-                  <Wrench className="h-2.5 w-2.5" />
-                  Fix issues
-                </button>
-              )}
-          </div>
-          {((report.checkRunsSummary.failedChecks?.length ?? 0) > 0 ||
-            (report.checkRunsSummary.warnChecks?.length ?? 0) > 0) && (
-            <div className="flex flex-wrap gap-1 mt-1 pl-5">
-              {report.checkRunsSummary.failedChecks?.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-red-950/40 text-red-400 border border-red-900/40"
-                >
-                  {name}
-                </span>
-              ))}
-              {report.checkRunsSummary.warnChecks?.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-yellow-950/40 text-yellow-400 border border-yellow-900/40"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
-          )}
-          {report.checkSummary && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
-              {report.checkSummary}
-            </p>
           )}
         </div>
       )}
@@ -2521,6 +2389,8 @@ function MessageRow({
   onSendMessage,
   onAutoFix,
   onNavigateToSecret,
+  canEditAndResend,
+  onEditAndResend,
 }: {
   msg: Message;
   searchQuery: string;
@@ -2531,6 +2401,8 @@ function MessageRow({
   /** Forwarded to QualityGateFailureCard; always sends with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
+  canEditAndResend?: boolean;
+  onEditAndResend?: (text: string) => void;
 }) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
@@ -2568,8 +2440,9 @@ function MessageRow({
         )}
       >
         <span className={cn("font-semibold", isUser ? "text-primary/80" : "text-foreground/60")}>
-          {isUser ? "You" : "AI"}
+          {isUser ? "You" : "Zero"}
         </span>
+        {!isUser && <ZeroAvatar className="h-4 w-4 border-0 bg-transparent" />}
         <AgentModePill mode={msg.agentMode} />
         {!isUser && msg.agentIdentity && <AgentBadge identity={msg.agentIdentity} />}
         {!isUser &&
@@ -2604,11 +2477,17 @@ function MessageRow({
           isUser
             ? "bg-primary/15 text-foreground border border-primary/20 rounded-br-sm"
             : isError
-              ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+              ? "text-foreground"
               : "bg-muted border border-border text-foreground rounded-bl-sm",
         )}
       >
-        {isConverse || isClarifying ? (
+        {isError ? (
+          <InlineBuilderError
+            message={(planPayload as { message?: string }).message ?? msg.content}
+            suggestions={(planPayload as { suggestions?: string[] }).suggestions}
+            onTryFix={onSendMessage}
+          />
+        ) : isConverse || isClarifying ? (
           <StreamingText
             content={msg.content}
             messageId={msg.id}
@@ -2643,6 +2522,12 @@ function MessageRow({
           <AttachmentGallery attachments={msg.attachments} />
         )}
 
+        {isUser && canEditAndResend && onEditAndResend && (
+          <div className="mt-1 flex justify-end">
+            <EditAndResend onEdit={() => onEditAndResend(msg.content)} />
+          </div>
+        )}
+
         {/* Clarifying quick-reply chips — read-only in history */}
         {isClarifying && (
           <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -2662,10 +2547,18 @@ function MessageRow({
           (() => {
             const taskId = (planPayload as { taskId?: number }).taskId;
             return typeof taskId === "number" && taskId > 0 ? (
-              <QATapeInline
+              <PersistedRunReplay
                 projectId={projectId}
                 taskId={taskId}
-                className="mt-2 border-t border-border/50 pt-2"
+                className="mt-2"
+                onRetry={
+                  onSendMessage
+                    ? () =>
+                        onSendMessage(
+                          "Fix the remaining runtime issue and verify the preview again.",
+                        )
+                    : undefined
+                }
               />
             ) : null;
           })()}
@@ -2705,31 +2598,16 @@ function MessageRow({
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     onClick={() => setReportExpanded((v) => !v)}
-                    className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors"
+                    className="flex items-center gap-1.5 rounded-sm px-1 py-1 text-[10px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <CheckCircle2 className="h-3 w-3" />
-                    View build report
+                    Build details
                     {reportExpanded ? (
                       <ChevronDown className="h-3 w-3 ml-0.5" />
                     ) : (
                       <ChevronRight className="h-3 w-3 ml-0.5" />
                     )}
                   </button>
-                  {/* Knowledge provenance chip */}
-                  {(() => {
-                    const ka = (planPayload as { report?: TaskReport }).report?.knowledgeApplied;
-                    if (!ka || ka.length === 0) return null;
-                    return (
-                      <a
-                        href="/knowledge"
-                        className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-primary/8 border border-primary/20 text-primary/70 hover:text-primary hover:bg-primary/12 transition-colors"
-                        title={`Lessons applied: ${ka.map((l) => l.title).join(", ")}`}
-                      >
-                        <BookOpen className="h-2.5 w-2.5" />
-                        {ka.length} Vault lesson{ka.length !== 1 ? "s" : ""} applied
-                      </a>
-                    );
-                  })()}
                 </div>
                 {reportExpanded && (
                   <InlineReportCard
@@ -4039,6 +3917,7 @@ export function ChatHistory({
   onSendMessage,
   onAutoFix,
   onNavigateToSecret,
+  onEditAndResend,
 }: {
   messages: Message[] | undefined;
   isLoading: boolean;
@@ -4050,6 +3929,7 @@ export function ChatHistory({
   /** Forwarded to QualityGateFailureCard Auto-fix button with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
+  onEditAndResend?: (text: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -4058,8 +3938,11 @@ export function ChatHistory({
   >(null);
   const [serverSearching, setServerSearching] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followsLatestRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const editableUserMessageId = latestUserMessageId(messages);
 
   // Debounce search input → server full-text search (Task #546)
   useEffect(() => {
@@ -4128,22 +4011,36 @@ export function ChatHistory({
   }
 
   useEffect(() => {
-    if (!searchQuery && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (searchQuery || !followsLatestRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const element = scrollRef.current;
+      if (!element || !followsLatestRef.current) return;
+      scrollChatToLatest(element);
+      lastScrollTopRef.current = element.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [messages, searchQuery]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowJumpToBottom(distFromBottom > 120);
+    const followsLatest = nextChatFollowState({
+      wasFollowing: followsLatestRef.current,
+      previousScrollTop: lastScrollTopRef.current,
+      metrics: el,
+    });
+    lastScrollTopRef.current = el.scrollTop;
+    followsLatestRef.current = followsLatest;
+    setShowJumpToBottom(!followsLatest);
   };
 
   const jumpToBottom = () => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const element = scrollRef.current;
+    if (!element) return;
+    scrollChatToLatest(element);
+    lastScrollTopRef.current = element.scrollTop;
+    followsLatestRef.current = true;
+    setShowJumpToBottom(false);
   };
 
   return (
@@ -4273,6 +4170,8 @@ export function ChatHistory({
                     onSendMessage={onSendMessage}
                     onAutoFix={onAutoFix}
                     onNavigateToSecret={onNavigateToSecret}
+                    canEditAndResend={msg.id === editableUserMessageId}
+                    onEditAndResend={onEditAndResend}
                   />
                 ))}
               </div>
@@ -4283,13 +4182,7 @@ export function ChatHistory({
       {/* Jump to bottom */}
       {showJumpToBottom && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-          <button
-            onClick={jumpToBottom}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card border border-border text-xs font-medium text-foreground shadow-md hover:bg-muted transition-colors"
-          >
-            <ArrowDown className="h-3 w-3" />
-            Jump to latest
-          </button>
+          <JumpToLatestButton onJump={jumpToBottom} />
         </div>
       )}
     </div>

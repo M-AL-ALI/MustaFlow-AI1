@@ -11,6 +11,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { authFetch } from "@/lib/api-fetch";
+import type { InlineSurfaceActivityUpdate } from "@/pages/projects/components/inline-activity-stream";
 
 interface Message {
   role: "user" | "assistant";
@@ -46,6 +47,8 @@ interface BrainstormPanelProps {
   storageKey?: string;
   /** Pre-fill the composer with this text on mount (e.g. seeded from the landing page). */
   initialInput?: string;
+  /** Mirrors the real brainstorm request state into the workspace thread. */
+  onActivityChange?: (update: InlineSurfaceActivityUpdate) => void;
 }
 
 const OPENING_MESSAGE_CONTENT =
@@ -109,6 +112,7 @@ export function BrainstormPanel({
   projectId,
   storageKey,
   initialInput,
+  onActivityChange,
 }: BrainstormPanelProps) {
   const [visible, setVisible] = useState(false);
 
@@ -133,6 +137,20 @@ export function BrainstormPanel({
   const userTurns = messages.filter((m) => m.role === "user").length;
   const showBuildButton = userTurns >= 2 || buildIntent;
   const isFetching = chatMutation.isPending;
+  const brainstormActive = chatMutation.isPending || resolveMutation.isPending;
+  const brainstormWasActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (brainstormActive) {
+      brainstormWasActiveRef.current = true;
+      onActivityChange?.({ status: "running", label: "Brainstorming" });
+      return;
+    }
+    if (brainstormWasActiveRef.current) {
+      brainstormWasActiveRef.current = false;
+      onActivityChange?.({ status: "completed", label: "Brainstormed the idea" });
+    }
+  }, [brainstormActive, onActivityChange]);
 
   const hasConversation =
     messages.length > 1 || (messages.length === 1 && !isOpeningMessage(messages[0]));

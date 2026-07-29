@@ -66,9 +66,9 @@ describe("AI Builder cohort access", () => {
     vi.stubEnv("BUILDER_OPEN_TO_ALL", "false");
     vi.stubEnv("BUILDER_ALLOWLIST", "allowed@example.com");
 
-    const response = await request(
-      createMiddlewareApp(async () => "other@example.com"),
-    ).post("/builder-mutation");
+    const response = await request(createMiddlewareApp(async () => "other@example.com")).post(
+      "/builder-mutation",
+    );
 
     expect(response.status).toBe(403);
     expect(response.body).toEqual({ error: BUILDER_ACCESS_DENIED_MESSAGE });
@@ -78,9 +78,7 @@ describe("AI Builder cohort access", () => {
     vi.stubEnv("BUILDER_OPEN_TO_ALL", "false");
     vi.stubEnv("BUILDER_ALLOWLIST", "allowed@example.com");
 
-    const response = await request(createMiddlewareApp(async () => null)).post(
-      "/builder-mutation",
-    );
+    const response = await request(createMiddlewareApp(async () => null)).post("/builder-mutation");
 
     expect(response.status).toBe(403);
     expect(response.body).toEqual({ error: BUILDER_ACCESS_DENIED_MESSAGE });
@@ -133,9 +131,12 @@ describe("AI Builder cohort access", () => {
     expect(route).toContain("...capabilities");
   });
 
-  it("surfaces the partial-validation completion message in the live Builder report", () => {
+  it("surfaces the partial-validation completion message in the inline build results", () => {
     const workspacePath = fileURLToPath(
-      new URL("../../../mustaflow/src/pages/projects/[id].tsx", import.meta.url),
+      new URL(
+        "../../../mustaflow/src/pages/projects/components/inline-build-results.tsx",
+        import.meta.url,
+      ),
     );
     const workspace = readFileSync(workspacePath, "utf8");
     expect(workspace).toContain("partialValidationMessage");

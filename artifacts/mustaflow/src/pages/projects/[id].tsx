@@ -43,7 +43,6 @@ import {
   Globe,
   TerminalSquare,
   BrainCircuit,
-  CheckCircle2,
   AlertTriangle,
   CreditCard,
   KeyRound,
@@ -174,6 +173,44 @@ import {
 } from "@/lib/builder-calm-status";
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
 import { QATapeInline } from "./components/qa-tape-inline";
+import { InlineBuildResults } from "./components/inline-build-results";
+import {
+  appendNarrationEntry,
+  InlineNarrationStream,
+  type InlineNarrationEntry,
+} from "./components/inline-narration-stream";
+import {
+  appendActivityEntry,
+  InlineActivityStream,
+  surfaceActivityEntry,
+  taskActivityForEvent,
+  type InlineActivityEntry,
+  type InlineSurfaceActivityUpdate,
+} from "./components/inline-activity-stream";
+import { ZeroAvatar } from "./components/zero-avatar";
+import { InlineRunGroup, PersistedRunReplay } from "./components/inline-run-group";
+import {
+  appendRecoveryStep,
+  InlineRecoveryLoop,
+  recoveryStepForEvent,
+  type InlineRecoveryStep,
+} from "./components/inline-recovery-loop";
+import { InlineBuilderError } from "./components/inline-builder-error";
+import { EditAndResend, latestUserMessageId } from "./components/edit-and-resend";
+import {
+  isNearChatBottom,
+  JumpToLatestButton,
+  nextChatFollowState,
+  scrollChatToLatest,
+} from "./components/smart-auto-scroll";
+import {
+  isRehydratableTaskStatus,
+  parseRunLoopProgress,
+  selectRehydratableTaskId,
+  type RunLoopProgress,
+} from "./components/run-rehydration";
+import { threadDensityForMode } from "./components/thread-density";
+import { WorkingAnchor } from "./components/working-anchor";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -376,89 +413,15 @@ function ReportCard({
   onViewHistory?: () => void;
   onSendMessage?: (text: string) => void;
 }) {
-  const partialValidationMessage =
-    (report.checkRunsSummary?.skipped ?? 0) > 0
-      ? (report.warnings.find((warning) =>
-          warning.toLowerCase().includes("validation was partial"),
-        ) ??
-        "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred.")
-      : null;
-
   return (
-    <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
-      <div className="flex items-center gap-2 font-semibold text-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-        Builder report
-      </div>
-      <div
-        className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}
-      >
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Created</div>
-          <div className="font-semibold text-foreground">{report.filesCreated.length}</div>
-        </div>
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Changed</div>
-          <div className="font-semibold text-foreground">{report.filesChanged.length}</div>
-        </div>
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Removed</div>
-          <div className="font-semibold text-foreground">{report.filesRemoved.length}</div>
-        </div>
-        {(report.filesUnchanged?.length ?? 0) > 0 && (
-          <div className="bg-muted rounded p-1.5">
-            <div className="text-muted-foreground text-[10px] uppercase">Unchanged</div>
-            <div className="font-semibold text-foreground">{report.filesUnchanged!.length}</div>
-          </div>
-        )}
-      </div>
-      {(report.filesCreated.length > 0 ||
-        report.filesChanged.length > 0 ||
-        report.filesRemoved.length > 0) && (
-        <div className="space-y-0.5 pt-0.5 border-t border-border/50">
-          {report.filesCreated.slice(0, 5).map((p) => (
-            <button
-              key={`c-${p}`}
-              onClick={() => onViewFile?.(p)}
-              className={cn(
-                "w-full text-left font-mono text-[10px] text-green-400 truncate flex items-center gap-1 group",
-                onViewFile && "hover:text-green-300 cursor-pointer",
-              )}
-            >
-              <span className="shrink-0">+</span>
-              <span className="truncate">{p}</span>
-              {onViewFile && (
-                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
-              )}
-            </button>
-          ))}
-          {report.filesChanged.slice(0, 5).map((p) => (
-            <button
-              key={`m-${p}`}
-              onClick={() => onViewFile?.(p)}
-              className={cn(
-                "w-full text-left font-mono text-[10px] text-yellow-400 truncate flex items-center gap-1 group",
-                onViewFile && "hover:text-yellow-300 cursor-pointer",
-              )}
-            >
-              <span className="shrink-0">~</span>
-              <span className="truncate">{p}</span>
-              {onViewFile && (
-                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
-              )}
-            </button>
-          ))}
-          {report.filesRemoved.slice(0, 3).map((p) => (
-            <div
-              key={`r-${p}`}
-              className="font-mono text-[10px] text-red-400/70 truncate flex items-center gap-1"
-            >
-              <span className="shrink-0">-</span>
-              <span className="truncate">{p}</span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="mt-2 space-y-1 text-xs">
+      <InlineBuildResults
+        report={report}
+        onViewFile={onViewFile}
+        onViewHistory={onViewHistory}
+        onSendMessage={onSendMessage}
+        showCheckpoint={false}
+      />
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
         <div className="space-y-1 pt-1.5 border-t border-border">
           <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
@@ -490,28 +453,6 @@ function ReportCard({
                   ({m.secretsConsumed.join(", ")})
                 </span>
               )}
-            </div>
-          ))}
-        </div>
-      )}
-      {report.knowledgeApplied && report.knowledgeApplied.length > 0 && (
-        <div className="space-y-1 pt-1.5 border-t border-border">
-          <a
-            href={`/knowledge?ids=${report.knowledgeApplied.map((k) => k.id).join(",")}`}
-            className="font-semibold text-foreground flex items-center gap-1 text-[11px] hover:text-primary transition-colors group"
-            title="View these lessons in the Knowledge Vault"
-          >
-            <BookOpen className="h-3 w-3 text-primary" />
-            Applied {report.knowledgeApplied.length} prior{" "}
-            {report.knowledgeApplied.length === 1 ? "lesson" : "lessons"}
-            <ExternalLink className="h-2.5 w-2.5 text-muted-foreground group-hover:text-primary transition-colors ml-auto" />
-          </a>
-          {report.knowledgeApplied.map((k, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
-                {k.category}
-              </span>
-              <span className="text-[11px] text-foreground truncate">{k.title}</span>
             </div>
           ))}
         </div>
@@ -560,79 +501,6 @@ function ReportCard({
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
-        </div>
-      )}
-      {report.checkRunsSummary && (
-        <div className="pt-1.5 border-t border-border">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
-            <ShieldCheck className="h-3 w-3 shrink-0 text-primary/70" />
-            <span className="font-semibold text-foreground/80">Checks</span>
-            {report.checkRunsSummary.passed > 0 && (
-              <span className="text-green-400">{report.checkRunsSummary.passed} passed</span>
-            )}
-            {report.checkRunsSummary.warnings > 0 && (
-              <span className="text-yellow-400">{report.checkRunsSummary.warnings} warnings</span>
-            )}
-            {report.checkRunsSummary.failed > 0 && (
-              <span className="text-red-400">{report.checkRunsSummary.failed} failed</span>
-            )}
-            {report.checkRunsSummary.skipped > 0 && (
-              <span className="text-muted-foreground/60">
-                {report.checkRunsSummary.skipped} skipped
-              </span>
-            )}
-            {(report.checkRunsSummary.failed > 0 || report.checkRunsSummary.warnings > 0) &&
-              onSendMessage && (
-                <button
-                  onClick={() => {
-                    const allBad = [
-                      ...(report.checkRunsSummary?.failedChecks ?? []),
-                      ...(report.checkRunsSummary?.warnChecks ?? []),
-                    ];
-                    const nameList = allBad.length > 0 ? ` (${allBad.join(", ")})` : "";
-                    onSendMessage(
-                      `Fix all failing check issues in the generated app${nameList} — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.`,
-                    );
-                  }}
-                  className="ml-auto flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
-                >
-                  <Wrench className="h-2.5 w-2.5" />
-                  Fix issues
-                </button>
-              )}
-          </div>
-          {partialValidationMessage && (
-            <div className="mt-1 pl-5 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-400/90">
-              <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
-              <span>{partialValidationMessage}</span>
-            </div>
-          )}
-          {((report.checkRunsSummary.failedChecks?.length ?? 0) > 0 ||
-            (report.checkRunsSummary.warnChecks?.length ?? 0) > 0) && (
-            <div className="flex flex-wrap gap-1 mt-1 pl-5">
-              {report.checkRunsSummary.failedChecks?.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-red-950/40 text-red-400 border border-red-900/40"
-                >
-                  {name}
-                </span>
-              ))}
-              {report.checkRunsSummary.warnChecks?.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-yellow-950/40 text-yellow-400 border border-yellow-900/40"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
-          )}
-          {report.checkSummary && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
-              {report.checkSummary}
-            </p>
-          )}
         </div>
       )}
       {report.auditReport && report.auditReport.findings.length > 0 && (
@@ -688,71 +556,6 @@ function ReportCard({
               #{report.versionId}
             </span>
           </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ErrorCard({
-  message,
-  suggestions,
-  onTryFix,
-  onBuyCredits,
-}: {
-  message: string;
-  suggestions?: string[];
-  onTryFix?: (text: string) => void;
-  onBuyCredits?: () => void;
-}) {
-  const isInsufficientCredits = message.startsWith("Insufficient credits");
-  return (
-    <div className="mt-2 bg-destructive/10 border border-destructive/30 rounded-xl p-3 text-xs space-y-2.5">
-      <div className="flex items-start gap-2">
-        <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
-        <span className="text-destructive/90 leading-relaxed">{message}</span>
-      </div>
-      {isInsufficientCredits && BILLING_ENABLED && (
-        <div className="border-t border-destructive/20 pt-2 flex items-center gap-2 flex-wrap">
-          <button
-            onClick={onBuyCredits}
-            className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2.5 py-1 rounded-lg transition-colors"
-          >
-            <CreditCard className="h-3 w-3" />
-            Buy credits
-          </button>
-          <a
-            href="/settings?tab=credits"
-            className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground border border-border bg-muted/30 hover:bg-muted/60 px-2.5 py-1 rounded-lg transition-colors"
-          >
-            Open Credits & Billing
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-      )}
-      {suggestions && suggestions.length > 0 && (
-        <div className="space-y-1.5 border-t border-destructive/20 pt-2">
-          <div className="font-semibold text-destructive/80 flex items-center gap-1 text-[10px] uppercase tracking-wider">
-            <Wrench className="h-3 w-3" /> Suggested fixes
-          </div>
-          {suggestions.map((s, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <div className="w-4 h-4 rounded-full bg-destructive/20 text-destructive text-[9px] flex items-center justify-center font-bold shrink-0 mt-0.5">
-                {i + 1}
-              </div>
-              <div className="flex-1 flex items-start gap-2 min-w-0">
-                <span className="text-foreground/80 leading-relaxed flex-1">{s}</span>
-                {onTryFix && (
-                  <button
-                    onClick={() => onTryFix(s)}
-                    className="shrink-0 text-[10px] font-medium text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2 py-0.5 rounded-lg transition-colors whitespace-nowrap"
-                  >
-                    Try this
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
         </div>
       )}
     </div>
@@ -1274,7 +1077,32 @@ export default function ProjectWorkspacePage() {
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [liveQATapeEvents, setLiveQATapeEvents] = useState<QATapeEvent[]>([]);
+  const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
+  const [liveActivityEvents, setLiveActivityEvents] = useState<InlineActivityEntry[]>([]);
+  const [liveRecoverySteps, setLiveRecoverySteps] = useState<InlineRecoveryStep[]>([]);
+  const [liveRunProgress, setLiveRunProgress] = useState<RunLoopProgress | null>(null);
+  const [liveRunTerminalEvent, setLiveRunTerminalEvent] = useState<
+    "completed" | "failed" | "cancelled" | null
+  >(null);
+  const [brainstormActivity, setBrainstormActivity] = useState<InlineActivityEntry | null>(null);
+  const [publishingActivity, setPublishingActivity] = useState<InlineActivityEntry | null>(null);
+  const surfaceActivityIdRef = useRef(1_000_000);
+  const handleBrainstormActivity = useCallback((update: InlineSurfaceActivityUpdate) => {
+    surfaceActivityIdRef.current += 1;
+    setBrainstormActivity(
+      surfaceActivityEntry(surfaceActivityIdRef.current, "brainstorming", update),
+    );
+  }, []);
+  const handlePublishingActivity = useCallback((update: InlineSurfaceActivityUpdate) => {
+    surfaceActivityIdRef.current += 1;
+    setPublishingActivity(surfaceActivityEntry(surfaceActivityIdRef.current, "publishing", update));
+  }, []);
   const [, setLiveCodeBuffer] = useState("");
+  const liveRunStepCount = new Set([
+    ...liveActivityEvents.map((event) => event.id),
+    ...liveNarrationEvents.map((event) => event.id),
+    ...liveQATapeEvents.map((event) => event.id),
+  ]).size;
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
   // preview_ready / preview_sync_failed events independent of any task.
@@ -1327,11 +1155,9 @@ export default function ProjectWorkspacePage() {
   const didAutoInitActiveTask = useRef(false);
   useEffect(() => {
     if (didAutoInitActiveTask.current || activeTaskId !== null || tasksForFeed.length === 0) return;
-    const inFlight = tasksForFeed.find(
-      (t) => !["completed", "failed", "canceled"].includes(t.status),
-    );
-    if (inFlight) {
-      setActiveTaskId(inFlight.id);
+    const inFlightTaskId = selectRehydratableTaskId(tasksForFeed);
+    if (inFlightTaskId !== null) {
+      setActiveTaskId(inFlightTaskId);
       didAutoInitActiveTask.current = true;
     }
   }, [tasksForFeed, activeTaskId]);
@@ -1918,9 +1744,15 @@ export default function ProjectWorkspacePage() {
     };
   } | null>(null);
 
-  // Combined busy state — true when either the regular mutation or the streaming fetch is active.
-  // Declared early so query refetchInterval options can reference it without a forward-reference.
-  const isBusy = sendMessage.isPending || isStreaming;
+  const activeTaskStatus = tasksForFeed.find((task) => task.id === activeTaskId)?.status;
+  // On refresh the originating mutation no longer exists, so the persisted task row keeps
+  // the real workspace busy state until the replayed terminal event arrives.
+  const hasRehydratedActiveRun =
+    activeTaskId !== null &&
+    liveRunTerminalEvent === null &&
+    isRehydratableTaskStatus(activeTaskStatus);
+  const isBusy = sendMessage.isPending || isStreaming || hasRehydratedActiveRun;
+  const activeThreadDensity = threadDensityForMode(agentMode);
   const isCreatingImages = liveImageGenerating || projectImages.isGenerating;
   const visibleCalmPhase: CalmBuilderPhase = isCreatingImages
     ? "images"
@@ -2000,6 +1832,7 @@ export default function ProjectWorkspacePage() {
   const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
   // Whether chat was scrolled to (or near) the bottom — controls auto-scroll behaviour
   const chatAtBottomRef = useRef(true);
+  const chatLastScrollTopRef = useRef(0);
   // Mirror of leftPanelTab as a ref so pagehide/unmount callbacks can read the current
   // value synchronously without depending on React state (which may be stale in closures).
   const leftPanelTabRef = useRef<"chat" | "files" | "history" | "saved">("chat");
@@ -2112,8 +1945,9 @@ export default function ProjectWorkspacePage() {
           const top = Number.isFinite(Number(saved)) ? Number(saved) : 0;
           el.scrollTop = top;
           if (leftPanelTab === "chat") {
-            const atBottom = el.scrollHeight - top - el.clientHeight < 80;
+            const atBottom = isNearChatBottom(el);
             chatAtBottomRef.current = atBottom;
+            chatLastScrollTopRef.current = top;
             setChatScrolledUp(!atBottom);
           }
         }
@@ -2174,10 +2008,27 @@ export default function ProjectWorkspacePage() {
   }, [messages]);
 
   useEffect(() => {
-    if (chatAtBottomRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, activeTaskId, liveQATapeEvents]);
+    if (!chatAtBottomRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const element = scrollRef.current;
+      if (!element || !chatAtBottomRef.current) return;
+      scrollChatToLatest(element);
+      chatLastScrollTopRef.current = element.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    messages,
+    activeTaskId,
+    streamingText,
+    liveQATapeEvents,
+    liveNarrationEvents,
+    liveActivityEvents,
+    liveRecoverySteps,
+    agentPrompts,
+    brainstormActivity,
+    publishingActivity,
+    sendMessage.isPending,
+  ]);
 
   // Subscribe to the SSE event stream for the active task. When the server
   // emits "page_map_updated" (guaranteed before "completed"), invalidate the
@@ -2188,6 +2039,11 @@ export default function ProjectWorkspacePage() {
     seenPageMapEventIdsRef.current = new Set();
     setAgentPrompts([]);
     setLiveQATapeEvents([]);
+    setLiveNarrationEvents([]);
+    setLiveActivityEvents([]);
+    setLiveRecoverySteps([]);
+    setLiveRunProgress(null);
+    setLiveRunTerminalEvent(null);
     setLiveCodeBuffer("");
     calmFilePathsRef.current = new Set();
     setCalmFileCount(0);
@@ -2220,6 +2076,24 @@ export default function ProjectWorkspacePage() {
               },
             ].sort((left, right) => left.id - right.id);
           });
+        }
+        if (event.eventType === "narration" && event.message) {
+          setLiveNarrationEvents((current) =>
+            appendNarrationEntry(current, {
+              id: event.id,
+              text: event.message ?? "",
+            }),
+          );
+        }
+        const loopProgress = parseRunLoopProgress(event.eventType, event.message);
+        if (loopProgress) setLiveRunProgress(loopProgress);
+        const activity = taskActivityForEvent(event.id, event.eventType, event.message);
+        if (activity) {
+          setLiveActivityEvents((current) => appendActivityEntry(current, activity));
+        }
+        const recoveryStep = recoveryStepForEvent(event);
+        if (recoveryStep) {
+          setLiveRecoverySteps((current) => appendRecoveryStep(current, recoveryStep));
         }
         if (event.eventType === "generate_image") {
           const generatedImage = parseZeroGeneratedImageEvent(projectId, {
@@ -2317,6 +2191,7 @@ export default function ProjectWorkspacePage() {
           event.eventType === "failed" ||
           event.eventType === "cancelled"
         ) {
+          setLiveRunTerminalEvent(event.eventType);
           // Drop any unanswered prompts and clear the live code buffer when task ends.
           setAgentPrompts([]);
           setLiveCodeBuffer("");
@@ -2352,6 +2227,8 @@ export default function ProjectWorkspacePage() {
               ),
             );
           }
+          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
         }
       } catch {
         // ignore malformed frames
@@ -3072,6 +2949,14 @@ export default function ProjectWorkspacePage() {
     setPendingIsConverse(false);
     pendingIsConverseRef.current = false;
   }, [activeTaskId, projectId, cancelTask]);
+
+  const handleEditAndResend = useCallback((content: string) => {
+    setShowChatHistory(false);
+    setPrompt(content);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('[data-tour="chat-input"] textarea')?.focus();
+    });
+  }, []);
 
   const handleAddKey = useCallback((keyName: string) => {
     setPrefillSecretName(keyName);
@@ -3882,6 +3767,7 @@ export default function ProjectWorkspacePage() {
                         setShowChatHistory(false);
                         send(text);
                       }}
+                      onEditAndResend={handleEditAndResend}
                       onAutoFix={(text) => {
                         // Auto-fix retries now use Main Agent so preview receives committed files.
                         setShowChatHistory(false);
@@ -3929,9 +3815,14 @@ export default function ProjectWorkspacePage() {
                       onScroll={() => {
                         const el = scrollRef.current;
                         if (!el) return;
-                        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                        chatAtBottomRef.current = atBottom;
-                        setChatScrolledUp(!atBottom);
+                        const followsLatest = nextChatFollowState({
+                          wasFollowing: chatAtBottomRef.current,
+                          previousScrollTop: chatLastScrollTopRef.current,
+                          metrics: el,
+                        });
+                        chatLastScrollTopRef.current = el.scrollTop;
+                        chatAtBottomRef.current = followsLatest;
+                        setChatScrolledUp(!followsLatest);
                       }}
                       className="h-full overflow-y-auto px-4 py-3 space-y-2.5 hide-scrollbar"
                     >
@@ -4021,6 +3912,7 @@ export default function ProjectWorkspacePage() {
                         const visibleMsgs = showAllRecent
                           ? allRecent
                           : allRecent.slice(-RECENT_DEFAULT);
+                        const editableUserMessageId = latestUserMessageId(messages);
                         const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
                           const p = msg.plan as ChatPlanPayload | null | undefined;
                           const k =
@@ -4041,10 +3933,11 @@ export default function ProjectWorkspacePage() {
                             <div
                               key={msg.id}
                               className={cn(
-                                "flex",
+                                "flex items-start gap-2",
                                 msg.role === "user" ? "justify-end" : "justify-start",
                               )}
                             >
+                              {msg.role === "assistant" && <ZeroAvatar className="mt-0.5" />}
                               {isTaskQueued ? (
                                 <button
                                   onClick={() => setBackgroundPanelOpen(true)}
@@ -4061,7 +3954,7 @@ export default function ProjectWorkspacePage() {
                                     msg.role === "user"
                                       ? "bg-primary text-primary-foreground rounded-br-sm"
                                       : isError
-                                        ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                        ? "text-foreground"
                                         : "bg-muted text-foreground rounded-bl-sm border border-border",
                                   )}
                                 >
@@ -4253,10 +4146,15 @@ export default function ProjectWorkspacePage() {
                                             </div>
                                           )}
                                           {rp.taskId && (
-                                            <QATapeInline
+                                            <PersistedRunReplay
                                               projectId={projectId}
                                               taskId={rp.taskId}
-                                              className="mt-2 border-t border-border/50 pt-2"
+                                              className="mt-2"
+                                              onRetry={() =>
+                                                send(
+                                                  "Fix the remaining runtime issue and verify the preview again.",
+                                                )
+                                              }
                                             />
                                           )}
                                           <ReportCard
@@ -4283,7 +4181,7 @@ export default function ProjectWorkspacePage() {
                                       );
                                     })()}
                                   {isError && (
-                                    <ErrorCard
+                                    <InlineBuilderError
                                       message={(planPayload as { message: string }).message}
                                       suggestions={
                                         (planPayload as { suggestions?: string[] }).suggestions
@@ -4292,6 +4190,7 @@ export default function ProjectWorkspacePage() {
                                         setPrompt(text);
                                       }}
                                       onBuyCredits={() => setBuyCreditsOpen(true)}
+                                      showCredits={BILLING_ENABLED}
                                     />
                                   )}
                                   {isPlanCard && (
@@ -4307,6 +4206,16 @@ export default function ProjectWorkspacePage() {
                                       </span>
                                     </button>
                                   )}
+                                  {msg.role === "user" &&
+                                    msg.id === editableUserMessageId &&
+                                    !isBusy && (
+                                      <div className="mt-1 flex justify-end">
+                                        <EditAndResend
+                                          onEdit={() => handleEditAndResend(msg.content)}
+                                          className="text-primary-foreground"
+                                        />
+                                      </div>
+                                    )}
                                 </div>
                               )}
                             </div>
@@ -4322,14 +4231,52 @@ export default function ProjectWorkspacePage() {
                             | undefined;
                           return payload?.kind === "report" && payload.taskId === activeTaskId;
                         }) && (
-                          <div className="flex justify-start">
-                            <QATapeInline
-                              projectId={projectId}
-                              taskId={activeTaskId}
-                              live
-                              liveEvents={liveQATapeEvents}
-                              className="max-w-[90%] rounded-xl rounded-bl-sm border border-border bg-muted px-3 py-2"
+                          <div className="max-w-[90%]">
+                            <WorkingAnchor
+                              activity={liveActivityEvents.at(-1)}
+                              progress={liveRunProgress}
+                              density={activeThreadDensity}
+                              live={liveRunTerminalEvent === null}
                             />
+                            <InlineRunGroup
+                              stepCount={liveRunStepCount}
+                              live={liveRunTerminalEvent === null}
+                              progress={liveRunProgress}
+                              density={activeThreadDensity}
+                              onStop={liveRunTerminalEvent === null ? handleStopStream : undefined}
+                              className="mt-1"
+                            >
+                              <InlineActivityStream
+                                entries={liveActivityEvents}
+                                live={liveRunTerminalEvent === null}
+                                showAvatar={false}
+                                density={activeThreadDensity}
+                              />
+                              <div className="ml-5 space-y-2">
+                                <InlineNarrationStream
+                                  entries={liveNarrationEvents}
+                                  live={liveRunTerminalEvent === null}
+                                  density={activeThreadDensity}
+                                />
+                                <InlineRecoveryLoop
+                                  steps={liveRecoverySteps}
+                                  live={liveRunTerminalEvent === null}
+                                  onRetry={() =>
+                                    send(
+                                      "Fix the remaining runtime issue and verify the preview again.",
+                                    )
+                                  }
+                                />
+                                <QATapeInline
+                                  projectId={projectId}
+                                  taskId={activeTaskId}
+                                  live={liveRunTerminalEvent === null}
+                                  hideRepairSteps
+                                  liveEvents={liveQATapeEvents}
+                                  className="max-w-full"
+                                />
+                              </div>
+                            </InlineRunGroup>
                           </div>
                         )}
 
@@ -4347,14 +4294,30 @@ export default function ProjectWorkspacePage() {
                         taskId={activeTaskId}
                         prompts={agentPrompts}
                         onDismiss={dismissAgentPrompt}
+                        onPublishingActivity={handlePublishingActivity}
                       />
+
+                      {brainstormActivity && (
+                        <InlineActivityStream
+                          entries={[brainstormActivity]}
+                          live={!brainstormActivity.terminal}
+                          className="max-w-[90%]"
+                        />
+                      )}
+                      {publishingActivity && (
+                        <InlineActivityStream
+                          entries={[publishingActivity]}
+                          live={!publishingActivity.terminal}
+                          className="max-w-[90%]"
+                        />
+                      )}
 
                       {/* Live streaming bubble — shown while SSE converse stream is active */}
                       {isStreaming && !sendMessage.isPending && (
                         <div className="relative">
                           {/* Reconnecting indicator — shown while retrying the stream connection */}
                           {streamReconnectAttempt > 0 ? (
-                            <div className="flex justify-start animate-in fade-in duration-150">
+                            <div className="flex justify-start motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
                               <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs bg-muted border border-amber-500/30 text-amber-400 rounded-bl-sm">
                                 <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
                                 <span>Reconnecting… (attempt {streamReconnectAttempt}/3)</span>
@@ -4372,7 +4335,7 @@ export default function ProjectWorkspacePage() {
                               {/* Typing indicator: fades out and steps aside when first token arrives */}
                               <div
                                 className={cn(
-                                  "transition-opacity duration-150",
+                                  "transition-opacity duration-150 motion-reduce:transition-none",
                                   streamingText.length > 0
                                     ? "opacity-0 pointer-events-none absolute top-0 left-0"
                                     : "opacity-100",
@@ -4382,10 +4345,11 @@ export default function ProjectWorkspacePage() {
                               </div>
                               {/* Streaming bubble: fades in as text arrives */}
                               {streamingText.length > 0 && (
-                                <div className="flex justify-start animate-in fade-in duration-150">
+                                <div className="flex justify-start motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
+                                  <ZeroAvatar active className="mr-2 mt-0.5" />
                                   <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
                                     <MarkdownMessage content={streamingText} />
-                                    <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                                    <span className="ml-0.5 inline-block h-3 w-0.5 bg-foreground/60 align-middle motion-safe:animate-pulse" />
                                     <div className="mt-1.5 flex justify-end">
                                       <button
                                         onClick={handleStopStream}
@@ -4406,12 +4370,13 @@ export default function ProjectWorkspacePage() {
 
                       {/* Stream error bubble — shown when all reconnect attempts are exhausted */}
                       {streamError && !isStreaming && !sendMessage.isPending && (
-                        <div className="flex justify-start animate-in fade-in duration-150">
-                          <div className="max-w-[90%] px-3 py-2.5 rounded-xl text-xs bg-muted border border-destructive/30 rounded-bl-sm">
+                        <div className="flex items-start justify-start gap-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
+                          <ZeroAvatar className="mt-0.5" />
+                          <div className="max-w-[90%] py-1 text-xs">
                             {streamErrorStatus === 401 ? (
                               <>
                                 <div className="flex items-start gap-2">
-                                  <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                                  <WifiOff className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-px" />
                                   <div className="flex-1 min-w-0">
                                     <p className="text-foreground font-medium">Session expired</p>
                                     <p className="text-muted-foreground mt-0.5">
@@ -4447,7 +4412,7 @@ export default function ProjectWorkspacePage() {
                             ) : (
                               <>
                                 <div className="flex items-start gap-2">
-                                  <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                                  <WifiOff className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-px" />
                                   <div className="flex-1 min-w-0">
                                     <p className="text-foreground font-medium">Connection lost</p>
                                     <p className="text-muted-foreground mt-0.5">
@@ -4489,24 +4454,19 @@ export default function ProjectWorkspacePage() {
                       {sendMessage.isPending && pendingIsConverse ? <TypingIndicator /> : null}
                     </div>
                     {chatScrolledUp && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const el = scrollRef.current;
-                          if (el) el.scrollTop = el.scrollHeight;
-                        }}
-                        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium shadow-lg hover:opacity-90 transition-opacity"
-                        title="Jump to latest message"
-                      >
-                        {isBusy && (
-                          <span className="relative flex h-2 w-2 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground" />
-                          </span>
-                        )}
-                        {!isBusy && <ChevronDown className="h-3 w-3" />}
-                        {isBusy ? "New events" : "Jump to latest"}
-                      </button>
+                      <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+                        <JumpToLatestButton
+                          busy={isBusy}
+                          onJump={() => {
+                            const el = scrollRef.current;
+                            if (!el) return;
+                            scrollChatToLatest(el);
+                            chatLastScrollTopRef.current = el.scrollTop;
+                            chatAtBottomRef.current = true;
+                            setChatScrolledUp(false);
+                          }}
+                        />
+                      </div>
                     )}
                   </div>
 
@@ -4637,7 +4597,8 @@ export default function ProjectWorkspacePage() {
                           setChatScrolledUp(false);
                           chatAtBottomRef.current = true;
                           if (scrollRef.current) {
-                            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                            scrollChatToLatest(scrollRef.current);
+                            chatLastScrollTopRef.current = scrollRef.current.scrollTop;
                           }
                         }
                         const imageOnly = attachments?.filter(
@@ -4669,6 +4630,7 @@ export default function ProjectWorkspacePage() {
                       promptValue={prompt}
                       onPromptValueChange={setPrompt}
                       onAgentIdentityChange={setAgentIdentity}
+                      onBrainstormActivity={handleBrainstormActivity}
                     />
                   </div>
                 </>
@@ -5277,6 +5239,7 @@ export default function ProjectWorkspacePage() {
                   onNavigateToChecks={() => setActiveTab("checks")}
                   onNavigateToLogs={() => setActiveTab("logs")}
                   onNavigateToTestEnv={() => setActiveTab("preview")}
+                  onPublishingActivity={handlePublishingActivity}
                 />
               )}
               {activeTab === "logs" && (
