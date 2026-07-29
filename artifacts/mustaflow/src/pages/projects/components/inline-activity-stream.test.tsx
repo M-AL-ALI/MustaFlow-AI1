@@ -25,6 +25,8 @@ describe("taskActivityForEvent", () => {
     ["reading_files", "reading", "Reading your project"],
     ["planning", "planning", "Planning"],
     ["generating_code", "writing", "Writing code"],
+    ["check_deferred", "checking", "Choosing available checks"],
+    ["review_context", "checking", "Preparing the review"],
     ["qa_step", "checking", "Testing what I built"],
     ["saving_version", "checkpoint", "Saving a checkpoint"],
     ["updating_preview", "preview", "Refreshing the preview"],
@@ -43,6 +45,49 @@ describe("taskActivityForEvent", () => {
       kind: "writing",
       label: "Adapting the fix",
       resolvedLabel: "Adapted the fix",
+    });
+  });
+
+  it.each([
+    [
+      "tool_call",
+      JSON.stringify({ tool: "read_file", args: { path: "src/App.tsx" } }),
+      "reading",
+      "Reading your project",
+    ],
+    [
+      "loop:step",
+      JSON.stringify({ stepIndex: 3, stepCap: 25, toolName: "apply_patch" }),
+      "writing",
+      "Writing code",
+    ],
+    [
+      "tool_call",
+      JSON.stringify({ tool: "dispatch_subagent", args: { role: "reviewer" } }),
+      "checking",
+      "Reviewing the change",
+    ],
+  ])(
+    "derives an honest state from the production %s payload",
+    (eventType, message, kind, label) => {
+      expect(taskActivityForEvent(9, eventType, message)).toMatchObject({
+        id: 9,
+        kind,
+        label,
+      });
+    },
+  );
+
+  it("does not call an unspecified subagent step a review", () => {
+    expect(
+      taskActivityForEvent(
+        10,
+        "loop:step",
+        JSON.stringify({ stepIndex: 12, stepCap: 25, toolName: "dispatch_subagent" }),
+      ),
+    ).toMatchObject({
+      kind: "thinking",
+      label: "Working through the next step",
     });
   });
 });

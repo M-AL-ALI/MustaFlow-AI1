@@ -178,6 +178,7 @@ import { useCheckpointHistoryNavigation } from "./components/use-checkpoint-hist
 import {
   appendNarrationEntry,
   InlineNarrationStream,
+  narrationForTaskEvent,
   type InlineNarrationEntry,
 } from "./components/inline-narration-stream";
 import {
@@ -207,6 +208,7 @@ import {
 import {
   isRehydratableTaskStatus,
   parseRunLoopProgress,
+  selectPendingRunTaskId,
   selectRehydratableTaskId,
   type RunLoopProgress,
 } from "./components/run-rehydration";
@@ -1097,6 +1099,10 @@ export default function ProjectWorkspacePage() {
   // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
   // though that value is computed further down the component body.
   const pendingFeedTaskIdRef = useRef<number | null>(null);
+  // Snapshot task ids before each foreground send. Production task timestamps can
+  // differ from the browser clock, so polling identifies the new run by id instead.
+  const pendingTaskIdsBeforeSendRef = useRef<ReadonlySet<number>>(new Set());
+  const pendingRunShouldRenderInlineRef = useRef(false);
   // Debounce timer for mid-run preview refresh triggered by file_diff events.
   const livePreviewRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guard: skip project_files_changed syncs when the active task is staged (needs_review).
@@ -1204,7 +1210,7 @@ export default function ProjectWorkspacePage() {
   const filesPayloadRef = useRef<ProjectFilesChangedPayload | null>(null);
   /** Incrementing seq so PreviewTab can react to new payloads even if the ref content changed. */
   const [filesPayloadSeq, setFilesPayloadSeq] = useState(0);
-  const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
+  const [, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   // Active artifact (Task #544). Initialised from ?artifactId in the URL;
@@ -2072,11 +2078,12 @@ export default function ProjectWorkspacePage() {
             ].sort((left, right) => left.id - right.id);
           });
         }
-        if (event.eventType === "narration" && event.message) {
+        const narration = narrationForTaskEvent(event.eventType, event.message);
+        if (narration) {
           setLiveNarrationEvents((current) =>
             appendNarrationEntry(current, {
               id: event.id,
-              text: event.message ?? "",
+              text: narration,
             }),
           );
         }
@@ -2526,6 +2533,8 @@ export default function ProjectWorkspacePage() {
       // Engage optimistic workspace state only after any credit gate is accepted.
       // A dismissed dialog therefore leaves both the draft and composer idle.
       opts?.onProceed?.();
+      pendingTaskIdsBeforeSendRef.current = new Set(tasksForFeed.map((task) => task.id));
+      pendingRunShouldRenderInlineRef.current = !effectiveBackground && !isLikelyConverse;
       if (!firstWsMsgFiredRef.current) {
         firstWsMsgFiredRef.current = true;
         try {
@@ -2914,6 +2923,7 @@ export default function ProjectWorkspacePage() {
       sendRegular,
       queryClient,
       agentIdentity,
+      tasksForFeed,
     ],
   );
 
@@ -3147,21 +3157,27 @@ export default function ProjectWorkspacePage() {
     };
   }, []);
 
-  // Discover the active task ID during sendMessage.isPending so AgentThinkingBubble
-  // can show real events even before the API call resolves (for synchronous builds).
+  // Discover the active task ID while the synchronous message POST is pending.
+  // Compare against the ids captured at send time rather than browser/server clocks.
   const pendingFeedTaskId = sendMessage.isPending
-    ? (tasksForFeed
-        .filter((t) => {
-          const activeStatuses = new Set(["planning", "building", "testing"]);
-          if (!activeStatuses.has(t.status)) return false;
-          if (!pendingBuildStartedAt) return true;
-          return new Date(t.createdAt).getTime() >= pendingBuildStartedAt.getTime() - 5000;
-        })
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id ??
-      null)
+    ? selectPendingRunTaskId(tasksForFeed, pendingTaskIdsBeforeSendRef.current)
     : null;
   // Keep the ref in sync so handleStopStream (defined earlier) can read it.
   pendingFeedTaskIdRef.current = pendingFeedTaskId;
+
+  // Promote every newly discovered foreground task into the real SSE-backed live
+  // run. This intentionally is not guarded as a one-time rehydration action: each
+  // subsequent synchronous build needs its own EventSource subscription.
+  useEffect(() => {
+    if (
+      !sendMessage.isPending ||
+      !pendingRunShouldRenderInlineRef.current ||
+      pendingFeedTaskId === null
+    ) {
+      return;
+    }
+    setActiveTaskId((current) => (current === pendingFeedTaskId ? current : pendingFeedTaskId));
+  }, [pendingFeedTaskId, sendMessage.isPending]);
 
   const backgroundTasks = useMemo(
     () =>
