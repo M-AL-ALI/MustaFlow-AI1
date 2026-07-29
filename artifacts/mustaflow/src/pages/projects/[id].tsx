@@ -209,6 +209,8 @@ import {
   selectRehydratableTaskId,
   type RunLoopProgress,
 } from "./components/run-rehydration";
+import { threadDensityForMode } from "./components/thread-density";
+import { WorkingAnchor } from "./components/working-anchor";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -1750,6 +1752,7 @@ export default function ProjectWorkspacePage() {
     liveRunTerminalEvent === null &&
     isRehydratableTaskStatus(activeTaskStatus);
   const isBusy = sendMessage.isPending || isStreaming || hasRehydratedActiveRun;
+  const activeThreadDensity = threadDensityForMode(agentMode);
   const isCreatingImages = liveImageGenerating || projectImages.isGenerating;
   const visibleCalmPhase: CalmBuilderPhase = isCreatingImages
     ? "images"
@@ -4228,41 +4231,53 @@ export default function ProjectWorkspacePage() {
                             | undefined;
                           return payload?.kind === "report" && payload.taskId === activeTaskId;
                         }) && (
-                          <InlineRunGroup
-                            stepCount={liveRunStepCount}
-                            live={liveRunTerminalEvent === null}
-                            progress={liveRunProgress}
-                            onStop={liveRunTerminalEvent === null ? handleStopStream : undefined}
-                            className="max-w-[90%]"
-                          >
-                            <InlineActivityStream
-                              entries={liveActivityEvents}
+                          <div className="max-w-[90%]">
+                            <WorkingAnchor
+                              activity={liveActivityEvents.at(-1)}
+                              progress={liveRunProgress}
+                              density={activeThreadDensity}
                               live={liveRunTerminalEvent === null}
                             />
-                            <div className="ml-8 space-y-2">
-                              <InlineNarrationStream
-                                entries={liveNarrationEvents}
+                            <InlineRunGroup
+                              stepCount={liveRunStepCount}
+                              live={liveRunTerminalEvent === null}
+                              progress={liveRunProgress}
+                              density={activeThreadDensity}
+                              onStop={liveRunTerminalEvent === null ? handleStopStream : undefined}
+                              className="mt-1"
+                            >
+                              <InlineActivityStream
+                                entries={liveActivityEvents}
                                 live={liveRunTerminalEvent === null}
+                                showAvatar={false}
+                                density={activeThreadDensity}
                               />
-                              <InlineRecoveryLoop
-                                steps={liveRecoverySteps}
-                                live={liveRunTerminalEvent === null}
-                                onRetry={() =>
-                                  send(
-                                    "Fix the remaining runtime issue and verify the preview again.",
-                                  )
-                                }
-                              />
-                              <QATapeInline
-                                projectId={projectId}
-                                taskId={activeTaskId}
-                                live={liveRunTerminalEvent === null}
-                                hideRepairSteps
-                                liveEvents={liveQATapeEvents}
-                                className="max-w-full"
-                              />
-                            </div>
-                          </InlineRunGroup>
+                              <div className="ml-5 space-y-2">
+                                <InlineNarrationStream
+                                  entries={liveNarrationEvents}
+                                  live={liveRunTerminalEvent === null}
+                                  density={activeThreadDensity}
+                                />
+                                <InlineRecoveryLoop
+                                  steps={liveRecoverySteps}
+                                  live={liveRunTerminalEvent === null}
+                                  onRetry={() =>
+                                    send(
+                                      "Fix the remaining runtime issue and verify the preview again.",
+                                    )
+                                  }
+                                />
+                                <QATapeInline
+                                  projectId={projectId}
+                                  taskId={activeTaskId}
+                                  live={liveRunTerminalEvent === null}
+                                  hideRepairSteps
+                                  liveEvents={liveQATapeEvents}
+                                  className="max-w-full"
+                                />
+                              </div>
+                            </InlineRunGroup>
+                          </div>
                         )}
 
                       <BuilderImageThreadGallery

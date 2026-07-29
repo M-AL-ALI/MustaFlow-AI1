@@ -22,6 +22,7 @@ import {
   type InlineRecoveryStep,
 } from "./inline-recovery-loop";
 import type { RunLoopProgress } from "./run-rehydration";
+import type { ThreadDensity } from "./thread-density";
 
 type ReplayEvent = QATapeEvent & {
   taskId?: number;
@@ -74,6 +75,7 @@ type InlineRunGroupProps = {
   className?: string;
   onStop?: () => void;
   progress?: RunLoopProgress | null;
+  density?: ThreadDensity;
 };
 
 export function InlineRunGroup({
@@ -83,15 +85,21 @@ export function InlineRunGroup({
   className,
   onStop,
   progress,
+  density = "standard",
 }: InlineRunGroupProps) {
-  const [expanded, setExpanded] = useState(live);
+  const [expanded, setExpanded] = useState(live && density !== "minimal");
   const wasLiveRef = useRef(live);
+  const previousDensityRef = useRef(density);
 
   useEffect(() => {
     if (wasLiveRef.current && !live) setExpanded(false);
-    if (!wasLiveRef.current && live) setExpanded(true);
+    if (!wasLiveRef.current && live) setExpanded(density !== "minimal");
+    if (live && previousDensityRef.current !== density) {
+      setExpanded(density !== "minimal");
+    }
     wasLiveRef.current = live;
-  }, [live]);
+    previousDensityRef.current = density;
+  }, [density, live]);
 
   const countLabel = `${stepCount} ${stepCount === 1 ? "step" : "steps"}`;
   const replayLabel = live
@@ -122,7 +130,7 @@ export function InlineRunGroup({
           <span>{replayLabel}</span>
         </button>
         <div className="flex items-center gap-2">
-          {live && progress && (
+          {live && progress && density !== "minimal" && density !== "detailed" && (
             <span
               className="text-[9px] tabular-nums text-muted-foreground/70"
               data-testid="inline-run-progress"

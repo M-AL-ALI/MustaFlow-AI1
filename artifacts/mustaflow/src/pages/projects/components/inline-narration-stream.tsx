@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import { type ThreadDensity, visibleThreadEntries } from "./thread-density";
 
 export type InlineNarrationEntry = {
   id: number;
@@ -95,12 +96,14 @@ type InlineNarrationStreamProps = {
   entries: InlineNarrationEntry[];
   live?: boolean;
   className?: string;
+  density?: ThreadDensity;
 };
 
 export function InlineNarrationStream({
   entries,
   live = false,
   className,
+  density = "detailed",
 }: InlineNarrationStreamProps) {
   if (entries.length === 0) return null;
 
@@ -114,7 +117,7 @@ export function InlineNarrationStream({
       aria-live={live ? "polite" : undefined}
       aria-relevant="additions text"
     >
-      {entries.map((entry) => (
+      {visibleThreadEntries(entries, density).map((entry) => (
         <div
           key={entry.id}
           className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"

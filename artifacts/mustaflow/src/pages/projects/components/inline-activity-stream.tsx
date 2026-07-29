@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ZeroAvatar } from "./zero-avatar";
+import { type ThreadDensity, visibleThreadEntries } from "./thread-density";
 
 export type InlineActivityKind =
   | "thinking"
@@ -190,6 +191,12 @@ const ACTIVITY_ICON: Record<InlineActivityKind, ComponentType<{ className?: stri
   done: Check,
 };
 
+export function activityIconForKind(
+  kind: InlineActivityKind,
+): ComponentType<{ className?: string }> {
+  return ACTIVITY_ICON[kind];
+}
+
 const MAX_ACTIVITY_ROWS = 12;
 
 export function taskActivityForEvent(
@@ -249,6 +256,7 @@ type InlineActivityStreamProps = {
   live?: boolean;
   showAvatar?: boolean;
   className?: string;
+  density?: ThreadDensity;
 };
 
 export function InlineActivityStream({
@@ -256,6 +264,7 @@ export function InlineActivityStream({
   live = false,
   showAvatar = true,
   className,
+  density = "detailed",
 }: InlineActivityStreamProps) {
   if (entries.length === 0) return null;
 
@@ -271,7 +280,7 @@ export function InlineActivityStream({
     >
       {showAvatar && <ZeroAvatar active={live && !lastEntry?.terminal} className="mt-0.5" />}
       <div className="min-w-0 flex-1 space-y-0.5 pt-0.5 text-xs">
-        {entries.map((entry) => {
+        {visibleThreadEntries(entries, density).map((entry) => {
           const active = live && entry.id === lastEntry?.id && !entry.terminal;
           const failed = entry.kind === "error";
           const Icon = active ? ACTIVITY_ICON[entry.kind] : failed ? AlertTriangle : Check;

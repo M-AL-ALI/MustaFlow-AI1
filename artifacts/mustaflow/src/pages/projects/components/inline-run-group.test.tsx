@@ -104,4 +104,24 @@ describe("InlineRunGroup", () => {
 
     expect(screen.getByTestId("inline-run-progress")).toHaveTextContent("step 3 of 25");
   });
+
+  it("keeps Lite minimal while Pro opens the same live details", () => {
+    const { rerender } = render(
+      <InlineRunGroup stepCount={8} live density="minimal">
+        <div>Same live detail</div>
+      </InlineRunGroup>,
+    );
+
+    expect(screen.getByTestId("inline-run-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Same live detail")).not.toBeInTheDocument();
+
+    rerender(
+      <InlineRunGroup stepCount={8} live density="detailed">
+        <div>Same live detail</div>
+      </InlineRunGroup>,
+    );
+
+    expect(screen.getByTestId("inline-run-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Same live detail")).toBeVisible();
+  });
 });
