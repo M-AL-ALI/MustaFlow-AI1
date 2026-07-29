@@ -23,13 +23,13 @@ import {
   Lightbulb,
   MoreHorizontal,
   AlertCircle,
-  ChevronDown,
   ListPlus,
 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -286,6 +286,15 @@ export function QueueComposer({
       }
     },
     [intentLsKey],
+  );
+
+  const prefillSinglePrompt = useCallback(
+    (text: string) => {
+      setActiveIntent(null);
+      setRows([{ id: crypto.randomUUID(), text }]);
+      onPromptValueChange?.(text);
+    },
+    [onPromptValueChange, setActiveIntent],
   );
 
   const { mutate: updateProject } = useUpdateProject();
@@ -1810,6 +1819,9 @@ export function QueueComposer({
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" side="top" className="w-52">
+                    <DropdownMenuLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                      Create
+                    </DropdownMenuLabel>
                     <DropdownMenuItem onSelect={() => setImagePanelOpen((v) => !v)}>
                       <ImageIcon className="mr-2 h-3.5 w-3.5" />
                       {imagePanelOpen ? "Close image generator" : "Generate image"}
@@ -1818,11 +1830,14 @@ export function QueueComposer({
                       <Lightbulb className="mr-2 h-3.5 w-3.5" />
                       {showBrainstorm ? "Close brainstorm" : "Brainstorm"}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={addRow}>
-                      <Plus className="mr-2 h-3.5 w-3.5" />
-                      Add queued task
+                    <DropdownMenuItem onSelect={() => setShowTemplatePicker(true)}>
+                      <LayoutTemplate className="mr-2 h-3.5 w-3.5" />
+                      Templates
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                      Plan
+                    </DropdownMenuLabel>
                     <DropdownMenuItem
                       onSelect={() => setAgentType(agentType === "planning" ? "main" : "planning")}
                     >
@@ -1832,6 +1847,24 @@ export function QueueComposer({
                         <span className="ml-auto text-[10px] text-primary">on</span>
                       )}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowPlanHistory(true)}>
+                      <Clock className="mr-2 h-3.5 w-3.5" />
+                      Plan history
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        prefillSinglePrompt(
+                          "Explain how this app works in plain language, including its pages, data flow, and important behavior.",
+                        );
+                      }}
+                    >
+                      <BookOpenIcon className="mr-2 h-3.5 w-3.5" />
+                      Explain my app
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                      Run
+                    </DropdownMenuLabel>
                     <DropdownMenuItem onSelect={() => onRunInBackgroundChange(!_runInBackground)}>
                       <Layers2 className="mr-2 h-3.5 w-3.5" />
                       Work in background
@@ -1839,90 +1872,17 @@ export function QueueComposer({
                         <span className="ml-auto text-[10px] text-primary">on</span>
                       )}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => setShowTemplatePicker(true)}>
-                      <LayoutTemplate className="mr-2 h-3.5 w-3.5" />
-                      Templates
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onVariantModeChange(!variantMode)}>
-                      <Layers2 className="mr-2 h-3.5 w-3.5" />
-                      Generate variants
-                      {variantMode && <span className="ml-auto text-[10px] text-primary">on</span>}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => setShowPlanHistory(true)}>
-                      <Clock className="mr-2 h-3.5 w-3.5" />
-                      Plan history
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        setActiveIntent("debug");
-                        const newId = crypto.randomUUID();
-                        setRows([{ id: newId, text: "Debug this error: " }]);
-                        onPromptValueChange?.("Debug this error: ");
-                      }}
-                    >
-                      <Bug className="mr-2 h-3.5 w-3.5" />
-                      Debug project
+                    <DropdownMenuItem onSelect={addRow}>
+                      <Plus className="mr-2 h-3.5 w-3.5" />
+                      Add queued task
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => {
-                        setActiveIntent("review");
-                        const newId = crypto.randomUUID();
-                        setRows([{ id: newId, text: "Review my code for " }]);
-                        onPromptValueChange?.("Review my code for ");
-                      }}
-                    >
-                      <CheckSquare className="mr-2 h-3.5 w-3.5" />
-                      Review project
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        setActiveIntent("explain");
-                        const newId = crypto.randomUUID();
-                        setRows([{ id: newId, text: "Explain how " }]);
-                        onPromptValueChange?.("Explain how ");
-                      }}
-                    >
-                      <BookOpenIcon className="mr-2 h-3.5 w-3.5" />
-                      Explain project
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        setActiveIntent("refactor");
-                        const newId = crypto.randomUUID();
-                        setRows([{ id: newId, text: "Refactor " }]);
-                        onPromptValueChange?.("Refactor ");
+                        prefillSinglePrompt("Fix or improve this app: ");
                       }}
                     >
                       <Wrench className="mr-2 h-3.5 w-3.5" />
-                      Improve project
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={disabled}
-                      onSelect={() =>
-                        onSingleSend("Fix all failing tests in this project", "fix_tests")
-                      }
-                    >
-                      <FlaskConical className="mr-2 h-3.5 w-3.5" />
-                      Fix tests
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={disabled}
-                      onSelect={() =>
-                        onSingleSend("Fix all TypeScript type errors in this project", "fix_types")
-                      }
-                    >
-                      <Wrench className="mr-2 h-3.5 w-3.5" />
-                      Fix TypeScript
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={disabled}
-                      onSelect={() =>
-                        onSingleSend("Fix all ESLint violations in this project", "fix_lint")
-                      }
-                    >
-                      <CheckSquare className="mr-2 h-3.5 w-3.5" />
-                      Fix lint
+                      Fix or improve...
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -1980,6 +1940,22 @@ export function QueueComposer({
         onModeChange={onAgentModeChange}
         onDeepReasoningChange={onDeepReasoningChange}
       />
+
+      {/* Variants remain available contextually instead of crowding the + menu. */}
+      {!isBusy && isDesignIntent && !variantMode && (
+        <div className="mt-1.5 px-3">
+          <button
+            onClick={() => {
+              onVariantModeChange(true);
+              void handleSend();
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            title="Generate 2 design variants (A: minimalist, B: bold) and pick the best"
+          >
+            <Layers2 className="h-3 w-3" /> Generate 2 variants
+          </button>
+        </div>
+      )}
 
       {!isBusy && issueCount > 0 && (
         <div className="mt-1.5 px-3 flex items-center gap-2 flex-wrap">
@@ -2062,130 +2038,6 @@ export function QueueComposer({
                 </div>
               </PopoverContent>
             </Popover>
-          )}
-
-          {/* Templates — always visible */}
-          <button
-            onClick={() => setShowTemplatePicker(true)}
-            className="hidden items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
-            title="Start from a pre-built plan template"
-          >
-            <LayoutTemplate className="h-3 w-3" /> Templates
-          </button>
-
-          {/* More dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="hidden items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
-                title="More actions"
-              >
-                <MoreHorizontal className="h-3 w-3" />
-                More
-                <ChevronDown className="h-2.5 w-2.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top" className="w-52">
-              <DropdownMenuItem
-                onClick={() => {
-                  setActiveIntent("debug");
-                  const newId = crypto.randomUUID();
-                  setRows([{ id: newId, text: "Debug this error: " }]);
-                  if (onPromptValueChange) onPromptValueChange("Debug this error: ");
-                }}
-              >
-                <Bug className="h-3.5 w-3.5 text-red-400" />
-                Debug project
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setActiveIntent("review");
-                  const newId = crypto.randomUUID();
-                  setRows([{ id: newId, text: "Review my code for " }]);
-                  if (onPromptValueChange) onPromptValueChange("Review my code for ");
-                }}
-              >
-                <CheckSquare className="h-3.5 w-3.5 text-blue-400" />
-                Review project
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setActiveIntent("explain");
-                  const newId = crypto.randomUUID();
-                  setRows([{ id: newId, text: "Explain how " }]);
-                  if (onPromptValueChange) onPromptValueChange("Explain how ");
-                }}
-              >
-                <BookOpenIcon className="h-3.5 w-3.5 text-violet-400" />
-                Explain project
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setActiveIntent("refactor");
-                  const newId = crypto.randomUUID();
-                  setRows([{ id: newId, text: "Refactor " }]);
-                  if (onPromptValueChange) onPromptValueChange("Refactor ");
-                }}
-              >
-                <Wrench className="h-3.5 w-3.5 text-yellow-400" />
-                Refactor / improve
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => onVariantModeChange(!variantMode)}>
-                <Layers2 className="h-3.5 w-3.5 text-violet-400" />
-                Generate variants
-                {variantMode && <span className="ml-auto text-[9px] text-violet-400">on</span>}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowPlanHistory(true)}>
-                <Clock className="h-3.5 w-3.5" />
-                Plan history
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={disabled}
-                onClick={() => {
-                  if (disabled) return;
-                  onSingleSend("Fix all failing tests in this project", "fix_tests");
-                }}
-              >
-                <FlaskConical className="h-3.5 w-3.5 text-emerald-400" />
-                Fix tests
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={disabled}
-                onClick={() => {
-                  if (disabled) return;
-                  onSingleSend("Fix all TypeScript type errors in this project", "fix_types");
-                }}
-              >
-                <Wrench className="h-3.5 w-3.5 text-blue-400" />
-                Fix TypeScript
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={disabled}
-                onClick={() => {
-                  if (disabled) return;
-                  onSingleSend("Fix all ESLint violations in this project", "fix_lint");
-                }}
-              >
-                <CheckSquare className="h-3.5 w-3.5 text-amber-400" />
-                Fix lint
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Contextual variants chip — shown when prompt matches design keywords */}
-          {isDesignIntent && !variantMode && (
-            <button
-              onClick={() => {
-                onVariantModeChange(true);
-                void handleSend();
-              }}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-violet-500/30 bg-violet-500/8 text-violet-400 hover:bg-violet-500/15 transition-colors"
-              title="Generate 2 design variants (A: minimalist, B: bold) and pick the best"
-            >
-              <Layers2 className="h-3 w-3" /> Generate 2 variants
-            </button>
           )}
 
           {/* Client-side intent hint badge — display-only, updates instantly as user types */}
