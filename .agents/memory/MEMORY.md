@@ -59,6 +59,7 @@
 - [Checkpoint auto-sync](github-checkpoint-autosync.md) / [workspace==GitHub before publish](workspace-github-sync-before-deploy.md) — confirm real remote SHA via forced pull-from-github; publish ships the WORKSPACE, verify HEAD==github/main first.
 - [Uncommitted edits revert](main-agent-uncommitted-changes-revert.md) — working-tree edits can vanish across turn boundaries; push in the same turn, verify via git show.
 - [pull-from-github merge conflict](pull-from-github-merge-conflict.md) / [merge branch via pull workflow](merge-branch-via-pull-workflow.md) — resolve conflicted merges via a background task; PULL_BRANCH='<branch>' merges a named branch.
+- [Pull/push ref-lock race](pull-push-reflock-race.md) — Run button starts both git workflows at once; pull dies on stale refs/remotes/github/main.lock; rm the lock file and rerun.
 - [Fly npm install nohup](fly-npm-install-nohup.md) / [npm idealTree](agentic-container-npm-conflict.md) / [yarn cache ENOENT](fly-yarn-cache-enoent.md) — sync installs OOM-kill in Fly exec; rm stale npm locks; pkill before each nohup; yarn cache clean first.
 - [flyFetch timeout](fly-fetch-timeout.md) / [exec file upload](fly-exec-file-upload.md) — 30s API / 360s exec timeouts; only chunked printf-append base64 (400ms gaps) works for >1KB files.
 - [Post-build container sync](agentic-postbuild-container-sync.md) / [preview proxy service](fly-preview-proxy-service.md) — detached installer + poll real reachability, never unconditional "Server started"; the separate proxy Fly app must be deployed or preview 502s.
