@@ -179,6 +179,13 @@ import {
   InlineNarrationStream,
   type InlineNarrationEntry,
 } from "./components/inline-narration-stream";
+import {
+  appendActivityEntry,
+  InlineActivityStream,
+  taskActivityForEvent,
+  type InlineActivityEntry,
+} from "./components/inline-activity-stream";
+import { ZeroAvatar } from "./components/zero-avatar";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -1111,6 +1118,7 @@ export default function ProjectWorkspacePage() {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [liveQATapeEvents, setLiveQATapeEvents] = useState<QATapeEvent[]>([]);
   const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
+  const [liveActivityEvents, setLiveActivityEvents] = useState<InlineActivityEntry[]>([]);
   const [, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
@@ -2014,7 +2022,7 @@ export default function ProjectWorkspacePage() {
     if (chatAtBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, activeTaskId, liveQATapeEvents, liveNarrationEvents]);
+  }, [messages, activeTaskId, liveQATapeEvents, liveNarrationEvents, liveActivityEvents]);
 
   // Subscribe to the SSE event stream for the active task. When the server
   // emits "page_map_updated" (guaranteed before "completed"), invalidate the
@@ -2026,6 +2034,7 @@ export default function ProjectWorkspacePage() {
     setAgentPrompts([]);
     setLiveQATapeEvents([]);
     setLiveNarrationEvents([]);
+    setLiveActivityEvents([]);
     setLiveCodeBuffer("");
     calmFilePathsRef.current = new Set();
     setCalmFileCount(0);
@@ -2066,6 +2075,10 @@ export default function ProjectWorkspacePage() {
               text: event.message ?? "",
             }),
           );
+        }
+        const activity = taskActivityForEvent(event.id, event.eventType);
+        if (activity) {
+          setLiveActivityEvents((current) => appendActivityEntry(current, activity));
         }
         if (event.eventType === "generate_image") {
           const generatedImage = parseZeroGeneratedImageEvent(projectId, {
@@ -3887,10 +3900,11 @@ export default function ProjectWorkspacePage() {
                             <div
                               key={msg.id}
                               className={cn(
-                                "flex",
+                                "flex items-start gap-2",
                                 msg.role === "user" ? "justify-end" : "justify-start",
                               )}
                             >
+                              {msg.role === "assistant" && <ZeroAvatar className="mt-0.5" />}
                               {isTaskQueued ? (
                                 <button
                                   onClick={() => setBackgroundPanelOpen(true)}
@@ -4169,8 +4183,9 @@ export default function ProjectWorkspacePage() {
                           return payload?.kind === "report" && payload.taskId === activeTaskId;
                         }) && (
                           <div className="max-w-[90%] space-y-2">
-                            <InlineNarrationStream entries={liveNarrationEvents} live />
-                            <div className="flex justify-start">
+                            <InlineActivityStream entries={liveActivityEvents} live />
+                            <div className="ml-8 space-y-2">
+                              <InlineNarrationStream entries={liveNarrationEvents} live />
                               <QATapeInline
                                 projectId={projectId}
                                 taskId={activeTaskId}
@@ -4232,6 +4247,7 @@ export default function ProjectWorkspacePage() {
                               {/* Streaming bubble: fades in as text arrives */}
                               {streamingText.length > 0 && (
                                 <div className="flex justify-start animate-in fade-in duration-150">
+                                  <ZeroAvatar active className="mr-2 mt-0.5" />
                                   <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
                                     <MarkdownMessage content={streamingText} />
                                     <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />

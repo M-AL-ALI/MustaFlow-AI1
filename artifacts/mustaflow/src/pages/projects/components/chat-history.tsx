@@ -39,6 +39,7 @@ import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
 import { QATapeInline } from "./qa-tape-inline";
 import { InlineBuildResults } from "./inline-build-results";
+import { ZeroAvatar } from "./zero-avatar";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -741,9 +742,7 @@ const completedAnimations = new Set<number>();
 export function TypingIndicator() {
   return (
     <div className="flex justify-start items-end gap-2">
-      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/25 flex items-center justify-center shrink-0 text-primary/80">
-        <AgentIcon size={12} state="active" />
-      </div>
+      <ZeroAvatar active />
       <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2.5 flex items-center gap-1">
         {[0, 1, 2].map((i) => (
           <span
@@ -2435,8 +2434,9 @@ function MessageRow({
         )}
       >
         <span className={cn("font-semibold", isUser ? "text-primary/80" : "text-foreground/60")}>
-          {isUser ? "You" : "AI"}
+          {isUser ? "You" : "Zero"}
         </span>
+        {!isUser && <ZeroAvatar className="h-4 w-4 border-0 bg-transparent" />}
         <AgentModePill mode={msg.agentMode} />
         {!isUser && msg.agentIdentity && <AgentBadge identity={msg.agentIdentity} />}
         {!isUser &&
