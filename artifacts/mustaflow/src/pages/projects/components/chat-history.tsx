@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
+import { QATapeInline } from "./qa-tape-inline";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -2655,6 +2656,19 @@ function MessageRow({
             ))}
           </div>
         )}
+
+        {/* Persisted QA tape */}
+        {isReport &&
+          (() => {
+            const taskId = (planPayload as { taskId?: number }).taskId;
+            return typeof taskId === "number" && taskId > 0 ? (
+              <QATapeInline
+                projectId={projectId}
+                taskId={taskId}
+                className="mt-2 border-t border-border/50 pt-2"
+              />
+            ) : null;
+          })()}
 
         {/* Subagent activity (live) — shows designer/explorer/tester/reviewer events */}
         {isReport &&
