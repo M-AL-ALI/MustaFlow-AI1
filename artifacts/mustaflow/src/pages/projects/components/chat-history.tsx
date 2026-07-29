@@ -9,7 +9,6 @@ import {
   KeyRound,
   ChevronDown,
   ChevronRight,
-  ArrowDown,
   ExternalLink,
   Lightbulb,
   ShieldAlert,
@@ -42,6 +41,7 @@ import { ZeroAvatar } from "./zero-avatar";
 import { PersistedRunReplay } from "./inline-run-group";
 import { InlineBuilderError } from "./inline-builder-error";
 import { EditAndResend, latestUserMessageId } from "./edit-and-resend";
+import { JumpToLatestButton, nextChatFollowState, scrollChatToLatest } from "./smart-auto-scroll";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -3938,6 +3938,8 @@ export function ChatHistory({
   >(null);
   const [serverSearching, setServerSearching] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followsLatestRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const editableUserMessageId = latestUserMessageId(messages);
@@ -4009,22 +4011,36 @@ export function ChatHistory({
   }
 
   useEffect(() => {
-    if (!searchQuery && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (searchQuery || !followsLatestRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const element = scrollRef.current;
+      if (!element || !followsLatestRef.current) return;
+      scrollChatToLatest(element);
+      lastScrollTopRef.current = element.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [messages, searchQuery]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowJumpToBottom(distFromBottom > 120);
+    const followsLatest = nextChatFollowState({
+      wasFollowing: followsLatestRef.current,
+      previousScrollTop: lastScrollTopRef.current,
+      metrics: el,
+    });
+    lastScrollTopRef.current = el.scrollTop;
+    followsLatestRef.current = followsLatest;
+    setShowJumpToBottom(!followsLatest);
   };
 
   const jumpToBottom = () => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const element = scrollRef.current;
+    if (!element) return;
+    scrollChatToLatest(element);
+    lastScrollTopRef.current = element.scrollTop;
+    followsLatestRef.current = true;
+    setShowJumpToBottom(false);
   };
 
   return (
@@ -4166,13 +4182,7 @@ export function ChatHistory({
       {/* Jump to bottom */}
       {showJumpToBottom && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-          <button
-            onClick={jumpToBottom}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card border border-border text-xs font-medium text-foreground shadow-md hover:bg-muted transition-colors"
-          >
-            <ArrowDown className="h-3 w-3" />
-            Jump to latest
-          </button>
+          <JumpToLatestButton onJump={jumpToBottom} />
         </div>
       )}
     </div>

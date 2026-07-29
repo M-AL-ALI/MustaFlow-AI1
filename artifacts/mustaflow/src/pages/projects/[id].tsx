@@ -197,6 +197,12 @@ import {
 } from "./components/inline-recovery-loop";
 import { InlineBuilderError } from "./components/inline-builder-error";
 import { EditAndResend, latestUserMessageId } from "./components/edit-and-resend";
+import {
+  isNearChatBottom,
+  JumpToLatestButton,
+  nextChatFollowState,
+  scrollChatToLatest,
+} from "./components/smart-auto-scroll";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -1810,6 +1816,7 @@ export default function ProjectWorkspacePage() {
   const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
   // Whether chat was scrolled to (or near) the bottom — controls auto-scroll behaviour
   const chatAtBottomRef = useRef(true);
+  const chatLastScrollTopRef = useRef(0);
   // Mirror of leftPanelTab as a ref so pagehide/unmount callbacks can read the current
   // value synchronously without depending on React state (which may be stale in closures).
   const leftPanelTabRef = useRef<"chat" | "files" | "history" | "saved">("chat");
@@ -1922,8 +1929,9 @@ export default function ProjectWorkspacePage() {
           const top = Number.isFinite(Number(saved)) ? Number(saved) : 0;
           el.scrollTop = top;
           if (leftPanelTab === "chat") {
-            const atBottom = el.scrollHeight - top - el.clientHeight < 80;
+            const atBottom = isNearChatBottom(el);
             chatAtBottomRef.current = atBottom;
+            chatLastScrollTopRef.current = top;
             setChatScrolledUp(!atBottom);
           }
         }
@@ -1984,16 +1992,26 @@ export default function ProjectWorkspacePage() {
   }, [messages]);
 
   useEffect(() => {
-    if (chatAtBottomRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (!chatAtBottomRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const element = scrollRef.current;
+      if (!element || !chatAtBottomRef.current) return;
+      scrollChatToLatest(element);
+      chatLastScrollTopRef.current = element.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
     messages,
     activeTaskId,
+    streamingText,
     liveQATapeEvents,
     liveNarrationEvents,
     liveActivityEvents,
     liveRecoverySteps,
+    agentPrompts,
+    brainstormActivity,
+    publishingActivity,
+    sendMessage.isPending,
   ]);
 
   // Subscribe to the SSE event stream for the active task. When the server
@@ -3774,9 +3792,14 @@ export default function ProjectWorkspacePage() {
                       onScroll={() => {
                         const el = scrollRef.current;
                         if (!el) return;
-                        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                        chatAtBottomRef.current = atBottom;
-                        setChatScrolledUp(!atBottom);
+                        const followsLatest = nextChatFollowState({
+                          wasFollowing: chatAtBottomRef.current,
+                          previousScrollTop: chatLastScrollTopRef.current,
+                          metrics: el,
+                        });
+                        chatLastScrollTopRef.current = el.scrollTop;
+                        chatAtBottomRef.current = followsLatest;
+                        setChatScrolledUp(!followsLatest);
                       }}
                       className="h-full overflow-y-auto px-4 py-3 space-y-2.5 hide-scrollbar"
                     >
@@ -4389,24 +4412,19 @@ export default function ProjectWorkspacePage() {
                       {sendMessage.isPending && pendingIsConverse ? <TypingIndicator /> : null}
                     </div>
                     {chatScrolledUp && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const el = scrollRef.current;
-                          if (el) el.scrollTop = el.scrollHeight;
-                        }}
-                        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium shadow-lg hover:opacity-90 transition-opacity"
-                        title="Jump to latest message"
-                      >
-                        {isBusy && (
-                          <span className="relative flex h-2 w-2 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground" />
-                          </span>
-                        )}
-                        {!isBusy && <ChevronDown className="h-3 w-3" />}
-                        {isBusy ? "New events" : "Jump to latest"}
-                      </button>
+                      <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+                        <JumpToLatestButton
+                          busy={isBusy}
+                          onJump={() => {
+                            const el = scrollRef.current;
+                            if (!el) return;
+                            scrollChatToLatest(el);
+                            chatLastScrollTopRef.current = el.scrollTop;
+                            chatAtBottomRef.current = true;
+                            setChatScrolledUp(false);
+                          }}
+                        />
+                      </div>
                     )}
                   </div>
 
@@ -4537,7 +4555,8 @@ export default function ProjectWorkspacePage() {
                           setChatScrolledUp(false);
                           chatAtBottomRef.current = true;
                           if (scrollRef.current) {
-                            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                            scrollChatToLatest(scrollRef.current);
+                            chatLastScrollTopRef.current = scrollRef.current.scrollTop;
                           }
                         }
                         const imageOnly = attachments?.filter(
