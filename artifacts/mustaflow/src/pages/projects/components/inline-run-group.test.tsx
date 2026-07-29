@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildRunReplayModel, InlineRunGroup } from "./inline-run-group";
 
 describe("buildRunReplayModel", () => {
@@ -74,5 +74,24 @@ describe("InlineRunGroup", () => {
     fireEvent.click(screen.getByTestId("inline-run-toggle"));
     expect(screen.getByText("Persisted detail")).toBeVisible();
     expect(screen.getByText("5 steps · collapse replay")).toBeVisible();
+  });
+
+  it("offers a real stop action only while a run is live", () => {
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <InlineRunGroup stepCount={3} live onStop={onStop}>
+        <div>Live detail</div>
+      </InlineRunGroup>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(onStop).toHaveBeenCalledOnce();
+
+    rerender(
+      <InlineRunGroup stepCount={3} live={false} onStop={onStop}>
+        <div>Finished detail</div>
+      </InlineRunGroup>,
+    );
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 });

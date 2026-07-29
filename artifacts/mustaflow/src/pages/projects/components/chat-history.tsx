@@ -41,6 +41,7 @@ import { InlineBuildResults } from "./inline-build-results";
 import { ZeroAvatar } from "./zero-avatar";
 import { PersistedRunReplay } from "./inline-run-group";
 import { InlineBuilderError } from "./inline-builder-error";
+import { EditAndResend, latestUserMessageId } from "./edit-and-resend";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -2388,6 +2389,8 @@ function MessageRow({
   onSendMessage,
   onAutoFix,
   onNavigateToSecret,
+  canEditAndResend,
+  onEditAndResend,
 }: {
   msg: Message;
   searchQuery: string;
@@ -2398,6 +2401,8 @@ function MessageRow({
   /** Forwarded to QualityGateFailureCard; always sends with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
+  canEditAndResend?: boolean;
+  onEditAndResend?: (text: string) => void;
 }) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
@@ -2515,6 +2520,12 @@ function MessageRow({
 
         {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
           <AttachmentGallery attachments={msg.attachments} />
+        )}
+
+        {isUser && canEditAndResend && onEditAndResend && (
+          <div className="mt-1 flex justify-end">
+            <EditAndResend onEdit={() => onEditAndResend(msg.content)} />
+          </div>
         )}
 
         {/* Clarifying quick-reply chips — read-only in history */}
@@ -3906,6 +3917,7 @@ export function ChatHistory({
   onSendMessage,
   onAutoFix,
   onNavigateToSecret,
+  onEditAndResend,
 }: {
   messages: Message[] | undefined;
   isLoading: boolean;
@@ -3917,6 +3929,7 @@ export function ChatHistory({
   /** Forwarded to QualityGateFailureCard Auto-fix button with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
+  onEditAndResend?: (text: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -3927,6 +3940,7 @@ export function ChatHistory({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const editableUserMessageId = latestUserMessageId(messages);
 
   // Debounce search input → server full-text search (Task #546)
   useEffect(() => {
@@ -4140,6 +4154,8 @@ export function ChatHistory({
                     onSendMessage={onSendMessage}
                     onAutoFix={onAutoFix}
                     onNavigateToSecret={onNavigateToSecret}
+                    canEditAndResend={msg.id === editableUserMessageId}
+                    onEditAndResend={onEditAndResend}
                   />
                 ))}
               </div>

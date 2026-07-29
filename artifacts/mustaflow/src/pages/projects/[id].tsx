@@ -188,10 +188,7 @@ import {
   type InlineSurfaceActivityUpdate,
 } from "./components/inline-activity-stream";
 import { ZeroAvatar } from "./components/zero-avatar";
-import {
-  InlineRunGroup,
-  PersistedRunReplay,
-} from "./components/inline-run-group";
+import { InlineRunGroup, PersistedRunReplay } from "./components/inline-run-group";
 import {
   appendRecoveryStep,
   InlineRecoveryLoop,
@@ -199,6 +196,7 @@ import {
   type InlineRecoveryStep,
 } from "./components/inline-recovery-loop";
 import { InlineBuilderError } from "./components/inline-builder-error";
+import { EditAndResend, latestUserMessageId } from "./components/edit-and-resend";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -2911,6 +2909,14 @@ export default function ProjectWorkspacePage() {
     pendingIsConverseRef.current = false;
   }, [activeTaskId, projectId, cancelTask]);
 
+  const handleEditAndResend = useCallback((content: string) => {
+    setShowChatHistory(false);
+    setPrompt(content);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('[data-tour="chat-input"] textarea')?.focus();
+    });
+  }, []);
+
   const handleAddKey = useCallback((keyName: string) => {
     setPrefillSecretName(keyName);
     setActiveTab("tools-files");
@@ -3720,6 +3726,7 @@ export default function ProjectWorkspacePage() {
                         setShowChatHistory(false);
                         send(text);
                       }}
+                      onEditAndResend={handleEditAndResend}
                       onAutoFix={(text) => {
                         // Auto-fix retries now use Main Agent so preview receives committed files.
                         setShowChatHistory(false);
@@ -3859,6 +3866,7 @@ export default function ProjectWorkspacePage() {
                         const visibleMsgs = showAllRecent
                           ? allRecent
                           : allRecent.slice(-RECENT_DEFAULT);
+                        const editableUserMessageId = latestUserMessageId(messages);
                         const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
                           const p = msg.plan as ChatPlanPayload | null | undefined;
                           const k =
@@ -4152,6 +4160,16 @@ export default function ProjectWorkspacePage() {
                                       </span>
                                     </button>
                                   )}
+                                  {msg.role === "user" &&
+                                    msg.id === editableUserMessageId &&
+                                    !isBusy && (
+                                      <div className="mt-1 flex justify-end">
+                                        <EditAndResend
+                                          onEdit={() => handleEditAndResend(msg.content)}
+                                          className="text-primary-foreground"
+                                        />
+                                      </div>
+                                    )}
                                 </div>
                               )}
                             </div>
@@ -4170,6 +4188,7 @@ export default function ProjectWorkspacePage() {
                           <InlineRunGroup
                             stepCount={liveRunStepCount}
                             live
+                            onStop={handleStopStream}
                             className="max-w-[90%]"
                           >
                             <InlineActivityStream entries={liveActivityEvents} live />

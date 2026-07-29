@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  getListTaskEventsQueryKey,
-  useListTaskEvents,
-} from "@workspace/api-client-react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { getListTaskEventsQueryKey, useListTaskEvents } from "@workspace/api-client-react";
+import { ChevronDown, ChevronRight, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { extractQATapeSteps, type QATapeEvent } from "@/lib/qa-video-tape";
 import {
@@ -74,6 +71,7 @@ type InlineRunGroupProps = {
   live: boolean;
   children: React.ReactNode;
   className?: string;
+  onStop?: () => void;
 };
 
 export function InlineRunGroup({
@@ -81,6 +79,7 @@ export function InlineRunGroup({
   live,
   children,
   className,
+  onStop,
 }: InlineRunGroupProps) {
   const [expanded, setExpanded] = useState(live);
   const wasLiveRef = useRef(live);
@@ -100,20 +99,33 @@ export function InlineRunGroup({
 
   return (
     <section className={cn("space-y-2", className)} data-testid="inline-run-group">
-      <button
-        type="button"
-        onClick={() => setExpanded((current) => !current)}
-        aria-expanded={expanded}
-        className="flex items-center gap-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        data-testid="inline-run-toggle"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3" aria-hidden="true" />
-        ) : (
-          <ChevronRight className="h-3 w-3" aria-hidden="true" />
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="inline-run-toggle"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3 w-3" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-3 w-3" aria-hidden="true" />
+          )}
+          <span>{replayLabel}</span>
+        </button>
+        {live && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="inline-run-stop"
+          >
+            <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+            Stop
+          </button>
         )}
-        <span>{replayLabel}</span>
-      </button>
+      </div>
       {expanded && (
         <div className="space-y-2 pl-1" data-testid="inline-run-replay">
           {children}
@@ -140,10 +152,7 @@ export function PersistedRunReplay({
       staleTime: Number.POSITIVE_INFINITY,
     },
   });
-  const replay = useMemo(
-    () => buildRunReplayModel(events as unknown as ReplayEvent[]),
-    [events],
-  );
+  const replay = useMemo(() => buildRunReplayModel(events as unknown as ReplayEvent[]), [events]);
   const qaSteps = useMemo(
     () => extractQATapeSteps(replay.qaEvents).filter((step) => step.phase !== "repair"),
     [replay.qaEvents],
