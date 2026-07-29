@@ -112,7 +112,7 @@ import { useProjectIssues } from "@/hooks/use-project-issues";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
 import type { BgTask } from "./components/background-tasks-drawer";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
-import { lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   projectFilesChangedPayloadFromFrame,
   type ProjectFilesChangedPayload,
@@ -220,119 +220,120 @@ import {
 } from "./components/project-image-model";
 import { useProjectImages } from "./components/use-project-images";
 import { useCveCriticalHighCount } from "./components/use-cve-critical-high-count";
+import { builderLazy } from "@/lib/builder-lazy";
 
-const CommandPalette = lazy(() =>
+const CommandPalette = builderLazy(() =>
   import("./components/command-palette").then((module) => ({
     default: module.CommandPalette,
   })),
 );
-const KeyboardShortcuts = lazy(() =>
+const KeyboardShortcuts = builderLazy(() =>
   import("./components/keyboard-shortcuts").then((module) => ({
     default: module.KeyboardShortcuts,
   })),
 );
-const ChatHistory = lazy(() =>
+const ChatHistory = builderLazy(() =>
   import("./components/chat-history").then((module) => ({ default: module.ChatHistory })),
 );
-const CodeEditorTab = lazy(() =>
+const CodeEditorTab = builderLazy(() =>
   import("./components/code-editor-tab").then((module) => ({ default: module.CodeEditorTab })),
 );
-const PageMapTab = lazy(() =>
+const PageMapTab = builderLazy(() =>
   import("./components/page-map-tab").then((module) => ({ default: module.PageMapTab })),
 );
-const SavedSuggestionsTab = lazy(() =>
+const SavedSuggestionsTab = builderLazy(() =>
   import("./components/saved-suggestions-tab").then((module) => ({
     default: module.SavedSuggestionsTab,
   })),
 );
-const TaskQueuePanel = lazy(() =>
+const TaskQueuePanel = builderLazy(() =>
   import("./components/task-queue-panel").then((module) => ({
     default: module.TaskQueuePanel,
   })),
 );
-const BackgroundTasksDrawer = lazy(() =>
+const BackgroundTasksDrawer = builderLazy(() =>
   import("./components/background-tasks-drawer").then((module) => ({
     default: module.BackgroundTasksDrawer,
   })),
 );
-const ZeroAgentPanel = lazy(() =>
+const ZeroAgentPanel = builderLazy(() =>
   import("./components/zero-agent-panel").then((module) => ({
     default: module.ZeroAgentPanel,
   })),
 );
-const CanvasTab = lazy(() =>
+const CanvasTab = builderLazy(() =>
   import("./components/canvas-tab").then((module) => ({ default: module.CanvasTab })),
 );
-const ArtifactTabs = lazy(() =>
+const ArtifactTabs = builderLazy(() =>
   import("./components/artifact-tabs").then((module) => ({ default: module.ArtifactTabs })),
 );
-const ToolsTab = lazy(() =>
+const ToolsTab = builderLazy(() =>
   import("./components/tools-tab").then((module) => ({ default: module.ToolsTab })),
 );
-const PublishingTab = lazy(() =>
+const PublishingTab = builderLazy(() =>
   import("./components/publishing-tab").then((module) => ({
     default: module.PublishingTab,
   })),
 );
-const LogsTab = lazy(() =>
+const LogsTab = builderLazy(() =>
   import("./components/logs-tab").then((module) => ({ default: module.LogsTab })),
 );
-const AnalyticsTab = lazy(() =>
+const AnalyticsTab = builderLazy(() =>
   import("./components/analytics-tab").then((module) => ({ default: module.AnalyticsTab })),
 );
-const ResourcesTab = lazy(() =>
+const ResourcesTab = builderLazy(() =>
   import("./components/resources-tab").then((module) => ({ default: module.ResourcesTab })),
 );
-const IntegrationsTab = lazy(() => import("./components/integrations-tab"));
-const HealthTab = lazy(() =>
+const IntegrationsTab = builderLazy(() => import("./components/integrations-tab"));
+const HealthTab = builderLazy(() =>
   import("./components/health-tab").then((module) => ({ default: module.HealthTab })),
 );
-const CheckpointsTab = lazy(() =>
+const CheckpointsTab = builderLazy(() =>
   import("./components/checkpoints-tab").then((module) => ({
     default: module.CheckpointsTab,
   })),
 );
-const ManageTab = lazy(() =>
+const ManageTab = builderLazy(() =>
   import("./components/manage-tab").then((module) => ({ default: module.ManageTab })),
 );
-const KnowledgeTab = lazy(() =>
+const KnowledgeTab = builderLazy(() =>
   import("./components/knowledge-tab").then((module) => ({ default: module.KnowledgeTab })),
 );
-const HistoryTab = lazy(() =>
+const HistoryTab = builderLazy(() =>
   import("./components/history-tab").then((module) => ({ default: module.HistoryTab })),
 );
-const TerminalTab = lazy(() =>
+const TerminalTab = builderLazy(() =>
   import("./components/terminal-tab").then((module) => ({ default: module.TerminalTab })),
 );
-const DatabaseTab = lazy(() =>
+const DatabaseTab = builderLazy(() =>
   import("./components/database-tab").then((module) => ({ default: module.DatabaseTab })),
 );
-const RuntimeTab = lazy(() =>
+const RuntimeTab = builderLazy(() =>
   import("./components/runtime-tab").then((module) => ({ default: module.RuntimeTab })),
 );
-const ChecksTab = lazy(() =>
+const ChecksTab = builderLazy(() =>
   import("./components/checks-tab").then((module) => ({ default: module.ChecksTab })),
 );
-const SecurityTab = lazy(() =>
+const SecurityTab = builderLazy(() =>
   import("./components/security-tab").then((module) => ({ default: module.SecurityTab })),
 );
-const GithubTab = lazy(() =>
+const GithubTab = builderLazy(() =>
   import("./components/github-tab").then((module) => ({ default: module.GithubTab })),
 );
-const RecipesTab = lazy(() =>
+const RecipesTab = builderLazy(() =>
   import("./components/recipes-tab").then((module) => ({ default: module.RecipesTab })),
 );
-const CommentsPanel = lazy(() =>
+const CommentsPanel = builderLazy(() =>
   import("./components/comments-panel").then((module) => ({
     default: module.CommentsPanel,
   })),
 );
-const ActivityLogTab = lazy(() =>
+const ActivityLogTab = builderLazy(() =>
   import("./components/activity-log-tab").then((module) => ({
     default: module.ActivityLogTab,
   })),
 );
-const ProjectImagesTab = lazy(() =>
+const ProjectImagesTab = builderLazy(() =>
   import("./components/project-images-tab").then((module) => ({
     default: module.ProjectImagesTab,
   })),

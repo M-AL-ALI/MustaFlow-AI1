@@ -1,0 +1,36 @@
+{
+  "observedAt": "2026-07-29",
+  "failedSession": {
+    "observedAt": "2026-07-29T17:00:51.220Z",
+    "entry": "/assets/index-97PEYwdT.js",
+    "requestedChunk": "/assets/_id_-C9c46yz6.js",
+    "error": "TypeError: Failed to fetch dynamically imported module"
+  },
+  "currentProduction": {
+    "rootHtml": {
+      "status": 200,
+      "bytes": 9436,
+      "entry": "/assets/index-Dx5Qb07z.js"
+    },
+    "projectHtml": {
+      "status": 200,
+      "bytes": 9436,
+      "entry": "/assets/index-Dx5Qb07z.js"
+    },
+    "entry": {
+      "status": 200,
+      "bytes": 64954,
+      "referencesRequestedChunk": true
+    },
+    "requestedChunk": {
+      "status": 200,
+      "bytes": 826417
+    },
+    "oldEntry": {
+      "status": 200,
+      "bytes": 328030,
+      "referencedByCurrentHtml": false
+    }
+  },
+  "finding": "The failed tab was running a stale entry document across a deployment boundary, but the requested project chunk hash is also the current healthy hash. The observed incident is therefore a transient chunk fetch failure from a stale page, not an old entry requesting a removed chunk."
+}

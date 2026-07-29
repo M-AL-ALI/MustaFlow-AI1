@@ -1,0 +1,12 @@
+{
+  "url": "http://127.0.0.1:4183/wave-d32-lab.html?scenario=transient&theme=light",
+  "snapshot": "- generic: Lab · transient · app loads 1\n- main:\n  - paragraph: Wave D.3.2 recovery lab\n  - heading \"Lazy workspace chunk\" [level=1]\n  - generic: Recovered after one cache-busted import. No page reload was needed.",
+  "logs": [
+    {
+      "level": "info",
+      "message": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "timestamp": "2026-07-29T17:37:25.716Z",
+      "url": "http://127.0.0.1:4183/node_modules/.vite/deps/chunk-52MUGAP3.js?v=7428bb98"
+    }
+  ]
+}

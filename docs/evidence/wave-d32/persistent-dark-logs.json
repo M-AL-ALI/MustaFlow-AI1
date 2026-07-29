@@ -1,0 +1,30 @@
+{
+  "url": "http://127.0.0.1:4183/wave-d32-lab.html?scenario=persistent&theme=dark",
+  "snapshot": "- generic: Lab · persistent · app loads 2\n- main:\n  - heading \"NabuFlow couldn’t finish loading this workspace.\" [level=1]\n  - paragraph: The app may have been updated while this page was open. Reload to reconnect to the latest version.\n  - button \"Reload\"",
+  "logs": [
+    {
+      "level": "info",
+      "message": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "timestamp": "2026-07-29T17:37:06.175Z",
+      "url": "http://127.0.0.1:4183/node_modules/.vite/deps/chunk-52MUGAP3.js?v=7428bb98"
+    },
+    {
+      "level": "error",
+      "message": "%o\n\n%s\n\n%s\n BuilderChunkReloadPendingError: NabuFlow was updated — refreshing…\n    at retryBuilderChunkImport (http://127.0.0.1:4183/src/lib/builder-chunk-recovery.ts:211:15) The above error occurred in one of your React components. React will try to recreate this component tree from scratch using the error boundary you provided, BuilderChunkErrorBoundary.",
+      "timestamp": "2026-07-29T17:37:06.519Z",
+      "url": "http://127.0.0.1:4183/node_modules/.vite/deps/chunk-52MUGAP3.js?v=7428bb98"
+    },
+    {
+      "level": "info",
+      "message": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "timestamp": "2026-07-29T17:37:07.758Z",
+      "url": "http://127.0.0.1:4183/node_modules/.vite/deps/chunk-52MUGAP3.js?v=7428bb98"
+    },
+    {
+      "level": "error",
+      "message": "%o\n\n%s\n\n%s\n BuilderChunkRecoveryError: NabuFlow could not finish loading this workspace.\n    at retryBuilderChunkImport (http://127.0.0.1:4183/src/lib/builder-chunk-recovery.ts:213:13) The above error occurred in one of your React components. React will try to recreate this component tree from scratch using the error boundary you provided, BuilderChunkErrorBoundary.",
+      "timestamp": "2026-07-29T17:37:08.091Z",
+      "url": "http://127.0.0.1:4183/node_modules/.vite/deps/chunk-52MUGAP3.js?v=7428bb98"
+    }
+  ]
+}

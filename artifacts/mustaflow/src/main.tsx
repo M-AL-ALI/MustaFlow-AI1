@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/react";
 import App from "./App";
 import "./index.css";
 import { installBuilderChunkRecovery } from "./lib/builder-chunk-recovery";
+import { BuilderChunkErrorBoundary } from "./components/builder-chunk-error-boundary";
 
 installBuilderChunkRecovery();
 
@@ -16,4 +17,8 @@ if (sentryDsn) {
   });
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <BuilderChunkErrorBoundary>
+    <App />
+  </BuilderChunkErrorBoundary>,
+);
