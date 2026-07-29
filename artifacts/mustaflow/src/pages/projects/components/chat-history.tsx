@@ -38,6 +38,7 @@ import {
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
 import { QATapeInline } from "./qa-tape-inline";
+import { InlineBuildResults } from "./inline-build-results";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -1053,80 +1054,13 @@ function InlineReportCard({
   const testsPending =
     couldHaveTests && (effectiveTestResults === null || effectiveTestResults === undefined);
   return (
-    <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
-      <div className="flex items-center gap-2 font-semibold text-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-        Builder report
-      </div>
-      <div
-        className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}
-      >
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Created</div>
-          <div className="font-semibold text-foreground">{report.filesCreated.length}</div>
-        </div>
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Changed</div>
-          <div className="font-semibold text-foreground">{report.filesChanged.length}</div>
-        </div>
-        <div className="bg-muted rounded p-1.5">
-          <div className="text-muted-foreground text-[10px] uppercase">Removed</div>
-          <div className="font-semibold text-foreground">{report.filesRemoved.length}</div>
-        </div>
-        {(report.filesUnchanged?.length ?? 0) > 0 && (
-          <div className="bg-muted rounded p-1.5">
-            <div className="text-muted-foreground text-[10px] uppercase">Unchanged</div>
-            <div className="font-semibold text-foreground">{report.filesUnchanged!.length}</div>
-          </div>
-        )}
-      </div>
-      {(report.filesCreated.length > 0 ||
-        report.filesChanged.length > 0 ||
-        report.filesRemoved.length > 0) && (
-        <div className="space-y-0.5 pt-0.5 border-t border-border/50">
-          {report.filesCreated.slice(0, 5).map((p) => (
-            <button
-              key={`c-${p}`}
-              onClick={() => onViewFile?.(p)}
-              className={cn(
-                "w-full text-left font-mono text-[10px] text-green-400 truncate flex items-center gap-1 group",
-                onViewFile && "hover:text-green-300 cursor-pointer",
-              )}
-            >
-              <span className="shrink-0">+</span>
-              <span className="truncate">{p}</span>
-              {onViewFile && (
-                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
-              )}
-            </button>
-          ))}
-          {report.filesChanged.slice(0, 5).map((p) => (
-            <button
-              key={`m-${p}`}
-              onClick={() => onViewFile?.(p)}
-              className={cn(
-                "w-full text-left font-mono text-[10px] text-yellow-400 truncate flex items-center gap-1 group",
-                onViewFile && "hover:text-yellow-300 cursor-pointer",
-              )}
-            >
-              <span className="shrink-0">~</span>
-              <span className="truncate">{p}</span>
-              {onViewFile && (
-                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
-              )}
-            </button>
-          ))}
-          {report.filesRemoved.slice(0, 3).map((p) => (
-            <div
-              key={`r-${p}`}
-              className="font-mono text-[10px] text-red-400/70 truncate flex items-center gap-1"
-            >
-              <span className="shrink-0">-</span>
-              <span className="truncate">{p}</span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="mt-2 space-y-1 text-xs">
+      <InlineBuildResults
+        report={report}
+        onViewFile={onViewFile}
+        onSendMessage={onSendMessage}
+        showCheckpoint={false}
+      />
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
         <div className="pt-1 border-t border-border">
           <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
@@ -1314,73 +1248,6 @@ function InlineReportCard({
                 </li>
               ))}
             </ul>
-          )}
-        </div>
-      )}
-      {report.checkRunsSummary && (
-        <div className="pt-1.5 border-t border-border">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
-            <ShieldCheck className="h-3 w-3 shrink-0 text-primary/70" />
-            <span className="font-semibold text-foreground/80">Checks</span>
-            {report.checkRunsSummary.passed > 0 && (
-              <span className="text-green-400">{report.checkRunsSummary.passed} passed</span>
-            )}
-            {report.checkRunsSummary.warnings > 0 && (
-              <span className="text-yellow-400">{report.checkRunsSummary.warnings} warnings</span>
-            )}
-            {report.checkRunsSummary.failed > 0 && (
-              <span className="text-red-400">{report.checkRunsSummary.failed} failed</span>
-            )}
-            {report.checkRunsSummary.skipped > 0 && (
-              <span className="text-muted-foreground/60">
-                {report.checkRunsSummary.skipped} skipped
-              </span>
-            )}
-            {(report.checkRunsSummary.failed > 0 || report.checkRunsSummary.warnings > 0) &&
-              onSendMessage && (
-                <button
-                  onClick={() => {
-                    const allBad = [
-                      ...(report.checkRunsSummary?.failedChecks ?? []),
-                      ...(report.checkRunsSummary?.warnChecks ?? []),
-                    ];
-                    const nameList = allBad.length > 0 ? ` (${allBad.join(", ")})` : "";
-                    onSendMessage(
-                      `Fix all failing check issues in the generated app${nameList} — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.`,
-                    );
-                  }}
-                  className="ml-auto flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
-                >
-                  <Wrench className="h-2.5 w-2.5" />
-                  Fix issues
-                </button>
-              )}
-          </div>
-          {((report.checkRunsSummary.failedChecks?.length ?? 0) > 0 ||
-            (report.checkRunsSummary.warnChecks?.length ?? 0) > 0) && (
-            <div className="flex flex-wrap gap-1 mt-1 pl-5">
-              {report.checkRunsSummary.failedChecks?.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-red-950/40 text-red-400 border border-red-900/40"
-                >
-                  {name}
-                </span>
-              ))}
-              {report.checkRunsSummary.warnChecks?.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-yellow-950/40 text-yellow-400 border border-yellow-900/40"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
-          )}
-          {report.checkSummary && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
-              {report.checkSummary}
-            </p>
           )}
         </div>
       )}
@@ -2705,31 +2572,16 @@ function MessageRow({
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     onClick={() => setReportExpanded((v) => !v)}
-                    className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors"
+                    className="flex items-center gap-1.5 rounded-sm px-1 py-1 text-[10px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <CheckCircle2 className="h-3 w-3" />
-                    View build report
+                    Build details
                     {reportExpanded ? (
                       <ChevronDown className="h-3 w-3 ml-0.5" />
                     ) : (
                       <ChevronRight className="h-3 w-3 ml-0.5" />
                     )}
                   </button>
-                  {/* Knowledge provenance chip */}
-                  {(() => {
-                    const ka = (planPayload as { report?: TaskReport }).report?.knowledgeApplied;
-                    if (!ka || ka.length === 0) return null;
-                    return (
-                      <a
-                        href="/knowledge"
-                        className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-primary/8 border border-primary/20 text-primary/70 hover:text-primary hover:bg-primary/12 transition-colors"
-                        title={`Lessons applied: ${ka.map((l) => l.title).join(", ")}`}
-                      >
-                        <BookOpen className="h-2.5 w-2.5" />
-                        {ka.length} Vault lesson{ka.length !== 1 ? "s" : ""} applied
-                      </a>
-                    );
-                  })()}
                 </div>
                 {reportExpanded && (
                   <InlineReportCard
