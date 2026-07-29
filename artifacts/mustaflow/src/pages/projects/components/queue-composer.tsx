@@ -45,6 +45,7 @@ import { PlanTemplatesPicker } from "./plan-templates-picker";
 import { PlanHistoryPanel } from "./plan-history";
 import type { StructuredPlan } from "./plan-card";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
+import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
 import {
   resolveBuilderComposerIntent,
   type BuilderComposerIntent,
@@ -215,6 +216,7 @@ interface QueueComposerProps {
   hasCodeQuality?: boolean;
   /** Whether this project already has a completed Builder task. */
   hasCompletedTask?: boolean;
+  onBrainstormActivity?: (update: InlineSurfaceActivityUpdate) => void;
 }
 
 export function QueueComposer({
@@ -246,6 +248,7 @@ export function QueueComposer({
   hasContainerError = false,
   hasCodeQuality = false,
   hasCompletedTask = false,
+  onBrainstormActivity,
 }: QueueComposerProps) {
   const lsKey = `mustaflow_agent_type_${projectId}`;
   const [agentType, setAgentTypeRaw] = useState<AgentType>(() => {
@@ -1394,6 +1397,7 @@ export function QueueComposer({
         <BrainstormPanel
           onClose={() => setShowBrainstorm(false)}
           projectId={projectId}
+          onActivityChange={onBrainstormActivity}
           onResolved={(prompt, messages, action) => {
             onSingleSend(prompt, action, undefined, messages);
             setShowBrainstorm(false);

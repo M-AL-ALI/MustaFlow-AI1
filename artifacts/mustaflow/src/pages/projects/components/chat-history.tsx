@@ -2532,7 +2532,7 @@ function MessageRow({
               <QATapeInline
                 projectId={projectId}
                 taskId={taskId}
-                className="mt-2 border-t border-border/50 pt-2"
+                className="mt-2"
               />
             ) : null;
           })()}

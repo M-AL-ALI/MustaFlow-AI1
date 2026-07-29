@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   appendActivityEntry,
   InlineActivityStream,
+  surfaceActivityEntry,
   taskActivityForEvent,
   type InlineActivityEntry,
 } from "./inline-activity-stream";
@@ -71,5 +72,26 @@ describe("InlineActivityStream", () => {
     expect(screen.queryByTestId("active-activity-icon")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("resolved-activity-icon")).toHaveLength(2);
     expect(screen.getByText("Done")).toBeVisible();
+  });
+
+  it("uses real surface-operation state for brainstorm and publish activity", () => {
+    expect(
+      surfaceActivityEntry(10, "brainstorming", {
+        status: "running",
+        label: "Brainstorming",
+      }),
+    ).toMatchObject({ kind: "brainstorming", terminal: false });
+    expect(
+      surfaceActivityEntry(11, "publishing", {
+        status: "completed",
+        label: "Published",
+      }),
+    ).toMatchObject({ kind: "publishing", terminal: true });
+    expect(
+      surfaceActivityEntry(12, "publishing", {
+        status: "failed",
+        label: "Publishing needs attention",
+      }),
+    ).toMatchObject({ kind: "error", terminal: true });
   });
 });

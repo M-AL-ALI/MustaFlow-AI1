@@ -182,8 +182,10 @@ import {
 import {
   appendActivityEntry,
   InlineActivityStream,
+  surfaceActivityEntry,
   taskActivityForEvent,
   type InlineActivityEntry,
+  type InlineSurfaceActivityUpdate,
 } from "./components/inline-activity-stream";
 import { ZeroAvatar } from "./components/zero-avatar";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
@@ -1119,6 +1121,19 @@ export default function ProjectWorkspacePage() {
   const [liveQATapeEvents, setLiveQATapeEvents] = useState<QATapeEvent[]>([]);
   const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
   const [liveActivityEvents, setLiveActivityEvents] = useState<InlineActivityEntry[]>([]);
+  const [brainstormActivity, setBrainstormActivity] = useState<InlineActivityEntry | null>(null);
+  const [publishingActivity, setPublishingActivity] = useState<InlineActivityEntry | null>(null);
+  const surfaceActivityIdRef = useRef(1_000_000);
+  const handleBrainstormActivity = useCallback((update: InlineSurfaceActivityUpdate) => {
+    surfaceActivityIdRef.current += 1;
+    setBrainstormActivity(
+      surfaceActivityEntry(surfaceActivityIdRef.current, "brainstorming", update),
+    );
+  }, []);
+  const handlePublishingActivity = useCallback((update: InlineSurfaceActivityUpdate) => {
+    surfaceActivityIdRef.current += 1;
+    setPublishingActivity(surfaceActivityEntry(surfaceActivityIdRef.current, "publishing", update));
+  }, []);
   const [, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
@@ -4116,7 +4131,7 @@ export default function ProjectWorkspacePage() {
                                             <QATapeInline
                                               projectId={projectId}
                                               taskId={rp.taskId}
-                                              className="mt-2 border-t border-border/50 pt-2"
+                                              className="mt-2"
                                             />
                                           )}
                                           <ReportCard
@@ -4191,7 +4206,7 @@ export default function ProjectWorkspacePage() {
                                 taskId={activeTaskId}
                                 live
                                 liveEvents={liveQATapeEvents}
-                                className="max-w-full rounded-xl rounded-bl-sm border border-border bg-muted px-3 py-2"
+                                className="max-w-full"
                               />
                             </div>
                           </div>
@@ -4211,7 +4226,23 @@ export default function ProjectWorkspacePage() {
                         taskId={activeTaskId}
                         prompts={agentPrompts}
                         onDismiss={dismissAgentPrompt}
+                        onPublishingActivity={handlePublishingActivity}
                       />
+
+                      {brainstormActivity && (
+                        <InlineActivityStream
+                          entries={[brainstormActivity]}
+                          live={!brainstormActivity.terminal}
+                          className="max-w-[90%]"
+                        />
+                      )}
+                      {publishingActivity && (
+                        <InlineActivityStream
+                          entries={[publishingActivity]}
+                          live={!publishingActivity.terminal}
+                          className="max-w-[90%]"
+                        />
+                      )}
 
                       {/* Live streaming bubble — shown while SSE converse stream is active */}
                       {isStreaming && !sendMessage.isPending && (
@@ -4534,6 +4565,7 @@ export default function ProjectWorkspacePage() {
                       promptValue={prompt}
                       onPromptValueChange={setPrompt}
                       onAgentIdentityChange={setAgentIdentity}
+                      onBrainstormActivity={handleBrainstormActivity}
                     />
                   </div>
                 </>
@@ -5142,6 +5174,7 @@ export default function ProjectWorkspacePage() {
                   onNavigateToChecks={() => setActiveTab("checks")}
                   onNavigateToLogs={() => setActiveTab("logs")}
                   onNavigateToTestEnv={() => setActiveTab("preview")}
+                  onPublishingActivity={handlePublishingActivity}
                 />
               )}
               {activeTab === "logs" && (

@@ -56,6 +56,7 @@ import { WebhooksPanel } from "./webhooks-panel";
 import { DomainAnalyticsCard } from "./domain-analytics-card";
 import { DomainPurchaseWidget } from "./domain-purchase-widget";
 import { useWorkspace } from "@/contexts/workspace-context";
+import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -3233,6 +3234,7 @@ export function PublishingTab({
   onNavigateToChecks,
   onNavigateToLogs,
   onNavigateToTestEnv,
+  onPublishingActivity,
 }: {
   projectId: number;
   kind?: string;
@@ -3251,6 +3253,7 @@ export function PublishingTab({
   onNavigateToLogs?: () => void;
   /** Task #768: navigate to the Test Environment tab. Shown in the testing gate banner. */
   onNavigateToTestEnv?: () => void;
+  onPublishingActivity?: (update: InlineSurfaceActivityUpdate) => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const isAgentic = builderMode === "agentic";
@@ -3742,6 +3745,7 @@ export function PublishingTab({
   async function handleDeploy() {
     setIsDeploying(true);
     setDeployError(null);
+    onPublishingActivity?.({ status: "running", label: "Publishing to production" });
     try {
       const res = await authFetch(`/api/projects/${projectId}/deploy`, {
         method: "POST",
@@ -3763,11 +3767,13 @@ export function PublishingTab({
       };
       setDeployResult(data);
       setShowDeployConfirm(false);
+      onPublishingActivity?.({ status: "completed", label: "Published to production" });
       if (data.prodContainerUrl) setProdContainerUrl(data.prodContainerUrl);
       void fetchDomain();
       void fetchDeployments();
       void fetchSiteSettings();
     } catch (err) {
+      onPublishingActivity?.({ status: "failed", label: "Publishing needs attention" });
       setDeployError(err instanceof Error ? err.message : "Deploy failed — please try again.");
     } finally {
       setIsDeploying(false);
@@ -3778,6 +3784,7 @@ export function PublishingTab({
     setIsStaging(true);
     setStagingError(null);
     setStagingResult(null);
+    onPublishingActivity?.({ status: "running", label: "Publishing to staging" });
     try {
       const res = await authFetch(`/api/projects/${projectId}/publish?env=staging`, {
         method: "POST",
@@ -3794,9 +3801,11 @@ export function PublishingTab({
         filesPublished?: number;
       };
       setStagingResult(data);
+      onPublishingActivity?.({ status: "completed", label: "Published to staging" });
       void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
       void fetchDeployments();
     } catch (err) {
+      onPublishingActivity?.({ status: "failed", label: "Publishing needs attention" });
       setStagingError(
         err instanceof Error ? err.message : "Staging publish failed — please try again.",
       );
@@ -3809,6 +3818,7 @@ export function PublishingTab({
     setIsPromoting(true);
     setPromoteError(null);
     setPromoteResult(null);
+    onPublishingActivity?.({ status: "running", label: "Publishing staging changes" });
     try {
       const res = await authFetch(`/api/projects/${projectId}/promote`, {
         method: "POST",
@@ -3825,9 +3835,11 @@ export function PublishingTab({
       };
       setPromoteResult(data);
       setShowPromoteConfirm(false);
+      onPublishingActivity?.({ status: "completed", label: "Published staging changes" });
       void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
       void fetchDeployments();
     } catch (err) {
+      onPublishingActivity?.({ status: "failed", label: "Publishing needs attention" });
       setPromoteError(err instanceof Error ? err.message : "Promote failed — please try again.");
     } finally {
       setIsPromoting(false);
@@ -3837,6 +3849,7 @@ export function PublishingTab({
   async function handlePublish() {
     setIsPublishing(true);
     setPublishError(null);
+    onPublishingActivity?.({ status: "running", label: "Publishing" });
     try {
       const res = await authFetch(`/api/projects/${projectId}/publish`, {
         method: "POST",
@@ -3857,12 +3870,14 @@ export function PublishingTab({
         containerUrl?: string | null;
       };
       setPublishResult(data);
+      onPublishingActivity?.({ status: "completed", label: "Published" });
       // Refresh project query so publicSlug is available immediately (e.g. QR panel in Preview tab)
       void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
       // Refresh domain info (subdomain url is now available) and deployment logs
       void fetchDomain();
       void fetchDeployments();
     } catch (err) {
+      onPublishingActivity?.({ status: "failed", label: "Publishing needs attention" });
       setPublishError(err instanceof Error ? err.message : "Publish failed — please try again.");
     } finally {
       setIsPublishing(false);

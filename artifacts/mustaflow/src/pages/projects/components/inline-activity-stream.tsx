@@ -35,6 +35,11 @@ export type InlineActivityEntry = {
   terminal?: boolean;
 };
 
+export type InlineSurfaceActivityUpdate = {
+  status: "running" | "completed" | "failed";
+  label: string;
+};
+
 type ActivityDefinition = Omit<InlineActivityEntry, "id">;
 
 const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
@@ -193,6 +198,23 @@ export function taskActivityForEvent(
 ): InlineActivityEntry | null {
   const definition = EVENT_ACTIVITY[eventType.toLowerCase()];
   return definition ? { id, ...definition } : null;
+}
+
+export function surfaceActivityEntry(
+  id: number,
+  kind: "brainstorming" | "publishing",
+  update: InlineSurfaceActivityUpdate,
+): InlineActivityEntry {
+  if (update.status === "failed") {
+    return { id, kind: "error", label: update.label, terminal: true };
+  }
+  return {
+    id,
+    kind,
+    label: update.label,
+    resolvedLabel: update.label,
+    terminal: update.status === "completed",
+  };
 }
 
 export function appendActivityEntry(
