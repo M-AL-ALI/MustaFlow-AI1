@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { collapseQATapeEvents, parseQACardEvent, type QATapeEvent } from "./qa-video-tape";
+import {
+  collapseQATapeEvents,
+  extractQATapeSteps,
+  parseQACardEvent,
+  type QATapeEvent,
+} from "./qa-video-tape";
 
 describe("QA video tape", () => {
   it("preserves readable live steps and take_screenshot attachments on the existing stream", () => {
@@ -78,5 +83,29 @@ describe("QA video tape", () => {
         status: "passed",
       },
     ]);
+  });
+
+  it("extracts persisted and live QA steps in event order", () => {
+    const steps = extractQATapeSteps<QATapeEvent>([
+      {
+        id: 11,
+        eventType: "qa_step",
+        message: "Opened the app",
+        data: { kind: "qa_tape_step", phase: "launch", status: "passed" },
+      },
+      {
+        id: 12,
+        eventType: "file_diff",
+        message: "Changed src/App.tsx",
+      },
+      {
+        id: 13,
+        eventType: "qa_step",
+        message: "Clicked 'Add task'",
+        data: { kind: "qa_tape_step", phase: "interaction", status: "passed" },
+      },
+    ]);
+
+    expect(steps.map((step) => step.message)).toEqual(["Opened the app", "Clicked 'Add task'"]);
   });
 });

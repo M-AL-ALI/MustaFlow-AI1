@@ -172,6 +172,8 @@ import {
   type CalmBuilderPhase,
 } from "@/lib/builder-calm-status";
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
+import { QATapeInline } from "./components/qa-tape-inline";
+import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
   parseZeroGeneratedImageEvent,
@@ -1269,6 +1271,7 @@ export default function ProjectWorkspacePage() {
     versionB: { id: number; userRequest: string; changelogEntry?: string | null };
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [liveQATapeEvents, setLiveQATapeEvents] = useState<QATapeEvent[]>([]);
   const [, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
@@ -2141,7 +2144,7 @@ export default function ProjectWorkspacePage() {
     if (chatAtBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, activeTaskId]);
+  }, [messages, activeTaskId, liveQATapeEvents]);
 
   // Subscribe to the SSE event stream for the active task. When the server
   // emits "page_map_updated" (guaranteed before "completed"), invalidate the
@@ -2151,6 +2154,7 @@ export default function ProjectWorkspacePage() {
     // Reset dedup set per task so it stays bounded across long sessions
     seenPageMapEventIdsRef.current = new Set();
     setAgentPrompts([]);
+    setLiveQATapeEvents([]);
     setLiveCodeBuffer("");
     calmFilePathsRef.current = new Set();
     setCalmFileCount(0);
@@ -2167,8 +2171,23 @@ export default function ProjectWorkspacePage() {
           createdAt?: string;
           data?: {
             changedPaths?: string[];
+            kind?: string;
           };
         };
+        if (event.eventType === "qa_step") {
+          setLiveQATapeEvents((current) => {
+            if (current.some((item) => item.id === event.id)) return current;
+            return [
+              ...current,
+              {
+                id: event.id,
+                eventType: event.eventType,
+                message: event.message ?? "",
+                data: event.data,
+              },
+            ].sort((left, right) => left.id - right.id);
+          });
+        }
         if (event.eventType === "generate_image") {
           const generatedImage = parseZeroGeneratedImageEvent(projectId, {
             id: event.id,
@@ -4200,6 +4219,13 @@ export default function ProjectWorkspacePage() {
                                               </span>
                                             </div>
                                           )}
+                                          {rp.taskId && (
+                                            <QATapeInline
+                                              projectId={projectId}
+                                              taskId={rp.taskId}
+                                              className="mt-2 border-t border-border/50 pt-2"
+                                            />
+                                          )}
                                           <ReportCard
                                             report={rp.report}
                                             onViewFile={(path, line) => {
@@ -4254,6 +4280,25 @@ export default function ProjectWorkspacePage() {
                           );
                         });
                       })()}
+
+                      {activeTaskId &&
+                        !messages?.some((message) => {
+                          const payload = message.plan as
+                            | { kind?: string; taskId?: number }
+                            | null
+                            | undefined;
+                          return payload?.kind === "report" && payload.taskId === activeTaskId;
+                        }) && (
+                          <div className="flex justify-start">
+                            <QATapeInline
+                              projectId={projectId}
+                              taskId={activeTaskId}
+                              live
+                              liveEvents={liveQATapeEvents}
+                              className="max-w-[90%] rounded-xl rounded-bl-sm border border-border bg-muted px-3 py-2"
+                            />
+                          </div>
+                        )}
 
                       <BuilderImageThreadGallery
                         images={chatGalleryImages}

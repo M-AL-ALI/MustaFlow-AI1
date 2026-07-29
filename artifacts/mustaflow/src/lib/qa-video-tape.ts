@@ -87,6 +87,17 @@ function parseStepData(message: string, value: unknown): QATapeStep {
   };
 }
 
+/**
+ * Reads QA tape lines directly from the existing task-event stream. Keeping
+ * this separate from the older collapsed card lets the simplified chat show
+ * each step as it arrives and reconstruct the same list from persisted events.
+ */
+export function extractQATapeSteps<T extends QATapeEvent>(events: T[]): QATapeStep[] {
+  return events
+    .filter((event) => event.eventType === "qa_step")
+    .map((event) => parseStepData(event.message, event.data));
+}
+
 function parsePayload(value: unknown): QACardPayload | null {
   if (!isRecord(value) || !Array.isArray(value.steps)) return null;
   const terminal =
