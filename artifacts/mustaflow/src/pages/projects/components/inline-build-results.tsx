@@ -5,11 +5,11 @@ import {
   ChevronRight,
   ExternalLink,
   FileCode2,
-  GitCommit,
   ShieldCheck,
   Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CheckpointHistoryAction, type OpenCheckpointHistory } from "./checkpoint-history-action";
 
 type KnowledgeLesson = {
   id: number;
@@ -40,7 +40,7 @@ export type InlineBuildResultsReport = {
 type InlineBuildResultsProps = {
   report: InlineBuildResultsReport;
   onViewFile?: (path: string, line?: number) => void;
-  onViewHistory?: () => void;
+  onOpenCheckpoint?: OpenCheckpointHistory;
   onSendMessage?: (text: string) => void;
   showCheckpoint?: boolean;
   className?: string;
@@ -165,7 +165,7 @@ function FileLine({
 export function InlineBuildResults({
   report,
   onViewFile,
-  onViewHistory,
+  onOpenCheckpoint,
   onSendMessage,
   showCheckpoint = true,
   className,
@@ -285,17 +285,11 @@ export function InlineBuildResults({
         </ResultRow>
       )}
 
-      {showCheckpoint && report.versionId && (
-        <button
-          type="button"
-          onClick={onViewHistory}
-          className="flex w-full items-center gap-2 border-t border-border/40 py-2 text-left text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-          data-testid="inline-build-checkpoint"
-        >
-          <GitCommit className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>Checkpoint saved — restore any time</span>
-          <span className="ml-auto font-mono text-[9px]">#{report.versionId}</span>
-        </button>
+      {showCheckpoint && report.versionId && onOpenCheckpoint && (
+        <CheckpointHistoryAction
+          checkpointId={report.versionId}
+          onOpenCheckpoint={onOpenCheckpoint}
+        />
       )}
     </div>
   );

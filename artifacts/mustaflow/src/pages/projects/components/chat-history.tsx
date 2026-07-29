@@ -994,6 +994,7 @@ function ArchitectReviewCard({ review }: { review: NonNullable<TaskReport["archi
 function InlineReportCard({
   report,
   onViewFile,
+  onOpenCheckpoint,
   onSendMessage,
   taskId,
   projectId,
@@ -1001,6 +1002,7 @@ function InlineReportCard({
 }: {
   report: TaskReport;
   onViewFile?: (path: string, line?: number) => void;
+  onOpenCheckpoint?: (checkpointId: number) => void;
   onSendMessage?: (text: string) => void;
   taskId?: number;
   projectId?: number;
@@ -1059,8 +1061,8 @@ function InlineReportCard({
       <InlineBuildResults
         report={report}
         onViewFile={onViewFile}
+        onOpenCheckpoint={onOpenCheckpoint}
         onSendMessage={onSendMessage}
-        showCheckpoint={false}
       />
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
         <div className="pt-1 border-t border-border">
@@ -1676,17 +1678,6 @@ function InlineReportCard({
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
-        </div>
-      )}
-      {report.versionId && (
-        <div className="pt-1.5 border-t border-border">
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
-            <RotateCcw className="h-3 w-3 shrink-0" />
-            <span>Checkpoint saved — roll back any time</span>
-            <span className="ml-auto font-mono text-[9px] text-muted-foreground/40">
-              #{report.versionId}
-            </span>
-          </div>
         </div>
       )}
     </div>
@@ -2385,6 +2376,7 @@ function MessageRow({
   searchQuery,
   projectId,
   onViewFile,
+  onOpenCheckpoint,
   onApply,
   onSendMessage,
   onAutoFix,
@@ -2396,6 +2388,7 @@ function MessageRow({
   searchQuery: string;
   projectId: number;
   onViewFile?: (path: string, line?: number) => void;
+  onOpenCheckpoint?: (checkpointId: number) => void;
   onApply?: (code: string) => void;
   onSendMessage?: (text: string) => void;
   /** Forwarded to QualityGateFailureCard; always sends with Main Agent identity. */
@@ -2613,6 +2606,7 @@ function MessageRow({
                   <InlineReportCard
                     report={(planPayload as { kind: "report"; report: TaskReport }).report}
                     onViewFile={onViewFile}
+                    onOpenCheckpoint={onOpenCheckpoint}
                     onSendMessage={onSendMessage}
                     taskId={(planPayload as { taskId?: number }).taskId}
                     projectId={projectId}
@@ -3912,6 +3906,7 @@ export function ChatHistory({
   isLoading,
   projectId,
   onViewFile,
+  onOpenCheckpoint,
   onClose,
   onApplyCode,
   onSendMessage,
@@ -3923,6 +3918,7 @@ export function ChatHistory({
   isLoading: boolean;
   projectId: number;
   onViewFile?: (path: string, line?: number) => void;
+  onOpenCheckpoint?: (checkpointId: number) => void;
   onClose: () => void;
   onApplyCode?: (code: string) => void;
   onSendMessage?: (text: string) => void;
@@ -4166,6 +4162,7 @@ export function ChatHistory({
                     searchQuery={searchQuery}
                     projectId={projectId}
                     onViewFile={onViewFile}
+                    onOpenCheckpoint={onOpenCheckpoint}
                     onApply={onApplyCode}
                     onSendMessage={onSendMessage}
                     onAutoFix={onAutoFix}

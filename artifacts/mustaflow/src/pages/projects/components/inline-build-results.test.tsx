@@ -33,7 +33,7 @@ const report: InlineBuildResultsReport = {
 
 describe("InlineBuildResults", () => {
   it("renders a quiet summary and collapsed result rows without report-card chrome", () => {
-    render(<InlineBuildResults report={report} />);
+    render(<InlineBuildResults report={report} onOpenCheckpoint={vi.fn()} />);
 
     expect(screen.getByTestId("inline-build-summary")).toHaveTextContent(
       "Updated 3 project files.",

@@ -42,10 +42,16 @@ function formatCalendarDate(iso: string): string {
 interface CheckpointsTabProps {
   projectId: number;
   focusCheckpointId?: number | null;
+  onFocusedCheckpoint?: (checkpointId: number) => void;
   onRestored?: () => void;
 }
 
-export function CheckpointsTab({ projectId, focusCheckpointId, onRestored }: CheckpointsTabProps) {
+export function CheckpointsTab({
+  projectId,
+  focusCheckpointId,
+  onFocusedCheckpoint,
+  onRestored,
+}: CheckpointsTabProps) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useListCheckpoints(projectId);
   const [restoreTarget, setRestoreTarget] = useState<Checkpoint | null>(null);
@@ -100,9 +106,10 @@ export function CheckpointsTab({ projectId, focusCheckpointId, onRestored }: Che
         block: "center",
       });
       target.focus({ preventScroll: true });
+      onFocusedCheckpoint?.(focusCheckpointId);
     });
     return () => cancelAnimationFrame(frame);
-  }, [data, focusCheckpointId, isLoading]);
+  }, [data, focusCheckpointId, isLoading, onFocusedCheckpoint]);
 
   return (
     <div ref={historySurfaceRef} className="h-full overflow-y-auto bg-background">

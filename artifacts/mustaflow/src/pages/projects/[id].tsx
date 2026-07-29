@@ -406,15 +406,15 @@ type ChatPlanPayload =
   | { kind: "error"; message: string; suggestions?: string[] }
   | Record<string, unknown>;
 
-function ReportCard({
+export function ReportCard({
   report,
   onViewFile,
-  onViewHistory,
+  onOpenCheckpoint,
   onSendMessage,
 }: {
   report: TaskReport;
   onViewFile?: (path: string, line?: number) => void;
-  onViewHistory?: () => void;
+  onOpenCheckpoint?: (checkpointId: number) => void;
   onSendMessage?: (text: string) => void;
 }) {
   return (
@@ -422,7 +422,7 @@ function ReportCard({
       <InlineBuildResults
         report={report}
         onViewFile={onViewFile}
-        onViewHistory={onViewHistory}
+        onOpenCheckpoint={onOpenCheckpoint}
         onSendMessage={onSendMessage}
       />
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
@@ -1951,14 +1951,16 @@ export default function ProjectWorkspacePage() {
   }, [leftPanelTab, projectId]);
 
   const isMobileLayout = windowWidth < 768;
-  const openCheckpointHistory = useCheckpointHistoryNavigation({
-    setActiveTab,
-    setAdvancedDataEnabled,
-    setCheckpointFocusId,
-    setMoreTabsExpanded,
-    setChatDrawerOpen,
-    isMobileLayout,
-  });
+  const { openCheckpointHistory, completeCheckpointHistoryNavigation } =
+    useCheckpointHistoryNavigation({
+      activeTab,
+      setActiveTab,
+      setAdvancedDataEnabled,
+      setCheckpointFocusId,
+      setMoreTabsExpanded,
+      setChatDrawerOpen,
+      isMobileLayout,
+    });
 
   // Derive active module IDs from the most recent completed task report
   const wiredModuleIds = useMemo<string[] | undefined>(() => {
@@ -3767,6 +3769,7 @@ export default function ProjectWorkspacePage() {
                           setActiveTab("code");
                         }
                       }}
+                      onOpenCheckpoint={openCheckpointHistory}
                       onClose={() => setShowChatHistory(false)}
                       onApplyCode={(code) =>
                         send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
@@ -4178,11 +4181,7 @@ export default function ProjectWorkspacePage() {
                                                 setActiveTab("code");
                                               }
                                             }}
-                                            onViewHistory={() => {
-                                              if (rp.report.versionId) {
-                                                openCheckpointHistory(rp.report.versionId);
-                                              }
-                                            }}
+                                            onOpenCheckpoint={openCheckpointHistory}
                                             onSendMessage={(text) => send(text)}
                                           />
                                           {isLastReport && rp.taskId && !isBusy && (
@@ -5317,6 +5316,7 @@ export default function ProjectWorkspacePage() {
                 <CheckpointsTab
                   projectId={projectId}
                   focusCheckpointId={checkpointFocusId}
+                  onFocusedCheckpoint={completeCheckpointHistoryNavigation}
                   onRestored={() => {
                     setBuildRefreshCount((count) => count + 1);
                     setActiveTab("preview");
