@@ -15,7 +15,6 @@ import {
   FlaskConical,
   LayoutTemplate,
   Clock,
-  Lock,
   Square,
   Bug,
   Wrench,
@@ -50,6 +49,7 @@ import {
   resolveBuilderComposerIntent,
   type BuilderComposerIntent,
 } from "@/lib/builder-followup-submit";
+import { BuilderModeControl } from "./builder-mode-control";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 type AgentType = "planning" | "main";
@@ -1924,139 +1924,11 @@ export function QueueComposer({
                       <CheckSquare className="mr-2 h-3.5 w-3.5" />
                       Fix lint
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {(
-                      [
-                        { mode: "lite", label: "Lite", desc: "Minimal change" },
-                        { mode: "eco", label: "Eco", desc: "Clean typed code" },
-                        { mode: "power", label: "Power", desc: "Production-ready" },
-                        { mode: "pro", label: "Pro", desc: "Strict review" },
-                      ] as const
-                    ).map(({ mode, label, desc }) => (
-                      <DropdownMenuItem key={mode} onSelect={() => onAgentModeChange(mode)}>
-                        <Sparkles className="mr-2 h-3.5 w-3.5" />
-                        <span className="flex-1">{label}</span>
-                        <span className="text-[10px] text-muted-foreground">{desc}</span>
-                      </DropdownMenuItem>
-                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>
             )}
             <div className="ml-auto flex items-center gap-2">
-              <div className="hidden">
-                {/* Discuss / Brainstorm pill — opens the full BrainstormPanel */}
-                <button
-                  type="button"
-                  onClick={() => setShowBrainstorm((v) => !v)}
-                  title={
-                    showBrainstorm
-                      ? "Close brainstorm panel"
-                      : "Brainstorm your idea before building — guided ideation"
-                  }
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0",
-                    showBrainstorm
-                      ? "border-violet-500/40 bg-violet-500/20 text-violet-200 hover:bg-violet-500/25"
-                      : "border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20",
-                  )}
-                >
-                  {showBrainstorm ? (
-                    <X className="h-3.5 w-3.5" />
-                  ) : (
-                    <Lightbulb className="h-3.5 w-3.5" />
-                  )}
-                  {showBrainstorm ? "Close brainstorm" : "Brainstorm first"}
-                </button>
-                <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
-                  {(
-                    [
-                      {
-                        mode: "lite",
-                        label: "Lite",
-                        desc: "1 credit · minimal correct change",
-                      },
-                      { mode: "eco", label: "Eco", desc: "2 credits · clean typed code" },
-                      {
-                        mode: "power",
-                        label: "Power",
-                        desc: "5 credits · production-ready TypeScript",
-                      },
-                      {
-                        mode: "pro",
-                        label: "Pro",
-                        desc: "10 credits · security-first strict mode",
-                      },
-                    ] as const
-                  ).map(({ mode, label, desc }) => {
-                    const locked = false;
-                    const title = locked
-                      ? `Upgrade to unlock — ${label} mode is included with the Pro and Team plans`
-                      : desc;
-                    return (
-                      <button
-                        key={mode}
-                        onClick={() => {
-                          if (locked) {
-                            window.location.href = "/billing";
-                            return;
-                          }
-                          onAgentModeChange(mode);
-                        }}
-                        title={title}
-                        aria-disabled={locked}
-                        className={cn(
-                          "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors inline-flex items-center gap-0.5",
-                          agentMode === mode && !locked
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : locked
-                              ? "text-muted-foreground/40 hover:text-muted-foreground cursor-help"
-                              : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {locked && <Lock style={{ width: 8, height: 8 }} />}
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button
-                  type="button"
-                  disabled={agentMode === "lite"}
-                  onClick={() => onDeepReasoningChange(!deepReasoning)}
-                  aria-pressed={deepReasoning}
-                  title={
-                    agentMode === "lite"
-                      ? "Deep Reasoning is available in Eco, Power, and Pro"
-                      : `Deep Reasoning: ${deepReasoning ? "on" : "off"}`
-                  }
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase transition-colors",
-                    deepReasoning
-                      ? "border-violet-400/60 bg-violet-500/20 text-violet-200"
-                      : "border-border text-muted-foreground hover:text-foreground",
-                    agentMode === "lite" && "cursor-not-allowed opacity-40",
-                  )}
-                >
-                  <Sparkles className="h-2.5 w-2.5" />
-                  Deep
-                </button>
-                <span className="text-[9px] text-muted-foreground/50 pr-0.5">
-                  {deepReasoning
-                    ? agentMode === "eco"
-                      ? "3 credits · deepest planning"
-                      : agentMode === "power"
-                        ? "7 credits · deepest planning"
-                        : "13 credits · deepest planning"
-                    : agentMode === "lite"
-                      ? "1 credit · minimal correct change"
-                      : agentMode === "eco"
-                        ? "2 credits · clean typed code"
-                        : agentMode === "power"
-                          ? "5 credits · production-ready TypeScript"
-                          : "10 credits · security-first strict mode"}
-                </span>
-              </div>
               {queueingBehind ? (
                 <button
                   onClick={() => {
@@ -2101,66 +1973,13 @@ export function QueueComposer({
         </div>
       </div>
 
-      <div data-testid="builder-mode-picker" className="mt-2 px-3 flex items-center gap-2 min-w-0">
-        <span className="text-[10px] font-medium text-muted-foreground shrink-0">Mode</span>
-        <div className="flex bg-background/70 border border-border rounded-lg p-0.5 min-w-0">
-          {(["lite", "eco", "power", "pro"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              disabled={isBusy}
-              onClick={() => onAgentModeChange(mode)}
-              aria-pressed={agentMode === mode}
-              className={cn(
-                "px-2 py-1 text-[9px] uppercase font-bold rounded-md transition-colors",
-                agentMode === mode
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-                isBusy && "cursor-not-allowed opacity-50",
-              )}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          data-testid="deep-reasoning-toggle"
-          disabled={agentMode === "lite" || isBusy}
-          onClick={() => onDeepReasoningChange(!deepReasoning)}
-          aria-pressed={deepReasoning}
-          title={
-            agentMode === "lite"
-              ? "Deep Reasoning is available in Eco, Power, and Pro"
-              : `Deep Reasoning: ${deepReasoning ? "on" : "off"}`
-          }
-          className={cn(
-            "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[9px] font-bold uppercase transition-colors shrink-0",
-            deepReasoning
-              ? "border-primary/60 bg-primary/15 text-primary"
-              : "border-border text-muted-foreground hover:text-foreground",
-            (agentMode === "lite" || isBusy) && "cursor-not-allowed opacity-40",
-          )}
-        >
-          <Sparkles className="h-2.5 w-2.5" />
-          Deep
-        </button>
-        <span className="truncate text-[9px] text-muted-foreground/70">
-          {deepReasoning
-            ? agentMode === "eco"
-              ? "3 credits"
-              : agentMode === "power"
-                ? "7 credits"
-                : "13 credits"
-            : agentMode === "lite"
-              ? "1 credit"
-              : agentMode === "eco"
-                ? "2 credits"
-                : agentMode === "power"
-                  ? "5 credits"
-                  : "10 credits"}
-        </span>
-      </div>
+      <BuilderModeControl
+        mode={agentMode}
+        deepReasoning={deepReasoning}
+        disabled={isBusy}
+        onModeChange={onAgentModeChange}
+        onDeepReasoningChange={onDeepReasoningChange}
+      />
 
       {!isBusy && issueCount > 0 && (
         <div className="mt-1.5 px-3 flex items-center gap-2 flex-wrap">
