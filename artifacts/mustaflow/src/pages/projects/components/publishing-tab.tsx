@@ -2454,7 +2454,7 @@ function SigningFileUpload({
             <div className="space-y-3">
               <p className="text-[11px] text-muted-foreground">
                 Upload your Apple Distribution certificate (.p12) and provisioning profile
-                (.mobileprovision) so EAS can sign your IPA without leaving MustaFlow.
+                (.mobileprovision) so EAS can sign your IPA without leaving NabuFlow.
               </p>
               <label className="block space-y-1">
                 <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">

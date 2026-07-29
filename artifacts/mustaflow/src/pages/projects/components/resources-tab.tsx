@@ -7,7 +7,7 @@ const RESOURCES = [
       {
         title: "How NabuFlow works",
         icon: Code2,
-        desc: "Learn how MustaFlow generates and modifies your app.",
+        desc: "Learn how NabuFlow generates and modifies your app.",
       },
       {
         title: "Plan Mode vs. Build Mode",

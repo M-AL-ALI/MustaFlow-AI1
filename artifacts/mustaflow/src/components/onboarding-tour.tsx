@@ -28,9 +28,9 @@ interface TourStep {
 
 const MAKER_STEPS: TourStep[] = [
   {
-    title: "Welcome to MustaFlow AI",
+    title: "Welcome to NabuFlow",
     description:
-      "You're about to build something great. MustaFlow turns plain English descriptions into working web apps — no coding required. This quick tour shows you the basics.",
+      "You're about to build something great. NabuFlow turns plain English descriptions into working web apps — no coding required. This quick tour shows you the basics.",
     icon: Zap,
   },
   {
@@ -63,7 +63,7 @@ const DEVELOPER_STEPS: TourStep[] = [
   {
     title: "Welcome, developer",
     description:
-      "MustaFlow is a full development environment in your browser. Describe or write what you need — the AI handles the boilerplate while you keep full control over the code.",
+      "NabuFlow is a full development environment in your browser. Describe or write what you need — the AI handles the boilerplate while you keep full control over the code.",
     icon: Terminal,
   },
   {
@@ -81,7 +81,7 @@ const DEVELOPER_STEPS: TourStep[] = [
   {
     title: "API tokens & REST access",
     description:
-      "Generate a personal access token in Settings to call the full platform REST API at /api/v1. Automate builds, manage projects, and integrate MustaFlow into your own pipelines.",
+      "Generate a personal access token in Settings to call the full platform REST API at /api/v1. Automate builds, manage projects, and integrate NabuFlow into your own pipelines.",
     icon: Key,
   },
   {

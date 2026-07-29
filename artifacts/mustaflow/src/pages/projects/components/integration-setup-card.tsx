@@ -64,9 +64,9 @@ const INTEGRATIONS: Record<string, IntegrationDef> = {
           "Click the key → Application restrictions: HTTP referrers (your domain). API restrictions: select only the APIs you enabled.",
       },
       {
-        label: "Add a test key to MustaFlow Secrets",
+        label: "Add a test key to NabuFlow Secrets",
         detail:
-          "In MustaFlow workspace → Secrets section → Development Keys → add GOOGLE_MAPS_API_KEY with your test/unrestricted key.",
+          "In your NabuFlow workspace → Secrets → Development Keys, add GOOGLE_MAPS_API_KEY with your test/unrestricted key.",
       },
       {
         label: "Add a production key separately",
@@ -118,7 +118,7 @@ const INTEGRATIONS: Record<string, IntegrationDef> = {
         detail: "Key ID is shown in the portal. Team ID is in the top-right of your account page.",
       },
       {
-        label: "Add keys to MustaFlow Secrets",
+        label: "Add keys to NabuFlow Secrets",
         detail:
           "Add APPLE_MAPS_KEY_ID, APPLE_MAPS_TEAM_ID, and the contents of the .p8 file as APPLE_MAPS_PRIVATE_KEY.",
       },
@@ -139,7 +139,7 @@ const INTEGRATIONS: Record<string, IntegrationDef> = {
     pricing:
       "Included with Apple Developer Program membership ($99/year). Free tier: 250,000 map loads/day.",
     previewNote:
-      "MapKit JS requires a signed JWT generated server-side. MustaFlow's preview uses Leaflet/OSM; MapKit activates in your built app.",
+      "MapKit JS requires a signed JWT generated server-side. NabuFlow's preview uses Leaflet/OSM; MapKit activates in your built app.",
     platforms: ["web", "ios"],
   },
   Mapbox: {
@@ -163,7 +163,7 @@ const INTEGRATIONS: Record<string, IntegrationDef> = {
           "Click + Create a token. Restrict to specific URLs and only the scopes you need (styles:read, tiles:read).",
       },
       {
-        label: "Add to MustaFlow Secrets",
+        label: "Add to NabuFlow Secrets",
         detail:
           "Development: MAPBOX_PUBLIC_TOKEN (unrestricted). Production: MAPBOX_PUBLIC_TOKEN (URL-restricted).",
       },
@@ -230,7 +230,7 @@ const INTEGRATIONS: Record<string, IntegrationDef> = {
       {
         label: "Add to your app",
         detail:
-          "Tell MustaFlow: 'Use [Font Name] from Google Fonts for headings'. The AI will add the CDN link automatically.",
+          "Tell NabuFlow: 'Use [Font Name] from Google Fonts for headings'. The AI will add the CDN link automatically.",
       },
     ],
     secretKeys: [],

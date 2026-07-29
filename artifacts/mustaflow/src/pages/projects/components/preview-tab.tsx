@@ -846,7 +846,7 @@ export function PreviewTab({
   const requestServerStartupFix = useCallback(() => {
     const target = onAutoSendPrompt ?? onFixPrompt;
     target?.(
-      "Fix the server startup so the container preview can run inside MustaFlow. Check the server logs, health endpoint, package scripts, and port binding.",
+      "Fix the server startup so the container preview can run inside NabuFlow. Check the server logs, health endpoint, package scripts, and port binding.",
     );
   }, [onAutoSendPrompt, onFixPrompt]);
 
@@ -1530,7 +1530,7 @@ export function PreviewTab({
                     <div className="text-center">
                       <p className="text-sm font-medium text-foreground mb-1">Not published yet</p>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Run and approve a test preview in MustaFlow first. A public QR code is
+                        Run and approve a test preview in NabuFlow first. A public QR code is
                         available after you choose to publish.
                       </p>
                     </div>
@@ -2351,7 +2351,7 @@ export function PreviewTab({
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {previewIssue === "proxy-unavailable"
-                  ? "The app files are still saved in MustaFlow. Use the test preview tools to start, retry, or inspect the container runtime."
+                  ? "The app files are still saved in NabuFlow. Use the test preview tools to start, retry, or inspect the container runtime."
                   : "The app files are saved, but the container app has not passed its health check. Inspect logs, fix startup, then retry the preview."}
               </p>
             </div>
@@ -2551,8 +2551,8 @@ export function PreviewTab({
               <h3 className="text-lg font-semibold text-foreground mb-2">No preview yet</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {isMobile
-                  ? "Use NabuFlow below to describe your mobile app. MustaFlow will generate Expo/React Native code and a web preview here."
-                  : "Use NabuFlow below to describe what you want to build. MustaFlow will generate your app and show a live preview here."}
+                  ? "Use NabuFlow below to describe your mobile app. NabuFlow will generate Expo/React Native code and a web preview here."
+                  : "Use NabuFlow below to describe what you want to build. NabuFlow will generate your app and show a live preview here."}
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">

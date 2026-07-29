@@ -1,7 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState, useCallback } from "react";
 import { Link, useLocation } from "wouter";
-import logoUrl from "/logo.png";
+import nabuFlowLogoUrl from "/logos/nabuflow-icon.png";
 import {
   FolderKanban,
   CreditCard,
@@ -215,9 +215,14 @@ export function SlideOutNav() {
       <button
         onClick={() => setOpen(true)}
         aria-label="Open navigation"
-        className="fixed top-3 left-3 z-50 h-9 w-9 rounded-xl bg-sidebar border border-border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+        aria-hidden={open}
+        tabIndex={open ? -1 : 0}
+        className={cn(
+          "fixed top-3 left-3 z-50 h-9 w-9 rounded-xl bg-sidebar border border-border shadow-md flex items-center justify-center hover:bg-muted transition-all",
+          open ? "pointer-events-none opacity-0" : "opacity-100",
+        )}
       >
-        <img src={logoUrl} alt="MustaFlow" className="h-6 w-auto object-contain" />
+        <img src={nabuFlowLogoUrl} alt="NabuFlow" className="h-6 w-6 object-contain" />
       </button>
 
       {/* Backdrop */}
@@ -236,9 +241,9 @@ export function SlideOutNav() {
         <div className="px-4 py-5 shrink-0">
           <div className="flex items-center gap-3">
             <div className="rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-2 shadow">
-              <img src={logoUrl} alt="MustaFlow AI" className="h-8 w-auto object-contain" />
+              <img src={nabuFlowLogoUrl} alt="NabuFlow" className="h-8 w-8 object-contain" />
             </div>
-            <span className="text-base font-bold text-foreground">MustaFlow</span>
+            <span className="text-base font-bold text-foreground">NabuFlow</span>
           </div>
         </div>
 

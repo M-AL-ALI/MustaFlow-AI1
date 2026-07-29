@@ -220,7 +220,7 @@ function ConnectPanel({
                   )}
                 </Button>
                 <a
-                  href="https://github.com/settings/tokens/new?description=MustaFlow&scopes=repo"
+                  href="https://github.com/settings/tokens/new?description=NabuFlow&scopes=repo"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-primary hover:underline flex items-center gap-1"
@@ -232,7 +232,7 @@ function ConnectPanel({
                 <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
                 <span>
                   Your token is AES-256 encrypted before being stored. It is never logged or
-                  returned to the frontend. Only your project&apos;s files are pushed — no MustaFlow
+                  returned to the frontend. Only your project&apos;s files are pushed — no NabuFlow
                   platform credentials are ever included.
                 </span>
               </div>
@@ -435,9 +435,9 @@ function ConnectedPanel({
   const [branchError, setBranchError] = useState<string | null>(null);
   const [branchResult, setBranchResult] = useState<string | null>(null);
 
-  const [prTitle, setPrTitle] = useState("Changes from MustaFlow AI");
+  const [prTitle, setPrTitle] = useState("Changes from NabuFlow");
   const [prHead, setPrHead] = useState("");
-  const [prBody, setPrBody] = useState("Generated via MustaFlow AI builder.");
+  const [prBody, setPrBody] = useState("Generated via NabuFlow.");
   const [prError, setPrError] = useState<string | null>(null);
   const [prResult, setPrResult] = useState<{ prUrl: string; prNumber: number } | null>(null);
   const [showPrForm, setShowPrForm] = useState(false);
@@ -534,7 +534,7 @@ function ConnectedPanel({
     onDisconnect();
   }, [disconnect, projectId, queryClient, onDisconnect]);
 
-  const codexPrompt = `Review this MustaFlow generated project. Check for bugs, security issues, missing tests, and improve the code without changing the product intent.`;
+  const codexPrompt = `Review this NabuFlow generated project. Check for bugs, security issues, missing tests, and improve the code without changing the product intent.`;
 
   const handleCopy = (text: string) => {
     void navigator.clipboard.writeText(text);
@@ -636,7 +636,7 @@ function ConnectedPanel({
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Commit message</label>
             <Input
-              placeholder="Push from MustaFlow AI"
+              placeholder="Push from NabuFlow"
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               className="h-8 text-xs"
@@ -961,7 +961,7 @@ function ConnectedPanel({
                 </div>
                 <p className="text-[10px] text-muted-foreground">
                   Paste this into Codex after linking your repository. Codex only has access to your
-                  project repo — no MustaFlow platform credentials are shared.
+                  project repo — no NabuFlow platform credentials are shared.
                 </p>
               </div>
             </div>

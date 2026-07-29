@@ -713,7 +713,7 @@ function GitPushPanel({ projectId }: { projectId: number }) {
                 type="text"
                 value={commitMessage}
                 onChange={(e) => setCommitMessage(e.target.value)}
-                placeholder="Push from MustaFlow AI"
+                placeholder="Push from NabuFlow"
                 className="w-full px-2 py-1.5 text-[11px] bg-background border border-border rounded text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>

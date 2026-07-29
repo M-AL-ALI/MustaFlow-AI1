@@ -15,7 +15,7 @@ const AGENTIC_STEPS: TooltipStep[] = [
   {
     title: "Your project is being set up",
     description:
-      "MustaFlow automatically provisions a private server and a Postgres database. The status badge here shows the current state — it typically takes under a minute.",
+      "NabuFlow automatically provisions a private server and a Postgres database. The status badge here shows the current state — it typically takes under a minute.",
     icon: Server,
     targetSelector: "[data-tour='provisioning-badge']",
   },
