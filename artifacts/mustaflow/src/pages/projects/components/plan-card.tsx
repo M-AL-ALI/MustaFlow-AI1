@@ -29,6 +29,12 @@ import { AgentIcon } from "@/components/agent-icon";
 import { PlanDecomposeView } from "./plan-decompose";
 import { PlanHistoryPanel } from "./plan-history";
 import { cn } from "@/lib/utils";
+import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import {
+  BUILDER_AGENT_MODES,
+  BuilderModeIcon,
+  type BuilderAgentMode,
+} from "@/components/builder-mode-icon";
 import { useListSecrets, getListSecretsQueryKey } from "@workspace/api-client-react";
 
 export type StructuredPlan = {
@@ -61,14 +67,9 @@ export type StructuredPlan = {
   };
 };
 
-type AgentMode = "lite" | "eco" | "power" | "pro";
+type AgentMode = BuilderAgentMode;
 
-const CREDIT_MULTIPLIER: Record<AgentMode, number> = {
-  lite: 1,
-  eco: 2,
-  power: 5,
-  pro: 10,
-};
+const CREDIT_MULTIPLIER = BUILDER_CREDIT_COST;
 
 const MODE_COLORS: Record<AgentMode, string> = {
   pro: "bg-purple-500/10 text-purple-400 border-purple-500/20",
@@ -1362,17 +1363,18 @@ export function PlanCard({
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground shrink-0">Mode:</span>
               <div className="flex bg-muted border border-border rounded-lg p-0.5 gap-0.5">
-                {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+                {BUILDER_AGENT_MODES.map((mode) => (
                   <button
                     key={mode}
                     onClick={() => setLocalMode(mode)}
                     className={cn(
-                      "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
+                      "flex items-center gap-1 px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
                       effectiveMode === mode
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
+                    <BuilderModeIcon mode={mode} className="h-2.5 w-2.5" />
                     {mode}
                   </button>
                 ))}

@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { X, Clock, ChevronDown, ChevronRight, BrainCircuit, ArrowLeft } from "lucide-react";
+import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import type { StructuredPlan } from "./plan-card";
 
 type PlanHistoryEntry = {
@@ -159,7 +160,10 @@ function PlanHistoryEntry({
               </span>
             )}
             {entry.agentMode && (
-              <span className="text-[9px] px-1 py-0.5 rounded bg-muted border border-border text-muted-foreground capitalize">
+              <span className="inline-flex items-center gap-1 text-[9px] px-1 py-0.5 rounded bg-muted border border-border text-muted-foreground capitalize">
+                {isBuilderAgentMode(entry.agentMode) && (
+                  <BuilderModeIcon mode={entry.agentMode} className="h-2.5 w-2.5" />
+                )}
                 {entry.agentMode} mode
               </span>
             )}

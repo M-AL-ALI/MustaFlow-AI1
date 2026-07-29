@@ -19,6 +19,15 @@ describe("BuilderModeControl", () => {
     );
 
     fireEvent.click(screen.getByTestId("builder-mode-trigger"));
+    const trigger = screen.getByTestId("builder-mode-trigger");
+    const panel = screen.getByTestId("builder-mode-panel");
+
+    expect(trigger.querySelector(".lucide-leaf")).not.toBeNull();
+    expect(panel.querySelector(".lucide-feather")).not.toBeNull();
+    expect(panel.querySelector(".lucide-leaf")).not.toBeNull();
+    expect(panel.querySelector(".lucide-zap")).not.toBeNull();
+    expect(panel.querySelector(".lucide-gem")).not.toBeNull();
+    expect(panel.querySelector(".lucide-brain")).not.toBeNull();
 
     expect(screen.getByRole("button", { name: /LiteQuick, minimal changes/ })).toHaveTextContent(
       "1 credit",

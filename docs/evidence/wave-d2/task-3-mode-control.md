@@ -62,7 +62,8 @@ The complete panel fits inside the viewport with 14 px of right clearance and
 - `task-3-mode-panel.png` — open desktop panel.
 - `task-3-mode-mobile.png` — open panel at 390 × 844.
 
-Task 3a adds the final mode-specific icons to this same panel and its screenshot.
+Task 3a completed the mode-specific icon pass and replaced the panel screenshot
+with the final icon-bearing UI.
 
 ## Verification
 
@@ -70,4 +71,3 @@ Task 3a adds the final mode-specific icons to this same panel and its screenshot
 - Mode/pricing tests: 9 passed
 - ESLint on changed TypeScript/TSX files: pass
 - Production Vite build: pass
-

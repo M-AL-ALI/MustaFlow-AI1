@@ -1,10 +1,15 @@
 import { useState } from "react";
-import { ChevronDown, Sparkles } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { builderCreditCost, BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import { builderCreditCost } from "@/lib/builder-followup-submit";
+import {
+  BuilderDeepReasoningIcon,
+  BuilderModeIcon,
+  type BuilderAgentMode,
+} from "@/components/builder-mode-icon";
 
-export type BuilderAgentMode = keyof typeof BUILDER_CREDIT_COST;
+export type { BuilderAgentMode } from "@/components/builder-mode-icon";
 
 export const BUILDER_MODE_OPTIONS: ReadonlyArray<{
   mode: BuilderAgentMode;
@@ -55,6 +60,7 @@ export function BuilderModeControl({
             )}
           >
             <span className="text-muted-foreground">Mode</span>
+            <BuilderModeIcon mode={mode} className="h-3 w-3" />
             <span className="truncate">
               {selected.label} · {creditLabel(selectedCost)}
             </span>
@@ -97,6 +103,7 @@ export function BuilderModeControl({
                     disabled && "cursor-not-allowed opacity-50",
                   )}
                 >
+                  <BuilderModeIcon mode={option.mode} className="mt-0.5 h-4 w-4" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-semibold text-foreground">
                       {option.label}
@@ -128,7 +135,7 @@ export function BuilderModeControl({
                 deepDisabled && "cursor-not-allowed opacity-40",
               )}
             >
-              <Sparkles className="h-4 w-4 shrink-0" />
+              <BuilderDeepReasoningIcon className="h-4 w-4" />
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-semibold text-foreground">Deep Reasoning</span>
                 <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">

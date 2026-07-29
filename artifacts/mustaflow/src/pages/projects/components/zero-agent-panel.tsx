@@ -9,7 +9,6 @@ import {
   ChevronDown,
   ChevronRight,
   Square,
-  Zap,
   Layers2,
   Brain,
   Maximize2,
@@ -17,6 +16,13 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import {
+  BUILDER_AGENT_MODES,
+  BuilderModeIcon,
+  builderModeLabel,
+  type BuilderAgentMode,
+} from "@/components/builder-mode-icon";
 import {
   getBuilderCheckpointLabel,
   getBuilderCompletionMessage,
@@ -42,7 +48,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
-type AgentMode = "lite" | "eco" | "power" | "pro";
+type AgentMode = BuilderAgentMode;
 
 const MODE_STORAGE_KEY = "mustaflow_zero_agent_mode";
 
@@ -176,13 +182,6 @@ function SessionCard({
     </div>
   );
 }
-
-const AGENT_MODES: { value: AgentMode; label: string; credits: string }[] = [
-  { value: "lite", label: "Lite", credits: "1 cr" },
-  { value: "eco", label: "Eco", credits: "2 cr" },
-  { value: "power", label: "Power", credits: "5 cr" },
-  { value: "pro", label: "Pro", credits: "10 cr" },
-];
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled", "discarded"]);
 
@@ -960,29 +959,34 @@ export function ZeroAgentPanel({
               )}
               title="Select builder mode"
             >
-              <Zap className="h-2.5 w-2.5" />
+              <BuilderModeIcon mode={agentMode} className="h-2.5 w-2.5" />
               {agentMode}
               <ChevronDown className="h-2.5 w-2.5 opacity-50" />
             </button>
             {showModeMenu && (
               <div className="absolute top-full right-0 mt-1.5 w-44 bg-popover border border-border rounded-xl shadow-xl py-1 z-10">
-                {AGENT_MODES.map((m) => (
+                {BUILDER_AGENT_MODES.map((mode) => (
                   <button
-                    key={m.value}
+                    key={mode}
                     onClick={() => {
-                      handleSetMode(m.value);
+                      handleSetMode(mode);
                       setShowModeMenu(false);
                     }}
                     className={cn(
                       "w-full flex items-center justify-between px-3 py-2 text-[11px] hover:bg-muted transition-colors",
                       "first:rounded-t-xl last:rounded-b-xl",
-                      agentMode === m.value
+                      agentMode === mode
                         ? "text-foreground font-semibold"
                         : "text-muted-foreground",
                     )}
                   >
-                    <span>{m.label}</span>
-                    <span className="text-muted-foreground/50">{m.credits}</span>
+                    <span className="flex items-center gap-1.5">
+                      <BuilderModeIcon mode={mode} className="h-3 w-3" />
+                      {builderModeLabel(mode)}
+                    </span>
+                    <span className="text-muted-foreground/50">
+                      {BUILDER_CREDIT_COST[mode]} cr
+                    </span>
                   </button>
                 ))}
               </div>

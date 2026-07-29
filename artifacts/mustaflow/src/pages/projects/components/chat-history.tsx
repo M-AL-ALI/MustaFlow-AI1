@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
+import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
 import ReactMarkdown from "react-markdown";
@@ -824,19 +825,23 @@ function AgentBadge({ identity }: { identity: string }) {
 }
 
 function AgentModePill({ mode }: { mode: string }) {
+  const normalizedMode = mode.toLowerCase();
   return (
     <span
       className={cn(
-        "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border shrink-0",
-        mode === "pro"
+        "inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border shrink-0",
+        normalizedMode === "pro"
           ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-          : mode === "power"
+          : normalizedMode === "power"
             ? "bg-primary/10 text-primary border-primary/20"
-            : mode === "eco"
+            : normalizedMode === "eco"
               ? "bg-green-500/10 text-green-400 border-green-500/20"
               : "bg-muted text-muted-foreground border-border",
       )}
     >
+      {isBuilderAgentMode(normalizedMode) && (
+        <BuilderModeIcon mode={normalizedMode} className="h-2.5 w-2.5" />
+      )}
       {mode}
     </span>
   );

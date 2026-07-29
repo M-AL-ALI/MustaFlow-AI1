@@ -11,6 +11,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import {
+  BUILDER_AGENT_MODES,
+  BuilderModeIcon,
+  builderModeLabel,
+} from "@/components/builder-mode-icon";
 
 interface CreditPackage {
   id: string;
@@ -161,16 +167,15 @@ export function BuyCreditsSheet({
               </h3>
             </div>
             <div className="divide-y divide-border">
-              {[
-                { mode: "Lite", cost: 1 },
-                { mode: "Eco", cost: 2 },
-                { mode: "Power", cost: 5 },
-                { mode: "Pro", cost: 10 },
-              ].map((row) => (
-                <div key={row.mode} className="flex items-center justify-between px-4 py-2 text-xs">
-                  <span className="text-muted-foreground">{row.mode} mode</span>
+              {BUILDER_AGENT_MODES.map((mode) => (
+                <div key={mode} className="flex items-center justify-between px-4 py-2 text-xs">
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <BuilderModeIcon mode={mode} className="h-3.5 w-3.5" />
+                    {builderModeLabel(mode)} mode
+                  </span>
                   <span className="font-semibold">
-                    {row.cost} credit{row.cost !== 1 ? "s" : ""}
+                    {BUILDER_CREDIT_COST[mode]} credit
+                    {BUILDER_CREDIT_COST[mode] !== 1 ? "s" : ""}
                   </span>
                 </div>
               ))}

@@ -25,6 +25,12 @@ import {
 } from "@workspace/api-client-react";
 import { AgentIcon } from "@/components/agent-icon";
 import { CreditBalancePill } from "@/components/credit-balance-pill";
+import {
+  BuilderDeepReasoningIcon,
+  BuilderModeIcon,
+  builderModeLabel,
+  normalizeBuilderAgentMode,
+} from "@/components/builder-mode-icon";
 import { BILLING_ENABLED } from "@/lib/billing-flag";
 import { pushRecentFile } from "./components/recent-files";
 import { StreamingText, MarkdownMessage, TypingIndicator } from "./components/chat-history";
@@ -5384,24 +5390,44 @@ export default function ProjectWorkspacePage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2">
+              {showCreditConfirm?.deepReasoning ? (
+                <BuilderDeepReasoningIcon className="h-4 w-4" />
+              ) : (
+                <BuilderModeIcon
+                  mode={normalizeBuilderAgentMode(showCreditConfirm?.mode)}
+                  className="h-4 w-4"
+                />
+              )}
               Confirm{" "}
               {showCreditConfirm?.deepReasoning
                 ? "Deep Reasoning"
-                : showCreditConfirm?.mode === "pro"
-                  ? "Pro"
-                  : "Power"}{" "}
+                : builderModeLabel(normalizeBuilderAgentMode(showCreditConfirm?.mode))}{" "}
               build
             </AlertDialogTitle>
             <AlertDialogDescription>
               This build uses{" "}
-              <span className="font-semibold text-foreground">
+              <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+                <BuilderModeIcon
+                  mode={normalizeBuilderAgentMode(showCreditConfirm?.mode)}
+                  className="h-3.5 w-3.5"
+                />
                 {showCreditConfirm?.cost} credit{(showCreditConfirm?.cost ?? 0) !== 1 ? "s" : ""}
               </span>{" "}
               (
-              {showCreditConfirm?.deepReasoning
-                ? `${showCreditConfirm.mode} mode with Deep Reasoning`
-                : `${showCreditConfirm?.mode === "pro" ? "Pro" : "Power"} mode`}
+              <span className="inline-flex items-center gap-1">
+                <BuilderModeIcon
+                  mode={normalizeBuilderAgentMode(showCreditConfirm?.mode)}
+                  className="h-3.5 w-3.5"
+                />
+                {builderModeLabel(normalizeBuilderAgentMode(showCreditConfirm?.mode))} mode
+                {showCreditConfirm?.deepReasoning && (
+                  <>
+                    {" "}
+                    with <BuilderDeepReasoningIcon className="h-3.5 w-3.5" /> Deep Reasoning
+                  </>
+                )}
+              </span>
               ). Your balance will be updated after the build completes. Continue?
             </AlertDialogDescription>
           </AlertDialogHeader>
