@@ -43,13 +43,11 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
   let narrations: InlineNarrationEntry[] = [];
   let recoverySteps: InlineRecoveryStep[] = [];
   const qaEvents: QATapeEvent[] = [];
-  const stepIds = new Set<number>();
 
   for (const event of [...events].sort((left, right) => left.id - right.id)) {
     const activity = taskActivityForEvent(event.id, event.eventType, event.message);
     if (activity) {
       activities = appendActivityEntry(activities, activity);
-      stepIds.add(event.id);
     }
     const narration = narrationForTaskEvent(event.eventType, event.message);
     if (narration) {
@@ -57,15 +55,23 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
         id: event.id,
         text: narration,
       });
-      stepIds.add(event.id);
     }
     if (event.eventType === "qa_step") {
       qaEvents.push(event);
-      stepIds.add(event.id);
     }
     const recovery = recoveryStepForEvent(event);
     if (recovery) recoverySteps = appendRecoveryStep(recoverySteps, recovery);
   }
+
+  // Match the live counter exactly: count the retained activity, narration, and
+  // QA rows after the same dedupe/windowing helpers have run, with shared event
+  // ids counted once. Counting raw qualifying history diverges from what the
+  // user actually saw live.
+  const stepIds = new Set([
+    ...activities.map((entry) => entry.id),
+    ...narrations.map((entry) => entry.id),
+    ...qaEvents.map((entry) => entry.id),
+  ]);
 
   return { activities, narrations, qaEvents, recoverySteps, stepCount: stepIds.size };
 }
@@ -181,6 +187,10 @@ export function PersistedRunReplay({
     query: {
       queryKey: getListTaskEventsQueryKey(projectId, taskId),
       staleTime: Number.POSITIVE_INFINITY,
+      // The live QA observer can seed this shared key with an early, partial
+      // snapshot. A completed replay must replace it with authoritative history
+      // instead of treating that partial cache entry as fresh forever.
+      refetchOnMount: "always",
     },
   });
   const replay = useMemo(() => buildRunReplayModel(events as unknown as ReplayEvent[]), [events]);
