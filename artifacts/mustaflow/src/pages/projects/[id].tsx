@@ -4,7 +4,6 @@ import { useWebContainer } from "@/hooks/use-web-container";
 import {
   useGetProject,
   useListMessages,
-  useListVersions,
   useListProjectFiles,
   useSendMessage,
   useListTasks,
@@ -27,16 +26,8 @@ import {
 import { AgentIcon } from "@/components/agent-icon";
 import { CreditBalancePill } from "@/components/credit-balance-pill";
 import { BILLING_ENABLED } from "@/lib/billing-flag";
-import { CodeEditorTab } from "./components/code-editor-tab";
-import { CommandPalette, pushRecentFile } from "./components/command-palette";
-import { KeyboardShortcuts } from "./components/keyboard-shortcuts";
-import {
-  ChatHistory,
-  StreamingText,
-  MarkdownMessage,
-  TypingIndicator,
-} from "./components/chat-history";
-import { PageMapTab } from "./components/page-map-tab";
+import { pushRecentFile } from "./components/recent-files";
+import { StreamingText, MarkdownMessage, TypingIndicator } from "./components/chat-history";
 import { Button } from "@/components/ui/button";
 import {
   Settings,
@@ -111,46 +102,27 @@ function SubscriptionTierBadge({ tier }: { tier: "free" | "core" | "wave" }) {
   );
 }
 import { SuggestionChips } from "./components/suggestion-chips";
-import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
 import { QueueComposer } from "./components/queue-composer";
-import { TaskQueuePanel } from "./components/task-queue-panel";
 import { useProjectIssues } from "@/hooks/use-project-issues";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
-import { BackgroundTasksDrawer, type BgTask } from "./components/background-tasks-drawer";
-import { ZeroAgentPanel } from "./components/zero-agent-panel";
+import type { BgTask } from "./components/background-tasks-drawer";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   projectFilesChangedPayloadFromFrame,
   type ProjectFilesChangedPayload,
 } from "@/lib/event-types";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
-import { CanvasTab } from "./components/canvas-tab";
-import { ArtifactTabs } from "./components/artifact-tabs";
 import { IntegrationSetupCard } from "./components/integration-setup-card";
-import { ToolsTab } from "./components/tools-tab";
-import { PublishingTab } from "./components/publishing-tab";
-import { LogsTab } from "./components/logs-tab";
-import { AnalyticsTab } from "./components/analytics-tab";
-import { ResourcesTab } from "./components/resources-tab";
-import IntegrationsTab from "./components/integrations-tab";
-import { HealthTab } from "./components/health-tab";
-import { CheckpointsTab } from "./components/checkpoints-tab";
-import { ManageTab } from "./components/manage-tab";
-import { KnowledgeTab } from "./components/knowledge-tab";
-import { HistoryTab } from "./components/history-tab";
-import { TerminalTab } from "./components/terminal-tab";
-import { DatabaseTab } from "./components/database-tab";
-import { RuntimeTab } from "./components/runtime-tab";
-import { ChecksTab, useCveCriticalHighCount, type BrowserQAResult } from "./components/checks-tab";
-import { SecurityTab } from "./components/security-tab";
+import type { BrowserQAResult } from "./components/checks-tab";
 import {
   useGetCveScanStatus,
   getGetCveScanStatusQueryKey,
   useAcknowledgeCveScan,
   useCancelTask,
   getBillingSubscription,
+  listVersions,
   resumePausedQueue,
   getContainerStatus,
   startContainer,
@@ -160,8 +132,6 @@ import {
   submitProjectQueue,
   getAuthToken,
 } from "@workspace/api-client-react";
-import { GithubTab } from "./components/github-tab";
-import { RecipesTab } from "./components/recipes-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import {
@@ -179,8 +149,6 @@ import { WorkspaceTour, useCompleteWorkspaceTourOnBuild } from "./components/wor
 import { MemoryIndicator } from "./components/memory-indicator";
 import { BrandPill } from "./components/brand-pill";
 import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-prompt-cards";
-import { CommentsPanel } from "./components/comments-panel";
-import { ActivityLogTab } from "./components/activity-log-tab";
 import { NotificationsBell } from "@/components/notifications-bell";
 import { AgenticOnboardingTooltip } from "@/components/agentic-onboarding-tooltip";
 import { useToast } from "@/hooks/use-toast";
@@ -198,13 +166,130 @@ import {
   type CalmBuilderPhase,
 } from "@/lib/builder-calm-status";
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
-import { ProjectImagesTab } from "./components/project-images-tab";
 import {
   mergeProjectImageItems,
   parseZeroGeneratedImageEvent,
   type ProjectImageItem,
 } from "./components/project-image-model";
 import { useProjectImages } from "./components/use-project-images";
+import { useCveCriticalHighCount } from "./components/use-cve-critical-high-count";
+
+const CommandPalette = lazy(() =>
+  import("./components/command-palette").then((module) => ({
+    default: module.CommandPalette,
+  })),
+);
+const KeyboardShortcuts = lazy(() =>
+  import("./components/keyboard-shortcuts").then((module) => ({
+    default: module.KeyboardShortcuts,
+  })),
+);
+const ChatHistory = lazy(() =>
+  import("./components/chat-history").then((module) => ({ default: module.ChatHistory })),
+);
+const CodeEditorTab = lazy(() =>
+  import("./components/code-editor-tab").then((module) => ({ default: module.CodeEditorTab })),
+);
+const PageMapTab = lazy(() =>
+  import("./components/page-map-tab").then((module) => ({ default: module.PageMapTab })),
+);
+const SavedSuggestionsTab = lazy(() =>
+  import("./components/saved-suggestions-tab").then((module) => ({
+    default: module.SavedSuggestionsTab,
+  })),
+);
+const TaskQueuePanel = lazy(() =>
+  import("./components/task-queue-panel").then((module) => ({
+    default: module.TaskQueuePanel,
+  })),
+);
+const BackgroundTasksDrawer = lazy(() =>
+  import("./components/background-tasks-drawer").then((module) => ({
+    default: module.BackgroundTasksDrawer,
+  })),
+);
+const ZeroAgentPanel = lazy(() =>
+  import("./components/zero-agent-panel").then((module) => ({
+    default: module.ZeroAgentPanel,
+  })),
+);
+const CanvasTab = lazy(() =>
+  import("./components/canvas-tab").then((module) => ({ default: module.CanvasTab })),
+);
+const ArtifactTabs = lazy(() =>
+  import("./components/artifact-tabs").then((module) => ({ default: module.ArtifactTabs })),
+);
+const ToolsTab = lazy(() =>
+  import("./components/tools-tab").then((module) => ({ default: module.ToolsTab })),
+);
+const PublishingTab = lazy(() =>
+  import("./components/publishing-tab").then((module) => ({
+    default: module.PublishingTab,
+  })),
+);
+const LogsTab = lazy(() =>
+  import("./components/logs-tab").then((module) => ({ default: module.LogsTab })),
+);
+const AnalyticsTab = lazy(() =>
+  import("./components/analytics-tab").then((module) => ({ default: module.AnalyticsTab })),
+);
+const ResourcesTab = lazy(() =>
+  import("./components/resources-tab").then((module) => ({ default: module.ResourcesTab })),
+);
+const IntegrationsTab = lazy(() => import("./components/integrations-tab"));
+const HealthTab = lazy(() =>
+  import("./components/health-tab").then((module) => ({ default: module.HealthTab })),
+);
+const CheckpointsTab = lazy(() =>
+  import("./components/checkpoints-tab").then((module) => ({
+    default: module.CheckpointsTab,
+  })),
+);
+const ManageTab = lazy(() =>
+  import("./components/manage-tab").then((module) => ({ default: module.ManageTab })),
+);
+const KnowledgeTab = lazy(() =>
+  import("./components/knowledge-tab").then((module) => ({ default: module.KnowledgeTab })),
+);
+const HistoryTab = lazy(() =>
+  import("./components/history-tab").then((module) => ({ default: module.HistoryTab })),
+);
+const TerminalTab = lazy(() =>
+  import("./components/terminal-tab").then((module) => ({ default: module.TerminalTab })),
+);
+const DatabaseTab = lazy(() =>
+  import("./components/database-tab").then((module) => ({ default: module.DatabaseTab })),
+);
+const RuntimeTab = lazy(() =>
+  import("./components/runtime-tab").then((module) => ({ default: module.RuntimeTab })),
+);
+const ChecksTab = lazy(() =>
+  import("./components/checks-tab").then((module) => ({ default: module.ChecksTab })),
+);
+const SecurityTab = lazy(() =>
+  import("./components/security-tab").then((module) => ({ default: module.SecurityTab })),
+);
+const GithubTab = lazy(() =>
+  import("./components/github-tab").then((module) => ({ default: module.GithubTab })),
+);
+const RecipesTab = lazy(() =>
+  import("./components/recipes-tab").then((module) => ({ default: module.RecipesTab })),
+);
+const CommentsPanel = lazy(() =>
+  import("./components/comments-panel").then((module) => ({
+    default: module.CommentsPanel,
+  })),
+);
+const ActivityLogTab = lazy(() =>
+  import("./components/activity-log-tab").then((module) => ({
+    default: module.ActivityLogTab,
+  })),
+);
+const ProjectImagesTab = lazy(() =>
+  import("./components/project-images-tab").then((module) => ({
+    default: module.ProjectImagesTab,
+  })),
+);
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -977,9 +1062,25 @@ function getLoadErrorMessage(error: unknown): string {
   return "The project could not be loaded. Please retry.";
 }
 
+function WorkspaceSurfaceFallback() {
+  return (
+    <div className="flex h-full min-h-32 items-center justify-center bg-background text-xs text-muted-foreground">
+      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+      Opening…
+    </div>
+  );
+}
+
 export default function ProjectWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = parseInt(id, 10);
+  const [advancedDataEnabled, setAdvancedDataEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("mustaflow_more_tabs") === "true";
+    } catch {
+      return false;
+    }
+  });
 
   const {
     data: project,
@@ -995,13 +1096,20 @@ export default function ProjectWorkspacePage() {
     query: {
       enabled: !!projectId,
       queryKey: getListMessagesQueryKey(projectId),
-      refetchInterval: project?.status === "building" || sendMessage.isPending ? 2000 : 15000,
+      refetchInterval: project?.status === "building" || sendMessage.isPending ? 2000 : 60_000,
     },
   });
+  const hasCompletedBuild = useMemo(
+    () =>
+      messages?.some((message) => {
+        const payload = message.plan as ChatPlanPayload | null | undefined;
+        return (
+          payload && typeof payload === "object" && (payload as { kind?: string }).kind === "report"
+        );
+      }) ?? false,
+    [messages],
+  );
   const rollbackVersion = useRollbackVersion();
-  const { data: versions } = useListVersions(projectId, {
-    query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
-  });
   const { data: files = [] } = useListProjectFiles(projectId, {
     query: { enabled: !!projectId, queryKey: getListProjectFilesQueryKey(projectId) },
   });
@@ -1019,7 +1127,7 @@ export default function ProjectWorkspacePage() {
     query: {
       enabled: !!projectId,
       queryKey: getListTasksQueryKey(projectId),
-      refetchInterval: sendMessage.isPending ? 800 : 15000,
+      refetchInterval: sendMessage.isPending ? 800 : 30_000,
     },
   });
 
@@ -1030,7 +1138,11 @@ export default function ProjectWorkspacePage() {
     {},
     {
       query: {
-        enabled: !!projectId,
+        enabled:
+          !!projectId &&
+          tasksForFeed.some((task) =>
+            ["queued", "planning", "building", "running", "in_progress"].includes(task.status),
+          ),
         queryKey: getListSuggestionsQueryKey(projectId, {}),
         refetchInterval: 30000,
         staleTime: 10000,
@@ -1038,10 +1150,11 @@ export default function ProjectWorkspacePage() {
     },
   );
   const pendingSuggestionsCount = allSuggestions.filter((s) => s.status === "pending").length;
-  const cveCriticalHighCount = useCveCriticalHighCount();
+  const cveCriticalHighCount = useCveCriticalHighCount(advancedDataEnabled);
 
   const { data: cveScanStatus } = useGetCveScanStatus({
     query: {
+      enabled: advancedDataEnabled,
       queryKey: getGetCveScanStatusQueryKey(),
       staleTime: 60_000,
       retry: false,
@@ -1218,6 +1331,23 @@ export default function ProjectWorkspacePage() {
     path: string;
     requestId: number;
   } | null>(null);
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const valid = WORKSPACE_TABS.map((tab) => tab.value);
+    if (typeof window !== "undefined") {
+      const urlTab = new URLSearchParams(window.location.search).get("tab");
+      if (urlTab && valid.includes(urlTab)) return urlTab;
+    }
+    const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
+    const visibleByDefault = CORE_WORKSPACE_TABS.map((tab) => tab.value);
+    return stored && visibleByDefault.includes(stored) ? stored : "preview";
+  });
+  const [moreTabsExpanded, setMoreTabsExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("mustaflow_more_tabs") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [threadImages, setThreadImages] = useState<ProjectImageItem[]>([]);
   const [liveProjectImages, setLiveProjectImages] = useState<ProjectImageItem[]>([]);
   const [liveImageGenerating, setLiveImageGenerating] = useState(false);
@@ -1230,6 +1360,7 @@ export default function ProjectWorkspacePage() {
   );
   const projectImages = useProjectImages({
     projectId,
+    enabled: activeTab === "images",
     taskIds: imageTaskIds,
     projectFiles: files,
     liveAssets: liveProjectImages,
@@ -1250,23 +1381,6 @@ export default function ProjectWorkspacePage() {
   /** Incrementing seq so PreviewTab can react to new payloads even if the ref content changed. */
   const [filesPayloadSeq, setFilesPayloadSeq] = useState(0);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
-  const [activeTab, setActiveTab] = useState<string>(() => {
-    const valid = WORKSPACE_TABS.map((t) => t.value);
-    if (typeof window !== "undefined") {
-      const urlTab = new URLSearchParams(window.location.search).get("tab");
-      if (urlTab && valid.includes(urlTab)) return urlTab;
-    }
-    const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
-    const visibleByDefault = CORE_WORKSPACE_TABS.map((tab) => tab.value);
-    return stored && visibleByDefault.includes(stored) ? stored : "preview";
-  });
-  const [moreTabsExpanded, setMoreTabsExpanded] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("mustaflow_more_tabs") === "true";
-    } catch {
-      return false;
-    }
-  });
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   // Active artifact (Task #544). Initialised from ?artifactId in the URL;
@@ -1317,8 +1431,8 @@ export default function ProjectWorkspacePage() {
   // True when the API confirms dismissal OR the local optimistic state is set.
   const onboardingDismissed = userPreferences?.dismissedOnboarding ?? onboardingDismissedLocal;
   const containerLayerConfigured = userPreferences?.containerLayerConfigured ?? false;
-  // Tracks whether onboarding was ever activated for this project (set when versions === 0 on
-  // first load). Prevents the checklist from appearing on existing projects that already have builds.
+  // Tracks whether onboarding was ever activated for this project. Existing projects are
+  // identified from the already-required recent chat feed instead of fetching version history.
   const [onboardingStarted, setOnboardingStarted] = useState(() => {
     try {
       return localStorage.getItem(`mustaflow_onboarding_started_${projectId}`) === "1";
@@ -1436,10 +1550,10 @@ export default function ProjectWorkspacePage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Activate onboarding the first time we confirm this project has 0 builds.
-  // This ensures the checklist never appears on existing projects.
+  // Activate onboarding the first time the recent chat feed confirms there is no build report.
+  // Version history stays deferred until its own surface is opened.
   useEffect(() => {
-    if (!onboardingStarted && versions !== undefined && versions.length === 0) {
+    if (!onboardingStarted && messages !== undefined && !hasCompletedBuild) {
       setOnboardingStarted(true);
       try {
         localStorage.setItem(`mustaflow_onboarding_started_${projectId}`, "1");
@@ -1447,7 +1561,7 @@ export default function ProjectWorkspacePage() {
         // ignore storage errors
       }
     }
-  }, [onboardingStarted, versions, projectId]);
+  }, [hasCompletedBuild, messages, onboardingStarted, projectId]);
 
   // Auto-start the tour the very first time a brand-new project is opened.
   // Only fires once per project if the tour has never been seen.
@@ -1783,7 +1897,12 @@ export default function ProjectWorkspacePage() {
   });
 
   // ── Project issues detection ────────────────────────────────────────────────
-  const projectIssues = useProjectIssues(projectId, containerStatus, project?.builderMode);
+  const projectIssues = useProjectIssues(
+    projectId,
+    containerStatus,
+    project?.builderMode,
+    activeTab === "checks",
+  );
 
   // ── Navigation guard (Task #755) ───────────────────────────────────────────
   // Warn users before they leave while a build is in progress.
@@ -2949,6 +3068,7 @@ export default function ProjectWorkspacePage() {
         void queryClient
           .fetchQuery({
             queryKey: getListVersionsQueryKey(projectId),
+            queryFn: () => listVersions(projectId),
             staleTime: 0,
           })
           .then((fetchedVersions: unknown) => {
@@ -3171,39 +3291,44 @@ export default function ProjectWorkspacePage() {
 
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
-      <CommandPalette
-        open={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-        files={files}
-        projectId={projectId}
-        onOpenFile={(fileId) => {
-          pushRecentFile(fileId);
-          setSelectedCodeFileId(fileId);
-          setActiveTab("code");
-        }}
-        onSendMessage={(text) => {
-          setPrompt(text);
-        }}
-        onNavigate={(target) => {
-          if (target === "shortcuts") {
-            setKeyboardShortcutsOpen(true);
-          } else if (
-            target === "git" ||
-            target === "packages" ||
-            target === "debugger" ||
-            target === "snippets"
-          ) {
-            // These are sidebar modes within the code editor — navigate to code tab
-            setActiveTab("code");
-          } else {
-            setActiveTab(target);
-          }
-        }}
-      />
-      <KeyboardShortcuts
-        open={keyboardShortcutsOpen}
-        onClose={() => setKeyboardShortcutsOpen(false)}
-      />
+      {commandPaletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open
+            onClose={() => setCommandPaletteOpen(false)}
+            files={files}
+            projectId={projectId}
+            onOpenFile={(fileId) => {
+              pushRecentFile(fileId);
+              setSelectedCodeFileId(fileId);
+              setActiveTab("code");
+            }}
+            onSendMessage={(text) => {
+              setPrompt(text);
+            }}
+            onNavigate={(target) => {
+              if (target === "shortcuts") {
+                setKeyboardShortcutsOpen(true);
+              } else if (
+                target === "git" ||
+                target === "packages" ||
+                target === "debugger" ||
+                target === "snippets"
+              ) {
+                // These are sidebar modes within the code editor — navigate to code tab
+                setActiveTab("code");
+              } else {
+                setActiveTab(target);
+              }
+            }}
+          />
+        </Suspense>
+      )}
+      {keyboardShortcutsOpen && (
+        <Suspense fallback={null}>
+          <KeyboardShortcuts open onClose={() => setKeyboardShortcutsOpen(false)} />
+        </Suspense>
+      )}
 
       <LowCreditsBanner projectId={projectId} onBuyCredits={() => setBuyCreditsOpen(true)} />
 
@@ -3234,11 +3359,13 @@ export default function ProjectWorkspacePage() {
 
       {/* ── Artifact tab strip (Task #544) ── */}
       {moreTabsExpanded && (
-        <ArtifactTabs
-          projectId={projectId}
-          activeArtifactId={activeArtifactId}
-          onSelect={setActiveArtifactId}
-        />
+        <Suspense fallback={null}>
+          <ArtifactTabs
+            projectId={projectId}
+            activeArtifactId={activeArtifactId}
+            onSelect={setActiveArtifactId}
+          />
+        </Suspense>
       )}
 
       {/* ── Top bar ── */}
@@ -3321,7 +3448,13 @@ export default function ProjectWorkspacePage() {
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={() => setMoreTabsExpanded((value) => !value)}
+            onClick={() =>
+              setMoreTabsExpanded((value) => {
+                const next = !value;
+                if (next) setAdvancedDataEnabled(true);
+                return next;
+              })
+            }
             className={cn(
               "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
               moreTabsExpanded || ADVANCED_TABS.some((tab) => tab.value === activeTab)
@@ -3667,36 +3800,38 @@ export default function ProjectWorkspacePage() {
               {/* Chat History overlay */}
               {showChatHistory && (
                 <div className="flex-1 min-h-0 relative">
-                  <ChatHistory
-                    messages={messages}
-                    isLoading={messages === undefined}
-                    projectId={projectId}
-                    onViewFile={(path, line) => {
-                      const f = files.find((x) => x.path === path);
-                      if (f) {
-                        setSelectedCodeFileId(f.id);
-                        setSelectedCodeFileLine(line ?? null);
-                        setActiveTab("code");
+                  <Suspense fallback={<WorkspaceSurfaceFallback />}>
+                    <ChatHistory
+                      messages={messages}
+                      isLoading={messages === undefined}
+                      projectId={projectId}
+                      onViewFile={(path, line) => {
+                        const f = files.find((x) => x.path === path);
+                        if (f) {
+                          setSelectedCodeFileId(f.id);
+                          setSelectedCodeFileLine(line ?? null);
+                          setActiveTab("code");
+                        }
+                      }}
+                      onClose={() => setShowChatHistory(false)}
+                      onApplyCode={(code) =>
+                        send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
+                          agentIntent: "build",
+                          planMode: false,
+                        })
                       }
-                    }}
-                    onClose={() => setShowChatHistory(false)}
-                    onApplyCode={(code) =>
-                      send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
-                        agentIntent: "build",
-                        planMode: false,
-                      })
-                    }
-                    onSendMessage={(text) => {
-                      setShowChatHistory(false);
-                      send(text);
-                    }}
-                    onAutoFix={(text) => {
-                      // Auto-fix retries now use Main Agent so preview receives committed files.
-                      setShowChatHistory(false);
-                      send(text, { agentIdentity: "main" });
-                    }}
-                    onNavigateToSecret={handleAddKey}
-                  />
+                      onSendMessage={(text) => {
+                        setShowChatHistory(false);
+                        send(text);
+                      }}
+                      onAutoFix={(text) => {
+                        // Auto-fix retries now use Main Agent so preview receives committed files.
+                        setShowChatHistory(false);
+                        send(text, { agentIdentity: "main" });
+                      }}
+                      onNavigateToSecret={handleAddKey}
+                    />
+                  </Suspense>
                 </div>
               )}
 
@@ -3709,7 +3844,7 @@ export default function ProjectWorkspacePage() {
                       <GettingStartedChecklist
                         projectId={projectId}
                         hasUserMessage={messages?.some((m) => m.role === "user") ?? false}
-                        hasBuilt={(versions?.length ?? 0) > 0}
+                        hasBuilt={hasCompletedBuild}
                         hasViewed={hasViewedPreview}
                         isPublished={project?.status === "published"}
                         onDismiss={() => {
@@ -4373,7 +4508,9 @@ export default function ProjectWorkspacePage() {
 
                   {/* Task queue panel — shows running / queued / paused tasks above composer */}
                   {moreTabsExpanded && (
-                    <TaskQueuePanel projectId={projectId} onStop={handleStopStream} />
+                    <Suspense fallback={null}>
+                      <TaskQueuePanel projectId={projectId} onStop={handleStopStream} />
+                    </Suspense>
                   )}
 
                   {/* Chat / Queue input */}
@@ -4505,19 +4642,21 @@ export default function ProjectWorkspacePage() {
 
           {/* ── HISTORY TAB ── */}
           {leftPanelTab === "history" && (
-            <HistoryTab
-              key={projectId}
-              projectId={projectId}
-              focusVersionId={historyFocusVersionId}
-              onRetry={(text) => {
-                setPrompt(text);
-                switchLeftPanel("chat");
-              }}
-              onViewInChat={(taskId) => {
-                setZeroScrollToTaskId(taskId);
-                setZeroPanelOpen(true);
-              }}
-            />
+            <Suspense fallback={<WorkspaceSurfaceFallback />}>
+              <HistoryTab
+                key={projectId}
+                projectId={projectId}
+                focusVersionId={historyFocusVersionId}
+                onRetry={(text) => {
+                  setPrompt(text);
+                  switchLeftPanel("chat");
+                }}
+                onViewInChat={(taskId) => {
+                  setZeroScrollToTaskId(taskId);
+                  setZeroPanelOpen(true);
+                }}
+              />
+            </Suspense>
           )}
 
           {/* ── SAVED SUGGESTIONS TAB ── */}
@@ -4530,13 +4669,15 @@ export default function ProjectWorkspacePage() {
                 </span>
                 <span className="ml-auto text-[10px] text-muted-foreground/60">Build any time</span>
               </div>
-              <SavedSuggestionsTab
-                projectId={projectId}
-                onAccepted={(tid) => {
-                  setActiveTaskId(tid);
-                  switchLeftPanel("chat");
-                }}
-              />
+              <Suspense fallback={<WorkspaceSurfaceFallback />}>
+                <SavedSuggestionsTab
+                  projectId={projectId}
+                  onAccepted={(tid) => {
+                    setActiveTaskId(tid);
+                    switchLeftPanel("chat");
+                  }}
+                />
+              </Suspense>
             </div>
           )}
         </div>
@@ -4688,515 +4829,533 @@ export default function ProjectWorkspacePage() {
           )}
 
           <div className={cn("flex-1 min-h-0 overflow-hidden", isMobileLayout && "pb-14")}>
-            {activeTab === "preview" && variantComparison && (
-              <div className="h-full flex flex-col">
-                <div className="shrink-0 px-4 py-2.5 bg-violet-950/40 border-b border-violet-500/30 flex items-center gap-3">
-                  <Layers2 className="h-4 w-4 text-violet-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-semibold text-violet-300">
-                      Design Variants Ready
-                    </span>
-                    <span className="ml-2 text-[11px] text-violet-400/70">
-                      Two versions were built — keep one to continue
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setVariantComparison(null)}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                    title="Dismiss"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="flex-1 min-h-0 flex">
-                  {/* Variant A */}
-                  <div className="flex-1 min-w-0 flex flex-col border-r border-violet-500/20">
-                    <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                        A
+            <Suspense fallback={<WorkspaceSurfaceFallback />}>
+              {activeTab === "preview" && variantComparison && (
+                <div className="h-full flex flex-col">
+                  <div className="shrink-0 px-4 py-2.5 bg-violet-950/40 border-b border-violet-500/30 flex items-center gap-3">
+                    <Layers2 className="h-4 w-4 text-violet-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-semibold text-violet-300">
+                        Design Variants Ready
                       </span>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-medium text-foreground">
-                          Minimalist · Light palette
-                        </span>
-                        {variantComparison.versionA.changelogEntry && (
-                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                            {variantComparison.versionA.changelogEntry.split("\n")[0]}
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => {
-                          rollbackVersion.mutate(
-                            { id: projectId, versionId: variantComparison.versionA.id },
-                            {
-                              onSuccess: () => {
-                                setVariantComparison(null);
-                                void queryClient.invalidateQueries({
-                                  queryKey: getListProjectFilesQueryKey(projectId),
-                                });
-                              },
-                            },
-                          );
-                        }}
-                        disabled={rollbackVersion.isPending}
-                        className="shrink-0 px-3 py-1 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                      >
-                        Keep A
-                      </button>
-                    </div>
-                    <iframe
-                      src={`/api/projects/${projectId}/versions/${variantComparison.versionA.id}/preview/`}
-                      sandbox="allow-scripts allow-forms allow-popups"
-                      className="flex-1 w-full border-0 bg-white"
-                      title="Variant A preview"
-                    />
-                  </div>
-                  {/* Variant B */}
-                  <div className="flex-1 min-w-0 flex flex-col">
-                    <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
-                        B
+                      <span className="ml-2 text-[11px] text-violet-400/70">
+                        Two versions were built — keep one to continue
                       </span>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-medium text-foreground">
-                          Bold · Dark palette
-                        </span>
-                        {variantComparison.versionB.changelogEntry && (
-                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                            {variantComparison.versionB.changelogEntry.split("\n")[0]}
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => {
-                          rollbackVersion.mutate(
-                            { id: projectId, versionId: variantComparison.versionB.id },
-                            {
-                              onSuccess: () => {
-                                setVariantComparison(null);
-                                void queryClient.invalidateQueries({
-                                  queryKey: getListProjectFilesQueryKey(projectId),
-                                });
-                              },
-                            },
-                          );
-                        }}
-                        disabled={rollbackVersion.isPending}
-                        className="shrink-0 px-3 py-1 text-[11px] font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50"
-                      >
-                        Keep B
-                      </button>
                     </div>
-                    <iframe
-                      src={`/api/projects/${projectId}/versions/${variantComparison.versionB.id}/preview/`}
-                      sandbox="allow-scripts allow-forms allow-popups"
-                      className="flex-1 w-full border-0 bg-white"
-                      title="Variant B preview"
-                    />
+                    <button
+                      onClick={() => setVariantComparison(null)}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      title="Dismiss"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="flex-1 min-h-0 flex">
+                    {/* Variant A */}
+                    <div className="flex-1 min-w-0 flex flex-col border-r border-violet-500/20">
+                      <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                          A
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[11px] font-medium text-foreground">
+                            Minimalist · Light palette
+                          </span>
+                          {variantComparison.versionA.changelogEntry && (
+                            <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                              {variantComparison.versionA.changelogEntry.split("\n")[0]}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            rollbackVersion.mutate(
+                              { id: projectId, versionId: variantComparison.versionA.id },
+                              {
+                                onSuccess: () => {
+                                  setVariantComparison(null);
+                                  void queryClient.invalidateQueries({
+                                    queryKey: getListProjectFilesQueryKey(projectId),
+                                  });
+                                },
+                              },
+                            );
+                          }}
+                          disabled={rollbackVersion.isPending}
+                          className="shrink-0 px-3 py-1 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        >
+                          Keep A
+                        </button>
+                      </div>
+                      <iframe
+                        src={`/api/projects/${projectId}/versions/${variantComparison.versionA.id}/preview/`}
+                        sandbox="allow-scripts allow-forms allow-popups"
+                        className="flex-1 w-full border-0 bg-white"
+                        title="Variant A preview"
+                      />
+                    </div>
+                    {/* Variant B */}
+                    <div className="flex-1 min-w-0 flex flex-col">
+                      <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                          B
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[11px] font-medium text-foreground">
+                            Bold · Dark palette
+                          </span>
+                          {variantComparison.versionB.changelogEntry && (
+                            <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                              {variantComparison.versionB.changelogEntry.split("\n")[0]}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            rollbackVersion.mutate(
+                              { id: projectId, versionId: variantComparison.versionB.id },
+                              {
+                                onSuccess: () => {
+                                  setVariantComparison(null);
+                                  void queryClient.invalidateQueries({
+                                    queryKey: getListProjectFilesQueryKey(projectId),
+                                  });
+                                },
+                              },
+                            );
+                          }}
+                          disabled={rollbackVersion.isPending}
+                          className="shrink-0 px-3 py-1 text-[11px] font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50"
+                        >
+                          Keep B
+                        </button>
+                      </div>
+                      <iframe
+                        src={`/api/projects/${projectId}/versions/${variantComparison.versionB.id}/preview/`}
+                        sandbox="allow-scripts allow-forms allow-popups"
+                        className="flex-1 w-full border-0 bg-white"
+                        title="Variant B preview"
+                      />
+                    </div>
+                  </div>
+                  <div className="shrink-0 px-4 py-2 bg-muted/30 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2">
+                    <RotateCcw className="h-3 w-3 shrink-0" />
+                    Keep A or Keep B to make that version active. The other snapshot stays in Build
+                    History.
                   </div>
                 </div>
-                <div className="shrink-0 px-4 py-2 bg-muted/30 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2">
-                  <RotateCcw className="h-3 w-3 shrink-0" />
-                  Keep A or Keep B to make that version active. The other snapshot stays in Build
-                  History.
-                </div>
-              </div>
-            )}
-            {activeTab === "preview" && !variantComparison && (
-              <PreviewTab
-                project={{
-                  ...project,
-                  kind: project.kind,
-                  projectFormat: project.projectFormat,
-                  publicSlug: project.publicSlug,
-                }}
-                wc={wc}
-                focusMode={focusMode}
-                onToggleFocusMode={() => setFocusMode((f) => !f)}
-                refreshTrigger={buildRefreshCount}
-                navigationRequest={previewNavigationRequest}
-                filesPayloadRef={filesPayloadRef}
-                filesPayloadSeq={filesPayloadSeq}
-                isTaskStaged={
-                  (tasksForFeed as Array<{ id: number; status: string }>).find(
-                    (t) => t.id === activeTaskId,
-                  )?.status === "needs_review"
-                }
-                validationWarnings={(() => {
-                  const recentReport = [...(messages ?? [])].reverse().find((m) => {
-                    const p = m.plan as ChatPlanPayload | null | undefined;
-                    return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
-                  });
-                  if (!recentReport) return [];
-                  const payload = recentReport.plan as { kind: "report"; report: TaskReport };
-                  return payload.report?.warnings ?? [];
-                })()}
-                nativeFeatures={(() => {
-                  const latestReport = [...(messages ?? [])].reverse().find((m) => {
-                    const p = m.plan as ChatPlanPayload | null | undefined;
-                    return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
-                  });
-                  if (!latestReport) return [];
-                  const payload = latestReport.plan as { kind: "report"; report: TaskReport };
-                  return payload.report?.nativeFeatures ?? [];
-                })()}
-                onFixPrompt={(text) => {
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  send(text, { agentIntent: "build" });
-                }}
-                onAutoSendPrompt={(text) => {
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  send(text);
-                }}
-                onOpenFileInEditor={(fileId) => {
-                  setSelectedCodeFileId(fileId);
-                  setSelectedCodeFileLine(null);
-                  setActiveTab("code");
-                }}
-                containerStatus={containerStatus}
-                containerUrl={containerUrl}
-                onStartContainer={handleStartContainer}
-                latestReport={(() => {
-                  const latest = [...(messages ?? [])].reverse().find((m) => {
-                    const p = m.plan as ChatPlanPayload | null | undefined;
-                    return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
-                  });
-                  if (!latest) return null;
-                  const payload = latest.plan as { kind: "report"; report: TaskReport };
-                  return payload.report ?? null;
-                })()}
-                onJumpToSecrets={() => setActiveTab("tools-files")}
-              />
-            )}
-            {activeTab === "plan" && (
-              <div className="h-full overflow-y-auto bg-background px-5 py-6 sm:px-8">
-                <div className="mx-auto max-w-3xl">
-                  <div className="mb-5">
-                    <h2 className="text-lg font-semibold text-foreground">Plan</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Review the next steps, make changes, then build when you are ready.
-                    </p>
-                  </div>
-                  {latestPlan ? (
-                    <PlanCard
-                      plan={latestPlan.plan}
-                      projectId={projectId}
-                      initialAgentMode={agentMode}
-                      modeOverride={agentMode}
-                      showModeSelector={false}
-                      onBuild={runPlanned}
-                      onAddKey={handleAddKey}
-                      disabled={isBusy}
-                      messageId={latestPlan.messageId}
-                    />
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-border bg-card/30 px-6 py-12 text-center">
-                      <ListOrdered className="mx-auto h-7 w-7 text-primary/70" />
-                      <h3 className="mt-4 text-sm font-semibold text-foreground">
-                        Your plan will appear here
-                      </h3>
-                      <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted-foreground">
-                        Ask for a plan in Chat, and you can review every step here before anything
-                        is built.
+              )}
+              {activeTab === "preview" && !variantComparison && (
+                <PreviewTab
+                  project={{
+                    ...project,
+                    kind: project.kind,
+                    projectFormat: project.projectFormat,
+                    publicSlug: project.publicSlug,
+                  }}
+                  wc={wc}
+                  focusMode={focusMode}
+                  onToggleFocusMode={() => setFocusMode((f) => !f)}
+                  refreshTrigger={buildRefreshCount}
+                  navigationRequest={previewNavigationRequest}
+                  filesPayloadRef={filesPayloadRef}
+                  filesPayloadSeq={filesPayloadSeq}
+                  isTaskStaged={
+                    (tasksForFeed as Array<{ id: number; status: string }>).find(
+                      (t) => t.id === activeTaskId,
+                    )?.status === "needs_review"
+                  }
+                  validationWarnings={(() => {
+                    const recentReport = [...(messages ?? [])].reverse().find((m) => {
+                      const p = m.plan as ChatPlanPayload | null | undefined;
+                      return (
+                        p && typeof p === "object" && (p as { kind?: string }).kind === "report"
+                      );
+                    });
+                    if (!recentReport) return [];
+                    const payload = recentReport.plan as { kind: "report"; report: TaskReport };
+                    return payload.report?.warnings ?? [];
+                  })()}
+                  nativeFeatures={(() => {
+                    const latestReport = [...(messages ?? [])].reverse().find((m) => {
+                      const p = m.plan as ChatPlanPayload | null | undefined;
+                      return (
+                        p && typeof p === "object" && (p as { kind?: string }).kind === "report"
+                      );
+                    });
+                    if (!latestReport) return [];
+                    const payload = latestReport.plan as { kind: "report"; report: TaskReport };
+                    return payload.report?.nativeFeatures ?? [];
+                  })()}
+                  onFixPrompt={(text) => {
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    send(text, { agentIntent: "build" });
+                  }}
+                  onAutoSendPrompt={(text) => {
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    send(text);
+                  }}
+                  onOpenFileInEditor={(fileId) => {
+                    setSelectedCodeFileId(fileId);
+                    setSelectedCodeFileLine(null);
+                    setActiveTab("code");
+                  }}
+                  containerStatus={containerStatus}
+                  containerUrl={containerUrl}
+                  onStartContainer={handleStartContainer}
+                  latestReport={(() => {
+                    const latest = [...(messages ?? [])].reverse().find((m) => {
+                      const p = m.plan as ChatPlanPayload | null | undefined;
+                      return (
+                        p && typeof p === "object" && (p as { kind?: string }).kind === "report"
+                      );
+                    });
+                    if (!latest) return null;
+                    const payload = latest.plan as { kind: "report"; report: TaskReport };
+                    return payload.report ?? null;
+                  })()}
+                  onJumpToSecrets={() => setActiveTab("tools-files")}
+                />
+              )}
+              {activeTab === "plan" && (
+                <div className="h-full overflow-y-auto bg-background px-5 py-6 sm:px-8">
+                  <div className="mx-auto max-w-3xl">
+                    <div className="mb-5">
+                      <h2 className="text-lg font-semibold text-foreground">Plan</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Review the next steps, make changes, then build when you are ready.
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          switchLeftPanel("chat");
-                          if (isMobileLayout) setChatDrawerOpen(true);
-                          setTimeout(() => promptInputRef.current?.focus(), 50);
-                        }}
-                        className="mt-5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-                      >
-                        Ask for a plan
-                      </button>
                     </div>
-                  )}
+                    {latestPlan ? (
+                      <PlanCard
+                        plan={latestPlan.plan}
+                        projectId={projectId}
+                        initialAgentMode={agentMode}
+                        modeOverride={agentMode}
+                        showModeSelector={false}
+                        onBuild={runPlanned}
+                        onAddKey={handleAddKey}
+                        disabled={isBusy}
+                        messageId={latestPlan.messageId}
+                      />
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-border bg-card/30 px-6 py-12 text-center">
+                        <ListOrdered className="mx-auto h-7 w-7 text-primary/70" />
+                        <h3 className="mt-4 text-sm font-semibold text-foreground">
+                          Your plan will appear here
+                        </h3>
+                        <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                          Ask for a plan in Chat, and you can review every step here before anything
+                          is built.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            switchLeftPanel("chat");
+                            if (isMobileLayout) setChatDrawerOpen(true);
+                            setTimeout(() => promptInputRef.current?.focus(), 50);
+                          }}
+                          className="mt-5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                        >
+                          Ask for a plan
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-            {activeTab === "images" && (
-              <ProjectImagesTab
-                images={projectImages.images}
-                loading={projectImages.loading}
-                generating={projectImages.isGenerating}
-                error={projectImages.error}
-                onGenerate={projectImages.generateImage}
-                onRegenerate={async (image) => {
-                  if (image.source === "studio") {
-                    await projectImages.regenerateImage(image);
-                    return;
-                  }
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  setActiveTab("preview");
-                  send(
-                    `Regenerate the image at "${image.path ?? image.prompt}" with a fresh version that fits the same role, then update the app to use it.`,
-                    { agentIntent: "build" },
-                  );
-                }}
-                onInsert={async (image) => {
-                  const path = await projectImages.insertIntoProject(image);
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  setActiveTab("preview");
-                  send(
-                    `Use the project image at "${path}" in the most appropriate visible part of the app. Keep the surrounding layout calm and accessible.`,
-                    { agentIntent: "build" },
-                  );
-                }}
-              />
-            )}
-            {activeTab === "code" && (
-              <CodeEditorTab
-                projectId={projectId}
-                initialFileId={selectedCodeFileId}
-                initialLine={selectedCodeFileLine}
-                containerStatus={containerStatus}
-                containerLayerConfigured={containerLayerConfigured}
-                containerUrl={containerUrl}
-                onHtmlFileSaved={handleHtmlFileSaved}
-                onSnippetInsert={(prompt) => {
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  send(prompt);
-                }}
-              />
-            )}
-            {activeTab === "terminal" && (
-              <TerminalTab
-                projectId={projectId}
-                containerStatus={containerStatus}
-                containerUrl={containerUrl}
-                onStartContainer={handleStartContainer}
-                onStopContainer={handleStopContainer}
-                isStarting={containerStarting}
-                containerLayerConfigured={containerLayerConfigured}
-              />
-            )}
-            {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
-            {activeTab === "page-map" && (
-              <PageMapTab
-                projectId={projectId}
-                isBuilding={project.status === "building"}
-                isSyncingAfterEdit={pageMapSyncing}
-                onSyncCleared={handlePageMapSyncCleared}
-                onSwitchToPreview={(path) => {
-                  if (path) {
-                    setPreviewNavigationRequest({ path, requestId: Date.now() });
-                  }
-                  setActiveTab("preview");
-                }}
-                onSwitchToCode={() => setActiveTab("code")}
-                onSwitchToChat={(prefill) => {
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  if (prefill) {
-                    // Auto-send so the build starts immediately without the user
-                    // having to press Send, and stay on the Page Map so they can
-                    // watch "Updating map after build…" progress.
-                    send(prefill);
-                  } else {
+              )}
+              {activeTab === "images" && (
+                <ProjectImagesTab
+                  images={projectImages.images}
+                  loading={projectImages.loading}
+                  generating={projectImages.isGenerating}
+                  error={projectImages.error}
+                  onGenerate={projectImages.generateImage}
+                  onRegenerate={async (image) => {
+                    if (image.source === "studio") {
+                      await projectImages.regenerateImage(image);
+                      return;
+                    }
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    setActiveTab("preview");
+                    send(
+                      `Regenerate the image at "${image.path ?? image.prompt}" with a fresh version that fits the same role, then update the app to use it.`,
+                      { agentIntent: "build" },
+                    );
+                  }}
+                  onInsert={async (image) => {
+                    const path = await projectImages.insertIntoProject(image);
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    setActiveTab("preview");
+                    send(
+                      `Use the project image at "${path}" in the most appropriate visible part of the app. Keep the surrounding layout calm and accessible.`,
+                      { agentIntent: "build" },
+                    );
+                  }}
+                  hasMoreHistory={projectImages.hasMoreHistory}
+                  onLoadMoreHistory={projectImages.loadMoreHistory}
+                />
+              )}
+              {activeTab === "code" && (
+                <CodeEditorTab
+                  projectId={projectId}
+                  initialFileId={selectedCodeFileId}
+                  initialLine={selectedCodeFileLine}
+                  containerStatus={containerStatus}
+                  containerLayerConfigured={containerLayerConfigured}
+                  containerUrl={containerUrl}
+                  onHtmlFileSaved={handleHtmlFileSaved}
+                  onSnippetInsert={(prompt) => {
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    send(prompt);
+                  }}
+                />
+              )}
+              {activeTab === "terminal" && (
+                <TerminalTab
+                  projectId={projectId}
+                  containerStatus={containerStatus}
+                  containerUrl={containerUrl}
+                  onStartContainer={handleStartContainer}
+                  onStopContainer={handleStopContainer}
+                  isStarting={containerStarting}
+                  containerLayerConfigured={containerLayerConfigured}
+                />
+              )}
+              {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
+              {activeTab === "page-map" && (
+                <PageMapTab
+                  projectId={projectId}
+                  isBuilding={project.status === "building"}
+                  isSyncingAfterEdit={pageMapSyncing}
+                  onSyncCleared={handlePageMapSyncCleared}
+                  onSwitchToPreview={(path) => {
+                    if (path) {
+                      setPreviewNavigationRequest({ path, requestId: Date.now() });
+                    }
+                    setActiveTab("preview");
+                  }}
+                  onSwitchToCode={() => setActiveTab("code")}
+                  onSwitchToChat={(prefill) => {
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    if (prefill) {
+                      // Auto-send so the build starts immediately without the user
+                      // having to press Send, and stay on the Page Map so they can
+                      // watch "Updating map after build…" progress.
+                      send(prefill);
+                    } else {
+                      setTimeout(() => promptInputRef.current?.focus(), 50);
+                    }
+                  }}
+                />
+              )}
+              {activeTab === "tools-files" && (
+                <ToolsTab
+                  projectId={projectId}
+                  projectKind={project?.kind}
+                  wiredModuleIds={wiredModuleIds}
+                  prefillSecretName={prefillSecretName}
+                  defaultTab={prefillSecretName ? "secrets" : undefined}
+                  onSendMessage={(text) => {
+                    setActiveTab("preview");
+                    send(text);
+                  }}
+                  onNavigateToFile={(filePath, line) => {
+                    const f = files.find(
+                      (x) => x.path === filePath || x.path.endsWith("/" + filePath),
+                    );
+                    if (f) {
+                      setSelectedCodeFileId(f.id);
+                      setSelectedCodeFileLine(line ?? null);
+                      setActiveTab("code");
+                    }
+                  }}
+                  onRollbackSuccess={() => setBuildRefreshCount((n) => n + 1)}
+                />
+              )}
+              {activeTab === "publishing" && (
+                <PublishingTab
+                  projectId={projectId}
+                  kind={project.kind}
+                  builderMode={project.builderMode}
+                  containerStatus={containerStatus}
+                  containerUrl={containerUrl}
+                  containerId={project.containerId}
+                  testedSnapshotId={project.testedSnapshotId}
+                  testingStatus={project.testingStatus}
+                  onNavigateToSecret={handleAddKey}
+                  onNavigateToMobileSettings={() => {
+                    setScrollManageToMobileSettings(true);
+                    setActiveTab("manage");
+                  }}
+                  onNavigateToChecks={() => setActiveTab("checks")}
+                  onNavigateToLogs={() => setActiveTab("logs")}
+                  onNavigateToTestEnv={() => setActiveTab("preview")}
+                />
+              )}
+              {activeTab === "logs" && (
+                <LogsTab
+                  projectId={projectId}
+                  kind={project.kind}
+                  builderMode={project.builderMode}
+                  onTryFix={(text) => {
+                    setPrompt(text);
+                    setActiveTab("preview");
+                  }}
+                />
+              )}
+              {activeTab === "checks" && (
+                <ChecksTab
+                  projectId={projectId}
+                  files={files}
+                  latestQaResult={latestQaResult}
+                  onSendMessage={(text) => {
+                    setPrompt(text);
+                  }}
+                  onNavigateToFile={(filePath, line) => {
+                    const f = files.find(
+                      (x) => x.path === filePath || x.path.endsWith("/" + filePath),
+                    );
+                    if (f) {
+                      setSelectedCodeFileId(f.id);
+                      setSelectedCodeFileLine(line ?? null);
+                      setActiveTab("code");
+                    }
+                  }}
+                />
+              )}
+              {activeTab === "security" && (
+                <SecurityTab
+                  projectId={projectId}
+                  onSendMessage={(text) => {
+                    setPrompt(text);
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
                     setTimeout(() => promptInputRef.current?.focus(), 50);
-                  }
-                }}
-              />
-            )}
-            {activeTab === "tools-files" && (
-              <ToolsTab
-                projectId={projectId}
-                projectKind={project?.kind}
-                wiredModuleIds={wiredModuleIds}
-                prefillSecretName={prefillSecretName}
-                defaultTab={prefillSecretName ? "secrets" : undefined}
-                onSendMessage={(text) => {
-                  setActiveTab("preview");
-                  send(text);
-                }}
-                onNavigateToFile={(filePath, line) => {
-                  const f = files.find(
-                    (x) => x.path === filePath || x.path.endsWith("/" + filePath),
-                  );
-                  if (f) {
-                    setSelectedCodeFileId(f.id);
-                    setSelectedCodeFileLine(line ?? null);
-                    setActiveTab("code");
-                  }
-                }}
-                onRollbackSuccess={() => setBuildRefreshCount((n) => n + 1)}
-              />
-            )}
-            {activeTab === "publishing" && (
-              <PublishingTab
-                projectId={projectId}
-                kind={project.kind}
-                builderMode={project.builderMode}
-                containerStatus={containerStatus}
-                containerUrl={containerUrl}
-                containerId={project.containerId}
-                testedSnapshotId={project.testedSnapshotId}
-                testingStatus={project.testingStatus}
-                onNavigateToSecret={handleAddKey}
-                onNavigateToMobileSettings={() => {
-                  setScrollManageToMobileSettings(true);
-                  setActiveTab("manage");
-                }}
-                onNavigateToChecks={() => setActiveTab("checks")}
-                onNavigateToLogs={() => setActiveTab("logs")}
-                onNavigateToTestEnv={() => setActiveTab("preview")}
-              />
-            )}
-            {activeTab === "logs" && (
-              <LogsTab
-                projectId={projectId}
-                kind={project.kind}
-                builderMode={project.builderMode}
-                onTryFix={(text) => {
-                  setPrompt(text);
-                  setActiveTab("preview");
-                }}
-              />
-            )}
-            {activeTab === "checks" && (
-              <ChecksTab
-                projectId={projectId}
-                files={files}
-                latestQaResult={latestQaResult}
-                onSendMessage={(text) => {
-                  setPrompt(text);
-                }}
-                onNavigateToFile={(filePath, line) => {
-                  const f = files.find(
-                    (x) => x.path === filePath || x.path.endsWith("/" + filePath),
-                  );
-                  if (f) {
-                    setSelectedCodeFileId(f.id);
-                    setSelectedCodeFileLine(line ?? null);
-                    setActiveTab("code");
-                  }
-                }}
-              />
-            )}
-            {activeTab === "security" && (
-              <SecurityTab
-                projectId={projectId}
-                onSendMessage={(text) => {
-                  setPrompt(text);
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  setTimeout(() => promptInputRef.current?.focus(), 50);
-                }}
-              />
-            )}
-            {activeTab === "database" && <DatabaseTab projectId={projectId} />}
-            {activeTab === "runtime" && (
-              <RuntimeTab
-                projectId={projectId}
-                containerLayerConfigured={containerLayerConfigured}
-              />
-            )}
-            {activeTab === "git" && <GithubTab projectId={projectId} />}
-            {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
-            {activeTab === "analytics" && <AnalyticsTab project={project} />}
-            {activeTab === "health" && <HealthTab projectId={projectId} />}
-            {activeTab === "resources" && <ResourcesTab />}
-            {activeTab === "integrations" && <IntegrationsTab projectId={projectId} />}
-            {activeTab === "comments" && <CommentsPanel projectId={projectId} />}
-            {activeTab === "activity-log" && <ActivityLogTab projectId={projectId} />}
-            {activeTab === "checkpoints" && (
-              <CheckpointsTab
-                projectId={projectId}
-                onRestored={() => {
-                  setBuildRefreshCount((count) => count + 1);
-                  setActiveTab("preview");
-                }}
-              />
-            )}
-            {activeTab === "manage" && (
-              <ManageTab
-                projectId={projectId}
-                scrollToMobileSettings={scrollManageToMobileSettings}
-                onScrollComplete={() => setScrollManageToMobileSettings(false)}
-              />
-            )}
-            {activeTab === "recipes" && (
-              <RecipesTab
-                projectId={projectId}
-                onApplyRecipe={(prompt) => {
-                  switchLeftPanel("chat");
-                  if (isMobileLayout) setChatDrawerOpen(true);
-                  send(prompt, { agentIntent: "build" });
-                  setActiveTab("preview");
-                }}
-              />
-            )}
+                  }}
+                />
+              )}
+              {activeTab === "database" && <DatabaseTab projectId={projectId} />}
+              {activeTab === "runtime" && (
+                <RuntimeTab
+                  projectId={projectId}
+                  containerLayerConfigured={containerLayerConfigured}
+                />
+              )}
+              {activeTab === "git" && <GithubTab projectId={projectId} />}
+              {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
+              {activeTab === "analytics" && <AnalyticsTab project={project} />}
+              {activeTab === "health" && <HealthTab projectId={projectId} />}
+              {activeTab === "resources" && <ResourcesTab />}
+              {activeTab === "integrations" && <IntegrationsTab projectId={projectId} />}
+              {activeTab === "comments" && <CommentsPanel projectId={projectId} />}
+              {activeTab === "activity-log" && <ActivityLogTab projectId={projectId} />}
+              {activeTab === "checkpoints" && (
+                <CheckpointsTab
+                  projectId={projectId}
+                  onRestored={() => {
+                    setBuildRefreshCount((count) => count + 1);
+                    setActiveTab("preview");
+                  }}
+                />
+              )}
+              {activeTab === "manage" && (
+                <ManageTab
+                  projectId={projectId}
+                  scrollToMobileSettings={scrollManageToMobileSettings}
+                  onScrollComplete={() => setScrollManageToMobileSettings(false)}
+                />
+              )}
+              {activeTab === "recipes" && (
+                <RecipesTab
+                  projectId={projectId}
+                  onApplyRecipe={(prompt) => {
+                    switchLeftPanel("chat");
+                    if (isMobileLayout) setChatDrawerOpen(true);
+                    send(prompt, { agentIntent: "build" });
+                    setActiveTab("preview");
+                  }}
+                />
+              )}
+            </Suspense>
           </div>
         </div>
       </div>
-      <BackgroundTasksDrawer
-        projectId={projectId}
-        isOpen={backgroundPanelOpen}
-        onClose={() => setBackgroundPanelOpen(false)}
-        tasks={backgroundTasks}
-        onRollback={(versionId) => {
-          rollbackVersion.mutate(
-            { id: projectId, versionId },
-            {
-              onSuccess: () => {
-                void queryClient.invalidateQueries({
-                  queryKey: getListProjectFilesQueryKey(projectId),
-                });
-                void queryClient.invalidateQueries({
-                  queryKey: getListVersionsQueryKey(projectId),
-                });
-                void queryClient.invalidateQueries({
-                  queryKey: getListMessagesQueryKey(projectId),
-                });
-                setBuildRefreshCount((n) => n + 1);
-              },
-            },
-          );
-        }}
-        onViewCode={() => {
-          setActiveTab("tools-files");
-          setBackgroundPanelOpen(false);
-        }}
-        onTopUp={() => setBuyCreditsOpen(true)}
-      >
-        {activeBatchId && (
-          <QueueProgressStrip
+      {backgroundPanelOpen && (
+        <Suspense fallback={null}>
+          <BackgroundTasksDrawer
             projectId={projectId}
-            batchId={activeBatchId}
-            onComplete={handleBatchComplete}
-            onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
-          />
-        )}
-      </BackgroundTasksDrawer>
+            isOpen={backgroundPanelOpen}
+            onClose={() => setBackgroundPanelOpen(false)}
+            tasks={backgroundTasks}
+            onRollback={(versionId) => {
+              rollbackVersion.mutate(
+                { id: projectId, versionId },
+                {
+                  onSuccess: () => {
+                    void queryClient.invalidateQueries({
+                      queryKey: getListProjectFilesQueryKey(projectId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: getListVersionsQueryKey(projectId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: getListMessagesQueryKey(projectId),
+                    });
+                    setBuildRefreshCount((n) => n + 1);
+                  },
+                },
+              );
+            }}
+            onViewCode={() => {
+              setActiveTab("tools-files");
+              setBackgroundPanelOpen(false);
+            }}
+            onTopUp={() => setBuyCreditsOpen(true)}
+          >
+            {activeBatchId && (
+              <QueueProgressStrip
+                projectId={projectId}
+                batchId={activeBatchId}
+                onComplete={handleBatchComplete}
+                onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
+              />
+            )}
+          </BackgroundTasksDrawer>
+        </Suspense>
+      )}
       {/* ── Zero Agent Panel ── */}
-      <ZeroAgentPanel
-        projectId={projectId}
-        isOpen={zeroPanelOpen}
-        onClose={() => setZeroPanelOpen(false)}
-        width={zeroPanelWidth}
-        onWidthChange={setZeroPanelWidth}
-        initialActiveTaskId={zeroBgTaskId}
-        scrollToTaskId={zeroScrollToTaskId}
-        onScrollToComplete={() => setZeroScrollToTaskId(null)}
-        onBuildComplete={() => {
-          setZeroBgTaskId(null);
-          void queryClient.invalidateQueries({
-            queryKey: getListProjectFilesQueryKey(projectId),
-          });
-          void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
-          setBuildRefreshCount((n) => n + 1);
-        }}
-        onBackgroundRun={(taskId) => {
-          setZeroBgTaskId(taskId);
-        }}
-      />
+      {zeroPanelOpen && (
+        <Suspense fallback={null}>
+          <ZeroAgentPanel
+            projectId={projectId}
+            isOpen={zeroPanelOpen}
+            onClose={() => setZeroPanelOpen(false)}
+            width={zeroPanelWidth}
+            onWidthChange={setZeroPanelWidth}
+            initialActiveTaskId={zeroBgTaskId}
+            scrollToTaskId={zeroScrollToTaskId}
+            onScrollToComplete={() => setZeroScrollToTaskId(null)}
+            onBuildComplete={() => {
+              setZeroBgTaskId(null);
+              void queryClient.invalidateQueries({
+                queryKey: getListProjectFilesQueryKey(projectId),
+              });
+              void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
+              setBuildRefreshCount((n) => n + 1);
+            }}
+            onBackgroundRun={(taskId) => {
+              setZeroBgTaskId(taskId);
+            }}
+          />
+        </Suspense>
+      )}
 
       <BuyCreditsSheet
         open={buyCreditsOpen}

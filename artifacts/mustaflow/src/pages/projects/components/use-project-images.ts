@@ -25,6 +25,10 @@ interface GenerateImageResponse {
   status: string;
 }
 
+export function selectRecentTaskIds(taskIds: number[], limit: number): number[] {
+  return [...new Set(taskIds)].slice(0, Math.max(0, limit));
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -44,6 +48,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 
 export function useProjectImages({
   projectId,
+  enabled,
   taskIds,
   projectFiles,
   liveAssets,
@@ -51,6 +56,7 @@ export function useProjectImages({
   onProjectFileInserted,
 }: {
   projectId: number;
+  enabled: boolean;
   taskIds: number[];
   projectFiles: ProjectImageFile[];
   liveAssets: ProjectImageItem[];
@@ -60,9 +66,10 @@ export function useProjectImages({
   const [studioImages, setStudioImages] = useState<ProjectImageItem[]>([]);
   const [taskAssets, setTaskAssets] = useState<ProjectImageItem[]>([]);
   const [insertedAssets, setInsertedAssets] = useState<ProjectImageItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyTaskLimit, setHistoryTaskLimit] = useState(6);
   const sessionStudioIdsRef = useRef<Set<number>>(new Set());
   const onThreadImageRef = useRef(onThreadImage);
   const onProjectFileInsertedRef = useRef(onProjectFileInserted);
@@ -98,18 +105,24 @@ export function useProjectImages({
   }, [projectId]);
 
   useEffect(() => {
-    setLoading(true);
     setStudioImages([]);
     setTaskAssets([]);
     setInsertedAssets([]);
+    setHistoryTaskLimit(6);
     sessionStudioIdsRef.current.clear();
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     void fetchStudioImages();
-  }, [fetchStudioImages]);
+  }, [enabled, fetchStudioImages]);
 
   const taskIdsKey = taskIds.join(",");
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
-    const uniqueTaskIds = [...new Set(taskIds)].slice(0, 24);
+    const uniqueTaskIds = selectRecentTaskIds(taskIds, historyTaskLimit);
     if (uniqueTaskIds.length === 0) {
       setTaskAssets([]);
       return;
@@ -146,16 +159,16 @@ export function useProjectImages({
     };
     // taskIdsKey is the stable signal; taskIds is intentionally excluded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, taskIdsKey]);
+  }, [enabled, historyTaskLimit, projectId, taskIdsKey]);
 
   const hasPendingStudioImage = studioImages.some(
     (image) => image.status === "pending" || image.status === "generating",
   );
   useEffect(() => {
-    if (!hasPendingStudioImage) return;
+    if (!enabled || !hasPendingStudioImage) return;
     const interval = setInterval(() => void fetchStudioImages(), 2_000);
     return () => clearInterval(interval);
-  }, [fetchStudioImages, hasPendingStudioImage]);
+  }, [enabled, fetchStudioImages, hasPendingStudioImage]);
 
   const generateImage = useCallback(
     async (prompt: string, options: GenerateProjectImageOptions) => {
@@ -290,5 +303,7 @@ export function useProjectImages({
     regenerateImage,
     insertIntoProject,
     refresh: fetchStudioImages,
+    hasMoreHistory: new Set(taskIds).size > historyTaskLimit,
+    loadMoreHistory: () => setHistoryTaskLimit((current) => current + 6),
   };
 }

@@ -23,6 +23,9 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getRecentFiles, pushRecentFile } from "./recent-files";
+
+export { pushRecentFile } from "./recent-files";
 
 export interface PaletteFile {
   id: number;
@@ -100,27 +103,6 @@ function fuzzyScore(text: string, query: string): number {
   if (t.startsWith(q)) return 90;
   if (t.includes(q)) return 80;
   return 50;
-}
-
-const RECENT_FILES_KEY = "mf_recent_files";
-const MAX_RECENT = 8;
-
-function getRecentFiles(): number[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_FILES_KEY) ?? "[]") as number[];
-  } catch {
-    return [];
-  }
-}
-
-export function pushRecentFile(fileId: number) {
-  try {
-    const current = getRecentFiles();
-    const next = [fileId, ...current.filter((id) => id !== fileId)].slice(0, MAX_RECENT);
-    localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
 }
 
 type PaletteItem =

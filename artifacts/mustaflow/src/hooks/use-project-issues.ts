@@ -16,6 +16,7 @@ export function useProjectIssues(
   projectId: number,
   containerStatus: string,
   builderMode?: string | null,
+  includeCheckRuns = false,
 ): ProjectIssues {
   const { data: tasks = [] } = useListTasks(projectId, {
     query: {
@@ -27,6 +28,7 @@ export function useProjectIssues(
 
   const { data: checkRuns = [] } = useGetCheckRuns(projectId, undefined, {
     query: {
+      enabled: includeCheckRuns,
       queryKey: getGetCheckRunsQueryKey(projectId),
       staleTime: 60_000,
     },
@@ -34,9 +36,9 @@ export function useProjectIssues(
 
   const hasFailedBuild = tasks[0]?.status === "failed";
   const hasContainerError = containerStatus === "error" && builderMode === "agentic";
-  const hasCodeQuality = checkRuns.some(
-    (r) => r.checkName === "code-quality" && r.status === "fail",
-  );
+  const hasCodeQuality =
+    includeCheckRuns &&
+    checkRuns.some((r) => r.checkName === "code-quality" && r.status === "fail");
 
   const totalCount =
     (hasFailedBuild ? 1 : 0) + (hasContainerError ? 1 : 0) + (hasCodeQuality ? 1 : 0);

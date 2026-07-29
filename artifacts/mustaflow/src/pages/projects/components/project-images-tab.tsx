@@ -32,6 +32,8 @@ export function ProjectImagesTab({
   onGenerate,
   onRegenerate,
   onInsert,
+  hasMoreHistory,
+  onLoadMoreHistory,
 }: {
   images: ProjectImageItem[];
   loading: boolean;
@@ -40,6 +42,8 @@ export function ProjectImagesTab({
   onGenerate: (prompt: string, options: GenerateProjectImageOptions) => Promise<void>;
   onRegenerate: (image: ProjectImageItem) => Promise<void>;
   onInsert: (image: ProjectImageItem) => Promise<void>;
+  hasMoreHistory: boolean;
+  onLoadMoreHistory: () => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [quality, setQuality] = useState<GenerateProjectImageOptions["quality"]>("standard");
@@ -292,6 +296,17 @@ export function ProjectImagesTab({
                 </article>
               );
             })}
+          </div>
+        )}
+        {!loading && hasMoreHistory && (
+          <div className="mt-5 flex justify-center">
+            <button
+              type="button"
+              onClick={onLoadMoreHistory}
+              className="rounded-lg border border-border bg-card/40 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Load more image history
+            </button>
           </div>
         )}
       </div>
