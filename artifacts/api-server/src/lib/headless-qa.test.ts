@@ -47,12 +47,19 @@ const qaMocks = vi.hoisted(() => {
     page,
     root,
     browser,
+    resolveChromium: vi.fn(),
     launch: vi.fn(async () => browser),
   };
 });
 
+vi.mock("./chromium-runtime", () => ({
+  resolveChromiumExecutable: qaMocks.resolveChromium,
+  startBuilderChromiumStartupProbe: vi.fn(),
+}));
+
 vi.mock("playwright", () => ({
   chromium: {
+    executablePath: vi.fn(() => "/mock/playwright/chromium"),
     launch: qaMocks.launch,
   },
 }));
@@ -62,6 +69,12 @@ import { runHeadlessQA, type QAStepEventData } from "./headless-qa";
 describe("headless QA tape", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    qaMocks.resolveChromium.mockResolvedValue({
+      found: true,
+      executablePath: "/nix/store/mock-chromium/bin/chromium",
+      source: "PATH:chromium",
+      checkedSources: ["env:PLAYWRIGHT_EXECUTABLE_PATH", "PATH:chromium"],
+    });
   });
 
   it("streams readable actions and bounded take_screenshot frames", async () => {
@@ -95,6 +108,11 @@ describe("headless QA tape", () => {
     expect(screenshots).toHaveLength(3);
     expect(screenshots.every((shot) => shot.tool === "take_screenshot")).toBe(true);
     expect(screenshots.every((shot) => shot.bytes <= 160 * 1024)).toBe(true);
+    expect(qaMocks.launch).toHaveBeenCalledWith({
+      headless: true,
+      executablePath: "/nix/store/mock-chromium/bin/chromium",
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
     expect(qaMocks.button.click).toHaveBeenCalledOnce();
     expect(qaMocks.input.fill).toHaveBeenCalledWith("buy milk", { timeout: 2_000 });
   });
@@ -125,6 +143,43 @@ describe("headless QA tape", () => {
     expect(events).toContainEqual({
       type: "qa_step",
       message: "Error: Preview rendered a blank page",
+    });
+  });
+
+  it("defers QA without failing the build when Chromium is unavailable", async () => {
+    qaMocks.resolveChromium.mockResolvedValueOnce({
+      found: false,
+      checkedSources: ["env:PLAYWRIGHT_EXECUTABLE_PATH", "PATH:chromium"],
+    });
+    const events: Array<{ type: string; message: string; data?: QAStepEventData }> = [];
+
+    const result = await runHeadlessQA(
+      [
+        {
+          path: "index.html",
+          content: "<main>App</main>",
+          mimeType: "text/html",
+        },
+      ],
+      async (type, message, data) => {
+        events.push({ type, message, data });
+      },
+    );
+
+    expect(result).toEqual({
+      passed: false,
+      errors: ["QA runner failed: no Chromium binary available; QA deferred"],
+      stepsRun: 0,
+    });
+    expect(qaMocks.launch).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      type: "qa_step",
+      message: "Error: QA runner failed: no Chromium binary available; QA deferred",
+      data: {
+        kind: "qa_tape_step",
+        phase: "launch",
+        status: "failed",
+      },
     });
   });
 });

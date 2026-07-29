@@ -2,6 +2,11 @@ import http from "node:http";
 import net from "node:net";
 import type { FileSnapshotEntry } from "@workspace/db";
 import { logger } from "./logger";
+import { resolveChromiumExecutable, startBuilderChromiumStartupProbe } from "./chromium-runtime";
+
+if (process.env.NODE_ENV !== "test") {
+  startBuilderChromiumStartupProbe();
+}
 
 export interface QAResult {
   passed: boolean;
@@ -203,7 +208,29 @@ export async function runHeadlessQA(
 
     await emitStep("Starting the QA browser", "launch", "running");
     const { chromium } = await import("playwright");
-    browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+    const chromiumResolution = await resolveChromiumExecutable({
+      bundledExecutablePath: chromium.executablePath(),
+    });
+    if (!chromiumResolution.found) {
+      logger.warn(
+        { checkedSources: chromiumResolution.checkedSources },
+        "headless-qa: Chromium browser not found; QA deferred (non-fatal)",
+      );
+      await recordError("QA runner failed: no Chromium binary available; QA deferred", "launch");
+      return { passed: false, errors, stepsRun };
+    }
+    logger.info(
+      {
+        executablePath: chromiumResolution.executablePath,
+        source: chromiumResolution.source,
+      },
+      "headless-qa: Chromium browser found",
+    );
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: chromiumResolution.executablePath,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
     const context = await browser.newContext({
       javaScriptEnabled: true,
       ignoreHTTPSErrors: true,
