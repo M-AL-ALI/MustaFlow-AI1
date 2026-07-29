@@ -70,4 +70,17 @@ describe("InlineBuildResults", () => {
     await user.click(screen.getByRole("button", { name: "Fix issues" }));
     expect(onSendMessage).toHaveBeenCalledWith(expect.stringContaining("preview"));
   });
+
+  it("keeps the honest partial-validation disclosure when the warning is omitted", async () => {
+    const user = userEvent.setup();
+    render(<InlineBuildResults report={{ ...report, warnings: [] }} />);
+
+    await user.click(screen.getByText("Checks"));
+
+    expect(
+      screen.getByText(
+        "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred.",
+      ),
+    ).toBeVisible();
+  });
 });

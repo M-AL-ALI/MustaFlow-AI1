@@ -80,6 +80,17 @@ function checkSummary(report: InlineBuildResultsReport) {
   return segments.join(" · ");
 }
 
+export function partialValidationMessage(report: InlineBuildResultsReport): string | null {
+  if ((report.checkRunsSummary?.skipped ?? 0) === 0) return null;
+
+  return (
+    (report.warnings ?? []).find((warning) =>
+      warning.toLowerCase().includes("validation was partial"),
+    ) ??
+    "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred."
+  );
+}
+
 function resultSummary(report: InlineBuildResultsReport) {
   const changed =
     report.filesCreated.length + report.filesChanged.length + report.filesRemoved.length;
@@ -162,9 +173,7 @@ export function InlineBuildResults({
   const lessons = report.knowledgeApplied ?? [];
   const checks = report.checkRunsSummary;
   const failedOrWarned = [...(checks?.failedChecks ?? []), ...(checks?.warnChecks ?? [])];
-  const partialValidation = (report.warnings ?? []).find((warning) =>
-    warning.toLowerCase().includes("validation was partial"),
-  );
+  const partialValidation = partialValidationMessage(report);
 
   return (
     <div
