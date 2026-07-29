@@ -240,12 +240,14 @@ export function appendActivityEntry(
 type InlineActivityStreamProps = {
   entries: InlineActivityEntry[];
   live?: boolean;
+  showAvatar?: boolean;
   className?: string;
 };
 
 export function InlineActivityStream({
   entries,
   live = false,
+  showAvatar = true,
   className,
 }: InlineActivityStreamProps) {
   if (entries.length === 0) return null;
@@ -254,7 +256,7 @@ export function InlineActivityStream({
 
   return (
     <div className={cn("flex items-start gap-2", className)} data-testid="inline-activity-stream">
-      <ZeroAvatar active={live && !lastEntry?.terminal} className="mt-0.5" />
+      {showAvatar && <ZeroAvatar active={live && !lastEntry?.terminal} className="mt-0.5" />}
       <div className="min-w-0 flex-1 space-y-0.5 pt-0.5 text-xs">
         {entries.map((entry) => {
           const active = live && entry.id === lastEntry?.id && !entry.terminal;

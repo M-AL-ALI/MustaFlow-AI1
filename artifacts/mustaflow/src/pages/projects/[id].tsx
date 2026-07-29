@@ -188,6 +188,10 @@ import {
   type InlineSurfaceActivityUpdate,
 } from "./components/inline-activity-stream";
 import { ZeroAvatar } from "./components/zero-avatar";
+import {
+  InlineRunGroup,
+  PersistedRunReplay,
+} from "./components/inline-run-group";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -1135,6 +1139,11 @@ export default function ProjectWorkspacePage() {
     setPublishingActivity(surfaceActivityEntry(surfaceActivityIdRef.current, "publishing", update));
   }, []);
   const [, setLiveCodeBuffer] = useState("");
+  const liveRunStepCount = new Set([
+    ...liveActivityEvents.map((event) => event.id),
+    ...liveNarrationEvents.map((event) => event.id),
+    ...liveQATapeEvents.map((event) => event.id),
+  ]).size;
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
   // preview_ready / preview_sync_failed events independent of any task.
@@ -4128,7 +4137,7 @@ export default function ProjectWorkspacePage() {
                                             </div>
                                           )}
                                           {rp.taskId && (
-                                            <QATapeInline
+                                            <PersistedRunReplay
                                               projectId={projectId}
                                               taskId={rp.taskId}
                                               className="mt-2"
@@ -4197,7 +4206,11 @@ export default function ProjectWorkspacePage() {
                             | undefined;
                           return payload?.kind === "report" && payload.taskId === activeTaskId;
                         }) && (
-                          <div className="max-w-[90%] space-y-2">
+                          <InlineRunGroup
+                            stepCount={liveRunStepCount}
+                            live
+                            className="max-w-[90%]"
+                          >
                             <InlineActivityStream entries={liveActivityEvents} live />
                             <div className="ml-8 space-y-2">
                               <InlineNarrationStream entries={liveNarrationEvents} live />
@@ -4209,7 +4222,7 @@ export default function ProjectWorkspacePage() {
                                 className="max-w-full"
                               />
                             </div>
-                          </div>
+                          </InlineRunGroup>
                         )}
 
                       <BuilderImageThreadGallery

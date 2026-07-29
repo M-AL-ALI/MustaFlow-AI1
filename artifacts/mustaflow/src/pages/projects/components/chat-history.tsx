@@ -37,9 +37,9 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
-import { QATapeInline } from "./qa-tape-inline";
 import { InlineBuildResults } from "./inline-build-results";
 import { ZeroAvatar } from "./zero-avatar";
+import { PersistedRunReplay } from "./inline-run-group";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -2529,11 +2529,7 @@ function MessageRow({
           (() => {
             const taskId = (planPayload as { taskId?: number }).taskId;
             return typeof taskId === "number" && taskId > 0 ? (
-              <QATapeInline
-                projectId={projectId}
-                taskId={taskId}
-                className="mt-2"
-              />
+              <PersistedRunReplay projectId={projectId} taskId={taskId} className="mt-2" />
             ) : null;
           })()}
 
