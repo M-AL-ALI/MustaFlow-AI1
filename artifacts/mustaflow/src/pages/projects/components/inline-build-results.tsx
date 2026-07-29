@@ -99,7 +99,11 @@ function ResultRow({ label, summary, icon: Icon, children, testId }: ResultRowPr
           aria-hidden="true"
         />
       </summary>
-      {children && <div className="pb-1 pl-5.5 pt-1">{children}</div>}
+      {children && (
+        <div className="pb-1 pl-5.5 pt-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
+          {children}
+        </div>
+      )}
     </details>
   );
 }
@@ -121,7 +125,7 @@ function FileLine({
       <span className="min-w-0 flex-1 truncate">{path}</span>
       {onViewFile && marker !== "-" && (
         <ExternalLink
-          className="h-2.5 w-2.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-60"
+          className="h-2.5 w-2.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-60 motion-reduce:transition-none"
           aria-hidden="true"
         />
       )}
@@ -140,7 +144,7 @@ function FileLine({
     <button
       type="button"
       onClick={() => onViewFile(path)}
-      className="group flex w-full items-center gap-1 rounded-sm font-mono text-[10px] leading-5 text-foreground/80 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex w-full items-center gap-1 rounded-sm font-mono text-[10px] leading-5 text-foreground/80 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
     >
       {content}
     </button>
@@ -163,7 +167,14 @@ export function InlineBuildResults({
   );
 
   return (
-    <div className={cn("mt-2 text-xs", className)} data-testid="inline-build-results">
+    <div
+      className={cn(
+        "mt-2 text-xs motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200",
+        className,
+      )}
+      data-testid="inline-build-results"
+      aria-label="Build results"
+    >
       <p
         className="flex items-center gap-2 pb-1.5 text-[11px] leading-relaxed text-foreground"
         data-testid="inline-build-summary"
@@ -269,7 +280,7 @@ export function InlineBuildResults({
         <button
           type="button"
           onClick={onViewHistory}
-          className="flex w-full items-center gap-2 border-t border-border/40 py-2 text-left text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex w-full items-center gap-2 border-t border-border/40 py-2 text-left text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           data-testid="inline-build-checkpoint"
         >
           <GitCommit className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

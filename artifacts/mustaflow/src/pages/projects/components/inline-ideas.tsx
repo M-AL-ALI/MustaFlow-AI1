@@ -53,8 +53,11 @@ export function InlineIdeas({
 
   if (loading) {
     return (
-      <div className={cn("flex items-center gap-2 text-[10px] text-muted-foreground", className)}>
-        <Lightbulb className="h-3 w-3 animate-pulse" aria-hidden="true" />
+      <div
+        className={cn("flex items-center gap-2 text-[10px] text-muted-foreground", className)}
+        role="status"
+      >
+        <Lightbulb className="h-3 w-3 motion-safe:animate-pulse" aria-hidden="true" />
         <span>Finding useful next ideas...</span>
       </div>
     );
@@ -66,7 +69,9 @@ export function InlineIdeas({
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}
-        className="flex w-full items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full items-center gap-1.5 rounded-sm text-[10px] font-semibold uppercase tracking-wider text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+        aria-expanded={!collapsed}
+        aria-controls="inline-ideas-list"
       >
         <Lightbulb className="h-3 w-3" aria-hidden="true" />
         <span>New ideas</span>
@@ -74,13 +79,19 @@ export function InlineIdeas({
           {visible.length}
         </span>
         <ChevronDown
-          className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")}
+          className={cn(
+            "h-3 w-3 transition-transform motion-reduce:transition-none",
+            collapsed && "-rotate-90",
+          )}
           aria-hidden="true"
         />
       </button>
 
       {!collapsed && (
-        <div className="space-y-1">
+        <div
+          id="inline-ideas-list"
+          className="space-y-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150"
+        >
           {visible.map((idea) => {
             const meta = CATEGORY_META[idea.category] ?? CATEGORY_META.feature!;
             const Icon = meta.icon;
@@ -90,14 +101,16 @@ export function InlineIdeas({
             return (
               <article
                 key={idea.id}
-                className="group flex flex-col gap-1.5 border-l border-border/60 py-1.5 pl-2.5"
+                className="group flex flex-col gap-1.5 border-l border-border/60 py-1.5 pl-2.5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
                 data-testid="inline-idea"
               >
                 <div className="flex items-start gap-2">
                   <Icon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-1.5">
-                      <span className="text-[10px] font-semibold text-foreground">{idea.title}</span>
+                      <span className="text-[10px] font-semibold text-foreground">
+                        {idea.title}
+                      </span>
                       <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
                         {meta.label}
                       </span>
@@ -125,11 +138,10 @@ export function InlineIdeas({
                         }}
                         disabled={saved}
                         title={saved ? "Saved in Ideas" : "Save in Ideas"}
+                        aria-label={saved ? "Saved in Ideas" : `Save ${idea.title} in Ideas`}
                         className={cn(
-                          "rounded p-1 transition-colors",
-                          saved
-                            ? "text-primary"
-                            : "text-muted-foreground hover:text-foreground",
+                          "rounded p-1 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+                          saved ? "text-primary" : "text-muted-foreground hover:text-foreground",
                         )}
                       >
                         {saved ? (
@@ -145,7 +157,8 @@ export function InlineIdeas({
                           setEditedPrompt(idea.prompt);
                         }}
                         title="Edit before building"
-                        className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                        aria-label={`Edit ${idea.title} before building`}
+                        className="rounded p-1 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                       >
                         <Pencil className="h-3 w-3" />
                       </button>
@@ -153,7 +166,7 @@ export function InlineIdeas({
                         type="button"
                         onClick={() => onBuild(idea)}
                         disabled={buildPending}
-                        className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary outline-none transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 motion-reduce:transition-none"
                       >
                         <Play className="h-2.5 w-2.5" />
                         Build
@@ -165,7 +178,8 @@ export function InlineIdeas({
                           onDismiss(idea);
                         }}
                         title="Dismiss"
-                        className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                        aria-label={`Dismiss ${idea.title}`}
+                        className="rounded p-1 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -182,6 +196,7 @@ export function InlineIdeas({
                       rows={3}
                       className="w-full resize-none rounded border border-border bg-background px-2 py-1.5 text-[10px] leading-snug text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                       placeholder="Edit the build request..."
+                      aria-label={`Edit build request for ${idea.title}`}
                     />
                     <div className="flex items-center gap-1.5">
                       <button
@@ -192,7 +207,7 @@ export function InlineIdeas({
                           setEditedPrompt("");
                         }}
                         disabled={buildPending || !editedPrompt.trim()}
-                        className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary outline-none transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 motion-reduce:transition-none"
                       >
                         <Check className="h-2.5 w-2.5" />
                         Build with edits
@@ -203,7 +218,7 @@ export function InlineIdeas({
                           setEditingId(null);
                           setEditedPrompt("");
                         }}
-                        className="text-[10px] text-muted-foreground hover:text-foreground"
+                        className="rounded-sm text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         Cancel
                       </button>

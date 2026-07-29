@@ -4302,7 +4302,7 @@ export default function ProjectWorkspacePage() {
                         <div className="relative">
                           {/* Reconnecting indicator — shown while retrying the stream connection */}
                           {streamReconnectAttempt > 0 ? (
-                            <div className="flex justify-start animate-in fade-in duration-150">
+                            <div className="flex justify-start motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
                               <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs bg-muted border border-amber-500/30 text-amber-400 rounded-bl-sm">
                                 <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
                                 <span>Reconnecting… (attempt {streamReconnectAttempt}/3)</span>
@@ -4320,7 +4320,7 @@ export default function ProjectWorkspacePage() {
                               {/* Typing indicator: fades out and steps aside when first token arrives */}
                               <div
                                 className={cn(
-                                  "transition-opacity duration-150",
+                                  "transition-opacity duration-150 motion-reduce:transition-none",
                                   streamingText.length > 0
                                     ? "opacity-0 pointer-events-none absolute top-0 left-0"
                                     : "opacity-100",
@@ -4330,11 +4330,11 @@ export default function ProjectWorkspacePage() {
                               </div>
                               {/* Streaming bubble: fades in as text arrives */}
                               {streamingText.length > 0 && (
-                                <div className="flex justify-start animate-in fade-in duration-150">
+                                <div className="flex justify-start motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
                                   <ZeroAvatar active className="mr-2 mt-0.5" />
                                   <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
                                     <MarkdownMessage content={streamingText} />
-                                    <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                                    <span className="ml-0.5 inline-block h-3 w-0.5 bg-foreground/60 align-middle motion-safe:animate-pulse" />
                                     <div className="mt-1.5 flex justify-end">
                                       <button
                                         onClick={handleStopStream}
@@ -4355,7 +4355,7 @@ export default function ProjectWorkspacePage() {
 
                       {/* Stream error bubble — shown when all reconnect attempts are exhausted */}
                       {streamError && !isStreaming && !sendMessage.isPending && (
-                        <div className="flex items-start justify-start gap-2 animate-in fade-in duration-150">
+                        <div className="flex items-start justify-start gap-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150">
                           <ZeroAvatar className="mt-0.5" />
                           <div className="max-w-[90%] py-1 text-xs">
                             {streamErrorStatus === 401 ? (

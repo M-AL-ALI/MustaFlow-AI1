@@ -1,9 +1,5 @@
 import { getListTaskEventsQueryKey, useListTaskEvents } from "@workspace/api-client-react";
-import {
-  extractQATapeSteps,
-  type QATapeEvent,
-  type QATapeStep,
-} from "@/lib/qa-video-tape";
+import { extractQATapeSteps, type QATapeEvent, type QATapeStep } from "@/lib/qa-video-tape";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Camera, Check, Eye, Loader } from "lucide-react";
 
@@ -38,7 +34,9 @@ export function QATapeStepsInline({
     <div
       className={cn("space-y-1.5 text-xs", className)}
       data-testid="qa-tape-steps"
+      role="log"
       aria-live={live ? "polite" : undefined}
+      aria-relevant="additions text"
     >
       <div className="flex items-center gap-1.5 font-medium text-foreground">
         <Eye className="h-3.5 w-3.5" aria-hidden="true" />
@@ -47,13 +45,16 @@ export function QATapeStepsInline({
       {steps.map((step, index) => (
         <div
           key={`${index}-${step.phase}-${step.message}`}
-          className="ml-5 space-y-1.5"
+          className="ml-5 space-y-1.5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
           data-status={step.status}
           data-testid="qa-tape-step"
         >
           <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
             {step.status === "running" ? (
-              <Loader className="mt-0.5 h-3 w-3 shrink-0 animate-pulse" aria-hidden="true" />
+              <Loader
+                className="mt-0.5 h-3 w-3 shrink-0 motion-safe:animate-pulse"
+                aria-hidden="true"
+              />
             ) : step.status === "failed" ? (
               <AlertTriangle
                 className="mt-0.5 h-3 w-3 shrink-0 text-destructive"

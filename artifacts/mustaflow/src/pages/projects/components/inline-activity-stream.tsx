@@ -241,9 +241,7 @@ export function appendActivityEntry(
   ) {
     return [...current.slice(0, -1), next].slice(-MAX_ACTIVITY_ROWS);
   }
-  return [...current, next]
-    .sort((left, right) => left.id - right.id)
-    .slice(-MAX_ACTIVITY_ROWS);
+  return [...current, next].sort((left, right) => left.id - right.id).slice(-MAX_ACTIVITY_ROWS);
 }
 
 type InlineActivityStreamProps = {
@@ -264,7 +262,13 @@ export function InlineActivityStream({
   const lastEntry = entries.at(-1);
 
   return (
-    <div className={cn("flex items-start gap-2", className)} data-testid="inline-activity-stream">
+    <div
+      className={cn("flex items-start gap-2", className)}
+      data-testid="inline-activity-stream"
+      role="log"
+      aria-live={live ? "polite" : undefined}
+      aria-relevant="additions text"
+    >
       {showAvatar && <ZeroAvatar active={live && !lastEntry?.terminal} className="mt-0.5" />}
       <div className="min-w-0 flex-1 space-y-0.5 pt-0.5 text-xs">
         {entries.map((entry) => {
@@ -278,6 +282,7 @@ export function InlineActivityStream({
               key={entry.id}
               className={cn(
                 "flex min-w-0 items-center gap-1.5 leading-5",
+                "motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200",
                 active || failed ? "text-foreground" : "text-muted-foreground",
               )}
               data-active={active ? "true" : "false"}
@@ -288,7 +293,7 @@ export function InlineActivityStream({
                 aria-hidden="true"
                 className={cn(
                   "h-3.5 w-3.5 shrink-0",
-                  active && "animate-pulse",
+                  active && "motion-safe:animate-pulse",
                   failed && "text-muted-foreground",
                 )}
                 data-testid={active ? "active-activity-icon" : "resolved-activity-icon"}

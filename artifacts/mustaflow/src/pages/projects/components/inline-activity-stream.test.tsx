@@ -64,8 +64,9 @@ describe("InlineActivityStream", () => {
     expect(rows[2]).toHaveAttribute("data-active", "true");
     expect(rows[2]).toHaveTextContent("Writing code");
     expect(screen.getAllByTestId("resolved-activity-icon")).toHaveLength(2);
-    expect(screen.getByTestId("active-activity-icon")).toHaveClass("animate-pulse");
+    expect(screen.getByTestId("active-activity-icon")).toHaveClass("motion-safe:animate-pulse");
     expect(screen.getByTestId("zero-avatar")).toHaveAttribute("aria-label", "Zero");
+    expect(screen.getByTestId("zero-avatar")).toHaveAttribute("role", "img");
   });
 
   it("replaces repeated phases and renders terminal completion as a static check", () => {

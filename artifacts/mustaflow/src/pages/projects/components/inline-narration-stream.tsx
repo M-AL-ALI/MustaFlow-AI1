@@ -80,7 +80,7 @@ function WordByWordLine({ text, stream }: WordByWordLineProps) {
         <span aria-hidden="true" className="absolute inset-0 block">
           {visibleText}
           {!complete && (
-            <span className="ml-0.5 inline-block h-3 w-px animate-pulse bg-current align-middle opacity-50" />
+            <span className="ml-0.5 inline-block h-3 w-px bg-current align-middle opacity-50 motion-safe:animate-pulse" />
           )}
         </span>
       </span>
@@ -110,9 +110,16 @@ export function InlineNarrationStream({
     <div
       className={cn("space-y-1 text-xs leading-5 text-muted-foreground", className)}
       data-testid="inline-narration-stream"
+      role="log"
+      aria-live={live ? "polite" : undefined}
+      aria-relevant="additions text"
     >
       {entries.map((entry) => (
-        <div key={entry.id} data-testid="inline-narration-line">
+        <div
+          key={entry.id}
+          className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
+          data-testid="inline-narration-line"
+        >
           <WordByWordLine text={entry.text} stream={live && entry.id === lastEntryId} />
         </div>
       ))}

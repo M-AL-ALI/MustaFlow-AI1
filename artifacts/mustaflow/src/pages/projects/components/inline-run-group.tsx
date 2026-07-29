@@ -101,13 +101,17 @@ export function InlineRunGroup({
     : `${countLabel} · ${expanded ? "collapse replay" : "expand to replay"}`;
 
   return (
-    <section className={cn("space-y-2", className)} data-testid="inline-run-group">
+    <section
+      className={cn("space-y-2", className)}
+      data-testid="inline-run-group"
+      aria-label={live ? "Active build activity" : "Completed build activity"}
+    >
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
-          className="flex items-center gap-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           data-testid="inline-run-toggle"
         >
           {expanded ? (
@@ -122,6 +126,7 @@ export function InlineRunGroup({
             <span
               className="text-[9px] tabular-nums text-muted-foreground/70"
               data-testid="inline-run-progress"
+              aria-label={`Build progress: step ${progress.stepIndex} of ${progress.stepCap}`}
             >
               step {progress.stepIndex} of {progress.stepCap}
             </span>
@@ -130,7 +135,7 @@ export function InlineRunGroup({
             <button
               type="button"
               onClick={onStop}
-              className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
               data-testid="inline-run-stop"
             >
               <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
@@ -140,7 +145,10 @@ export function InlineRunGroup({
         </div>
       </div>
       {expanded && (
-        <div className="space-y-2 pl-1" data-testid="inline-run-replay">
+        <div
+          className="space-y-2 pl-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150"
+          data-testid="inline-run-replay"
+        >
           {children}
         </div>
       )}

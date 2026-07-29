@@ -21,7 +21,7 @@ export function EditAndResend({ onEdit, className }: { onEdit: () => void; class
       type="button"
       onClick={onEdit}
       className={cn(
-        "inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] opacity-70 outline-none transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] opacity-70 outline-none transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
         className,
       )}
       aria-label="Edit and resend this message"

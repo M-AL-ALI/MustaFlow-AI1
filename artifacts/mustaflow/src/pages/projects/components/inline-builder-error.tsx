@@ -16,7 +16,11 @@ export function InlineBuilderError({
   const isInsufficientCredits = message.startsWith("Insufficient credits");
 
   return (
-    <div className="space-y-2.5 text-xs" data-testid="inline-builder-error">
+    <div
+      className="space-y-2.5 text-xs motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
+      data-testid="inline-builder-error"
+      role="alert"
+    >
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
@@ -30,14 +34,14 @@ export function InlineBuilderError({
           <button
             type="button"
             onClick={onBuyCredits}
-            className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           >
             <CreditCard className="h-3 w-3" />
             Buy credits
           </button>
           <a
             href="/settings?tab=credits"
-            className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           >
             Open Credits & Billing
             <ExternalLink className="h-3 w-3" />
@@ -60,7 +64,7 @@ export function InlineBuilderError({
                 <button
                   type="button"
                   onClick={() => onTryFix(suggestion)}
-                  className="shrink-0 rounded-sm text-[10px] font-medium text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
+                  className="shrink-0 rounded-sm text-[10px] font-medium text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                 >
                   Try this
                 </button>
