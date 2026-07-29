@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListCheckpoints,
@@ -41,13 +41,15 @@ function formatCalendarDate(iso: string): string {
 
 interface CheckpointsTabProps {
   projectId: number;
+  focusCheckpointId?: number | null;
   onRestored?: () => void;
 }
 
-export function CheckpointsTab({ projectId, onRestored }: CheckpointsTabProps) {
+export function CheckpointsTab({ projectId, focusCheckpointId, onRestored }: CheckpointsTabProps) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useListCheckpoints(projectId);
   const [restoreTarget, setRestoreTarget] = useState<Checkpoint | null>(null);
+  const historySurfaceRef = useRef<HTMLDivElement>(null);
 
   const restore = useRestoreCheckpoint({
     mutation: {
@@ -83,8 +85,27 @@ export function CheckpointsTab({ projectId, onRestored }: CheckpointsTabProps) {
 
   const checkpoints = data ?? [];
 
+  useEffect(() => {
+    if (!focusCheckpointId || isLoading) return;
+    const target = historySurfaceRef.current?.querySelector<HTMLElement>(
+      `[data-checkpoint-id="${focusCheckpointId}"]`,
+    );
+    if (!target) return;
+
+    const frame = requestAnimationFrame(() => {
+      target.scrollIntoView({
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "center",
+      });
+      target.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [data, focusCheckpointId, isLoading]);
+
   return (
-    <div className="h-full overflow-y-auto bg-background">
+    <div ref={historySurfaceRef} className="h-full overflow-y-auto bg-background">
       <div className="mx-auto max-w-3xl px-5 py-7 sm:px-8">
         <div className="mb-6">
           <div className="flex items-center gap-2 text-primary">
@@ -121,7 +142,11 @@ export function CheckpointsTab({ projectId, onRestored }: CheckpointsTabProps) {
             {checkpoints.map((checkpoint, index) => (
               <article
                 key={checkpoint.id}
-                className="group rounded-2xl border border-border bg-card/50 p-4 transition-colors hover:border-primary/25 hover:bg-card"
+                tabIndex={-1}
+                data-checkpoint-id={checkpoint.id}
+                data-focused={checkpoint.id === focusCheckpointId ? "true" : undefined}
+                aria-current={checkpoint.id === focusCheckpointId ? "true" : undefined}
+                className="group rounded-2xl border border-border bg-card/50 p-4 outline-none transition-colors hover:border-primary/25 hover:bg-card data-[focused=true]:border-primary/50 data-[focused=true]:bg-primary/5 focus-visible:ring-2 focus-visible:ring-primary/50"
               >
                 <div className="flex items-start gap-4">
                   <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">

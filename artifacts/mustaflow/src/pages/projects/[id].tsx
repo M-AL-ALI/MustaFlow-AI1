@@ -174,6 +174,7 @@ import {
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
 import { QATapeInline } from "./components/qa-tape-inline";
 import { InlineBuildResults } from "./components/inline-build-results";
+import { useCheckpointHistoryNavigation } from "./components/use-checkpoint-history-navigation";
 import {
   appendNarrationEntry,
   InlineNarrationStream,
@@ -420,7 +421,6 @@ function ReportCard({
         onViewFile={onViewFile}
         onViewHistory={onViewHistory}
         onSendMessage={onSendMessage}
-        showCheckpoint={false}
       />
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
         <div className="space-y-1 pt-1.5 border-t border-border">
@@ -542,20 +542,6 @@ function ReportCard({
               — see Quality tab for details
             </div>
           )}
-        </div>
-      )}
-      {report.versionId && (
-        <div className="pt-1.5 border-t border-border">
-          <button
-            onClick={onViewHistory}
-            className="w-full flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors group"
-          >
-            <RotateCcw className="h-3 w-3 shrink-0 text-muted-foreground/50 group-hover:text-foreground/70 transition-colors" />
-            <span>Checkpoint saved — roll back any time</span>
-            <span className="ml-auto font-mono text-[9px] text-muted-foreground/40">
-              #{report.versionId}
-            </span>
-          </button>
         </div>
       )}
     </div>
@@ -1240,7 +1226,7 @@ export default function ProjectWorkspacePage() {
   const [showAllRecent, setShowAllRecent] = useState(false);
   const [visibleMessageWindow, setVisibleMessageWindow] = useState(20);
   const [chatScrolledUp, setChatScrolledUp] = useState(false);
-  const [historyFocusVersionId] = useState<number | null>(null);
+  const [checkpointFocusId, setCheckpointFocusId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
@@ -1958,6 +1944,14 @@ export default function ProjectWorkspacePage() {
   }, [leftPanelTab, projectId]);
 
   const isMobileLayout = windowWidth < 768;
+  const openCheckpointHistory = useCheckpointHistoryNavigation({
+    setActiveTab,
+    setAdvancedDataEnabled,
+    setCheckpointFocusId,
+    setMoreTabsExpanded,
+    setChatDrawerOpen,
+    isMobileLayout,
+  });
 
   // Derive active module IDs from the most recent completed task report
   const wiredModuleIds = useMemo<string[] | undefined>(() => {
@@ -4167,7 +4161,11 @@ export default function ProjectWorkspacePage() {
                                                 setActiveTab("code");
                                               }
                                             }}
-                                            onViewHistory={() => switchLeftPanel("history")}
+                                            onViewHistory={() => {
+                                              if (rp.report.versionId) {
+                                                openCheckpointHistory(rp.report.versionId);
+                                              }
+                                            }}
                                             onSendMessage={(text) => send(text)}
                                           />
                                           {isLastReport && rp.taskId && !isBusy && (
@@ -4688,7 +4686,6 @@ export default function ProjectWorkspacePage() {
               <HistoryTab
                 key={projectId}
                 projectId={projectId}
-                focusVersionId={historyFocusVersionId}
                 onRetry={(text) => {
                   setPrompt(text);
                   switchLeftPanel("chat");
@@ -5302,6 +5299,7 @@ export default function ProjectWorkspacePage() {
               {activeTab === "checkpoints" && (
                 <CheckpointsTab
                   projectId={projectId}
+                  focusCheckpointId={checkpointFocusId}
                   onRestored={() => {
                     setBuildRefreshCount((count) => count + 1);
                     setActiveTab("preview");
