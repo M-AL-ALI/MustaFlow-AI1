@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { InlineBuildResults } from "./inline-build-results";
 import { ZeroAvatar } from "./zero-avatar";
 import { PersistedRunReplay } from "./inline-run-group";
+import { InlineBuilderError } from "./inline-builder-error";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
@@ -2471,11 +2472,17 @@ function MessageRow({
           isUser
             ? "bg-primary/15 text-foreground border border-primary/20 rounded-br-sm"
             : isError
-              ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+              ? "text-foreground"
               : "bg-muted border border-border text-foreground rounded-bl-sm",
         )}
       >
-        {isConverse || isClarifying ? (
+        {isError ? (
+          <InlineBuilderError
+            message={(planPayload as { message?: string }).message ?? msg.content}
+            suggestions={(planPayload as { suggestions?: string[] }).suggestions}
+            onTryFix={onSendMessage}
+          />
+        ) : isConverse || isClarifying ? (
           <StreamingText
             content={msg.content}
             messageId={msg.id}
@@ -2529,7 +2536,19 @@ function MessageRow({
           (() => {
             const taskId = (planPayload as { taskId?: number }).taskId;
             return typeof taskId === "number" && taskId > 0 ? (
-              <PersistedRunReplay projectId={projectId} taskId={taskId} className="mt-2" />
+              <PersistedRunReplay
+                projectId={projectId}
+                taskId={taskId}
+                className="mt-2"
+                onRetry={
+                  onSendMessage
+                    ? () =>
+                        onSendMessage(
+                          "Fix the remaining runtime issue and verify the preview again.",
+                        )
+                    : undefined
+                }
+              />
             ) : null;
           })()}
 

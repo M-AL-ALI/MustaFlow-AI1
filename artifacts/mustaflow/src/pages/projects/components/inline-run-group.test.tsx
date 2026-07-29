@@ -14,17 +14,31 @@ describe("buildRunReplayModel", () => {
         message: "Opened the app",
         data: { kind: "qa_tape_step", phase: "launch", status: "passed" },
       },
+      {
+        id: 6,
+        eventType: "editing_files",
+        message: "Repairing src/App.tsx",
+      },
       { id: 5, eventType: "heartbeat", message: "Still alive" },
     ]);
 
-    expect(replay.stepCount).toBe(4);
+    expect(replay.stepCount).toBe(5);
     expect(replay.activities.map((entry) => entry.kind)).toEqual([
       "reading",
       "checking",
       "done",
+      "writing",
     ]);
     expect(replay.narrations).toEqual([{ id: 2, text: "I found the subtitle." }]);
     expect(replay.qaEvents).toHaveLength(1);
+    expect(replay.recoverySteps).toEqual([
+      {
+        id: 6,
+        phase: "adapt",
+        message: "Adjusted src/App.tsx",
+        status: "running",
+      },
+    ]);
   });
 });
 

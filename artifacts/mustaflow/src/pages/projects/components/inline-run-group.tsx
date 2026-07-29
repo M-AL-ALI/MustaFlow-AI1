@@ -18,6 +18,12 @@ import {
   type InlineNarrationEntry,
 } from "./inline-narration-stream";
 import { QATapeStepsInline } from "./qa-tape-inline";
+import {
+  appendRecoveryStep,
+  InlineRecoveryLoop,
+  recoveryStepForEvent,
+  type InlineRecoveryStep,
+} from "./inline-recovery-loop";
 
 type ReplayEvent = QATapeEvent & {
   taskId?: number;
@@ -28,17 +34,19 @@ export type RunReplayModel = {
   activities: InlineActivityEntry[];
   narrations: InlineNarrationEntry[];
   qaEvents: QATapeEvent[];
+  recoverySteps: InlineRecoveryStep[];
   stepCount: number;
 };
 
 export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
   let activities: InlineActivityEntry[] = [];
   let narrations: InlineNarrationEntry[] = [];
+  let recoverySteps: InlineRecoveryStep[] = [];
   const qaEvents: QATapeEvent[] = [];
   const stepIds = new Set<number>();
 
   for (const event of [...events].sort((left, right) => left.id - right.id)) {
-    const activity = taskActivityForEvent(event.id, event.eventType);
+    const activity = taskActivityForEvent(event.id, event.eventType, event.message);
     if (activity) {
       activities = appendActivityEntry(activities, activity);
       stepIds.add(event.id);
@@ -54,9 +62,11 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
       qaEvents.push(event);
       stepIds.add(event.id);
     }
+    const recovery = recoveryStepForEvent(event);
+    if (recovery) recoverySteps = appendRecoveryStep(recoverySteps, recovery);
   }
 
-  return { activities, narrations, qaEvents, stepCount: stepIds.size };
+  return { activities, narrations, qaEvents, recoverySteps, stepCount: stepIds.size };
 }
 
 type InlineRunGroupProps = {
@@ -116,10 +126,12 @@ export function InlineRunGroup({
 export function PersistedRunReplay({
   projectId,
   taskId,
+  onRetry,
   className,
 }: {
   projectId: number;
   taskId: number;
+  onRetry?: () => void;
   className?: string;
 }) {
   const { data: events = [] } = useListTaskEvents(projectId, taskId, {
@@ -132,7 +144,10 @@ export function PersistedRunReplay({
     () => buildRunReplayModel(events as unknown as ReplayEvent[]),
     [events],
   );
-  const qaSteps = useMemo(() => extractQATapeSteps(replay.qaEvents), [replay.qaEvents]);
+  const qaSteps = useMemo(
+    () => extractQATapeSteps(replay.qaEvents).filter((step) => step.phase !== "repair"),
+    [replay.qaEvents],
+  );
 
   if (replay.stepCount === 0) return null;
 
@@ -140,6 +155,7 @@ export function PersistedRunReplay({
     <InlineRunGroup stepCount={replay.stepCount} live={false} className={className}>
       <InlineActivityStream entries={replay.activities} showAvatar={false} />
       <InlineNarrationStream entries={replay.narrations} />
+      <InlineRecoveryLoop steps={replay.recoverySteps} onRetry={onRetry} />
       <QATapeStepsInline steps={qaSteps} />
     </InlineRunGroup>
   );

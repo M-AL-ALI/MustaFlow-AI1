@@ -192,6 +192,13 @@ import {
   InlineRunGroup,
   PersistedRunReplay,
 } from "./components/inline-run-group";
+import {
+  appendRecoveryStep,
+  InlineRecoveryLoop,
+  recoveryStepForEvent,
+  type InlineRecoveryStep,
+} from "./components/inline-recovery-loop";
+import { InlineBuilderError } from "./components/inline-builder-error";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -537,71 +544,6 @@ function ReportCard({
               #{report.versionId}
             </span>
           </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ErrorCard({
-  message,
-  suggestions,
-  onTryFix,
-  onBuyCredits,
-}: {
-  message: string;
-  suggestions?: string[];
-  onTryFix?: (text: string) => void;
-  onBuyCredits?: () => void;
-}) {
-  const isInsufficientCredits = message.startsWith("Insufficient credits");
-  return (
-    <div className="mt-2 bg-destructive/10 border border-destructive/30 rounded-xl p-3 text-xs space-y-2.5">
-      <div className="flex items-start gap-2">
-        <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
-        <span className="text-destructive/90 leading-relaxed">{message}</span>
-      </div>
-      {isInsufficientCredits && BILLING_ENABLED && (
-        <div className="border-t border-destructive/20 pt-2 flex items-center gap-2 flex-wrap">
-          <button
-            onClick={onBuyCredits}
-            className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2.5 py-1 rounded-lg transition-colors"
-          >
-            <CreditCard className="h-3 w-3" />
-            Buy credits
-          </button>
-          <a
-            href="/settings?tab=credits"
-            className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground border border-border bg-muted/30 hover:bg-muted/60 px-2.5 py-1 rounded-lg transition-colors"
-          >
-            Open Credits & Billing
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-      )}
-      {suggestions && suggestions.length > 0 && (
-        <div className="space-y-1.5 border-t border-destructive/20 pt-2">
-          <div className="font-semibold text-destructive/80 flex items-center gap-1 text-[10px] uppercase tracking-wider">
-            <Wrench className="h-3 w-3" /> Suggested fixes
-          </div>
-          {suggestions.map((s, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <div className="w-4 h-4 rounded-full bg-destructive/20 text-destructive text-[9px] flex items-center justify-center font-bold shrink-0 mt-0.5">
-                {i + 1}
-              </div>
-              <div className="flex-1 flex items-start gap-2 min-w-0">
-                <span className="text-foreground/80 leading-relaxed flex-1">{s}</span>
-                {onTryFix && (
-                  <button
-                    onClick={() => onTryFix(s)}
-                    className="shrink-0 text-[10px] font-medium text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2 py-0.5 rounded-lg transition-colors whitespace-nowrap"
-                  >
-                    Try this
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
         </div>
       )}
     </div>
@@ -1125,6 +1067,7 @@ export default function ProjectWorkspacePage() {
   const [liveQATapeEvents, setLiveQATapeEvents] = useState<QATapeEvent[]>([]);
   const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
   const [liveActivityEvents, setLiveActivityEvents] = useState<InlineActivityEntry[]>([]);
+  const [liveRecoverySteps, setLiveRecoverySteps] = useState<InlineRecoveryStep[]>([]);
   const [brainstormActivity, setBrainstormActivity] = useState<InlineActivityEntry | null>(null);
   const [publishingActivity, setPublishingActivity] = useState<InlineActivityEntry | null>(null);
   const surfaceActivityIdRef = useRef(1_000_000);
@@ -2046,7 +1989,14 @@ export default function ProjectWorkspacePage() {
     if (chatAtBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, activeTaskId, liveQATapeEvents, liveNarrationEvents, liveActivityEvents]);
+  }, [
+    messages,
+    activeTaskId,
+    liveQATapeEvents,
+    liveNarrationEvents,
+    liveActivityEvents,
+    liveRecoverySteps,
+  ]);
 
   // Subscribe to the SSE event stream for the active task. When the server
   // emits "page_map_updated" (guaranteed before "completed"), invalidate the
@@ -2059,6 +2009,7 @@ export default function ProjectWorkspacePage() {
     setLiveQATapeEvents([]);
     setLiveNarrationEvents([]);
     setLiveActivityEvents([]);
+    setLiveRecoverySteps([]);
     setLiveCodeBuffer("");
     calmFilePathsRef.current = new Set();
     setCalmFileCount(0);
@@ -2100,9 +2051,13 @@ export default function ProjectWorkspacePage() {
             }),
           );
         }
-        const activity = taskActivityForEvent(event.id, event.eventType);
+        const activity = taskActivityForEvent(event.id, event.eventType, event.message);
         if (activity) {
           setLiveActivityEvents((current) => appendActivityEntry(current, activity));
+        }
+        const recoveryStep = recoveryStepForEvent(event);
+        if (recoveryStep) {
+          setLiveRecoverySteps((current) => appendRecoveryStep(current, recoveryStep));
         }
         if (event.eventType === "generate_image") {
           const generatedImage = parseZeroGeneratedImageEvent(projectId, {
@@ -3945,7 +3900,7 @@ export default function ProjectWorkspacePage() {
                                     msg.role === "user"
                                       ? "bg-primary text-primary-foreground rounded-br-sm"
                                       : isError
-                                        ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                        ? "text-foreground"
                                         : "bg-muted text-foreground rounded-bl-sm border border-border",
                                   )}
                                 >
@@ -4141,6 +4096,11 @@ export default function ProjectWorkspacePage() {
                                               projectId={projectId}
                                               taskId={rp.taskId}
                                               className="mt-2"
+                                              onRetry={() =>
+                                                send(
+                                                  "Fix the remaining runtime issue and verify the preview again.",
+                                                )
+                                              }
                                             />
                                           )}
                                           <ReportCard
@@ -4167,7 +4127,7 @@ export default function ProjectWorkspacePage() {
                                       );
                                     })()}
                                   {isError && (
-                                    <ErrorCard
+                                    <InlineBuilderError
                                       message={(planPayload as { message: string }).message}
                                       suggestions={
                                         (planPayload as { suggestions?: string[] }).suggestions
@@ -4176,6 +4136,7 @@ export default function ProjectWorkspacePage() {
                                         setPrompt(text);
                                       }}
                                       onBuyCredits={() => setBuyCreditsOpen(true)}
+                                      showCredits={BILLING_ENABLED}
                                     />
                                   )}
                                   {isPlanCard && (
@@ -4214,10 +4175,20 @@ export default function ProjectWorkspacePage() {
                             <InlineActivityStream entries={liveActivityEvents} live />
                             <div className="ml-8 space-y-2">
                               <InlineNarrationStream entries={liveNarrationEvents} live />
+                              <InlineRecoveryLoop
+                                steps={liveRecoverySteps}
+                                live
+                                onRetry={() =>
+                                  send(
+                                    "Fix the remaining runtime issue and verify the preview again.",
+                                  )
+                                }
+                              />
                               <QATapeInline
                                 projectId={projectId}
                                 taskId={activeTaskId}
                                 live
+                                hideRepairSteps
                                 liveEvents={liveQATapeEvents}
                                 className="max-w-full"
                               />
@@ -4315,12 +4286,13 @@ export default function ProjectWorkspacePage() {
 
                       {/* Stream error bubble — shown when all reconnect attempts are exhausted */}
                       {streamError && !isStreaming && !sendMessage.isPending && (
-                        <div className="flex justify-start animate-in fade-in duration-150">
-                          <div className="max-w-[90%] px-3 py-2.5 rounded-xl text-xs bg-muted border border-destructive/30 rounded-bl-sm">
+                        <div className="flex items-start justify-start gap-2 animate-in fade-in duration-150">
+                          <ZeroAvatar className="mt-0.5" />
+                          <div className="max-w-[90%] py-1 text-xs">
                             {streamErrorStatus === 401 ? (
                               <>
                                 <div className="flex items-start gap-2">
-                                  <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                                  <WifiOff className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-px" />
                                   <div className="flex-1 min-w-0">
                                     <p className="text-foreground font-medium">Session expired</p>
                                     <p className="text-muted-foreground mt-0.5">
@@ -4356,7 +4328,7 @@ export default function ProjectWorkspacePage() {
                             ) : (
                               <>
                                 <div className="flex items-start gap-2">
-                                  <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                                  <WifiOff className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-px" />
                                   <div className="flex-1 min-w-0">
                                     <p className="text-foreground font-medium">Connection lost</p>
                                     <p className="text-muted-foreground mt-0.5">

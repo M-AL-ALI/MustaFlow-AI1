@@ -195,7 +195,16 @@ const MAX_ACTIVITY_ROWS = 12;
 export function taskActivityForEvent(
   id: number,
   eventType: string,
+  message = "",
 ): InlineActivityEntry | null {
+  if (eventType.toLowerCase() === "editing_files" && /^repairing\b/i.test(message.trim())) {
+    return {
+      id,
+      kind: "writing",
+      label: "Adapting the fix",
+      resolvedLabel: "Adapted the fix",
+    };
+  }
   const definition = EVENT_ACTIVITY[eventType.toLowerCase()];
   return definition ? { id, ...definition } : null;
 }
@@ -280,7 +289,7 @@ export function InlineActivityStream({
                 className={cn(
                   "h-3.5 w-3.5 shrink-0",
                   active && "animate-pulse",
-                  failed && "text-destructive",
+                  failed && "text-muted-foreground",
                 )}
                 data-testid={active ? "active-activity-icon" : "resolved-activity-icon"}
               />

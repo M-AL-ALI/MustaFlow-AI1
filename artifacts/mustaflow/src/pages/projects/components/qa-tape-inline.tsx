@@ -12,6 +12,7 @@ type QATapeInlineProps = {
   taskId: number;
   liveEvents?: QATapeEvent[];
   live?: boolean;
+  hideRepairSteps?: boolean;
   className?: string;
 };
 
@@ -89,6 +90,7 @@ export function QATapeInline({
   taskId,
   liveEvents = [],
   live = false,
+  hideRepairSteps = false,
   className,
 }: QATapeInlineProps) {
   const { data: persistedEvents = [] } = useListTaskEvents(projectId, taskId, {
@@ -98,7 +100,9 @@ export function QATapeInline({
     },
   });
   const history = persistedEvents as unknown as QATapeEvent[];
-  const steps = extractQATapeSteps(mergeEvents(history, liveEvents));
+  const steps = extractQATapeSteps(mergeEvents(history, liveEvents)).filter(
+    (step) => !hideRepairSteps || step.phase !== "repair",
+  );
 
   if (steps.length === 0) return null;
 

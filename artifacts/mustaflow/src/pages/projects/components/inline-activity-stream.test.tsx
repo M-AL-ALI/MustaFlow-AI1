@@ -37,6 +37,14 @@ describe("taskActivityForEvent", () => {
   it("ignores events that do not represent an activity state", () => {
     expect(taskActivityForEvent(4, "narration")).toBeNull();
   });
+
+  it("uses the existing Repairing event wording for the adapt state", () => {
+    expect(taskActivityForEvent(5, "editing_files", "Repairing src/App.tsx")).toMatchObject({
+      kind: "writing",
+      label: "Adapting the fix",
+      resolvedLabel: "Adapted the fix",
+    });
+  });
 });
 
 describe("InlineActivityStream", () => {
