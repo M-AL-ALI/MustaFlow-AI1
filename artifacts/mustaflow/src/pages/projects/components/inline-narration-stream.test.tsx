@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendNarrationEntry,
   InlineNarrationStream,
+  narrationForTaskEvent,
   type InlineNarrationEntry,
 } from "./inline-narration-stream";
 
@@ -21,6 +22,26 @@ describe("appendNarrationEntry", () => {
     expect(entries).toHaveLength(12);
     expect(entries[0]).toEqual({ id: 3, text: "Step 3" });
     expect(entries.at(-1)).toEqual({ id: 14, text: "Step 14" });
+  });
+
+  it("derives narration only from real production loop and status payloads", () => {
+    expect(
+      narrationForTaskEvent(
+        "loop:step",
+        JSON.stringify({ stepIndex: 10, stepCap: 25, toolName: "run_command" }),
+      ),
+    ).toBe("Checking the project.");
+    expect(narrationForTaskEvent("review_context", "Reviewer context assembled (in_loop).")).toBe(
+      "Reviewing the change against the current project.",
+    );
+    expect(narrationForTaskEvent("tool_call", '{"tool":"unknown"}')).toBeNull();
+  });
+
+  it("does not repeat an identical derived line twice in a row", () => {
+    let entries: InlineNarrationEntry[] = [];
+    entries = appendNarrationEntry(entries, { id: 1, text: "Checking the project." });
+    entries = appendNarrationEntry(entries, { id: 2, text: "Checking the project." });
+    expect(entries).toEqual([{ id: 1, text: "Checking the project." }]);
   });
 });
 
@@ -55,12 +76,8 @@ describe("InlineNarrationStream", () => {
   });
 
   it("renders persisted narration immediately when the run is not live", () => {
-    render(
-      <InlineNarrationStream entries={[{ id: 8, text: "Quality checks passed." }]} />,
-    );
+    render(<InlineNarrationStream entries={[{ id: 8, text: "Quality checks passed." }]} />);
 
-    expect(screen.getByTestId("inline-narration-line")).toHaveTextContent(
-      "Quality checks passed.",
-    );
+    expect(screen.getByTestId("inline-narration-line")).toHaveTextContent("Quality checks passed.");
   });
 });

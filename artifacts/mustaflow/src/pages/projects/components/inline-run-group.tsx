@@ -12,6 +12,7 @@ import {
 import {
   appendNarrationEntry,
   InlineNarrationStream,
+  narrationForTaskEvent,
   type InlineNarrationEntry,
 } from "./inline-narration-stream";
 import { QATapeStepsInline } from "./qa-tape-inline";
@@ -50,10 +51,11 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
       activities = appendActivityEntry(activities, activity);
       stepIds.add(event.id);
     }
-    if (event.eventType === "narration" && event.message.trim()) {
+    const narration = narrationForTaskEvent(event.eventType, event.message);
+    if (narration) {
       narrations = appendNarrationEntry(narrations, {
         id: event.id,
-        text: event.message,
+        text: narration,
       });
       stepIds.add(event.id);
     }

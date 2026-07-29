@@ -123,10 +123,20 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
     label: "Running a check",
     resolvedLabel: "Ran the check",
   },
+  check_deferred: {
+    kind: "checking",
+    label: "Choosing available checks",
+    resolvedLabel: "Chose available checks",
+  },
   check_result: {
     kind: "checking",
     label: "Checking the work",
     resolvedLabel: "Checked the work",
+  },
+  review_context: {
+    kind: "checking",
+    label: "Preparing the review",
+    resolvedLabel: "Prepared the review",
   },
   typecheck_result: {
     kind: "checking",
@@ -199,12 +209,84 @@ export function activityIconForKind(
 
 const MAX_ACTIVITY_ROWS = 12;
 
+function activityForToolName(toolName: string, subagentRole?: string): ActivityDefinition | null {
+  switch (toolName.toLowerCase()) {
+    case "read_file":
+    case "list_files":
+    case "search_files":
+      return {
+        kind: "reading",
+        label: "Reading your project",
+        resolvedLabel: "Read your project",
+      };
+    case "apply_patch":
+    case "write_file":
+      return {
+        kind: "writing",
+        label: "Writing code",
+        resolvedLabel: "Wrote the code",
+      };
+    case "run_command":
+      return {
+        kind: "checking",
+        label: "Running a check",
+        resolvedLabel: "Ran the check",
+      };
+    case "dispatch_subagent":
+      return subagentRole?.toLowerCase() === "reviewer"
+        ? {
+            kind: "checking",
+            label: "Reviewing the change",
+            resolvedLabel: "Reviewed the change",
+          }
+        : {
+            kind: "thinking",
+            label: "Working through the next step",
+            resolvedLabel: "Completed the step",
+          };
+    case "plan_subtasks":
+      return {
+        kind: "planning",
+        label: "Planning the next steps",
+        resolvedLabel: "Planned the next steps",
+      };
+    case "take_screenshot":
+      return {
+        kind: "checking",
+        label: "Checking the preview",
+        resolvedLabel: "Checked the preview",
+      };
+    default:
+      return null;
+  }
+}
+
+function activityForStructuredToolEvent(
+  eventType: string,
+  message: string,
+): ActivityDefinition | null {
+  if (!message.startsWith("{")) return null;
+  try {
+    const payload = JSON.parse(message) as {
+      tool?: unknown;
+      toolName?: unknown;
+      args?: { role?: unknown };
+    };
+    const toolName = eventType === "tool_call" ? payload.tool : payload.toolName;
+    const subagentRole = typeof payload.args?.role === "string" ? payload.args.role : undefined;
+    return typeof toolName === "string" ? activityForToolName(toolName, subagentRole) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function taskActivityForEvent(
   id: number,
   eventType: string,
   message = "",
 ): InlineActivityEntry | null {
-  if (eventType.toLowerCase() === "editing_files" && /^repairing\b/i.test(message.trim())) {
+  const normalizedEventType = eventType.toLowerCase();
+  if (normalizedEventType === "editing_files" && /^repairing\b/i.test(message.trim())) {
     return {
       id,
       kind: "writing",
@@ -212,7 +294,11 @@ export function taskActivityForEvent(
       resolvedLabel: "Adapted the fix",
     };
   }
-  const definition = EVENT_ACTIVITY[eventType.toLowerCase()];
+  if (normalizedEventType === "tool_call" || normalizedEventType === "loop:step") {
+    const toolActivity = activityForStructuredToolEvent(normalizedEventType, message);
+    if (toolActivity) return { id, ...toolActivity };
+  }
+  const definition = EVENT_ACTIVITY[normalizedEventType];
   return definition ? { id, ...definition } : null;
 }
 

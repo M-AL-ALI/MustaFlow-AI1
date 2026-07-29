@@ -15,11 +15,65 @@ export function appendNarrationEntry(
   next: InlineNarrationEntry,
 ): InlineNarrationEntry[] {
   const text = next.text.trim();
-  if (!text || current.some((entry) => entry.id === next.id)) return current;
+  if (
+    !text ||
+    current.some((entry) => entry.id === next.id) ||
+    current.at(-1)?.text.trim() === text
+  ) {
+    return current;
+  }
 
   return [...current, { ...next, text }]
     .sort((left, right) => left.id - right.id)
     .slice(-MAX_VISIBLE_NARRATION_LINES);
+}
+
+/**
+ * Turn the production task stream into user-facing narration without inventing
+ * work. Explicit narration is preserved verbatim; structured loop/status events
+ * contribute only a plain-language description of the tool or phase they name.
+ */
+export function narrationForTaskEvent(
+  eventType: string,
+  message: string | undefined,
+): string | null {
+  const normalizedEventType = eventType.toLowerCase();
+  const text = message?.trim() ?? "";
+  if (normalizedEventType === "narration") return text || null;
+  if (normalizedEventType === "review_context") {
+    return "Reviewing the change against the current project.";
+  }
+  if (normalizedEventType === "check_deferred") {
+    return "Continuing with the checks available in this workspace.";
+  }
+  if (normalizedEventType === "qa_done") return "Browser checks finished.";
+  if (normalizedEventType !== "loop:step" || !text.startsWith("{")) return null;
+
+  try {
+    const payload = JSON.parse(text) as { toolName?: unknown };
+    if (typeof payload.toolName !== "string") return null;
+    switch (payload.toolName.toLowerCase()) {
+      case "read_file":
+      case "list_files":
+      case "search_files":
+        return "Reading the relevant project files.";
+      case "apply_patch":
+      case "write_file":
+        return "Applying the requested code change.";
+      case "run_command":
+        return "Checking the project.";
+      case "dispatch_subagent":
+        return "Working through the next build step.";
+      case "plan_subtasks":
+        return "Planning the next steps.";
+      case "take_screenshot":
+        return "Checking the preview.";
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
 }
 
 function narrationTokens(text: string): string[] {
