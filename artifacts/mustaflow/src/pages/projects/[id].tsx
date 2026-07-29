@@ -82,6 +82,7 @@ import {
   CheckSquare,
   WifiOff,
   RefreshCw,
+  ImagePlus,
 } from "lucide-react";
 
 function SubscriptionTierBadge({ tier }: { tier: "free" | "core" | "wave" }) {
@@ -196,6 +197,14 @@ import {
   getCalmBuilderStatus,
   type CalmBuilderPhase,
 } from "@/lib/builder-calm-status";
+import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
+import { ProjectImagesTab } from "./components/project-images-tab";
+import {
+  mergeProjectImageItems,
+  parseZeroGeneratedImageEvent,
+  type ProjectImageItem,
+} from "./components/project-image-model";
+import { useProjectImages } from "./components/use-project-images";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -841,6 +850,7 @@ const CORE_WORKSPACE_TABS = [
 ];
 
 const ADVANCED_TABS = [
+  { label: "Images", value: "images", icon: ImagePlus },
   { label: "Code", value: "code", icon: FileCode2 },
   { label: "Recipes", value: "recipes", icon: Puzzle },
   { label: "Publishing", value: "publishing", icon: Rocket },
@@ -1208,6 +1218,33 @@ export default function ProjectWorkspacePage() {
     path: string;
     requestId: number;
   } | null>(null);
+  const [threadImages, setThreadImages] = useState<ProjectImageItem[]>([]);
+  const [liveProjectImages, setLiveProjectImages] = useState<ProjectImageItem[]>([]);
+  const [liveImageGenerating, setLiveImageGenerating] = useState(false);
+  const recordThreadImage = useCallback((image: ProjectImageItem) => {
+    setThreadImages((current) => mergeProjectImageItems(current, [image]).slice(0, 12));
+  }, []);
+  const imageTaskIds = useMemo(
+    () => (tasksForFeed as Array<{ id: number }>).map((task) => task.id),
+    [tasksForFeed],
+  );
+  const projectImages = useProjectImages({
+    projectId,
+    taskIds: imageTaskIds,
+    projectFiles: files,
+    liveAssets: liveProjectImages,
+    onThreadImage: recordThreadImage,
+    onProjectFileInserted: () => {
+      void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
+      setBuildRefreshCount((count) => count + 1);
+    },
+  });
+  const chatGalleryImages = useMemo(() => {
+    const persistedGeneratedImages = projectImages.images.filter(
+      (image) => image.source === "studio" || image.source === "zero",
+    );
+    return mergeProjectImageItems(persistedGeneratedImages, threadImages).slice(0, 4);
+  }, [projectImages.images, threadImages]);
   /** Ref holding the most recent ProjectFilesChangedPayload — updated by SSE handler. */
   const filesPayloadRef = useRef<ProjectFilesChangedPayload | null>(null);
   /** Incrementing seq so PreviewTab can react to new payloads even if the ref content changed. */
@@ -1728,15 +1765,18 @@ export default function ProjectWorkspacePage() {
   // Combined busy state — true when either the regular mutation or the streaming fetch is active.
   // Declared early so query refetchInterval options can reference it without a forward-reference.
   const isBusy = sendMessage.isPending || isStreaming;
-  const visibleCalmPhase: CalmBuilderPhase = !isBusy
-    ? "idle"
-    : pendingIsConverse
-      ? "answering"
-      : pendingIsPlan
-        ? "planning"
-        : calmPhase === "idle"
-          ? "building"
-          : calmPhase;
+  const isCreatingImages = liveImageGenerating || projectImages.isGenerating;
+  const visibleCalmPhase: CalmBuilderPhase = isCreatingImages
+    ? "images"
+    : !isBusy
+      ? "idle"
+      : pendingIsConverse
+        ? "answering"
+        : pendingIsPlan
+          ? "planning"
+          : calmPhase === "idle"
+            ? "building"
+            : calmPhase;
   const calmStatusText = getCalmBuilderStatus({
     phase: visibleCalmPhase,
     fileCount: calmFileCount,
@@ -1996,12 +2036,35 @@ export default function ProjectWorkspacePage() {
       try {
         const event = JSON.parse(e.data) as {
           id: number;
+          taskId?: number;
           eventType: string;
           message?: string;
+          createdAt?: string;
           data?: {
             changedPaths?: string[];
           };
         };
+        if (event.eventType === "generate_image") {
+          const generatedImage = parseZeroGeneratedImageEvent(projectId, {
+            id: event.id,
+            taskId: event.taskId ?? activeTaskId ?? 0,
+            eventType: event.eventType,
+            message: event.message,
+            createdAt: event.createdAt ?? new Date().toISOString(),
+          });
+          if (generatedImage) {
+            const pendingImage = { ...generatedImage, status: "pending" as const };
+            setLiveProjectImages((current) =>
+              mergeProjectImageItems(current, [pendingImage]).slice(0, 24),
+            );
+            recordThreadImage(pendingImage);
+            setLiveImageGenerating(false);
+          } else {
+            setLiveImageGenerating(true);
+          }
+        } else {
+          setLiveImageGenerating(false);
+        }
         const nextCalmPhase = calmPhaseForTaskEvent(event.eventType, event.message);
         if (nextCalmPhase) setCalmPhase(nextCalmPhase);
         if (event.eventType === "file_diff" && event.message) {
@@ -2084,6 +2147,33 @@ export default function ProjectWorkspacePage() {
           if (event.eventType === "completed") {
             setBuildRefreshCount((n) => n + 1);
             setPreflightBanner(null);
+            setLiveProjectImages((current) =>
+              current.map((image) =>
+                image.status === "pending"
+                  ? { ...image, status: "completed", createdAt: new Date().toISOString() }
+                  : image,
+              ),
+            );
+            setThreadImages((current) =>
+              current.map((image) =>
+                image.source === "zero" && image.status === "pending"
+                  ? { ...image, status: "completed", createdAt: new Date().toISOString() }
+                  : image,
+              ),
+            );
+          } else {
+            setLiveProjectImages((current) =>
+              current.map((image) =>
+                image.status === "pending" ? { ...image, status: "failed" } : image,
+              ),
+            );
+            setThreadImages((current) =>
+              current.map((image) =>
+                image.source === "zero" && image.status === "pending"
+                  ? { ...image, status: "failed" }
+                  : image,
+              ),
+            );
           }
         }
       } catch {
@@ -2096,7 +2186,7 @@ export default function ProjectWorkspacePage() {
       setLiveCodeBuffer("");
       if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
     };
-  }, [activeTaskId, projectId, queryClient]);
+  }, [activeTaskId, projectId, queryClient, recordThreadImage]);
 
   // ── Project-level preview SSE ───────────────────────────────────────────────
   // Subscribe to /preview-events/stream for the lifetime of this project page.
@@ -4024,6 +4114,14 @@ export default function ProjectWorkspacePage() {
                         });
                       })()}
 
+                      <BuilderImageThreadGallery
+                        images={chatGalleryImages}
+                        onOpenImages={() => {
+                          setMoreTabsExpanded(true);
+                          setActiveTab("images");
+                        }}
+                      />
+
                       {/* Task #532: human-in-the-loop prompts from the agent loop */}
                       <AgentPromptCardsList
                         projectId={projectId}
@@ -4819,6 +4917,38 @@ export default function ProjectWorkspacePage() {
                   )}
                 </div>
               </div>
+            )}
+            {activeTab === "images" && (
+              <ProjectImagesTab
+                images={projectImages.images}
+                loading={projectImages.loading}
+                generating={projectImages.isGenerating}
+                error={projectImages.error}
+                onGenerate={projectImages.generateImage}
+                onRegenerate={async (image) => {
+                  if (image.source === "studio") {
+                    await projectImages.regenerateImage(image);
+                    return;
+                  }
+                  switchLeftPanel("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  setActiveTab("preview");
+                  send(
+                    `Regenerate the image at "${image.path ?? image.prompt}" with a fresh version that fits the same role, then update the app to use it.`,
+                    { agentIntent: "build" },
+                  );
+                }}
+                onInsert={async (image) => {
+                  const path = await projectImages.insertIntoProject(image);
+                  switchLeftPanel("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  setActiveTab("preview");
+                  send(
+                    `Use the project image at "${path}" in the most appropriate visible part of the app. Keep the surrounding layout calm and accessible.`,
+                    { agentIntent: "build" },
+                  );
+                }}
+              />
             )}
             {activeTab === "code" && (
               <CodeEditorTab

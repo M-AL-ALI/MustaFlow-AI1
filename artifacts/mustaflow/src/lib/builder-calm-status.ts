@@ -3,6 +3,7 @@ export type CalmBuilderPhase =
   | "answering"
   | "planning"
   | "building"
+  | "images"
   | "testing"
   | "fixing";
 
@@ -11,6 +12,7 @@ export const CALM_STATUS_VOCABULARY = {
   answering: "Answering your question...",
   planning: "Planning your app...",
   building: "Building your app...",
+  images: "Creating images for your app...",
   testing: "Testing what I built...",
   fixing: "Fixing an issue I found...",
 } as const;
