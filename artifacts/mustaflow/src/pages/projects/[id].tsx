@@ -166,6 +166,7 @@ import {
   mapIntentToSendOptions,
   shouldDeferComposerClearForCreditGate,
 } from "@/lib/builder-followup-submit";
+import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builder-mode-persistence";
 import {
   calmPhaseForTaskEvent,
   getCalmBuilderStatus,
@@ -1226,9 +1227,10 @@ export default function ProjectWorkspacePage() {
       savedMode === "pro"
     ) {
       setAgentMode(savedMode);
+      setDeepReasoning(loadBuilderDeepReasoning(projectId, savedMode));
       agentModeInitializedRef.current = true;
     }
-  }, [project?.agentMode]);
+  }, [project?.agentMode, projectId]);
   const [subscriptionTier, setSubscriptionTier] = useState<"free" | "core" | "wave">("free");
   const [showCreditConfirm, setShowCreditConfirm] = useState<{
     mode: string;
@@ -1788,6 +1790,37 @@ export default function ProjectWorkspacePage() {
   const [upgradeNudgeVisible, setUpgradeNudgeVisible] = useState(false);
   const [isUpgradingToAgentic, setIsUpgradingToAgentic] = useState(false);
   const updateProject = useUpdateProject();
+
+  const persistAgentModeSelection = useCallback(
+    (mode: AgentMode) => {
+      agentModeInitializedRef.current = true;
+      setAgentMode(mode);
+      const persistedDeepReasoning = saveBuilderDeepReasoning(projectId, mode, deepReasoning);
+      if (persistedDeepReasoning !== deepReasoning) {
+        setDeepReasoning(persistedDeepReasoning);
+      }
+      updateProject.mutate(
+        {
+          id: projectId,
+          data: { agentMode: mode },
+        },
+        {
+          onSuccess: (updatedProject) => {
+            queryClient.setQueryData(getGetProjectQueryKey(projectId), updatedProject);
+          },
+        },
+      );
+    },
+    [deepReasoning, projectId, queryClient, updateProject],
+  );
+
+  const persistDeepReasoningSelection = useCallback(
+    (enabled: boolean) => {
+      const persisted = saveBuilderDeepReasoning(projectId, agentMode, enabled);
+      setDeepReasoning(persisted);
+    },
+    [agentMode, projectId],
+  );
 
   const checkUpgradeNudge = useCallback(
     (messageText: string) => {
@@ -4569,13 +4602,9 @@ export default function ProjectWorkspacePage() {
                     <QueueComposer
                       projectId={projectId}
                       agentMode={agentMode}
-                      onAgentModeChange={(mode) => {
-                        agentModeInitializedRef.current = true;
-                        setAgentMode(mode);
-                        if (mode === "lite") setDeepReasoning(false);
-                      }}
+                      onAgentModeChange={persistAgentModeSelection}
                       deepReasoning={deepReasoning}
-                      onDeepReasoningChange={setDeepReasoning}
+                      onDeepReasoningChange={persistDeepReasoningSelection}
                       subscriptionTier={subscriptionTier}
                       planMode={planMode}
                       onPlanModeChange={setPlanMode}
