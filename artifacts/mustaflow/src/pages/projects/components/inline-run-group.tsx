@@ -21,6 +21,7 @@ import {
   recoveryStepForEvent,
   type InlineRecoveryStep,
 } from "./inline-recovery-loop";
+import type { RunLoopProgress } from "./run-rehydration";
 
 type ReplayEvent = QATapeEvent & {
   taskId?: number;
@@ -72,6 +73,7 @@ type InlineRunGroupProps = {
   children: React.ReactNode;
   className?: string;
   onStop?: () => void;
+  progress?: RunLoopProgress | null;
 };
 
 export function InlineRunGroup({
@@ -80,6 +82,7 @@ export function InlineRunGroup({
   children,
   className,
   onStop,
+  progress,
 }: InlineRunGroupProps) {
   const [expanded, setExpanded] = useState(live);
   const wasLiveRef = useRef(live);
@@ -114,17 +117,27 @@ export function InlineRunGroup({
           )}
           <span>{replayLabel}</span>
         </button>
-        {live && onStop && (
-          <button
-            type="button"
-            onClick={onStop}
-            className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            data-testid="inline-run-stop"
-          >
-            <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
-            Stop
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {live && progress && (
+            <span
+              className="text-[9px] tabular-nums text-muted-foreground/70"
+              data-testid="inline-run-progress"
+            >
+              step {progress.stepIndex} of {progress.stepCap}
+            </span>
+          )}
+          {live && onStop && (
+            <button
+              type="button"
+              onClick={onStop}
+              className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="inline-run-stop"
+            >
+              <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+              Stop
+            </button>
+          )}
+        </div>
       </div>
       {expanded && (
         <div className="space-y-2 pl-1" data-testid="inline-run-replay">

@@ -94,4 +94,14 @@ describe("InlineRunGroup", () => {
     );
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
+
+  it("shows exact existing loop progress without a loud progress bar", () => {
+    render(
+      <InlineRunGroup stepCount={4} live progress={{ stepIndex: 3, stepCap: 25 }}>
+        <div>Rehydrated detail</div>
+      </InlineRunGroup>,
+    );
+
+    expect(screen.getByTestId("inline-run-progress")).toHaveTextContent("step 3 of 25");
+  });
 });

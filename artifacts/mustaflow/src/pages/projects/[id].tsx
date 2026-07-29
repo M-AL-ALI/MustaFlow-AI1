@@ -203,6 +203,12 @@ import {
   nextChatFollowState,
   scrollChatToLatest,
 } from "./components/smart-auto-scroll";
+import {
+  isRehydratableTaskStatus,
+  parseRunLoopProgress,
+  selectRehydratableTaskId,
+  type RunLoopProgress,
+} from "./components/run-rehydration";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -1072,6 +1078,10 @@ export default function ProjectWorkspacePage() {
   const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
   const [liveActivityEvents, setLiveActivityEvents] = useState<InlineActivityEntry[]>([]);
   const [liveRecoverySteps, setLiveRecoverySteps] = useState<InlineRecoveryStep[]>([]);
+  const [liveRunProgress, setLiveRunProgress] = useState<RunLoopProgress | null>(null);
+  const [liveRunTerminalEvent, setLiveRunTerminalEvent] = useState<
+    "completed" | "failed" | "cancelled" | null
+  >(null);
   const [brainstormActivity, setBrainstormActivity] = useState<InlineActivityEntry | null>(null);
   const [publishingActivity, setPublishingActivity] = useState<InlineActivityEntry | null>(null);
   const surfaceActivityIdRef = useRef(1_000_000);
@@ -1143,11 +1153,9 @@ export default function ProjectWorkspacePage() {
   const didAutoInitActiveTask = useRef(false);
   useEffect(() => {
     if (didAutoInitActiveTask.current || activeTaskId !== null || tasksForFeed.length === 0) return;
-    const inFlight = tasksForFeed.find(
-      (t) => !["completed", "failed", "canceled"].includes(t.status),
-    );
-    if (inFlight) {
-      setActiveTaskId(inFlight.id);
+    const inFlightTaskId = selectRehydratableTaskId(tasksForFeed);
+    if (inFlightTaskId !== null) {
+      setActiveTaskId(inFlightTaskId);
       didAutoInitActiveTask.current = true;
     }
   }, [tasksForFeed, activeTaskId]);
@@ -1734,9 +1742,14 @@ export default function ProjectWorkspacePage() {
     };
   } | null>(null);
 
-  // Combined busy state — true when either the regular mutation or the streaming fetch is active.
-  // Declared early so query refetchInterval options can reference it without a forward-reference.
-  const isBusy = sendMessage.isPending || isStreaming;
+  const activeTaskStatus = tasksForFeed.find((task) => task.id === activeTaskId)?.status;
+  // On refresh the originating mutation no longer exists, so the persisted task row keeps
+  // the real workspace busy state until the replayed terminal event arrives.
+  const hasRehydratedActiveRun =
+    activeTaskId !== null &&
+    liveRunTerminalEvent === null &&
+    isRehydratableTaskStatus(activeTaskStatus);
+  const isBusy = sendMessage.isPending || isStreaming || hasRehydratedActiveRun;
   const isCreatingImages = liveImageGenerating || projectImages.isGenerating;
   const visibleCalmPhase: CalmBuilderPhase = isCreatingImages
     ? "images"
@@ -2026,6 +2039,8 @@ export default function ProjectWorkspacePage() {
     setLiveNarrationEvents([]);
     setLiveActivityEvents([]);
     setLiveRecoverySteps([]);
+    setLiveRunProgress(null);
+    setLiveRunTerminalEvent(null);
     setLiveCodeBuffer("");
     calmFilePathsRef.current = new Set();
     setCalmFileCount(0);
@@ -2067,6 +2082,8 @@ export default function ProjectWorkspacePage() {
             }),
           );
         }
+        const loopProgress = parseRunLoopProgress(event.eventType, event.message);
+        if (loopProgress) setLiveRunProgress(loopProgress);
         const activity = taskActivityForEvent(event.id, event.eventType, event.message);
         if (activity) {
           setLiveActivityEvents((current) => appendActivityEntry(current, activity));
@@ -2171,6 +2188,7 @@ export default function ProjectWorkspacePage() {
           event.eventType === "failed" ||
           event.eventType === "cancelled"
         ) {
+          setLiveRunTerminalEvent(event.eventType);
           // Drop any unanswered prompts and clear the live code buffer when task ends.
           setAgentPrompts([]);
           setLiveCodeBuffer("");
@@ -2206,6 +2224,8 @@ export default function ProjectWorkspacePage() {
               ),
             );
           }
+          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
         }
       } catch {
         // ignore malformed frames
@@ -4210,16 +4230,23 @@ export default function ProjectWorkspacePage() {
                         }) && (
                           <InlineRunGroup
                             stepCount={liveRunStepCount}
-                            live
-                            onStop={handleStopStream}
+                            live={liveRunTerminalEvent === null}
+                            progress={liveRunProgress}
+                            onStop={liveRunTerminalEvent === null ? handleStopStream : undefined}
                             className="max-w-[90%]"
                           >
-                            <InlineActivityStream entries={liveActivityEvents} live />
+                            <InlineActivityStream
+                              entries={liveActivityEvents}
+                              live={liveRunTerminalEvent === null}
+                            />
                             <div className="ml-8 space-y-2">
-                              <InlineNarrationStream entries={liveNarrationEvents} live />
+                              <InlineNarrationStream
+                                entries={liveNarrationEvents}
+                                live={liveRunTerminalEvent === null}
+                              />
                               <InlineRecoveryLoop
                                 steps={liveRecoverySteps}
-                                live
+                                live={liveRunTerminalEvent === null}
                                 onRetry={() =>
                                   send(
                                     "Fix the remaining runtime issue and verify the preview again.",
@@ -4229,7 +4256,7 @@ export default function ProjectWorkspacePage() {
                               <QATapeInline
                                 projectId={projectId}
                                 taskId={activeTaskId}
-                                live
+                                live={liveRunTerminalEvent === null}
                                 hideRepairSteps
                                 liveEvents={liveQATapeEvents}
                                 className="max-w-full"
