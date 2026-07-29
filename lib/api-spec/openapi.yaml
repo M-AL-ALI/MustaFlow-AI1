@@ -824,7 +824,7 @@ paths:
     get:
       operationId: listCheckpoints
       tags: [checkpoints]
-      summary: Unified Checkpoints — file snapshot + linked DB snapshot per version
+      summary: Version History — file snapshot + linked DB snapshot per saved version
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
@@ -840,7 +840,7 @@ paths:
     post:
       operationId: restoreCheckpoint
       tags: [checkpoints]
-      summary: Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+      summary: Restore files and database to a saved version while preserving chat and appending forward-only safety checkpoints.
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: checkpointId, in: path, required: true, schema: { type: integer } }
@@ -7833,6 +7833,7 @@ components:
         projectId: { type: integer }
         label: { type: string }
         note: { type: ["string", "null"] }
+        changelogEntry: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
         filesCount: { type: integer }
         hasDbSnapshot: { type: boolean }
@@ -7901,13 +7902,22 @@ components:
 
     CheckpointRestoreResponse:
       type: object
-      required: [checkpointId, label, restoredFiles, truncatedMessages, dbSnapshotRestored]
+      required:
+        [
+          checkpointId,
+          label,
+          restoredFiles,
+          truncatedMessages,
+          restoredCheckpointId,
+          dbSnapshotRestored,
+        ]
       properties:
         checkpointId: { type: integer }
         label: { type: string }
         restoredFiles: { type: integer }
         truncatedMessages: { type: integer }
         forwardCheckpointId: { type: ["integer", "null"] }
+        restoredCheckpointId: { type: integer }
         dbSnapshotRestored: { type: boolean }
         dbSnapshotError: { type: ["string", "null"] }
 

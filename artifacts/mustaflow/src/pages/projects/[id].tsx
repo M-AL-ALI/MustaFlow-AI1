@@ -871,7 +871,7 @@ const ADVANCED_TABS = [
   { label: "Health", value: "health", icon: HeartPulse },
   { label: "Comments", value: "comments", icon: MessageSquare },
   { label: "Activity", value: "activity-log", icon: Activity },
-  { label: "Checkpoints", value: "checkpoints", icon: RotateCcw },
+  { label: "Version history", value: "checkpoints", icon: RotateCcw },
 ];
 
 const WORKSPACE_TABS = [...CORE_WORKSPACE_TABS, ...ADVANCED_TABS];
@@ -5106,7 +5106,15 @@ export default function ProjectWorkspacePage() {
             {activeTab === "integrations" && <IntegrationsTab projectId={projectId} />}
             {activeTab === "comments" && <CommentsPanel projectId={projectId} />}
             {activeTab === "activity-log" && <ActivityLogTab projectId={projectId} />}
-            {activeTab === "checkpoints" && <CheckpointsTab projectId={projectId} />}
+            {activeTab === "checkpoints" && (
+              <CheckpointsTab
+                projectId={projectId}
+                onRestored={() => {
+                  setBuildRefreshCount((count) => count + 1);
+                  setActiveTab("preview");
+                }}
+              />
+            )}
             {activeTab === "manage" && (
               <ManageTab
                 projectId={projectId}

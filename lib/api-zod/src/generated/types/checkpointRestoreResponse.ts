@@ -13,6 +13,7 @@ export interface CheckpointRestoreResponse {
   truncatedMessages: number;
   /** @nullable */
   forwardCheckpointId?: number | null;
+  restoredCheckpointId: number;
   dbSnapshotRestored: boolean;
   /** @nullable */
   dbSnapshotError?: string | null;

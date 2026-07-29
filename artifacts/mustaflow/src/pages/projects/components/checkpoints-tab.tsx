@@ -1,10 +1,3 @@
-/**
- * Unified Checkpoints timeline (Task #538)
- *
- * Replaces the old Versions tab. Lists every checkpoint with the file count,
- * whether a database snapshot is attached, and a Rewind button that restores
- * code + DB + chat history together (with a 2-step confirm).
- */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,152 +5,213 @@ import {
   useRestoreCheckpoint,
   getListCheckpointsQueryKey,
   getListMessagesQueryKey,
+  getListProjectFilesQueryKey,
   getListVersionsQueryKey,
   getGetProjectQueryKey,
 } from "@workspace/api-client-react";
+import type { Checkpoint } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
-import { Clock, Database, FileText, RotateCcw, ShieldCheck } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Clock3, Database, FileText, History, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import {
+  formatCheckpointClockTime,
+  restoreConfirmationMessage,
+  versionHistoryDescription,
+} from "./version-history-model";
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+function formatCalendarDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Saved version";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  }).format(date);
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = Date.now();
-  const diffMs = now - d.getTime();
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return d.toLocaleDateString();
+interface CheckpointsTabProps {
+  projectId: number;
+  onRestored?: () => void;
 }
 
-export function CheckpointsTab({ projectId }: { projectId: number }) {
+export function CheckpointsTab({ projectId, onRestored }: CheckpointsTabProps) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useListCheckpoints(projectId);
-  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<Checkpoint | null>(null);
 
   const restore = useRestoreCheckpoint({
     mutation: {
-      onSuccess: (resp) => {
+      onSuccess: (response) => {
         toast.success(
-          `Rewound to "${resp.label ?? "checkpoint"}" — ${resp.restoredFiles ?? 0} files restored${
-            resp.dbSnapshotRestored ? ", database restored" : ""
-          }${
-            (resp.truncatedMessages ?? 0) > 0
-              ? `, ${resp.truncatedMessages} later messages removed`
-              : ""
-          }.`,
+          `Restored "${response.label || "saved version"}". Your previous version is still saved.`,
         );
-        queryClient.invalidateQueries({ queryKey: getListCheckpointsQueryKey(projectId) });
-        queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-        queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
-        queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
-        setConfirmId(null);
+        void queryClient.invalidateQueries({
+          queryKey: getListCheckpointsQueryKey(projectId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: getListMessagesQueryKey(projectId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: getListProjectFilesQueryKey(projectId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: getListVersionsQueryKey(projectId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: getGetProjectQueryKey(projectId),
+        });
+        setRestoreTarget(null);
+        onRestored?.();
       },
-      onError: (err: unknown) => {
-        const msg = err instanceof Error ? err.message : "Restore failed";
-        toast.error(msg);
-        setConfirmId(null);
+      onError: (error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : "That version could not be restored.";
+        toast.error(message);
       },
     },
   });
 
-  if (isLoading) {
-    return <div className="p-4 text-xs text-muted-foreground">Loading checkpoints…</div>;
-  }
-
   const checkpoints = data ?? [];
-  if (checkpoints.length === 0) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground text-center">
-        <Clock className="h-6 w-6 mx-auto mb-2 opacity-50" />
-        No checkpoints yet. Every build, refine, rollback, or publish creates one automatically.
-      </div>
-    );
-  }
 
   return (
-    <div className="flex flex-col gap-2 p-3">
-      <div className="text-[11px] text-muted-foreground px-1 pb-1">
-        Restoring a checkpoint rewinds your code, database, and chat history together. A safety
-        checkpoint is created first so you can undo.
-      </div>
-      {checkpoints.map((cp) => {
-        const isConfirming = confirmId === cp.id;
-        const isPending = restore.isPending && restore.variables?.id === cp.id;
-        return (
-          <div
-            key={cp.id}
-            className="border border-border rounded-lg p-3 bg-card hover:bg-muted/30 transition-colors"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                <ShieldCheck className="h-4 w-4 text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2 flex-wrap">
-                  <div className="font-medium text-sm truncate">{cp.label}</div>
-                  <div className="text-[11px] text-muted-foreground shrink-0">
-                    {formatTime(cp.createdAt)}
-                  </div>
-                </div>
-                <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <FileText className="h-3 w-3" />
-                    {cp.filesCount} files
-                  </span>
-                  {cp.hasDbSnapshot && (
-                    <span className="flex items-center gap-1 text-emerald-500">
-                      <Database className="h-3 w-3" />
-                      Database{cp.dbProvider ? ` (${cp.dbProvider})` : ""}
-                      {cp.dbSnapshotSizeBytes ? ` · ${formatBytes(cp.dbSnapshotSizeBytes)}` : ""}
-                    </span>
-                  )}
-                </div>
-                {cp.triggerMessagePreview && (
-                  <div className="mt-2 text-[11px] text-muted-foreground italic line-clamp-2 border-l-2 border-border/60 pl-2">
-                    “{cp.triggerMessagePreview}”
-                  </div>
-                )}
-              </div>
-              <div className="shrink-0">
-                {isConfirming ? (
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={isPending}
-                      onClick={() => restore.mutate({ id: projectId, checkpointId: cp.id })}
-                    >
-                      {isPending ? "Restoring…" : "Confirm rewind"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={isPending}
-                      onClick={() => setConfirmId(null)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={() => setConfirmId(cp.id)}>
-                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Rewind
-                  </Button>
-                )}
-              </div>
-            </div>
+    <div className="h-full overflow-y-auto bg-background">
+      <div className="mx-auto max-w-3xl px-5 py-7 sm:px-8">
+        <div className="mb-6">
+          <div className="flex items-center gap-2 text-primary">
+            <History className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">
+              Version history
+            </span>
           </div>
-        );
-      })}
+          <h2 className="mt-2 text-xl font-semibold text-foreground">
+            Go back without losing work
+          </h2>
+          <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
+            Every restore saves your current app first, so you can always move forward again.
+          </p>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 rounded-2xl border border-border bg-card/30 px-5 py-8 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            Loading saved versions...
+          </div>
+        ) : checkpoints.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card/30 px-6 py-12 text-center">
+            <Clock3 className="mx-auto h-7 w-7 text-primary/70" />
+            <h3 className="mt-4 text-sm font-semibold text-foreground">
+              Your saved versions will appear here
+            </h3>
+            <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted-foreground">
+              Build your app or make a change. NabuFlow saves a version automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {checkpoints.map((checkpoint, index) => (
+              <article
+                key={checkpoint.id}
+                className="group rounded-2xl border border-border bg-card/50 p-4 transition-colors hover:border-primary/25 hover:bg-card"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Clock3 className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-sm font-semibold text-foreground">
+                        {checkpoint.label || "Saved version"}
+                      </h3>
+                      {index === 0 && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                          Latest
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 line-clamp-1 text-xs leading-relaxed text-muted-foreground">
+                      {versionHistoryDescription(checkpoint)}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                      <span>
+                        {formatCalendarDate(checkpoint.createdAt)} at{" "}
+                        {formatCheckpointClockTime(checkpoint.createdAt)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        {checkpoint.filesCount} file{checkpoint.filesCount === 1 ? "" : "s"}
+                      </span>
+                      {checkpoint.hasDbSnapshot && (
+                        <span className="flex items-center gap-1">
+                          <Database className="h-3 w-3" />
+                          Database saved
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 rounded-lg"
+                    disabled={restore.isPending}
+                    onClick={() => setRestoreTarget(checkpoint)}
+                  >
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    Restore
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <AlertDialog
+        open={restoreTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !restore.isPending) setRestoreTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore this version?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {restoreTarget
+                ? restoreConfirmationMessage(restoreTarget.createdAt)
+                : "Your current version stays saved."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restore.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restore.isPending || !restoreTarget}
+              onClick={(event) => {
+                event.preventDefault();
+                if (!restoreTarget) return;
+                restore.mutate({ id: projectId, checkpointId: restoreTarget.id });
+              }}
+            >
+              {restore.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Restoring...
+                </>
+              ) : (
+                "Restore"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1223,7 +1223,7 @@ export const GetProjectsSummaryResponse = zod.object({
 
 
 /**
- * @summary Unified Checkpoints — file snapshot + linked DB snapshot per version
+ * @summary Version History — file snapshot + linked DB snapshot per saved version
  */
 export const ListCheckpointsParams = zod.object({
   "id": zod.coerce.number()
@@ -1234,6 +1234,7 @@ export const ListCheckpointsResponseItem = zod.object({
   "projectId": zod.number(),
   "label": zod.string(),
   "note": zod.string().nullish(),
+  "changelogEntry": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "filesCount": zod.number(),
   "hasDbSnapshot": zod.boolean(),
@@ -1246,7 +1247,7 @@ export const ListCheckpointsResponse = zod.array(ListCheckpointsResponseItem)
 
 
 /**
- * @summary Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+ * @summary Restore files and database to a saved version while preserving chat and appending forward-only safety checkpoints.
  */
 export const RestoreCheckpointParams = zod.object({
   "id": zod.coerce.number(),
@@ -1259,6 +1260,7 @@ export const RestoreCheckpointResponse = zod.object({
   "restoredFiles": zod.number(),
   "truncatedMessages": zod.number(),
   "forwardCheckpointId": zod.number().nullish(),
+  "restoredCheckpointId": zod.number(),
   "dbSnapshotRestored": zod.boolean(),
   "dbSnapshotError": zod.string().nullish()
 })

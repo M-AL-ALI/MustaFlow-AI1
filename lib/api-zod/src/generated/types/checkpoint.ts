@@ -12,6 +12,8 @@ export interface Checkpoint {
   label: string;
   /** @nullable */
   note?: string | null;
+  /** @nullable */
+  changelogEntry?: string | null;
   createdAt: Date;
   filesCount: number;
   hasDbSnapshot: boolean;

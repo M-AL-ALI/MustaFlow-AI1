@@ -1,21 +1,19 @@
 /**
- * Unified Checkpoints (Task #538)
+ * Version History
  *
- * Restores a project to a previous checkpoint (project_versions row) in one
- * atomic-ish flow:
+ * Restores a project to a previous project_versions checkpoint while keeping
+ * history forward-only:
  *
- *   1) Snapshot the CURRENT state into a forward-checkpoint version (so the
- *      user can undo the restore). DB snapshot is captured best-effort.
- *   2) Restore files from the target version.
+ *   1) Save the CURRENT files as a safety checkpoint.
+ *   2) Restore files from the selected checkpoint.
  *   3) Restore the linked database snapshot if one exists.
- *   4) Truncate chat history after the anchored message — everything that came
- *      after the checkpoint is removed.
+ *   4) Append the restored state as a new checkpoint.
  *
- * Safety: forward-checkpoint runs first. If it fails (rare), the restore is
- * aborted so the user can't lose unrecoverable state.
+ * Chat and prior checkpoints are never deleted. If the safety checkpoint
+ * cannot be created, the restore is aborted before any project state changes.
  */
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gt, or, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -31,13 +29,14 @@ import { logger } from "../lib/logger";
 import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
 import { downloadSnapshotBlob } from "../lib/snapshot-storage";
 import { captureProjectDbSnapshot } from "../lib/db-snapshot-capture";
+import { publishProjectFilesChanged } from "../lib/preview-events";
 
 const router: IRouter = Router();
 
 interface SnapshotFile {
   path: string;
   content: string;
-  mimeType?: string;
+  mimeType: string;
 }
 
 router.get(
@@ -60,6 +59,7 @@ router.get(
       project_id: number;
       label: string | null;
       note: string | null;
+      changelog_entry: string | null;
       created_at: Date;
       files_count: number;
       db_snapshot_id: number | null;
@@ -72,6 +72,7 @@ router.get(
              v.project_id,
              v.label,
              v.note,
+             v.changelog_entry,
              v.created_at,
              COALESCE(jsonb_array_length(v.files_snapshot), 0) AS files_count,
              s.id AS db_snapshot_id,
@@ -107,6 +108,7 @@ router.get(
         projectId: Number(r.project_id),
         label: (r.label as string | null) ?? "",
         note: (r.note as string | null) ?? null,
+        changelogEntry: (r.changelog_entry as string | null) ?? null,
         createdAt:
           r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at ?? ""),
         filesCount: Number(r.files_count ?? 0),
@@ -149,13 +151,17 @@ router.post(
       res.status(400).json({ error: "Checkpoint snapshot is missing or corrupted" });
       return;
     }
-    const targetSnapshot = target.filesSnapshot as SnapshotFile[];
+    const targetSnapshot = target.filesSnapshot.map((file) => ({
+      path: file.path,
+      content: file.content,
+      mimeType: file.mimeType ?? "text/plain",
+    }));
 
-    // ── 1) Forward checkpoint: snapshot the CURRENT state first ────────────
-    // eslint-disable-next-line no-useless-assignment
+    // 1) Save the current state before changing anything.
     let forwardCheckpointId: number | null = null;
+    let currentFiles: SnapshotFile[];
     try {
-      const currentFiles = await db
+      const currentFileRows = await db
         .select({
           path: projectFilesTable.path,
           content: projectFilesTable.content,
@@ -163,39 +169,36 @@ router.post(
         })
         .from(projectFilesTable)
         .where(eq(projectFilesTable.projectId, projectId));
+      currentFiles = currentFileRows.map((file) => ({
+        path: file.path,
+        content: file.content,
+        mimeType: file.mimeType ?? "text/plain",
+      }));
 
       const [forward] = await db
         .insert(projectVersionsTable)
         .values({
           projectId,
-          label: `Before rewind to "${target.label}"`,
-          note: `Auto-checkpoint created before restoring checkpoint #${checkpointId}`,
-          changelogEntry: "Auto-checkpoint (pre-rewind safety snapshot)",
-          filesSnapshot: currentFiles.map((f) => ({
-            path: f.path,
-            content: f.content,
-            mimeType: f.mimeType ?? "text/plain",
-          })),
+          label: `Before restoring "${target.label}"`,
+          note: `Your app immediately before restoring checkpoint #${checkpointId}.`,
+          changelogEntry: `Saved automatically before restoring "${target.label}".`,
+          filesSnapshot: currentFiles,
         })
         .returning({ id: projectVersionsTable.id });
       forwardCheckpointId = forward?.id ?? null;
 
       if (forwardCheckpointId) {
-        // best-effort DB snapshot of current state
-        await captureProjectDbSnapshot(projectId, forwardCheckpointId, `Pre-rewind auto-snapshot`);
+        await captureProjectDbSnapshot(projectId, forwardCheckpointId, "Before version restore");
       }
     } catch (err) {
-      req.log.error(
-        { err, projectId, checkpointId },
-        "Forward checkpoint failed; aborting restore",
-      );
+      req.log.error({ err, projectId, checkpointId }, "Safety checkpoint failed; aborting restore");
       res
         .status(500)
         .json({ error: "Failed to create safety snapshot before restore. Restore aborted." });
       return;
     }
 
-    // ── 2) Restore linked DB snapshot FIRST (external/non-transactional) ──
+    // 2) Restore a linked database snapshot first (external/non-transactional).
     // We do DB restore before touching files/chat. If it fails, we abort
     // before mutating the project so the user is never left with code+chat
     // rewound but DB not. The forward safety checkpoint is preserved either
@@ -230,11 +233,11 @@ router.post(
               and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")),
             );
           if (!secretRow) {
-            dbSnapshotError = "DATABASE_URL secret not found — DB restore skipped.";
+            dbSnapshotError = "DATABASE_URL secret not found - database restore skipped.";
           } else {
             const connectionString = encryptionService.decrypt(secretRow.valueEncrypted);
             if (!connectionString || connectionString.includes("localhost:5432")) {
-              dbSnapshotError = "DATABASE_URL is a placeholder — DB restore skipped.";
+              dbSnapshotError = "DATABASE_URL is a placeholder - database restore skipped.";
             } else {
               await restorePostgresDump(connectionString, dumpContent);
               dbSnapshotRestored = true;
@@ -249,7 +252,8 @@ router.post(
             .from(projectsTable)
             .where(eq(projectsTable.id, projectId));
           if (!proj?.containerId || proj.containerStatus !== "running") {
-            dbSnapshotError = "SQLite restore requires an active container — DB restore skipped.";
+            dbSnapshotError =
+              "SQLite restore requires an active container - database restore skipped.";
           } else {
             await restoreSQLiteSnapshot(proj.containerId, dumpContent, projectId);
             dbSnapshotRestored = true;
@@ -273,8 +277,9 @@ router.post(
       return;
     }
 
-    // ── 3) Restore files + truncate chat (transactional) ─────────────────
-    let truncatedMessages = 0;
+    // 3) Restore files and append the restored state as a new checkpoint in
+    // one transaction. Existing checkpoints and chat remain untouched.
+    let restoredCheckpointId: number | null = null;
     try {
       await db.transaction(async (tx) => {
         await tx.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
@@ -289,50 +294,47 @@ router.post(
           );
         }
 
-        // Truncate chat by anchor message id when available; fall back to
-        // version createdAt only if no anchor message exists.
-        const [anchor] = await tx
-          .select({ id: chatMessagesTable.id, createdAt: chatMessagesTable.createdAt })
-          .from(chatMessagesTable)
-          .where(
-            and(
-              eq(chatMessagesTable.projectId, projectId),
-              eq(chatMessagesTable.checkpointId, checkpointId),
-            ),
-          )
-          .orderBy(chatMessagesTable.id)
-          .limit(1);
-        if (anchor) {
-          const deleted = await tx
-            .delete(chatMessagesTable)
-            .where(
-              and(eq(chatMessagesTable.projectId, projectId), gt(chatMessagesTable.id, anchor.id)),
-            )
-            .returning({ id: chatMessagesTable.id });
-          truncatedMessages = deleted.length;
-        } else if (target.createdAt) {
-          const cutoff = target.createdAt;
-          const deleted = await tx
-            .delete(chatMessagesTable)
-            .where(
-              or(
-                and(
-                  eq(chatMessagesTable.projectId, projectId),
-                  gt(chatMessagesTable.createdAt, cutoff),
-                ),
-              )!,
-            )
-            .returning({ id: chatMessagesTable.id });
-          truncatedMessages = deleted.length;
+        const [restored] = await tx
+          .insert(projectVersionsTable)
+          .values({
+            projectId,
+            label: `Restored "${target.label}"`,
+            note: `Restored from checkpoint #${checkpointId}. The previous state remains saved as checkpoint #${forwardCheckpointId}.`,
+            changelogEntry: `Restored "${target.label}" from Version History.`,
+            filesSnapshot: targetSnapshot,
+            planSnapshot: target.planSnapshot,
+            validationStatus: target.validationStatus,
+          })
+          .returning({ id: projectVersionsTable.id });
+        if (!restored?.id) {
+          throw new Error("Restored checkpoint was not created");
         }
+        restoredCheckpointId = restored.id;
       });
     } catch (err) {
       req.log.error({ err, projectId, checkpointId }, "Checkpoint restore transaction failed");
       res.status(500).json({
-        error: "Failed to restore files and chat history. No changes were applied.",
+        error: "Failed to restore this version. No file changes were applied.",
         forwardCheckpointId,
       });
       return;
+    }
+
+    if (!restoredCheckpointId) {
+      res.status(500).json({
+        error: "Failed to record the restored version.",
+        forwardCheckpointId,
+      });
+      return;
+    }
+
+    try {
+      await captureProjectDbSnapshot(projectId, restoredCheckpointId, `Restored "${target.label}"`);
+    } catch (err) {
+      req.log.warn(
+        { err, projectId, checkpointId, restoredCheckpointId },
+        "Restored checkpoint database snapshot failed",
+      );
     }
 
     // Invalidate semantic search embeddings (best-effort)
@@ -343,15 +345,29 @@ router.post(
       req.log.warn({ err, projectId }, "checkpoint restore: invalidate embeddings failed");
     }
 
-    // ── 4) System message marker (lands AFTER truncation, so it stays) ────
+    // Tell active previews to sync the restored files without a page reload.
+    try {
+      const targetPaths = new Set(targetSnapshot.map((file) => file.path));
+      publishProjectFilesChanged(
+        projectId,
+        targetSnapshot.map((file) => ({ path: file.path, content: file.content })),
+        currentFiles.map((file) => file.path).filter((path) => !targetPaths.has(path)),
+        "rollback",
+      );
+    } catch (err) {
+      req.log.warn({ err, projectId }, "checkpoint restore: preview refresh event failed");
+    }
+
+    // 4) Append a calm chat marker. Existing conversation remains intact.
     await db.insert(chatMessagesTable).values({
       projectId,
       role: "system",
-      content: `Rewound to checkpoint "${target.label}" — ${targetSnapshot.length} files restored${
-        dbSnapshotRestored ? ", database snapshot restored" : ""
-      }${truncatedMessages > 0 ? `, ${truncatedMessages} later messages removed` : ""}. A safety checkpoint was created so you can undo.`,
+      content: `Restored "${target.label}" with ${targetSnapshot.length} file${
+        targetSnapshot.length === 1 ? "" : "s"
+      }${dbSnapshotRestored ? " and its database snapshot" : ""}. Your previous version is still saved.`,
       agentMode: "eco",
       planMode: false,
+      checkpointId: restoredCheckpointId,
     });
 
     await db
@@ -359,7 +375,7 @@ router.post(
       .set({
         updatedAt: sql`now()`,
         status: "testing",
-        lastTaskSummary: `Rewound to "${target.label}"`,
+        lastTaskSummary: `Restored "${target.label}"`,
       })
       .where(eq(projectsTable.id, projectId));
 
@@ -367,8 +383,9 @@ router.post(
       checkpointId,
       label: target.label,
       restoredFiles: targetSnapshot.length,
-      truncatedMessages,
+      truncatedMessages: 0,
       forwardCheckpointId,
+      restoredCheckpointId,
       dbSnapshotRestored,
       dbSnapshotError,
     });

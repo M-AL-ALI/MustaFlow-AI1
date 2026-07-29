@@ -3313,7 +3313,7 @@ export const getListCheckpointsUrl = (id: number,) => {
 }
 
 /**
- * @summary Unified Checkpoints — file snapshot + linked DB snapshot per version
+ * @summary Version History — file snapshot + linked DB snapshot per saved version
  */
 export const listCheckpoints = async (id: number, options?: RequestInit): Promise<Checkpoint[]> => {
 
@@ -3360,7 +3360,7 @@ export type ListCheckpointsQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Unified Checkpoints — file snapshot + linked DB snapshot per version
+ * @summary Version History — file snapshot + linked DB snapshot per saved version
  */
 
 export function useListCheckpoints<TData = Awaited<ReturnType<typeof listCheckpoints>>, TError = ErrorType<unknown>>(
@@ -3391,7 +3391,7 @@ export const getRestoreCheckpointUrl = (id: number,
 }
 
 /**
- * @summary Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+ * @summary Restore files and database to a saved version while preserving chat and appending forward-only safety checkpoints.
  */
 export const restoreCheckpoint = async (id: number,
     checkpointId: number, options?: RequestInit): Promise<CheckpointRestoreResponse> => {
@@ -3440,7 +3440,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RestoreCheckpointMutationError = ErrorType<unknown>
 
     /**
- * @summary Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+ * @summary Restore files and database to a saved version while preserving chat and appending forward-only safety checkpoints.
  */
 export const useRestoreCheckpoint = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreCheckpoint>>, TError,{id: number;checkpointId: number}, TContext>, request?: SecondParameter<typeof customFetch>}

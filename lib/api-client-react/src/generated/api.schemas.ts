@@ -1183,6 +1183,8 @@ export interface Checkpoint {
   label: string;
   /** @nullable */
   note?: string | null;
+  /** @nullable */
+  changelogEntry?: string | null;
   createdAt: string;
   filesCount: number;
   hasDbSnapshot: boolean;
@@ -1290,6 +1292,7 @@ export interface CheckpointRestoreResponse {
   truncatedMessages: number;
   /** @nullable */
   forwardCheckpointId?: number | null;
+  restoredCheckpointId: number;
   dbSnapshotRestored: boolean;
   /** @nullable */
   dbSnapshotError?: string | null;
