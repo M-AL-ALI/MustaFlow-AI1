@@ -29,6 +29,47 @@ export interface ApiError {
   error: string;
 }
 
+export type NabuflowPlanLadder = {
+  proBuildsPerCycle?: number | null;
+  deepBuildsPerCycle?: number | null;
+  proDeepCombo: boolean;
+};
+
+export interface NabuflowPlan {
+  id: string;
+  name: string;
+  available: boolean;
+  priceUsd?: number | null;
+  includedMonthlyCredits: number;
+  overageUsdPerCredit: number;
+  rolloverCycles: number;
+  rolloverMaxCredits: number;
+  parallelBuildLimit: number;
+  queuePriority: number;
+  defaultSpendCapUsdCents: number;
+  maxSpendCapUsdCents: number;
+  ladder: NabuflowPlanLadder;
+}
+
+export interface NabuflowUsageEvent {
+  id: number;
+  cycleId: number;
+  projectId?: number | null;
+  taskId?: number | null;
+  source: string;
+  engineMode?: string | null;
+  deepReasoning: boolean;
+  credits: number;
+  includedCredits: number;
+  overageCredits: number;
+  overageUsdCents: number;
+  usdValueCents: number;
+  attribution: string;
+  description?: string | null;
+  reversedAt?: string | null;
+  createdAt?: string | null;
+}
+
 /**
  * Ora-only plan tier metadata. Contains ONLY Ora features (messages, images, voice minutes, Deep Thinking, support level) — never AI Builder credits, concurrent builds, build queue, or Builder connectors. Single source of truth for both website and mobile Ora plan cards.
 
@@ -5655,6 +5696,155 @@ export type GetBillingSubscription200 = {
 
 export type GetBillingOraPlans200 = {
   tiers: OraTierMeta[];
+};
+
+export type ListNabuflowPlans200 = {
+  plans: NabuflowPlan[];
+};
+
+export type GetNabuflowBillingState200Subscription = {
+  status: string;
+  cancelAtPeriodEnd: boolean;
+  currentCycleStart?: string | null;
+  currentCycleEnd?: string | null;
+  dunningStatus?: string | null;
+  dunningGraceUntil?: string | null;
+} | null;
+
+export type GetNabuflowBillingState200Card = {
+  brand?: string | null;
+  last4?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
+} | null;
+
+export type GetNabuflowBillingState200SpendCap = {
+  usdCents: number;
+  defaultUsdCents: number;
+  maxUsdCents: number;
+} | null;
+
+export type GetNabuflowBillingState200Cycle = {
+  includedCredits: number;
+  rolloverCredits: number;
+  usedIncludedCredits: number;
+  remainingIncludedCredits: number;
+  overageCredits: number;
+  overageUsdCents: number;
+  proBuildsUsed: number;
+  deepBuildsUsed: number;
+  remainingProBuilds?: number | null;
+  remainingDeepBuilds?: number | null;
+  resetsAt?: string | null;
+} | null;
+
+export type GetNabuflowBillingState200 = {
+  enforcementEnabled: boolean;
+  exempt: boolean;
+  canBuild: boolean;
+  /** Structured gate error (code, message, remaining counters, reset date, upgrade target) when canBuild is false. */
+  blockedReason?: unknown | null;
+  plan?: NabuflowPlan | null;
+  subscription?: GetNabuflowBillingState200Subscription;
+  card?: GetNabuflowBillingState200Card;
+  spendCap?: GetNabuflowBillingState200SpendCap;
+  cycle?: GetNabuflowBillingState200Cycle;
+};
+
+export type ListNabuflowUsageParams = {
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+};
+
+export type ListNabuflowUsage200 = {
+  events: NabuflowUsageEvent[];
+};
+
+export type ListNabuflowBillingNotifications200NotificationsItem = {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  metadata?: unknown | null;
+  createdAt?: string | null;
+};
+
+export type ListNabuflowBillingNotifications200 = {
+  notifications: ListNabuflowBillingNotifications200NotificationsItem[];
+};
+
+export type CreateNabuflowSetupIntent200 = {
+  clientSecret: string;
+  setupIntentId: string;
+};
+
+export type SubscribeNabuflowPlanBodyPlanId = typeof SubscribeNabuflowPlanBodyPlanId[keyof typeof SubscribeNabuflowPlanBodyPlanId];
+
+
+export const SubscribeNabuflowPlanBodyPlanId = {
+  orbit: 'orbit',
+  comet: 'comet',
+  nova: 'nova',
+  constellation: 'constellation',
+} as const;
+
+export type SubscribeNabuflowPlanBody = {
+  planId: SubscribeNabuflowPlanBodyPlanId;
+};
+
+export type SubscribeNabuflowPlan200 = {
+  ok: boolean;
+  planId: string;
+  status: string;
+  currentCycleEnd?: string | null;
+};
+
+export type SwitchNabuflowPlanBodyPlanId = typeof SwitchNabuflowPlanBodyPlanId[keyof typeof SwitchNabuflowPlanBodyPlanId];
+
+
+export const SwitchNabuflowPlanBodyPlanId = {
+  orbit: 'orbit',
+  comet: 'comet',
+  nova: 'nova',
+  constellation: 'constellation',
+} as const;
+
+export type SwitchNabuflowPlanBody = {
+  planId: SwitchNabuflowPlanBodyPlanId;
+  confirm?: boolean;
+};
+
+export type SwitchNabuflowPlan200 = {
+  /** Proration preview (amount due, currency, line items) when confirm=false. */
+  preview?: unknown | null;
+  ok?: boolean;
+  planId?: string;
+  status?: string;
+  upgradedCreditsGranted?: number;
+};
+
+export type CancelNabuflowSubscription200 = {
+  ok: boolean;
+  cancelsAt?: string | null;
+  message?: string;
+};
+
+export type ResumeNabuflowSubscription200 = {
+  ok: boolean;
+};
+
+export type UpdateNabuflowSpendCapBody = {
+  /** @minimum 0 */
+  spendCapUsdCents: number | null;
+};
+
+export type UpdateNabuflowSpendCap200 = {
+  ok: boolean;
+  spendCapUsdCents?: number | null;
+  effectiveSpendCapUsdCents: number;
 };
 
 export type SubmitAbuseReportBody = {

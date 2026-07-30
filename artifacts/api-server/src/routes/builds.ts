@@ -72,11 +72,29 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
 
   // Credit pre-flight check
   if (project.ownerId) {
+    // NabuFlow billing gate (Task #1516): EAS builds are charged builds, so
+    // they pass the same plan/card/cap/dunning resolver as the pipeline. EAS
+    // runs aren't engine-mode builds, so the mode ladder doesn't apply.
+    const { nabuflowGateHttpError, nabuflowChargeActive } = await import(
+      "../lib/nabuflow-billing"
+    );
+    const gateErr = await nabuflowGateHttpError(project.ownerId, {
+      engineMode: null,
+      deepReasoning: false,
+      projectedCredits: EAS_BUILD_CREDIT_COST,
+      source: "eas",
+    });
+    if (gateErr) {
+      res.status(gateErr.status).json(gateErr.body);
+      return;
+    }
+
     const credits = await getOrCreateCredits(project.ownerId);
     const ownerIsSuperuser = await isSuperuser(project.ownerId);
     if (
       CREDITS_ENFORCEMENT_ENABLED &&
       !ownerIsSuperuser &&
+      !(await nabuflowChargeActive(project.ownerId)) &&
       credits.balance < EAS_BUILD_CREDIT_COST
     ) {
       res.status(402).json({
@@ -105,6 +123,7 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
         type: "build",
         description: `EAS ${platform} build queued — project ${projectId}`,
         projectId,
+        source: "eas",
       });
       if ("insufficient" in debit) {
         res.status(402).json({

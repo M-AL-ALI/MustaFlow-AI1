@@ -6187,6 +6187,222 @@ export const GetBillingOraPlansResponse = zod.object({
 
 
 /**
+ * @summary NabuFlow Builder plan family (Orbit/Comet/Nova + Constellation stub)
+ */
+export const ListNabuflowPlansResponse = zod.object({
+  "plans": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "available": zod.boolean(),
+  "priceUsd": zod.number().nullish(),
+  "includedMonthlyCredits": zod.number(),
+  "overageUsdPerCredit": zod.number(),
+  "rolloverCycles": zod.number(),
+  "rolloverMaxCredits": zod.number(),
+  "parallelBuildLimit": zod.number(),
+  "queuePriority": zod.number(),
+  "defaultSpendCapUsdCents": zod.number(),
+  "maxSpendCapUsdCents": zod.number(),
+  "ladder": zod.object({
+  "proBuildsPerCycle": zod.number().nullish(),
+  "deepBuildsPerCycle": zod.number().nullish(),
+  "proDeepCombo": zod.boolean()
+})
+}))
+})
+
+
+/**
+ * @summary NabuFlow billing state — plan, card, cap, counters and reset date (read-only mirror of the server-side build gate)
+ */
+export const GetNabuflowBillingStateResponse = zod.object({
+  "enforcementEnabled": zod.boolean(),
+  "exempt": zod.boolean(),
+  "canBuild": zod.boolean(),
+  "blockedReason": zod.unknown().nullish().describe('Structured gate error (code, message, remaining counters, reset date, upgrade target) when canBuild is false.'),
+  "plan": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "available": zod.boolean(),
+  "priceUsd": zod.number().nullish(),
+  "includedMonthlyCredits": zod.number(),
+  "overageUsdPerCredit": zod.number(),
+  "rolloverCycles": zod.number(),
+  "rolloverMaxCredits": zod.number(),
+  "parallelBuildLimit": zod.number(),
+  "queuePriority": zod.number(),
+  "defaultSpendCapUsdCents": zod.number(),
+  "maxSpendCapUsdCents": zod.number(),
+  "ladder": zod.object({
+  "proBuildsPerCycle": zod.number().nullish(),
+  "deepBuildsPerCycle": zod.number().nullish(),
+  "proDeepCombo": zod.boolean()
+})
+}).nullish(),
+  "subscription": zod.object({
+  "status": zod.string(),
+  "cancelAtPeriodEnd": zod.boolean(),
+  "currentCycleStart": zod.coerce.date().nullish(),
+  "currentCycleEnd": zod.coerce.date().nullish(),
+  "dunningStatus": zod.string().nullish(),
+  "dunningGraceUntil": zod.coerce.date().nullish()
+}).nullish(),
+  "card": zod.object({
+  "brand": zod.string().nullish(),
+  "last4": zod.string().nullish(),
+  "expMonth": zod.number().nullish(),
+  "expYear": zod.number().nullish()
+}).nullish(),
+  "spendCap": zod.object({
+  "usdCents": zod.number(),
+  "defaultUsdCents": zod.number(),
+  "maxUsdCents": zod.number()
+}).nullish(),
+  "cycle": zod.object({
+  "includedCredits": zod.number(),
+  "rolloverCredits": zod.number(),
+  "usedIncludedCredits": zod.number(),
+  "remainingIncludedCredits": zod.number(),
+  "overageCredits": zod.number(),
+  "overageUsdCents": zod.number(),
+  "proBuildsUsed": zod.number(),
+  "deepBuildsUsed": zod.number(),
+  "remainingProBuilds": zod.number().nullish(),
+  "remainingDeepBuilds": zod.number().nullish(),
+  "resetsAt": zod.coerce.date().nullish()
+}).nullish()
+})
+
+
+/**
+ * @summary Per-build NabuFlow usage ledger (engine mode, deep flag, included-vs-overage attribution)
+ */
+export const listNabuflowUsageQueryLimitDefault = 50;
+export const listNabuflowUsageQueryLimitMax = 200;
+
+
+
+export const ListNabuflowUsageQueryParams = zod.object({
+  "limit": zod.coerce.number().min(1).max(listNabuflowUsageQueryLimitMax).default(listNabuflowUsageQueryLimitDefault)
+})
+
+export const ListNabuflowUsageResponse = zod.object({
+  "events": zod.array(zod.object({
+  "id": zod.number(),
+  "cycleId": zod.number(),
+  "projectId": zod.number().nullish(),
+  "taskId": zod.number().nullish(),
+  "source": zod.string(),
+  "engineMode": zod.string().nullish(),
+  "deepReasoning": zod.boolean(),
+  "credits": zod.number(),
+  "includedCredits": zod.number(),
+  "overageCredits": zod.number(),
+  "overageUsdCents": zod.number(),
+  "usdValueCents": zod.number(),
+  "attribution": zod.string(),
+  "description": zod.string().nullish(),
+  "reversedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date().nullish()
+}))
+})
+
+
+/**
+ * @summary Recent NabuFlow billing notifications (usage warnings, dunning)
+ */
+export const ListNabuflowBillingNotificationsResponse = zod.object({
+  "notifications": zod.array(zod.object({
+  "id": zod.number(),
+  "type": zod.string(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "metadata": zod.unknown().nullish(),
+  "createdAt": zod.coerce.date().nullish()
+}))
+})
+
+
+/**
+ * @summary Create a SetupIntent for NabuFlow card capture (card state confirmed via webhooks)
+ */
+export const CreateNabuflowSetupIntentResponse = zod.object({
+  "clientSecret": zod.string(),
+  "setupIntentId": zod.string()
+})
+
+
+/**
+ * @summary Subscribe to a NabuFlow plan (requires a default payment method on file)
+ */
+export const SubscribeNabuflowPlanBody = zod.object({
+  "planId": zod.enum(['orbit', 'comet', 'nova', 'constellation'])
+})
+
+export const SubscribeNabuflowPlanResponse = zod.object({
+  "ok": zod.boolean(),
+  "planId": zod.string(),
+  "status": zod.string(),
+  "currentCycleEnd": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Switch NabuFlow plan — returns a proration preview unless confirm=true
+ */
+export const switchNabuflowPlanBodyConfirmDefault = false;
+
+export const SwitchNabuflowPlanBody = zod.object({
+  "planId": zod.enum(['orbit', 'comet', 'nova', 'constellation']),
+  "confirm": zod.boolean().default(switchNabuflowPlanBodyConfirmDefault)
+})
+
+export const SwitchNabuflowPlanResponse = zod.object({
+  "preview": zod.unknown().nullish().describe('Proration preview (amount due, currency, line items) when confirm=false.'),
+  "ok": zod.boolean().optional(),
+  "planId": zod.string().optional(),
+  "status": zod.string().optional(),
+  "upgradedCreditsGranted": zod.number().optional()
+})
+
+
+/**
+ * @summary Cancel the NabuFlow plan at the end of the current cycle
+ */
+export const CancelNabuflowSubscriptionResponse = zod.object({
+  "ok": zod.boolean(),
+  "cancelsAt": zod.coerce.date().nullish(),
+  "message": zod.string().optional()
+})
+
+
+/**
+ * @summary Un-cancel a NabuFlow plan scheduled for cancellation at period end
+ */
+export const ResumeNabuflowSubscriptionResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Update the monthly pay-as-you-go spend cap (null reverts to the plan default)
+ */
+export const updateNabuflowSpendCapBodySpendCapUsdCentsMin = 0;
+
+
+
+export const UpdateNabuflowSpendCapBody = zod.object({
+  "spendCapUsdCents": zod.number().min(updateNabuflowSpendCapBodySpendCapUsdCentsMin).nullable()
+})
+
+export const UpdateNabuflowSpendCapResponse = zod.object({
+  "ok": zod.boolean(),
+  "spendCapUsdCents": zod.number().nullish(),
+  "effectiveSpendCapUsdCents": zod.number()
+})
+
+
+/**
  * @summary Submit an abuse report for a hosted site (public — no auth required)
  */
 export const submitAbuseReportBodyReasonMin = 10;

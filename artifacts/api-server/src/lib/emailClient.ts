@@ -20,6 +20,8 @@ import {
   domainRenewalWarningTemplate,
   orgInviteTemplate,
   domainRenewalFailureTemplate,
+  nabuflowUsageWarningTemplate,
+  nabuflowPaymentFailedTemplate,
 } from "./emailTemplates";
 
 function resendEnabled(): boolean {
@@ -239,5 +241,31 @@ export async function sendDomainRenewalFailure(opts: {
 }): Promise<void> {
   const { to, ...rest } = opts;
   const tmpl = domainRenewalFailureTemplate(rest);
+  await sendEmail({ to, ...tmpl });
+}
+
+export async function sendNabuflowUsageWarningEmail(opts: {
+  to: string;
+  kind: "credits" | "spend_cap";
+  level: number;
+  planName: string;
+  detail: string;
+  billingUrl: string;
+}): Promise<void> {
+  const { to, ...rest } = opts;
+  const tmpl = nabuflowUsageWarningTemplate(rest);
+  await sendEmail({ to, ...tmpl });
+}
+
+export async function sendNabuflowPaymentFailedEmail(opts: {
+  to: string;
+  planName: string;
+  attempt: number;
+  paused: boolean;
+  graceUntil: string;
+  billingUrl: string;
+}): Promise<void> {
+  const { to, ...rest } = opts;
+  const tmpl = nabuflowPaymentFailedTemplate(rest);
   await sendEmail({ to, ...tmpl });
 }

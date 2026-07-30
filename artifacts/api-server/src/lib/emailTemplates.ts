@@ -333,3 +333,52 @@ export function supportReplyTemplate(opts: {
 
   return { subject: emailSubject, html, text };
 }
+
+// ── NabuFlow billing (Task #1516) ─────────────────────────────────────────────
+
+export function nabuflowUsageWarningTemplate(opts: {
+  kind: "credits" | "spend_cap";
+  level: number;
+  planName: string;
+  detail: string;
+  billingUrl: string;
+}): EmailTemplate {
+  const what = opts.kind === "credits" ? "included build credits" : "monthly spend cap";
+  const subject =
+    opts.level >= 100
+      ? `You've reached 100% of your NabuFlow ${what}`
+      : `You've used ${opts.level}% of your NabuFlow ${what}`;
+
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">${subject}</h2>
+  <p>Your <strong>${opts.planName}</strong> plan: ${opts.detail}</p>
+  ${ctaButton("Review usage & billing", opts.billingUrl)}
+  <p style="font-size:13px;color:#4b5563">In-flight builds are never interrupted — this only affects new builds.</p>`);
+
+  const text = `${subject}\n\n${opts.planName} plan: ${opts.detail}\n\nReview usage & billing: ${opts.billingUrl}`;
+  return { subject, html, text };
+}
+
+export function nabuflowPaymentFailedTemplate(opts: {
+  planName: string;
+  attempt: number;
+  paused: boolean;
+  graceUntil: string;
+  billingUrl: string;
+}): EmailTemplate {
+  const subject = opts.paused
+    ? "NabuFlow builds paused — payment failed"
+    : "NabuFlow payment failed — we'll retry";
+
+  const body = opts.paused
+    ? `<p>Your <strong>${opts.planName}</strong> payment couldn't be processed after ${opts.attempt} attempt${opts.attempt === 1 ? "" : "s"}. <strong>New builds are paused</strong> until your payment method is updated. In-flight builds were not interrupted.</p>`
+    : `<p>Your <strong>${opts.planName}</strong> payment couldn't be processed (attempt ${opts.attempt}). We'll retry automatically. If payment keeps failing, new builds pause on <strong>${opts.graceUntil}</strong>.</p>`;
+
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">${subject}</h2>
+  ${body}
+  ${ctaButton("Update payment method", opts.billingUrl, "#dc2626")}`);
+
+  const text = `${subject}\n\nYour ${opts.planName} payment couldn't be processed (attempt ${opts.attempt}).${opts.paused ? " New builds are paused until your payment method is updated." : ` New builds pause on ${opts.graceUntil} if payment keeps failing.`}\n\nUpdate your payment method: ${opts.billingUrl}`;
+  return { subject, html, text };
+}

@@ -48,6 +48,26 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
   const mode = agentMode as AgentMode;
   const batchAgentIdentity: AgentIdentity = "main";
 
+  // NabuFlow billing gate (Task #1516) — batch preflight. Refuses the whole
+  // batch when the plan/card/cap/ladder can't support it; each task is also
+  // re-gated at drain time in runJob (authoritative, per-build).
+  if (project.ownerId) {
+    const { creditCostFor, resolveStageProvider } = await import("../lib/ai-providers");
+    const { provider } = resolveStageProvider("build", mode);
+    const perBuildCost = creditCostFor(mode, provider, false);
+    const { nabuflowGateHttpError } = await import("../lib/nabuflow-billing");
+    const gateErr = await nabuflowGateHttpError(project.ownerId, {
+      engineMode: mode,
+      deepReasoning: false,
+      projectedCredits: perBuildCost * messages.length,
+      source: "queue",
+    });
+    if (gateErr) {
+      res.status(gateErr.status).json(gateErr.body);
+      return;
+    }
+  }
+
   const batchId = crypto.randomUUID();
   const taskIds: number[] = [];
 
@@ -212,6 +232,22 @@ router.post(
       res.status(400).json({ error: "Invalid project id" });
       return;
     }
+    // NabuFlow billing gate (Task #1516): resuming paused work is a build
+    // entry point too — plan/card/dunning must be healthy before the drain.
+    // Per-build ladder/cap checks happen in runJob as each task starts.
+    const [project] = await db
+      .select({ ownerId: projectsTable.ownerId })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+    if (project?.ownerId) {
+      const { nabuflowGateHttpError } = await import("../lib/nabuflow-billing");
+      const gateErr = await nabuflowGateHttpError(project.ownerId, { source: "resume" });
+      if (gateErr) {
+        res.status(gateErr.status).json(gateErr.body);
+        return;
+      }
+    }
+
     try {
       const resumed = await resumeProjectPausedTasks(projectId);
       res.json({ resumed });

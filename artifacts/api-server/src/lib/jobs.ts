@@ -17,7 +17,6 @@ import {
   appTestRunsTable,
   cveFindingsTable,
   projectDomainsTable,
-  userSubscriptionsTable,
   projectActivityTable,
   notificationsTable,
   type AgentTaskCompletionKind,
@@ -2308,46 +2307,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
 
-    // --- Subscription tier gate: enforce model access per tier ---
-    // Free → lite/eco only. Pro/Team → all modes (power/pro unlocked).
-    // Gated by CREDITS_ENFORCEMENT_ENABLED so we can run free/unlimited in dev
-    // and degrade gracefully when the user_subscriptions table is missing.
-    if (
-      CREDITS_ENFORCEMENT_ENABLED &&
-      project.ownerId &&
-      (agentMode === "power" || agentMode === "pro")
-    ) {
-      try {
-        const [sub] = await db
-          .select({ tier: userSubscriptionsTable.tier })
-          .from(userSubscriptionsTable)
-          .where(eq(userSubscriptionsTable.userId, project.ownerId))
-          .limit(1);
-        const tier = sub?.tier ?? "free";
-        if (tier === "free") {
-          const msg = `The ${agentMode === "pro" ? "Pro" : "Power"} mode is available on the Pro and Team plans. Upgrade your subscription in Billing to use this mode, or switch to Lite or Eco.`;
-          await emitEvent(taskId, "failed", msg);
-          await db
-            .update(agentTasksTable)
-            .set({
-              status: "failed",
-              result: msg,
-              completedAt: sql`now()`,
-              tokenCount: flushTokenCount(taskId),
-            })
-            .where(eq(agentTasksTable.id, taskId));
-          return;
-        }
-      } catch (err) {
-        // Table missing or query failed → fail-open: don't block the build.
-        logger.warn({ err }, "Subscription tier gate skipped (query failed)");
-      }
-    }
-
-    // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
-    // For background jobs (Task #509) the credits were already reserved at enqueue,
-    // so the pre-flight check + post-success deduction is skipped here.
-    // Provider-aware cost — Anthropic premium tiers cost ~1.6× more, Gemini ~0.7×.
+    // --- Provider-aware credit cost (prices unchanged — the Task #1516 ladder
+    // is access-only). Needed by both the billing gate and the wallet pre-flight.
+    // Anthropic premium tiers cost ~1.6× more, Gemini ~0.7×.
     const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
     const buildStageForCost = input.kind === "refine" ? "refine" : "build";
     const { provider: costProvider } = resolveStageProvider(buildStageForCost, agentMode);
@@ -2360,11 +2322,60 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .where(eq(agentTasksTable.id, taskId))
         .limit(1)
         .then((r) => (r[0]?.reserved ?? null) !== null));
+
+    // --- NabuFlow billing gate (Task #1516) — replaces the free-tier power/pro
+    // gate. One server-side resolver: active plan ∧ card on file ∧ under spend
+    // cap ∧ not dunning-paused ∧ engine-mode ladder (Orbit 3 Pro/no Deep,
+    // Comet unlimited Pro/10 Deep, Nova unlimited + exclusive Pro+Deep).
+    // Superuser/BUILDER_ALLOWLIST bypass entirely. Tasks whose credits were
+    // reserved at enqueue already passed usage checks and consumed their
+    // counters, so the drain-time re-check skips usage (it can never block the
+    // task that used the last slot) but still honors plan/card/pause state.
+    if (project.ownerId) {
+      const { resolveNabuflowBuildGate, nabuflowGateHttpBody } = await import(
+        "./nabuflow-billing"
+      );
+      const gate = await resolveNabuflowBuildGate(project.ownerId, {
+        engineMode: agentMode,
+        deepReasoning: input.deepReasoning ?? false,
+        projectedCredits: creditCost,
+        source: input.runMode === "background" ? "background" : "pipeline",
+        skipUsageChecks: creditsAlreadyReserved,
+      });
+      if (!gate.allowed) {
+        const msg = gate.error.message;
+        await emitEvent(taskId, "failed", msg);
+        await db
+          .update(agentTasksTable)
+          .set({
+            status: "failed",
+            result: msg,
+            completedAt: sql`now()`,
+            tokenCount: flushTokenCount(taskId),
+          })
+          .where(eq(agentTasksTable.id, taskId));
+        // Pause queued siblings so they don't drain and fail one-by-one with
+        // the same billing error (mirrors the insufficient-credits path).
+        await pauseRemainingQueuedTasks(taskId, projectId);
+        logger.info(
+          { taskId, projectId, billing: nabuflowGateHttpBody(gate.error) },
+          "NabuFlow gate blocked build",
+        );
+        return;
+      }
+    }
+
+    // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
+    // For background jobs (Task #509) the credits were already reserved at enqueue,
+    // so the pre-flight check + post-success deduction is skipped here.
+    // NabuFlow plan users skip the wallet check — their charge path is cycle
+    // accounting (included credits → metered overage), authorized by the gate.
     if (
       CREDITS_ENFORCEMENT_ENABLED &&
       project.ownerId &&
       !creditsAlreadyReserved &&
-      !(await isSuperuser(project.ownerId))
+      !(await isSuperuser(project.ownerId)) &&
+      !(await (await import("./nabuflow-billing")).nabuflowChargeActive(project.ownerId))
     ) {
       const credits = await getOrCreateCredits(project.ownerId);
       if (credits.balance < creditCost) {
@@ -2853,13 +2864,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   onBillableSenseBatch: (credits, total) => {
                     if (!project.ownerId) return;
                     void getOrCreateCredits(project.ownerId)
-                      .then((bal) => {
+                      .then(async (bal) => {
                         if (bal.balance < credits) {
-                          logger.warn(
-                            { projectId, credits, balance: bal.balance },
-                            "credits_exhausted: skipping senses deduction — insufficient balance",
-                          );
-                          return;
+                          // NabuFlow plan users charge via cycle accounting —
+                          // the wallet balance is irrelevant (Task #1516).
+                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
+                          if (!(await nabuflowChargeActive(project.ownerId!))) {
+                            logger.warn(
+                              { projectId, credits, balance: bal.balance },
+                              "credits_exhausted: skipping senses deduction — insufficient balance",
+                            );
+                            return;
+                          }
                         }
                         return deductCreditsAtomic(project.ownerId!, credits, {
                           type: "senses",
@@ -2881,13 +2897,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   onBillableCreativeCall: (credits, tool) => {
                     if (!project.ownerId) return;
                     void getOrCreateCredits(project.ownerId)
-                      .then((bal) => {
+                      .then(async (bal) => {
                         if (bal.balance < credits) {
-                          logger.warn(
-                            { projectId, credits, tool, balance: bal.balance },
-                            "credits_exhausted: skipping creative deduction — insufficient balance",
-                          );
-                          return;
+                          // NabuFlow plan users charge via cycle accounting —
+                          // the wallet balance is irrelevant (Task #1516).
+                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
+                          if (!(await nabuflowChargeActive(project.ownerId!))) {
+                            logger.warn(
+                              { projectId, credits, tool, balance: bal.balance },
+                              "credits_exhausted: skipping creative deduction — insufficient balance",
+                            );
+                            return;
+                          }
                         }
                         return deductCreditsAtomic(project.ownerId!, credits, {
                           type: "creative",
@@ -3409,13 +3430,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   onBillableSenseBatch: (credits, total) => {
                     if (!project.ownerId) return;
                     void getOrCreateCredits(project.ownerId)
-                      .then((bal) => {
+                      .then(async (bal) => {
                         if (bal.balance < credits) {
-                          logger.warn(
-                            { projectId, credits, balance: bal.balance },
-                            "credits_exhausted: skipping senses deduction — insufficient balance",
-                          );
-                          return;
+                          // NabuFlow plan users charge via cycle accounting —
+                          // the wallet balance is irrelevant (Task #1516).
+                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
+                          if (!(await nabuflowChargeActive(project.ownerId!))) {
+                            logger.warn(
+                              { projectId, credits, balance: bal.balance },
+                              "credits_exhausted: skipping senses deduction — insufficient balance",
+                            );
+                            return;
+                          }
                         }
                         return deductCreditsAtomic(project.ownerId!, credits, {
                           type: "senses",
@@ -3437,13 +3463,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   onBillableCreativeCall: (credits, tool) => {
                     if (!project.ownerId) return;
                     void getOrCreateCredits(project.ownerId)
-                      .then((bal) => {
+                      .then(async (bal) => {
                         if (bal.balance < credits) {
-                          logger.warn(
-                            { projectId, credits, tool, balance: bal.balance },
-                            "credits_exhausted: skipping creative deduction — insufficient balance",
-                          );
-                          return;
+                          // NabuFlow plan users charge via cycle accounting —
+                          // the wallet balance is irrelevant (Task #1516).
+                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
+                          if (!(await nabuflowChargeActive(project.ownerId!))) {
+                            logger.warn(
+                              { projectId, credits, tool, balance: bal.balance },
+                              "credits_exhausted: skipping creative deduction — insufficient balance",
+                            );
+                            return;
+                          }
                         }
                         return deductCreditsAtomic(project.ownerId!, credits, {
                           type: "creative",
@@ -3736,13 +3767,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 onBillableSenseBatch: (credits, total) => {
                   if (!project.ownerId) return;
                   void getOrCreateCredits(project.ownerId)
-                    .then((bal) => {
+                    .then(async (bal) => {
                       if (bal.balance < credits) {
-                        logger.warn(
-                          { projectId, credits, balance: bal.balance },
-                          "credits_exhausted: skipping senses deduction — insufficient balance",
-                        );
-                        return;
+                        // NabuFlow plan users charge via cycle accounting —
+                        // the wallet balance is irrelevant (Task #1516).
+                        const { nabuflowChargeActive } = await import("./nabuflow-billing");
+                        if (!(await nabuflowChargeActive(project.ownerId!))) {
+                          logger.warn(
+                            { projectId, credits, balance: bal.balance },
+                            "credits_exhausted: skipping senses deduction — insufficient balance",
+                          );
+                          return;
+                        }
                       }
                       return deductCreditsAtomic(project.ownerId!, credits, {
                         type: "senses",
@@ -3757,13 +3793,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 onBillableCreativeCall: (credits, tool) => {
                   if (!project.ownerId) return;
                   void getOrCreateCredits(project.ownerId)
-                    .then((bal) => {
+                    .then(async (bal) => {
                       if (bal.balance < credits) {
-                        logger.warn(
-                          { projectId, credits, tool, balance: bal.balance },
-                          "credits_exhausted: skipping creative deduction — insufficient balance",
-                        );
-                        return;
+                        // NabuFlow plan users charge via cycle accounting —
+                        // the wallet balance is irrelevant (Task #1516).
+                        const { nabuflowChargeActive } = await import("./nabuflow-billing");
+                        if (!(await nabuflowChargeActive(project.ownerId!))) {
+                          logger.warn(
+                            { projectId, credits, tool, balance: bal.balance },
+                            "credits_exhausted: skipping creative deduction — insufficient balance",
+                          );
+                          return;
+                        }
                       }
                       return deductCreditsAtomic(project.ownerId!, credits, {
                         type: "creative",
@@ -5525,6 +5566,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               try {
                 const debit = await deductCreditsAtomic(project.ownerId, ARCHITECT_CREDIT_COST, {
                   projectId,
+                  taskId,
                   type: "architect",
                   description: `Architect review for task #${taskId} (verdict: ${review.verdict}, findings: ${review.findings.length})`,
                 });
@@ -6234,6 +6276,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           type: kind,
           description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
           projectId,
+          engineMode: agentMode,
+          deepReasoning: input.deepReasoning ?? false,
+          taskId,
+          source: "pipeline",
         })
           .then((result) => {
             if ("insufficient" in result) {
@@ -7694,6 +7740,10 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       type: "refine",
       description: `Staged review apply - Task #${taskId}, project ${projectId}`,
       projectId,
+      engineMode: agentMode,
+      deepReasoning: task.deepReasoning ?? false,
+      taskId,
+      source: "pipeline",
     })
       .then((result) => {
         if ("insufficient" in result) {

@@ -787,6 +787,34 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     // Per-mode wall-clock cap for background runs (Task #509).
     const wallClockCapMs = runInBackground ? backgroundWallClockFor(mode) : null;
 
+    // NabuFlow billing gate (Task #1516): every build entry point passes the
+    // single server-side resolver BEFORE a task row is created, so blocked
+    // users get a calm structured 402 instead of a silently failed task.
+    // runJob re-checks at start (authoritative for queued/drained work).
+    if (project.ownerId) {
+      const { resolveStageProvider, creditCostFor } = await import("../lib/ai-providers");
+      const { provider: gateProvider } = resolveStageProvider(
+        kind === "build" ? "build" : "refine",
+        mode as Parameters<typeof creditCostFor>[0],
+      );
+      const gateCost = creditCostFor(
+        mode as Parameters<typeof creditCostFor>[0],
+        gateProvider,
+        deepReasoning,
+      );
+      const { nabuflowGateHttpError } = await import("../lib/nabuflow-billing");
+      const gateErr = await nabuflowGateHttpError(project.ownerId, {
+        engineMode: mode,
+        deepReasoning,
+        projectedCredits: gateCost,
+        source: runInBackground ? "background" : "pipeline",
+      });
+      if (gateErr) {
+        res.status(gateErr.status).json(gateErr.body);
+        return;
+      }
+    }
+
     // Reserve credits upfront for background runs. Foreground runs deduct on success.
     // If the user can't afford it, refuse before creating the task row.
     let reservedCredits: number | null = null;
@@ -803,8 +831,15 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         resolvedProvider,
         deepReasoning,
       );
+      // NabuFlow plan users reserve through cycle accounting (included bucket
+      // → metered overage), so the legacy wallet-balance check is skipped.
+      const { nabuflowChargeActive } = await import("../lib/nabuflow-billing");
       const credits = await getOrCreateCredits(project.ownerId);
-      if (CREDITS_ENFORCEMENT_ENABLED && credits.balance < cost) {
+      if (
+        CREDITS_ENFORCEMENT_ENABLED &&
+        !(await nabuflowChargeActive(project.ownerId)) &&
+        credits.balance < cost
+      ) {
         res.status(402).json({
           error: `Insufficient credits. A background ${mode} run reserves ${cost} credit(s) but your balance is ${credits.balance}. Top up in Billing.`,
         });
@@ -814,6 +849,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         type: kind === "build" ? "build" : "refine",
         description: `Reserve for background task — project ${project.id} (${mode})`,
         projectId: project.id,
+        engineMode: mode,
+        deepReasoning,
+        source: "background",
       });
       if ("insufficient" in deduct) {
         res.status(402).json({ error: "Insufficient credits to reserve background run." });
