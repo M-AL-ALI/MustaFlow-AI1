@@ -344,7 +344,6 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
       // ratio = charge / actual_cost. When ratio >= 1.15 we have at least 15%
       // headroom (charge covers cost with margin). When ratio < 1.15 the mode
       // is underpriced relative to actual AI cost → flag for recalibration.
-      // Using chargeUsd in the numerator avoids flagging low-cost modes as risky.
       const ratio = avgActualCostUsd > 0 ? chargeUsd / avgActualCostUsd : null;
       return {
         mode,
