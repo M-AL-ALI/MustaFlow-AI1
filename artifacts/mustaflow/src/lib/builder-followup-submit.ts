@@ -17,26 +17,6 @@ export type BuilderSendIntentOptions = {
   agentIntent?: BuilderComposerIntent;
 };
 
-export function shouldDeferComposerClearForCreditGate({
-  agentMode,
-  deepReasoning = false,
-  isLikelyConverse,
-  creditConfirmed,
-  billingExempt = false,
-}: {
-  agentMode: string;
-  deepReasoning?: boolean;
-  isLikelyConverse: boolean;
-  creditConfirmed: boolean;
-  billingExempt?: boolean;
-}): boolean {
-  return (
-    !billingExempt &&
-    (deepReasoning || agentMode === "power" || agentMode === "pro") &&
-    !isLikelyConverse &&
-    !creditConfirmed
-  );
-}
 
 export const BUILDER_CREDIT_COST = {
   lite: 1,
