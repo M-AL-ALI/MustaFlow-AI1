@@ -867,6 +867,7 @@ router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(abuseReportsTable)
+    .where(statusFilter ? eq(abuseReportsTable.status, statusFilter) : undefined)
     .orderBy(desc(abuseReportsTable.createdAt))
     .limit(limit)
     .offset(offset);
