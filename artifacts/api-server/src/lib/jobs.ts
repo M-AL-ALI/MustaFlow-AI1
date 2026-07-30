@@ -104,6 +104,7 @@ import {
   ARCHITECT_CREDIT_COST,
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
+import { persistArchitectAutoFixLink } from "./architect-auto-fix-link";
 import { encryptionService } from "./encryption";
 import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 import {
@@ -5625,6 +5626,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               isReReview: isArchitectAutoFix,
               completedWithWarnings,
             };
+            if (autoFixQueued && autoFixTaskId !== null) {
+              await persistArchitectAutoFixLink({
+                taskId,
+                architectReview: report.architectReview,
+                query: (text, values) => pool.query(text, values),
+              });
+            }
 
             logger.info(
               {

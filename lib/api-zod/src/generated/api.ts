@@ -1691,6 +1691,26 @@ export const ListTasksResponseItem = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1797,6 +1817,26 @@ export const ReorderTasksResponseItem = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1882,6 +1922,26 @@ export const CancelTaskResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1966,6 +2026,26 @@ export const ForceStartTaskResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -2054,6 +2134,26 @@ export const UpdateTaskResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -2153,6 +2253,26 @@ export const ApplyTaskStagingResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -2271,6 +2391,26 @@ export const DiscardTaskStagingResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -2376,6 +2516,26 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -5570,6 +5730,26 @@ export const GetProjectQueueBatchResponse = zod.object({
   "label": zod.string().optional(),
   "message": zod.string().optional()
 })).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "architectReview": zod.object({
+  "verdict": zod.enum(['pass', 'partial', 'fail']),
+  "summary": zod.string(),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['critical', 'high', 'medium', 'low']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "file": zod.string().nullish()
+})),
+  "nextActions": zod.array(zod.string()),
+  "autoFixQueued": zod.boolean(),
+  "autoFixTaskId": zod.number().nullish().describe('Queued architect auto-fix task id, or null when no auto-fix was queued.'),
+  "creditsCharged": zod.number(),
+  "reviewedAt": zod.string(),
+  "model": zod.string(),
+  "skipped": zod.boolean().optional(),
+  "skipReason": zod.string().optional(),
+  "isReReview": zod.boolean().optional(),
+  "completedWithWarnings": zod.boolean().optional()
+}).nullish().describe('Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),

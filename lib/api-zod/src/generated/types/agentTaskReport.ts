@@ -22,6 +22,35 @@ export type AgentTaskReport = {
   label?: string;
   message?: string;
 }[];
+  /**
+     * Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task.
+     * @nullable
+     */
+  architectReview?: {
+  verdict: 'pass' | 'partial' | 'fail';
+  summary: string;
+  findings: ({
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  title: string;
+  detail: string;
+  /** @nullable */
+  file?: string | null;
+})[];
+  nextActions: string[];
+  autoFixQueued: boolean;
+  /**
+     * Queued architect auto-fix task id, or null when no auto-fix was queued.
+     * @nullable
+     */
+  autoFixTaskId?: number | null;
+  creditsCharged: number;
+  reviewedAt: string;
+  model: string;
+  skipped?: boolean;
+  skipReason?: string;
+  isReReview?: boolean;
+  completedWithWarnings?: boolean;
+} | null;
   suggestions?: string[];
   nextRecommendation?: string;
   /** Native Expo/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe. */

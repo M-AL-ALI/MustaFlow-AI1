@@ -8161,6 +8161,45 @@ components:
                   id: { type: string }
                   label: { type: string }
                   message: { type: string }
+            architectReview:
+              type: ["object", "null"]
+              description: "Persisted architect review outcome. When autoFixQueued is true, autoFixTaskId is the machine-readable link to the queued recovery task."
+              required:
+                [
+                  verdict,
+                  summary,
+                  findings,
+                  nextActions,
+                  autoFixQueued,
+                  creditsCharged,
+                  reviewedAt,
+                  model,
+                ]
+              properties:
+                verdict: { type: string, enum: [pass, partial, fail] }
+                summary: { type: string }
+                findings:
+                  type: array
+                  items:
+                    type: object
+                    required: [severity, title, detail]
+                    properties:
+                      severity: { type: string, enum: [critical, high, medium, low] }
+                      title: { type: string }
+                      detail: { type: string }
+                      file: { type: ["string", "null"] }
+                nextActions: { type: array, items: { type: string } }
+                autoFixQueued: { type: boolean }
+                autoFixTaskId:
+                  type: ["integer", "null"]
+                  description: "Queued architect auto-fix task id, or null when no auto-fix was queued."
+                creditsCharged: { type: integer }
+                reviewedAt: { type: string }
+                model: { type: string }
+                skipped: { type: boolean }
+                skipReason: { type: string }
+                isReReview: { type: boolean }
+                completedWithWarnings: { type: boolean }
             suggestions: { type: array, items: { type: string } }
             nextRecommendation: { type: string }
             nativeFeatures:
