@@ -12,6 +12,9 @@ Recipe for E2E-testing builder billing UI (ladder counters, blocked states, mete
 - After restoring env, non-allowlisted test users bounce from builder routes to `/mode-select` — that IS the restored gating working, not a test failure. Brief the tester on this or it reports a false failure.
 - Never click plan CTAs while seeded with fake Stripe ids (`cus_e2e_fake`/`sub_e2e_fake`) — checkout/switch would call Stripe with them. The invoices endpoint reads the legacy subscriptions row's Stripe customer (shared-customer design), so nabuflow seeding does not break it.
 - The metered blocked card only fires on an actual BUILD submission; a plain chat/plan message may not hit the gate — have the tester send a build-style prompt in the gated mode.
+- The testing agent's headless browser CANNOT load Stripe Elements iframes (they resolve to chrome-error://) — card-entry dialogs are untestable in-browser. Bridge: attach `pm_card_visa` to the customer + set invoice_settings.default_payment_method server-side, then resume the UI flow (purchase dialogs that charge the saved PM work fine in the browser).
+- A build submitted while a prior build is still running on the same project queues; its reserve charge fires only when the job starts — don't assert its ledger draw immediately, and don't restore env (enforcement off) before it starts or the draw never lands.
+- Composer trigger copy like "Mode: Pro · 10 credits" is the selected-mode COST label, not a limit counter — brief testers on this or they report a false Nova failure.
 
 **Why:** builder surfaces are allowlist-gated in dev; without the env override every fresh test user lands on /mode-select and all billing pages are unreachable, while allowlisted users are billing-exempt and can never show blocked states.
 
