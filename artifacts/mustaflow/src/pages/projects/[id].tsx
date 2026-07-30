@@ -162,7 +162,11 @@ import { useToast } from "@/hooks/use-toast";
 import { ProvisioningProgress } from "./components/provisioning-progress";
 import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
-import { builderCreditCost, mapIntentToSendOptions } from "@/lib/builder-followup-submit";
+import {
+  getCreditCost,
+  mapIntentToSendOptions,
+  useBuilderCreditCosts,
+} from "@/lib/builder-followup-submit";
 import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builder-mode-persistence";
 import {
   calmPhaseForTaskEvent,
@@ -929,19 +933,29 @@ export default function ProjectWorkspacePage() {
     !nabuflowBillingStateError &&
     nabuflowBillingState?.exempt === true;
 
+  // Live credit costs from server — accounts for provider multipliers (Anthropic/Gemini/DeepSeek).
+  // Falls back to default OpenAI pricing while loading or on error.
+  const liveCreditCosts = useBuilderCreditCosts();
+
   // ── Overage-crossing notice — once per billing cycle ─────────────────────
   // Keyed by the billing cycle start date so it auto-resets each new cycle.
   const overageCycleKey =
     nabuflowBillingState?.subscription?.currentCycleStart?.substring(0, 10) ?? null;
   const [overageNoticeDismissed, setOverageNoticeDismissed] = useState(false);
+  // Derive dismissed state from localStorage whenever the cycle key changes.
+  // Explicitly sets false for new/null keys so a cycle rollover in a long-lived
+  // session always re-arms the notice.
   useEffect(() => {
-    if (!overageCycleKey) return;
+    if (!overageCycleKey) {
+      setOverageNoticeDismissed(false);
+      return;
+    }
     try {
-      if (localStorage.getItem(`nabuflow_overage_ack_${overageCycleKey}`) === "1") {
-        setOverageNoticeDismissed(true);
-      }
+      setOverageNoticeDismissed(
+        localStorage.getItem(`nabuflow_overage_ack_${overageCycleKey}`) === "1",
+      );
     } catch {
-      /* storage unavailable */
+      setOverageNoticeDismissed(false);
     }
   }, [overageCycleKey]);
   const dismissOverageNotice = useCallback(() => {
@@ -4745,8 +4759,8 @@ export default function ProjectWorkspacePage() {
                     </span>
                     <span className="text-muted-foreground/50">·</span>
                     <span>
-                      {builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning)}{" "}
-                      {builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning) === 1
+                      {getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning)}{" "}
+                      {getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning) === 1
                         ? "credit"
                         : "credits"}
                     </span>
@@ -4756,7 +4770,7 @@ export default function ProjectWorkspacePage() {
                         <span
                           className={
                             nabuflowBillingState.cycle.remainingIncludedCredits <
-                            builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning)
+                            getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning)
                               ? "text-amber-500"
                               : ""
                           }
@@ -4776,7 +4790,7 @@ export default function ProjectWorkspacePage() {
                     nabuflowBillingState?.cycle?.remainingIncludedCredits != null &&
                     nabuflowBillingState.cycle.remainingIncludedCredits >= 0 &&
                     nabuflowBillingState.cycle.remainingIncludedCredits <
-                      builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning) && (
+                      getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning) && (
                       <div
                         data-testid="overage-crossing-notice"
                         role="alert"

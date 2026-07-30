@@ -452,19 +452,27 @@ export interface StreamChatCompletionParams {
  * Provider-agnostic streaming chat completion. Yields incremental text deltas
  * so callers can pipe them into their existing SSE channel without caring
  * which provider executed the request.
+ *
+ * BILLING SCOPE: this path is used exclusively by the Ora/converse SSE
+ * channel, which is NOT metered by NabuFlow credits. Builder build/refine
+ * generation always goes through `createChatCompletion` (non-streaming), which
+ * accumulates per-call token telemetry in `accumulateBuildTokens`. Do NOT add
+ * NabuFlow metering here — it would double-charge or misattribute costs.
  */
 export async function* streamChatCompletion(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stream: any = await (openai.chat.completions as any).create({
-      model: params.model,
-      messages: params.messages,
-      max_completion_tokens: params.max_completion_tokens,
-      stream: true,
-      signal: params.signal,
-    });
+    const stream: any = await (openai.chat.completions as any).create(
+      {
+        model: params.model,
+        messages: params.messages,
+        max_completion_tokens: params.max_completion_tokens,
+        stream: true,
+      },
+      { signal: params.signal },
+    );
     for await (const chunk of stream) {
       if (params.signal?.aborted) return;
       const delta = chunk.choices[0]?.delta?.content;
@@ -496,13 +504,15 @@ async function* streamDeepSeek(
 ): AsyncGenerator<string, void, void> {
   const client = getDeepSeekClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await (client.chat.completions as any).create({
-    model: params.model,
-    messages: params.messages,
-    max_tokens: params.max_completion_tokens,
-    stream: true,
-    signal: params.signal,
-  });
+  const stream: any = await (client.chat.completions as any).create(
+    {
+      model: params.model,
+      messages: params.messages,
+      max_tokens: params.max_completion_tokens,
+      stream: true,
+    },
+    { signal: params.signal },
+  );
   for await (const chunk of stream) {
     if (params.signal?.aborted) return;
     const delta = chunk.choices[0]?.delta?.content;

@@ -76,23 +76,61 @@ export function builderCreditCost(
 }
 
 /**
- * React hook — fetches the live builder credit cost table from the server.
- * Falls back to DEFAULT_BUILDER_CREDIT_COSTS while loading or on error so
- * the UI is never blank.
+ * Stage-keyed credit cost response from the server.
+ * `build` costs apply when AI_PROVIDER_BUILD is active;
+ * `refine` costs apply when AI_PROVIDER_REFINE is active (may differ).
  */
-export function useBuilderCreditCosts(): BuilderCreditCosts {
-  const [costs, setCosts] = useState<BuilderCreditCosts>(DEFAULT_BUILDER_CREDIT_COSTS);
+export type BuilderCreditCostsByStage = {
+  build: BuilderCreditCosts;
+  refine: BuilderCreditCosts;
+};
+
+const DEFAULT_BUILDER_CREDIT_COSTS_BY_STAGE: BuilderCreditCostsByStage = {
+  build: DEFAULT_BUILDER_CREDIT_COSTS,
+  refine: DEFAULT_BUILDER_CREDIT_COSTS,
+};
+
+/**
+ * React hook — fetches live builder credit cost tables keyed by stage from the
+ * server. Falls back to default OpenAI pricing for both stages while loading
+ * or on error so the UI is never blank.
+ *
+ * `build` costs apply to initial/full builds (AI_PROVIDER_BUILD).
+ * `refine` costs apply to refine requests (AI_PROVIDER_REFINE).
+ *
+ * UI surfaces that cannot determine the stage at display time should use
+ * `build` costs (the common initial-build path).
+ */
+export function useBuilderCreditCostsByStage(): BuilderCreditCostsByStage {
+  const [costs, setCosts] = useState<BuilderCreditCostsByStage>(
+    DEFAULT_BUILDER_CREDIT_COSTS_BY_STAGE,
+  );
   useEffect(() => {
     authFetch("/api/billing/nabuflow/credit-costs")
-      .then((r) => (r.ok ? (r.json() as Promise<BuilderCreditCosts>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<BuilderCreditCostsByStage>) : null))
       .then((data) => {
-        if (data?.standard && data?.deep) setCosts(data);
+        if (data?.build?.standard && data?.build?.deep && data?.refine?.standard) {
+          setCosts(data);
+        }
       })
       .catch(() => {
         /* keep default */
       });
   }, []);
   return costs;
+}
+
+/**
+ * React hook — fetches the live builder credit cost table from the server for
+ * the **build** stage (AI_PROVIDER_BUILD). Falls back to DEFAULT_BUILDER_CREDIT_COSTS
+ * while loading or on error.
+ *
+ * For components that need both build and refine costs, use
+ * `useBuilderCreditCostsByStage()` instead.
+ */
+export function useBuilderCreditCosts(): BuilderCreditCosts {
+  const { build } = useBuilderCreditCostsByStage();
+  return build;
 }
 
 /**
@@ -134,6 +172,6 @@ export function resolveBuilderComposerIntent({
   if (localIntent === "converse" || localIntent === "plan" || localIntent === "build") {
     return localIntent;
   }
-  if (hasCompletedTask && routingAgentIdentity !== "planning") return "build";
+  if (hasCompletedTask && routingAgentIdentity === "main") return "build";
   return undefined;
 }

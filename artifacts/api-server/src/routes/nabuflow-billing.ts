@@ -148,31 +148,68 @@ function publicPlanShape(plan: NabuflowPlanConfig) {
 }
 
 // ── GET /billing/nabuflow/plans ───────────────────────────────────────────────
+// Returns plan shapes plus stage-keyed provider-resolved mode costs — the same
+// resolution logic as /billing/nabuflow/credit-costs so every cost-displaying
+// surface (pricing page, plan cards) agrees with the actual charges the build
+// gate applies. `modeCosts.build` uses AI_PROVIDER_BUILD; `modeCosts.refine`
+// uses AI_PROVIDER_REFINE — these may differ if operators configure them
+// separately.
 router.get("/billing/nabuflow/plans", async (_req, res): Promise<void> => {
+  const { creditCostFor, resolveStageProvider } = await import("../lib/ai-providers");
+
+  function resolvedModeCosts(stage: "build" | "refine") {
+    const { provider } = resolveStageProvider(stage, "power");
+    return NABUFLOW_BUILD_MODE_COSTS.map((entry) => ({
+      ...entry,
+      credits: creditCostFor(
+        entry.mode.toLowerCase() as Parameters<typeof creditCostFor>[0],
+        provider,
+      ),
+    }));
+  }
+
   res.json({
     plans: NABUFLOW_PLAN_IDS.map((id) => publicPlanShape(NABUFLOW_PLANS[id])),
-    modeCosts: NABUFLOW_BUILD_MODE_COSTS,
+    modeCosts: {
+      build: resolvedModeCosts("build"),
+      refine: resolvedModeCosts("refine"),
+    },
   });
 });
 
 // ── GET /billing/nabuflow/credit-costs ─────────────────────────────────────────
-// PUBLIC — no auth required; returns the current builder credit cost table so
-// the frontend can display mode costs without hard-coding them.
+// PUBLIC — no auth required; returns stage-keyed builder credit cost tables so
+// every UI cost surface can display the exact cost that will be charged.
+//
+// Returns { build: { standard, deep }, refine: { standard, deep } } so clients
+// can select the table that matches the operation they will submit. Build and
+// refine may use different providers (AI_PROVIDER_BUILD / AI_PROVIDER_REFINE),
+// so the costs can differ. UI surfaces that cannot determine the stage at
+// display time should default to `build` costs (the common initial-build path).
+// Deep-reasoning costs are provider-independent fixed premiums.
 router.get("/billing/nabuflow/credit-costs", async (_req, res): Promise<void> => {
-  const { creditCostFor, DEEP_REASONING_CREDIT_COST } = await import("../lib/ai-providers");
-  res.json({
-    standard: {
-      lite: creditCostFor("lite"),
-      eco: creditCostFor("eco"),
-      power: creditCostFor("power"),
-      pro: creditCostFor("pro"),
-    },
-    deep: {
-      eco: DEEP_REASONING_CREDIT_COST.eco ?? creditCostFor("eco"),
-      power: DEEP_REASONING_CREDIT_COST.power ?? creditCostFor("power"),
-      pro: DEEP_REASONING_CREDIT_COST.pro ?? creditCostFor("pro"),
-    },
-  });
+  const { creditCostFor, DEEP_REASONING_CREDIT_COST, resolveStageProvider } =
+    await import("../lib/ai-providers");
+
+  function makeCostTable(stage: "build" | "refine") {
+    const { provider } = resolveStageProvider(stage, "power");
+    return {
+      standard: {
+        lite: creditCostFor("lite", provider),
+        eco: creditCostFor("eco", provider),
+        power: creditCostFor("power", provider),
+        pro: creditCostFor("pro", provider),
+      },
+      deep: {
+        // Deep costs are provider-independent fixed premiums.
+        eco: DEEP_REASONING_CREDIT_COST.eco ?? creditCostFor("eco", provider),
+        power: DEEP_REASONING_CREDIT_COST.power ?? creditCostFor("power", provider),
+        pro: DEEP_REASONING_CREDIT_COST.pro ?? creditCostFor("pro", provider),
+      },
+    };
+  }
+
+  res.json({ build: makeCostTable("build"), refine: makeCostTable("refine") });
 });
 
 // ── GET /billing/nabuflow/state ───────────────────────────────────────────────
