@@ -332,7 +332,7 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
     const MODES = ["lite", "eco", "power", "pro"] as const;
     type ModeName = (typeof MODES)[number];
 
-    const report = bttRows.rows.map((r) => {
+    const report = rows.rows.map((r) => {
       const mode = r.mode as ModeName;
       const avgActualCostUsd = r.avg_actual_cost_usd
         ? Number(Number(r.avg_actual_cost_usd).toFixed(6))
@@ -409,7 +409,7 @@ router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
     .orderBy(desc(agentInboxTable.createdAt))
     .limit(limit);
   const [{ n }] = await db
-    .select({ n: drizzleSql<number>`count(*)::int` })
+    .select({ n: sql<number>`count(*)::int` })
     .from(agentInboxTable)
     .where(eq(agentInboxTable.status, "unread"));
   res.json({
@@ -861,7 +861,7 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
 // ── GET /api/admin/abuse-reports ──────────────────────────────────────────────
 // Returns abuse reports with optional ?status=open|dismissed|resolved filter.
 router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
-  const _statusFilter = req.query.status as string | undefined;
+  const statusFilter = req.query.status as string | undefined;
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const offset = Number(req.query.offset ?? 0);
 
