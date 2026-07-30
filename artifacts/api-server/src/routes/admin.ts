@@ -32,6 +32,7 @@ import { getUncachableStripeClient } from "../lib/stripeClient";
 import { logger } from "../lib/logger";
 import { requireAdmin } from "../lib/adminAuth";
 import { creditCostFor } from "../lib/ai-providers";
+import { NABUFLOW_MIN_OVERAGE_RATE_USD } from "../lib/nabuflow-plans";
 import { errorsPerDay } from "../lib/prodLogs";
 import { getCfHostnameSummary } from "../lib/cf-scheduler";
 import {
@@ -343,8 +344,11 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
       const avgActualCostUsd = r.avg_actual_cost_usd
         ? Number(Number(r.avg_actual_cost_usd).toFixed(6))
         : 0;
-      // charge_usd = credits × $0.01 per credit (credits are sold at $0.01 each)
-      const chargeUsd = creditCostFor(mode) * 0.01;
+      // charge_usd = credits × minimum overage rate (Nova: $0.012/credit).
+      // Using the lowest published rate is conservative: if actual cost exceeds
+      // 1.15× this floor, the mode is underpriced on EVERY plan. Plans with
+      // higher overage rates (Orbit $0.015, Comet $0.013) generate more revenue.
+      const chargeUsd = creditCostFor(mode) * NABUFLOW_MIN_OVERAGE_RATE_USD;
       // ratio = charge / actual_cost. When ratio >= 1.15 we have at least 15%
       // headroom (charge covers cost with margin). When ratio < 1.15 the mode
       // is underpriced relative to actual AI cost → flag for recalibration.
@@ -364,7 +368,7 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
     const reportModes = new Set(report.map((r: (typeof report)[0]) => r.mode));
     for (const mode of MODES) {
       if (!reportModes.has(mode)) {
-        const chargeUsd = creditCostFor(mode) * 0.01;
+        const chargeUsd = creditCostFor(mode) * NABUFLOW_MIN_OVERAGE_RATE_USD;
         report.push({
           mode,
           buildCount: 0,

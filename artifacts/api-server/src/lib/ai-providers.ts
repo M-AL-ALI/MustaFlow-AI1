@@ -277,10 +277,19 @@ export function creditCostFor(
 
 interface BuildTokenAccumulator {
   mode: string;
+  /** Provider of the most-recent call (stored for audit; cost is pre-computed). */
   provider: string;
+  /** Model of the most-recent call (stored for audit; cost is pre-computed). */
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Running USD cost total, accumulated per call at capture time using each
+   * call's own model/rate. This avoids mispricing multi-model builds where a
+   * cheap planner is followed by an expensive code-generation call (or vice
+   * versa); the total is correct regardless of call order.
+   */
+  computedUsdCost: number;
 }
 export interface CreateChatCompletionParams {
   provider: Provider;
@@ -446,6 +455,15 @@ export interface StreamChatCompletionParams {
    * the Builder code-generation stream) keep full thinking.
    */
   disableThinking?: boolean;
+  /**
+   * NabuFlow R2 Phase D: when set, token usage captured from the provider's
+   * streaming response is accumulated in the in-memory BuildTokenAccumulator
+   * for this task so that flushBuildTokenTelemetry() can persist it on
+   * build completion.
+   */
+  taskId?: number;
+  /** Build mode (lite/eco/power/pro). Ignored when taskId is absent. */
+  taskMode?: string;
 }
 
 /**
@@ -470,10 +488,30 @@ export async function* streamChatCompletion(
     config,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
-  for await (const chunk of stream) {
-    if (params.signal?.aborted) return;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
     const delta = chunk.choices[0]?.delta?.content;
       if (delta) yield delta;
+      // The final chunk (when stream_options.include_usage is set) has usage.
+      if (chunk.usage) {
+        inputTokens = chunk.usage.prompt_tokens ?? 0;
+        outputTokens = chunk.usage.completion_tokens ?? 0;
+      }
+    }
+    if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
+      accumulateBuildTokens(params.taskId, {
+        mode: params.taskMode ?? "unknown",
+        provider: "openai",
+        model: params.model,
+        inputTokens,
+        outputTokens,
+      });
     }
     return;
   }
@@ -507,10 +545,29 @@ async function* streamDeepSeek(
     config,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
-  for await (const chunk of stream) {
-    if (params.signal?.aborted) return;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
     const delta = chunk.choices[0]?.delta?.content;
     if (delta) yield delta;
+    if (chunk.usage) {
+      inputTokens = chunk.usage.prompt_tokens ?? 0;
+      outputTokens = chunk.usage.completion_tokens ?? 0;
+    }
+  }
+  if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
+    accumulateBuildTokens(params.taskId, {
+      mode: params.taskMode ?? "unknown",
+      provider: "deepseek",
+      model: params.model,
+      inputTokens,
+      outputTokens,
+    });
   }
 }
 
@@ -553,12 +610,33 @@ async function* streamAnthropic(
     config,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
-  for await (const event of stream) {
-    if (params.signal?.aborted) return;
-    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
       const text = event.delta.text;
       if (typeof text === "string" && text.length > 0) yield text;
     }
+    // Capture token counts: message_start has input_tokens; message_delta has output_tokens.
+    if (event?.type === "message_start" && event.message?.usage) {
+      inputTokens = event.message.usage.input_tokens ?? 0;
+    }
+    if (event?.type === "message_delta" && event.usage) {
+      outputTokens = event.usage.output_tokens ?? 0;
+    }
+  }
+  if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
+    accumulateBuildTokens(params.taskId, {
+      mode: params.taskMode ?? "unknown",
+      provider: "anthropic",
+      model: params.model,
+      inputTokens,
+      outputTokens,
+    });
   }
 }
 
@@ -620,20 +698,17 @@ async function* streamGemini(
     config,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
-  for await (const chunk of stream) {
-    if (params.signal?.aborted) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
+
+  let inputTokens = 0;
     const parts = (chunk as any).candidates?.[0]?.content?.parts ?? [];
-    for (const part of parts) {
-      if (typeof part.text === "string" && part.text.length > 0) yield part.text;
-    }
-  }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Anthropic adapter
-// ─────────────────────────────────────────────────────────────────────────────
-
+    const meta = (chunk as any).usageMetadata;
 async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCompletion> {
   const { anthropic } = await import("@workspace/integrations-anthropic-ai");
 
@@ -1232,17 +1307,21 @@ export function accumulateBuildTokens(
     outputTokens: number;
   },
 ): void {
+  // Compute this call's USD cost at capture time using the call's own model
+  // rates. This prevents multi-model builds (planner → code-gen, escalation,
+  // correction passes) from mispricing all tokens at the final model's rate.
+  const callCost = computeModelUsdCost(opts.model, opts.inputTokens, opts.outputTokens);
   const existing = buildTokenAccumulators.get(taskId);
   if (existing) {
     existing.inputTokens += opts.inputTokens;
     existing.outputTokens += opts.outputTokens;
-    // Last-used provider/model wins so the telemetry row reflects the dominant
-    // (typically the build-stage) call rather than a fast classifier call.
+    existing.computedUsdCost += callCost;
+    // Last-used provider/model stored for audit; cost is already pre-computed.
     existing.provider = opts.provider;
     existing.model = opts.model;
     if (opts.mode) existing.mode = opts.mode;
   } else {
-    buildTokenAccumulators.set(taskId, { ...opts });
+    buildTokenAccumulators.set(taskId, { ...opts, computedUsdCost: callCost });
   }
 }
 
@@ -1277,7 +1356,9 @@ export async function flushBuildTokenTelemetry(taskId: number): Promise<void> {
   buildTokenAccumulators.delete(taskId);
   if (!acc) return;
 
-  const computedUsdCost = computeModelUsdCost(acc.model, acc.inputTokens, acc.outputTokens);
+  // Use the pre-accumulated cost (summed per-call at capture time) rather than
+  // recomputing from the final model's rates, which would misprice multi-model builds.
+  const computedUsdCost = acc.computedUsdCost;
 
   try {
     const { pool } = await import("@workspace/db");
@@ -1369,3 +1450,5 @@ const USD_PER_1K_INPUT: Array<[pattern: string, rate: number]> = [
   // DeepSeek
   ["deepseek", 0.00014],
 ];
+
+  let outputTokens = 0;

@@ -25,6 +25,15 @@
 export const NABUFLOW_PLAN_IDS = ["orbit", "comet", "nova", "constellation"] as const;
 
 /**
+ * The lowest overage rate across all purchasable NabuFlow plans (Nova: $0.012/credit).
+ * Used by the calibration report as a conservative floor: if actual AI cost exceeds
+ * 1.15 × (credits × this rate), the mode is underpriced even on the most generous plan.
+ * Orbit ($0.015) and Comet ($0.013) plans charge more per credit, so builds on those
+ * plans generate higher revenue — using the floor avoids false-positive alarms.
+ */
+export const NABUFLOW_MIN_OVERAGE_RATE_USD = 0.012;
+
+/**
  * Per-engine-mode credit costs for NabuFlow builds.
  * Single source of truth — returned by GET /billing/nabuflow/plans so the
  * pricing page never hard-codes these values.
