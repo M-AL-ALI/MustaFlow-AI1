@@ -1793,6 +1793,10 @@ async function streamAndAccumulate(
       max_completion_tokens: maxTokens,
       messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
       signal,
+      // NabuFlow R2 Phase D: pass task context so each streaming call
+      // accumulates its token counts for the telemetry table.
+      taskId,
+      taskMode,
     })) {
       if (signal?.aborted) throw new Error("Build cancelled");
       accumulated += delta;
@@ -5511,6 +5515,8 @@ async function runStackRefinePipeline(
     imageAttachments,
     onEvent,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
@@ -5584,6 +5590,8 @@ async function runStackRefinePipeline(
     signal,
     "refine",
     agentMode,
+    taskId,
+    taskMode,
   );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];

@@ -3622,6 +3622,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             conversationSummary,
             imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
+            signal,
+            taskId: taskId as number,
+            taskMode: refineEscalationMode,
           };
           const escalatedResult = isSlidesProject
             ? await runSlidesRefinePipeline(escalatedStackRefineArgs)
@@ -3644,6 +3647,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       planContext: effectiveRefinePlanContext,
                       conversationSummary,
                       imageAttachments,
+                      signal,
+                      taskId: taskId as number,
+                      taskMode: refineEscalationMode,
                     })
                   : isNextjsProject
                     ? await runNextjsRefinePipeline(escalatedStackRefineArgs)
@@ -3673,6 +3679,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                 onEvent: async (type: string, message: string) =>
                                   emitEvent(taskId, type, message),
                                 onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                                signal,
+                                taskId: taskId as number,
+                                taskMode: refineEscalationMode,
                               });
           wasEscalated = true;
           agentMode = refineEscalationMode;
@@ -3879,6 +3888,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     imageAttachments,
                     onEvent: async (type, message) => emitEvent(taskId, type, message),
                     signal,
+                    taskId: taskId as number,
+                    taskMode: agentMode,
                   })
                 : isSlidesProject
                   ? await runSlidesRefinePipeline(retryStackArgs)
@@ -3903,6 +3914,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                             imageAttachments,
                             onEvent: async (type, message) => emitEvent(taskId, type, message),
                             signal,
+                            taskId: taskId as number,
+                            taskMode: agentMode,
                           })
                         : isNextjsProject
                           ? await runNextjsRefinePipeline(retryStackArgs)
@@ -3935,6 +3948,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                         emitEvent(taskId, type, message),
                                       onToken: (delta: string) => emitTokenEvent(taskId, delta),
                                       signal,
+                                      taskId: taskId as number,
+                                      taskMode: agentMode,
                                     });
               if (!retryResult.correctionFailed) {
                 refineResult = retryResult;
@@ -6587,6 +6602,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         (err.message === "Build cancelled" || abortController.signal.aborted)
       ) {
         await emitEvent(taskId, "cancelled", "Build cancelled by user.");
+        // Clear the telemetry accumulator so the in-memory Map doesn't grow
+        // unbounded on cancel paths (no partial telemetry row written — that
+        // data would skew the calibration report).
+        const { clearBuildTokenAccumulator } = await import("./ai-providers");
+        clearBuildTokenAccumulator(taskId);
         // Flush the token counter before entering the transaction so we can
         // persist the partial count even for mid-run cancellations.
         const canceledTokenCount = flushTokenCount(taskId);
@@ -6650,6 +6670,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
       }
 
+      // Clear the telemetry accumulator on failure so the in-memory Map doesn't
+      // grow unbounded. No partial telemetry row is written on failure paths —
+      // incomplete data would skew the calibration averages.
+      {
+        const { clearBuildTokenAccumulator } = await import("./ai-providers");
+        clearBuildTokenAccumulator(taskId);
+      }
       // Generate specific fix suggestions via AI (parallel with DB writes)
       const finalTokenCount = flushTokenCount(taskId);
       const [suggestions] = await Promise.all([
