@@ -24,6 +24,7 @@ import {
   type NabuflowOrgSeat,
 } from "@workspace/db";
 import {
+  NABUFLOW_BUILD_MODE_COSTS,
   NABUFLOW_ORG_BULK_TIERS,
   NABUFLOW_ORG_MIN_PURCHASE_CREDITS,
   NABUFLOW_PLAN_IDS,
@@ -143,6 +144,7 @@ function publicPlanShape(plan: NabuflowPlanConfig) {
 router.get("/billing/nabuflow/plans", async (_req, res): Promise<void> => {
   res.json({
     plans: NABUFLOW_PLAN_IDS.map((id) => publicPlanShape(NABUFLOW_PLANS[id])),
+    modeCosts: NABUFLOW_BUILD_MODE_COSTS,
   });
 });
 
