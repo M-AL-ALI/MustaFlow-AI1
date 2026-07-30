@@ -2415,6 +2415,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         tools: toolsForLoop,
         tool_choice: "required",
         signal: perCallSignal,
+        // NabuFlow R2 Phase D: accumulate token telemetry keyed by task id so
+        // flushBuildTokenTelemetry() can upsert one row at build completion.
+        taskId: input.taskId ?? undefined,
+        taskMode: input.agentMode,
       });
     } catch (err) {
       if (input.signal.aborted) {

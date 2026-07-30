@@ -151,6 +151,12 @@ router.get("/billing/nabuflow/plans", async (_req, res): Promise<void> => {
 // ── GET /billing/nabuflow/state ───────────────────────────────────────────────
 // Single read model for the UI: plan, card, cap, counters + reset date — an
 // exact mirror of what the build gate will decide.
+//
+// SOURCE OF TRUTH AUDIT (NabuFlow R2 Phase D): All displayed counters derive
+// from the charge ledger. `usedIncludedCredits`, `overageCredits`, and
+// `overageUsdCents` come from `nabuflow_billing_cycles` which is updated
+// atomically by the charge pipeline (chargeNabuflowCredits). Neither
+// agent_tasks.token_count nor any report-claimed amount is surfaced here.
 router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
   const userId = requireUserId(req, res);
   if (!userId) return;
@@ -274,6 +280,11 @@ router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
 });
 
 // ── GET /billing/nabuflow/usage ───────────────────────────────────────────────
+// SOURCE OF TRUTH AUDIT (NabuFlow R2 Phase D): All displayed usage figures are
+// sourced from `nabuflow_usage_events` (the charge ledger). No path reads from
+// agent_tasks.token_count, agent_tasks.report, or any report-claimed amount.
+// The `credits`, `overage_usd_cents`, and `usd_value_cents` columns originate
+// from the charge pipeline (reserveNabuflowCredits → chargeNabuflowCredits).
 router.get("/billing/nabuflow/usage", async (req, res): Promise<void> => {
   const userId = requireUserId(req, res);
   if (!userId) return;
