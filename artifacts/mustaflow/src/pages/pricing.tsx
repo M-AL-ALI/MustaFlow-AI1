@@ -754,6 +754,18 @@ export default function PricingPage() {
             q: "What if a build fails?",
             a: "Credits are only deducted for successful builds. Platform errors are not charged.",
           },
+          {
+            q: "How does credit rollover work on NabuFlow Builder plans?",
+            a: "Any unused included credits from your monthly allocation roll over into the next billing cycle — up to a plan-specific maximum. Rolled-over credits are used first, before that month's fresh allocation. Credits purchased as pay-as-you-go overage never expire and are not subject to the rollover cap.",
+          },
+          {
+            q: "When does overage kick in, and how does the spend cap protect me?",
+            a: "Overage billing starts automatically the moment your monthly included credits (plus any rolled-over credits) run out. Each additional build is charged at the per-credit overage rate shown on your plan. The spend cap puts a hard ceiling on how much overage you can accrue in a single month — once the cap is reached, new builds are paused rather than charged further. You can raise or lower the cap at any time from your billing dashboard, up to the maximum your plan allows.",
+          },
+          {
+            q: "What happens to my credits if I switch NabuFlow plans mid-cycle?",
+            a: "When you upgrade, the new plan's higher included-credit allocation takes effect immediately and your remaining credits from the old allocation are carried forward. When you downgrade, the switch takes effect at the start of your next billing cycle so you keep your current plan's credits for the remainder of the period. Rolled-over credits already in your balance are preserved across plan changes, subject to the new plan's rollover maximum.",
+          },
         ].map((item) => (
           <div key={item.q} className="border-b border-border pb-5">
             <div className="text-sm font-semibold mb-1.5">{item.q}</div>
