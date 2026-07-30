@@ -31,7 +31,7 @@ import {
   Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
-import { useSearch } from "wouter";
+import { Link, useSearch } from "wouter";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -424,6 +424,20 @@ export default function BillingPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+        {/* Pointer to the consolidated NabuFlow builder billing section */}
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2"
+          data-testid="legacy-billing-pointer"
+        >
+          <p className="text-xs text-muted-foreground">
+            Looking for your NabuFlow plan, usage charts, invoices or spending limits? They moved to
+            the new billing home.
+          </p>
+          <Link href="/billing" className="text-xs font-semibold text-primary hover:underline">
+            Open Billing &amp; Usage →
+          </Link>
+        </div>
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">

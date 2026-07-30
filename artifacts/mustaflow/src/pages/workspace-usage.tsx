@@ -112,7 +112,7 @@ export default function WorkspaceUsagePage() {
       isOverLimit ||
       isDomainsOverLimit);
   const recommendedTier = quota ? getRecommendedTier(quota.plan) : "starter";
-  const upgradeHref = `/billing?tier=${recommendedTier}`;
+  const upgradeHref = `/billing/legacy?tier=${recommendedTier}`;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">

@@ -21,18 +21,21 @@ import {
 } from "lucide-react";
 import { getBuilderTaskQueueLabel } from "@/lib/builder-completion";
 import { selectLingeringCompletedTask } from "@/lib/builder-task-queue";
+import { parseNabuflowGateError, type NabuflowGateError } from "@/lib/nabuflow-billing";
 import { cn } from "@/lib/utils";
 
 interface TaskQueuePanelProps {
   projectId: number;
   onStop: () => void;
+  /** Bubble a NabuFlow billing block up to the workspace's calm blocked card. */
+  onBillingBlock?: (gate: NabuflowGateError) => void;
 }
 
 const ACTIVE_STATUSES = ["planning", "building", "testing", "needs_review", "needs_fix"] as const;
 const WAITING_STATUSES = new Set(["needs_review", "needs_fix"]);
 const PAUSED_STATUS = "paused-insufficient-credits";
 
-export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
+export function TaskQueuePanel({ projectId, onStop, onBillingBlock }: TaskQueuePanelProps) {
   const queryClient = useQueryClient();
 
   const { data: tasks = [] } = useListTasks(projectId, {
@@ -65,8 +68,13 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
           invalidate();
         }
       })
-      .catch(() => {});
-  }, [projectId, invalidate]);
+      .catch((err) => {
+        // NabuFlow billing gate — bubble the calm blocked card up to the
+        // workspace instead of swallowing the failure.
+        const gate = parseNabuflowGateError(err);
+        if (gate && onBillingBlock) onBillingBlock(gate);
+      });
+  }, [projectId, invalidate, onBillingBlock]);
 
   const activeTask = tasks.find((t) => (ACTIVE_STATUSES as readonly string[]).includes(t.status));
   const activeTaskIsWaiting = activeTask ? WAITING_STATUSES.has(activeTask.status) : false;

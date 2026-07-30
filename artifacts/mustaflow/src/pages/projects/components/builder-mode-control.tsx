@@ -1,8 +1,20 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Link } from "wouter";
+import { ArrowUpRight, ChevronDown, Lock } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { builderCreditCost } from "@/lib/builder-followup-submit";
+import {
+  getGetNabuflowBillingStateQueryKey,
+  getListNabuflowPlansQueryKey,
+  useGetNabuflowBillingState,
+  useListNabuflowPlans,
+} from "@workspace/api-client-react";
+import {
+  formatResetDate,
+  nabuflowComboUnlockPlan,
+  nabuflowDeepUnlockPlan,
+} from "@/lib/nabuflow-billing";
 import {
   BuilderDeepReasoningIcon,
   BuilderModeIcon,
@@ -42,7 +54,61 @@ export function BuilderModeControl({
   const [open, setOpen] = useState(false);
   const selected = BUILDER_MODE_OPTIONS.find((option) => option.mode === mode)!;
   const selectedCost = builderCreditCost(mode, deepReasoning);
-  const deepDisabled = mode === "lite" || disabled;
+
+  // NabuFlow engine-mode ladder — display only; the server gate stays the
+  // sole authority. When enforcement is off, the user is exempt, or there is
+  // no plan yet, the control behaves exactly as before.
+  const { data: billing } = useGetNabuflowBillingState({
+    query: {
+      queryKey: getGetNabuflowBillingStateQueryKey(),
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+    },
+  });
+  const { data: plansData } = useListNabuflowPlans({
+    query: { queryKey: getListNabuflowPlansQueryKey(), staleTime: 5 * 60_000 },
+  });
+  const ladderActive = !!billing?.enforcementEnabled && !billing.exempt && !!billing.plan;
+  const ladder = ladderActive ? billing!.plan!.ladder : null;
+  const cycle = ladderActive ? (billing!.cycle ?? null) : null;
+  const plans = plansData?.plans ?? [];
+
+  const proLimit = ladder ? (ladder.proBuildsPerCycle ?? null) : null;
+  const deepLimit = ladder ? (ladder.deepBuildsPerCycle ?? null) : null;
+  const remPro = cycle?.remainingProBuilds ?? null;
+  const remDeep = cycle?.remainingDeepBuilds ?? null;
+  const resetShort = formatResetDate(cycle?.resetsAt);
+  const resetTitle = resetShort ? `Resets on ${resetShort}` : undefined;
+
+  const deepUnlock = nabuflowDeepUnlockPlan(plans);
+  const comboUnlock = nabuflowComboUnlockPlan(plans);
+
+  /** Deep is entirely off this plan (e.g. Orbit) — visible but locked. */
+  const deepLockedByPlan = !!ladder && deepLimit === 0;
+  /** Pro + Deep together is reserved for a higher tier (e.g. below Nova). */
+  const comboLocked = !!ladder && mode === "pro" && !ladder.proDeepCombo;
+
+  const deepDisabled = mode === "lite" || disabled || deepLockedByPlan || comboLocked;
+  const deepMetered = !!ladder && deepLimit != null && deepLimit > 0;
+
+  const triggerProCounter =
+    ladderActive && mode === "pro" && proLimit != null ? `${remPro ?? 0} of ${proLimit} left` : null;
+  const triggerDeepCounter =
+    ladderActive && deepReasoning && deepMetered ? `Deep · ${remDeep ?? 0} of ${deepLimit} left` : null;
+
+  const upgradeLink = comboLocked
+    ? {
+        href: `/billing/plans${comboUnlock ? `?highlight=${comboUnlock.id}` : ""}`,
+        label: `Unlock Pro + Deep together on ${comboUnlock?.name ?? "a higher plan"}`,
+        testId: "combo-upgrade-link",
+      }
+    : deepLockedByPlan && mode !== "lite"
+      ? {
+          href: `/billing/plans${deepUnlock ? `?highlight=${deepUnlock.id}` : ""}`,
+          label: `Unlock Deep Reasoning on ${deepUnlock?.name ?? "a higher plan"}`,
+          testId: "deep-upgrade-link",
+        }
+      : null;
 
   return (
     <div data-testid="builder-mode-picker" className="mt-2 px-3 min-w-0">
@@ -52,7 +118,9 @@ export function BuilderModeControl({
             type="button"
             disabled={disabled}
             data-testid="builder-mode-trigger"
-            aria-label={`Mode: ${selected.label}, ${creditLabel(selectedCost)}`}
+            aria-label={`Mode: ${selected.label}, ${creditLabel(selectedCost)}${
+              triggerProCounter ? `, Pro ${triggerProCounter}` : ""
+            }${triggerDeepCounter ? `, ${triggerDeepCounter}` : ""}`}
             className={cn(
               "inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-[10px] font-medium text-foreground transition-colors",
               "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -64,6 +132,34 @@ export function BuilderModeControl({
             <span className="truncate">
               {selected.label} · {creditLabel(selectedCost)}
             </span>
+            {triggerProCounter && (
+              <span
+                title={resetTitle}
+                data-testid="trigger-pro-counter"
+                className={cn(
+                  "shrink-0 rounded-full border px-1.5 py-px text-[9px] font-semibold",
+                  remPro === 0
+                    ? "border-amber-500/50 text-amber-500"
+                    : "border-border text-muted-foreground",
+                )}
+              >
+                {triggerProCounter}
+              </span>
+            )}
+            {triggerDeepCounter && (
+              <span
+                title={resetTitle}
+                data-testid="trigger-deep-counter"
+                className={cn(
+                  "shrink-0 rounded-full border px-1.5 py-px text-[9px] font-semibold",
+                  remDeep === 0
+                    ? "border-amber-500/50 text-amber-500"
+                    : "border-border text-muted-foreground",
+                )}
+              >
+                {triggerDeepCounter}
+              </span>
+            )}
             <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
           </button>
         </PopoverTrigger>
@@ -85,6 +181,7 @@ export function BuilderModeControl({
           <div className="space-y-1">
             {BUILDER_MODE_OPTIONS.map((option) => {
               const selectedMode = option.mode === mode;
+              const isMeteredPro = option.mode === "pro" && ladderActive && proLimit != null;
               return (
                 <button
                   key={option.mode}
@@ -93,6 +190,11 @@ export function BuilderModeControl({
                   onClick={() => {
                     onModeChange(option.mode);
                     if (option.mode === "lite") onDeepReasoningChange(false);
+                    // Mirror the server's combo rule: picking Pro with Deep on
+                    // when the plan lacks the combo would be rejected anyway.
+                    if (option.mode === "pro" && deepReasoning && ladder && !ladder.proDeepCombo) {
+                      onDeepReasoningChange(false);
+                    }
                   }}
                   aria-pressed={selectedMode}
                   className={cn(
@@ -111,6 +213,21 @@ export function BuilderModeControl({
                     <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
                       {option.description}
                     </span>
+                    {isMeteredPro && (
+                      <span
+                        title={resetTitle}
+                        data-testid="pro-mode-counter"
+                        className={cn(
+                          "mt-1 inline-block rounded-full border px-1.5 py-px text-[9px] font-semibold",
+                          remPro === 0
+                            ? "border-amber-500/50 text-amber-500"
+                            : "border-border text-muted-foreground",
+                        )}
+                      >
+                        {remPro ?? 0} of {proLimit} left this cycle
+                        {resetShort ? ` · resets ${resetShort}` : ""}
+                      </span>
+                    )}
                   </span>
                   <span className="shrink-0 pt-0.5 text-[10px] font-medium text-foreground">
                     {creditLabel(builderCreditCost(option.mode))}
@@ -135,16 +252,37 @@ export function BuilderModeControl({
                 deepDisabled && "cursor-not-allowed opacity-40",
               )}
             >
-              <BuilderDeepReasoningIcon className="h-4 w-4" />
+              {deepLockedByPlan || comboLocked ? (
+                <Lock className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <BuilderDeepReasoningIcon className="h-4 w-4" />
+              )}
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-semibold text-foreground">Deep Reasoning</span>
                 <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
                   {mode === "lite"
                     ? "Available in Eco, Power, and Pro"
-                    : `Use the deepest planning pass · ${selected.label} becomes ${creditLabel(
-                        builderCreditCost(mode, true),
-                      )}`}
+                    : comboLocked
+                      ? `Pro + Deep together is a ${comboUnlock?.name ?? "top-tier"} exclusive`
+                      : deepLockedByPlan
+                        ? `Available from ${deepUnlock?.name ?? "a higher plan"} up`
+                        : `Use the deepest planning pass · ${selected.label} becomes ${creditLabel(
+                            builderCreditCost(mode, true),
+                          )}`}
                 </span>
+                {deepMetered && !comboLocked && mode !== "lite" && (
+                  <span
+                    title={resetTitle}
+                    data-testid="deep-toggle-counter"
+                    className={cn(
+                      "mt-0.5 block text-[9px] font-semibold",
+                      remDeep === 0 ? "text-amber-500" : "text-muted-foreground",
+                    )}
+                  >
+                    {remDeep ?? 0} of {deepLimit} Deep builds left this cycle
+                    {resetShort ? ` · resets ${resetShort}` : ""}
+                  </span>
+                )}
               </span>
               <span
                 aria-hidden="true"
@@ -161,6 +299,18 @@ export function BuilderModeControl({
                 />
               </span>
             </button>
+
+            {upgradeLink && (
+              <Link
+                href={upgradeLink.href}
+                data-testid={upgradeLink.testId}
+                className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 no-underline"
+              >
+                <span className="min-w-0 truncate">{upgradeLink.label}</span>
+                <ArrowUpRight className="h-3 w-3 shrink-0" />
+              </Link>
+            )}
+
             <p className="px-3 pt-1.5 text-[9px] text-muted-foreground">
               Deep prices:{" "}
               {BUILDER_MODE_OPTIONS.filter((option) => option.mode !== "lite")

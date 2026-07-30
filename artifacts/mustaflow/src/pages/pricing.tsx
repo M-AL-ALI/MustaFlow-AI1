@@ -477,7 +477,7 @@ export default function PricingPage() {
           </div>
           <p className="text-center text-xs text-muted-foreground mt-4">
             Building heavily? Top up Builder credits anytime from your{" "}
-            <Link href="/billing" className="text-primary hover:underline">
+            <Link href="/billing/legacy" className="text-primary hover:underline">
               billing dashboard
             </Link>
             .

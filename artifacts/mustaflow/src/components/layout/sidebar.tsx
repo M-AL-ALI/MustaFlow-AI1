@@ -19,7 +19,6 @@ import {
   PanelLeftClose,
   Zap,
   AlertTriangle,
-  ShoppingCart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -40,7 +39,7 @@ const NAV_ITEMS = [
   { name: "Published Projects", href: "/published", icon: Globe },
   { name: "Integrations", href: "/integrations", icon: Blocks },
   { name: "Security", href: "/security", icon: ShieldCheck },
-  { name: "Promotions", href: "/billing", icon: ShoppingCart },
+  { name: "Billing & Usage", href: "/billing", icon: CreditCard },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

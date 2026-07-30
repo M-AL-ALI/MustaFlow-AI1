@@ -368,7 +368,7 @@ export default function WorkspaceDomainsPage() {
                   You've hit your domain limit. Upgrade to claim more.
                 </div>
                 <Link
-                  href="/billing"
+                  href="/billing/legacy"
                   className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors"
                 >
                   <Zap size={12} /> Upgrade plan
@@ -381,7 +381,7 @@ export default function WorkspaceDomainsPage() {
                   Need more domains or teammate roles? Upgrade for higher limits.
                 </div>
                 <Link
-                  href="/billing"
+                  href="/billing/legacy"
                   className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded-lg text-xs font-medium text-neutral-200 transition-colors"
                 >
                   <Zap size={12} /> See plans
