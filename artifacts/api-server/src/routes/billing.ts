@@ -56,6 +56,11 @@ import {
 } from "../lib/plans";
 import { isSuperuser, SUPERUSER_ORA_TIER } from "../lib/superusers";
 import { logger } from "../lib/logger";
+import {
+  NABUFLOW_BUILD_MODE_COSTS,
+  NABUFLOW_PLAN_IDS,
+  NABUFLOW_PLANS,
+} from "../lib/nabuflow-plans";
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
@@ -751,12 +756,10 @@ export async function handleStripeWebhook(
         // credits off a NabuFlow renewal. Routing is metadata-first with a
         // local nabuflow_subscriptions lookup as fallback. Enterprise org
         // bulk-pool invoices (their own COMPANY customer) route first of all.
-        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaid } = await import(
-          "../lib/nabuflow-org"
-        );
-        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } = await import(
-          "../lib/nabuflow-billing"
-        );
+        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaid } =
+          await import("../lib/nabuflow-org");
+        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } =
+          await import("../lib/nabuflow-billing");
         const invoice = event.data?.object as any;
         if (await isNabuflowOrgInvoiceEvent(invoice)) {
           await handleNabuflowOrgInvoicePaid(invoice);
@@ -768,12 +771,10 @@ export async function handleStripeWebhook(
         break;
       }
       case "invoice.payment_failed": {
-        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaymentFailed } = await import(
-          "../lib/nabuflow-org"
-        );
-        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } = await import(
-          "../lib/nabuflow-billing"
-        );
+        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaymentFailed } =
+          await import("../lib/nabuflow-org");
+        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } =
+          await import("../lib/nabuflow-billing");
         const invoice = event.data?.object as any;
         if (await isNabuflowOrgInvoiceEvent(invoice)) {
           await handleNabuflowOrgInvoicePaymentFailed(invoice);
@@ -1150,8 +1151,6 @@ billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> =
 // Public NabuFlow plans metadata — no auth required (pricing page, landing page).
 // Parallel to GET /billing/ora-plans; does NOT leak per-user state.
 billingPublicRouter.get("/billing/nabuflow/plans", (_req, res): void => {
-  const { NABUFLOW_BUILD_MODE_COSTS, NABUFLOW_PLAN_IDS, NABUFLOW_PLANS } =
-    require("../lib/nabuflow-plans") as typeof import("../lib/nabuflow-plans");
   res.json({
     plans: NABUFLOW_PLAN_IDS.map((id: string) => {
       const plan = NABUFLOW_PLANS[id as keyof typeof NABUFLOW_PLANS];
