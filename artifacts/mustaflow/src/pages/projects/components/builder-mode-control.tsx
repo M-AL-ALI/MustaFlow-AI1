@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { ArrowUpRight, ChevronDown, Lock } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { builderCreditCost } from "@/lib/builder-followup-submit";
+import { useBuilderCreditCosts, getCreditCost } from "@/lib/builder-followup-submit";
 import {
   getGetNabuflowBillingStateQueryKey,
   getListNabuflowPlansQueryKey,
@@ -52,8 +52,9 @@ export function BuilderModeControl({
   onDeepReasoningChange: (enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const creditCosts = useBuilderCreditCosts();
   const selected = BUILDER_MODE_OPTIONS.find((option) => option.mode === mode)!;
-  const selectedCost = builderCreditCost(mode, deepReasoning);
+  const selectedCost = getCreditCost(creditCosts, mode, deepReasoning);
 
   // NabuFlow engine-mode ladder — display only; the server gate stays the
   // sole authority. When enforcement is off, the user is exempt, or there is
@@ -92,9 +93,13 @@ export function BuilderModeControl({
   const deepMetered = !!ladder && deepLimit != null && deepLimit > 0;
 
   const triggerProCounter =
-    ladderActive && mode === "pro" && proLimit != null ? `${remPro ?? 0} of ${proLimit} left` : null;
+    ladderActive && mode === "pro" && proLimit != null
+      ? `${remPro ?? 0} of ${proLimit} left`
+      : null;
   const triggerDeepCounter =
-    ladderActive && deepReasoning && deepMetered ? `Deep · ${remDeep ?? 0} of ${deepLimit} left` : null;
+    ladderActive && deepReasoning && deepMetered
+      ? `Deep · ${remDeep ?? 0} of ${deepLimit} left`
+      : null;
 
   const upgradeLink = comboLocked
     ? {
@@ -230,7 +235,7 @@ export function BuilderModeControl({
                     )}
                   </span>
                   <span className="shrink-0 pt-0.5 text-[10px] font-medium text-foreground">
-                    {creditLabel(builderCreditCost(option.mode))}
+                    {creditLabel(getCreditCost(creditCosts, option.mode))}
                   </span>
                 </button>
               );
@@ -267,7 +272,7 @@ export function BuilderModeControl({
                       : deepLockedByPlan
                         ? `Available from ${deepUnlock?.name ?? "a higher plan"} up`
                         : `Use the deepest planning pass · ${selected.label} becomes ${creditLabel(
-                            builderCreditCost(mode, true),
+                            getCreditCost(creditCosts, mode, true),
                           )}`}
                 </span>
                 {deepMetered && !comboLocked && mode !== "lite" && (
@@ -316,7 +321,7 @@ export function BuilderModeControl({
               {BUILDER_MODE_OPTIONS.filter((option) => option.mode !== "lite")
                 .map(
                   (option) =>
-                    `${option.label} ${creditLabel(builderCreditCost(option.mode, true))}`,
+                    `${option.label} ${creditLabel(getCreditCost(creditCosts, option.mode, true))}`,
                 )
                 .join(" · ")}
             </p>

@@ -38,18 +38,18 @@ describe("BuilderModeControl", () => {
     expect(panel.querySelector(".lucide-brain")).not.toBeNull();
 
     expect(screen.getByRole("button", { name: /LiteQuick, minimal changes/ })).toHaveTextContent(
-      "1 credit",
+      "13 credits",
     );
     expect(
       screen.getByRole("button", { name: /EcoBalanced planning and clean typed code/ }),
-    ).toHaveTextContent("2 credits");
+    ).toHaveTextContent("34 credits");
     expect(
       screen.getByRole("button", { name: /PowerDeeper planning for production-ready work/ }),
-    ).toHaveTextContent("5 credits");
+    ).toHaveTextContent("160 credits");
     expect(
       screen.getByRole("button", { name: /ProDeepest planning with strict review/ }),
-    ).toHaveTextContent("10 credits");
-    expect(screen.getByText(/Eco 3 credits · Power 7 credits · Pro 13 credits/)).toBeVisible();
+    ).toHaveTextContent("475 credits");
+    expect(screen.getByText(/Eco 60 credits · Power 290 credits · Pro 850 credits/)).toBeVisible();
 
     fireEvent.click(
       screen.getByRole("button", { name: /PowerDeeper planning for production-ready work/ }),

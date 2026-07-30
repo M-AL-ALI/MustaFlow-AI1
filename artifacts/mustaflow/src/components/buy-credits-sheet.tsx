@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
 import {
   BUILDER_AGENT_MODES,
   BuilderModeIcon,
@@ -46,6 +46,7 @@ export function BuyCreditsSheet({
   const [balance, setBalance] = useState<number | null>(null);
   const [loadingPkgs, setLoadingPkgs] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const creditCosts = useBuilderCreditCosts();
 
   const fetchData = useCallback(async () => {
     setLoadingPkgs(true);
@@ -174,8 +175,8 @@ export function BuyCreditsSheet({
                     {builderModeLabel(mode)} mode
                   </span>
                   <span className="font-semibold">
-                    {BUILDER_CREDIT_COST[mode]} credit
-                    {BUILDER_CREDIT_COST[mode] !== 1 ? "s" : ""}
+                    {creditCosts.standard[mode]} credit
+                    {creditCosts.standard[mode] !== 1 ? "s" : ""}
                   </span>
                 </div>
               ))}

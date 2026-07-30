@@ -16,17 +16,14 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
 import {
   BUILDER_AGENT_MODES,
   BuilderModeIcon,
   builderModeLabel,
   type BuilderAgentMode,
 } from "@/components/builder-mode-icon";
-import {
-  getBuilderCheckpointLabel,
-  getBuilderCompletionMessage,
-} from "@/lib/builder-completion";
+import { getBuilderCheckpointLabel, getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { PlanCard, type StructuredPlan } from "./plan-card";
@@ -437,6 +434,7 @@ export function ZeroAgentPanel({
   /** Tracks which scrollToTaskId we have already acted on to avoid re-running */
   const appliedScrollTaskIdRef = useRef<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
+  const creditCosts = useBuilderCreditCosts();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -985,7 +983,7 @@ export function ZeroAgentPanel({
                       {builderModeLabel(mode)}
                     </span>
                     <span className="text-muted-foreground/50">
-                      {BUILDER_CREDIT_COST[mode]} cr
+                      {creditCosts.standard[mode as keyof typeof creditCosts.standard]} cr
                     </span>
                   </button>
                 ))}

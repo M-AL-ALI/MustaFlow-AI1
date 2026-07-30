@@ -33,7 +33,7 @@ import {
   type NabuflowUsageEvent,
 } from "@workspace/api-client-react";
 import { formatResetDate, formatUsdCents } from "@/lib/nabuflow-billing";
-import { builderCreditCost } from "@/lib/builder-followup-submit";
+import { useBuilderCreditCosts, getCreditCost } from "@/lib/builder-followup-submit";
 import { MeterBar, SectionCard, useNabuflowState, usePrefersReducedMotion } from "./shared";
 
 const MODE_LABELS: Record<string, string> = {
@@ -87,6 +87,7 @@ export function UsageSection() {
   );
   const { data: projects } = useListProjects();
   const reducedMotion = usePrefersReducedMotion();
+  const creditCosts = useBuilderCreditCosts();
 
   const [preset, setPreset] = useState<CyclePreset>("current");
   const [customStart, setCustomStart] = useState("");
@@ -131,16 +132,37 @@ export function UsageSection() {
   const daily = useMemo(() => {
     const byDay = new Map<
       string,
-      { builds: number; credits: number; included: number; overage: number; overageUsd: number; pool: number }
+      {
+        builds: number;
+        credits: number;
+        included: number;
+        overage: number;
+        overageUsd: number;
+        pool: number;
+      }
     >();
     // Seed every day of the window (clamped to today) so charts have a full axis.
     const endClamp = Math.min(range.end.getTime(), Date.now() + 24 * 3600 * 1000);
     for (let t = range.start.getTime(); t < endClamp; t += 24 * 3600 * 1000) {
-      byDay.set(dayKey(new Date(t)), { builds: 0, credits: 0, included: 0, overage: 0, overageUsd: 0, pool: 0 });
+      byDay.set(dayKey(new Date(t)), {
+        builds: 0,
+        credits: 0,
+        included: 0,
+        overage: 0,
+        overageUsd: 0,
+        pool: 0,
+      });
     }
     for (const e of events) {
       const key = dayKey(new Date(e.createdAt!));
-      const row = byDay.get(key) ?? { builds: 0, credits: 0, included: 0, overage: 0, overageUsd: 0, pool: 0 };
+      const row = byDay.get(key) ?? {
+        builds: 0,
+        credits: 0,
+        included: 0,
+        overage: 0,
+        overageUsd: 0,
+        pool: 0,
+      };
       row.builds += 1;
       row.credits += e.credits;
       row.included += e.includedCredits;
@@ -183,10 +205,11 @@ export function UsageSection() {
       const mode = MODE_ORDER.includes((e.engineMode ?? "") as (typeof MODE_ORDER)[number])
         ? (e.engineMode as (typeof MODE_ORDER)[number])
         : "eco";
-      baseCredits += builderCreditCost(mode, false);
+      baseCredits += getCreditCost(creditCosts, mode, false);
     }
     const surchargeCredits = Math.max(deepCredits - baseCredits, 0);
-    const surchargeUsd = deepCredits > 0 ? Math.round(deepUsd * (surchargeCredits / deepCredits)) : 0;
+    const surchargeUsd =
+      deepCredits > 0 ? Math.round(deepUsd * (surchargeCredits / deepCredits)) : 0;
     return {
       count: deepEvents.length,
       share: events.length > 0 ? (deepEvents.length / events.length) * 100 : 0,
@@ -194,13 +217,16 @@ export function UsageSection() {
       surchargeCredits,
       surchargeUsd,
     };
-  }, [events]);
+  }, [events, creditCosts]);
 
   const projectTotals = useMemo(() => {
     const nameById = new Map<number, string>((projects ?? []).map((p) => [p.id, p.name]));
     const byProject = new Map<string, { credits: number; usd: number }>();
     for (const e of events) {
-      const name = e.projectId != null ? (nameById.get(e.projectId) ?? `Project #${e.projectId}`) : "No project";
+      const name =
+        e.projectId != null
+          ? (nameById.get(e.projectId) ?? `Project #${e.projectId}`)
+          : "No project";
       const row = byProject.get(name) ?? { credits: 0, usd: 0 };
       row.credits += e.credits;
       row.usd += e.usdValueCents / 100;
@@ -326,7 +352,13 @@ export function UsageSection() {
           <span className="hidden text-[11px] text-muted-foreground sm:inline">
             {shortDay(dayKey(range.start))} – {shortDay(dayKey(range.end))} · {totals.builds} builds
           </span>
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={allEvents.length === 0} data-testid="usage-export-csv">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportCsv}
+            disabled={allEvents.length === 0}
+            data-testid="usage-export-csv"
+          >
             <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
           </Button>
         </div>
@@ -345,7 +377,9 @@ export function UsageSection() {
       {plan && cycle && (
         <SectionCard
           title="Metered Pro / Deep counters"
-          description={resetDate ? `Live counters for the current cycle — reset on ${resetDate}.` : undefined}
+          description={
+            resetDate ? `Live counters for the current cycle — reset on ${resetDate}.` : undefined
+          }
           testId="usage-counters"
         >
           <div className="grid gap-4 sm:grid-cols-2">
@@ -359,7 +393,9 @@ export function UsageSection() {
                 label="Pro builds"
                 used={cycle.proBuildsUsed}
                 total={plan.ladder.proBuildsPerCycle}
-                formatValue={() => `${cycle.remainingProBuilds ?? 0} of ${plan.ladder.proBuildsPerCycle} left`}
+                formatValue={() =>
+                  `${cycle.remainingProBuilds ?? 0} of ${plan.ladder.proBuildsPerCycle} left`
+                }
               />
             )}
             {plan.ladder.deepBuildsPerCycle == null ? (
@@ -377,7 +413,9 @@ export function UsageSection() {
                 label="Deep-reasoning builds"
                 used={cycle.deepBuildsUsed}
                 total={plan.ladder.deepBuildsPerCycle}
-                formatValue={() => `${cycle.remainingDeepBuilds ?? 0} of ${plan.ladder.deepBuildsPerCycle} left`}
+                formatValue={() =>
+                  `${cycle.remainingDeepBuilds ?? 0} of ${plan.ladder.deepBuildsPerCycle} left`
+                }
               />
             )}
           </div>
@@ -389,7 +427,9 @@ export function UsageSection() {
           <div className="flex flex-col items-center gap-2 py-10 text-center">
             <Gauge className="h-6 w-6 text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">No usage in this window</p>
-            <p className="text-xs text-muted-foreground">Run a build and it'll show up here within a minute.</p>
+            <p className="text-xs text-muted-foreground">
+              Run a build and it'll show up here within a minute.
+            </p>
           </div>
         </SectionCard>
       ) : (
@@ -398,24 +438,50 @@ export function UsageSection() {
             {/* 1. Spend vs cap */}
             <SectionCard
               title="Spend vs cap"
-              description={resetDate ? `Pay-as-you-go spend this window · cap resets ${resetDate}` : "Pay-as-you-go spend this window"}
+              description={
+                resetDate
+                  ? `Pay-as-you-go spend this window · cap resets ${resetDate}`
+                  : "Pay-as-you-go spend this window"
+              }
               testId="chart-spend-vs-cap"
             >
               <ChartContainer
-                config={{ cumUsd: { label: "Spend ($)", color: COLOR_SPEND } } satisfies ChartConfig}
+                config={
+                  { cumUsd: { label: "Spend ($)", color: COLOR_SPEND } } satisfies ChartConfig
+                }
                 className="h-48 w-full"
               >
                 <AreaChart data={daily} margin={{ left: 4, right: 8, top: 8 }}>
                   <CartesianGrid vertical={false} strokeOpacity={0.25} />
-                  <XAxis dataKey="day" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={10} minTickGap={28} />
-                  <YAxis tickLine={false} axisLine={false} fontSize={10} width={40} tickFormatter={(v: number) => `$${v}`} />
-                  <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />} />
+                  <XAxis
+                    dataKey="day"
+                    tickFormatter={shortDay}
+                    tickLine={false}
+                    axisLine={false}
+                    fontSize={10}
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    fontSize={10}
+                    width={40}
+                    tickFormatter={(v: number) => `$${v}`}
+                  />
+                  <ChartTooltip
+                    content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />}
+                  />
                   {capUsd > 0 && (
                     <ReferenceLine
                       y={capUsd}
                       stroke="#ef4444"
                       strokeDasharray="4 4"
-                      label={{ value: `Cap $${capUsd}`, position: "insideTopRight", fontSize: 10, fill: "#ef4444" }}
+                      label={{
+                        value: `Cap $${capUsd}`,
+                        position: "insideTopRight",
+                        fontSize: 10,
+                        fill: "#ef4444",
+                      }}
                     />
                   )}
                   <Area
@@ -429,7 +495,8 @@ export function UsageSection() {
                 </AreaChart>
               </ChartContainer>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                {formatUsdCents(totals.overageUsdCents)} spent beyond included credits in this window.
+                {formatUsdCents(totals.overageUsdCents)} spent beyond included credits in this
+                window.
               </p>
             </SectionCard>
 
@@ -440,20 +507,38 @@ export function UsageSection() {
               testId="chart-credits"
             >
               <ChartContainer
-                config={{ cumIncluded: { label: "Included used", color: COLOR_CREDITS } } satisfies ChartConfig}
+                config={
+                  {
+                    cumIncluded: { label: "Included used", color: COLOR_CREDITS },
+                  } satisfies ChartConfig
+                }
                 className="h-48 w-full"
               >
                 <AreaChart data={daily} margin={{ left: 4, right: 8, top: 8 }}>
                   <CartesianGrid vertical={false} strokeOpacity={0.25} />
-                  <XAxis dataKey="day" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={10} minTickGap={28} />
+                  <XAxis
+                    dataKey="day"
+                    tickFormatter={shortDay}
+                    tickLine={false}
+                    axisLine={false}
+                    fontSize={10}
+                    minTickGap={28}
+                  />
                   <YAxis tickLine={false} axisLine={false} fontSize={10} width={44} />
-                  <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />} />
+                  <ChartTooltip
+                    content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />}
+                  />
                   {preset === "current" && cycle && (
                     <ReferenceLine
                       y={cycle.includedCredits}
                       stroke={COLOR_CREDITS}
                       strokeDasharray="4 4"
-                      label={{ value: "Included", position: "insideTopRight", fontSize: 10, fill: COLOR_CREDITS }}
+                      label={{
+                        value: "Included",
+                        position: "insideTopRight",
+                        fontSize: 10,
+                        fill: COLOR_CREDITS,
+                      }}
                     />
                   )}
                   <Area
@@ -481,13 +566,35 @@ export function UsageSection() {
               >
                 <BarChart data={daily} margin={{ left: 4, right: 8, top: 8 }}>
                   <CartesianGrid vertical={false} strokeOpacity={0.25} />
-                  <XAxis dataKey="day" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={10} minTickGap={28} />
-                  <YAxis tickLine={false} axisLine={false} fontSize={10} width={30} allowDecimals={false} />
-                  <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />} />
-                  <Bar dataKey="builds" fill={COLOR_BUILDS} radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion} />
+                  <XAxis
+                    dataKey="day"
+                    tickFormatter={shortDay}
+                    tickLine={false}
+                    axisLine={false}
+                    fontSize={10}
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    fontSize={10}
+                    width={30}
+                    allowDecimals={false}
+                  />
+                  <ChartTooltip
+                    content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />}
+                  />
+                  <Bar
+                    dataKey="builds"
+                    fill={COLOR_BUILDS}
+                    radius={[3, 3, 0, 0]}
+                    isAnimationActive={!reducedMotion}
+                  />
                 </BarChart>
               </ChartContainer>
-              <p className="mt-2 text-[11px] text-muted-foreground">{totals.builds} builds in this window.</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                {totals.builds} builds in this window.
+              </p>
             </SectionCard>
 
             {/* 4. Builds by engine mode (required) */}
@@ -499,7 +606,13 @@ export function UsageSection() {
                 <BarChart data={modeTotals} margin={{ left: 4, right: 8, top: 8 }}>
                   <CartesianGrid vertical={false} strokeOpacity={0.25} />
                   <XAxis dataKey="mode" tickLine={false} axisLine={false} fontSize={11} />
-                  <YAxis tickLine={false} axisLine={false} fontSize={10} width={30} allowDecimals={false} />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    fontSize={10}
+                    width={30}
+                    allowDecimals={false}
+                  />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion}>
                     {modeTotals.map((m) => (
@@ -510,7 +623,10 @@ export function UsageSection() {
               </ChartContainer>
               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                 {modeTotals.map((m) => (
-                  <span key={m.mode} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <span
+                    key={m.mode}
+                    className="flex items-center gap-1 text-[10px] text-muted-foreground"
+                  >
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: m.fill }} />
                     {m.mode}: {m.count}
                   </span>
@@ -534,7 +650,11 @@ export function UsageSection() {
                     <Pie
                       data={[
                         { name: "Deep", value: deepStats.count, fill: COLOR_DEEP },
-                        { name: "Standard", value: Math.max(totals.builds - deepStats.count, 0), fill: COLOR_STANDARD },
+                        {
+                          name: "Standard",
+                          value: Math.max(totals.builds - deepStats.count, 0),
+                          fill: COLOR_STANDARD,
+                        },
                       ]}
                       dataKey="value"
                       nameKey="name"
@@ -555,7 +675,8 @@ export function UsageSection() {
                   <p className="text-xs text-muted-foreground">
                     Deep surcharge:{" "}
                     <span className="font-semibold text-foreground">
-                      ≈{deepStats.surchargeCredits.toLocaleString()} credits ({formatUsdCents(deepStats.surchargeUsd)})
+                      ≈{deepStats.surchargeCredits.toLocaleString()} credits (
+                      {formatUsdCents(deepStats.surchargeUsd)})
                     </span>{" "}
                     on top of the base mode cost.
                   </p>
@@ -569,15 +690,29 @@ export function UsageSection() {
             {/* 6. Cost by project */}
             <SectionCard title="Cost by project" testId="chart-projects">
               {projectTotals.length === 0 ? (
-                <p className="py-8 text-center text-xs text-muted-foreground">No project usage in this window.</p>
+                <p className="py-8 text-center text-xs text-muted-foreground">
+                  No project usage in this window.
+                </p>
               ) : (
                 <ChartContainer
-                  config={{ credits: { label: "Credits", color: COLOR_SPEND } } satisfies ChartConfig}
+                  config={
+                    { credits: { label: "Credits", color: COLOR_SPEND } } satisfies ChartConfig
+                  }
                   className="h-48 w-full"
                 >
-                  <BarChart data={projectTotals} layout="vertical" margin={{ left: 8, right: 12, top: 4 }}>
+                  <BarChart
+                    data={projectTotals}
+                    layout="vertical"
+                    margin={{ left: 8, right: 12, top: 4 }}
+                  >
                     <CartesianGrid horizontal={false} strokeOpacity={0.25} />
-                    <XAxis type="number" tickLine={false} axisLine={false} fontSize={10} allowDecimals={false} />
+                    <XAxis
+                      type="number"
+                      tickLine={false}
+                      axisLine={false}
+                      fontSize={10}
+                      allowDecimals={false}
+                    />
                     <YAxis
                       type="category"
                       dataKey="name"
@@ -588,7 +723,12 @@ export function UsageSection() {
                       tickFormatter={(v: string) => (v.length > 16 ? `${v.slice(0, 15)}…` : v)}
                     />
                     <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="credits" fill={COLOR_SPEND} radius={[0, 3, 3, 0]} isAnimationActive={!reducedMotion} />
+                    <Bar
+                      dataKey="credits"
+                      fill={COLOR_SPEND}
+                      radius={[0, 3, 3, 0]}
+                      isAnimationActive={!reducedMotion}
+                    />
                   </BarChart>
                 </ChartContainer>
               )}
@@ -613,19 +753,49 @@ export function UsageSection() {
             >
               <BarChart data={daily} margin={{ left: 4, right: 8, top: 8 }}>
                 <CartesianGrid vertical={false} strokeOpacity={0.25} />
-                <XAxis dataKey="day" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={10} minTickGap={28} />
+                <XAxis
+                  dataKey="day"
+                  tickFormatter={shortDay}
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={10}
+                  minTickGap={28}
+                />
                 <YAxis tickLine={false} axisLine={false} fontSize={10} width={44} />
-                <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />} />
-                {hasPool && <Bar dataKey="pool" stackId="c" fill={COLOR_POOL} isAnimationActive={!reducedMotion} />}
-                <Bar dataKey="included" stackId="c" fill={COLOR_INCLUDED} isAnimationActive={!reducedMotion} />
-                <Bar dataKey="overage" stackId="c" fill={COLOR_PAYG} radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion} />
+                <ChartTooltip
+                  content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />}
+                />
+                {hasPool && (
+                  <Bar
+                    dataKey="pool"
+                    stackId="c"
+                    fill={COLOR_POOL}
+                    isAnimationActive={!reducedMotion}
+                  />
+                )}
+                <Bar
+                  dataKey="included"
+                  stackId="c"
+                  fill={COLOR_INCLUDED}
+                  isAnimationActive={!reducedMotion}
+                />
+                <Bar
+                  dataKey="overage"
+                  stackId="c"
+                  fill={COLOR_PAYG}
+                  radius={[3, 3, 0, 0]}
+                  isAnimationActive={!reducedMotion}
+                />
               </BarChart>
             </ChartContainer>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              {totals.included.toLocaleString()} included credits · {totals.overage.toLocaleString()} pay-as-you-go
-              credits ({formatUsdCents(totals.overageUsdCents)})
-              {hasPool ? ` · ${totals.pool.toLocaleString()} credits drawn from your organization's pool` : ""} in
-              this window.
+              {totals.included.toLocaleString()} included credits ·{" "}
+              {totals.overage.toLocaleString()} pay-as-you-go credits (
+              {formatUsdCents(totals.overageUsdCents)})
+              {hasPool
+                ? ` · ${totals.pool.toLocaleString()} credits drawn from your organization's pool`
+                : ""}{" "}
+              in this window.
             </p>
           </SectionCard>
         </>

@@ -1,15 +1,8 @@
 import { Brain, Feather, Gem, Leaf, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+export type BuilderAgentMode = "lite" | "eco" | "power" | "pro";
 
-export type BuilderAgentMode = keyof typeof BUILDER_CREDIT_COST;
-
-export const BUILDER_AGENT_MODES: readonly BuilderAgentMode[] = [
-  "lite",
-  "eco",
-  "power",
-  "pro",
-];
+export const BUILDER_AGENT_MODES: readonly BuilderAgentMode[] = ["lite", "eco", "power", "pro"];
 
 const MODE_LABELS: Record<BuilderAgentMode, string> = {
   lite: "Lite",

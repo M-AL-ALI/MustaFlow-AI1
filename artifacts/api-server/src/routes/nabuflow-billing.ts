@@ -78,7 +78,10 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-function requireUserId(req: { userId?: string }, res: { status: (n: number) => { json: (b: unknown) => void } }): string | null {
+function requireUserId(
+  req: { userId?: string },
+  res: { status: (n: number) => { json: (b: unknown) => void } },
+): string | null {
   const userId = req.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthenticated" });
@@ -105,9 +108,13 @@ function stripeErrStatus(code: NabuflowStripeError["code"]): number {
   }
 }
 
-function handleNabuflowError(res: {
-  status: (n: number) => { json: (b: unknown) => void };
-}, err: unknown, fallback: string): void {
+function handleNabuflowError(
+  res: {
+    status: (n: number) => { json: (b: unknown) => void };
+  },
+  err: unknown,
+  fallback: string,
+): void {
   if (err instanceof NabuflowStripeError) {
     res.status(stripeErrStatus(err.code)).json({ error: err.message, code: err.code });
     return;
@@ -143,6 +150,26 @@ function publicPlanShape(plan: NabuflowPlanConfig) {
 router.get("/billing/nabuflow/plans", async (_req, res): Promise<void> => {
   res.json({
     plans: NABUFLOW_PLAN_IDS.map((id) => publicPlanShape(NABUFLOW_PLANS[id])),
+  });
+});
+
+// ── GET /billing/nabuflow/credit-costs ─────────────────────────────────────────
+// PUBLIC — no auth required; returns the current builder credit cost table so
+// the frontend can display mode costs without hard-coding them.
+router.get("/billing/nabuflow/credit-costs", async (_req, res): Promise<void> => {
+  const { creditCostFor, DEEP_REASONING_CREDIT_COST } = await import("../lib/ai-providers");
+  res.json({
+    standard: {
+      lite: creditCostFor("lite"),
+      eco: creditCostFor("eco"),
+      power: creditCostFor("power"),
+      pro: creditCostFor("pro"),
+    },
+    deep: {
+      eco: DEEP_REASONING_CREDIT_COST.eco ?? creditCostFor("eco"),
+      power: DEEP_REASONING_CREDIT_COST.power ?? creditCostFor("power"),
+      pro: DEEP_REASONING_CREDIT_COST.pro ?? creditCostFor("pro"),
+    },
   });
 });
 

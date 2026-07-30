@@ -29,7 +29,7 @@ import { AgentIcon } from "@/components/agent-icon";
 import { PlanDecomposeView } from "./plan-decompose";
 import { PlanHistoryPanel } from "./plan-history";
 import { cn } from "@/lib/utils";
-import { BUILDER_CREDIT_COST } from "@/lib/builder-followup-submit";
+import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
 import {
   BUILDER_AGENT_MODES,
   BuilderModeIcon,
@@ -68,8 +68,6 @@ export type StructuredPlan = {
 };
 
 type AgentMode = BuilderAgentMode;
-
-const CREDIT_MULTIPLIER = BUILDER_CREDIT_COST;
 
 const MODE_COLORS: Record<AgentMode, string> = {
   pro: "bg-purple-500/10 text-purple-400 border-purple-500/20",
@@ -504,6 +502,7 @@ export function PlanCard({
     (plan?.recommendedMode as AgentMode | undefined) ?? initialAgentMode,
   );
   const effectiveMode = modeOverride ?? localMode;
+  const creditCosts = useBuilderCreditCosts();
   const [editState, setEditState] = useState<EditState>(() => {
     const base: EditState = {
       goal: plan?.goal ?? "",
@@ -576,8 +575,8 @@ export function PlanCard({
   const estimatedSeconds = plan?.estimatedBuildSeconds ?? 0;
   const creditCost =
     score > 0
-      ? Math.max(1, Math.round(score * CREDIT_MULTIPLIER[effectiveMode]))
-      : CREDIT_MULTIPLIER[effectiveMode];
+      ? Math.max(1, Math.round(score * creditCosts.standard[effectiveMode]))
+      : creditCosts.standard[effectiveMode];
 
   const keysNeeded = plan?.keysNeeded ?? [];
   const missingKeys = keysNeeded.filter((k) => !secretNames.has(k.toLowerCase()));
@@ -1334,7 +1333,7 @@ export function PlanCard({
               </span>
               {score > 0 && (
                 <span className="ml-1 text-muted-foreground/60">
-                  (complexity {score} × {CREDIT_MULTIPLIER[effectiveMode]}×)
+                  (complexity {score} × {creditCosts.standard[effectiveMode]}×)
                 </span>
               )}
             </span>
