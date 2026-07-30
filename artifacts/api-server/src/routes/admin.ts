@@ -854,6 +854,10 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
     .from(domainServeEventsTable)
     .where(gte(domainServeEventsTable.ts, since));
 
+  const statusFilter = _statusFilter && ["open", "dismissed", "resolved"].includes(_statusFilter)
+    ? _statusFilter
+    : undefined;
+
   res.json({
     sinceDays: days,
     totalDomains: totalDomainsRow?.total ?? 0,
@@ -866,7 +870,9 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
 // ── GET /api/admin/abuse-reports ──────────────────────────────────────────────
 // Returns abuse reports with optional ?status=open|dismissed|resolved filter.
 router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
-  const statusFilter = req.query.status as string | undefined;
+  const statusFilter = _statusFilter && ["open", "dismissed", "resolved"].includes(_statusFilter)
+    ? _statusFilter
+    : undefined;
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const offset = Number(req.query.offset ?? 0);
 
