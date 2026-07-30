@@ -623,7 +623,15 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
 
 // ── GET /api/admin/roles ──────────────────────────────────────────────────────
 router.get("/admin/roles", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(userRolesTable);
+  const rows = await db
+    .select({
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
+    })
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
   res.json({ roles: rows });
 });
 
@@ -672,8 +680,8 @@ router.get("/admin/audit-log", async (req, res): Promise<void> => {
   const rawLimit = Number(req.query["limit"] ?? 50);
   const rawOffset = Number(req.query["offset"] ?? 0);
 
-  const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200);
-  const offset = Math.max(0, isNaN(rawOffset) ? 0 : rawOffset);
+  const limit = Math.min(Number(req.query.limit ?? 100), 500);
+  const offset = Number(req.query.offset ?? 0);
 
   const [entries, [totalRow]] = await Promise.all([
     db
@@ -864,12 +872,14 @@ router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
   const offset = Number(req.query.offset ?? 0);
 
   const rows = await db
-    .select()
-    .from(abuseReportsTable)
-    .where(statusFilter ? eq(abuseReportsTable.status, statusFilter) : undefined)
-    .orderBy(desc(abuseReportsTable.createdAt))
-    .limit(limit)
-    .offset(offset);
+    .select({
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
+    })
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
 
   const [totals] = await db
     .select({
