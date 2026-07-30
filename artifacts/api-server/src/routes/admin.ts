@@ -246,81 +246,20 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
       GROUP BY mode
       ORDER BY mode
     `);
-    buildTokenTelemetryRows = bttResult.rows.map((r) => ({
-      mode: r.mode,
-      buildCount: Number(r.build_count),
-      avgInputTokens: Number(r.avg_input_tokens ?? 0),
-      avgOutputTokens: Number(r.avg_output_tokens ?? 0),
-      avgUsdCost: r.avg_usd_cost ? Number(Number(r.avg_usd_cost).toFixed(6)) : 0,
-    }));
-  } catch {
-    /* non-fatal — table may not exist on older deploys */
-  }
 
-  res.json({
-    projects: {
-      total: projectStats?.total ?? 0,
-      published: publishedStats?.total ?? 0,
-    },
-    users: {
-      withCredits: creditStats?.total ?? 0,
-      withRoles: roleStats?.total ?? 0,
-    },
-    transactions: txStats?.total ?? 0,
-    deployments: deployStats?.total ?? 0,
-    cfHostnames,
-    architectReviews: {
-      windowDays: 30,
-      reviewed: Number(archRow?.reviewed ?? 0),
-      avgFindingsPerBuild: archRow?.avg_findings
-        ? Number(Number(archRow.avg_findings).toFixed(2))
-        : 0,
-      passCount: Number(archRow?.pass ?? 0),
-      partialCount: Number(archRow?.partial ?? 0),
-      failCount: Number(archRow?.fail ?? 0),
-      autoFixesQueued: Number(archRow?.auto_fixed ?? 0),
-    },
-    prodErrors: {
-      last14Days: errorsTotal,
-      byDay: errorsByDay,
-    },
-    e2e: {
-      runs7d: e2eAgg.runs,
-      scenarios7d: e2eTotal,
-      passRate7d,
-    },
-    topSkills: {
-      windowDays: SKILLS_WINDOW_DAYS,
-      totalBuildsWithSkills,
-      skills: topSkills,
-    },
-    tokenUsage: {
-      windowDays: 30,
-      totalTokens: Number(tokenRow?.total_tokens ?? 0),
-      avgTokensPerTask: tokenRow?.avg_tokens_per_task
-        ? Number(Number(tokenRow.avg_tokens_per_task).toFixed(0))
-        : 0,
-      tasksWithTokens: Number(tokenRow?.tasks_with_tokens ?? 0),
-      totalTasks: Number(tokenRow?.total_tasks ?? 0),
-    },
-    /** NabuFlow R2 Phase D — trailing 7-day per-mode token averages. */
-    buildTokenTelemetry: {
-      windowDays: 7,
-      byMode: buildTokenTelemetryRows,
-    },
-  });
-});
-
-// ── GET /api/admin/telemetry/calibration ─────────────────────────────────────
-// NabuFlow R2 Phase D calibration report.
-//
-// Returns per-mode: avg actual USD cost (from build_token_telemetry),
-// the credit charge basis in USD, the ratio between them, and a flag when the
-// ratio drops below 1.15× (indicating that AI cost may exceed the charge basis).
-//
-// Read-only. No business logic is changed by this endpoint.
-router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
-  try {
+    const bttRows = await db.execute<{
+      mode: string;
+      build_count: string;
+      avg_actual_cost_usd: string | null;
+    }>(sql`
+      SELECT
+        mode,
+        COUNT(*)::int             AS build_count,
+        AVG(computed_usd_cost::float) AS avg_actual_cost_usd
+      FROM build_token_telemetry
+      WHERE recorded_at > now() - interval '7 days'
+      GROUP BY mode
+    `);
   const rows = await db
     .select({
       userId: userCreditsTable.userId,
@@ -330,7 +269,6 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
     .from(userCreditsTable)
     .orderBy(desc(userCreditsTable.balance))
     .limit(100);
-
     const MODES = ["lite", "eco", "power", "pro"] as const;
     type ModeName = (typeof MODES)[number];
 
@@ -388,9 +326,6 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
 // owning project's name resolved for display in the admin dashboard tile.
 router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
   const { agentInboxTable, projectsTable } = await import("@workspace/db");
-
-  const { eq, desc, sql } = await import("drizzle-orm");
-  const { eq, desc, sql } = await import("drizzle-orm");
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const rows = await db
     .select({
