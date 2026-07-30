@@ -134,6 +134,6 @@ export function resolveBuilderComposerIntent({
   if (localIntent === "converse" || localIntent === "plan" || localIntent === "build") {
     return localIntent;
   }
-  if (hasCompletedTask && routingAgentIdentity !== "planning") return "build";
+  if (hasCompletedTask && routingAgentIdentity === "main") return "build";
   return undefined;
 }

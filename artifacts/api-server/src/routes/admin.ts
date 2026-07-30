@@ -385,7 +385,8 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
 // owning project's name resolved for display in the admin dashboard tile.
 router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
   const { agentInboxTable, projectsTable } = await import("@workspace/db");
-  const limit = Math.min(Number(req.query.limit ?? 100), 500);
+  const rawLimit = Number(req.query.limit ?? 100);
+  const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 100 : rawLimit), 500);
   const rows = await db
     .select({
       id: agentInboxTable.id,
@@ -662,8 +663,10 @@ router.delete("/admin/roles/:userId", async (req, res): Promise<void> => {
 // ── GET /api/admin/audit-log ──────────────────────────────────────────────────
 // Query params: limit (1–200, default 50), offset (default 0)
 router.get("/admin/audit-log", async (req, res): Promise<void> => {
-  const limit = Math.min(Number(req.query.limit ?? 100), 500);
-  const offset = Number(req.query.offset ?? 0);
+  const rawLimit = Number(req.query.limit ?? 50);
+  const rawOffset = Number(req.query.offset ?? 0);
+  const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200);
+  const offset = isNaN(rawOffset) || rawOffset < 0 ? 0 : rawOffset;
 
   const [entries, [totalRow]] = await Promise.all([
     db
