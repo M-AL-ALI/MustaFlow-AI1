@@ -675,8 +675,6 @@ router.delete("/admin/roles/:userId", async (req, res): Promise<void> => {
 // ── GET /api/admin/audit-log ──────────────────────────────────────────────────
 // Query params: limit (1–200, default 50), offset (default 0)
 router.get("/admin/audit-log", async (req, res): Promise<void> => {
-  const rawLimit = Number(req.query.limit ?? 50);
-  const rawOffset = Number(req.query.offset ?? 0);
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const offset = Number(req.query.offset ?? 0);
 
@@ -873,14 +871,12 @@ router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
   const offset = Number(req.query.offset ?? 0);
 
   const rows = await db
-    .select({
-      userId: userCreditsTable.userId,
-      balance: userCreditsTable.balance,
-      updatedAt: userCreditsTable.updatedAt,
-    })
-    .from(userCreditsTable)
-    .orderBy(desc(userCreditsTable.balance))
-    .limit(100);
+    .select()
+    .from(abuseReportsTable)
+    .where(statusFilter ? eq(abuseReportsTable.status, statusFilter) : undefined)
+    .orderBy(desc(abuseReportsTable.createdAt))
+    .limit(limit)
+    .offset(offset);
 
   const [totals] = await db
     .select({
