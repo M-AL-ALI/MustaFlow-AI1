@@ -10,7 +10,9 @@ import {
   useRollbackVersion,
   useListSuggestions,
   useGetUserCredits,
+  useGetNabuflowBillingState,
   getGetUserCreditsQueryKey,
+  getGetNabuflowBillingStateQueryKey,
   useGetMyPreferences,
   useUpdateMyPreferences,
   getGetMyPreferencesQueryKey,
@@ -913,6 +915,23 @@ export default function ProjectWorkspacePage() {
   } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId), retry: false },
   });
+  const {
+    data: nabuflowBillingState,
+    isLoading: nabuflowBillingStateLoading,
+    isError: nabuflowBillingStateError,
+  } = useGetNabuflowBillingState({
+    query: {
+      queryKey: getGetNabuflowBillingStateQueryKey(),
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+    },
+  });
+  // Unknown, loading, and errored billing state all resolve to non-exempt.
+  // Only an explicit server-confirmed exemption may skip the local confirmation.
+  const billingExempt =
+    !nabuflowBillingStateLoading &&
+    !nabuflowBillingStateError &&
+    nabuflowBillingState?.exempt === true;
   const sendMessage = useSendMessage();
   const { data: messages } = useListMessages(projectId, {
     query: {
@@ -2596,6 +2615,7 @@ export default function ProjectWorkspacePage() {
           deepReasoning: effectiveDeepReasoning,
           isLikelyConverse,
           creditConfirmed: creditConfirmedRef.current,
+          billingExempt,
         })
       ) {
         pendingCreditConfirmRef.current = () => {
@@ -3032,6 +3052,7 @@ export default function ProjectWorkspacePage() {
       queryClient,
       agentIdentity,
       tasksForFeed,
+      billingExempt,
     ],
   );
 
