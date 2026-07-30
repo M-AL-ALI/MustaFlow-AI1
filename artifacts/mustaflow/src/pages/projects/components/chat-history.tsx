@@ -162,7 +162,7 @@ type TaskReport = {
     nextActions: string[];
     autoFixQueued: boolean;
     autoFixTaskId?: number | null;
-    creditsCharged: number;
+    creditsCharged?: number;
     reviewedAt: string;
     model: string;
     skipped?: boolean;
@@ -855,7 +855,11 @@ const TESTS_PENDING_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 // ─────────────────────────────────────────────────────────────────────────────
 // Architect review card (Task #507) — verdict badge + collapsible findings.
 // ─────────────────────────────────────────────────────────────────────────────
-function ArchitectReviewCard({ review }: { review: NonNullable<TaskReport["architectReview"]> }) {
+export function ArchitectReviewCard({
+  review,
+}: {
+  review: NonNullable<TaskReport["architectReview"]>;
+}) {
   const [open, setOpen] = useState(false);
   const verdictStyle = {
     pass: {
@@ -882,6 +886,7 @@ function ArchitectReviewCard({ review }: { review: NonNullable<TaskReport["archi
     low: "bg-sky-500/15 text-sky-400 border-sky-500/30",
   };
   const findingCount = review.findings.length;
+  const creditsCharged = review.creditsCharged ?? 0;
 
   return (
     <div className="pt-1.5 border-t border-border">
@@ -980,10 +985,10 @@ function ArchitectReviewCard({ review }: { review: NonNullable<TaskReport["archi
             </div>
           )}
           <p className="text-[10px] text-muted-foreground/70">
-            {review.creditsCharged > 0
-              ? `${review.creditsCharged} credit${review.creditsCharged === 1 ? "" : "s"} charged`
-              : "No credits charged"}
-            {review.model ? ` · ${review.model}` : ""}
+            {creditsCharged > 0
+              ? `${creditsCharged} credit${creditsCharged === 1 ? "" : "s"} charged`
+              : null}
+            {review.model ? `${creditsCharged > 0 ? " · " : ""}${review.model}` : ""}
           </p>
         </div>
       )}

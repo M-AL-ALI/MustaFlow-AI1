@@ -39,7 +39,6 @@ import {
   IMAGE_RATE_LIMIT_PER_HOUR,
   IMAGE_DAILY_LIMIT,
 } from "../routes/image-credits";
-import { CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
 import { isSuperuser } from "./superusers";
 import { refundOraQuota } from "./public-ai/ora-usage";
 import {
@@ -369,13 +368,12 @@ export async function enqueueImageJob(
   jobs.set(jobId, job);
 
   // Kick off background processing (fire-and-forget, errors handled internally).
-  // creditsWereDeducted is false when CREDITS_ENFORCEMENT_ENABLED is off so that
-  // refundCredits is not called unconditionally (which would create free credits).
+  // Refund only an amount the deduction source of truth says was actually charged.
   void runImageJob(
     job,
     { ...opts, quality: resolvedQuality, subscriptionTier: planTier },
     creditCost,
-    CREDITS_ENFORCEMENT_ENABLED,
+    deduction.charged > 0,
   );
 
   return { jobId, imageId };
@@ -466,6 +464,7 @@ export async function enqueueImageEditJob(
   if (!imageRow) throw new Error("Failed to create edit image record");
   const imageId = imageRow.id;
 
+  let creditsWereDeducted = false;
   if (billingMode === "credits") {
     // Deduct credits atomically
     const deduction = await deductCreditsAtomic(userId, creditCost, {
@@ -488,6 +487,7 @@ export async function enqueueImageEditJob(
         balance: deduction.balance,
       });
     }
+    creditsWereDeducted = deduction.charged > 0;
   }
 
   const jobId = randomUUID();
@@ -504,7 +504,7 @@ export async function enqueueImageEditJob(
     job,
     { ...opts, quality: resolvedQuality, subscriptionTier: planTier, providerInstruction },
     creditCost,
-    billingMode === "credits" && CREDITS_ENFORCEMENT_ENABLED,
+    creditsWereDeducted,
   );
 
   return { jobId, imageId };

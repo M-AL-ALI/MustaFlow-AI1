@@ -857,7 +857,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         res.status(402).json({ error: "Insufficient credits to reserve background run." });
         return;
       }
-      reservedCredits = cost;
+      reservedCredits = deduct.charged;
     }
 
     const [task] = await db

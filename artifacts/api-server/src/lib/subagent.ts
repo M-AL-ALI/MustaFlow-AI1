@@ -205,7 +205,7 @@ async function chargeRoleCredits(
     if ("insufficient" in debit) {
       return { ok: false, reason: `insufficient credits (need ${cost}, have ${debit.balance})` };
     }
-    return { ok: true, charged: cost };
+    return { ok: true, charged: debit.charged };
   } catch (err) {
     logger.warn({ err, role }, "Subagent credit deduction failed (non-fatal)");
     return { ok: true, charged: 0 };

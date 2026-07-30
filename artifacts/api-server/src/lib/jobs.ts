@@ -5571,7 +5571,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   description: `Architect review for task #${taskId} (verdict: ${review.verdict}, findings: ${review.findings.length})`,
                 });
                 if (!("insufficient" in debit)) {
-                  creditsCharged = ARCHITECT_CREDIT_COST;
+                  creditsCharged = debit.charged;
                 }
               } catch (creditErr) {
                 logger.warn(

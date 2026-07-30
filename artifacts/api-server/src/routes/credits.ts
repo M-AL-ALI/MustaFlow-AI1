@@ -154,7 +154,12 @@ export async function deductCredits(
 
 // Atomic credit deduction — uses a conditional UPDATE so concurrent requests
 // cannot both succeed when the balance is tight. Falls back gracefully when
-// CREDITS_ENFORCEMENT is disabled. Returns { insufficient } when balance < amount.
+// CREDITS_ENFORCEMENT is disabled. Successful results report the amount that
+// was actually charged; exempt/no-op paths return charged: 0.
+export type CreditDeductionResult =
+  | { newBalance: number; charged: number }
+  | { insufficient: true; balance: number };
+
 export async function deductCreditsAtomic(
   userId: string,
   amount: number,
@@ -168,17 +173,17 @@ export async function deductCreditsAtomic(
     taskId?: number | null;
     source?: string | null;
   },
-): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
+): Promise<CreditDeductionResult> {
   const credits = await getOrCreateCredits(userId);
 
   // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. No
   // deduction, no transaction row, never "insufficient".
   if (await isSuperuser(userId)) {
-    return { newBalance: credits.balance };
+    return { newBalance: credits.balance, charged: 0 };
   }
 
   if (!CREDITS_ENFORCEMENT_ENABLED) {
-    return { newBalance: credits.balance };
+    return { newBalance: credits.balance, charged: 0 };
   }
 
   // NabuFlow billing (Task #1516): allow-listed owners build free with no
@@ -189,7 +194,7 @@ export async function deductCreditsAtomic(
   try {
     const nabuflow = await import("../lib/nabuflow-billing");
     if (await nabuflow.isBuilderAllowlistExempt(userId)) {
-      return { newBalance: credits.balance };
+      return { newBalance: credits.balance, charged: 0 };
     }
     const nabuCharge = await nabuflow.maybeChargeNabuflow(userId, amount, {
       projectId: opts.projectId ?? null,
@@ -200,7 +205,7 @@ export async function deductCreditsAtomic(
       deepReasoning: opts.deepReasoning ?? false,
       source: opts.source ?? null,
     });
-    if (nabuCharge) return nabuCharge;
+    if (nabuCharge) return { ...nabuCharge, charged: amount };
   } catch (err) {
     logger.error(
       { err, userId, amount },
@@ -262,7 +267,7 @@ export async function deductCreditsAtomic(
     })();
   }
 
-  return { newBalance: updated.balance };
+  return { newBalance: updated.balance, charged: amount };
 }
 
 // Refund credits — used when a background job is canceled, discarded, or fails
