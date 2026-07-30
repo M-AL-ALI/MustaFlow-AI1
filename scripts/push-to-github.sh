@@ -39,13 +39,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
 git add \
-  artifacts/api-server/src \
-  artifacts/api-server/acceptance \
-  artifacts/mustaflow/src \
-  lib/api-client-react/src/generated \
-  lib/api-spec/openapi.yaml \
-  lib/api-zod/src \
-  lib/db/src/schema \
   .agents/memory \
   docs/changelog.md \
   scripts/push-to-github.sh \
