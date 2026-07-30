@@ -197,6 +197,7 @@ import {
   recoveryStepForEvent,
   type InlineRecoveryStep,
 } from "./components/inline-recovery-loop";
+import { addRunStepId, createRunStepIdSet, type RunStepIdSet } from "./components/run-step-count";
 import { InlineBuilderError } from "./components/inline-builder-error";
 import { EditAndResend, latestUserMessageId } from "./components/edit-and-resend";
 import {
@@ -1106,6 +1107,8 @@ export default function ProjectWorkspacePage() {
   const [liveRunTerminalEvent, setLiveRunTerminalEvent] = useState<
     "completed" | "failed" | "cancelled" | null
   >(null);
+  const liveRunStepIdsRef = useRef<RunStepIdSet>(createRunStepIdSet());
+  const [liveRunStepCount, setLiveRunStepCount] = useState(0);
   const [brainstormActivity, setBrainstormActivity] = useState<InlineActivityEntry | null>(null);
   const [publishingActivity, setPublishingActivity] = useState<InlineActivityEntry | null>(null);
   const surfaceActivityIdRef = useRef(1_000_000);
@@ -1120,11 +1123,10 @@ export default function ProjectWorkspacePage() {
     setPublishingActivity(surfaceActivityEntry(surfaceActivityIdRef.current, "publishing", update));
   }, []);
   const [, setLiveCodeBuffer] = useState("");
-  const liveRunStepCount = new Set([
-    ...liveActivityEvents.map((event) => event.id),
-    ...liveNarrationEvents.map((event) => event.id),
-    ...liveQATapeEvents.map((event) => event.id),
-  ]).size;
+  useEffect(() => {
+    liveRunStepIdsRef.current = createRunStepIdSet();
+    setLiveRunStepCount(0);
+  }, [activeTaskId]);
   const taskEventSourceRef = useRef<EventSource | null>(null);
   // Project-level preview event stream — receives project_files_changed /
   // preview_ready / preview_sync_failed events independent of any task.
@@ -2119,6 +2121,10 @@ export default function ProjectWorkspacePage() {
             kind?: string;
           };
         };
+        const nextRunStepCount = addRunStepId(liveRunStepIdsRef.current, event);
+        setLiveRunStepCount((current) =>
+          current === nextRunStepCount ? current : nextRunStepCount,
+        );
         if (event.eventType === "qa_step") {
           setLiveQATapeEvents((current) => {
             if (current.some((item) => item.id === event.id)) return current;

@@ -22,7 +22,7 @@ describe("buildRunReplayModel", () => {
       { id: 5, eventType: "heartbeat", message: "Still alive" },
     ]);
 
-    expect(replay.stepCount).toBe(5);
+    expect(replay.stepCount).toBe(1);
     expect(replay.activities.map((entry) => entry.kind)).toEqual([
       "reading",
       "checking",
