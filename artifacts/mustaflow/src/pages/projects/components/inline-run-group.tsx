@@ -37,6 +37,7 @@ import {
   type RecoveryReport,
   type RecoveryTask,
 } from "./inline-run-recovery";
+import { buildRunStepIdSet } from "./run-step-count";
 
 type ReplayEvent = QATapeEvent & {
   taskId?: number;
@@ -56,8 +57,9 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
   let narrations: InlineNarrationEntry[] = [];
   let recoverySteps: InlineRecoveryStep[] = [];
   const qaEvents: QATapeEvent[] = [];
+  const chronologicalEvents = [...events].sort((left, right) => left.id - right.id);
 
-  for (const event of [...events].sort((left, right) => left.id - right.id)) {
+  for (const event of chronologicalEvents) {
     const activity = taskActivityForEvent(event.id, event.eventType, event.message);
     if (activity) {
       activities = appendActivityEntry(activities, activity);
@@ -76,15 +78,7 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
     if (recovery) recoverySteps = appendRecoveryStep(recoverySteps, recovery);
   }
 
-  // Match the live counter exactly: count the retained activity, narration, and
-  // QA rows after the same dedupe/windowing helpers have run, with shared event
-  // ids counted once. Counting raw qualifying history diverges from what the
-  // user actually saw live.
-  const stepIds = new Set([
-    ...activities.map((entry) => entry.id),
-    ...narrations.map((entry) => entry.id),
-    ...qaEvents.map((entry) => entry.id),
-  ]);
+  const stepIds = buildRunStepIdSet(chronologicalEvents);
 
   return { activities, narrations, qaEvents, recoverySteps, stepCount: stepIds.size };
 }
