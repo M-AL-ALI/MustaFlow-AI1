@@ -436,9 +436,9 @@ describe("composer credit counter", () => {
 
     const counter = await screen.findByTestId("composer-credit-counter");
     expect(counter).toBeInTheDocument();
-    // Project has agentMode: "power" → 5 credits
+    // Project has agentMode: "power" → 160 credits (current pricing table)
     expect(counter).toHaveTextContent(/Power/i);
-    expect(counter).toHaveTextContent(/5\s*credits/);
+    expect(counter).toHaveTextContent(/160\s*credits/);
   });
 
   it("shows remaining included credits when cycle data is available", async () => {
@@ -519,7 +519,7 @@ describe("overage-crossing notice", () => {
   });
 
   it("does NOT show the overage notice when remainingIncludedCredits >= modeCost", async () => {
-    // Power mode costs 5 credits; remaining = 10 → still within included
+    // Power mode costs 160 credits; remaining = 200 → still within included
     testState.billing = {
       data: {
         enforcementEnabled: true,
@@ -530,7 +530,7 @@ describe("overage-crossing notice", () => {
         subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
         card: null,
         spendCap: null,
-        cycle: { remainingIncludedCredits: 10 },
+        cycle: { remainingIncludedCredits: 200 },
       },
       isLoading: false,
       isError: false,

@@ -7,15 +7,15 @@ import {
 
 describe("Deep Reasoning pricing", () => {
   it("uses the fixed price table for all modes and deep variants", () => {
-    expect(builderCreditCost("lite", false)).toBe(1);
-    expect(builderCreditCost("eco", false)).toBe(2);
-    expect(builderCreditCost("power", false)).toBe(5);
-    expect(builderCreditCost("pro", false)).toBe(10);
-    expect(builderCreditCost("eco", true)).toBe(3);
-    expect(builderCreditCost("power", true)).toBe(7);
-    expect(builderCreditCost("pro", true)).toBe(13);
+    expect(builderCreditCost("lite", false)).toBe(13);
+    expect(builderCreditCost("eco", false)).toBe(34);
+    expect(builderCreditCost("power", false)).toBe(160);
+    expect(builderCreditCost("pro", false)).toBe(475);
+    expect(builderCreditCost("eco", true)).toBe(60);
+    expect(builderCreditCost("power", true)).toBe(290);
+    expect(builderCreditCost("pro", true)).toBe(850);
     // Deep on Lite is always Lite pricing (Deep is disabled for Lite)
-    expect(builderCreditCost("lite", true)).toBe(1);
+    expect(builderCreditCost("lite", true)).toBe(13);
   });
 });
 

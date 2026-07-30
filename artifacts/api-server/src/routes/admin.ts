@@ -618,15 +618,7 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
 
 // ── GET /api/admin/roles ──────────────────────────────────────────────────────
 router.get("/admin/roles", async (_req, res): Promise<void> => {
-  const rows = await db
-    .select({
-      userId: userCreditsTable.userId,
-      balance: userCreditsTable.balance,
-      updatedAt: userCreditsTable.updatedAt,
-    })
-    .from(userCreditsTable)
-    .orderBy(desc(userCreditsTable.balance))
-    .limit(100);
+  const rows = await db.select().from(userRolesTable);
   res.json({ roles: rows });
 });
 
