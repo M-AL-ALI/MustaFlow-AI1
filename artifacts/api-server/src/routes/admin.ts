@@ -863,7 +863,9 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
 // Returns abuse reports with optional ?status=open|dismissed|resolved filter.
 router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
   const _raw = req.query.status as string | undefined;
-  const statusFilter = _raw && ["open", "dismissed", "resolved"].includes(_raw) ? _raw : undefined;
+  const statusFilter = _raw && ["open", "dismissed", "resolved"].includes(_raw)
+    ? (_raw as "open" | "dismissed" | "resolved")
+    : undefined;
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const offset = Number(req.query.offset ?? 0);
 
