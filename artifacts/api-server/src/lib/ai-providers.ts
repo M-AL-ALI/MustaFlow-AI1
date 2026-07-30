@@ -464,18 +464,15 @@ export async function* streamChatCompletion(
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stream: any = await (openai.chat.completions as any).create(
-      {
-        model: params.model,
-        messages: params.messages,
-        max_completion_tokens: params.max_completion_tokens,
-        stream: true,
-      },
-      { signal: params.signal },
-    );
-    for await (const chunk of stream) {
-      if (params.signal?.aborted) return;
-      const delta = chunk.choices[0]?.delta?.content;
+  const stream: any = await ai.models.generateContentStream({
+    model: params.model,
+    contents,
+    config,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+  for await (const chunk of stream) {
+    if (params.signal?.aborted) return;
+    const delta = chunk.choices[0]?.delta?.content;
       if (delta) yield delta;
     }
     return;
@@ -504,15 +501,12 @@ async function* streamDeepSeek(
 ): AsyncGenerator<string, void, void> {
   const client = getDeepSeekClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await (client.chat.completions as any).create(
-    {
-      model: params.model,
-      messages: params.messages,
-      max_tokens: params.max_completion_tokens,
-      stream: true,
-    },
-    { signal: params.signal },
-  );
+  const stream: any = await ai.models.generateContentStream({
+    model: params.model,
+    contents,
+    config,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
   for await (const chunk of stream) {
     if (params.signal?.aborted) return;
     const delta = chunk.choices[0]?.delta?.content;
@@ -539,8 +533,8 @@ async function* streamAnthropic(
       if (Array.isArray(msg.content)) {
         turns.push({ role: "user", content: openAiContentToAnthropicBlocks(msg.content) });
       } else {
-        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-        turns.push({ role: "user", content });
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        contents.push({ role: "user", parts: [{ text: content }] });
       }
       continue;
     }
@@ -553,16 +547,12 @@ async function* streamAnthropic(
   const defaultMaxTokens = /haiku/i.test(params.model) ? 8192 : 16000;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await anthropic.messages.stream(
-    {
-      model: params.model,
-      max_tokens: params.max_completion_tokens ?? defaultMaxTokens,
-      system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-      messages: turns,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any,
-    { signal: params.signal },
-  );
+  const stream: any = await ai.models.generateContentStream({
+    model: params.model,
+    contents,
+    config,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
   for await (const event of stream) {
     if (params.signal?.aborted) return;
     if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
@@ -1274,6 +1264,14 @@ function lookupUsdPer1K(model: string, side: "input" | "output"): number {
  * Safe to call on failure — the upsert overwrites any stale row for the same
  * task_id. The existing `agent_tasks.token_count` column is unaffected.
  */
+/**
+ * Removes a task's accumulator entry without writing to the DB.
+ * Call on all non-success terminal paths (cancel, fail) so the Map
+ * does not grow unbounded in long-running workers.
+ */
+export function clearBuildTokenAccumulator(taskId: number): void {
+  buildTokenAccumulators.delete(taskId);
+}
 export async function flushBuildTokenTelemetry(taskId: number): Promise<void> {
   const acc = buildTokenAccumulators.get(taskId);
   buildTokenAccumulators.delete(taskId);
