@@ -26,12 +26,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 const h = vi.hoisted(() => {
   const state = {
     selectResult: [] as unknown[],
+    /** FIFO of per-select results; when empty, falls back to selectResult. */
+    selectQueue: [] as unknown[][],
     updates: [] as Array<Record<string, unknown>>,
     inserted: [] as Array<Record<string, unknown>>,
   };
 
   const makeWhereResult = () => {
-    const arr = state.selectResult;
+    const arr =
+      state.selectQueue.length > 0 ? (state.selectQueue.shift() as unknown[]) : state.selectResult;
     const thenable = Promise.resolve(arr) as Promise<unknown[]> & {
       limit: () => Promise<unknown[]>;
       orderBy: () => { limit: () => Promise<unknown[]> };
@@ -50,9 +53,25 @@ const h = vi.hoisted(() => {
         state.inserted.push(v);
         const p = Promise.resolve(undefined) as Promise<unknown> & {
           onConflictDoNothing: () => { returning: () => Promise<unknown[]> };
+          onConflictDoUpdate: (opts: unknown) => { returning: () => Promise<unknown[]> };
           returning: () => Promise<unknown[]>;
         };
         p.onConflictDoNothing = () => ({ returning: () => Promise.resolve([]) });
+        // Upsert returns the row as the DB would: schema defaults + values.
+        p.onConflictDoUpdate = () => ({
+          returning: () =>
+            Promise.resolve([
+              {
+                id: 991,
+                status: "incomplete",
+                rolloverCredits: 0,
+                dunningStatus: "none",
+                dunningAttemptCount: 0,
+                cancelAtPeriodEnd: false,
+                ...v,
+              },
+            ]),
+        });
         p.returning = () => Promise.resolve([v]);
         return p;
       },
@@ -117,6 +136,8 @@ import {
   nabuflowGateHttpBody,
   isChargeableNabuflowStatus,
   handleNabuflowInvoicePaymentFailed,
+  handleNabuflowSubscriptionEvent,
+  handleNabuflowInvoicePaid,
   _clearNabuflowAllowlistCache,
   type NabuflowGateState,
   type NabuflowGateRequest,
@@ -194,6 +215,7 @@ beforeEach(() => {
     delete process.env[k];
   }
   h.state.selectResult = [];
+  h.state.selectQueue = [];
   h.state.updates = [];
   h.state.inserted = [];
   _clearNabuflowAllowlistCache();
@@ -673,5 +695,145 @@ describe("dunning transitions", () => {
 
     await handleNabuflowInvoicePaymentFailed({ attempt_count: 1 });
     expect(h.state.updates).toHaveLength(0);
+  });
+});
+
+// ─── First-time subscription materialization ─────────────────────────────────
+// A brand-new subscriber has NO local nabuflow_subscriptions row when the
+// first Stripe event (or the subscribe route's direct sync) arrives. The
+// handlers must create it from metadata — otherwise the gate would keep
+// resolving "no plan" for a paying customer forever.
+describe("first-time subscription materialization", () => {
+  const PS = Math.floor(new Date("2026-07-30T00:00:00Z").getTime() / 1000);
+  const PE = Math.floor(new Date("2026-08-29T00:00:00Z").getTime() / 1000);
+
+  it("customer.subscription.created with no local row creates it, syncs state, and grants the first cycle", async () => {
+    const freshRow = {
+      id: 991,
+      userId: "u_first",
+      planId: "comet",
+      status: "active",
+      rolloverCredits: 0,
+      dunningStatus: "none",
+    };
+    h.state.selectQueue = [
+      [], // findNabuflowSubscriptionByStripeId — nothing yet
+      [], // getNabuflowSubscription(metadata userId) — first-timer
+      [freshRow], // re-fetch after the sync update, feeding grantNabuflowCycle
+      [], // latestCycleBefore — no previous cycle
+      [{ id: 5001, includedCredits: 4800 }], // getCycleRow (insert took conflict path)
+    ];
+
+    await handleNabuflowSubscriptionEvent("customer.subscription.created", {
+      id: "sub_first",
+      status: "active",
+      customer: "cus_shared_9",
+      cancel_at_period_end: false,
+      metadata: { surface: "nabuflow", plan: "comet", userId: "u_first" },
+      items: { data: [{ id: "si_first", current_period_start: PS, current_period_end: PE }] },
+    } as never);
+
+    // Row created with plan + Stripe linkage:
+    const created = h.state.inserted.find((i) => i.stripeSubscriptionId === "sub_first");
+    expect(created).toBeDefined();
+    expect(created!.userId).toBe("u_first");
+    expect(created!.planId).toBe("comet");
+    expect(created!.stripeCustomerId).toBe("cus_shared_9");
+
+    // State synced (status/plan/item id):
+    const sync = h.state.updates.find((u) => u.status === "active" && "stripeItemId" in u);
+    expect(sync).toBeDefined();
+    expect(sync!.planId).toBe("comet");
+    expect(sync!.stripeItemId).toBe("si_first");
+
+    // First cycle bucket granted from Stripe's authoritative period:
+    const cycle = h.state.inserted.find((i) => "includedCredits" in i);
+    expect(cycle).toBeDefined();
+    expect(cycle!.userId).toBe("u_first");
+    expect(cycle!.includedCredits).toBe(NABUFLOW_PLANS.comet.includedMonthlyCredits);
+    expect(cycle!.cycleStart).toEqual(new Date(PS * 1000));
+    expect(cycle!.cycleEnd).toEqual(new Date(PE * 1000));
+  });
+
+  it("gate resolves allowed for the fresh subscriber right afterwards (no lingering 'no plan')", async () => {
+    process.env.CREDITS_ENFORCEMENT = "true";
+    const cycleStart = new Date(Date.now() - 24 * 60 * 60_000);
+    const cycleEnd = new Date(Date.now() + 29 * 24 * 60 * 60_000);
+    h.state.selectQueue = [
+      [
+        {
+          id: 991,
+          userId: "u_first",
+          planId: "comet",
+          status: "active",
+          dunningStatus: "none",
+          dunningGraceUntil: null,
+          defaultPaymentMethodId: "pm_9",
+          cardExpMonth: 12,
+          cardExpYear: 2031,
+          currentCycleStart: cycleStart,
+          currentCycleEnd: cycleEnd,
+          rolloverCredits: 0,
+        },
+      ], // getNabuflowSubscription — the row the webhook just materialized
+      [
+        {
+          includedCredits: 4800,
+          usedIncludedCredits: 0,
+          overageUsdCents: 0,
+          proBuildsUsed: 0,
+          deepBuildsUsed: 0,
+        },
+      ], // getCycleRow (materializeCycle insert hits the conflict path)
+      [], // billing settings — default spend cap
+    ];
+
+    const d = await resolveNabuflowBuildGate("u_first", {
+      engineMode: "pro",
+      projectedCredits: 50,
+    });
+    expect(d.allowed).toBe(true);
+  });
+
+  it("subscription event with no row AND no metadata is still ignored (cannot attribute)", async () => {
+    h.state.selectQueue = [[]];
+    await handleNabuflowSubscriptionEvent("customer.subscription.updated", {
+      id: "sub_orphan",
+      status: "active",
+    } as never);
+    expect(h.state.inserted).toHaveLength(0);
+    expect(h.state.updates).toHaveLength(0);
+  });
+
+  it("invoice.paid racing ahead of subscription.created materializes the row and grants the cycle", async () => {
+    h.state.selectQueue = [
+      [], // findNabuflowSubscriptionByStripeId
+      [], // latestCycleBefore
+      [{ id: 5002, includedCredits: 1800 }], // getCycleRow (insert took conflict path)
+    ];
+
+    await handleNabuflowInvoicePaid({
+      customer: "cus_shared_9",
+      parent: {
+        subscription_details: {
+          subscription: "sub_race",
+          metadata: { surface: "nabuflow", plan: "orbit", userId: "u_race" },
+        },
+      },
+      lines: { data: [{ subscription: "sub_race", period: { start: PS, end: PE } }] },
+    } as never);
+
+    const created = h.state.inserted.find((i) => i.stripeSubscriptionId === "sub_race");
+    expect(created).toBeDefined();
+    expect(created!.userId).toBe("u_race");
+    expect(created!.planId).toBe("orbit");
+    expect(created!.stripeCustomerId).toBe("cus_shared_9");
+
+    const cycle = h.state.inserted.find((i) => "includedCredits" in i);
+    expect(cycle).toBeDefined();
+    expect(cycle!.includedCredits).toBe(NABUFLOW_PLANS.orbit.includedMonthlyCredits);
+
+    const activated = h.state.updates.find((u) => u.status === "active");
+    expect(activated).toBeDefined();
   });
 });

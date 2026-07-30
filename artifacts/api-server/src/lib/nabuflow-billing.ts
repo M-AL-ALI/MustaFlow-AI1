@@ -155,6 +155,43 @@ export async function findNabuflowSubscriptionByCustomerId(
 }
 
 /**
+ * Idempotently create (or re-link) the local subscription row for a user.
+ * First-time subscribers have NO local row when the first Stripe event — or
+ * the subscribe route's direct sync — arrives, and webhook delivery order is
+ * not guaranteed, so subscription AND invoice handlers must be able to
+ * materialize the row from the subscription's `surface: nabuflow` metadata.
+ * Race-safe via the unique userId constraint: concurrent events collapse to
+ * one row and the loser just re-links the Stripe ids. Status stays at the
+ * schema default ("incomplete"); every caller immediately syncs the real
+ * status afterwards.
+ */
+export async function materializeNabuflowSubscriptionRow(opts: {
+  userId: string;
+  planId: NabuflowPlanId;
+  stripeSubscriptionId: string;
+  stripeCustomerId?: string | null;
+}): Promise<NabuflowSubscription | null> {
+  const [row] = await db
+    .insert(nabuflowSubscriptionsTable)
+    .values({
+      userId: opts.userId,
+      planId: opts.planId,
+      stripeSubscriptionId: opts.stripeSubscriptionId,
+      ...(opts.stripeCustomerId ? { stripeCustomerId: opts.stripeCustomerId } : {}),
+    })
+    .onConflictDoUpdate({
+      target: nabuflowSubscriptionsTable.userId,
+      set: {
+        stripeSubscriptionId: opts.stripeSubscriptionId,
+        ...(opts.stripeCustomerId ? { stripeCustomerId: opts.stripeCustomerId } : {}),
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning();
+  return row ?? (await getNabuflowSubscription(opts.userId));
+}
+
+/**
  * True when charges for this user must flow through NabuFlow cycle accounting
  * (used by legacy wallet-balance preflights to step aside).
  */
@@ -1158,6 +1195,8 @@ export function isNabuflowStripeSubscription(subscription: AnyObj | null | undef
 export function nabuflowInvoiceLinkage(invoice: AnyObj): {
   subscriptionId: string | null;
   markedNabuflow: boolean;
+  metaUserId: string | null;
+  metaPlanId: string | null;
 } {
   const subRef =
     invoice?.subscription ??
@@ -1170,7 +1209,12 @@ export function nabuflowInvoiceLinkage(invoice: AnyObj): {
     invoice?.subscription_details?.metadata ??
     invoice?.parent?.subscription_details?.metadata ??
     null;
-  return { subscriptionId, markedNabuflow: meta?.surface === "nabuflow" };
+  return {
+    subscriptionId,
+    markedNabuflow: meta?.surface === "nabuflow",
+    metaUserId: meta?.userId ?? null,
+    metaPlanId: meta?.plan ?? null,
+  };
 }
 
 function stripeTsToDate(ts: unknown): Date | null {
@@ -1258,11 +1302,35 @@ export async function handleNabuflowSubscriptionEvent(
     sub = await getNabuflowSubscription(metaUserId);
   }
   if (!sub) {
-    logger.warn(
-      { stripeSubId, metaUserId, eventType },
-      "nabuflow: subscription event with no local row — ignoring",
+    // First-time subscriber: no local row exists yet (the subscribe route's
+    // direct sync and the webhook race each other, and Stripe's delivery
+    // order isn't guaranteed). Materialize the row from the subscription's
+    // own metadata — otherwise a brand-new subscriber would keep "no plan"
+    // state forever and the gate would block them despite a live Stripe sub.
+    if (!metaUserId || !metaPlan) {
+      logger.warn(
+        { stripeSubId, metaUserId, eventType },
+        "nabuflow: subscription event with no local row and no usable metadata — ignoring",
+      );
+      return;
+    }
+    sub = await materializeNabuflowSubscriptionRow({
+      userId: metaUserId,
+      planId: metaPlan.id,
+      stripeSubscriptionId: stripeSubId,
+      stripeCustomerId: customerId,
+    });
+    if (!sub) {
+      logger.error(
+        { stripeSubId, metaUserId, eventType },
+        "nabuflow: could not materialize local subscription row",
+      );
+      return;
+    }
+    logger.info(
+      { userId: metaUserId, planId: metaPlan.id, stripeSubId, eventType },
+      "nabuflow: materialized local subscription row (first-time subscriber)",
     );
-    return;
   }
 
   const status =
@@ -1303,9 +1371,27 @@ export async function handleNabuflowSubscriptionEvent(
 
 /** invoice.paid for a NabuFlow subscription: renew cycle + clear dunning. */
 export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> {
-  const { subscriptionId } = nabuflowInvoiceLinkage(invoice);
+  const { subscriptionId, markedNabuflow, metaUserId, metaPlanId } =
+    nabuflowInvoiceLinkage(invoice);
   if (!subscriptionId) return;
-  const sub = await findNabuflowSubscriptionByStripeId(subscriptionId);
+  let sub = await findNabuflowSubscriptionByStripeId(subscriptionId);
+  if (!sub && markedNabuflow && metaUserId) {
+    // invoice.paid can beat customer.subscription.created for a first-time
+    // subscriber (delivery order isn't guaranteed) — materialize from the
+    // subscription metadata the invoice carries.
+    const metaPlan = getNabuflowPlan(metaPlanId);
+    if (metaPlan) {
+      sub = await materializeNabuflowSubscriptionRow({
+        userId: metaUserId,
+        planId: metaPlan.id,
+        stripeSubscriptionId: subscriptionId,
+        stripeCustomerId:
+          typeof invoice?.customer === "string"
+            ? invoice.customer
+            : ((invoice?.customer as AnyObj)?.id ?? null),
+      });
+    }
+  }
   if (!sub) return;
   const plan = getNabuflowPlan(sub.planId);
   if (!plan) return;
@@ -1337,9 +1423,26 @@ export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> 
  * builds are never killed).
  */
 export async function handleNabuflowInvoicePaymentFailed(invoice: AnyObj): Promise<void> {
-  const { subscriptionId } = nabuflowInvoiceLinkage(invoice);
+  const { subscriptionId, markedNabuflow, metaUserId, metaPlanId } =
+    nabuflowInvoiceLinkage(invoice);
   if (!subscriptionId) return;
-  const sub = await findNabuflowSubscriptionByStripeId(subscriptionId);
+  let sub = await findNabuflowSubscriptionByStripeId(subscriptionId);
+  if (!sub && markedNabuflow && metaUserId) {
+    // A first-time subscriber whose very first invoice fails must still land
+    // in dunning — materialize the row so the failure isn't invisible.
+    const metaPlan = getNabuflowPlan(metaPlanId);
+    if (metaPlan) {
+      sub = await materializeNabuflowSubscriptionRow({
+        userId: metaUserId,
+        planId: metaPlan.id,
+        stripeSubscriptionId: subscriptionId,
+        stripeCustomerId:
+          typeof invoice?.customer === "string"
+            ? invoice.customer
+            : ((invoice?.customer as AnyObj)?.id ?? null),
+      });
+    }
+  }
   if (!sub) return;
   const plan = getNabuflowPlan(sub.planId);
 
