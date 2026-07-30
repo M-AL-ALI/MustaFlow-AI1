@@ -267,9 +267,21 @@ export function creditCostFor(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Unified chat completion — OpenAI shape in, OpenAI shape out.
+// Per-build token telemetry accumulator — NabuFlow R2 Phase D.
+//
+// Every createChatCompletion call that carries a taskId adds its prompt +
+// completion token counts to this map. flushBuildTokenTelemetry() is called
+// once at build completion to upsert one row to build_token_telemetry and
+// clear the in-memory entry.
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface BuildTokenAccumulator {
+  mode: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}
 export interface CreateChatCompletionParams {
   provider: Provider;
   model: string;
@@ -289,6 +301,19 @@ export interface CreateChatCompletionParams {
   disableThinking?: boolean;
   /** OpenAI reasoning effort. Used only for Pro + Deep Builder planning. */
   reasoning_effort?: "low" | "medium" | "high";
+  /**
+   * Optional NabuFlow task id. When set, prompt + completion token counts from
+   * this call are accumulated in memory and can be flushed to
+   * `build_token_telemetry` via `flushBuildTokenTelemetry(taskId)` at build
+   * completion. Does not affect the call itself.
+   */
+  taskId?: number;
+  /**
+   * Agent mode at call time (lite | eco | power | pro). Stored alongside the
+   * token accumulator so the telemetry row carries the correct mode label.
+   * Ignored when taskId is absent.
+   */
+  taskMode?: string;
 }
 
 /**
@@ -322,7 +347,7 @@ export async function createChatCompletion(
           ? deepseekCircuit
           : openaiCircuit;
 
-  return circuit.call(() =>
+  const result = await circuit.call(() =>
     withRetry(
       () => {
         if (params.provider === "openai") {
@@ -381,6 +406,24 @@ export async function createChatCompletion(
       },
     ),
   );
+
+  // Accumulate token telemetry when a taskId is provided (NabuFlow R2 Phase D).
+  // The returned usage object is the source of truth — all provider adapters
+  // route through synthesizeChatCompletion which always populates usage.
+  if (params.taskId != null) {
+    const usage = result.usage;
+    if (usage) {
+      accumulateBuildTokens(params.taskId, {
+        mode: params.taskMode ?? "unknown",
+        provider: params.provider,
+        model: params.model,
+        inputTokens: usage.prompt_tokens ?? 0,
+        outputTokens: usage.completion_tokens ?? 0,
+      });
+    }
+  }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -414,14 +457,15 @@ export async function* streamChatCompletion(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
-    const stream = await openai.chat.completions.create(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stream: any = await openai.chat.completions.create(
       {
         model: params.model,
-        max_completion_tokens: params.max_completion_tokens,
-        stream: true,
         messages: params.messages,
+        stream: true as const,
+        max_completion_tokens: params.max_completion_tokens,
       },
-      params.signal ? { signal: params.signal } : undefined,
+      { signal: params.signal },
     );
     for await (const chunk of stream) {
       if (params.signal?.aborted) return;
@@ -453,14 +497,16 @@ async function* streamDeepSeek(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   const client = getDeepSeekClient();
-  const stream = await client.chat.completions.create(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await client.chat.completions.create(
     {
       model: params.model,
-      max_tokens: params.max_completion_tokens,
-      stream: true,
       messages: params.messages,
+      stream: true as const,
+      // DeepSeek uses max_tokens (not max_completion_tokens)
+      max_tokens: params.max_completion_tokens,
     },
-    params.signal ? { signal: params.signal } : undefined,
+    { signal: params.signal },
   );
   for await (const chunk of stream) {
     if (params.signal?.aborted) return;
@@ -499,11 +545,12 @@ async function* streamAnthropic(
     }
   }
 
+  const defaultMaxTokens = /haiku/i.test(params.model) ? 8192 : 16000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stream: any = await anthropic.messages.stream(
     {
       model: params.model,
-      max_tokens: params.max_completion_tokens ?? 1200,
+      max_tokens: params.max_completion_tokens ?? defaultMaxTokens,
       system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
       messages: turns,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -539,7 +586,7 @@ async function* streamGemini(
       if (Array.isArray(msg.content)) {
         contents.push({ role: "user", parts: openAiContentToGeminiParts(msg.content) });
       } else {
-        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
         contents.push({ role: "user", parts: [{ text: content }] });
       }
       continue;
@@ -1171,3 +1218,150 @@ function synthesizeChatCompletion(opts: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
+
+const FALLBACK_USD_INPUT = 0.001;
+
+/**
+ * Add token counts from one model call to the per-task accumulator.
+ * Can be called directly by streaming paths that don't return usage metadata
+ * through the normal createChatCompletion return value.
+ */
+export function accumulateBuildTokens(
+  taskId: number,
+  opts: {
+    mode: string;
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  },
+): void {
+  const existing = buildTokenAccumulators.get(taskId);
+  if (existing) {
+    existing.inputTokens += opts.inputTokens;
+    existing.outputTokens += opts.outputTokens;
+    // Last-used provider/model wins so the telemetry row reflects the dominant
+    // (typically the build-stage) call rather than a fast classifier call.
+    existing.provider = opts.provider;
+    existing.model = opts.model;
+    if (opts.mode) existing.mode = opts.mode;
+  } else {
+    buildTokenAccumulators.set(taskId, { ...opts });
+  }
+}
+
+const buildTokenAccumulators = new Map<number, BuildTokenAccumulator>();
+
+function lookupUsdPer1K(model: string, side: "input" | "output"): number {
+  const lower = model.toLowerCase();
+  const table = side === "input" ? USD_PER_1K_INPUT : USD_PER_1K_OUTPUT;
+  for (const [pattern, rate] of table) {
+    if (lower.includes(pattern)) return rate;
+  }
+  return side === "input" ? FALLBACK_USD_INPUT : FALLBACK_USD_OUTPUT;
+}
+
+/**
+ * Upsert the accumulated token telemetry for a build to `build_token_telemetry`
+ * and clear the in-memory accumulator. No-op when no tokens were recorded.
+ *
+ * Safe to call on failure — the upsert overwrites any stale row for the same
+ * task_id. The existing `agent_tasks.token_count` column is unaffected.
+ */
+export async function flushBuildTokenTelemetry(taskId: number): Promise<void> {
+  const acc = buildTokenAccumulators.get(taskId);
+  buildTokenAccumulators.delete(taskId);
+  if (!acc) return;
+
+  const computedUsdCost = computeModelUsdCost(acc.model, acc.inputTokens, acc.outputTokens);
+
+  try {
+    const { pool } = await import("@workspace/db");
+    const client = await pool.connect();
+    try {
+      await client.query(
+        `INSERT INTO build_token_telemetry
+           (task_id, mode, provider, model, input_tokens, output_tokens, computed_usd_cost, recorded_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+         ON CONFLICT (task_id) DO UPDATE SET
+           mode              = EXCLUDED.mode,
+           provider          = EXCLUDED.provider,
+           model             = EXCLUDED.model,
+           input_tokens      = EXCLUDED.input_tokens,
+           output_tokens     = EXCLUDED.output_tokens,
+           computed_usd_cost = EXCLUDED.computed_usd_cost,
+           recorded_at       = now()`,
+        [
+          taskId,
+          acc.mode,
+          acc.provider,
+          acc.model,
+          acc.inputTokens,
+          acc.outputTokens,
+          computedUsdCost.toFixed(8),
+        ],
+      );
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    logger.warn({ err, taskId }, "flushBuildTokenTelemetry: upsert failed (non-fatal)");
+  }
+}
+
+const USD_PER_1K_OUTPUT: Array<[pattern: string, rate: number]> = [
+  ["gpt-4o-mini", 0.0006],
+  ["gpt-4o", 0.01],
+  ["gpt-4.5", 0.03],
+  ["gpt-5-nano", 0.0006],
+  ["gpt-5", 0.012],
+  ["o4-mini", 0.0044],
+  ["o3", 0.04],
+  ["claude-opus", 0.075],
+  ["claude-sonnet", 0.015],
+  ["claude-haiku", 0.00125],
+  ["gemini-2.5-pro", 0.01],
+  ["gemini-2.5-flash", 0.0003],
+  ["gemini-3", 0.002],
+  ["gemini", 0.0014],
+  ["deepseek", 0.00028],
+];
+
+/**
+ * Estimate USD cost for a model call using static list-price approximations.
+ * For calibration reporting only — not used for billing.
+ */
+export function computeModelUsdCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  return (
+    (inputTokens / 1000) * lookupUsdPer1K(model, "input") +
+    (outputTokens / 1000) * lookupUsdPer1K(model, "output")
+  );
+}
+
+const FALLBACK_USD_OUTPUT = 0.003;
+
+const USD_PER_1K_INPUT: Array<[pattern: string, rate: number]> = [
+  // OpenAI
+  ["gpt-4o-mini", 0.00015],
+  ["gpt-4o", 0.0025],
+  ["gpt-4.5", 0.0075],
+  ["gpt-5-nano", 0.00015],
+  ["gpt-5", 0.003],
+  ["o4-mini", 0.0011],
+  ["o3", 0.01],
+  // Anthropic
+  ["claude-opus", 0.015],
+  ["claude-sonnet", 0.003],
+  ["claude-haiku", 0.00025],
+  // Gemini
+  ["gemini-2.5-pro", 0.00125],
+  ["gemini-2.5-flash", 0.000075],
+  ["gemini-3", 0.0005],
+  ["gemini", 0.00035],
+  // DeepSeek
+  ["deepseek", 0.00014],
+];

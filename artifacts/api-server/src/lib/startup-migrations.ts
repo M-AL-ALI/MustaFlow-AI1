@@ -4973,6 +4973,41 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-build-token-telemetry ────────────────────────────────────────────
+  // NabuFlow R2 Phase D — per-build token telemetry table.
+  // Purely additive: no existing table, column, or constraint is altered.
+  {
+    name: "migrate-build-token-telemetry",
+    async run(client) {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS build_token_telemetry (
+          id                SERIAL PRIMARY KEY,
+          task_id           INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+          mode              TEXT NOT NULL,
+          provider          TEXT NOT NULL,
+          model             TEXT NOT NULL,
+          input_tokens      INTEGER NOT NULL DEFAULT 0,
+          output_tokens     INTEGER NOT NULL DEFAULT 0,
+          computed_usd_cost NUMERIC(12, 8) NOT NULL DEFAULT 0,
+          recorded_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT build_token_telemetry_task_id_unique UNIQUE (task_id)
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS build_token_telemetry_task_id_idx
+           ON build_token_telemetry(task_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS build_token_telemetry_mode_recorded_idx
+           ON build_token_telemetry(mode, recorded_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS build_token_telemetry_recorded_at_idx
+           ON build_token_telemetry(recorded_at)`,
+      );
+    },
+  },
 ];
 
 /**
