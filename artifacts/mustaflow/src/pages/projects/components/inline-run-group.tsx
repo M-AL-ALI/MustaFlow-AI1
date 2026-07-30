@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getListTaskEventsQueryKey, useListTaskEvents } from "@workspace/api-client-react";
+import {
+  getListTaskEventsQueryKey,
+  getListTasksQueryKey,
+  useListTaskEvents,
+  useListTasks,
+} from "@workspace/api-client-react";
 import { ChevronDown, ChevronRight, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { extractQATapeSteps, type QATapeEvent } from "@/lib/qa-video-tape";
@@ -24,6 +29,14 @@ import {
 } from "./inline-recovery-loop";
 import type { RunLoopProgress } from "./run-rehydration";
 import type { ThreadDensity } from "./thread-density";
+import {
+  commandFailuresForEvents,
+  InlineRunRecoveryStory,
+  linkedRecoveryTaskId,
+  resolveLinkedRecoveryTask,
+  type RecoveryReport,
+  type RecoveryTask,
+} from "./inline-run-recovery";
 
 type ReplayEvent = QATapeEvent & {
   taskId?: number;
@@ -176,11 +189,13 @@ export function PersistedRunReplay({
   projectId,
   taskId,
   onRetry,
+  onOpenTask,
   className,
 }: {
   projectId: number;
   taskId: number;
   onRetry?: () => void;
+  onOpenTask?: (taskId: number) => void;
   className?: string;
 }) {
   const { data: events = [] } = useListTaskEvents(projectId, taskId, {
@@ -193,7 +208,31 @@ export function PersistedRunReplay({
       refetchOnMount: "always",
     },
   });
+  const { data: tasks = [] } = useListTasks(projectId, {
+    query: {
+      queryKey: getListTasksQueryKey(projectId),
+      refetchOnMount: "always",
+      refetchInterval: (query) => {
+        const currentTasks = (query.state.data ?? []) as RecoveryTask[];
+        const sourceTask = currentTasks.find((task) => task.id === taskId);
+        const linkedId = linkedRecoveryTaskId(sourceTask?.report as RecoveryReport);
+        const linkedTask =
+          linkedId === null ? null : currentTasks.find((task) => task.id === linkedId);
+        return linkedTask &&
+          !["completed", "failed", "canceled", "discarded"].includes(linkedTask.status)
+          ? 2_500
+          : false;
+      },
+    },
+  });
   const replay = useMemo(() => buildRunReplayModel(events as unknown as ReplayEvent[]), [events]);
+  const commandFailures = useMemo(
+    () => commandFailuresForEvents(events as unknown as ReplayEvent[]),
+    [events],
+  );
+  const recoveryTasks = tasks as unknown as RecoveryTask[];
+  const sourceTask = recoveryTasks.find((task) => task.id === taskId);
+  const linkedTask = resolveLinkedRecoveryTask(sourceTask?.report as RecoveryReport, recoveryTasks);
   const qaSteps = useMemo(
     () => extractQATapeSteps(replay.qaEvents).filter((step) => step.phase !== "repair"),
     [replay.qaEvents],
@@ -202,11 +241,25 @@ export function PersistedRunReplay({
   if (replay.stepCount === 0) return null;
 
   return (
-    <InlineRunGroup stepCount={replay.stepCount} live={false} className={className}>
-      <InlineActivityStream entries={replay.activities} showAvatar={false} />
-      <InlineNarrationStream entries={replay.narrations} />
-      <InlineRecoveryLoop steps={replay.recoverySteps} onRetry={onRetry} />
-      <QATapeStepsInline steps={qaSteps} />
-    </InlineRunGroup>
+    <div
+      id={`task-run-${taskId}`}
+      className={cn("space-y-2", className)}
+      data-run-task-id={taskId}
+      tabIndex={-1}
+    >
+      <InlineRunRecoveryStory
+        failures={commandFailures}
+        completionKind={sourceTask?.completionKind}
+        linkedTask={linkedTask}
+        onOpenTask={onOpenTask}
+        onRetry={onRetry}
+      />
+      <InlineRunGroup stepCount={replay.stepCount} live={false}>
+        <InlineActivityStream entries={replay.activities} showAvatar={false} />
+        <InlineNarrationStream entries={replay.narrations} />
+        <InlineRecoveryLoop steps={replay.recoverySteps} onRetry={onRetry} />
+        <QATapeStepsInline steps={qaSteps} />
+      </InlineRunGroup>
+    </div>
   );
 }

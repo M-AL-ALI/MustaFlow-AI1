@@ -16,13 +16,16 @@ type CapturedTaskEvent = {
 const api = vi.hoisted(() => ({
   events: [] as CapturedTaskEvent[],
   useListTaskEvents: vi.fn(),
+  useListTasks: vi.fn(),
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
   getListTaskEventsQueryKey: (projectId: number, taskId: number) => [
     `/api/projects/${projectId}/tasks/${taskId}/events`,
   ],
+  getListTasksQueryKey: (projectId: number) => [`/api/projects/${projectId}/tasks`],
   useListTaskEvents: api.useListTaskEvents,
+  useListTasks: api.useListTasks,
 }));
 
 import { buildRunReplayModel, PersistedRunReplay } from "./inline-run-group";
@@ -43,6 +46,7 @@ describe("PersistedRunReplay with captured production traffic", () => {
   beforeAll(() => {
     api.events = loadProductionTask140();
     api.useListTaskEvents.mockReturnValue({ data: api.events });
+    api.useListTasks.mockReturnValue({ data: [] });
   });
 
   it("refetches authoritative history and replays the retained live steps in order", () => {
@@ -74,25 +78,15 @@ describe("PersistedRunReplay with captured production traffic", () => {
         }),
       }),
     );
-    expect(
-      screen.getByText(`${replay.stepCount} steps · expand to replay`),
-    ).toBeVisible();
+    expect(screen.getByText(`${replay.stepCount} steps · expand to replay`)).toBeVisible();
 
     fireEvent.click(screen.getByTestId("inline-run-toggle"));
     expect(
-      screen
-        .getAllByTestId("inline-activity-row")
-        .map((row) => row.textContent?.trim()),
-    ).toEqual(
-      replay.activities.map((event) => event.resolvedLabel ?? event.label),
-    );
+      screen.getAllByTestId("inline-activity-row").map((row) => row.textContent?.trim()),
+    ).toEqual(replay.activities.map((event) => event.resolvedLabel ?? event.label));
     expect(
-      screen
-        .getAllByTestId("inline-narration-line")
-        .map((row) => row.textContent?.trim()),
-    ).toEqual(
-      replay.narrations.map((event) => event.text),
-    );
+      screen.getAllByTestId("inline-narration-line").map((row) => row.textContent?.trim()),
+    ).toEqual(replay.narrations.map((event) => event.text));
     const qaRows = screen.getAllByTestId("qa-tape-step");
     expect(qaRows).toHaveLength(replay.qaEvents.length);
     replay.qaEvents.forEach((event, index) => {

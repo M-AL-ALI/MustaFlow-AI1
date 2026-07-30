@@ -214,6 +214,16 @@ import {
 } from "./components/run-rehydration";
 import { threadDensityForMode } from "./components/thread-density";
 import { WorkingAnchor } from "./components/working-anchor";
+import {
+  appendCommandFailure,
+  commandFailureForEvent,
+  InlineRunRecoveryStory,
+  refreshSourceReportsForTaskQueuedSignals,
+  resolveLinkedRecoveryTask,
+  type CommandFailure,
+  type RecoveryReport,
+  type RecoveryTask,
+} from "./components/inline-run-recovery";
 import type { QATapeEvent } from "@/lib/qa-video-tape";
 import {
   mergeProjectImageItems,
@@ -390,6 +400,10 @@ type TaskReport = {
     failedChecks?: string[];
     warnChecks?: string[];
   };
+  architectReview?: {
+    autoFixQueued: boolean;
+    autoFixTaskId?: number | null;
+  } | null;
 };
 
 type ChatPlanPayload =
@@ -934,6 +948,24 @@ export default function ProjectWorkspacePage() {
 
   // Global suggestions poll — catches background build suggestions even when SuggestionChips
   // is not visible (background tasks don't create a foreground report card).
+  const seenQueuedTaskSignalsRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    refreshSourceReportsForTaskQueuedSignals(
+      (messages ?? []).map(
+        (message) => message.plan as { kind?: string; taskId?: number } | null | undefined,
+      ),
+      seenQueuedTaskSignalsRef.current,
+      () => {
+        void queryClient.refetchQueries({ queryKey: getListTasksQueryKey(projectId) });
+      },
+    );
+  }, [messages, projectId, queryClient]);
+
+  useEffect(() => {
+    seenQueuedTaskSignalsRef.current.clear();
+  }, [projectId]);
+
   const { data: allSuggestions = [] } = useListSuggestions(
     projectId,
     {},
@@ -1069,6 +1101,7 @@ export default function ProjectWorkspacePage() {
   const [liveNarrationEvents, setLiveNarrationEvents] = useState<InlineNarrationEntry[]>([]);
   const [liveActivityEvents, setLiveActivityEvents] = useState<InlineActivityEntry[]>([]);
   const [liveRecoverySteps, setLiveRecoverySteps] = useState<InlineRecoveryStep[]>([]);
+  const [liveCommandFailures, setLiveCommandFailures] = useState<CommandFailure[]>([]);
   const [liveRunProgress, setLiveRunProgress] = useState<RunLoopProgress | null>(null);
   const [liveRunTerminalEvent, setLiveRunTerminalEvent] = useState<
     "completed" | "failed" | "cancelled" | null
@@ -1746,6 +1779,12 @@ export default function ProjectWorkspacePage() {
     isRehydratableTaskStatus(activeTaskStatus);
   const isBusy = sendMessage.isPending || isStreaming || hasRehydratedActiveRun;
   const activeThreadDensity = threadDensityForMode(agentMode);
+  const recoveryTasksForFeed = tasksForFeed as unknown as RecoveryTask[];
+  const activeRecoverySourceTask = recoveryTasksForFeed.find((task) => task.id === activeTaskId);
+  const activeLinkedRecoveryTask = resolveLinkedRecoveryTask(
+    activeRecoverySourceTask?.report as RecoveryReport,
+    recoveryTasksForFeed,
+  );
   const isCreatingImages = liveImageGenerating || projectImages.isGenerating;
   const visibleCalmPhase: CalmBuilderPhase = isCreatingImages
     ? "images"
@@ -1962,6 +2001,18 @@ export default function ProjectWorkspacePage() {
       isMobileLayout,
     });
 
+  const openRecoveryTaskRun = useCallback((taskId: number) => {
+    setShowChatHistory(false);
+    setActiveTaskId(taskId);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const target = document.querySelector<HTMLElement>(`[data-run-task-id="${taskId}"]`);
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
+    });
+  }, []);
+
   // Derive active module IDs from the most recent completed task report
   const wiredModuleIds = useMemo<string[] | undefined>(() => {
     if (!messages) return undefined;
@@ -2027,6 +2078,7 @@ export default function ProjectWorkspacePage() {
     liveNarrationEvents,
     liveActivityEvents,
     liveRecoverySteps,
+    liveCommandFailures,
     agentPrompts,
     brainstormActivity,
     publishingActivity,
@@ -2045,6 +2097,7 @@ export default function ProjectWorkspacePage() {
     setLiveNarrationEvents([]);
     setLiveActivityEvents([]);
     setLiveRecoverySteps([]);
+    setLiveCommandFailures([]);
     setLiveRunProgress(null);
     setLiveRunTerminalEvent(null);
     setLiveCodeBuffer("");
@@ -2098,6 +2151,10 @@ export default function ProjectWorkspacePage() {
         const recoveryStep = recoveryStepForEvent(event);
         if (recoveryStep) {
           setLiveRecoverySteps((current) => appendRecoveryStep(current, recoveryStep));
+        }
+        const commandFailure = commandFailureForEvent(event);
+        if (commandFailure) {
+          setLiveCommandFailures((current) => appendCommandFailure(current, commandFailure));
         }
         if (event.eventType === "generate_image") {
           const generatedImage = parseZeroGeneratedImageEvent(projectId, {
@@ -3770,6 +3827,7 @@ export default function ProjectWorkspacePage() {
                         }
                       }}
                       onOpenCheckpoint={openCheckpointHistory}
+                      onOpenTask={openRecoveryTaskRun}
                       onClose={() => setShowChatHistory(false)}
                       onApplyCode={(code) =>
                         send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
@@ -4169,6 +4227,7 @@ export default function ProjectWorkspacePage() {
                                                   "Fix the remaining runtime issue and verify the preview again.",
                                                 )
                                               }
+                                              onOpenTask={openRecoveryTaskRun}
                                             />
                                           )}
                                           <ReportCard
@@ -4245,7 +4304,12 @@ export default function ProjectWorkspacePage() {
                             | undefined;
                           return payload?.kind === "report" && payload.taskId === activeTaskId;
                         }) && (
-                          <div className="max-w-[90%]">
+                          <div
+                            id={`task-run-${activeTaskId}`}
+                            className="max-w-[90%]"
+                            data-run-task-id={activeTaskId}
+                            tabIndex={-1}
+                          >
                             <WorkingAnchor
                               activity={liveActivityEvents.at(-1)}
                               progress={liveRunProgress}
@@ -4271,6 +4335,18 @@ export default function ProjectWorkspacePage() {
                                   entries={liveNarrationEvents}
                                   live={liveRunTerminalEvent === null}
                                   density={activeThreadDensity}
+                                />
+                                <InlineRunRecoveryStory
+                                  failures={liveCommandFailures}
+                                  completionKind={activeRecoverySourceTask?.completionKind}
+                                  linkedTask={activeLinkedRecoveryTask}
+                                  live={liveRunTerminalEvent === null}
+                                  onOpenTask={openRecoveryTaskRun}
+                                  onRetry={() =>
+                                    send(
+                                      "Fix the remaining runtime issue and verify the preview again.",
+                                    )
+                                  }
                                 />
                                 <InlineRecoveryLoop
                                   steps={liveRecoverySteps}

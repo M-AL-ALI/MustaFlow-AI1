@@ -1,12 +1,14 @@
 import { AlertTriangle, CreditCard, ExternalLink, RotateCcw, Wrench } from "lucide-react";
 
 export function InlineBuilderError({
+  title = "I couldn't finish this step.",
   message,
   suggestions,
   onTryFix,
   onBuyCredits,
   showCredits = false,
 }: {
+  title?: string;
   message: string;
   suggestions?: string[];
   onTryFix?: (text: string) => void;
@@ -24,7 +26,7 @@ export function InlineBuilderError({
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
-          <p className="font-medium text-foreground">I couldn't finish this step.</p>
+          <p className="font-medium text-foreground">{title}</p>
           <p className="mt-0.5 leading-relaxed text-muted-foreground">{message}</p>
         </div>
       </div>

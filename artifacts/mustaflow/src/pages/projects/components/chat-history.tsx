@@ -2377,6 +2377,7 @@ function MessageRow({
   projectId,
   onViewFile,
   onOpenCheckpoint,
+  onOpenTask,
   onApply,
   onSendMessage,
   onAutoFix,
@@ -2389,6 +2390,7 @@ function MessageRow({
   projectId: number;
   onViewFile?: (path: string, line?: number) => void;
   onOpenCheckpoint?: (checkpointId: number) => void;
+  onOpenTask?: (taskId: number) => void;
   onApply?: (code: string) => void;
   onSendMessage?: (text: string) => void;
   /** Forwarded to QualityGateFailureCard; always sends with Main Agent identity. */
@@ -2552,6 +2554,7 @@ function MessageRow({
                         )
                     : undefined
                 }
+                onOpenTask={onOpenTask}
               />
             ) : null;
           })()}
@@ -3907,6 +3910,7 @@ export function ChatHistory({
   projectId,
   onViewFile,
   onOpenCheckpoint,
+  onOpenTask,
   onClose,
   onApplyCode,
   onSendMessage,
@@ -3919,6 +3923,7 @@ export function ChatHistory({
   projectId: number;
   onViewFile?: (path: string, line?: number) => void;
   onOpenCheckpoint?: (checkpointId: number) => void;
+  onOpenTask?: (taskId: number) => void;
   onClose: () => void;
   onApplyCode?: (code: string) => void;
   onSendMessage?: (text: string) => void;
@@ -4163,6 +4168,7 @@ export function ChatHistory({
                     projectId={projectId}
                     onViewFile={onViewFile}
                     onOpenCheckpoint={onOpenCheckpoint}
+                    onOpenTask={onOpenTask}
                     onApply={onApplyCode}
                     onSendMessage={onSendMessage}
                     onAutoFix={onAutoFix}
