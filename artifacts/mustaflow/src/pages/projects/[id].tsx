@@ -165,7 +165,6 @@ import { cn } from "@/lib/utils";
 import {
   builderCreditCost,
   mapIntentToSendOptions,
-  shouldDeferComposerClearForCreditGate,
 } from "@/lib/builder-followup-submit";
 import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builder-mode-persistence";
 import {
@@ -932,6 +931,33 @@ export default function ProjectWorkspacePage() {
     !nabuflowBillingStateLoading &&
     !nabuflowBillingStateError &&
     nabuflowBillingState?.exempt === true;
+
+  // ── Overage-crossing notice — once per billing cycle ─────────────────────
+  // Keyed by the billing cycle start date so it auto-resets each new cycle.
+  const overageCycleKey =
+    nabuflowBillingState?.subscription?.currentCycleStart?.substring(0, 10) ?? null;
+  const [overageNoticeDismissed, setOverageNoticeDismissed] = useState(false);
+  useEffect(() => {
+    if (!overageCycleKey) return;
+    try {
+      if (localStorage.getItem(`nabuflow_overage_ack_${overageCycleKey}`) === "1") {
+        setOverageNoticeDismissed(true);
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, [overageCycleKey]);
+  const dismissOverageNotice = useCallback(() => {
+    setOverageNoticeDismissed(true);
+    if (overageCycleKey) {
+      try {
+        localStorage.setItem(`nabuflow_overage_ack_${overageCycleKey}`, "1");
+      } catch {
+        /* storage unavailable */
+      }
+    }
+  }, [overageCycleKey]);
+
   const sendMessage = useSendMessage();
   const { data: messages } = useListMessages(projectId, {
     query: {
@@ -1082,13 +1108,6 @@ export default function ProjectWorkspacePage() {
     }
   }, [project?.agentMode, projectId]);
   const [subscriptionTier, setSubscriptionTier] = useState<"free" | "core" | "wave">("free");
-  const [showCreditConfirm, setShowCreditConfirm] = useState<{
-    mode: string;
-    cost: number;
-    deepReasoning: boolean;
-  } | null>(null);
-  const pendingCreditConfirmRef = useRef<(() => void) | null>(null);
-  const creditConfirmedRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2589,6 +2608,7 @@ export default function ProjectWorkspacePage() {
       const idempotencyKey = crypto.randomUUID();
 
       const effectiveMode = opts?.agentMode ?? agentMode;
+      const effectiveDeepReasoning = effectiveMode === "lite" ? false : deepReasoning;
       const effectivePlanMode = opts?.planMode ?? planMode;
       const effectiveBackground = opts?.background ?? runInBackground;
       const effectiveAgentIntent = opts?.agentIntent;
@@ -2603,39 +2623,10 @@ export default function ProjectWorkspacePage() {
         effectiveAgentIntent === "review" ||
         effectiveAgentIntent === "explain" ||
         (converseKeywords.test(content.trim()) && !effectivePlanMode);
-      // Credit confirmation for Power/Pro builds — skip for converse-intent
-      // messages so casual questions aren't gated behind a dialog.
-      // Use creditConfirmedRef (a stable ref) to bypass the dialog on the
-      // second call so we avoid any stale-closure issues with useCallback.
-      const effectiveDeepReasoning = effectiveMode === "lite" ? false : deepReasoning;
-      const modeCost = builderCreditCost(effectiveMode, effectiveDeepReasoning);
-      if (
-        shouldDeferComposerClearForCreditGate({
-          agentMode: effectiveMode,
-          deepReasoning: effectiveDeepReasoning,
-          isLikelyConverse,
-          creditConfirmed: creditConfirmedRef.current,
-          billingExempt,
-        })
-      ) {
-        pendingCreditConfirmRef.current = () => {
-          setShowCreditConfirm(null);
-          pendingCreditConfirmRef.current = null;
-          creditConfirmedRef.current = true;
-          send(content, opts);
-        };
-        setShowCreditConfirm({
-          mode: effectiveMode,
-          cost: modeCost,
-          deepReasoning: effectiveDeepReasoning,
-        });
-        return;
-      }
-      // Reset bypass flag so the next independent build shows the dialog again
-      creditConfirmedRef.current = false;
-
-      // Engage optimistic workspace state only after any credit gate is accepted.
-      // A dismissed dialog therefore leaves both the draft and composer idle.
+      // Build-start invariant: no synchronous Stripe call on send. Credits are
+      // authorized instantly by the gate (resolveNabuflowBuildGate) and any
+      // overage charge is settled as a pending invoice item in the background
+      // via deductCreditsAtomic in jobs.ts — never on the hot send path.
       opts?.onProceed?.();
       pendingTaskIdsBeforeSendRef.current = new Set(tasksForFeed.map((task) => task.id));
       pendingRunShouldRenderInlineRef.current = !effectiveBackground && !isLikelyConverse;
@@ -4739,6 +4730,93 @@ export default function ProjectWorkspacePage() {
                     </div>
                   )}
 
+                  {/* Composer credit counter — persistent quiet label in the send-bar area.
+                      Updates reactively when mode or Deep toggle changes; never blocks sending. */}
+                  <div
+                    data-testid="composer-credit-counter"
+                    className="px-3 pt-1.5 pb-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground select-none"
+                  >
+                    {agentMode !== "lite" && deepReasoning ? (
+                      <BuilderDeepReasoningIcon className="h-3 w-3 shrink-0" />
+                    ) : (
+                      <BuilderModeIcon
+                        mode={normalizeBuilderAgentMode(agentMode)}
+                        className="h-3 w-3 shrink-0"
+                      />
+                    )}
+                    <span className="font-medium text-foreground">
+                      {builderModeLabel(normalizeBuilderAgentMode(agentMode))}
+                    </span>
+                    <span className="text-muted-foreground/50">·</span>
+                    <span>
+                      {builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning)}{" "}
+                      {builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning) === 1
+                        ? "credit"
+                        : "credits"}
+                    </span>
+                    {nabuflowBillingState?.cycle?.remainingIncludedCredits != null && (
+                      <>
+                        <span className="text-muted-foreground/50">·</span>
+                        <span
+                          className={
+                            nabuflowBillingState.cycle.remainingIncludedCredits <
+                            builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning)
+                              ? "text-amber-500"
+                              : ""
+                          }
+                        >
+                          {nabuflowBillingState.cycle.remainingIncludedCredits.toLocaleString()}{" "}
+                          remaining
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Overage-crossing notice — fires once per billing cycle the first time a
+                      build would draw from pay-as-you-go credits. Never blocks sending. */}
+                  {!billingExempt &&
+                    !overageNoticeDismissed &&
+                    nabuflowBillingState?.enforcementEnabled === true &&
+                    nabuflowBillingState?.cycle?.remainingIncludedCredits != null &&
+                    nabuflowBillingState.cycle.remainingIncludedCredits >= 0 &&
+                    nabuflowBillingState.cycle.remainingIncludedCredits <
+                      builderCreditCost(agentMode, agentMode !== "lite" && deepReasoning) && (
+                      <div
+                        data-testid="overage-crossing-notice"
+                        role="alert"
+                        className="mx-3 mb-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2"
+                      >
+                        <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                          You've used your included credits.
+                        </p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-amber-600/80 dark:text-amber-400/80">
+                          Builds now bill pay-as-you-go
+                          {nabuflowBillingState?.plan?.overageUsdPerCredit != null
+                            ? ` at $${nabuflowBillingState.plan.overageUsdPerCredit.toFixed(3)}/credit`
+                            : ""}
+                          , up to your spend cap.
+                        </p>
+                        <div className="mt-2 flex items-center gap-3">
+                          <button
+                            type="button"
+                            data-testid="overage-notice-continue"
+                            onClick={dismissOverageNotice}
+                            className="text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-300"
+                          >
+                            Continue
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="overage-notice-dont-show"
+                            onClick={dismissOverageNotice}
+                            className="text-[11px] text-amber-600/70 hover:underline dark:text-amber-400/70"
+                          >
+                            Don't show again this cycle
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                   {/* Chat / Queue input */}
                   <div data-tour="chat-input">
                     <QueueComposer
@@ -5597,79 +5675,6 @@ export default function ProjectWorkspacePage() {
           isAgenticProject={project.builderMode === "agentic"}
         />
       )}
-
-      {/* Credit confirmation dialog for Power / Pro builds */}
-      <AlertDialog
-        open={!!showCreditConfirm}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowCreditConfirm(null);
-            pendingCreditConfirmRef.current = null;
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              {showCreditConfirm?.deepReasoning ? (
-                <BuilderDeepReasoningIcon className="h-4 w-4" />
-              ) : (
-                <BuilderModeIcon
-                  mode={normalizeBuilderAgentMode(showCreditConfirm?.mode)}
-                  className="h-4 w-4"
-                />
-              )}
-              Confirm{" "}
-              {showCreditConfirm?.deepReasoning
-                ? "Deep Reasoning"
-                : builderModeLabel(normalizeBuilderAgentMode(showCreditConfirm?.mode))}{" "}
-              build
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This build uses{" "}
-              <span className="inline-flex items-center gap-1 font-semibold text-foreground">
-                <BuilderModeIcon
-                  mode={normalizeBuilderAgentMode(showCreditConfirm?.mode)}
-                  className="h-3.5 w-3.5"
-                />
-                {showCreditConfirm?.cost} credit{(showCreditConfirm?.cost ?? 0) !== 1 ? "s" : ""}
-              </span>{" "}
-              (
-              <span className="inline-flex items-center gap-1">
-                <BuilderModeIcon
-                  mode={normalizeBuilderAgentMode(showCreditConfirm?.mode)}
-                  className="h-3.5 w-3.5"
-                />
-                {builderModeLabel(normalizeBuilderAgentMode(showCreditConfirm?.mode))} mode
-                {showCreditConfirm?.deepReasoning && (
-                  <>
-                    {" "}
-                    with <BuilderDeepReasoningIcon className="h-3.5 w-3.5" /> Deep Reasoning
-                  </>
-                )}
-              </span>
-              ). Your balance will be updated after the build completes. Continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                setShowCreditConfirm(null);
-                pendingCreditConfirmRef.current = null;
-              }}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                pendingCreditConfirmRef.current?.();
-              }}
-            >
-              Build now
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Build-in-progress navigation guard (Task #755) */}
       <AlertDialog open={navGuardOpen} onOpenChange={setNavGuardOpen}>

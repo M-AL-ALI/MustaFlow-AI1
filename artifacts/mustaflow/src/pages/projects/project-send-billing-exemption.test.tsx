@@ -13,11 +13,11 @@ const testState = vi.hoisted(() => ({
           exempt: boolean;
           canBuild: boolean;
           blockedReason: null;
-          plan: null;
-          subscription: null;
+          plan: { overageUsdPerCredit: number | null } | null;
+          subscription: { currentCycleStart: string | null } | null;
           card: null;
           spendCap: null;
-          cycle: null;
+          cycle: { remainingIncludedCredits: number } | null;
         }
       | undefined,
     isLoading: false,
@@ -244,7 +244,7 @@ async function sendPowerBuild() {
   await user.click(send);
 }
 
-describe("project send billing exemption", () => {
+describe("project send — no confirmation dialog", () => {
   beforeEach(() => {
     testState.sendMessageMutate.mockReset();
     testState.clearComposer.mockReset();
@@ -277,7 +277,7 @@ describe("project send billing exemption", () => {
     );
   });
 
-  it("submits an exempt Power build directly through the real page send path", async () => {
+  it("submits an exempt Power build directly — no dialog, send proceeds", async () => {
     testState.billing = {
       data: {
         enforcementEnabled: true,
@@ -297,9 +297,8 @@ describe("project send billing exemption", () => {
 
     await sendPowerBuild();
 
-    expect(
-      screen.queryByRole("alertdialog", { name: "Confirm Power build" }),
-    ).not.toBeInTheDocument();
+    // No confirmation dialog for any user
+    expect(screen.queryByRole("alertdialog", { name: /Confirm.*build/ })).not.toBeInTheDocument();
     await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
     expect(testState.sendMessageMutate.mock.calls[0]?.[0]).toMatchObject({
       id: 47,
@@ -312,7 +311,7 @@ describe("project send billing exemption", () => {
     expect(testState.clearComposer).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the Power confirmation gate unchanged for a non-exempt account", async () => {
+  it("submits a non-exempt Power build directly — dialog is gone, no gate for any user", async () => {
     testState.billing = {
       data: {
         enforcementEnabled: true,
@@ -332,9 +331,10 @@ describe("project send billing exemption", () => {
 
     await sendPowerBuild();
 
-    expect(screen.getByRole("alertdialog", { name: "Confirm Power build" })).toBeVisible();
-    expect(testState.sendMessageMutate).not.toHaveBeenCalled();
-    expect(testState.clearComposer).not.toHaveBeenCalled();
+    // No alertdialog for non-exempt users either — dialog is removed
+    expect(screen.queryByRole("alertdialog", { name: /Confirm.*build/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+    expect(testState.clearComposer).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -375,14 +375,274 @@ describe("project send billing exemption", () => {
         isError: true,
       },
     ],
-  ])("fails closed while billing state is %s", async (_label, billing) => {
+  ])("sends immediately while billing state is %s — no blocking dialog", async (_label, billing) => {
     testState.billing = billing;
     renderPage();
 
     await sendPowerBuild();
 
-    expect(screen.getByRole("alertdialog", { name: "Confirm Power build" })).toBeVisible();
-    expect(testState.sendMessageMutate).not.toHaveBeenCalled();
-    expect(testState.clearComposer).not.toHaveBeenCalled();
+    // Dialog is removed entirely — no gate for unknown billing state either
+    expect(screen.queryByRole("alertdialog", { name: /Confirm.*build/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+    expect(testState.clearComposer).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("composer credit counter", () => {
+  beforeEach(() => {
+    testState.sendMessageMutate.mockReset();
+    testState.clearComposer.mockReset();
+    localStorage.clear();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        onmessage: ((event: MessageEvent<string>) => void) | null = null;
+        onerror: (() => void) | null = null;
+        close() {}
+      },
+    );
+  });
+
+  it("shows the composer credit counter in the send-bar area for all users", async () => {
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: null,
+        subscription: null,
+        card: null,
+        spendCap: null,
+        cycle: null,
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    const counter = await screen.findByTestId("composer-credit-counter");
+    expect(counter).toBeInTheDocument();
+    // Project has agentMode: "power" → 5 credits
+    expect(counter).toHaveTextContent(/Power/i);
+    expect(counter).toHaveTextContent(/5\s*credits/);
+  });
+
+  it("shows remaining included credits when cycle data is available", async () => {
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 42 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    const counter = await screen.findByTestId("composer-credit-counter");
+    expect(counter).toHaveTextContent(/42/);
+    expect(counter).toHaveTextContent(/remaining/);
+  });
+});
+
+describe("overage-crossing notice", () => {
+  beforeEach(() => {
+    testState.sendMessageMutate.mockReset();
+    testState.clearComposer.mockReset();
+    localStorage.clear();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        onmessage: ((event: MessageEvent<string>) => void) | null = null;
+        onerror: (() => void) | null = null;
+        close() {}
+      },
+    );
+  });
+
+  it("shows the overage notice when remainingIncludedCredits < modeCost for a non-exempt account", async () => {
+    // Power mode costs 5 credits; remaining = 2 → would cross into overage
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    const notice = await screen.findByTestId("overage-crossing-notice");
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/You've used your included credits/);
+    expect(notice).toHaveTextContent(/\$0\.012\/credit/);
+  });
+
+  it("does NOT show the overage notice when remainingIncludedCredits >= modeCost", async () => {
+    // Power mode costs 5 credits; remaining = 10 → still within included
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 10 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    await screen.findByTestId("composer-credit-counter");
+    expect(screen.queryByTestId("overage-crossing-notice")).not.toBeInTheDocument();
+  });
+
+  it("does NOT show the overage notice for an exempt account", async () => {
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: true,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    await screen.findByTestId("composer-credit-counter");
+    expect(screen.queryByTestId("overage-crossing-notice")).not.toBeInTheDocument();
+  });
+
+  it("dismissing the notice hides it and persists the ack to localStorage", async () => {
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByTestId("overage-crossing-notice");
+    await user.click(screen.getByTestId("overage-notice-continue"));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("overage-crossing-notice")).not.toBeInTheDocument(),
+    );
+    // Ack is persisted so it won't re-appear after a refresh
+    expect(localStorage.getItem("nabuflow_overage_ack_2026-07-01")).toBe("1");
+  });
+
+  it("don't-show-again suppresses the notice for the rest of the cycle", async () => {
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByTestId("overage-crossing-notice");
+    await user.click(screen.getByTestId("overage-notice-dont-show"));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("overage-crossing-notice")).not.toBeInTheDocument(),
+    );
+    expect(localStorage.getItem("nabuflow_overage_ack_2026-07-01")).toBe("1");
+  });
+
+  it("build proceeds immediately even when the overage notice is visible — notice never blocks", async () => {
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-07-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    await screen.findByTestId("overage-crossing-notice");
+    // Send without dismissing the notice first
+    await sendPowerBuild();
+
+    await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+    expect(testState.clearComposer).toHaveBeenCalledTimes(1);
   });
 });

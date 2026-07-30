@@ -23,6 +23,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const NABUFLOW_PLAN_IDS = ["orbit", "comet", "nova", "constellation"] as const;
+
+/**
+ * Per-engine-mode credit costs for NabuFlow builds.
+ * Single source of truth — returned by GET /billing/nabuflow/plans so the
+ * pricing page never hard-codes these values.
+ */
+export const NABUFLOW_BUILD_MODE_COSTS = [
+  { mode: "Lite", credits: 1, desc: "Fast, lightweight builds" },
+  { mode: "Eco", credits: 2, desc: "Balanced quality and speed" },
+  { mode: "Power", credits: 5, desc: "High-quality multi-file builds" },
+  { mode: "Pro", credits: 10, desc: "Maximum quality, extended context" },
+] as const;
+
+export type NabuflowBuildModeCost = (typeof NABUFLOW_BUILD_MODE_COSTS)[number];
 export type NabuflowPlanId = (typeof NABUFLOW_PLAN_IDS)[number];
 
 /** Engine-mode access ladder — `null` means unlimited. */

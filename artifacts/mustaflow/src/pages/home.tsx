@@ -1123,6 +1123,56 @@ export default function HomePage() {
           </div>
         </div>
 
+        {/* NabuFlow pricing teaser */}
+        <div className="border-t border-border bg-background">
+          <div className="max-w-5xl mx-auto px-6 py-16">
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-8 sm:p-10">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+                <div className="flex-1 min-w-0">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-3">
+                    <Zap className="h-3 w-3" />
+                    NabuFlow Builder plans
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight mb-2">
+                    Pick a plan and start shipping
+                  </h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
+                    Orbit, Comet, and Nova — credit-based builder plans from $20/month. Unused credits roll over.
+                    Pay-as-you-go overage only when your monthly bucket runs out.
+                    Enterprise teams get Constellation with pooled credits and org-wide spend caps.
+                  </p>
+                  <div className="flex flex-wrap gap-3 mt-4 text-xs text-muted-foreground">
+                    {[
+                      "Orbit · $20 / 1,600 credits",
+                      "Comet · $50 / 4,000 credits",
+                      "Nova · $100 / 8,000 credits",
+                    ].map((label) => (
+                      <span key={label} className="flex items-center gap-1.5">
+                        <CheckCircle2 className="h-3 w-3 text-primary/60 shrink-0" />
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="shrink-0 flex flex-col items-start sm:items-end gap-3">
+                  <Button asChild size="sm" className="gap-2 rounded-full px-5">
+                    <Link href="/pricing#nabuflow-plans">
+                      See builder plans
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                  <Link
+                    href="/pricing"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Full pricing →
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Industry Starter Packs section */}
         <div className="border-t border-border bg-muted/20">
           <div className="max-w-4xl mx-auto px-6 py-16">
