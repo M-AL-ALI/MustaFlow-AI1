@@ -458,15 +458,15 @@ export async function* streamChatCompletion(
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await ai.models.generateContentStream({
-    model: params.model,
-    contents,
-    config,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
-  for await (const chunk of stream) {
-    if (params.signal?.aborted) return;
-    const delta = chunk.choices[0]?.delta?.content;
+    const stream: any = await ai.models.generateContentStream({
+      model: params.model,
+      contents,
+      config,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    for await (const chunk of stream) {
+      if (params.signal?.aborted) return;
+      const delta = chunk.choices[0]?.delta?.content;
       if (delta) yield delta;
     }
     return;
@@ -495,15 +495,12 @@ async function* streamDeepSeek(
 ): AsyncGenerator<string, void, void> {
   const client = getDeepSeekClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await client.chat.completions.create(
-    {
-      model: params.model,
-      messages: params.messages,
-      stream: true as const,
-      max_tokens: params.max_completion_tokens,
-    },
-    { signal: params.signal },
-  );
+  const stream: any = await ai.models.generateContentStream({
+    model: params.model,
+    contents,
+    config,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
   for await (const chunk of stream) {
     if (params.signal?.aborted) return;
     const delta = chunk.choices[0]?.delta?.content;
@@ -530,7 +527,7 @@ async function* streamAnthropic(
       if (Array.isArray(msg.content)) {
         turns.push({ role: "user", content: openAiContentToAnthropicBlocks(msg.content) });
       } else {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
         contents.push({ role: "user", parts: [{ text: content }] });
       }
       continue;
@@ -578,7 +575,7 @@ async function* streamGemini(
       if (Array.isArray(msg.content)) {
         contents.push({ role: "user", parts: openAiContentToGeminiParts(msg.content) });
       } else {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
         contents.push({ role: "user", parts: [{ text: content }] });
       }
       continue;

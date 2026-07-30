@@ -321,15 +321,15 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
 // Read-only. No business logic is changed by this endpoint.
 router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
   try {
-  const rows = await db
-    .select({
-      userId: userCreditsTable.userId,
-      balance: userCreditsTable.balance,
-      updatedAt: userCreditsTable.updatedAt,
-    })
-    .from(userCreditsTable)
-    .orderBy(desc(userCreditsTable.balance))
-    .limit(100);
+    const rows = await db
+      .select({
+        userId: userCreditsTable.userId,
+        balance: userCreditsTable.balance,
+        updatedAt: userCreditsTable.updatedAt,
+      })
+      .from(userCreditsTable)
+      .orderBy(desc(userCreditsTable.balance))
+      .limit(100);
 
     const MODES = ["lite", "eco", "power", "pro"] as const;
     type ModeName = (typeof MODES)[number];
@@ -414,7 +414,7 @@ router.get("/admin/eval-results", async (_req, res): Promise<void> => {
     const { readFile } = await import("fs/promises");
     const { join } = await import("path");
     const path = join(process.cwd(), "scripts", "eval-results", "latest.json");
-  const raw = await readDraftRaw(name);
+    const raw = await readDraftRaw(name);
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     res.json({ ran: true, ...parsed });
   } catch {
