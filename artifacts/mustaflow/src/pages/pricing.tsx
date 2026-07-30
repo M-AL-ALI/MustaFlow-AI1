@@ -129,13 +129,16 @@ const TIER_RANK: Record<string, number> = { free: 0, core: 1, wave: 2 };
 
 /** "$0.012" style per-credit overage price without trailing zeros. */
 function fmtPerCredit(v: number): string {
-  const s = v.toFixed(v < 0.095 ? 3 : 2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  const s = v
+    .toFixed(v < 0.095 ? 3 : 2)
+    .replace(/(\.\d*?)0+$/, "$1")
+    .replace(/\.$/, "");
   return `$${s}`;
 }
 
 function NabuFlowPlansSection({
   plans,
-  modeCosts,
+  modeCosts: _modeCosts,
   isSignedIn,
 }: {
   plans: NabuflowPublicPlan[];
@@ -201,8 +204,8 @@ function NabuFlowPlansSection({
           Plans for every builder
         </h2>
         <p className="text-muted-foreground text-sm max-w-lg mx-auto">
-          Credit-based builder plans — change your plan anytime and unused included credits roll over.
-          Pay-as-you-go overage kicks in only when your monthly bucket runs out.
+          Credit-based builder plans — change your plan anytime and unused included credits roll
+          over. Pay-as-you-go overage kicks in only when your monthly bucket runs out.
         </p>
       </div>
 
@@ -229,7 +232,9 @@ function NabuFlowPlansSection({
               )}
 
               <div>
-                <p className={`text-xs font-semibold uppercase tracking-wider mb-1 ${isPopular ? "text-primary/80" : "text-muted-foreground"}`}>
+                <p
+                  className={`text-xs font-semibold uppercase tracking-wider mb-1 ${isPopular ? "text-primary/80" : "text-muted-foreground"}`}
+                >
                   {plan.name}
                 </p>
                 <div className="flex items-baseline gap-1 mb-1">
@@ -246,7 +251,9 @@ function NabuFlowPlansSection({
               <ul className="space-y-2 flex-1">
                 {bullets.map((b) => (
                   <li key={b} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <CheckCircle2 className={`h-4 w-4 shrink-0 mt-0.5 ${isPopular ? "text-primary" : "text-green-500"}`} />
+                    <CheckCircle2
+                      className={`h-4 w-4 shrink-0 mt-0.5 ${isPopular ? "text-primary" : "text-green-500"}`}
+                    />
                     {b}
                   </li>
                 ))}
@@ -279,9 +286,12 @@ function NabuFlowPlansSection({
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
                 {plan.name} — Enterprise
               </p>
-              <p className="font-semibold text-foreground">Custom pricing · unlimited builds · dedicated support</p>
+              <p className="font-semibold text-foreground">
+                Custom pricing · unlimited builds · dedicated support
+              </p>
               <p className="text-sm text-muted-foreground mt-1">
-                Pool-based credit purchasing, org-wide spend caps, RBAC seat management, and priority queue access.
+                Pool-based credit purchasing, org-wide spend caps, RBAC seat management, and
+                priority queue access.
               </p>
             </div>
           </div>
@@ -695,7 +705,10 @@ export default function PricingPage() {
               </div>
               <div className="divide-y divide-border">
                 {nabuflowModeCosts.map((row) => (
-                  <div key={row.mode} className="flex items-center justify-between px-5 py-3 text-sm">
+                  <div
+                    key={row.mode}
+                    className="flex items-center justify-between px-5 py-3 text-sm"
+                  >
                     <span className="text-muted-foreground">
                       <span className="font-semibold text-foreground">{row.mode}</span> — {row.desc}
                     </span>
@@ -740,6 +753,18 @@ export default function PricingPage() {
           {
             q: "What if a build fails?",
             a: "Credits are only deducted for successful builds. Platform errors are not charged.",
+          },
+          {
+            q: "How does credit rollover work on NabuFlow Builder plans?",
+            a: "Any unused included credits from your monthly allocation roll over into the next billing cycle — up to a plan-specific maximum. Rolled-over credits are used first, before that month's fresh allocation. Credits purchased as pay-as-you-go overage never expire and are not subject to the rollover cap.",
+          },
+          {
+            q: "When does overage kick in, and how does the spend cap protect me?",
+            a: "Overage billing starts automatically the moment your monthly included credits (plus any rolled-over credits) run out. Each additional build is charged at the per-credit overage rate shown on your plan. The spend cap puts a hard ceiling on how much overage you can accrue in a single month — once the cap is reached, new builds are paused rather than charged further. You can raise or lower the cap at any time from your billing dashboard, up to the maximum your plan allows.",
+          },
+          {
+            q: "What happens to my credits if I switch NabuFlow plans mid-cycle?",
+            a: "When you upgrade, the new plan's higher included-credit allocation takes effect immediately and your remaining credits from the old allocation are carried forward. When you downgrade, the switch takes effect at the start of your next billing cycle so you keep your current plan's credits for the remainder of the period. Rolled-over credits already in your balance are preserved across plan changes, subject to the new plan's rollover maximum.",
           },
         ].map((item) => (
           <div key={item.q} className="border-b border-border pb-5">

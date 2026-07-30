@@ -585,7 +585,7 @@ async function* streamGemini(
       if (Array.isArray(msg.content)) {
         contents.push({ role: "user", parts: openAiContentToGeminiParts(msg.content) });
       } else {
-        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
         contents.push({ role: "user", parts: [{ text: content }] });
       }
       continue;

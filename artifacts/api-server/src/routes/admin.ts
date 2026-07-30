@@ -332,7 +332,7 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
     const MODES = ["lite", "eco", "power", "pro"] as const;
     type ModeName = (typeof MODES)[number];
 
-    const report = rows.rows.map((r) => {
+    const report = bttRows.rows.map((r) => {
       const mode = r.mode as ModeName;
       const avgActualCostUsd = r.avg_actual_cost_usd
         ? Number(Number(r.avg_actual_cost_usd).toFixed(6))
@@ -355,7 +355,7 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
     });
 
     // Fill in modes that have no telemetry yet with placeholder rows.
-    const reportModes = new Set(report.map((r) => r.mode));
+    const reportModes = new Set(report.map((r: (typeof report)[0]) => r.mode));
     for (const mode of MODES) {
       if (!reportModes.has(mode)) {
         const chargeUsd = creditCostFor(mode) * 0.01;
@@ -369,7 +369,10 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
         });
       }
     }
-    report.sort((a, b) => MODES.indexOf(a.mode as ModeName) - MODES.indexOf(b.mode as ModeName));
+    report.sort(
+      (a: (typeof report)[0], b: (typeof report)[0]) =>
+        MODES.indexOf(a.mode as ModeName) - MODES.indexOf(b.mode as ModeName),
+    );
 
     res.json({ windowDays: 7, report });
   } catch (err) {
@@ -406,7 +409,7 @@ router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
     .orderBy(desc(agentInboxTable.createdAt))
     .limit(limit);
   const [{ n }] = await db
-    .select({ n: sql<number>`count(*)::int` })
+    .select({ n: drizzleSql<number>`count(*)::int` })
     .from(agentInboxTable)
     .where(eq(agentInboxTable.status, "unread"));
   res.json({
@@ -858,7 +861,7 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
 // ── GET /api/admin/abuse-reports ──────────────────────────────────────────────
 // Returns abuse reports with optional ?status=open|dismissed|resolved filter.
 router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
-  const statusFilter = req.query.status as string | undefined;
+  const _statusFilter = req.query.status as string | undefined;
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const offset = Number(req.query.offset ?? 0);
 

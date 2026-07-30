@@ -162,10 +162,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ProvisioningProgress } from "./components/provisioning-progress";
 import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
-import {
-  builderCreditCost,
-  mapIntentToSendOptions,
-} from "@/lib/builder-followup-submit";
+import { builderCreditCost, mapIntentToSendOptions } from "@/lib/builder-followup-submit";
 import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builder-mode-persistence";
 import {
   calmPhaseForTaskEvent,
@@ -3043,7 +3040,6 @@ export default function ProjectWorkspacePage() {
       queryClient,
       agentIdentity,
       tasksForFeed,
-      billingExempt,
     ],
   );
 
