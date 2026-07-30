@@ -339,15 +339,18 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
         : 0;
       // charge_usd = credits × $0.01 per credit (credits are sold at $0.01 each)
       const chargeUsd = creditCostFor(mode) * 0.01;
-      const ratio = chargeUsd > 0 ? avgActualCostUsd / chargeUsd : null;
+      // ratio = charge / actual_cost. When ratio >= 1.15 we have at least 15%
+      // headroom (charge covers cost with margin). When ratio < 1.15 the mode
+      // is underpriced relative to actual AI cost → flag for recalibration.
+      // Using chargeUsd in the numerator avoids flagging low-cost modes as risky.
+      const ratio = avgActualCostUsd > 0 ? chargeUsd / avgActualCostUsd : null;
       return {
         mode,
         buildCount: Number(r.build_count),
         avgActualCostUsd,
         chargeUsd: Number(chargeUsd.toFixed(6)),
         ratio: ratio !== null ? Number(ratio.toFixed(4)) : null,
-        // Flag modes where actual cost ≥ 1.15× charge — the desired minimum
-        // margin for the calibration recalibration loop.
+        // Flag when charge covers less than 1.15× actual cost (margin too thin).
         flagged: ratio !== null && ratio < 1.15,
       };
     });
