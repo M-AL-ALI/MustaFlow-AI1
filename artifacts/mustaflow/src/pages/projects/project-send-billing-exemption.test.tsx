@@ -647,4 +647,60 @@ describe("overage-crossing notice", () => {
     await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
     expect(testState.clearComposer).toHaveBeenCalledTimes(1);
   });
+
+  it("notice re-appears after a billing cycle rollover even if it was dismissed in the previous cycle", async () => {
+    // Simulate: user dismissed the notice in the July cycle
+    localStorage.setItem("nabuflow_overage_ack_2026-07-01", "1");
+
+    // New cycle (August) — no ack for this key
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-08-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    // The notice must fire again because the new cycle key has no ack
+    await screen.findByTestId("overage-crossing-notice");
+    // Old cycle's ack is still in storage and was not incorrectly applied
+    expect(localStorage.getItem("nabuflow_overage_ack_2026-08-01")).toBeNull();
+  });
+
+  it("notice stays hidden when cycle rolls over and the new cycle already has an ack", async () => {
+    // Both old and new cycle acks present
+    localStorage.setItem("nabuflow_overage_ack_2026-07-01", "1");
+    localStorage.setItem("nabuflow_overage_ack_2026-08-01", "1");
+
+    testState.billing = {
+      data: {
+        enforcementEnabled: true,
+        exempt: false,
+        canBuild: true,
+        blockedReason: null,
+        plan: { overageUsdPerCredit: 0.012 },
+        subscription: { currentCycleStart: "2026-08-01T00:00:00.000Z" },
+        card: null,
+        spendCap: null,
+        cycle: { remainingIncludedCredits: 2 },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    // Already acked for this cycle — should remain hidden
+    await waitFor(() =>
+      expect(screen.queryByTestId("overage-crossing-notice")).not.toBeInTheDocument(),
+    );
+  });
 });

@@ -934,14 +934,20 @@ export default function ProjectWorkspacePage() {
   const overageCycleKey =
     nabuflowBillingState?.subscription?.currentCycleStart?.substring(0, 10) ?? null;
   const [overageNoticeDismissed, setOverageNoticeDismissed] = useState(false);
+  // Derive dismissed state from localStorage whenever the cycle key changes.
+  // Explicitly sets false for new/null keys so a cycle rollover in a long-lived
+  // session always re-arms the notice.
   useEffect(() => {
-    if (!overageCycleKey) return;
+    if (!overageCycleKey) {
+      setOverageNoticeDismissed(false);
+      return;
+    }
     try {
-      if (localStorage.getItem(`nabuflow_overage_ack_${overageCycleKey}`) === "1") {
-        setOverageNoticeDismissed(true);
-      }
+      setOverageNoticeDismissed(
+        localStorage.getItem(`nabuflow_overage_ack_${overageCycleKey}`) === "1",
+      );
     } catch {
-      /* storage unavailable */
+      setOverageNoticeDismissed(false);
     }
   }, [overageCycleKey]);
   const dismissOverageNotice = useCallback(() => {
