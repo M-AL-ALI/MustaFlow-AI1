@@ -118,19 +118,26 @@ export const nabuflowBillingCyclesTable = pgTable(
   ],
 );
 
-export const NABUFLOW_USAGE_ATTRIBUTIONS = ["included", "overage", "mixed"] as const;
+// "pool" = drawn from an enterprise org's shared prepaid pool (Constellation).
+export const NABUFLOW_USAGE_ATTRIBUTIONS = ["included", "overage", "mixed", "pool"] as const;
 export type NabuflowUsageAttribution = (typeof NABUFLOW_USAGE_ATTRIBUTIONS)[number];
 
 // Per-build usage ledger. Every charged build records exactly what was drawn
 // from the included bucket vs metered overage, with engine mode, deep flag,
 // project and cycle attribution so dashboards and invoices reconcile exactly.
+// Enterprise pool draws land here too (orgId set, cycleId NULL, attribution
+// "pool") so a seat's builds are visible in the same usage surface.
 export const nabuflowUsageEventsTable = pgTable(
   "nabuflow_usage_events",
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
-    cycleId: integer("cycle_id").notNull(),
+    /** Personal billing cycle — NULL for enterprise pool draws. */
+    cycleId: integer("cycle_id"),
+    /** Cycle start (personal) or UTC month start (enterprise pool draws). */
     cycleStart: timestamp("cycle_start", { withTimezone: true }).notNull(),
+    /** Enterprise org the draw billed to (nabuflow_orgs.id) — NULL for personal. */
+    orgId: integer("org_id"),
     projectId: integer("project_id"),
     taskId: integer("task_id"),
     /** pipeline | background | queue | eas | architect | senses | converse | creative | plan */
@@ -158,6 +165,7 @@ export const nabuflowUsageEventsTable = pgTable(
   (t) => [
     index("nabuflow_usage_events_user_idx").on(t.userId, t.createdAt),
     index("nabuflow_usage_events_cycle_idx").on(t.cycleId),
+    index("nabuflow_usage_events_org_idx").on(t.orgId, t.createdAt),
   ],
 );
 

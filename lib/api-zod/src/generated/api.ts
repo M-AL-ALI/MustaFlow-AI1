@@ -6270,7 +6270,19 @@ export const GetNabuflowBillingStateResponse = zod.object({
   "remainingProBuilds": zod.number().nullish(),
   "remainingDeepBuilds": zod.number().nullish(),
   "resetsAt": zod.coerce.date().nullish()
-}).nullish()
+}).nullish(),
+  "org": zod.object({
+  "orgId": zod.number(),
+  "companyName": zod.string(),
+  "role": zod.string(),
+  "status": zod.string(),
+  "poolCredits": zod.number(),
+  "capUsdCents": zod.number(),
+  "monthDrawnUsdCents": zod.number(),
+  "seatCapUsdCents": zod.number().nullish(),
+  "seatMonthDrawnUsdCents": zod.number(),
+  "monthResetsAt": zod.coerce.date()
+}).nullish().describe('Present when the caller is a seat of a Constellation organization — the shared credit pool replaces the personal plan, card, spend cap and cycle (which are all null for seats).\n')
 })
 
 
@@ -6289,7 +6301,8 @@ export const ListNabuflowUsageQueryParams = zod.object({
 export const ListNabuflowUsageResponse = zod.object({
   "events": zod.array(zod.object({
   "id": zod.number(),
-  "cycleId": zod.number(),
+  "cycleId": zod.number().nullable(),
+  "orgId": zod.number().nullish(),
   "projectId": zod.number().nullish(),
   "taskId": zod.number().nullish(),
   "source": zod.string(),
@@ -6396,6 +6409,279 @@ export const UpdateNabuflowSpendCapBody = zod.object({
 })
 
 export const UpdateNabuflowSpendCapResponse = zod.object({
+  "ok": zod.boolean(),
+  "spendCapUsdCents": zod.number().nullish(),
+  "effectiveSpendCapUsdCents": zod.number()
+})
+
+
+/**
+ * @summary Register a Constellation enterprise organization (company-flagged Stripe Customer + shared credit pool; requester becomes billing admin)
+ */
+export const registerNabuflowOrgBodyCompanyNameMin = 2;
+export const registerNabuflowOrgBodyCompanyNameMax = 200;
+
+export const registerNabuflowOrgBodyBillingContactNameMax = 200;
+
+export const registerNabuflowOrgBodyBillingContactEmailMax = 320;
+
+export const registerNabuflowOrgBodyTaxIdMax = 60;
+
+export const registerNabuflowOrgBodyAddressLine1Max = 300;
+
+export const registerNabuflowOrgBodyAddressLine2Max = 300;
+
+export const registerNabuflowOrgBodyCityMax = 120;
+
+export const registerNabuflowOrgBodyRegionMax = 120;
+
+export const registerNabuflowOrgBodyPostalCodeMax = 20;
+
+export const registerNabuflowOrgBodyCountryMin = 2;
+export const registerNabuflowOrgBodyCountryMax = 2;
+
+export const registerNabuflowOrgBodyPoReferenceMax = 140;
+
+
+
+export const RegisterNabuflowOrgBody = zod.object({
+  "companyName": zod.string().min(registerNabuflowOrgBodyCompanyNameMin).max(registerNabuflowOrgBodyCompanyNameMax),
+  "billingContactName": zod.string().max(registerNabuflowOrgBodyBillingContactNameMax).optional(),
+  "billingContactEmail": zod.string().email().max(registerNabuflowOrgBodyBillingContactEmailMax),
+  "taxId": zod.string().max(registerNabuflowOrgBodyTaxIdMax).optional().describe('Tax or VAT identifier printed on company invoices.'),
+  "addressLine1": zod.string().min(1).max(registerNabuflowOrgBodyAddressLine1Max),
+  "addressLine2": zod.string().max(registerNabuflowOrgBodyAddressLine2Max).optional(),
+  "city": zod.string().min(1).max(registerNabuflowOrgBodyCityMax),
+  "region": zod.string().max(registerNabuflowOrgBodyRegionMax).optional(),
+  "postalCode": zod.string().min(1).max(registerNabuflowOrgBodyPostalCodeMax),
+  "country": zod.string().min(registerNabuflowOrgBodyCountryMin).max(registerNabuflowOrgBodyCountryMax).describe('ISO 3166-1 alpha-2 country code.'),
+  "poReference": zod.string().max(registerNabuflowOrgBodyPoReferenceMax).optional()
+})
+
+
+/**
+ * @summary Organization billing state for the caller's seat (billing admins also get seats, purchases, ledger and the company card)
+ */
+export const GetNabuflowOrgResponse = zod.object({
+  "org": zod.object({
+  "id": zod.number(),
+  "companyName": zod.string(),
+  "billingContactName": zod.string().nullish(),
+  "billingContactEmail": zod.string(),
+  "taxId": zod.string().nullish(),
+  "addressLine1": zod.string(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string(),
+  "region": zod.string().nullish(),
+  "postalCode": zod.string(),
+  "country": zod.string(),
+  "poReference": zod.string().nullish(),
+  "invoiceTermsEnabled": zod.boolean(),
+  "termsNetDays": zod.number(),
+  "status": zod.string(),
+  "poolCredits": zod.number(),
+  "monthlySpendCapUsdCents": zod.number().nullish(),
+  "effectiveSpendCapUsdCents": zod.number(),
+  "createdAt": zod.coerce.date().nullish()
+}).describe('Constellation enterprise organization — the company entity that owns the shared credit pool. Monetary fields are USD cents; poolCredits is the prepaid shared balance that seats draw builds from.\n'),
+  "role": zod.string(),
+  "month": zod.object({
+  "drawnUsdCents": zod.number(),
+  "capUsdCents": zod.number(),
+  "seatDrawnUsdCents": zod.number(),
+  "seatCapUsdCents": zod.number().nullish(),
+  "resetsAt": zod.coerce.date()
+}),
+  "card": zod.object({
+  "brand": zod.string().nullish(),
+  "last4": zod.string().nullish(),
+  "expMonth": zod.number().nullish(),
+  "expYear": zod.number().nullish()
+}).nullish(),
+  "seats": zod.array(zod.object({
+  "userId": zod.string(),
+  "role": zod.string(),
+  "email": zod.string().nullish(),
+  "seatSpendCapUsdCents": zod.number().nullish(),
+  "createdAt": zod.coerce.date().nullish()
+})).optional(),
+  "purchases": zod.array(zod.object({
+  "id": zod.number(),
+  "credits": zod.number(),
+  "amountUsdCents": zod.number(),
+  "method": zod.string(),
+  "status": zod.string(),
+  "poReference": zod.string().nullish(),
+  "hostedInvoiceUrl": zod.string().nullish(),
+  "invoicePdfUrl": zod.string().nullish(),
+  "dueAt": zod.coerce.date().nullish(),
+  "paidAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date().nullish()
+})).optional(),
+  "ledger": zod.array(zod.object({
+  "id": zod.number(),
+  "entryType": zod.string(),
+  "credits": zod.number(),
+  "balanceAfter": zod.number(),
+  "usdCents": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "description": zod.string().nullish(),
+  "createdAt": zod.coerce.date().nullish()
+})).optional()
+})
+
+
+/**
+ * @summary Update org billing details (PO reference, contact, net-terms days; enabling invoice terms is platform-gated)
+ */
+export const updateNabuflowOrgBodyPoReferenceMax = 140;
+
+export const updateNabuflowOrgBodyBillingContactNameMax = 200;
+
+export const updateNabuflowOrgBodyBillingContactEmailMax = 320;
+
+export const updateNabuflowOrgBodyTermsNetDaysMax = 90;
+
+
+
+export const UpdateNabuflowOrgBody = zod.object({
+  "poReference": zod.string().max(updateNabuflowOrgBodyPoReferenceMax).nullish(),
+  "billingContactName": zod.string().max(updateNabuflowOrgBodyBillingContactNameMax).nullish(),
+  "billingContactEmail": zod.string().email().max(updateNabuflowOrgBodyBillingContactEmailMax).optional(),
+  "termsNetDays": zod.number().min(1).max(updateNabuflowOrgBodyTermsNetDaysMax).optional(),
+  "invoiceTermsEnabled": zod.boolean().optional().describe('Platform-gated — only the NabuFlow team can enable invoice terms.')
+})
+
+export const UpdateNabuflowOrgResponse = zod.object({
+  "ok": zod.boolean(),
+  "org": zod.object({
+  "id": zod.number(),
+  "companyName": zod.string(),
+  "billingContactName": zod.string().nullish(),
+  "billingContactEmail": zod.string(),
+  "taxId": zod.string().nullish(),
+  "addressLine1": zod.string(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string(),
+  "region": zod.string().nullish(),
+  "postalCode": zod.string(),
+  "country": zod.string(),
+  "poReference": zod.string().nullish(),
+  "invoiceTermsEnabled": zod.boolean(),
+  "termsNetDays": zod.number(),
+  "status": zod.string(),
+  "poolCredits": zod.number(),
+  "monthlySpendCapUsdCents": zod.number().nullish(),
+  "effectiveSpendCapUsdCents": zod.number(),
+  "createdAt": zod.coerce.date().nullish()
+}).describe('Constellation enterprise organization — the company entity that owns the shared credit pool. Monetary fields are USD cents; poolCredits is the prepaid shared balance that seats draw builds from.\n')
+})
+
+
+/**
+ * @summary Volume-discount tiers for bulk credit-pool purchases (visible before registration)
+ */
+export const GetNabuflowOrgPricingResponse = zod.object({
+  "minPurchaseCredits": zod.number(),
+  "selfServeRateUsdPerCredit": zod.number(),
+  "tiers": zod.array(zod.object({
+  "minCredits": zod.number(),
+  "usdPerCredit": zod.number(),
+  "label": zod.string()
+}))
+})
+
+
+/**
+ * @summary Create a SetupIntent to capture the company card (billing admin only)
+ */
+export const CreateNabuflowOrgSetupIntentResponse = zod.object({
+  "clientSecret": zod.string(),
+  "setupIntentId": zod.string()
+})
+
+
+/**
+ * @summary Bulk credit-pool purchase at volume rates — card charges now; invoice sends with net terms and funds the pool on payment
+ */
+
+export const purchaseNabuflowOrgCreditsBodyPoReferenceMax = 140;
+
+
+
+export const PurchaseNabuflowOrgCreditsBody = zod.object({
+  "credits": zod.number().min(1),
+  "method": zod.enum(['card', 'invoice']),
+  "poReference": zod.string().max(purchaseNabuflowOrgCreditsBodyPoReferenceMax).optional()
+})
+
+
+/**
+ * @summary Add a seat by account email — the seat's builds draw from the shared pool
+ */
+export const addNabuflowOrgSeatBodyEmailMax = 320;
+
+export const addNabuflowOrgSeatBodySeatSpendCapUsdCentsMin = 0;
+
+
+
+export const AddNabuflowOrgSeatBody = zod.object({
+  "email": zod.string().email().max(addNabuflowOrgSeatBodyEmailMax),
+  "seatSpendCapUsdCents": zod.number().min(addNabuflowOrgSeatBodySeatSpendCapUsdCentsMin).nullish()
+})
+
+
+/**
+ * @summary Remove a seat (the last billing admin cannot be removed)
+ */
+export const RemoveNabuflowOrgSeatParams = zod.object({
+  "seatUserId": zod.coerce.string()
+})
+
+export const RemoveNabuflowOrgSeatResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Set or clear a per-seat monthly sub-cap (clamped to the org cap at enforcement time)
+ */
+export const UpdateNabuflowOrgSeatCapParams = zod.object({
+  "seatUserId": zod.coerce.string()
+})
+
+export const updateNabuflowOrgSeatCapBodySeatSpendCapUsdCentsMin = 0;
+
+
+
+export const UpdateNabuflowOrgSeatCapBody = zod.object({
+  "seatSpendCapUsdCents": zod.number().min(updateNabuflowOrgSeatCapBodySeatSpendCapUsdCentsMin).nullable()
+})
+
+export const UpdateNabuflowOrgSeatCapResponse = zod.object({
+  "ok": zod.boolean(),
+  "seat": zod.object({
+  "userId": zod.string(),
+  "role": zod.string(),
+  "email": zod.string().nullish(),
+  "seatSpendCapUsdCents": zod.number().nullish(),
+  "createdAt": zod.coerce.date().nullish()
+})
+})
+
+
+/**
+ * @summary Update the org-wide monthly spend cap (null reverts to the Constellation default)
+ */
+export const updateNabuflowOrgSpendCapBodySpendCapUsdCentsMin = 0;
+
+
+
+export const UpdateNabuflowOrgSpendCapBody = zod.object({
+  "spendCapUsdCents": zod.number().min(updateNabuflowOrgSpendCapBodySpendCapUsdCentsMin).nullable()
+})
+
+export const UpdateNabuflowOrgSpendCapResponse = zod.object({
   "ok": zod.boolean(),
   "spendCapUsdCents": zod.number().nullish(),
   "effectiveSpendCapUsdCents": zod.number()

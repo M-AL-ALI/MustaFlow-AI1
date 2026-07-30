@@ -8,7 +8,8 @@
 
 export interface NabuflowUsageEvent {
   id: number;
-  cycleId: number;
+  cycleId: number | null;
+  orgId?: number | null;
   projectId?: number | null;
   taskId?: number | null;
   source: string;

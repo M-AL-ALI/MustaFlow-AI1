@@ -33,9 +33,11 @@ import {
 } from "@workspace/db";
 import {
   NABUFLOW_DUNNING,
+  NABUFLOW_PLANS,
   NABUFLOW_WARNING_THRESHOLDS,
   getNabuflowPlan,
   nabuflowEffectiveSpendCapCents,
+  nabuflowOrgDrawValueCents,
   nabuflowOverageCents,
   nabuflowUpgradeTarget,
   type NabuflowPlanConfig,
@@ -45,6 +47,13 @@ import { isSuperuser } from "./superusers";
 import { parseBuilderAllowlist } from "./builder-access";
 import { getClerkUserById } from "./clerk-users";
 import { logger } from "./logger";
+import {
+  getNabuflowOrgSeatContext,
+  buildNabuflowOrgGateInfo,
+  chargeNabuflowOrgPool,
+  refundNabuflowOrgPool,
+  type NabuflowOrgGateInfo,
+} from "./nabuflow-org";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Enforcement + bypass
@@ -197,6 +206,9 @@ export async function materializeNabuflowSubscriptionRow(opts: {
  */
 export async function nabuflowChargeActive(userId: string): Promise<boolean> {
   if (!creditsEnforcementEnabled()) return false;
+  // Enterprise seats always bill to the org pool (even while suspended: a
+  // reserved build that started must still drain from the pool, honestly).
+  if (await getNabuflowOrgSeatContext(userId)) return true;
   const sub = await getNabuflowSubscription(userId);
   return !!sub && isChargeableNabuflowStatus(sub.status) && !!getNabuflowPlan(sub.planId);
 }
@@ -320,7 +332,12 @@ export type NabuflowGateErrorCode =
   | "mode_not_available"
   | "combo_not_available"
   | "mode_limit_reached"
-  | "spend_cap_reached";
+  | "spend_cap_reached"
+  // Enterprise (Constellation) org-seat blocks — honest states, calm copy.
+  | "org_suspended"
+  | "org_pool_exhausted"
+  | "org_spend_cap_reached"
+  | "org_seat_cap_reached";
 
 export interface NabuflowGateError {
   code: NabuflowGateErrorCode;
@@ -361,6 +378,12 @@ export interface NabuflowGateState {
     | "deepBuildsUsed"
   > | null;
   spendCapUsdCents: number;
+  /**
+   * Present when the account is a seat of a Constellation enterprise org —
+   * the org lane REPLACES the personal plan rules (prepaid pool, no card
+   * requirement; org cap + optional seat sub-cap instead of the personal cap).
+   */
+  org?: NabuflowOrgGateInfo | null;
 }
 
 function cardExpired(
@@ -392,6 +415,91 @@ export function evaluateNabuflowGate(
   const resetsAt = sub?.currentCycleEnd ? sub.currentCycleEnd.toISOString() : null;
 
   const block = (error: NabuflowGateError): NabuflowGateDecision => ({ allowed: false, error });
+
+  // ── Enterprise org seats (Constellation) ──────────────────────────────────
+  // The org lane replaces personal-plan rules: the pool is PREPAID (no card
+  // requirement, no dunning), mode access follows the Constellation ladder,
+  // and spending is bounded by the org-wide monthly cap plus the optional
+  // per-seat sub-cap. Blocks are pre-start only — in-flight builds are never
+  // killed, which is also why the pool may go slightly negative.
+  if (state.org) {
+    const org = state.org;
+    const orgResetsAt = org.monthResetsAt.toISOString();
+    const resetDay = orgResetsAt.slice(0, 10);
+
+    if (org.status !== "active") {
+      return block({
+        code: "org_suspended",
+        message: `${org.companyName}'s NabuFlow billing is suspended. Ask your billing admin to get things back up.`,
+        planId: "constellation",
+      });
+    }
+
+    // Reserved-at-enqueue builds re-checked at drain: plan/status verified,
+    // usage checks already consumed at reserve time (mirrors personal lane).
+    if (request.skipUsageChecks) return { allowed: true, bypass: null };
+
+    // Engine-mode availability follows the Constellation ladder config (all
+    // modes + Pro+Deep combo today; config stays authoritative).
+    const orgLadder = NABUFLOW_PLANS.constellation.ladder;
+    const mode = request.engineMode ?? null;
+    const deep = !!request.deepReasoning;
+    if (deep && orgLadder.deepBuildsPerCycle === 0) {
+      return block({
+        code: "mode_not_available",
+        message: "Deep reasoning isn't enabled for your organization's plan.",
+        planId: "constellation",
+      });
+    }
+    if (mode === "pro" && deep && !orgLadder.proDeepCombo) {
+      return block({
+        code: "combo_not_available",
+        message: "Pro + Deep together isn't enabled for your organization's plan.",
+        planId: "constellation",
+      });
+    }
+
+    const projected = Math.max(request.projectedCredits ?? 0, 0);
+    const projectedValueCents = nabuflowOrgDrawValueCents(projected);
+
+    // Shared pool must cover the build (honest block; admins top up).
+    if (org.poolCredits < projected || (projected === 0 && org.poolCredits <= 0)) {
+      return block({
+        code: "org_pool_exhausted",
+        message: `${org.companyName}'s shared credit pool ${org.poolCredits <= 0 ? "is empty" : "can't cover this build"}. Ask your billing admin to top up the pool.`,
+        planId: "constellation",
+      });
+    }
+
+    // Org-wide monthly spend cap (draw value at the Constellation rate).
+    if (
+      projectedValueCents > 0 &&
+      org.monthDrawnUsdCents + projectedValueCents > org.capUsdCents
+    ) {
+      return block({
+        code: "org_spend_cap_reached",
+        message: `This build would take ${org.companyName} past its monthly spend cap. Your billing admin can raise it, or it resets on ${resetDay}.`,
+        planId: "constellation",
+        resetsAt: orgResetsAt,
+      });
+    }
+
+    // Optional per-seat sub-cap.
+    if (
+      org.seatCapUsdCents !== null &&
+      projectedValueCents > 0 &&
+      org.seatMonthDrawnUsdCents + projectedValueCents > org.seatCapUsdCents
+    ) {
+      return block({
+        code: "org_seat_cap_reached",
+        message: `This build would exceed your seat's monthly limit at ${org.companyName}. Ask your billing admin to raise it, or it resets on ${resetDay}.`,
+        planId: "constellation",
+        resetsAt: orgResetsAt,
+      });
+    }
+
+    return { allowed: true, bypass: null };
+  }
 
   if (!sub || !plan) {
     return block({
@@ -545,6 +653,17 @@ export async function resolveNabuflowBuildGate(
   if (nabuflowTestBypassActive()) return { allowed: true, bypass: "test" };
   if (await isSuperuser(userId)) return { allowed: true, bypass: "superuser" };
   if (await isBuilderAllowlistExempt(userId)) return { allowed: true, bypass: "allowlist" };
+
+  // Enterprise seats bill to their org's shared pool — the org lane replaces
+  // the personal-plan rules entirely (deterministic: one org per account).
+  const orgCtx = await getNabuflowOrgSeatContext(userId);
+  if (orgCtx) {
+    const org = await buildNabuflowOrgGateInfo(orgCtx);
+    return evaluateNabuflowGate(
+      { plan: null, subscription: null, cycle: null, spendCapUsdCents: 0, org },
+      request,
+    );
+  }
 
   const sub = await getNabuflowSubscription(userId);
   const plan = getNabuflowPlan(sub?.planId);
@@ -925,6 +1044,17 @@ export async function maybeChargeNabuflow(
   opts: NabuflowChargeOpts,
 ): Promise<{ newBalance: number } | null> {
   if (amount <= 0) return null;
+
+  // Enterprise seats draw from the org's shared pool — same charge pipeline,
+  // same credit amounts, pool accounting instead of personal cycles. Never
+  // fails a started build (the pool may dip below zero; the gate blocks new
+  // builds pre-start).
+  const orgCtx = await getNabuflowOrgSeatContext(userId);
+  if (orgCtx) {
+    const drawn = await chargeNabuflowOrgPool(orgCtx.org.id, userId, amount, opts);
+    return { newBalance: Math.max(drawn.poolCredits, 0) };
+  }
+
   const sub = await getNabuflowSubscription(userId);
   if (!sub || !isChargeableNabuflowStatus(sub.status)) return null;
   const plan = getNabuflowPlan(sub.planId);
@@ -947,6 +1077,14 @@ export async function maybeRefundNabuflow(
   opts: { projectId?: number | null; description?: string },
 ): Promise<number | null> {
   if (amount <= 0) return null;
+
+  // Enterprise seats: reverse the matching pool draw (mirrors charge routing).
+  const orgCtx = await getNabuflowOrgSeatContext(userId);
+  if (orgCtx) {
+    const pool = await refundNabuflowOrgPool(orgCtx.org.id, userId, amount, opts);
+    return Math.max(pool, 0);
+  }
+
   const sub = await getNabuflowSubscription(userId);
   if (!sub || !isChargeableNabuflowStatus(sub.status)) return null;
   const plan = getNabuflowPlan(sub.planId);
@@ -957,6 +1095,10 @@ export async function maybeRefundNabuflow(
     eq(nabuflowUsageEventsTable.userId, userId),
     eq(nabuflowUsageEventsTable.credits, amount),
     isNull(nabuflowUsageEventsTable.reversedAt),
+    // Personal-lane events only — org pool draws (orgId set, cycleId null)
+    // are reversed by refundNabuflowOrgPool, never against a personal cycle
+    // (matters for accounts whose org seat was removed mid-flight).
+    isNull(nabuflowUsageEventsTable.orgId),
     gt(nabuflowUsageEventsTable.createdAt, cutoff),
   ];
   if (opts.projectId != null) {
@@ -969,7 +1111,7 @@ export async function maybeRefundNabuflow(
     .orderBy(desc(nabuflowUsageEventsTable.createdAt))
     .limit(1);
 
-  if (!event) {
+  if (!event || event.cycleId === null) {
     // Nothing to reverse (e.g. charge predates the plan) — report current
     // remaining bucket without fabricating credits.
     const cycle = await ensureCurrentNabuflowCycle(sub, plan);
@@ -979,6 +1121,7 @@ export async function maybeRefundNabuflow(
     );
     return Math.max(cycle.includedCredits - cycle.usedIncludedCredits, 0);
   }
+  const eventCycleId = event.cycleId;
 
   const proDec = event.source && event.engineMode === "pro" && isBuildSource(event.source) ? 1 : 0;
   const deepDec = event.deepReasoning && isBuildSource(event.source) ? 1 : 0;
@@ -996,7 +1139,7 @@ export async function maybeRefundNabuflow(
     const [cycle] = await tx
       .select()
       .from(nabuflowBillingCyclesTable)
-      .where(eq(nabuflowBillingCyclesTable.id, event.cycleId))
+      .where(eq(nabuflowBillingCyclesTable.id, eventCycleId))
       .for("update");
     if (!cycle) return null;
 
@@ -1010,7 +1153,7 @@ export async function maybeRefundNabuflow(
         deepBuildsUsed: sql`GREATEST(${nabuflowBillingCyclesTable.deepBuildsUsed} - ${deepDec}, 0)`,
         updatedAt: sql`now()`,
       })
-      .where(eq(nabuflowBillingCyclesTable.id, event.cycleId))
+      .where(eq(nabuflowBillingCyclesTable.id, eventCycleId))
       .returning();
 
     return updated ? Math.max(updated.includedCredits - updated.usedIncludedCredits, 0) : null;

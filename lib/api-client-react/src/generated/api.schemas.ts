@@ -53,7 +53,8 @@ export interface NabuflowPlan {
 
 export interface NabuflowUsageEvent {
   id: number;
-  cycleId: number;
+  cycleId: number | null;
+  orgId?: number | null;
   projectId?: number | null;
   taskId?: number | null;
   source: string;
@@ -67,6 +68,65 @@ export interface NabuflowUsageEvent {
   attribution: string;
   description?: string | null;
   reversedAt?: string | null;
+  createdAt?: string | null;
+}
+
+/**
+ * Constellation enterprise organization — the company entity that owns the shared credit pool. Monetary fields are USD cents; poolCredits is the prepaid shared balance that seats draw builds from.
+
+ */
+export interface NabuflowOrg {
+  id: number;
+  companyName: string;
+  billingContactName?: string | null;
+  billingContactEmail: string;
+  taxId?: string | null;
+  addressLine1: string;
+  addressLine2?: string | null;
+  city: string;
+  region?: string | null;
+  postalCode: string;
+  country: string;
+  poReference?: string | null;
+  invoiceTermsEnabled: boolean;
+  termsNetDays: number;
+  status: string;
+  poolCredits: number;
+  monthlySpendCapUsdCents?: number | null;
+  effectiveSpendCapUsdCents: number;
+  createdAt?: string | null;
+}
+
+export interface NabuflowOrgSeat {
+  userId: string;
+  role: string;
+  email?: string | null;
+  seatSpendCapUsdCents?: number | null;
+  createdAt?: string | null;
+}
+
+export interface NabuflowOrgPurchase {
+  id: number;
+  credits: number;
+  amountUsdCents: number;
+  method: string;
+  status: string;
+  poReference?: string | null;
+  hostedInvoiceUrl?: string | null;
+  invoicePdfUrl?: string | null;
+  dueAt?: string | null;
+  paidAt?: string | null;
+  createdAt?: string | null;
+}
+
+export interface NabuflowOrgLedgerEntry {
+  id: number;
+  entryType: string;
+  credits: number;
+  balanceAfter: number;
+  usdCents?: number | null;
+  userId?: string | null;
+  description?: string | null;
   createdAt?: string | null;
 }
 
@@ -5738,6 +5798,23 @@ export type GetNabuflowBillingState200Cycle = {
   resetsAt?: string | null;
 } | null;
 
+/**
+ * Present when the caller is a seat of a Constellation organization — the shared credit pool replaces the personal plan, card, spend cap and cycle (which are all null for seats).
+
+ */
+export type GetNabuflowBillingState200Org = {
+  orgId: number;
+  companyName: string;
+  role: string;
+  status: string;
+  poolCredits: number;
+  capUsdCents: number;
+  monthDrawnUsdCents: number;
+  seatCapUsdCents?: number | null;
+  seatMonthDrawnUsdCents: number;
+  monthResetsAt: string;
+} | null;
+
 export type GetNabuflowBillingState200 = {
   enforcementEnabled: boolean;
   exempt: boolean;
@@ -5749,6 +5826,9 @@ export type GetNabuflowBillingState200 = {
   card?: GetNabuflowBillingState200Card;
   spendCap?: GetNabuflowBillingState200SpendCap;
   cycle?: GetNabuflowBillingState200Cycle;
+  /** Present when the caller is a seat of a Constellation organization — the shared credit pool replaces the personal plan, card, spend cap and cycle (which are all null for seats).
+   */
+  org?: GetNabuflowBillingState200Org;
 };
 
 export type ListNabuflowUsageParams = {
@@ -5842,6 +5922,191 @@ export type UpdateNabuflowSpendCapBody = {
 };
 
 export type UpdateNabuflowSpendCap200 = {
+  ok: boolean;
+  spendCapUsdCents?: number | null;
+  effectiveSpendCapUsdCents: number;
+};
+
+export type RegisterNabuflowOrgBody = {
+  /**
+     * @minLength 2
+     * @maxLength 200
+     */
+  companyName: string;
+  /** @maxLength 200 */
+  billingContactName?: string;
+  /** @maxLength 320 */
+  billingContactEmail: string;
+  /**
+     * Tax or VAT identifier printed on company invoices.
+     * @maxLength 60
+     */
+  taxId?: string;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     */
+  addressLine1: string;
+  /** @maxLength 300 */
+  addressLine2?: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  city: string;
+  /** @maxLength 120 */
+  region?: string;
+  /**
+     * @minLength 1
+     * @maxLength 20
+     */
+  postalCode: string;
+  /**
+     * ISO 3166-1 alpha-2 country code.
+     * @minLength 2
+     * @maxLength 2
+     */
+  country: string;
+  /** @maxLength 140 */
+  poReference?: string;
+};
+
+export type RegisterNabuflowOrg201 = {
+  ok: boolean;
+  org: NabuflowOrg;
+  role: string;
+};
+
+export type GetNabuflowOrg200Month = {
+  drawnUsdCents: number;
+  capUsdCents: number;
+  seatDrawnUsdCents: number;
+  seatCapUsdCents?: number | null;
+  resetsAt: string;
+};
+
+export type GetNabuflowOrg200Card = {
+  brand?: string | null;
+  last4?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
+} | null;
+
+export type GetNabuflowOrg200 = {
+  org: NabuflowOrg;
+  role: string;
+  month: GetNabuflowOrg200Month;
+  card?: GetNabuflowOrg200Card;
+  seats?: NabuflowOrgSeat[];
+  purchases?: NabuflowOrgPurchase[];
+  ledger?: NabuflowOrgLedgerEntry[];
+};
+
+export type UpdateNabuflowOrgBody = {
+  /** @maxLength 140 */
+  poReference?: string | null;
+  /** @maxLength 200 */
+  billingContactName?: string | null;
+  /** @maxLength 320 */
+  billingContactEmail?: string;
+  /**
+     * @minimum 1
+     * @maximum 90
+     */
+  termsNetDays?: number;
+  /** Platform-gated — only the NabuFlow team can enable invoice terms. */
+  invoiceTermsEnabled?: boolean;
+};
+
+export type UpdateNabuflowOrg200 = {
+  ok: boolean;
+  org: NabuflowOrg;
+};
+
+export type GetNabuflowOrgPricing200TiersItem = {
+  minCredits: number;
+  usdPerCredit: number;
+  label: string;
+};
+
+export type GetNabuflowOrgPricing200 = {
+  minPurchaseCredits: number;
+  selfServeRateUsdPerCredit: number;
+  tiers: GetNabuflowOrgPricing200TiersItem[];
+};
+
+export type CreateNabuflowOrgSetupIntent200 = {
+  clientSecret: string;
+  setupIntentId: string;
+};
+
+export type PurchaseNabuflowOrgCreditsBodyMethod = typeof PurchaseNabuflowOrgCreditsBodyMethod[keyof typeof PurchaseNabuflowOrgCreditsBodyMethod];
+
+
+export const PurchaseNabuflowOrgCreditsBodyMethod = {
+  card: 'card',
+  invoice: 'invoice',
+} as const;
+
+export type PurchaseNabuflowOrgCreditsBody = {
+  /** @minimum 1 */
+  credits: number;
+  method: PurchaseNabuflowOrgCreditsBodyMethod;
+  /** @maxLength 140 */
+  poReference?: string;
+};
+
+export type PurchaseNabuflowOrgCredits201Purchase = {
+  id: number;
+  credits: number;
+  amountUsdCents: number;
+  method: string;
+  status: string;
+  tierLabel: string;
+  usdPerCredit: number;
+  hostedInvoiceUrl?: string | null;
+  invoicePdfUrl?: string | null;
+  dueAt?: string | null;
+};
+
+export type PurchaseNabuflowOrgCredits201 = {
+  ok: boolean;
+  purchase: PurchaseNabuflowOrgCredits201Purchase;
+  poolCredits: number;
+};
+
+export type AddNabuflowOrgSeatBody = {
+  /** @maxLength 320 */
+  email: string;
+  /** @minimum 0 */
+  seatSpendCapUsdCents?: number | null;
+};
+
+export type AddNabuflowOrgSeat201 = {
+  ok: boolean;
+  seat: NabuflowOrgSeat;
+};
+
+export type RemoveNabuflowOrgSeat200 = {
+  ok: boolean;
+};
+
+export type UpdateNabuflowOrgSeatCapBody = {
+  /** @minimum 0 */
+  seatSpendCapUsdCents: number | null;
+};
+
+export type UpdateNabuflowOrgSeatCap200 = {
+  ok: boolean;
+  seat: NabuflowOrgSeat;
+};
+
+export type UpdateNabuflowOrgSpendCapBody = {
+  /** @minimum 0 */
+  spendCapUsdCents: number | null;
+};
+
+export type UpdateNabuflowOrgSpendCap200 = {
   ok: boolean;
   spendCapUsdCents?: number | null;
   effectiveSpendCapUsdCents: number;

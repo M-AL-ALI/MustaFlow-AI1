@@ -14,7 +14,12 @@ export type NabuflowGateErrorCode =
   | "mode_not_available"
   | "combo_not_available"
   | "mode_limit_reached"
-  | "spend_cap_reached";
+  | "spend_cap_reached"
+  // Constellation organization lane (seats drawing from the shared pool)
+  | "org_suspended"
+  | "org_pool_exhausted"
+  | "org_spend_cap_reached"
+  | "org_seat_cap_reached";
 
 export interface NabuflowGateError {
   code: NabuflowGateErrorCode;
@@ -37,6 +42,10 @@ const GATE_CODES: ReadonlySet<string> = new Set([
   "combo_not_available",
   "mode_limit_reached",
   "spend_cap_reached",
+  "org_suspended",
+  "org_pool_exhausted",
+  "org_spend_cap_reached",
+  "org_seat_cap_reached",
 ]);
 
 function numberOrNull(value: unknown): number | null | undefined {

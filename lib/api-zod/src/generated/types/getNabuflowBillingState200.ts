@@ -7,6 +7,7 @@
  */
 import type { GetNabuflowBillingState200Card } from './getNabuflowBillingState200Card';
 import type { GetNabuflowBillingState200Cycle } from './getNabuflowBillingState200Cycle';
+import type { GetNabuflowBillingState200Org } from './getNabuflowBillingState200Org';
 import type { GetNabuflowBillingState200SpendCap } from './getNabuflowBillingState200SpendCap';
 import type { GetNabuflowBillingState200Subscription } from './getNabuflowBillingState200Subscription';
 import type { NabuflowPlan } from './nabuflowPlan';
@@ -22,4 +23,7 @@ export type GetNabuflowBillingState200 = {
   card?: GetNabuflowBillingState200Card;
   spendCap?: GetNabuflowBillingState200SpendCap;
   cycle?: GetNabuflowBillingState200Cycle;
+  /** Present when the caller is a seat of a Constellation organization — the shared credit pool replaces the personal plan, card, spend cap and cycle (which are all null for seats).
+   */
+  org?: GetNabuflowBillingState200Org;
 };

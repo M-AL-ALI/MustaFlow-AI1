@@ -73,6 +73,30 @@ const BLOCK_COPY: Record<NabuflowGateErrorCode, BlockCopy> = {
     ctaLabel: (e) => `Upgrade to ${nabuflowPlanDisplayName(e.upgradeTarget)}`,
     ctaHref: (e) => `/billing/plans${e.upgradeTarget ? `?highlight=${e.upgradeTarget}` : ""}`,
   },
+  org_suspended: {
+    title: "Your organization's billing is suspended",
+    icon: PauseCircle,
+    ctaLabel: () => "Open organization billing",
+    ctaHref: () => "/billing/org",
+  },
+  org_pool_exhausted: {
+    title: "Your organization's credit pool is empty",
+    icon: Gauge,
+    ctaLabel: () => "Open organization billing",
+    ctaHref: () => "/billing/org",
+  },
+  org_spend_cap_reached: {
+    title: "Organization monthly spend cap reached",
+    icon: Gauge,
+    ctaLabel: () => "Open organization billing",
+    ctaHref: () => "/billing/org",
+  },
+  org_seat_cap_reached: {
+    title: "Your seat's monthly sub-cap is reached",
+    icon: Gauge,
+    ctaLabel: () => "Open organization billing",
+    ctaHref: () => "/billing/org",
+  },
   spend_cap_reached: {
     title: "Monthly spend cap reached",
     icon: Gauge,

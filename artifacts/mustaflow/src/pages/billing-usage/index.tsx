@@ -1,10 +1,11 @@
 // Billing & Usage — the one home for all NabuFlow builder billing.
-// Six sub-pages under /billing: Overview, Plans & Upgrades, Usage,
-// Payment method, Invoices, Spending limits.
+// Sub-pages under /billing: Overview, Plans & Upgrades, Organization
+// (Constellation orgs only), Usage, Payment method, Invoices, Spending limits.
 import { Link, Redirect, useRoute, useSearch } from "wouter";
 import {
   AlertTriangle,
   BarChart3,
+  Building2,
   CreditCard,
   FileText,
   Gauge,
@@ -20,10 +21,12 @@ import { UsageSection } from "./usage";
 import { PaymentSection } from "./payment";
 import { InvoicesSection } from "./invoices";
 import { LimitsSection } from "./limits";
+import { OrgSection } from "./org";
 
 const SECTIONS = [
   { slug: "", label: "Overview", icon: LayoutDashboard },
   { slug: "plans", label: "Plans & Upgrades", icon: Rocket },
+  { slug: "org", label: "Organization", icon: Building2 },
   { slug: "usage", label: "Usage", icon: BarChart3 },
   { slug: "payment", label: "Payment method", icon: CreditCard },
   { slug: "invoices", label: "Invoices", icon: FileText },
@@ -32,10 +35,18 @@ const SECTIONS = [
 
 type SectionSlug = (typeof SECTIONS)[number]["slug"];
 
-function NavLinks({ active, className }: { active: SectionSlug; className?: string }) {
+function NavLinks({
+  sections,
+  active,
+  className,
+}: {
+  sections: ReadonlyArray<(typeof SECTIONS)[number]>;
+  active: SectionSlug;
+  className?: string;
+}) {
   return (
     <nav className={className} aria-label="Billing sections">
-      {SECTIONS.map((s) => {
+      {sections.map((s) => {
         const Icon = s.icon;
         const isActive = s.slug === active;
         return (
@@ -78,6 +89,11 @@ export default function BillingUsagePage() {
     return <Redirect to="/billing" replace />;
   }
   const active = rawSection as SectionSlug;
+
+  // The Organization tab only shows for accounts on a Constellation org —
+  // the section itself still renders for direct links (it self-handles the
+  // "no organization yet" state).
+  const visibleSections = state?.org ? SECTIONS : SECTIONS.filter((s) => s.slug !== "org");
 
   const dunning = state?.subscription?.dunningStatus;
   const showDunningBanner =
@@ -122,6 +138,7 @@ export default function BillingUsagePage() {
 
       {/* Mobile: horizontal tabs */}
       <NavLinks
+        sections={visibleSections}
         active={active}
         className="mb-5 flex gap-1 overflow-x-auto border-b border-border pb-2 md:hidden"
       />
@@ -129,12 +146,13 @@ export default function BillingUsagePage() {
       <div className="flex gap-8">
         {/* Desktop: left rail */}
         <aside className="hidden w-52 shrink-0 md:block">
-          <NavLinks active={active} className="sticky top-4 flex flex-col gap-1" />
+          <NavLinks sections={visibleSections} active={active} className="sticky top-4 flex flex-col gap-1" />
         </aside>
 
         <main className="min-w-0 flex-1">
           {active === "" && <OverviewSection />}
           {active === "plans" && <PlansSection />}
+          {active === "org" && <OrgSection />}
           {active === "usage" && <UsageSection />}
           {active === "payment" && <PaymentSection />}
           {active === "invoices" && <InvoicesSection />}

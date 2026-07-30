@@ -47,6 +47,7 @@ import {
   type NabuflowProrationPreview,
 } from "@/lib/nabuflow-billing";
 import { CardSetupDialog } from "@/components/billing/card-setup-dialog";
+import { OrgSetupDialog } from "./org";
 import { useNabuflowState } from "./shared";
 
 const ACTIVE_SUB_STATUSES = new Set(["active", "trialing", "past_due"]);
@@ -84,6 +85,7 @@ export function PlansSection() {
     preview: NabuflowProrationPreview | null;
   } | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [orgSetupOpen, setOrgSetupOpen] = useState(false);
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   const plans = plansData?.plans ?? [];
@@ -343,13 +345,24 @@ export function PlansSection() {
                 <Building2 className="h-4 w-4 text-muted-foreground" /> {plan.name}
               </h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Enterprise plan for teams — pooled credits, custom spending caps, and the full
-                engine-mode ladder for every seat.
+                Enterprise plan for teams — a shared, volume-discounted credit pool, company
+                invoicing with PO references, and the full engine-mode ladder for every seat.
               </p>
             </div>
-            <Button asChild variant="outline" size="sm" data-testid="constellation-contact">
-              <Link href="/support/tickets">Contact us / Set up enterprise</Link>
-            </Button>
+            {state?.org ? (
+              <Button asChild variant="outline" size="sm" data-testid="constellation-contact">
+                <Link href="/billing/org">Manage organization</Link>
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOrgSetupOpen(true)}
+                data-testid="constellation-contact"
+              >
+                Contact us / Set up enterprise
+              </Button>
+            )}
           </div>
         </div>
       ))}
@@ -490,6 +503,9 @@ export function PlansSection() {
         submitLabel="Save card & subscribe"
         previousLast4={state?.card?.last4 ?? null}
       />
+
+      {/* Constellation enterprise setup (gated — no self-serve checkout) */}
+      <OrgSetupDialog open={orgSetupOpen} onClose={() => setOrgSetupOpen(false)} />
     </div>
   );
 }

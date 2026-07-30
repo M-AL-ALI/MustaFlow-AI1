@@ -4825,6 +4825,154 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-nabuflow-orgs (Task #1518) ────────────────────────────────────
+  // Constellation enterprise lane: company billing records, seat membership,
+  // shared credit-pool ledger, bulk purchases and monthly draw counters for
+  // the org-wide cap + per-seat sub-caps. Usage events grow a nullable org
+  // linkage (pool draws have no personal cycle). Ora/Orax untouched.
+  {
+    name: "migrate-nabuflow-orgs",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_orgs (
+          id SERIAL PRIMARY KEY,
+          organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
+          company_name TEXT NOT NULL,
+          billing_contact_name TEXT,
+          billing_contact_email TEXT NOT NULL,
+          tax_id TEXT,
+          address_line1 TEXT NOT NULL,
+          address_line2 TEXT,
+          city TEXT NOT NULL,
+          region TEXT,
+          postal_code TEXT NOT NULL,
+          country TEXT NOT NULL,
+          po_reference TEXT,
+          invoice_terms_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+          terms_net_days INTEGER NOT NULL DEFAULT 30,
+          stripe_customer_id TEXT UNIQUE,
+          status TEXT NOT NULL DEFAULT 'active',
+          pool_credits INTEGER NOT NULL DEFAULT 0,
+          monthly_spend_cap_usd_cents INTEGER,
+          created_by_user_id TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_orgs_created_by_idx
+           ON nabuflow_orgs (created_by_user_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_org_seats (
+          id SERIAL PRIMARY KEY,
+          org_id INTEGER NOT NULL REFERENCES nabuflow_orgs(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL UNIQUE,
+          role TEXT NOT NULL DEFAULT 'member',
+          seat_spend_cap_usd_cents INTEGER,
+          email TEXT,
+          added_by_user_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_org_seats_org_idx
+           ON nabuflow_org_seats (org_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_org_purchases (
+          id SERIAL PRIMARY KEY,
+          org_id INTEGER NOT NULL REFERENCES nabuflow_orgs(id) ON DELETE CASCADE,
+          credits INTEGER NOT NULL,
+          amount_usd_cents INTEGER NOT NULL,
+          method TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          stripe_invoice_id TEXT UNIQUE,
+          hosted_invoice_url TEXT,
+          invoice_pdf_url TEXT,
+          po_reference TEXT,
+          requested_by_user_id TEXT NOT NULL,
+          due_at TIMESTAMPTZ,
+          paid_at TIMESTAMPTZ,
+          credited_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_org_purchases_org_idx
+           ON nabuflow_org_purchases (org_id, created_at)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_org_ledger (
+          id SERIAL PRIMARY KEY,
+          org_id INTEGER NOT NULL REFERENCES nabuflow_orgs(id) ON DELETE CASCADE,
+          entry_type TEXT NOT NULL,
+          credits INTEGER NOT NULL,
+          balance_after INTEGER NOT NULL,
+          usd_cents INTEGER NOT NULL DEFAULT 0,
+          user_id TEXT,
+          usage_event_id INTEGER,
+          purchase_id INTEGER,
+          description TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_org_ledger_org_idx
+           ON nabuflow_org_ledger (org_id, created_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_org_ledger_user_idx
+           ON nabuflow_org_ledger (user_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_org_months (
+          id SERIAL PRIMARY KEY,
+          org_id INTEGER NOT NULL REFERENCES nabuflow_orgs(id) ON DELETE CASCADE,
+          month_start TIMESTAMPTZ NOT NULL,
+          credits_drawn INTEGER NOT NULL DEFAULT 0,
+          drawn_usd_cents INTEGER NOT NULL DEFAULT 0,
+          cap_notify_level INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT nabuflow_org_months_unique UNIQUE (org_id, month_start)
+        )
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_org_seat_months (
+          id SERIAL PRIMARY KEY,
+          org_id INTEGER NOT NULL REFERENCES nabuflow_orgs(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          month_start TIMESTAMPTZ NOT NULL,
+          credits_drawn INTEGER NOT NULL DEFAULT 0,
+          drawn_usd_cents INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT nabuflow_org_seat_months_unique UNIQUE (org_id, user_id, month_start)
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_org_seat_months_user_idx
+           ON nabuflow_org_seat_months (user_id, month_start)`,
+      );
+      // Usage events: pool draws carry an org id and no personal cycle.
+      await client.query(
+        `ALTER TABLE nabuflow_usage_events ADD COLUMN IF NOT EXISTS org_id INTEGER`,
+      );
+      await client.query(
+        `ALTER TABLE nabuflow_usage_events ALTER COLUMN cycle_id DROP NOT NULL`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_usage_events_org_idx
+           ON nabuflow_usage_events (org_id, created_at)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

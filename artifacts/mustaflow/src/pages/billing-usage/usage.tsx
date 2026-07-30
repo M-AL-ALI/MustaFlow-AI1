@@ -56,6 +56,7 @@ const COLOR_DEEP = "#f43f5e";
 const COLOR_STANDARD = "#64748b";
 const COLOR_INCLUDED = "#38bdf8";
 const COLOR_PAYG = "#f59e0b";
+const COLOR_POOL = "#8b5cf6";
 
 type CyclePreset = "current" | "last" | "custom";
 
@@ -130,21 +131,23 @@ export function UsageSection() {
   const daily = useMemo(() => {
     const byDay = new Map<
       string,
-      { builds: number; credits: number; included: number; overage: number; overageUsd: number }
+      { builds: number; credits: number; included: number; overage: number; overageUsd: number; pool: number }
     >();
     // Seed every day of the window (clamped to today) so charts have a full axis.
     const endClamp = Math.min(range.end.getTime(), Date.now() + 24 * 3600 * 1000);
     for (let t = range.start.getTime(); t < endClamp; t += 24 * 3600 * 1000) {
-      byDay.set(dayKey(new Date(t)), { builds: 0, credits: 0, included: 0, overage: 0, overageUsd: 0 });
+      byDay.set(dayKey(new Date(t)), { builds: 0, credits: 0, included: 0, overage: 0, overageUsd: 0, pool: 0 });
     }
     for (const e of events) {
       const key = dayKey(new Date(e.createdAt!));
-      const row = byDay.get(key) ?? { builds: 0, credits: 0, included: 0, overage: 0, overageUsd: 0 };
+      const row = byDay.get(key) ?? { builds: 0, credits: 0, included: 0, overage: 0, overageUsd: 0, pool: 0 };
       row.builds += 1;
       row.credits += e.credits;
       row.included += e.includedCredits;
       row.overage += e.overageCredits;
       row.overageUsd += e.overageUsdCents / 100;
+      // Constellation seats: draws against the org's shared pool.
+      row.pool += e.attribution === "pool" ? e.credits : 0;
       byDay.set(key, row);
     }
     let cumUsd = 0;
@@ -216,6 +219,7 @@ export function UsageSection() {
       included: events.reduce((s, e) => s + e.includedCredits, 0),
       overage: events.reduce((s, e) => s + e.overageCredits, 0),
       overageUsdCents: events.reduce((s, e) => s + e.overageUsdCents, 0),
+      pool: events.reduce((s, e) => s + (e.attribution === "pool" ? e.credits : 0), 0),
     }),
     [events],
   );
@@ -235,6 +239,7 @@ export function UsageSection() {
       "attribution",
       "projectId",
       "taskId",
+      "orgId",
       "description",
       "reversedAt",
     ] as const;
@@ -272,6 +277,7 @@ export function UsageSection() {
 
   const capUsd = (cap?.usdCents ?? 0) / 100;
   const empty = events.length === 0;
+  const hasPool = totals.pool > 0;
 
   const presetBtn = (id: CyclePreset, label: string) => (
     <button
@@ -600,6 +606,7 @@ export function UsageSection() {
                 {
                   included: { label: "Included", color: COLOR_INCLUDED },
                   overage: { label: "Pay-as-you-go", color: COLOR_PAYG },
+                  ...(hasPool ? { pool: { label: "Org pool", color: COLOR_POOL } } : {}),
                 } satisfies ChartConfig
               }
               className="h-52 w-full"
@@ -609,13 +616,16 @@ export function UsageSection() {
                 <XAxis dataKey="day" tickFormatter={shortDay} tickLine={false} axisLine={false} fontSize={10} minTickGap={28} />
                 <YAxis tickLine={false} axisLine={false} fontSize={10} width={44} />
                 <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />} />
+                {hasPool && <Bar dataKey="pool" stackId="c" fill={COLOR_POOL} isAnimationActive={!reducedMotion} />}
                 <Bar dataKey="included" stackId="c" fill={COLOR_INCLUDED} isAnimationActive={!reducedMotion} />
                 <Bar dataKey="overage" stackId="c" fill={COLOR_PAYG} radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion} />
               </BarChart>
             </ChartContainer>
             <p className="mt-2 text-[11px] text-muted-foreground">
               {totals.included.toLocaleString()} included credits · {totals.overage.toLocaleString()} pay-as-you-go
-              credits ({formatUsdCents(totals.overageUsdCents)}) in this window.
+              credits ({formatUsdCents(totals.overageUsdCents)})
+              {hasPool ? ` · ${totals.pool.toLocaleString()} credits drawn from your organization's pool` : ""} in
+              this window.
             </p>
           </SectionCard>
         </>

@@ -749,12 +749,18 @@ export async function handleStripeWebhook(
         // NabuFlow invoices (namespaced subscription on the SHARED customer)
         // must never reach Ora's invoice handler — it would grant Ora monthly
         // credits off a NabuFlow renewal. Routing is metadata-first with a
-        // local nabuflow_subscriptions lookup as fallback.
+        // local nabuflow_subscriptions lookup as fallback. Enterprise org
+        // bulk-pool invoices (their own COMPANY customer) route first of all.
+        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaid } = await import(
+          "../lib/nabuflow-org"
+        );
         const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } = await import(
           "../lib/nabuflow-billing"
         );
         const invoice = event.data?.object as any;
-        if (await isNabuflowInvoiceEvent(invoice)) {
+        if (await isNabuflowOrgInvoiceEvent(invoice)) {
+          await handleNabuflowOrgInvoicePaid(invoice);
+        } else if (await isNabuflowInvoiceEvent(invoice)) {
           await handleNabuflowInvoicePaid(invoice);
         } else {
           await handleInvoicePaid(event as any);
@@ -762,11 +768,16 @@ export async function handleStripeWebhook(
         break;
       }
       case "invoice.payment_failed": {
+        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaymentFailed } = await import(
+          "../lib/nabuflow-org"
+        );
         const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } = await import(
           "../lib/nabuflow-billing"
         );
         const invoice = event.data?.object as any;
-        if (await isNabuflowInvoiceEvent(invoice)) {
+        if (await isNabuflowOrgInvoiceEvent(invoice)) {
+          await handleNabuflowOrgInvoicePaymentFailed(invoice);
+        } else if (await isNabuflowInvoiceEvent(invoice)) {
           await handleNabuflowInvoicePaymentFailed(invoice);
         } else {
           await handleInvoicePaymentFailed(event as any);

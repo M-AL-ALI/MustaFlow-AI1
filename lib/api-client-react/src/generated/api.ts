@@ -28,6 +28,8 @@ import type {
   AddAdminSupportTicketNoteBody,
   AddDomainInput,
   AddDomainResponse,
+  AddNabuflowOrgSeat201,
+  AddNabuflowOrgSeatBody,
   AdminAuditLogPage,
   AdminInboxRecentUnread,
   AdminJobQueue,
@@ -82,6 +84,7 @@ import type {
   ContainerStatus,
   CreateDbSnapshotInput,
   CreateGithubBranch200,
+  CreateNabuflowOrgSetupIntent200,
   CreateNabuflowSetupIntent200,
   CreatePreviewSession200,
   CreateProjectDomainDnsRecord201,
@@ -138,6 +141,8 @@ import type {
   GetCheckRunsParams,
   GetContainerLogsParams,
   GetNabuflowBillingState200,
+  GetNabuflowOrg200,
+  GetNabuflowOrgPricing200,
   GetPreviewEnvStatus200,
   GetProjectAllFileContent200Item,
   GetProjectDomainDnsHistory200,
@@ -243,6 +248,8 @@ import type {
   PublishResult,
   PurchaseDomainInput,
   PurchaseDomainResponse,
+  PurchaseNabuflowOrgCredits201,
+  PurchaseNabuflowOrgCreditsBody,
   PurchasedDomainResponse,
   PurchasedDomainsResponse,
   RateKnowledge200,
@@ -250,9 +257,12 @@ import type {
   ReadinessResult,
   RebuildPreviewEnv202,
   RefreshPurchasedDomainInfo200,
+  RegisterNabuflowOrg201,
+  RegisterNabuflowOrgBody,
   RegisterProjectUploadBody,
   RejectAdminSkillDraft200,
   ReleasePurchasedDomain200,
+  RemoveNabuflowOrgSeat200,
   RemoveProjectDomain200,
   RemoveProjectDomainCertificate200,
   RenewDomainResponse,
@@ -336,6 +346,12 @@ import type {
   UpdateAdminSupportTicket200,
   UpdateAdminSupportTicketBody,
   UpdateAgentInboxItemBody,
+  UpdateNabuflowOrg200,
+  UpdateNabuflowOrgBody,
+  UpdateNabuflowOrgSeatCap200,
+  UpdateNabuflowOrgSeatCapBody,
+  UpdateNabuflowOrgSpendCap200,
+  UpdateNabuflowOrgSpendCapBody,
   UpdateNabuflowSpendCap200,
   UpdateNabuflowSpendCapBody,
   UpdatePreferencesBody,
@@ -17484,6 +17500,727 @@ export const useUpdateNabuflowSpendCap = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getUpdateNabuflowSpendCapMutationOptions(options));
+    }
+
+export const getRegisterNabuflowOrgUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org`
+}
+
+/**
+ * @summary Register a Constellation enterprise organization (company-flagged Stripe Customer + shared credit pool; requester becomes billing admin)
+ */
+export const registerNabuflowOrg = async (registerNabuflowOrgBody: RegisterNabuflowOrgBody, options?: RequestInit): Promise<RegisterNabuflowOrg201> => {
+
+  return customFetch<RegisterNabuflowOrg201>(getRegisterNabuflowOrgUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      registerNabuflowOrgBody,)
+  }
+);}
+
+
+
+
+export const getRegisterNabuflowOrgMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerNabuflowOrg>>, TError,{data: BodyType<RegisterNabuflowOrgBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerNabuflowOrg>>, TError,{data: BodyType<RegisterNabuflowOrgBody>}, TContext> => {
+
+const mutationKey = ['registerNabuflowOrg'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerNabuflowOrg>>, {data: BodyType<RegisterNabuflowOrgBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  registerNabuflowOrg(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterNabuflowOrgMutationResult = NonNullable<Awaited<ReturnType<typeof registerNabuflowOrg>>>
+    export type RegisterNabuflowOrgMutationBody = BodyType<RegisterNabuflowOrgBody>
+    export type RegisterNabuflowOrgMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Register a Constellation enterprise organization (company-flagged Stripe Customer + shared credit pool; requester becomes billing admin)
+ */
+export const useRegisterNabuflowOrg = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerNabuflowOrg>>, TError,{data: BodyType<RegisterNabuflowOrgBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerNabuflowOrg>>,
+        TError,
+        {data: BodyType<RegisterNabuflowOrgBody>},
+        TContext
+      > => {
+      return useMutation(getRegisterNabuflowOrgMutationOptions(options));
+    }
+
+export const getGetNabuflowOrgUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org`
+}
+
+/**
+ * @summary Organization billing state for the caller's seat (billing admins also get seats, purchases, ledger and the company card)
+ */
+export const getNabuflowOrg = async ( options?: RequestInit): Promise<GetNabuflowOrg200> => {
+
+  return customFetch<GetNabuflowOrg200>(getGetNabuflowOrgUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNabuflowOrgQueryKey = () => {
+    return [
+    `/api/billing/nabuflow/org`
+    ] as const;
+    }
+
+
+export const getGetNabuflowOrgQueryOptions = <TData = Awaited<ReturnType<typeof getNabuflowOrg>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNabuflowOrg>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNabuflowOrgQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNabuflowOrg>>> = ({ signal }) => getNabuflowOrg({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNabuflowOrg>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetNabuflowOrgQueryResult = NonNullable<Awaited<ReturnType<typeof getNabuflowOrg>>>
+export type GetNabuflowOrgQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Organization billing state for the caller's seat (billing admins also get seats, purchases, ledger and the company card)
+ */
+
+export function useGetNabuflowOrg<TData = Awaited<ReturnType<typeof getNabuflowOrg>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNabuflowOrg>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetNabuflowOrgQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateNabuflowOrgUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org`
+}
+
+/**
+ * @summary Update org billing details (PO reference, contact, net-terms days; enabling invoice terms is platform-gated)
+ */
+export const updateNabuflowOrg = async (updateNabuflowOrgBody: UpdateNabuflowOrgBody, options?: RequestInit): Promise<UpdateNabuflowOrg200> => {
+
+  return customFetch<UpdateNabuflowOrg200>(getUpdateNabuflowOrgUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateNabuflowOrgBody,)
+  }
+);}
+
+
+
+
+export const getUpdateNabuflowOrgMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrg>>, TError,{data: BodyType<UpdateNabuflowOrgBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrg>>, TError,{data: BodyType<UpdateNabuflowOrgBody>}, TContext> => {
+
+const mutationKey = ['updateNabuflowOrg'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateNabuflowOrg>>, {data: BodyType<UpdateNabuflowOrgBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateNabuflowOrg(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNabuflowOrgMutationResult = NonNullable<Awaited<ReturnType<typeof updateNabuflowOrg>>>
+    export type UpdateNabuflowOrgMutationBody = BodyType<UpdateNabuflowOrgBody>
+    export type UpdateNabuflowOrgMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update org billing details (PO reference, contact, net-terms days; enabling invoice terms is platform-gated)
+ */
+export const useUpdateNabuflowOrg = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrg>>, TError,{data: BodyType<UpdateNabuflowOrgBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateNabuflowOrg>>,
+        TError,
+        {data: BodyType<UpdateNabuflowOrgBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateNabuflowOrgMutationOptions(options));
+    }
+
+export const getGetNabuflowOrgPricingUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org/pricing`
+}
+
+/**
+ * @summary Volume-discount tiers for bulk credit-pool purchases (visible before registration)
+ */
+export const getNabuflowOrgPricing = async ( options?: RequestInit): Promise<GetNabuflowOrgPricing200> => {
+
+  return customFetch<GetNabuflowOrgPricing200>(getGetNabuflowOrgPricingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNabuflowOrgPricingQueryKey = () => {
+    return [
+    `/api/billing/nabuflow/org/pricing`
+    ] as const;
+    }
+
+
+export const getGetNabuflowOrgPricingQueryOptions = <TData = Awaited<ReturnType<typeof getNabuflowOrgPricing>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNabuflowOrgPricing>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNabuflowOrgPricingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNabuflowOrgPricing>>> = ({ signal }) => getNabuflowOrgPricing({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNabuflowOrgPricing>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetNabuflowOrgPricingQueryResult = NonNullable<Awaited<ReturnType<typeof getNabuflowOrgPricing>>>
+export type GetNabuflowOrgPricingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Volume-discount tiers for bulk credit-pool purchases (visible before registration)
+ */
+
+export function useGetNabuflowOrgPricing<TData = Awaited<ReturnType<typeof getNabuflowOrgPricing>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNabuflowOrgPricing>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetNabuflowOrgPricingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateNabuflowOrgSetupIntentUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org/setup-intent`
+}
+
+/**
+ * @summary Create a SetupIntent to capture the company card (billing admin only)
+ */
+export const createNabuflowOrgSetupIntent = async ( options?: RequestInit): Promise<CreateNabuflowOrgSetupIntent200> => {
+
+  return customFetch<CreateNabuflowOrgSetupIntent200>(getCreateNabuflowOrgSetupIntentUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCreateNabuflowOrgSetupIntentMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>, TError,void, TContext> => {
+
+const mutationKey = ['createNabuflowOrgSetupIntent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>, void> = () => {
+
+
+          return  createNabuflowOrgSetupIntent(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateNabuflowOrgSetupIntentMutationResult = NonNullable<Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>>
+
+    export type CreateNabuflowOrgSetupIntentMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a SetupIntent to capture the company card (billing admin only)
+ */
+export const useCreateNabuflowOrgSetupIntent = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateNabuflowOrgSetupIntentMutationOptions(options));
+    }
+
+export const getPurchaseNabuflowOrgCreditsUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org/purchase`
+}
+
+/**
+ * @summary Bulk credit-pool purchase at volume rates — card charges now; invoice sends with net terms and funds the pool on payment
+ */
+export const purchaseNabuflowOrgCredits = async (purchaseNabuflowOrgCreditsBody: PurchaseNabuflowOrgCreditsBody, options?: RequestInit): Promise<PurchaseNabuflowOrgCredits201> => {
+
+  return customFetch<PurchaseNabuflowOrgCredits201>(getPurchaseNabuflowOrgCreditsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      purchaseNabuflowOrgCreditsBody,)
+  }
+);}
+
+
+
+
+export const getPurchaseNabuflowOrgCreditsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purchaseNabuflowOrgCredits>>, TError,{data: BodyType<PurchaseNabuflowOrgCreditsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof purchaseNabuflowOrgCredits>>, TError,{data: BodyType<PurchaseNabuflowOrgCreditsBody>}, TContext> => {
+
+const mutationKey = ['purchaseNabuflowOrgCredits'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof purchaseNabuflowOrgCredits>>, {data: BodyType<PurchaseNabuflowOrgCreditsBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  purchaseNabuflowOrgCredits(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PurchaseNabuflowOrgCreditsMutationResult = NonNullable<Awaited<ReturnType<typeof purchaseNabuflowOrgCredits>>>
+    export type PurchaseNabuflowOrgCreditsMutationBody = BodyType<PurchaseNabuflowOrgCreditsBody>
+    export type PurchaseNabuflowOrgCreditsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Bulk credit-pool purchase at volume rates — card charges now; invoice sends with net terms and funds the pool on payment
+ */
+export const usePurchaseNabuflowOrgCredits = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purchaseNabuflowOrgCredits>>, TError,{data: BodyType<PurchaseNabuflowOrgCreditsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof purchaseNabuflowOrgCredits>>,
+        TError,
+        {data: BodyType<PurchaseNabuflowOrgCreditsBody>},
+        TContext
+      > => {
+      return useMutation(getPurchaseNabuflowOrgCreditsMutationOptions(options));
+    }
+
+export const getAddNabuflowOrgSeatUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org/seats`
+}
+
+/**
+ * @summary Add a seat by account email — the seat's builds draw from the shared pool
+ */
+export const addNabuflowOrgSeat = async (addNabuflowOrgSeatBody: AddNabuflowOrgSeatBody, options?: RequestInit): Promise<AddNabuflowOrgSeat201> => {
+
+  return customFetch<AddNabuflowOrgSeat201>(getAddNabuflowOrgSeatUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      addNabuflowOrgSeatBody,)
+  }
+);}
+
+
+
+
+export const getAddNabuflowOrgSeatMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addNabuflowOrgSeat>>, TError,{data: BodyType<AddNabuflowOrgSeatBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof addNabuflowOrgSeat>>, TError,{data: BodyType<AddNabuflowOrgSeatBody>}, TContext> => {
+
+const mutationKey = ['addNabuflowOrgSeat'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addNabuflowOrgSeat>>, {data: BodyType<AddNabuflowOrgSeatBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  addNabuflowOrgSeat(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddNabuflowOrgSeatMutationResult = NonNullable<Awaited<ReturnType<typeof addNabuflowOrgSeat>>>
+    export type AddNabuflowOrgSeatMutationBody = BodyType<AddNabuflowOrgSeatBody>
+    export type AddNabuflowOrgSeatMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Add a seat by account email — the seat's builds draw from the shared pool
+ */
+export const useAddNabuflowOrgSeat = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addNabuflowOrgSeat>>, TError,{data: BodyType<AddNabuflowOrgSeatBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof addNabuflowOrgSeat>>,
+        TError,
+        {data: BodyType<AddNabuflowOrgSeatBody>},
+        TContext
+      > => {
+      return useMutation(getAddNabuflowOrgSeatMutationOptions(options));
+    }
+
+export const getRemoveNabuflowOrgSeatUrl = (seatUserId: string,) => {
+
+
+
+
+  return `/api/billing/nabuflow/org/seats/${seatUserId}`
+}
+
+/**
+ * @summary Remove a seat (the last billing admin cannot be removed)
+ */
+export const removeNabuflowOrgSeat = async (seatUserId: string, options?: RequestInit): Promise<RemoveNabuflowOrgSeat200> => {
+
+  return customFetch<RemoveNabuflowOrgSeat200>(getRemoveNabuflowOrgSeatUrl(seatUserId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getRemoveNabuflowOrgSeatMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeNabuflowOrgSeat>>, TError,{seatUserId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeNabuflowOrgSeat>>, TError,{seatUserId: string}, TContext> => {
+
+const mutationKey = ['removeNabuflowOrgSeat'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeNabuflowOrgSeat>>, {seatUserId: string}> = (props) => {
+          const {seatUserId} = props ?? {};
+
+          return  removeNabuflowOrgSeat(seatUserId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveNabuflowOrgSeatMutationResult = NonNullable<Awaited<ReturnType<typeof removeNabuflowOrgSeat>>>
+
+    export type RemoveNabuflowOrgSeatMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Remove a seat (the last billing admin cannot be removed)
+ */
+export const useRemoveNabuflowOrgSeat = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeNabuflowOrgSeat>>, TError,{seatUserId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeNabuflowOrgSeat>>,
+        TError,
+        {seatUserId: string},
+        TContext
+      > => {
+      return useMutation(getRemoveNabuflowOrgSeatMutationOptions(options));
+    }
+
+export const getUpdateNabuflowOrgSeatCapUrl = (seatUserId: string,) => {
+
+
+
+
+  return `/api/billing/nabuflow/org/seats/${seatUserId}/cap`
+}
+
+/**
+ * @summary Set or clear a per-seat monthly sub-cap (clamped to the org cap at enforcement time)
+ */
+export const updateNabuflowOrgSeatCap = async (seatUserId: string,
+    updateNabuflowOrgSeatCapBody: UpdateNabuflowOrgSeatCapBody, options?: RequestInit): Promise<UpdateNabuflowOrgSeatCap200> => {
+
+  return customFetch<UpdateNabuflowOrgSeatCap200>(getUpdateNabuflowOrgSeatCapUrl(seatUserId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateNabuflowOrgSeatCapBody,)
+  }
+);}
+
+
+
+
+export const getUpdateNabuflowOrgSeatCapMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrgSeatCap>>, TError,{seatUserId: string;data: BodyType<UpdateNabuflowOrgSeatCapBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrgSeatCap>>, TError,{seatUserId: string;data: BodyType<UpdateNabuflowOrgSeatCapBody>}, TContext> => {
+
+const mutationKey = ['updateNabuflowOrgSeatCap'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateNabuflowOrgSeatCap>>, {seatUserId: string;data: BodyType<UpdateNabuflowOrgSeatCapBody>}> = (props) => {
+          const {seatUserId,data} = props ?? {};
+
+          return  updateNabuflowOrgSeatCap(seatUserId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNabuflowOrgSeatCapMutationResult = NonNullable<Awaited<ReturnType<typeof updateNabuflowOrgSeatCap>>>
+    export type UpdateNabuflowOrgSeatCapMutationBody = BodyType<UpdateNabuflowOrgSeatCapBody>
+    export type UpdateNabuflowOrgSeatCapMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Set or clear a per-seat monthly sub-cap (clamped to the org cap at enforcement time)
+ */
+export const useUpdateNabuflowOrgSeatCap = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrgSeatCap>>, TError,{seatUserId: string;data: BodyType<UpdateNabuflowOrgSeatCapBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateNabuflowOrgSeatCap>>,
+        TError,
+        {seatUserId: string;data: BodyType<UpdateNabuflowOrgSeatCapBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateNabuflowOrgSeatCapMutationOptions(options));
+    }
+
+export const getUpdateNabuflowOrgSpendCapUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/org/spend-cap`
+}
+
+/**
+ * @summary Update the org-wide monthly spend cap (null reverts to the Constellation default)
+ */
+export const updateNabuflowOrgSpendCap = async (updateNabuflowOrgSpendCapBody: UpdateNabuflowOrgSpendCapBody, options?: RequestInit): Promise<UpdateNabuflowOrgSpendCap200> => {
+
+  return customFetch<UpdateNabuflowOrgSpendCap200>(getUpdateNabuflowOrgSpendCapUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateNabuflowOrgSpendCapBody,)
+  }
+);}
+
+
+
+
+export const getUpdateNabuflowOrgSpendCapMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrgSpendCap>>, TError,{data: BodyType<UpdateNabuflowOrgSpendCapBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrgSpendCap>>, TError,{data: BodyType<UpdateNabuflowOrgSpendCapBody>}, TContext> => {
+
+const mutationKey = ['updateNabuflowOrgSpendCap'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateNabuflowOrgSpendCap>>, {data: BodyType<UpdateNabuflowOrgSpendCapBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateNabuflowOrgSpendCap(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNabuflowOrgSpendCapMutationResult = NonNullable<Awaited<ReturnType<typeof updateNabuflowOrgSpendCap>>>
+    export type UpdateNabuflowOrgSpendCapMutationBody = BodyType<UpdateNabuflowOrgSpendCapBody>
+    export type UpdateNabuflowOrgSpendCapMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update the org-wide monthly spend cap (null reverts to the Constellation default)
+ */
+export const useUpdateNabuflowOrgSpendCap = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowOrgSpendCap>>, TError,{data: BodyType<UpdateNabuflowOrgSpendCapBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateNabuflowOrgSpendCap>>,
+        TError,
+        {data: BodyType<UpdateNabuflowOrgSpendCapBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateNabuflowOrgSpendCapMutationOptions(options));
     }
 
 export const getSubmitAbuseReportUrl = () => {

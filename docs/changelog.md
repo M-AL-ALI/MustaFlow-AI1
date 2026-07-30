@@ -2,7 +2,15 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
-## Fix: Ora voice parity hardening and complete lazy repository reads (2026-07-25)
+## Feat: Constellation enterprise billing lane + full acceptance pass + staged enforcement flip (2026-07-30)
+
+NabuFlow's enterprise lane is live end-to-end: a company registers from the Constellation plans card (gated dialog — legal name, billing contact, tax/VAT, address, PO reference), which creates a company-flagged Stripe Customer with enterprise namespace metadata and links the requester as billing admin. Bulk credit purchases fund a shared pool at volume tiers (25k@$0.009 / 100k@$0.008 / 500k@$0.007, 25k minimum) by saved card or platform-gated Stripe invoice with net terms; invoices carry human-readable line items plus PO/tax fields. Seats draw from the pool through the same charge pipeline (org lane replaces personal rules: pool-first accounting with usage-event attribution, org-wide monthly cap + per-seat sub-caps enforced pre-start, in-flight builds never killed so the pool may go briefly negative, suspension blocks even drains).
+
+- **Schema:** `lib/db/src/schema/nabuflow-orgs.ts` (orgs, seats, pool ledger, purchases, org months, seat months) with startup migrations registered.
+- **Server:** `nabuflow-org.ts` + `nabuflow-org-stripe.ts` libs, nine org routes under `/api/billing/nabuflow/org*`, org-first webhook routing, live card summary read from the Stripe customer.
+- **Web:** org management page under Billing & Usage (pool, ledger, seats, caps, purchases), Constellation card CTA, ladder counters in composer/plans/usage with calm blocked states.
+- **Acceptance (Stripe test mode):** `artifacts/api-server/acceptance/verify-constellation.ts` (122 assertions) and `verify-ladder.ts` (73 assertions) both green — covering no-card block, decline→void, purchases, seat draws, caps, negative pool, refunds, suspension, net-45 terms invoice, reconciliation, Ora independence, plus the engine-mode ladder (Orbit 4th Pro blocked, Comet 11th Deep blocked → Nova, Nova-only Pro+Deep, cycle rollover reset, overage invoice matching). Browser UI pass verified counters, blocked cards, and the full org setup → purchase → cap → seat flow.
+- **Production flip staged:** `CREDITS_ENFORCEMENT=true` set for production with `BUILDER_ALLOWLIST` prod-only (owner) and the E2E bypass dev-only; takes effect on the next republish, which also migrates the org tables into prod.
 
 Post-release verification found four edge cases in the otherwise-complete Talk to Ora and lazy GitHub work: a file generated during a live call was not carried into the next spoken revision, the website could let a late asynchronous start/reconnect outlive an explicit End action, tool narration depended on prompt compliance instead of the realtime protocol, and GitHub's truncated recursive-tree response could silently omit source paths. Connected-account repository discovery also stopped after 200 repositories.
 

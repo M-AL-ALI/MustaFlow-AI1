@@ -164,6 +164,59 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
   },
 };
 
+// ── Constellation enterprise bulk-credit pricing ─────────────────────────────
+// Volume-discounted vs self-serve: every tier undercuts the cheapest
+// self-serve rate (Nova overage, $0.010/credit). Bulk pools are prepaid
+// one-time purchases billed to the company entity; the pool never expires.
+export interface NabuflowBulkTier {
+  /** Minimum credits purchased to qualify for this rate. */
+  minCredits: number;
+  /** Volume-discounted price per credit (USD). */
+  usdPerCredit: number;
+  label: string;
+}
+
+/** Ascending tiers — the best rate whose minimum the purchase meets applies. */
+export const NABUFLOW_ORG_BULK_TIERS: readonly NabuflowBulkTier[] = [
+  { minCredits: 25_000, usdPerCredit: 0.009, label: "25,000+ credits" },
+  { minCredits: 100_000, usdPerCredit: 0.008, label: "100,000+ credits" },
+  { minCredits: 500_000, usdPerCredit: 0.007, label: "500,000+ credits" },
+] as const;
+
+/** Smallest bulk purchase Constellation accepts (the first tier's minimum). */
+export const NABUFLOW_ORG_MIN_PURCHASE_CREDITS = NABUFLOW_ORG_BULK_TIERS[0].minCredits;
+
+/**
+ * Pool draws are valued at the Constellation per-credit rate for spend-cap
+ * accounting (org-wide cap and per-seat sub-caps are USD caps, like the
+ * self-serve spend cap). Purchases are priced at the discounted tier rate.
+ */
+export function nabuflowOrgDrawRateUsdPerCredit(): number {
+  return NABUFLOW_PLANS.constellation.overageUsdPerCredit;
+}
+
+/** USD-cent value of `credits` drawn from a pool (cap accounting, not billing). */
+export function nabuflowOrgDrawValueCents(credits: number): number {
+  if (credits <= 0) return 0;
+  return Math.round(credits * nabuflowOrgDrawRateUsdPerCredit() * 100);
+}
+
+/** The bulk tier a purchase of `credits` qualifies for, or null below the minimum. */
+export function nabuflowBulkTierFor(credits: number): NabuflowBulkTier | null {
+  let match: NabuflowBulkTier | null = null;
+  for (const tier of NABUFLOW_ORG_BULK_TIERS) {
+    if (credits >= tier.minCredits) match = tier;
+  }
+  return match;
+}
+
+/** Invoice total in USD cents for a bulk purchase (null below the minimum). */
+export function nabuflowBulkPurchaseCents(credits: number): number | null {
+  const tier = nabuflowBulkTierFor(credits);
+  if (!tier) return null;
+  return Math.round(credits * tier.usdPerCredit * 100);
+}
+
 /** Dunning guardrails: Stripe retries, we notify, new builds pause after grace. */
 export const NABUFLOW_DUNNING = {
   /** invoice.payment_failed attempts before we hard-pause regardless of grace. */

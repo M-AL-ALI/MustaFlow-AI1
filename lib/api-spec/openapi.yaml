@@ -5375,6 +5375,37 @@ paths:
                       remainingProBuilds: { type: integer, nullable: true }
                       remainingDeepBuilds: { type: integer, nullable: true }
                       resetsAt: { type: string, format: date-time, nullable: true }
+                  org:
+                    type: object
+                    nullable: true
+                    description: >
+                      Present when the caller is a seat of a Constellation
+                      organization — the shared credit pool replaces the
+                      personal plan, card, spend cap and cycle (which are all
+                      null for seats).
+                    required:
+                      [
+                        orgId,
+                        companyName,
+                        role,
+                        status,
+                        poolCredits,
+                        capUsdCents,
+                        monthDrawnUsdCents,
+                        seatMonthDrawnUsdCents,
+                        monthResetsAt,
+                      ]
+                    properties:
+                      orgId: { type: integer }
+                      companyName: { type: string }
+                      role: { type: string }
+                      status: { type: string }
+                      poolCredits: { type: integer }
+                      capUsdCents: { type: integer }
+                      monthDrawnUsdCents: { type: integer }
+                      seatCapUsdCents: { type: integer, nullable: true }
+                      seatMonthDrawnUsdCents: { type: integer }
+                      monthResetsAt: { type: string, format: date-time }
         "401":
           description: Unauthenticated
           content:
@@ -5608,6 +5639,372 @@ paths:
                   effectiveSpendCapUsdCents: { type: integer }
         "400":
           description: Cap exceeds the tier maximum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/org:
+    post:
+      operationId: registerNabuflowOrg
+      tags: [billing]
+      summary: Register a Constellation enterprise organization (company-flagged Stripe Customer + shared credit pool; requester becomes billing admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                [companyName, billingContactEmail, addressLine1, city, postalCode, country]
+              properties:
+                companyName: { type: string, minLength: 2, maxLength: 200 }
+                billingContactName: { type: string, maxLength: 200 }
+                billingContactEmail: { type: string, format: email, maxLength: 320 }
+                taxId:
+                  type: string
+                  maxLength: 60
+                  description: Tax or VAT identifier printed on company invoices.
+                addressLine1: { type: string, minLength: 1, maxLength: 300 }
+                addressLine2: { type: string, maxLength: 300 }
+                city: { type: string, minLength: 1, maxLength: 120 }
+                region: { type: string, maxLength: 120 }
+                postalCode: { type: string, minLength: 1, maxLength: 20 }
+                country:
+                  type: string
+                  minLength: 2
+                  maxLength: 2
+                  description: ISO 3166-1 alpha-2 country code.
+                poReference: { type: string, maxLength: 140 }
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, org, role]
+                properties:
+                  ok: { type: boolean }
+                  org: { $ref: "#/components/schemas/NabuflowOrg" }
+                  role: { type: string }
+        "409":
+          description: Caller already belongs to an organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: getNabuflowOrg
+      tags: [billing]
+      summary: Organization billing state for the caller's seat (billing admins also get seats, purchases, ledger and the company card)
+      responses:
+        "200":
+          description: Organization billing state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [org, role, month]
+                properties:
+                  org: { $ref: "#/components/schemas/NabuflowOrg" }
+                  role: { type: string }
+                  month:
+                    type: object
+                    required: [drawnUsdCents, capUsdCents, seatDrawnUsdCents, resetsAt]
+                    properties:
+                      drawnUsdCents: { type: integer }
+                      capUsdCents: { type: integer }
+                      seatDrawnUsdCents: { type: integer }
+                      seatCapUsdCents: { type: integer, nullable: true }
+                      resetsAt: { type: string, format: date-time }
+                  card:
+                    type: object
+                    nullable: true
+                    properties:
+                      brand: { type: string, nullable: true }
+                      last4: { type: string, nullable: true }
+                      expMonth: { type: integer, nullable: true }
+                      expYear: { type: integer, nullable: true }
+                  seats:
+                    type: array
+                    items: { $ref: "#/components/schemas/NabuflowOrgSeat" }
+                  purchases:
+                    type: array
+                    items: { $ref: "#/components/schemas/NabuflowOrgPurchase" }
+                  ledger:
+                    type: array
+                    items: { $ref: "#/components/schemas/NabuflowOrgLedgerEntry" }
+        "404":
+          description: Caller has no organization seat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateNabuflowOrg
+      tags: [billing]
+      summary: Update org billing details (PO reference, contact, net-terms days; enabling invoice terms is platform-gated)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                poReference: { type: string, maxLength: 140, nullable: true }
+                billingContactName: { type: string, maxLength: 200, nullable: true }
+                billingContactEmail: { type: string, format: email, maxLength: 320 }
+                termsNetDays: { type: integer, minimum: 1, maximum: 90 }
+                invoiceTermsEnabled:
+                  type: boolean
+                  description: Platform-gated — only the NabuFlow team can enable invoice terms.
+      responses:
+        "200":
+          description: Organization updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, org]
+                properties:
+                  ok: { type: boolean }
+                  org: { $ref: "#/components/schemas/NabuflowOrg" }
+        "403":
+          description: Not the billing admin, or terms toggle without platform access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/org/pricing:
+    get:
+      operationId: getNabuflowOrgPricing
+      tags: [billing]
+      summary: Volume-discount tiers for bulk credit-pool purchases (visible before registration)
+      responses:
+        "200":
+          description: Bulk pricing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [minPurchaseCredits, selfServeRateUsdPerCredit, tiers]
+                properties:
+                  minPurchaseCredits: { type: integer }
+                  selfServeRateUsdPerCredit: { type: number }
+                  tiers:
+                    type: array
+                    items:
+                      type: object
+                      required: [minCredits, usdPerCredit, label]
+                      properties:
+                        minCredits: { type: integer }
+                        usdPerCredit: { type: number }
+                        label: { type: string }
+
+  /billing/nabuflow/org/setup-intent:
+    post:
+      operationId: createNabuflowOrgSetupIntent
+      tags: [billing]
+      summary: Create a SetupIntent to capture the company card (billing admin only)
+      responses:
+        "200":
+          description: SetupIntent created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clientSecret, setupIntentId]
+                properties:
+                  clientSecret: { type: string }
+                  setupIntentId: { type: string }
+        "403":
+          description: Not the billing admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/org/purchase:
+    post:
+      operationId: purchaseNabuflowOrgCredits
+      tags: [billing]
+      summary: Bulk credit-pool purchase at volume rates — card charges now; invoice sends with net terms and funds the pool on payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credits, method]
+              properties:
+                credits: { type: integer, minimum: 1 }
+                method: { type: string, enum: [card, invoice] }
+                poReference: { type: string, maxLength: 140 }
+      responses:
+        "201":
+          description: Purchase created (paid immediately on the card path)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, purchase, poolCredits]
+                properties:
+                  ok: { type: boolean }
+                  purchase:
+                    type: object
+                    required: [id, credits, amountUsdCents, method, status, tierLabel, usdPerCredit]
+                    properties:
+                      id: { type: integer }
+                      credits: { type: integer }
+                      amountUsdCents: { type: integer }
+                      method: { type: string }
+                      status: { type: string }
+                      tierLabel: { type: string }
+                      usdPerCredit: { type: number }
+                      hostedInvoiceUrl: { type: string, nullable: true }
+                      invoicePdfUrl: { type: string, nullable: true }
+                      dueAt: { type: string, format: date-time, nullable: true }
+                  poolCredits: { type: integer }
+        "400":
+          description: Below the bulk minimum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "402":
+          description: Card declined, or invoice terms not enabled for this organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/org/seats:
+    post:
+      operationId: addNabuflowOrgSeat
+      tags: [billing]
+      summary: Add a seat by account email — the seat's builds draw from the shared pool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 320 }
+                seatSpendCapUsdCents: { type: integer, minimum: 0, nullable: true }
+      responses:
+        "201":
+          description: Seat added
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, seat]
+                properties:
+                  ok: { type: boolean }
+                  seat: { $ref: "#/components/schemas/NabuflowOrgSeat" }
+        "404":
+          description: No account with that email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: That account already has a seat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/org/seats/{seatUserId}:
+    delete:
+      operationId: removeNabuflowOrgSeat
+      tags: [billing]
+      summary: Remove a seat (the last billing admin cannot be removed)
+      parameters:
+        - name: seatUserId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Seat removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        "404":
+          description: Seat not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/org/seats/{seatUserId}/cap:
+    post:
+      operationId: updateNabuflowOrgSeatCap
+      tags: [billing]
+      summary: Set or clear a per-seat monthly sub-cap (clamped to the org cap at enforcement time)
+      parameters:
+        - name: seatUserId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seatSpendCapUsdCents]
+              properties:
+                seatSpendCapUsdCents: { type: integer, minimum: 0, nullable: true }
+      responses:
+        "200":
+          description: Seat cap updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, seat]
+                properties:
+                  ok: { type: boolean }
+                  seat: { $ref: "#/components/schemas/NabuflowOrgSeat" }
+
+  /billing/nabuflow/org/spend-cap:
+    post:
+      operationId: updateNabuflowOrgSpendCap
+      tags: [billing]
+      summary: Update the org-wide monthly spend cap (null reverts to the Constellation default)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spendCapUsdCents]
+              properties:
+                spendCapUsdCents: { type: integer, minimum: 0, nullable: true }
+      responses:
+        "200":
+          description: Org spend cap updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, effectiveSpendCapUsdCents]
+                properties:
+                  ok: { type: boolean }
+                  spendCapUsdCents: { type: integer, nullable: true }
+                  effectiveSpendCapUsdCents: { type: integer }
+        "400":
+          description: Cap exceeds the Constellation maximum
           content:
             application/json:
               schema:
@@ -7328,7 +7725,8 @@ components:
         ]
       properties:
         id: { type: integer }
-        cycleId: { type: integer }
+        cycleId: { type: integer, nullable: true }
+        orgId: { type: integer, nullable: true }
         projectId: { type: integer, nullable: true }
         taskId: { type: integer, nullable: true }
         source: { type: string }
@@ -7342,6 +7740,87 @@ components:
         attribution: { type: string }
         description: { type: string, nullable: true }
         reversedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+
+    NabuflowOrg:
+      type: object
+      description: >
+        Constellation enterprise organization — the company entity that owns
+        the shared credit pool. Monetary fields are USD cents; poolCredits is
+        the prepaid shared balance that seats draw builds from.
+      required:
+        [
+          id,
+          companyName,
+          billingContactEmail,
+          addressLine1,
+          city,
+          postalCode,
+          country,
+          invoiceTermsEnabled,
+          termsNetDays,
+          status,
+          poolCredits,
+          effectiveSpendCapUsdCents,
+        ]
+      properties:
+        id: { type: integer }
+        companyName: { type: string }
+        billingContactName: { type: string, nullable: true }
+        billingContactEmail: { type: string }
+        taxId: { type: string, nullable: true }
+        addressLine1: { type: string }
+        addressLine2: { type: string, nullable: true }
+        city: { type: string }
+        region: { type: string, nullable: true }
+        postalCode: { type: string }
+        country: { type: string }
+        poReference: { type: string, nullable: true }
+        invoiceTermsEnabled: { type: boolean }
+        termsNetDays: { type: integer }
+        status: { type: string }
+        poolCredits: { type: integer }
+        monthlySpendCapUsdCents: { type: integer, nullable: true }
+        effectiveSpendCapUsdCents: { type: integer }
+        createdAt: { type: string, format: date-time, nullable: true }
+
+    NabuflowOrgSeat:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string }
+        role: { type: string }
+        email: { type: string, nullable: true }
+        seatSpendCapUsdCents: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+
+    NabuflowOrgPurchase:
+      type: object
+      required: [id, credits, amountUsdCents, method, status]
+      properties:
+        id: { type: integer }
+        credits: { type: integer }
+        amountUsdCents: { type: integer }
+        method: { type: string }
+        status: { type: string }
+        poReference: { type: string, nullable: true }
+        hostedInvoiceUrl: { type: string, nullable: true }
+        invoicePdfUrl: { type: string, nullable: true }
+        dueAt: { type: string, format: date-time, nullable: true }
+        paidAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+
+    NabuflowOrgLedgerEntry:
+      type: object
+      required: [id, entryType, credits, balanceAfter]
+      properties:
+        id: { type: integer }
+        entryType: { type: string }
+        credits: { type: integer }
+        balanceAfter: { type: integer }
+        usdCents: { type: integer, nullable: true }
+        userId: { type: string, nullable: true }
+        description: { type: string, nullable: true }
         createdAt: { type: string, format: date-time, nullable: true }
 
     OraTierMeta:

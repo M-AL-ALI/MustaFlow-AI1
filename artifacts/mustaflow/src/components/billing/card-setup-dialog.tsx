@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { AddressElement, Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { Loader2, ShieldCheck } from "lucide-react";
@@ -125,6 +125,8 @@ export function CardSetupDialog({
   description = "NabuFlow plans keep a card on file for the monthly subscription and any metered overage.",
   submitLabel = "Save card",
   previousLast4,
+  createIntent,
+  verifySaved,
 }: {
   open: boolean;
   onClose: () => void;
@@ -134,11 +136,23 @@ export function CardSetupDialog({
   description?: string;
   submitLabel?: string;
   previousLast4?: string | null;
+  /**
+   * Override the SetupIntent factory — e.g. the organization/company card,
+   * which lives on the company's Stripe Customer instead of the personal one.
+   */
+  createIntent?: () => Promise<{ clientSecret: string; setupIntentId: string }>;
+  /** Custom "is the new card visible yet" check for the finishing poll. */
+  verifySaved?: () => Promise<boolean>;
 }) {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"form" | "finishing">("form");
+  // Latest-value refs so inline arrow props don't retrigger the setup effect.
+  const createIntentRef = useRef(createIntent);
+  createIntentRef.current = createIntent;
+  const verifySavedRef = useRef(verifySaved);
+  verifySavedRef.current = verifySaved;
 
   useEffect(() => {
     if (!open) {
@@ -150,8 +164,9 @@ export function CardSetupDialog({
     let cancelled = false;
     void (async () => {
       try {
+        const intentFactory = createIntentRef.current ?? createNabuflowSetupIntent;
         const [intent, pkgRes] = await Promise.all([
-          createNabuflowSetupIntent(),
+          intentFactory(),
           authFetch("/api/billing/packages"),
         ]);
         const pkg = pkgRes.ok
@@ -182,10 +197,15 @@ export function CardSetupDialog({
     setPhase("finishing");
     for (let i = 0; i < 10; i++) {
       try {
-        const state = await getNabuflowBillingState();
-        const last4 = state.card?.last4 ?? null;
-        if (last4 && last4 !== (previousLast4 ?? null)) break;
-        if (last4 && !previousLast4) break;
+        const verify = verifySavedRef.current;
+        if (verify) {
+          if (await verify()) break;
+        } else {
+          const state = await getNabuflowBillingState();
+          const last4 = state.card?.last4 ?? null;
+          if (last4 && last4 !== (previousLast4 ?? null)) break;
+          if (last4 && !previousLast4) break;
+        }
       } catch {
         // keep polling
       }

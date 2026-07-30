@@ -15,14 +15,24 @@ import {
   db,
   nabuflowBillingCyclesTable,
   nabuflowBillingSettingsTable,
+  nabuflowOrgLedgerTable,
+  nabuflowOrgPurchasesTable,
+  nabuflowOrgsTable,
   nabuflowUsageEventsTable,
   notificationsTable,
+  type NabuflowOrg,
+  type NabuflowOrgSeat,
 } from "@workspace/db";
 import {
+  NABUFLOW_ORG_BULK_TIERS,
+  NABUFLOW_ORG_MIN_PURCHASE_CREDITS,
   NABUFLOW_PLAN_IDS,
   NABUFLOW_PLANS,
   getNabuflowPlan,
+  nabuflowBulkPurchaseCents,
+  nabuflowBulkTierFor,
   nabuflowEffectiveSpendCapCents,
+  nabuflowOrgDrawRateUsdPerCredit,
   type NabuflowPlanConfig,
 } from "../lib/nabuflow-plans";
 import {
@@ -36,6 +46,22 @@ import {
   resolveNabuflowBuildGate,
 } from "../lib/nabuflow-billing";
 import {
+  NabuflowOrgError,
+  addNabuflowOrgSeat,
+  buildNabuflowOrgGateInfo,
+  creditNabuflowOrgPurchase,
+  getNabuflowOrgSeatContext,
+  listNabuflowOrgSeats,
+  nabuflowOrgEffectiveCapCents,
+  registerNabuflowOrg,
+  removeNabuflowOrgSeat,
+} from "../lib/nabuflow-org";
+import {
+  createNabuflowOrgBulkInvoice,
+  createNabuflowOrgSetupIntent,
+  getNabuflowOrgCardSummary,
+} from "../lib/nabuflow-org-stripe";
+import {
   NabuflowStripeError,
   cancelNabuflowStripeSubscription,
   createNabuflowSetupIntent,
@@ -46,6 +72,7 @@ import {
   snapshotCustomerCard,
   switchNabuflowStripePlan,
 } from "../lib/nabuflow-stripe";
+import { isSuperuser } from "../lib/superusers";
 import { ensureStripeCustomer } from "./billing";
 import { logger } from "../lib/logger";
 
@@ -127,10 +154,47 @@ router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
   if (!userId) return;
 
   try {
-    const [sub, exempt] = await Promise.all([
+    const [sub, exempt, orgCtx] = await Promise.all([
       getNabuflowSubscription(userId),
       isNabuflowBillingExempt(userId),
+      getNabuflowOrgSeatContext(userId),
     ]);
+
+    // Enterprise seats: the org pool replaces the personal plan entirely.
+    // Plan shape is Constellation (unlimited ladder — the composer shows no
+    // counters), subscription/card/cycle are null, and the `org` block carries
+    // pool + cap state. The gate below routes through the org lane itself.
+    if (orgCtx) {
+      const [org, gate] = await Promise.all([
+        buildNabuflowOrgGateInfo(orgCtx),
+        resolveNabuflowBuildGate(userId, {}),
+      ]);
+      res.json({
+        enforcementEnabled: creditsEnforcementEnabled(),
+        exempt,
+        canBuild: gate.allowed,
+        blockedReason: gate.allowed ? null : gate.error,
+        plan: publicPlanShape(NABUFLOW_PLANS.constellation),
+        subscription: null,
+        card: null,
+        spendCap: null,
+        cycle: null,
+        org: {
+          orgId: org.orgId,
+          companyName: org.companyName,
+          role: org.role,
+          status: org.status,
+          poolCredits: org.poolCredits,
+          capUsdCents: org.capUsdCents,
+          monthDrawnUsdCents: org.monthDrawnUsdCents,
+          seatCapUsdCents: org.seatCapUsdCents,
+          seatMonthDrawnUsdCents: org.seatMonthDrawnUsdCents,
+          monthResetsAt: org.monthResetsAt.toISOString(),
+        },
+      });
+      return;
+    }
+
     const plan = getNabuflowPlan(sub?.planId);
 
     let cycle = null;
@@ -224,6 +288,7 @@ router.get("/billing/nabuflow/usage", async (req, res): Promise<void> => {
     events: rows.map((r) => ({
       id: r.id,
       cycleId: r.cycleId,
+      orgId: r.orgId ?? null,
       projectId: r.projectId,
       taskId: r.taskId,
       source: r.source,
@@ -537,6 +602,607 @@ router.post("/billing/nabuflow/spend-cap", async (req, res): Promise<void> => {
     res.json({ ok: true, spendCapUsdCents: requested, effectiveSpendCapUsdCents: effective });
   } catch (err) {
     handleNabuflowError(res, err, "Failed to update spend cap");
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Constellation enterprise organizations (Task #1518)
+//
+// Gated setup — a company registers, gets its own company-flagged Stripe
+// Customer, funds a shared credit pool via volume-discounted bulk purchases,
+// and its seats draw builds from that pool through the same charge pipeline.
+// No self-serve subscription checkout on this lane.
+// ═════════════════════════════════════════════════════════════════════════════
+
+function orgErrStatus(code: NabuflowOrgError["code"]): number {
+  switch (code) {
+    case "already_in_org":
+    case "seat_exists":
+      return 409;
+    case "not_in_org":
+    case "seat_not_found":
+    case "user_not_found":
+      return 404;
+    case "not_billing_admin":
+      return 403;
+    case "last_billing_admin":
+      return 400;
+    default:
+      return 500;
+  }
+}
+
+function handleOrgError(
+  res: { status: (n: number) => { json: (b: unknown) => void } },
+  err: unknown,
+  fallback: string,
+): void {
+  if (err instanceof NabuflowOrgError) {
+    res.status(orgErrStatus(err.code)).json({ error: err.message, code: err.code });
+    return;
+  }
+  handleNabuflowError(res, err, fallback);
+}
+
+/** Resolve the caller's org seat; 404 when they have none. */
+async function requireOrgSeat(
+  userId: string,
+  res: { status: (n: number) => { json: (b: unknown) => void } },
+): Promise<{ org: NabuflowOrg; seat: NabuflowOrgSeat } | null> {
+  const ctx = await getNabuflowOrgSeatContext(userId);
+  if (!ctx) {
+    res.status(404).json({
+      error: "You're not part of a NabuFlow organization yet.",
+      code: "not_in_org",
+    });
+    return null;
+  }
+  return ctx;
+}
+
+/** Resolve the caller's org seat and require the billing_admin role. */
+async function requireOrgAdmin(
+  userId: string,
+  res: { status: (n: number) => { json: (b: unknown) => void } },
+): Promise<{ org: NabuflowOrg; seat: NabuflowOrgSeat } | null> {
+  const ctx = await requireOrgSeat(userId, res);
+  if (!ctx) return null;
+  if (ctx.seat.role !== "billing_admin") {
+    res.status(403).json({
+      error: "Only your organization's billing admin can do that.",
+      code: "not_billing_admin",
+    });
+    return null;
+  }
+  return ctx;
+}
+
+function publicOrgShape(org: NabuflowOrg) {
+  return {
+    id: org.id,
+    companyName: org.companyName,
+    billingContactName: org.billingContactName,
+    billingContactEmail: org.billingContactEmail,
+    taxId: org.taxId,
+    addressLine1: org.addressLine1,
+    addressLine2: org.addressLine2,
+    city: org.city,
+    region: org.region,
+    postalCode: org.postalCode,
+    country: org.country,
+    poReference: org.poReference,
+    invoiceTermsEnabled: org.invoiceTermsEnabled,
+    termsNetDays: org.termsNetDays,
+    status: org.status,
+    poolCredits: org.poolCredits,
+    monthlySpendCapUsdCents: org.monthlySpendCapUsdCents,
+    effectiveSpendCapUsdCents: nabuflowOrgEffectiveCapCents(org),
+    createdAt: org.createdAt?.toISOString() ?? null,
+  };
+}
+
+const OrgRegisterBody = z.object({
+  companyName: z.string().trim().min(2).max(200),
+  billingContactName: z.string().trim().max(200).optional(),
+  billingContactEmail: z.string().trim().email().max(320),
+  taxId: z.string().trim().max(60).optional(),
+  addressLine1: z.string().trim().min(1).max(300),
+  addressLine2: z.string().trim().max(300).optional(),
+  city: z.string().trim().min(1).max(120),
+  region: z.string().trim().max(120).optional(),
+  postalCode: z.string().trim().min(1).max(20),
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((s) => s.toUpperCase()),
+  poReference: z.string().trim().max(140).optional(),
+});
+
+// ── POST /billing/nabuflow/org ───────────────────────────────────────────────
+// Register the company (gated setup from the Constellation card — creates the
+// company-flagged Stripe Customer + org record, requester = billing admin).
+router.post("/billing/nabuflow/org", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const parsed = OrgRegisterBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const { org, seat } = await registerNabuflowOrg(userId, {
+      ...parsed.data,
+      billingContactName: parsed.data.billingContactName ?? null,
+      taxId: parsed.data.taxId ?? null,
+      addressLine2: parsed.data.addressLine2 ?? null,
+      region: parsed.data.region ?? null,
+      poReference: parsed.data.poReference ?? null,
+    });
+    res.status(201).json({ ok: true, org: publicOrgShape(org), role: seat.role });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to set up the enterprise organization");
+  }
+});
+
+// ── GET /billing/nabuflow/org ────────────────────────────────────────────────
+// Org billing state for the caller's seat. Billing admins additionally get
+// seats, recent purchases, ledger tail and the company card summary.
+router.get("/billing/nabuflow/org", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  try {
+    const ctx = await requireOrgSeat(userId, res);
+    if (!ctx) return;
+    const info = await buildNabuflowOrgGateInfo(ctx);
+    const isAdmin = ctx.seat.role === "billing_admin";
+
+    const base = {
+      org: publicOrgShape(ctx.org),
+      role: ctx.seat.role,
+      month: {
+        drawnUsdCents: info.monthDrawnUsdCents,
+        capUsdCents: info.capUsdCents,
+        seatDrawnUsdCents: info.seatMonthDrawnUsdCents,
+        seatCapUsdCents: info.seatCapUsdCents,
+        resetsAt: info.monthResetsAt.toISOString(),
+      },
+    };
+
+    if (!isAdmin) {
+      res.json(base);
+      return;
+    }
+
+    const [seats, purchases, ledger, card] = await Promise.all([
+      listNabuflowOrgSeats(ctx.org.id),
+      db
+        .select()
+        .from(nabuflowOrgPurchasesTable)
+        .where(eq(nabuflowOrgPurchasesTable.orgId, ctx.org.id))
+        .orderBy(desc(nabuflowOrgPurchasesTable.createdAt))
+        .limit(50),
+      db
+        .select()
+        .from(nabuflowOrgLedgerTable)
+        .where(eq(nabuflowOrgLedgerTable.orgId, ctx.org.id))
+        .orderBy(desc(nabuflowOrgLedgerTable.createdAt))
+        .limit(100),
+      ctx.org.stripeCustomerId
+        ? getNabuflowOrgCardSummary(ctx.org.stripeCustomerId).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    res.json({
+      ...base,
+      card,
+      seats: seats.map((s) => ({
+        userId: s.userId,
+        role: s.role,
+        email: s.email,
+        seatSpendCapUsdCents: s.seatSpendCapUsdCents,
+        createdAt: s.createdAt?.toISOString() ?? null,
+      })),
+      purchases: purchases.map((p) => ({
+        id: p.id,
+        credits: p.credits,
+        amountUsdCents: p.amountUsdCents,
+        method: p.method,
+        status: p.status,
+        poReference: p.poReference,
+        hostedInvoiceUrl: p.hostedInvoiceUrl,
+        invoicePdfUrl: p.invoicePdfUrl,
+        dueAt: p.dueAt?.toISOString() ?? null,
+        paidAt: p.paidAt?.toISOString() ?? null,
+        createdAt: p.createdAt?.toISOString() ?? null,
+      })),
+      ledger: ledger.map((l) => ({
+        id: l.id,
+        entryType: l.entryType,
+        credits: l.credits,
+        balanceAfter: l.balanceAfter,
+        usdCents: l.usdCents,
+        userId: l.userId,
+        description: l.description,
+        createdAt: l.createdAt?.toISOString() ?? null,
+      })),
+    });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to load organization billing");
+  }
+});
+
+const OrgPatchBody = z.object({
+  poReference: z.string().trim().max(140).nullable().optional(),
+  billingContactName: z.string().trim().max(200).nullable().optional(),
+  billingContactEmail: z.string().trim().email().max(320).optional(),
+  termsNetDays: z.number().int().min(1).max(90).optional(),
+  /** Platform-gated: only the platform owner can enable invoice terms. */
+  invoiceTermsEnabled: z.boolean().optional(),
+});
+
+// ── PATCH /billing/nabuflow/org ──────────────────────────────────────────────
+router.patch("/billing/nabuflow/org", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const parsed = OrgPatchBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+
+    const patch: Record<string, unknown> = {};
+    if (parsed.data.poReference !== undefined) patch.poReference = parsed.data.poReference;
+    if (parsed.data.billingContactName !== undefined)
+      patch.billingContactName = parsed.data.billingContactName;
+    if (parsed.data.billingContactEmail !== undefined)
+      patch.billingContactEmail = parsed.data.billingContactEmail;
+    if (parsed.data.termsNetDays !== undefined) patch.termsNetDays = parsed.data.termsNetDays;
+
+    if (parsed.data.invoiceTermsEnabled !== undefined) {
+      // "Invoice with terms WHERE ENABLED": terms are a platform-granted
+      // capability (credit exposure), not self-serve — owner flips it.
+      if (!(await isSuperuser(userId))) {
+        res.status(403).json({
+          error:
+            "Invoice terms are enabled by the NabuFlow team — get in touch and we'll set it up.",
+          code: "terms_platform_gated",
+        });
+        return;
+      }
+      patch.invoiceTermsEnabled = parsed.data.invoiceTermsEnabled;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      res.json({ ok: true, org: publicOrgShape(ctx.org) });
+      return;
+    }
+
+    const [updated] = await db
+      .update(nabuflowOrgsTable)
+      .set({ ...patch, updatedAt: sql`now()` })
+      .where(eq(nabuflowOrgsTable.id, ctx.org.id))
+      .returning();
+    res.json({ ok: true, org: publicOrgShape(updated) });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to update organization");
+  }
+});
+
+// ── GET /billing/nabuflow/org/pricing ────────────────────────────────────────
+// Volume tiers for the bulk-purchase dialog (auth required; org not required
+// so the setup flow can show pricing before registration).
+router.get("/billing/nabuflow/org/pricing", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  res.json({
+    minPurchaseCredits: NABUFLOW_ORG_MIN_PURCHASE_CREDITS,
+    selfServeRateUsdPerCredit: nabuflowOrgDrawRateUsdPerCredit(),
+    tiers: NABUFLOW_ORG_BULK_TIERS.map((t) => ({
+      minCredits: t.minCredits,
+      usdPerCredit: t.usdPerCredit,
+      label: t.label,
+    })),
+  });
+});
+
+// ── POST /billing/nabuflow/org/setup-intent ──────────────────────────────────
+// Card capture for the COMPANY customer (billing admin only).
+router.post("/billing/nabuflow/org/setup-intent", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+    if (!ctx.org.stripeCustomerId) {
+      res.status(409).json({ error: "This organization has no Stripe customer yet." });
+      return;
+    }
+    const intent = await createNabuflowOrgSetupIntent(ctx.org.stripeCustomerId, ctx.org.id, userId);
+    res.json({ clientSecret: intent.clientSecret, setupIntentId: intent.setupIntentId });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to create organization SetupIntent");
+  }
+});
+
+const OrgPurchaseBody = z.object({
+  credits: z.number().int().positive(),
+  method: z.enum(["card", "invoice"]),
+  poReference: z.string().trim().max(140).optional(),
+});
+
+// ── POST /billing/nabuflow/org/purchase ──────────────────────────────────────
+// Bulk credit-pool purchase at volume-discounted rates. Card → charged now,
+// pool funded immediately. Invoice → sent with net-N terms; pool funded when
+// `invoice.paid` arrives. Either way the invoice line item is human-readable
+// and carries the PO reference + tax id as printed custom fields.
+router.post("/billing/nabuflow/org/purchase", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const parsed = OrgPurchaseBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+    const { credits, method } = parsed.data;
+
+    const tier = nabuflowBulkTierFor(credits);
+    const amountUsdCents = nabuflowBulkPurchaseCents(credits);
+    if (!tier || amountUsdCents === null) {
+      res.status(400).json({
+        error: `Bulk purchases start at ${NABUFLOW_ORG_MIN_PURCHASE_CREDITS.toLocaleString("en-US")} credits.`,
+        code: "below_minimum",
+        minPurchaseCredits: NABUFLOW_ORG_MIN_PURCHASE_CREDITS,
+      });
+      return;
+    }
+
+    if (method === "invoice" && !ctx.org.invoiceTermsEnabled) {
+      res.status(402).json({
+        error:
+          "Invoice terms aren't enabled for your organization yet — pay by card, or contact us to set up net terms.",
+        code: "terms_not_enabled",
+      });
+      return;
+    }
+
+    const poReference = parsed.data.poReference ?? ctx.org.poReference ?? null;
+
+    // 1. Local purchase record first (pending) — the Stripe invoice references
+    //    it by id, and the webhook path funds the pool through its
+    //    credited_at idempotency latch.
+    const [purchase] = await db
+      .insert(nabuflowOrgPurchasesTable)
+      .values({
+        orgId: ctx.org.id,
+        credits,
+        amountUsdCents,
+        method,
+        status: "pending",
+        poReference,
+        requestedByUserId: userId,
+      })
+      .returning();
+
+    let invoiceResult;
+    try {
+      invoiceResult = await createNabuflowOrgBulkInvoice({
+        org: ctx.org,
+        credits,
+        amountUsdCents,
+        tier,
+        method,
+        poReference,
+        requestedByUserId: userId,
+        purchaseId: purchase.id,
+      });
+    } catch (err) {
+      await db
+        .update(nabuflowOrgPurchasesTable)
+        .set({ status: "failed", updatedAt: sql`now()` })
+        .where(eq(nabuflowOrgPurchasesTable.id, purchase.id));
+      throw err;
+    }
+
+    await db
+      .update(nabuflowOrgPurchasesTable)
+      .set({
+        stripeInvoiceId: invoiceResult.stripeInvoiceId,
+        hostedInvoiceUrl: invoiceResult.hostedInvoiceUrl,
+        invoicePdfUrl: invoiceResult.invoicePdfUrl,
+        dueAt: invoiceResult.dueAt,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(nabuflowOrgPurchasesTable.id, purchase.id));
+
+    // Card path: fund the pool right now (webhook re-delivery is a no-op).
+    if (invoiceResult.paid) {
+      await creditNabuflowOrgPurchase(purchase.id, { paidAt: new Date() });
+    }
+
+    const [freshOrg] = await db
+      .select()
+      .from(nabuflowOrgsTable)
+      .where(eq(nabuflowOrgsTable.id, ctx.org.id))
+      .limit(1);
+
+    res.status(201).json({
+      ok: true,
+      purchase: {
+        id: purchase.id,
+        credits,
+        amountUsdCents,
+        method,
+        status: invoiceResult.paid ? "paid" : "pending",
+        tierLabel: tier.label,
+        usdPerCredit: tier.usdPerCredit,
+        hostedInvoiceUrl: invoiceResult.hostedInvoiceUrl,
+        invoicePdfUrl: invoiceResult.invoicePdfUrl,
+        dueAt: invoiceResult.dueAt?.toISOString() ?? null,
+      },
+      poolCredits: freshOrg?.poolCredits ?? ctx.org.poolCredits,
+    });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to purchase bulk credits");
+  }
+});
+
+const OrgSeatBody = z.object({
+  email: z.string().trim().email().max(320),
+  seatSpendCapUsdCents: z.number().int().min(0).nullable().optional(),
+});
+
+// ── POST /billing/nabuflow/org/seats ─────────────────────────────────────────
+router.post("/billing/nabuflow/org/seats", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const parsed = OrgSeatBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+    const seat = await addNabuflowOrgSeat(ctx.org, {
+      email: parsed.data.email,
+      addedByUserId: userId,
+      seatSpendCapUsdCents: parsed.data.seatSpendCapUsdCents ?? null,
+    });
+    res.status(201).json({
+      ok: true,
+      seat: {
+        userId: seat.userId,
+        role: seat.role,
+        email: seat.email,
+        seatSpendCapUsdCents: seat.seatSpendCapUsdCents,
+      },
+    });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to add seat");
+  }
+});
+
+// ── DELETE /billing/nabuflow/org/seats/:seatUserId ───────────────────────────
+router.delete("/billing/nabuflow/org/seats/:seatUserId", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+    await removeNabuflowOrgSeat(ctx.org, req.params.seatUserId);
+    res.json({ ok: true });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to remove seat");
+  }
+});
+
+const SeatCapBody = z.object({
+  /** null → no per-seat sub-cap. Cents; effective value is clamped to the org cap. */
+  seatSpendCapUsdCents: z.number().int().min(0).nullable(),
+});
+
+// ── POST /billing/nabuflow/org/seats/:seatUserId/cap ─────────────────────────
+router.post("/billing/nabuflow/org/seats/:seatUserId/cap", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const parsed = SeatCapBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+    const seats = await listNabuflowOrgSeats(ctx.org.id);
+    const target = seats.find((s) => s.userId === req.params.seatUserId);
+    if (!target) {
+      res.status(404).json({ error: "That account has no seat here.", code: "seat_not_found" });
+      return;
+    }
+    const { nabuflowOrgSeatsTable } = await import("@workspace/db");
+    const [updated] = await db
+      .update(nabuflowOrgSeatsTable)
+      .set({ seatSpendCapUsdCents: parsed.data.seatSpendCapUsdCents, updatedAt: sql`now()` })
+      .where(eq(nabuflowOrgSeatsTable.id, target.id))
+      .returning();
+    res.json({
+      ok: true,
+      seat: {
+        userId: updated.userId,
+        role: updated.role,
+        email: updated.email,
+        seatSpendCapUsdCents: updated.seatSpendCapUsdCents,
+      },
+    });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to update seat cap");
+  }
+});
+
+const OrgSpendCapBody = z.object({
+  /** null → Constellation plan default. Cents, capped at the plan max. */
+  spendCapUsdCents: z.number().int().min(0).nullable(),
+});
+
+// ── POST /billing/nabuflow/org/spend-cap ─────────────────────────────────────
+router.post("/billing/nabuflow/org/spend-cap", async (req, res): Promise<void> => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const parsed = OrgSpendCapBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const ctx = await requireOrgAdmin(userId, res);
+    if (!ctx) return;
+
+    const plan = NABUFLOW_PLANS.constellation;
+    const requested = parsed.data.spendCapUsdCents;
+    const maxCapCents = Math.round(plan.maxSpendCapUsd * 100);
+    if (requested !== null && requested > maxCapCents) {
+      res.status(400).json({
+        error: `The organization spend cap can be at most $${plan.maxSpendCapUsd.toFixed(2)} per month.`,
+        maxSpendCapUsdCents: maxCapCents,
+      });
+      return;
+    }
+
+    const [updated] = await db
+      .update(nabuflowOrgsTable)
+      .set({ monthlySpendCapUsdCents: requested, updatedAt: sql`now()` })
+      .where(eq(nabuflowOrgsTable.id, ctx.org.id))
+      .returning();
+    res.json({
+      ok: true,
+      spendCapUsdCents: requested,
+      effectiveSpendCapUsdCents: nabuflowOrgEffectiveCapCents(updated),
+    });
+  } catch (err) {
+    handleOrgError(res, err, "Failed to update organization spend cap");
   }
 });
 
