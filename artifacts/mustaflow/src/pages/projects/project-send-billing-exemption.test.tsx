@@ -461,7 +461,6 @@ describe("composer credit counter", () => {
       isError: false,
     };
     renderPage();
-
     const counter = await screen.findByTestId("composer-credit-counter");
     expect(counter).toHaveTextContent(/42/);
     expect(counter).toHaveTextContent(/remaining/);

@@ -239,16 +239,6 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
       GROUP BY mode
       ORDER BY mode
     `);
-    buildTokenTelemetryRows = bttResult.rows.map((r) => ({
-      mode: r.mode,
-      buildCount: Number(r.build_count),
-      avgInputTokens: Number(r.avg_input_tokens ?? 0),
-      avgOutputTokens: Number(r.avg_output_tokens ?? 0),
-      avgUsdCost: r.avg_usd_cost ? Number(Number(r.avg_usd_cost).toFixed(6)) : 0,
-    }));
-  } catch {
-    /* non-fatal — table may not exist on older deploys */
-  }
 
   res.json({
     projects: {
@@ -847,6 +837,10 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
     .from(domainServeEventsTable)
     .where(gte(domainServeEventsTable.ts, since));
 
+  const statusFilter = _statusFilter && ["open", "dismissed", "resolved"].includes(_statusFilter)
+    ? _statusFilter
+    : undefined;
+
   res.json({
     sinceDays: days,
     totalDomains: totalDomainsRow?.total ?? 0,
@@ -859,7 +853,9 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
 // ── GET /api/admin/abuse-reports ──────────────────────────────────────────────
 // Returns abuse reports with optional ?status=open|dismissed|resolved filter.
 router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
-  const statusFilter = req.query.status as string | undefined;
+  const statusFilter = _statusFilter && ["open", "dismissed", "resolved"].includes(_statusFilter)
+    ? _statusFilter
+    : undefined;
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const offset = Number(req.query.offset ?? 0);
 
