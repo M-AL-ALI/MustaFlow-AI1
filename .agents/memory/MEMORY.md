@@ -125,3 +125,4 @@
 - [NabuFlow prod enforcement flip](nabuflow-prod-enforcement.md) — shared env reaches prod (E2E flag trap); allowlist prod-only owner-only; env changes need republish; Stripe prices self-provision per env.
 - [Stripe shared-customer routing](stripe-shared-customer-routing.md) — two plan families on ONE customer: route webhooks metadata-first + local sub lookup, EARLY, both-direction isolation tests.
 - [NabuFlow billing UI test recipe](nabuflow-billing-ui-testing.md) — BUILDER_OPEN_TO_ALL grants access w/o billing exemption; CREDITS_ENFORCEMENT is live-read; seed 3 nabuflow tables; post-restore /mode-select bounce = success.
+- [Acceptance script pricing coupling](acceptance-script-pricing-coupling.md) — verify-ladder.ts has hardcoded expected overage cents; update when plan rates change.

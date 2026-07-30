@@ -13,13 +13,13 @@
 // superusers bypass billing.
 //
 // Credit calibration (margin protection): builds charge exactly what
-// `creditCostFor` in ai-providers.ts returns today — Pro 10 (16 on Anthropic),
-// Pro+Deep 13, Power 5/7, Eco 2/3, Lite 1. Included buckets are sized so the
-// bucket's dollar value at the plan's own overage rate stays below the plan
-// price (Orbit 1,800 cr × $0.012 = $21.60 marginal value on a $20 plan with
-// only 3 Pro builds; Comet 4,800 × $0.011 = $52.80; Nova 10,500 × $0.010 =
-// $105) — margin comes from typical partial utilisation plus the ladder caps,
-// while overage is billed at or above the marginal rate from the first credit.
+// `creditCostFor` in ai-providers.ts returns today — Pro 475 (760 on Anthropic),
+// Pro+Deep 850, Power 160/290, Eco 34/60, Lite 13. Included buckets are sized so
+// the bucket's dollar value at the plan's own overage rate stays below the plan
+// price (Orbit 1,600 cr × $0.015 = $24 marginal value on a $20 plan with only 3
+// Pro builds; Comet 4,000 × $0.013 = $52; Nova 8,000 × $0.012 = $96) — margin
+// comes from typical partial utilisation plus the ladder caps, while overage is
+// billed at or above the marginal rate from the first credit.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const NABUFLOW_PLAN_IDS = ["orbit", "comet", "nova", "constellation"] as const;
@@ -71,12 +71,12 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
     id: "orbit",
     name: "Orbit",
     priceUsd: 20,
-    includedMonthlyCredits: 1800,
+    includedMonthlyCredits: 1600,
     rolloverCycles: 0,
     rolloverMaxCredits: 0,
     parallelBuildLimit: 1,
     queuePriority: 1,
-    overageUsdPerCredit: 0.012,
+    overageUsdPerCredit: 0.015,
     defaultSpendCapUsd: 25,
     maxSpendCapUsd: 100,
     ladder: { proBuildsPerCycle: 3, deepBuildsPerCycle: 0, proDeepCombo: false },
@@ -84,10 +84,10 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
     stripeLookupKey: "nabuflow_orbit_monthly",
     available: true,
     features: [
-      "1,800 build credits / month",
+      "1,600 build credits / month",
       "Lite, Eco & Power engine modes",
       "3 Pro builds per cycle",
-      "Pay-as-you-go overage at $0.012/credit",
+      "Pay-as-you-go overage at $0.015/credit",
       "1 concurrent build",
     ],
   },
@@ -95,12 +95,12 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
     id: "comet",
     name: "Comet",
     priceUsd: 50,
-    includedMonthlyCredits: 4800,
+    includedMonthlyCredits: 4000,
     rolloverCycles: 1,
-    rolloverMaxCredits: 4800,
+    rolloverMaxCredits: 4000,
     parallelBuildLimit: 3,
     queuePriority: 2,
-    overageUsdPerCredit: 0.011,
+    overageUsdPerCredit: 0.013,
     defaultSpendCapUsd: 60,
     maxSpendCapUsd: 250,
     ladder: { proBuildsPerCycle: null, deepBuildsPerCycle: 10, proDeepCombo: false },
@@ -108,11 +108,11 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
     stripeLookupKey: "nabuflow_comet_monthly",
     available: true,
     features: [
-      "4,800 build credits / month",
+      "4,000 build credits / month",
       "Unlimited Pro builds",
       "10 Deep-reasoning builds per cycle",
       "Unused credits roll over one cycle",
-      "Pay-as-you-go overage at $0.011/credit",
+      "Pay-as-you-go overage at $0.013/credit",
       "3 concurrent builds",
     ],
   },
@@ -120,12 +120,12 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
     id: "nova",
     name: "Nova",
     priceUsd: 100,
-    includedMonthlyCredits: 10500,
+    includedMonthlyCredits: 8000,
     rolloverCycles: 1,
-    rolloverMaxCredits: 10500,
+    rolloverMaxCredits: 8000,
     parallelBuildLimit: 6,
     queuePriority: 3,
-    overageUsdPerCredit: 0.01,
+    overageUsdPerCredit: 0.012,
     defaultSpendCapUsd: 120,
     maxSpendCapUsd: 500,
     ladder: { proBuildsPerCycle: null, deepBuildsPerCycle: null, proDeepCombo: true },
@@ -133,11 +133,11 @@ export const NABUFLOW_PLANS: Record<NabuflowPlanId, NabuflowPlanConfig> = {
     stripeLookupKey: "nabuflow_nova_monthly",
     available: true,
     features: [
-      "10,500 build credits / month",
+      "8,000 build credits / month",
       "Unlimited Pro & Deep-reasoning builds",
       "Pro + Deep combo (Nova exclusive)",
       "Unused credits roll over one cycle",
-      "Pay-as-you-go overage at $0.010/credit",
+      "Pay-as-you-go overage at $0.012/credit",
       "6 concurrent builds",
     ],
   },

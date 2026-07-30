@@ -241,16 +241,16 @@ const PROVIDER_COST_MULTIPLIER: Record<Provider, number> = {
 };
 
 const BASE_COST: Record<AgentMode, number> = {
-  lite: 1,
-  eco: 2,
-  power: 5,
-  pro: 10,
+  lite: 13,
+  eco: 34,
+  power: 160,
+  pro: 475,
 };
 
 export const DEEP_REASONING_CREDIT_COST: Readonly<Partial<Record<AgentMode, number>>> = {
-  eco: 3,
-  power: 7,
-  pro: 13,
+  eco: 60,
+  power: 290,
+  pro: 850,
 };
 
 export function creditCostFor(
