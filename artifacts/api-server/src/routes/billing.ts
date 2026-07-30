@@ -1147,6 +1147,37 @@ billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> =
     })),
   });
 });
+// Public NabuFlow plans metadata — no auth required (pricing page, landing page).
+// Parallel to GET /billing/ora-plans; does NOT leak per-user state.
+billingPublicRouter.get("/billing/nabuflow/plans", (_req, res): void => {
+  const { NABUFLOW_BUILD_MODE_COSTS, NABUFLOW_PLAN_IDS, NABUFLOW_PLANS } =
+    require("../lib/nabuflow-plans") as typeof import("../lib/nabuflow-plans");
+  res.json({
+    plans: NABUFLOW_PLAN_IDS.map((id: string) => {
+      const plan = NABUFLOW_PLANS[id as keyof typeof NABUFLOW_PLANS];
+      return {
+        id: plan.id,
+        name: plan.name,
+        available: plan.available,
+        priceUsd: plan.priceUsd,
+        includedMonthlyCredits: plan.includedMonthlyCredits,
+        overageUsdPerCredit: plan.overageUsdPerCredit,
+        rolloverCycles: plan.rolloverCycles,
+        rolloverMaxCredits: plan.rolloverMaxCredits,
+        parallelBuildLimit: plan.parallelBuildLimit,
+        queuePriority: plan.queuePriority,
+        defaultSpendCapUsdCents: Math.round(plan.defaultSpendCapUsd * 100),
+        maxSpendCapUsdCents: Math.round(plan.maxSpendCapUsd * 100),
+        ladder: {
+          proBuildsPerCycle: plan.ladder.proBuildsPerCycle,
+          deepBuildsPerCycle: plan.ladder.deepBuildsPerCycle,
+          proDeepCombo: plan.ladder.proDeepCombo,
+        },
+      };
+    }),
+    modeCosts: NABUFLOW_BUILD_MODE_COSTS,
+  });
+});
 
 // ── Auth-required billing router ──────────────────────────────────────────────
 const router: IRouter = Router();
