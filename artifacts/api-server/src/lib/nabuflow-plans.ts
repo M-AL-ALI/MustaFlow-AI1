@@ -30,10 +30,10 @@ export const NABUFLOW_PLAN_IDS = ["orbit", "comet", "nova", "constellation"] as 
  * pricing page never hard-codes these values.
  */
 export const NABUFLOW_BUILD_MODE_COSTS = [
-  { mode: "Lite", credits: 1, desc: "Fast, lightweight builds" },
-  { mode: "Eco", credits: 2, desc: "Balanced quality and speed" },
-  { mode: "Power", credits: 5, desc: "High-quality multi-file builds" },
-  { mode: "Pro", credits: 10, desc: "Maximum quality, extended context" },
+  { mode: "Lite", credits: 13, desc: "Fast, lightweight builds" },
+  { mode: "Eco", credits: 34, desc: "Balanced quality and speed" },
+  { mode: "Power", credits: 160, desc: "High-quality multi-file builds" },
+  { mode: "Pro", credits: 475, desc: "Maximum quality, extended context" },
 ] as const;
 
 export type NabuflowBuildModeCost = (typeof NABUFLOW_BUILD_MODE_COSTS)[number];

@@ -2332,9 +2332,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     // counters, so the drain-time re-check skips usage (it can never block the
     // task that used the last slot) but still honors plan/card/pause state.
     if (project.ownerId) {
-      const { resolveNabuflowBuildGate, nabuflowGateHttpBody } = await import(
-        "./nabuflow-billing"
-      );
+      const { resolveNabuflowBuildGate, nabuflowGateHttpBody } = await import("./nabuflow-billing");
       const gate = await resolveNabuflowBuildGate(project.ownerId, {
         engineMode: agentMode,
         deepReasoning: input.deepReasoning ?? false,
@@ -2758,6 +2756,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           imageAttachments,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           signal,
+          taskId: taskId as number,
+          taskMode: agentMode,
         };
 
         // ── Agentic pre-flight gate ────────────────────────────────────────────
@@ -2943,6 +2943,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   imageAttachments,
                   onEvent: async (type, message) => emitEvent(taskId, type, message),
                   signal,
+                  taskId: taskId as number,
+                  taskMode: agentMode,
                 })
               : isSlidesProject
                 ? await runSlidesBuildPipeline(stackBuildArgs)
@@ -2964,6 +2966,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           imageAttachments,
                           onEvent: async (type, message) => emitEvent(taskId, type, message),
                           signal,
+                          taskId: taskId as number,
+                          taskMode: agentMode,
                         })
                       : isNextjsProject
                         ? await runNextjsBuildPipeline(stackBuildArgs)
@@ -2991,6 +2995,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                       emitEvent(taskId, type, message),
                                     onToken: (delta: string) => emitTokenEvent(taskId, delta),
                                     signal,
+                                    taskId: taskId as number,
+                                    taskMode: agentMode,
                                   });
 
         analyticsCorrectionPasses = result.correctionPasses;
@@ -3028,6 +3034,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
             signal,
+            taskId: taskId as number,
+            taskMode: buildEscalationMode,
           };
           const escalatedResult = isSlidesProject
             ? await runSlidesBuildPipeline(escalatedStackBuildArgs)
@@ -3048,6 +3056,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       conversationSummary,
                       imageAttachments,
                       signal,
+                      taskId: taskId as number,
+                      taskMode: buildEscalationMode,
                     })
                   : isNextjsProject
                     ? await runNextjsBuildPipeline(escalatedStackBuildArgs)
@@ -3075,6 +3085,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                   emitEvent(taskId, type, message),
                                 onToken: (delta: string) => emitTokenEvent(taskId, delta),
                                 signal,
+                                taskId: taskId as number,
+                                taskMode: buildEscalationMode,
                               });
           wasEscalated = true;
           agentMode = buildEscalationMode;
@@ -3330,6 +3342,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           imageAttachments,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           signal,
+          taskId: taskId as number,
+          taskMode: agentMode,
         };
 
         // ── Agentic pre-flight gate (refine path) ────────────────────────────
@@ -3510,6 +3524,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   imageAttachments,
                   onEvent: async (type, message) => emitEvent(taskId, type, message),
                   signal,
+                  taskId: taskId as number,
+                  taskMode: agentMode,
                 })
               : isSlidesProject
                 ? await runSlidesRefinePipeline(stackRefineArgs)
@@ -3534,6 +3550,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           imageAttachments,
                           onEvent: async (type, message) => emitEvent(taskId, type, message),
                           signal,
+                          taskId: taskId as number,
+                          taskMode: agentMode,
                         })
                       : isNextjsProject
                         ? await runNextjsRefinePipeline(stackRefineArgs)
@@ -3566,6 +3584,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                       emitEvent(taskId, type, message),
                                     onToken: (delta: string) => emitTokenEvent(taskId, delta),
                                     signal,
+                                    taskId: taskId as number,
+                                    taskMode: agentMode,
                                   });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
