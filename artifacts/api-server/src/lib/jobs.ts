@@ -5706,6 +5706,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         versionValidationStatus,
         PARTIAL_VALIDATION_WARNING,
       );
+      // NabuFlow R2 Phase D: flush per-build token telemetry alongside the
+      // existing token_count update so both the aggregate counter and the
+      // queryable telemetry row are written at the same logical completion point.
+      const { flushBuildTokenTelemetry } = await import("./ai-providers");
+      const [, flushedTelemetryTokenCount] = await Promise.all([
+        flushBuildTokenTelemetry(taskId),
+        Promise.resolve(flushTokenCount(taskId)),
+      ]);
       await db
         .update(agentTasksTable)
         .set({
@@ -5713,7 +5721,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           report,
           completionKind,
           currentStep: finalStepCount,
-          tokenCount: flushTokenCount(taskId),
+          tokenCount: flushedTelemetryTokenCount,
         })
         .where(
           and(
