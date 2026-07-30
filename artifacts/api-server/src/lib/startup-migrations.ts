@@ -4712,6 +4712,119 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-nabuflow-billing (Task #1516) ─────────────────────────────────
+  // NabuFlow Builder billing core: plan subscriptions, spend-cap settings,
+  // per-cycle buckets/counters, and the per-build usage ledger. Fully separate
+  // from Ora's user_subscriptions — nothing here touches Ora plan state.
+  {
+    name: "migrate-nabuflow-billing",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_subscriptions (
+          id SERIAL PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          plan_id TEXT NOT NULL,
+          stripe_customer_id TEXT,
+          stripe_subscription_id TEXT,
+          stripe_item_id TEXT,
+          status TEXT NOT NULL DEFAULT 'incomplete',
+          cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+          current_cycle_start TIMESTAMPTZ,
+          current_cycle_end TIMESTAMPTZ,
+          rollover_credits INTEGER NOT NULL DEFAULT 0,
+          default_payment_method_id TEXT,
+          card_brand TEXT,
+          card_last4 TEXT,
+          card_exp_month INTEGER,
+          card_exp_year INTEGER,
+          dunning_status TEXT NOT NULL DEFAULT 'none',
+          dunning_started_at TIMESTAMPTZ,
+          dunning_grace_until TIMESTAMPTZ,
+          dunning_paused_at TIMESTAMPTZ,
+          dunning_attempt_count INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_subscriptions_stripe_sub_idx
+           ON nabuflow_subscriptions (stripe_subscription_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_subscriptions_stripe_customer_idx
+           ON nabuflow_subscriptions (stripe_customer_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_billing_settings (
+          id SERIAL PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          spend_cap_usd_cents INTEGER,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_billing_cycles (
+          id SERIAL PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          cycle_start TIMESTAMPTZ NOT NULL,
+          cycle_end TIMESTAMPTZ NOT NULL,
+          included_credits INTEGER NOT NULL DEFAULT 0,
+          rollover_credits INTEGER NOT NULL DEFAULT 0,
+          used_included_credits INTEGER NOT NULL DEFAULT 0,
+          overage_credits INTEGER NOT NULL DEFAULT 0,
+          overage_usd_cents INTEGER NOT NULL DEFAULT 0,
+          pro_builds_used INTEGER NOT NULL DEFAULT 0,
+          deep_builds_used INTEGER NOT NULL DEFAULT 0,
+          bucket_notify_level INTEGER NOT NULL DEFAULT 0,
+          cap_notify_level INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT nabuflow_cycles_user_cycle_unique UNIQUE (user_id, cycle_start)
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_cycles_user_idx
+           ON nabuflow_billing_cycles (user_id, cycle_start)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nabuflow_usage_events (
+          id SERIAL PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          cycle_id INTEGER NOT NULL,
+          cycle_start TIMESTAMPTZ NOT NULL,
+          project_id INTEGER,
+          task_id INTEGER,
+          source TEXT NOT NULL DEFAULT 'pipeline',
+          engine_mode TEXT,
+          deep_reasoning BOOLEAN NOT NULL DEFAULT FALSE,
+          credits INTEGER NOT NULL,
+          included_credits INTEGER NOT NULL DEFAULT 0,
+          overage_credits INTEGER NOT NULL DEFAULT 0,
+          overage_usd_cents INTEGER NOT NULL DEFAULT 0,
+          usd_value_cents INTEGER NOT NULL DEFAULT 0,
+          attribution TEXT NOT NULL DEFAULT 'included',
+          description TEXT,
+          stripe_invoice_item_id TEXT,
+          stripe_reported_at TIMESTAMPTZ,
+          reversed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_usage_events_user_idx
+           ON nabuflow_usage_events (user_id, created_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS nabuflow_usage_events_cycle_idx
+           ON nabuflow_usage_events (cycle_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

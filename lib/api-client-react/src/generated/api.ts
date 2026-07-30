@@ -62,6 +62,7 @@ import type {
   BrainstormChatOutput,
   BrainstormResolveInput,
   BrainstormResolveOutput,
+  CancelNabuflowSubscription200,
   CancelProjectQueueBatch200,
   ChatExchange,
   ChatMessage,
@@ -81,6 +82,7 @@ import type {
   ContainerStatus,
   CreateDbSnapshotInput,
   CreateGithubBranch200,
+  CreateNabuflowSetupIntent200,
   CreatePreviewSession200,
   CreateProjectDomainDnsRecord201,
   CveFinding,
@@ -135,6 +137,7 @@ import type {
   GetCheckRunTrendsParams,
   GetCheckRunsParams,
   GetContainerLogsParams,
+  GetNabuflowBillingState200,
   GetPreviewEnvStatus200,
   GetProjectAllFileContent200Item,
   GetProjectDomainDnsHistory200,
@@ -188,6 +191,10 @@ import type {
   ListImagesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
+  ListNabuflowBillingNotifications200,
+  ListNabuflowPlans200,
+  ListNabuflowUsage200,
+  ListNabuflowUsageParams,
   ListProjectDomainDnsRecords200,
   ListProjectUploads200,
   ListProjectsParams,
@@ -260,6 +267,7 @@ import type {
   RequestProjectUploadUrl200,
   RequestProjectUploadUrlBody,
   RerunTestsResult,
+  ResumeNabuflowSubscription200,
   ResumePausedQueue200,
   ResumeStreamParams,
   RetryProjectProvisioning200,
@@ -302,6 +310,8 @@ import type {
   SubmitAbuseReportBody,
   SubmitProjectQueue200,
   SubmitProjectQueueBody,
+  SubscribeNabuflowPlan200,
+  SubscribeNabuflowPlanBody,
   SuggestionAcceptResult,
   SupportChatInput,
   SupportChatOutput,
@@ -309,6 +319,8 @@ import type {
   SupportConversationsOutput,
   SupportTicketDetail,
   SupportTicketsOutput,
+  SwitchNabuflowPlan200,
+  SwitchNabuflowPlanBody,
   TaskEvent,
   TaskFeedbackInput,
   ToggleAdminSkill200,
@@ -324,6 +336,8 @@ import type {
   UpdateAdminSupportTicket200,
   UpdateAdminSupportTicketBody,
   UpdateAgentInboxItemBody,
+  UpdateNabuflowSpendCap200,
+  UpdateNabuflowSpendCapBody,
   UpdatePreferencesBody,
   UpdateProjectDomainDnsRecord200,
   UpdateTaskBody,
@@ -16733,6 +16747,744 @@ export function useGetBillingOraPlans<TData = Awaited<ReturnType<typeof getBilli
 
 
 
+
+export const getListNabuflowPlansUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/plans`
+}
+
+/**
+ * @summary NabuFlow Builder plan family (Orbit/Comet/Nova + Constellation stub)
+ */
+export const listNabuflowPlans = async ( options?: RequestInit): Promise<ListNabuflowPlans200> => {
+
+  return customFetch<ListNabuflowPlans200>(getListNabuflowPlansUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListNabuflowPlansQueryKey = () => {
+    return [
+    `/api/billing/nabuflow/plans`
+    ] as const;
+    }
+
+
+export const getListNabuflowPlansQueryOptions = <TData = Awaited<ReturnType<typeof listNabuflowPlans>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listNabuflowPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListNabuflowPlansQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listNabuflowPlans>>> = ({ signal }) => listNabuflowPlans({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listNabuflowPlans>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListNabuflowPlansQueryResult = NonNullable<Awaited<ReturnType<typeof listNabuflowPlans>>>
+export type ListNabuflowPlansQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary NabuFlow Builder plan family (Orbit/Comet/Nova + Constellation stub)
+ */
+
+export function useListNabuflowPlans<TData = Awaited<ReturnType<typeof listNabuflowPlans>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listNabuflowPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListNabuflowPlansQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetNabuflowBillingStateUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/state`
+}
+
+/**
+ * @summary NabuFlow billing state — plan, card, cap, counters and reset date (read-only mirror of the server-side build gate)
+ */
+export const getNabuflowBillingState = async ( options?: RequestInit): Promise<GetNabuflowBillingState200> => {
+
+  return customFetch<GetNabuflowBillingState200>(getGetNabuflowBillingStateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNabuflowBillingStateQueryKey = () => {
+    return [
+    `/api/billing/nabuflow/state`
+    ] as const;
+    }
+
+
+export const getGetNabuflowBillingStateQueryOptions = <TData = Awaited<ReturnType<typeof getNabuflowBillingState>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNabuflowBillingState>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNabuflowBillingStateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNabuflowBillingState>>> = ({ signal }) => getNabuflowBillingState({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNabuflowBillingState>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetNabuflowBillingStateQueryResult = NonNullable<Awaited<ReturnType<typeof getNabuflowBillingState>>>
+export type GetNabuflowBillingStateQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary NabuFlow billing state — plan, card, cap, counters and reset date (read-only mirror of the server-side build gate)
+ */
+
+export function useGetNabuflowBillingState<TData = Awaited<ReturnType<typeof getNabuflowBillingState>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNabuflowBillingState>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetNabuflowBillingStateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListNabuflowUsageUrl = (params?: ListNabuflowUsageParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/billing/nabuflow/usage?${stringifiedParams}` : `/api/billing/nabuflow/usage`
+}
+
+/**
+ * @summary Per-build NabuFlow usage ledger (engine mode, deep flag, included-vs-overage attribution)
+ */
+export const listNabuflowUsage = async (params?: ListNabuflowUsageParams, options?: RequestInit): Promise<ListNabuflowUsage200> => {
+
+  return customFetch<ListNabuflowUsage200>(getListNabuflowUsageUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListNabuflowUsageQueryKey = (params?: ListNabuflowUsageParams,) => {
+    return [
+    `/api/billing/nabuflow/usage`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListNabuflowUsageQueryOptions = <TData = Awaited<ReturnType<typeof listNabuflowUsage>>, TError = ErrorType<unknown>>(params?: ListNabuflowUsageParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listNabuflowUsage>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListNabuflowUsageQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listNabuflowUsage>>> = ({ signal }) => listNabuflowUsage(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listNabuflowUsage>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListNabuflowUsageQueryResult = NonNullable<Awaited<ReturnType<typeof listNabuflowUsage>>>
+export type ListNabuflowUsageQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Per-build NabuFlow usage ledger (engine mode, deep flag, included-vs-overage attribution)
+ */
+
+export function useListNabuflowUsage<TData = Awaited<ReturnType<typeof listNabuflowUsage>>, TError = ErrorType<unknown>>(
+ params?: ListNabuflowUsageParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listNabuflowUsage>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListNabuflowUsageQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListNabuflowBillingNotificationsUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/notifications`
+}
+
+/**
+ * @summary Recent NabuFlow billing notifications (usage warnings, dunning)
+ */
+export const listNabuflowBillingNotifications = async ( options?: RequestInit): Promise<ListNabuflowBillingNotifications200> => {
+
+  return customFetch<ListNabuflowBillingNotifications200>(getListNabuflowBillingNotificationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListNabuflowBillingNotificationsQueryKey = () => {
+    return [
+    `/api/billing/nabuflow/notifications`
+    ] as const;
+    }
+
+
+export const getListNabuflowBillingNotificationsQueryOptions = <TData = Awaited<ReturnType<typeof listNabuflowBillingNotifications>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listNabuflowBillingNotifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListNabuflowBillingNotificationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listNabuflowBillingNotifications>>> = ({ signal }) => listNabuflowBillingNotifications({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listNabuflowBillingNotifications>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListNabuflowBillingNotificationsQueryResult = NonNullable<Awaited<ReturnType<typeof listNabuflowBillingNotifications>>>
+export type ListNabuflowBillingNotificationsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Recent NabuFlow billing notifications (usage warnings, dunning)
+ */
+
+export function useListNabuflowBillingNotifications<TData = Awaited<ReturnType<typeof listNabuflowBillingNotifications>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listNabuflowBillingNotifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListNabuflowBillingNotificationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateNabuflowSetupIntentUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/setup-intent`
+}
+
+/**
+ * @summary Create a SetupIntent for NabuFlow card capture (card state confirmed via webhooks)
+ */
+export const createNabuflowSetupIntent = async ( options?: RequestInit): Promise<CreateNabuflowSetupIntent200> => {
+
+  return customFetch<CreateNabuflowSetupIntent200>(getCreateNabuflowSetupIntentUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCreateNabuflowSetupIntentMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNabuflowSetupIntent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createNabuflowSetupIntent>>, TError,void, TContext> => {
+
+const mutationKey = ['createNabuflowSetupIntent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createNabuflowSetupIntent>>, void> = () => {
+
+
+          return  createNabuflowSetupIntent(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateNabuflowSetupIntentMutationResult = NonNullable<Awaited<ReturnType<typeof createNabuflowSetupIntent>>>
+
+    export type CreateNabuflowSetupIntentMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a SetupIntent for NabuFlow card capture (card state confirmed via webhooks)
+ */
+export const useCreateNabuflowSetupIntent = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNabuflowSetupIntent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createNabuflowSetupIntent>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateNabuflowSetupIntentMutationOptions(options));
+    }
+
+export const getSubscribeNabuflowPlanUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/subscribe`
+}
+
+/**
+ * @summary Subscribe to a NabuFlow plan (requires a default payment method on file)
+ */
+export const subscribeNabuflowPlan = async (subscribeNabuflowPlanBody: SubscribeNabuflowPlanBody, options?: RequestInit): Promise<SubscribeNabuflowPlan200> => {
+
+  return customFetch<SubscribeNabuflowPlan200>(getSubscribeNabuflowPlanUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      subscribeNabuflowPlanBody,)
+  }
+);}
+
+
+
+
+export const getSubscribeNabuflowPlanMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof subscribeNabuflowPlan>>, TError,{data: BodyType<SubscribeNabuflowPlanBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof subscribeNabuflowPlan>>, TError,{data: BodyType<SubscribeNabuflowPlanBody>}, TContext> => {
+
+const mutationKey = ['subscribeNabuflowPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof subscribeNabuflowPlan>>, {data: BodyType<SubscribeNabuflowPlanBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  subscribeNabuflowPlan(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubscribeNabuflowPlanMutationResult = NonNullable<Awaited<ReturnType<typeof subscribeNabuflowPlan>>>
+    export type SubscribeNabuflowPlanMutationBody = BodyType<SubscribeNabuflowPlanBody>
+    export type SubscribeNabuflowPlanMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Subscribe to a NabuFlow plan (requires a default payment method on file)
+ */
+export const useSubscribeNabuflowPlan = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof subscribeNabuflowPlan>>, TError,{data: BodyType<SubscribeNabuflowPlanBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof subscribeNabuflowPlan>>,
+        TError,
+        {data: BodyType<SubscribeNabuflowPlanBody>},
+        TContext
+      > => {
+      return useMutation(getSubscribeNabuflowPlanMutationOptions(options));
+    }
+
+export const getSwitchNabuflowPlanUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/switch`
+}
+
+/**
+ * @summary Switch NabuFlow plan — returns a proration preview unless confirm=true
+ */
+export const switchNabuflowPlan = async (switchNabuflowPlanBody: SwitchNabuflowPlanBody, options?: RequestInit): Promise<SwitchNabuflowPlan200> => {
+
+  return customFetch<SwitchNabuflowPlan200>(getSwitchNabuflowPlanUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      switchNabuflowPlanBody,)
+  }
+);}
+
+
+
+
+export const getSwitchNabuflowPlanMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchNabuflowPlan>>, TError,{data: BodyType<SwitchNabuflowPlanBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof switchNabuflowPlan>>, TError,{data: BodyType<SwitchNabuflowPlanBody>}, TContext> => {
+
+const mutationKey = ['switchNabuflowPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof switchNabuflowPlan>>, {data: BodyType<SwitchNabuflowPlanBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  switchNabuflowPlan(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SwitchNabuflowPlanMutationResult = NonNullable<Awaited<ReturnType<typeof switchNabuflowPlan>>>
+    export type SwitchNabuflowPlanMutationBody = BodyType<SwitchNabuflowPlanBody>
+    export type SwitchNabuflowPlanMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Switch NabuFlow plan — returns a proration preview unless confirm=true
+ */
+export const useSwitchNabuflowPlan = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchNabuflowPlan>>, TError,{data: BodyType<SwitchNabuflowPlanBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof switchNabuflowPlan>>,
+        TError,
+        {data: BodyType<SwitchNabuflowPlanBody>},
+        TContext
+      > => {
+      return useMutation(getSwitchNabuflowPlanMutationOptions(options));
+    }
+
+export const getCancelNabuflowSubscriptionUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/cancel`
+}
+
+/**
+ * @summary Cancel the NabuFlow plan at the end of the current cycle
+ */
+export const cancelNabuflowSubscription = async ( options?: RequestInit): Promise<CancelNabuflowSubscription200> => {
+
+  return customFetch<CancelNabuflowSubscription200>(getCancelNabuflowSubscriptionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCancelNabuflowSubscriptionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelNabuflowSubscription>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelNabuflowSubscription>>, TError,void, TContext> => {
+
+const mutationKey = ['cancelNabuflowSubscription'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelNabuflowSubscription>>, void> = () => {
+
+
+          return  cancelNabuflowSubscription(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelNabuflowSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof cancelNabuflowSubscription>>>
+
+    export type CancelNabuflowSubscriptionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Cancel the NabuFlow plan at the end of the current cycle
+ */
+export const useCancelNabuflowSubscription = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelNabuflowSubscription>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelNabuflowSubscription>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCancelNabuflowSubscriptionMutationOptions(options));
+    }
+
+export const getResumeNabuflowSubscriptionUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/resume`
+}
+
+/**
+ * @summary Un-cancel a NabuFlow plan scheduled for cancellation at period end
+ */
+export const resumeNabuflowSubscription = async ( options?: RequestInit): Promise<ResumeNabuflowSubscription200> => {
+
+  return customFetch<ResumeNabuflowSubscription200>(getResumeNabuflowSubscriptionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResumeNabuflowSubscriptionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeNabuflowSubscription>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeNabuflowSubscription>>, TError,void, TContext> => {
+
+const mutationKey = ['resumeNabuflowSubscription'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeNabuflowSubscription>>, void> = () => {
+
+
+          return  resumeNabuflowSubscription(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeNabuflowSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof resumeNabuflowSubscription>>>
+
+    export type ResumeNabuflowSubscriptionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Un-cancel a NabuFlow plan scheduled for cancellation at period end
+ */
+export const useResumeNabuflowSubscription = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeNabuflowSubscription>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeNabuflowSubscription>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getResumeNabuflowSubscriptionMutationOptions(options));
+    }
+
+export const getUpdateNabuflowSpendCapUrl = () => {
+
+
+
+
+  return `/api/billing/nabuflow/spend-cap`
+}
+
+/**
+ * @summary Update the monthly pay-as-you-go spend cap (null reverts to the plan default)
+ */
+export const updateNabuflowSpendCap = async (updateNabuflowSpendCapBody: UpdateNabuflowSpendCapBody, options?: RequestInit): Promise<UpdateNabuflowSpendCap200> => {
+
+  return customFetch<UpdateNabuflowSpendCap200>(getUpdateNabuflowSpendCapUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateNabuflowSpendCapBody,)
+  }
+);}
+
+
+
+
+export const getUpdateNabuflowSpendCapMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowSpendCap>>, TError,{data: BodyType<UpdateNabuflowSpendCapBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowSpendCap>>, TError,{data: BodyType<UpdateNabuflowSpendCapBody>}, TContext> => {
+
+const mutationKey = ['updateNabuflowSpendCap'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateNabuflowSpendCap>>, {data: BodyType<UpdateNabuflowSpendCapBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateNabuflowSpendCap(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNabuflowSpendCapMutationResult = NonNullable<Awaited<ReturnType<typeof updateNabuflowSpendCap>>>
+    export type UpdateNabuflowSpendCapMutationBody = BodyType<UpdateNabuflowSpendCapBody>
+    export type UpdateNabuflowSpendCapMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update the monthly pay-as-you-go spend cap (null reverts to the plan default)
+ */
+export const useUpdateNabuflowSpendCap = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateNabuflowSpendCap>>, TError,{data: BodyType<UpdateNabuflowSpendCapBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateNabuflowSpendCap>>,
+        TError,
+        {data: BodyType<UpdateNabuflowSpendCapBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateNabuflowSpendCapMutationOptions(options));
+    }
 
 export const getSubmitAbuseReportUrl = () => {
 

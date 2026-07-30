@@ -224,7 +224,9 @@ async function getOrCreateSubscription(userId: string) {
   return created!;
 }
 
-async function ensureStripeCustomer(
+// Exported for NabuFlow billing (Task #1516): both plan families share the
+// account's single Stripe Customer, stored on user_subscriptions.
+export async function ensureStripeCustomer(
   userId: string,
   stripe: NonNullable<Awaited<ReturnType<typeof getUncachableStripeClient>>>,
 ): Promise<string> {
@@ -602,6 +604,28 @@ export async function handleStripeWebhook(
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
   ) {
+    // NabuFlow subscriptions are namespaced via metadata.surface === 'nabuflow'
+    // and share the account's Stripe Customer with Ora/workspace plans — they
+    // must be routed EARLY so Ora's customer-id fallback can never misattribute
+    // them (and NabuFlow code never touches user_subscriptions).
+    if (event.data?.object?.metadata?.surface === "nabuflow") {
+      try {
+        const { handleNabuflowSubscriptionEvent } = await import("../lib/nabuflow-billing");
+        await handleNabuflowSubscriptionEvent(event.type, event.data.object);
+        await markEventSucceeded();
+        res.json({ ok: true, type: event.type, surface: "nabuflow", processed: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unexpected error";
+        logger.error(
+          { err: msg, eventId: event.id, type: event.type },
+          "NabuFlow subscription sync failed",
+        );
+        await markEventFailed(msg);
+        res.status(500).json({ error: "NabuFlow subscription sync failed", willRetry: true });
+      }
+      return;
+    }
+
     try {
       await handleSubscriptionEvent(event);
       await markEventSucceeded();
@@ -721,18 +745,56 @@ export async function handleStripeWebhook(
       case "checkout.session.completed":
         await handleCheckoutCompleted(stripe, event as any);
         break;
-      case "invoice.paid":
-        await handleInvoicePaid(event as any);
+      case "invoice.paid": {
+        // NabuFlow invoices (namespaced subscription on the SHARED customer)
+        // must never reach Ora's invoice handler — it would grant Ora monthly
+        // credits off a NabuFlow renewal. Routing is metadata-first with a
+        // local nabuflow_subscriptions lookup as fallback.
+        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } = await import(
+          "../lib/nabuflow-billing"
+        );
+        const invoice = event.data?.object as any;
+        if (await isNabuflowInvoiceEvent(invoice)) {
+          await handleNabuflowInvoicePaid(invoice);
+        } else {
+          await handleInvoicePaid(event as any);
+        }
         break;
-      case "invoice.payment_failed":
-        await handleInvoicePaymentFailed(event as any);
+      }
+      case "invoice.payment_failed": {
+        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } = await import(
+          "../lib/nabuflow-billing"
+        );
+        const invoice = event.data?.object as any;
+        if (await isNabuflowInvoiceEvent(invoice)) {
+          await handleNabuflowInvoicePaymentFailed(invoice);
+        } else {
+          await handleInvoicePaymentFailed(event as any);
+        }
         break;
+      }
       case "customer.subscription.updated":
         await handleSubscriptionUpdated(event as any);
         break;
       case "customer.subscription.deleted":
         await handleSubscriptionDeleted(event as any);
         break;
+      // NabuFlow card-on-file state is webhook-driven (never client calls).
+      case "payment_method.attached": {
+        const { handleNabuflowPaymentMethodAttached } = await import("../lib/nabuflow-billing");
+        await handleNabuflowPaymentMethodAttached(event.data?.object as any);
+        break;
+      }
+      case "payment_method.detached": {
+        const { handleNabuflowPaymentMethodDetached } = await import("../lib/nabuflow-billing");
+        await handleNabuflowPaymentMethodDetached(event.data?.object as any);
+        break;
+      }
+      case "setup_intent.succeeded": {
+        const { handleNabuflowSetupIntentSucceeded } = await import("../lib/nabuflow-billing");
+        await handleNabuflowSetupIntentSucceeded(event.data?.object as any);
+        break;
+      }
       default:
         logger.info({ eventId: event.id, type: event.type }, "Stripe webhook unhandled event type");
     }

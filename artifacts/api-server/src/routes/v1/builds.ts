@@ -133,6 +133,7 @@ router.post(
         id: projectsTable.id,
         agentMode: projectsTable.agentMode,
         status: projectsTable.status,
+        ownerId: projectsTable.ownerId,
       })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId));
@@ -140,6 +141,25 @@ router.post(
     if (!project) {
       res.status(404).json({ error: "Project not found." });
       return;
+    }
+
+    // NabuFlow billing gate (Task #1516) — the public API build trigger passes
+    // the same server-side resolver as every other build entry point.
+    if (project.ownerId) {
+      const { creditCostFor, resolveStageProvider } = await import("../../lib/ai-providers");
+      const gateMode = project.agentMode as Parameters<typeof creditCostFor>[0];
+      const { provider } = resolveStageProvider("build", gateMode);
+      const { nabuflowGateHttpError } = await import("../../lib/nabuflow-billing");
+      const gateErr = await nabuflowGateHttpError(project.ownerId, {
+        engineMode: gateMode,
+        deepReasoning: false,
+        projectedCredits: creditCostFor(gateMode, provider, false),
+        source: "pipeline",
+      });
+      if (gateErr) {
+        res.status(gateErr.status).json(gateErr.body);
+        return;
+      }
     }
 
     // Check if a build is already active — queue if so.

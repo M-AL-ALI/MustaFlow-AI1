@@ -162,6 +162,11 @@ export async function deductCreditsAtomic(
     projectId?: number;
     type: "build" | "refine" | "plan" | "architect" | "senses" | "creative" | "converse";
     description: string;
+    /** NabuFlow ledger attribution (Task #1516) — build entry points pass these. */
+    engineMode?: string | null;
+    deepReasoning?: boolean;
+    taskId?: number | null;
+    source?: string | null;
   },
 ): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
   const credits = await getOrCreateCredits(userId);
@@ -174,6 +179,33 @@ export async function deductCreditsAtomic(
 
   if (!CREDITS_ENFORCEMENT_ENABLED) {
     return { newBalance: credits.balance };
+  }
+
+  // NabuFlow billing (Task #1516): allow-listed owners build free with no
+  // charge; users on an active NabuFlow plan charge through cycle accounting
+  // (included credits first, then metered pay-as-you-go overage) with exactly
+  // this `amount` — never "insufficient", since the build gate authorized the
+  // run before it started. Charge amounts stay identical to creditCostFor.
+  try {
+    const nabuflow = await import("../lib/nabuflow-billing");
+    if (await nabuflow.isBuilderAllowlistExempt(userId)) {
+      return { newBalance: credits.balance };
+    }
+    const nabuCharge = await nabuflow.maybeChargeNabuflow(userId, amount, {
+      projectId: opts.projectId ?? null,
+      taskId: opts.taskId ?? null,
+      type: opts.type,
+      description: opts.description,
+      engineMode: opts.engineMode ?? null,
+      deepReasoning: opts.deepReasoning ?? false,
+      source: opts.source ?? null,
+    });
+    if (nabuCharge) return nabuCharge;
+  } catch (err) {
+    logger.error(
+      { err, userId, amount },
+      "NabuFlow charge delegation failed — falling back to wallet path",
+    );
   }
 
   if (credits.balance < amount) {
@@ -244,6 +276,26 @@ export async function refundCredits(
     const c = await getOrCreateCredits(userId);
     return c.balance;
   }
+
+  // NabuFlow billing (Task #1516): users on an active NabuFlow plan get the
+  // matching usage-ledger event reversed (bucket, counters, pending overage
+  // invoice item) instead of a legacy wallet credit.
+  try {
+    const { nabuflowChargeActive, maybeRefundNabuflow } = await import("../lib/nabuflow-billing");
+    if (await nabuflowChargeActive(userId)) {
+      const remaining = await maybeRefundNabuflow(userId, amount, {
+        projectId: opts.projectId ?? null,
+        description: opts.description,
+      });
+      if (remaining !== null) return remaining;
+    }
+  } catch (err) {
+    logger.error(
+      { err, userId, amount },
+      "NabuFlow refund delegation failed — falling back to wallet refund",
+    );
+  }
+
   const credits = await getOrCreateCredits(userId);
   const newBalance = credits.balance + amount;
 

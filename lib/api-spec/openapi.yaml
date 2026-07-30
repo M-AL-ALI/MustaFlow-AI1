@@ -5280,6 +5280,339 @@ paths:
                     items:
                       $ref: "#/components/schemas/OraTierMeta"
 
+  /billing/nabuflow/plans:
+    get:
+      operationId: listNabuflowPlans
+      tags: [billing]
+      summary: NabuFlow Builder plan family (Orbit/Comet/Nova + Constellation stub)
+      responses:
+        "200":
+          description: NabuFlow plans
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NabuflowPlan"
+
+  /billing/nabuflow/state:
+    get:
+      operationId: getNabuflowBillingState
+      tags: [billing]
+      summary: NabuFlow billing state — plan, card, cap, counters and reset date (read-only mirror of the server-side build gate)
+      responses:
+        "200":
+          description: Billing state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enforcementEnabled, exempt, canBuild]
+                properties:
+                  enforcementEnabled: { type: boolean }
+                  exempt: { type: boolean }
+                  canBuild: { type: boolean }
+                  blockedReason:
+                    nullable: true
+                    description: Structured gate error (code, message, remaining counters, reset date, upgrade target) when canBuild is false.
+                  plan:
+                    nullable: true
+                    allOf: [{ $ref: "#/components/schemas/NabuflowPlan" }]
+                  subscription:
+                    type: object
+                    nullable: true
+                    required: [status, cancelAtPeriodEnd]
+                    properties:
+                      status: { type: string }
+                      cancelAtPeriodEnd: { type: boolean }
+                      currentCycleStart: { type: string, format: date-time, nullable: true }
+                      currentCycleEnd: { type: string, format: date-time, nullable: true }
+                      dunningStatus: { type: string, nullable: true }
+                      dunningGraceUntil: { type: string, format: date-time, nullable: true }
+                  card:
+                    type: object
+                    nullable: true
+                    properties:
+                      brand: { type: string, nullable: true }
+                      last4: { type: string, nullable: true }
+                      expMonth: { type: integer, nullable: true }
+                      expYear: { type: integer, nullable: true }
+                  spendCap:
+                    type: object
+                    nullable: true
+                    required: [usdCents, defaultUsdCents, maxUsdCents]
+                    properties:
+                      usdCents: { type: integer }
+                      defaultUsdCents: { type: integer }
+                      maxUsdCents: { type: integer }
+                  cycle:
+                    type: object
+                    nullable: true
+                    required:
+                      [
+                        includedCredits,
+                        rolloverCredits,
+                        usedIncludedCredits,
+                        remainingIncludedCredits,
+                        overageCredits,
+                        overageUsdCents,
+                        proBuildsUsed,
+                        deepBuildsUsed,
+                      ]
+                    properties:
+                      includedCredits: { type: integer }
+                      rolloverCredits: { type: integer }
+                      usedIncludedCredits: { type: integer }
+                      remainingIncludedCredits: { type: integer }
+                      overageCredits: { type: integer }
+                      overageUsdCents: { type: integer }
+                      proBuildsUsed: { type: integer }
+                      deepBuildsUsed: { type: integer }
+                      remainingProBuilds: { type: integer, nullable: true }
+                      remainingDeepBuilds: { type: integer, nullable: true }
+                      resetsAt: { type: string, format: date-time, nullable: true }
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/usage:
+    get:
+      operationId: listNabuflowUsage
+      tags: [billing]
+      summary: Per-build NabuFlow usage ledger (engine mode, deep flag, included-vs-overage attribution)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Usage events, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NabuflowUsageEvent"
+
+  /billing/nabuflow/notifications:
+    get:
+      operationId: listNabuflowBillingNotifications
+      tags: [billing]
+      summary: Recent NabuFlow billing notifications (usage warnings, dunning)
+      responses:
+        "200":
+          description: Notifications, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notifications]
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, type, title, body]
+                      properties:
+                        id: { type: integer }
+                        type: { type: string }
+                        title: { type: string }
+                        body: { type: string }
+                        metadata:
+                          nullable: true
+                        createdAt: { type: string, format: date-time, nullable: true }
+
+  /billing/nabuflow/setup-intent:
+    post:
+      operationId: createNabuflowSetupIntent
+      tags: [billing]
+      summary: Create a SetupIntent for NabuFlow card capture (card state confirmed via webhooks)
+      responses:
+        "200":
+          description: SetupIntent created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clientSecret, setupIntentId]
+                properties:
+                  clientSecret: { type: string }
+                  setupIntentId: { type: string }
+        "503":
+          description: Stripe unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/subscribe:
+    post:
+      operationId: subscribeNabuflowPlan
+      tags: [billing]
+      summary: Subscribe to a NabuFlow plan (requires a default payment method on file)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties:
+                planId: { type: string, enum: [orbit, comet, nova, constellation] }
+      responses:
+        "200":
+          description: Subscribed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, planId, status]
+                properties:
+                  ok: { type: boolean }
+                  planId: { type: string }
+                  status: { type: string }
+                  currentCycleEnd: { type: string, format: date-time, nullable: true }
+        "402":
+          description: No valid payment method on file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Already subscribed — use switch instead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/switch:
+    post:
+      operationId: switchNabuflowPlan
+      tags: [billing]
+      summary: Switch NabuFlow plan — returns a proration preview unless confirm=true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties:
+                planId: { type: string, enum: [orbit, comet, nova, constellation] }
+                confirm: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Proration preview (confirm=false) or switch result (confirm=true)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preview:
+                    nullable: true
+                    description: Proration preview (amount due, currency, line items) when confirm=false.
+                  ok: { type: boolean }
+                  planId: { type: string }
+                  status: { type: string }
+                  upgradedCreditsGranted: { type: integer }
+        "404":
+          description: No active plan to switch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/cancel:
+    post:
+      operationId: cancelNabuflowSubscription
+      tags: [billing]
+      summary: Cancel the NabuFlow plan at the end of the current cycle
+      responses:
+        "200":
+          description: Cancellation scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  cancelsAt: { type: string, format: date-time, nullable: true }
+                  message: { type: string }
+        "404":
+          description: No plan to cancel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/resume:
+    post:
+      operationId: resumeNabuflowSubscription
+      tags: [billing]
+      summary: Un-cancel a NabuFlow plan scheduled for cancellation at period end
+      responses:
+        "200":
+          description: Resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        "404":
+          description: No plan to resume
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/nabuflow/spend-cap:
+    post:
+      operationId: updateNabuflowSpendCap
+      tags: [billing]
+      summary: Update the monthly pay-as-you-go spend cap (null reverts to the plan default)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spendCapUsdCents]
+              properties:
+                spendCapUsdCents: { type: integer, minimum: 0, nullable: true }
+      responses:
+        "200":
+          description: Spend cap updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, effectiveSpendCapUsdCents]
+                properties:
+                  ok: { type: boolean }
+                  spendCapUsdCents: { type: integer, nullable: true }
+                  effectiveSpendCapUsdCents: { type: integer }
+        "400":
+          description: Cap exceeds the tier maximum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /abuse-reports:
     post:
       operationId: submitAbuseReport
@@ -6939,6 +7272,77 @@ components:
       properties:
         error: { type: string }
       required: [error]
+
+    NabuflowPlan:
+      type: object
+      required:
+        [
+          id,
+          name,
+          available,
+          includedMonthlyCredits,
+          overageUsdPerCredit,
+          rolloverCycles,
+          rolloverMaxCredits,
+          parallelBuildLimit,
+          queuePriority,
+          defaultSpendCapUsdCents,
+          maxSpendCapUsdCents,
+          ladder,
+        ]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        available: { type: boolean }
+        priceUsd: { type: number, nullable: true }
+        includedMonthlyCredits: { type: integer }
+        overageUsdPerCredit: { type: number }
+        rolloverCycles: { type: integer }
+        rolloverMaxCredits: { type: integer }
+        parallelBuildLimit: { type: integer }
+        queuePriority: { type: integer }
+        defaultSpendCapUsdCents: { type: integer }
+        maxSpendCapUsdCents: { type: integer }
+        ladder:
+          type: object
+          required: [proDeepCombo]
+          properties:
+            proBuildsPerCycle: { type: integer, nullable: true }
+            deepBuildsPerCycle: { type: integer, nullable: true }
+            proDeepCombo: { type: boolean }
+
+    NabuflowUsageEvent:
+      type: object
+      required:
+        [
+          id,
+          cycleId,
+          source,
+          deepReasoning,
+          credits,
+          includedCredits,
+          overageCredits,
+          overageUsdCents,
+          usdValueCents,
+          attribution,
+        ]
+      properties:
+        id: { type: integer }
+        cycleId: { type: integer }
+        projectId: { type: integer, nullable: true }
+        taskId: { type: integer, nullable: true }
+        source: { type: string }
+        engineMode: { type: string, nullable: true }
+        deepReasoning: { type: boolean }
+        credits: { type: integer }
+        includedCredits: { type: integer }
+        overageCredits: { type: integer }
+        overageUsdCents: { type: integer }
+        usdValueCents: { type: integer }
+        attribution: { type: string }
+        description: { type: string, nullable: true }
+        reversedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
 
     OraTierMeta:
       type: object

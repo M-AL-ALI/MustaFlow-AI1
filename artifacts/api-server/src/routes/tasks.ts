@@ -88,6 +88,25 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     return;
   }
 
+  // NabuFlow billing gate (Task #1516): tasks execute builds, so they pass
+  // the same server-side resolver as every other build entry point.
+  if (project.ownerId) {
+    const { creditCostFor, resolveStageProvider } = await import("../lib/ai-providers");
+    const gateMode = project.agentMode as Parameters<typeof creditCostFor>[0];
+    const { provider } = resolveStageProvider("build", gateMode);
+    const { nabuflowGateHttpError } = await import("../lib/nabuflow-billing");
+    const gateErr = await nabuflowGateHttpError(project.ownerId, {
+      engineMode: gateMode,
+      deepReasoning: false,
+      projectedCredits: creditCostFor(gateMode, provider, false),
+      source: "pipeline",
+    });
+    if (gateErr) {
+      res.status(gateErr.status).json(gateErr.body);
+      return;
+    }
+  }
+
   const prompt = parsed.data.prompt ?? parsed.data.title;
 
   // Conflict detection: check if any non-background task is currently building or planning for
