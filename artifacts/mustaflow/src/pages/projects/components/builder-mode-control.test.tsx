@@ -1,14 +1,22 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { BuilderModeControl } from "./builder-mode-control";
+
+function renderWithQueryClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 describe("BuilderModeControl", () => {
   it("shows every mode and prices from the shared pricing tables", () => {
     const onModeChange = vi.fn();
     const onDeepReasoningChange = vi.fn();
-    render(
+    renderWithQueryClient(
       <BuilderModeControl
         mode="eco"
         deepReasoning={false}
@@ -53,7 +61,7 @@ describe("BuilderModeControl", () => {
   });
 
   it("keeps Deep Reasoning disabled in Lite", () => {
-    render(
+    renderWithQueryClient(
       <BuilderModeControl
         mode="lite"
         deepReasoning={false}
