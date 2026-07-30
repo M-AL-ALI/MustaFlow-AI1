@@ -331,7 +331,7 @@ async function main(): Promise<void> {
       .select()
       .from(nabuflowUsageEventsTable)
       .where(and(eq(nabuflowUsageEventsTable.userId, ORBIT), eq(nabuflowUsageEventsTable.attribution, "overage")));
-    check("overage event: 100cr @ $0.012 = 120¢", ovEvent?.overageCredits === 100 && ovEvent?.overageUsdCents === 120, ovEvent);
+    check("overage event: 100cr @ $0.015 = 150¢", ovEvent?.overageCredits === 100 && ovEvent?.overageUsdCents === 150, ovEvent);
 
     // Async invoice-item reporting lands on the customer in Stripe test mode.
     let itemId: string | null = null;
@@ -347,7 +347,7 @@ async function main(): Promise<void> {
     if (itemId) {
       const item = (await stripe.invoiceItems.retrieve(itemId)) as any;
       check("invoice item bills the right customer", (typeof item.customer === "string" ? item.customer : item.customer?.id) === cust.id);
-      check("invoice item amount = ledger cents", item.amount === 120, item.amount);
+      check("invoice item amount = ledger cents", item.amount === 150, item.amount);
       check(
         "invoice item line is human-readable",
         typeof item.description === "string" && /pay-as-you-go|overage/i.test(item.description) && /100 credits/.test(item.description),
