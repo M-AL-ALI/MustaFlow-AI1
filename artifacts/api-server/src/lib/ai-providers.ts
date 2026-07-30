@@ -457,6 +457,7 @@ export async function* streamChatCompletion(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stream: any = await ai.models.generateContentStream({
     model: params.model,
     contents,
