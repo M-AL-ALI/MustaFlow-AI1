@@ -42,10 +42,10 @@ export function InlineBuilderError({
             Buy credits
           </button>
           <a
-            href="/settings?tab=credits"
+            href="/billing"
             className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           >
-            Open Credits & Billing
+            Open Billing & Usage
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>

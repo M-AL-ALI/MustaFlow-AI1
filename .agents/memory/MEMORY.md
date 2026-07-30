@@ -121,3 +121,4 @@
 - [Ticker marquee testing](ticker-marquee-testing.md) — test with reducedMotion:"no-preference"; assert scroll via bbox sampling; synthetic-hover "pause failed" verdicts are unreliable, not regressions.
 - [NabuFlow billing core](nabuflow-billing-core.md) — ladder is access-only (charges = creditCostFor); counters at reserve + skipUsageChecks drain; config DOLLARS vs API cents; allowlist degrades closed.
 - [Stripe shared-customer routing](stripe-shared-customer-routing.md) — two plan families on ONE customer: route webhooks metadata-first + local sub lookup, EARLY, both-direction isolation tests.
+- [NabuFlow billing UI test recipe](nabuflow-billing-ui-testing.md) — BUILDER_OPEN_TO_ALL grants access w/o billing exemption; CREDITS_ENFORCEMENT is live-read; seed 3 nabuflow tables; post-restore /mode-select bounce = success.

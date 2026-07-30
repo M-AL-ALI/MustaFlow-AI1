@@ -801,7 +801,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
                 {autoscaleLocked && (
                   <div className="absolute inset-x-0 -bottom-7 hidden group-hover:block z-10">
                     <div className="bg-popover border border-border rounded px-2 py-1 text-[11px] text-center shadow-lg whitespace-nowrap">
-                      <a href="/billing" className="text-primary hover:underline">
+                      <a href="/billing/legacy" className="text-primary hover:underline">
                         Upgrade to Core
                       </a>{" "}
                       to use autoscale
@@ -5418,7 +5418,7 @@ export function PublishingTab({
                               </span>
                               {showUpgrade && domainQuota.plan !== "enterprise" && (
                                 <Link
-                                  href={`/billing?tier=${recommended}`}
+                                  href={`/billing/legacy?tier=${recommended}`}
                                   className="text-xs px-2 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
                                 >
                                   Upgrade

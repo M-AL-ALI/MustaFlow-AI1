@@ -86,7 +86,7 @@ function SubscriptionTierBadge({ tier }: { tier: "free" | "core" | "wave" }) {
   const isPaid = tier === "core" || tier === "wave";
   return (
     <Link
-      href="/billing"
+      href="/billing/legacy"
       className={cn(
         "flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition-colors no-underline",
         tier === "wave"
@@ -199,6 +199,12 @@ import {
 } from "./components/inline-recovery-loop";
 import { addRunStepId, createRunStepIdSet, type RunStepIdSet } from "./components/run-step-count";
 import { InlineBuilderError } from "./components/inline-builder-error";
+import { NabuflowBlockedCard } from "@/components/billing/nabuflow-blocked-card";
+import {
+  extractNabuflowGate,
+  parseNabuflowGateError,
+  type NabuflowGateError,
+} from "@/lib/nabuflow-billing";
 import { EditAndResend, latestUserMessageId } from "./components/edit-and-resend";
 import {
   isNearChatBottom,
@@ -1361,8 +1367,11 @@ export default function ProjectWorkspacePage() {
           void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
         }
       })
-      .catch(() => {
-        // best-effort
+      .catch((err) => {
+        // Surface a NabuFlow billing block instead of silently swallowing it;
+        // anything else stays best-effort.
+        const gate = parseNabuflowGateError(err);
+        if (gate) setBillingBlock(gate);
       });
   }, [creditsSuccess, projectId, queryClient]);
 
@@ -1749,6 +1758,10 @@ export default function ProjectWorkspacePage() {
   // Reconnect state: attempt count (0 = connected/idle) and error flag (max retries hit)
   const [streamReconnectAttempt, setStreamReconnectAttempt] = useState(0);
   const [streamError, setStreamError] = useState(false);
+  // NabuFlow billing gate block — set from structured 402 errors on build
+  // submit, streaming, batch retry and queue resume; rendered as a calm card
+  // above the composer. Mirrors the server gate, never authorizes on its own.
+  const [billingBlock, setBillingBlock] = useState<NabuflowGateError | null>(null);
   const [streamErrorStatus, setStreamErrorStatus] = useState<number | null>(null);
   // Stored params for "Try again" retry after exhausted reconnects
   const streamRetryParamsRef = useRef<{
@@ -2487,13 +2500,17 @@ export default function ProjectWorkspacePage() {
             // subsequent messages continue planning without a manual toggle.
             if (data?.assistantMessage?.planMode) setPlanMode(true);
           },
-          onError: () => {
+          onError: (err) => {
             setPendingBuildStartedAt(null);
             setCalmPhase("idle");
             pendingIsPlanRef.current = false;
             setPendingIsPlan(false);
             pendingIsConverseRef.current = false;
             setPendingIsConverse(false);
+            // NabuFlow billing gate — show the calm blocked card instead of a
+            // raw failure when the cause is billing.
+            const gate = parseNabuflowGateError(err);
+            if (gate) setBillingBlock(gate);
           },
         },
       );
@@ -2543,6 +2560,8 @@ export default function ProjectWorkspacePage() {
       // Allow image-only sends — when no text prompt is given the server injects a default.
       const hasImageAttachments = (opts?.attachments ?? []).length > 0;
       if (!content.trim() && !hasImageAttachments) return;
+      // A fresh attempt clears any previous billing block; the server re-gates.
+      setBillingBlock(null);
 
       // Generate a per-send idempotency key so the server can detect duplicate
       // POSTs caused by network blips (client timed out but server processed the
@@ -2732,6 +2751,30 @@ export default function ProjectWorkspacePage() {
                 await new Promise<void>((r) => setTimeout(r, 3000));
                 attempt += 1;
                 continue;
+              }
+
+              // NabuFlow billing gate — a structured 402 means a billing cause
+              // (no card, cap reached, metered mode limit …). Show the calm
+              // blocked card instead of the generic stream error; never retry.
+              if (resp.status === 402) {
+                let gate: NabuflowGateError | null = null;
+                try {
+                  gate = extractNabuflowGate((await resp.json()) as unknown);
+                } catch {
+                  gate = null;
+                }
+                if (gate) {
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setBillingBlock(gate);
+                  setPendingBuildStartedAt(null);
+                  pendingIsPlanRef.current = false;
+                  setPendingIsPlan(false);
+                  pendingIsConverseRef.current = false;
+                  setPendingIsConverse(false);
+                  return;
+                }
               }
 
               // Non-2xx or no body — surface the error and let the user decide.
@@ -3122,7 +3165,14 @@ export default function ProjectWorkspacePage() {
         if (data) {
           handleBatchStarted(data.batchId, data.totalTasks);
         }
-      } catch {
+      } catch (err) {
+        // A billing block applies to every retry mode — show the calm card
+        // instead of falling back to a single send that would hit it again.
+        const gate = parseNabuflowGateError(err);
+        if (gate) {
+          setBillingBlock(gate);
+          return;
+        }
         send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
       }
     },
@@ -4649,8 +4699,23 @@ export default function ProjectWorkspacePage() {
                   {/* Task queue panel — shows running / queued / paused tasks above composer */}
                   {moreTabsExpanded && (
                     <Suspense fallback={null}>
-                      <TaskQueuePanel projectId={projectId} onStop={handleStopStream} />
+                      <TaskQueuePanel
+                        projectId={projectId}
+                        onStop={handleStopStream}
+                        onBillingBlock={setBillingBlock}
+                      />
                     </Suspense>
+                  )}
+
+                  {/* NabuFlow billing block — calm, actionable, mirrors the server gate */}
+                  {billingBlock && (
+                    <div className="px-3 pt-2">
+                      <NabuflowBlockedCard
+                        error={billingBlock}
+                        onDismiss={() => setBillingBlock(null)}
+                        compact
+                      />
+                    </div>
                   )}
 
                   {/* Chat / Queue input */}

@@ -1584,11 +1584,17 @@ router.get("/billing/invoices", async (req, res): Promise<void> => {
       number: inv.number,
       status: inv.status,
       amountPaid: inv.amount_paid,
+      amountDue: inv.amount_due,
       currency: inv.currency,
       created: inv.created,
       pdfUrl: inv.invoice_pdf,
       hostedUrl: inv.hosted_invoice_url,
       description: inv.description,
+      // Human-readable line items for the Billing & Usage invoices page.
+      lines: (inv.lines?.data ?? []).map((line) => ({
+        description: line.description,
+        amount: line.amount,
+      })),
     }));
     res.json({ invoices });
   } catch (err) {

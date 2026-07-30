@@ -54,6 +54,7 @@ const AdminPage = builderLazy(() => import("./pages/admin"));
 const SupportInboxPage = builderLazy(() => import("./pages/support-inbox"));
 const TrashPage = builderLazy(() => import("./pages/trash"));
 const BillingPage = builderLazy(() => import("./pages/billing"));
+const BillingUsagePage = builderLazy(() => import("./pages/billing-usage"));
 const PublishedPage = builderLazy(() => import("./pages/published"));
 const IntegrationsPage = builderLazy(() => import("./pages/integrations"));
 const SecurityPage = builderLazy(() => import("./pages/security"));
@@ -667,11 +668,20 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                       </BuilderGuard>
                     </Protected>
                   </Route>
-                  <Route path="/billing">
+                  <Route path="/billing/legacy">
                     <Protected>
                       <BuilderGuard>
                         <AppLayout>
                           <BillingPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/billing/:section?">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <BillingUsagePage />
                         </AppLayout>
                       </BuilderGuard>
                     </Protected>
