@@ -481,22 +481,19 @@ export async function* streamChatCompletion(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await ai.models.generateContentStream({
-    model: params.model,
-    contents,
-    config,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-    const delta = chunk.choices[0]?.delta?.content;
+    const stream = await openai.chat.completions.create({
+      model: params.model,
+      messages: params.messages as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      stream: true,
+      stream_options: { include_usage: true },
+      ...(params.max_completion_tokens != null
+        ? { max_completion_tokens: params.max_completion_tokens }
+        : {}),
+    });
+    let inputTokens = 0;
+    let outputTokens = 0;
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
       if (delta) yield delta;
       // The final chunk (when stream_options.include_usage is set) has usage.
       if (chunk.usage) {
@@ -538,21 +535,16 @@ async function* streamDeepSeek(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   const client = getDeepSeekClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await ai.models.generateContentStream({
+  const stream = await client.chat.completions.create({
     model: params.model,
-    contents,
-    config,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
-
+    messages: params.messages as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    stream: true,
+    stream_options: { include_usage: true },
+    ...(params.max_completion_tokens != null ? { max_tokens: params.max_completion_tokens } : {}),
+  });
   let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
+  let outputTokens = 0;
+  for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content;
     if (delta) yield delta;
     if (chunk.usage) {
@@ -590,8 +582,8 @@ async function* streamAnthropic(
       if (Array.isArray(msg.content)) {
         turns.push({ role: "user", content: openAiContentToAnthropicBlocks(msg.content) });
       } else {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-        contents.push({ role: "user", parts: [{ text: content }] });
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        turns.push({ role: "user", content });
       }
       continue;
     }
@@ -603,21 +595,16 @@ async function* streamAnthropic(
 
   const defaultMaxTokens = /haiku/i.test(params.model) ? 8192 : 16000;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await ai.models.generateContentStream({
+  let inputTokens = 0;
+  let outputTokens = 0;
+  const stream = anthropic.messages.stream({
     model: params.model,
-    contents,
-    config,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
+    system: systemParts.join("\n\n") || undefined,
+    messages: turns as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    max_tokens: params.max_completion_tokens ?? defaultMaxTokens,
+  });
+  for await (const event of stream) {
+    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
       const text = event.delta.text;
       if (typeof text === "string" && text.length > 0) yield text;
     }
@@ -660,7 +647,7 @@ async function* streamGemini(
       if (Array.isArray(msg.content)) {
         contents.push({ role: "user", parts: openAiContentToGeminiParts(msg.content) });
       } else {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
         contents.push({ role: "user", parts: [{ text: content }] });
       }
       continue;
@@ -700,15 +687,29 @@ async function* streamGemini(
   } as any);
 
   let inputTokens = 0;
+  let outputTokens = 0;
+  for await (const chunk of stream) {
+    const parts = (chunk as any).candidates?.[0]?.content?.parts ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+    for (const part of parts) {
+      if (typeof part.text === "string" && part.text.length > 0) yield part.text;
+    }
+    const meta = (chunk as any).usageMetadata; // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (meta) {
+      inputTokens = meta.promptTokenCount ?? 0;
+      outputTokens = meta.candidatesTokenCount ?? 0;
+    }
+  }
+  if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
+    accumulateBuildTokens(params.taskId, {
+      mode: params.taskMode ?? "unknown",
+      provider: "gemini",
+      model: params.model,
+      inputTokens,
+      outputTokens,
+    });
+  }
+}
 
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-
-  let inputTokens = 0;
-    const parts = (chunk as any).candidates?.[0]?.content?.parts ?? [];
-
-    const meta = (chunk as any).usageMetadata;
 async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCompletion> {
   const { anthropic } = await import("@workspace/integrations-anthropic-ai");
 
@@ -1450,5 +1451,3 @@ const USD_PER_1K_INPUT: Array<[pattern: string, rate: number]> = [
   // DeepSeek
   ["deepseek", 0.00014],
 ];
-
-  let outputTokens = 0;
