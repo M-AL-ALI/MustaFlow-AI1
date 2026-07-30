@@ -751,12 +751,10 @@ export async function handleStripeWebhook(
         // credits off a NabuFlow renewal. Routing is metadata-first with a
         // local nabuflow_subscriptions lookup as fallback. Enterprise org
         // bulk-pool invoices (their own COMPANY customer) route first of all.
-        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaid } = await import(
-          "../lib/nabuflow-org"
-        );
-        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } = await import(
-          "../lib/nabuflow-billing"
-        );
+        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaid } =
+          await import("../lib/nabuflow-org");
+        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } =
+          await import("../lib/nabuflow-billing");
         const invoice = event.data?.object as any;
         if (await isNabuflowOrgInvoiceEvent(invoice)) {
           await handleNabuflowOrgInvoicePaid(invoice);
@@ -768,12 +766,10 @@ export async function handleStripeWebhook(
         break;
       }
       case "invoice.payment_failed": {
-        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaymentFailed } = await import(
-          "../lib/nabuflow-org"
-        );
-        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } = await import(
-          "../lib/nabuflow-billing"
-        );
+        const { isNabuflowOrgInvoiceEvent, handleNabuflowOrgInvoicePaymentFailed } =
+          await import("../lib/nabuflow-org");
+        const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } =
+          await import("../lib/nabuflow-billing");
         const invoice = event.data?.object as any;
         if (await isNabuflowOrgInvoiceEvent(invoice)) {
           await handleNabuflowOrgInvoicePaymentFailed(invoice);

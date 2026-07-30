@@ -1137,8 +1137,8 @@ export default function HomePage() {
                     Pick a plan and start shipping
                   </h2>
                   <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
-                    Orbit, Comet, and Nova — credit-based builder plans from $20/month. Unused credits roll over.
-                    Pay-as-you-go overage only when your monthly bucket runs out.
+                    Orbit, Comet, and Nova — credit-based builder plans from $20/month. Unused
+                    credits roll over. Pay-as-you-go overage only when your monthly bucket runs out.
                     Enterprise teams get Constellation with pooled credits and org-wide spend caps.
                   </p>
                   <div className="flex flex-wrap gap-3 mt-4 text-xs text-muted-foreground">

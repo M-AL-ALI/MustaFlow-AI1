@@ -20,7 +20,6 @@ export type BuilderSendIntentOptions = {
   agentIntent?: BuilderComposerIntent;
 };
 
-
 // ─── Credit cost types ────────────────────────────────────────────────────────
 
 export type BuilderCreditCosts = {
