@@ -392,6 +392,9 @@ router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
       id: agentInboxTable.id,
       projectId: agentInboxTable.projectId,
       status: agentInboxTable.status,
+      category: agentInboxTable.category,
+      severity: agentInboxTable.severity,
+      description: agentInboxTable.description,
       createdAt: agentInboxTable.createdAt,
       projectName: projectsTable.name,
     })
@@ -839,8 +842,6 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
     .select({ total: count() })
     .from(domainServeEventsTable)
     .where(gte(domainServeEventsTable.ts, since));
-
-  const _statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
 
   res.json({
     sinceDays: days,
