@@ -18,12 +18,19 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Request, Response, NextFunction } from "express";
 import { aiBuilderLimiter, oraLimiter, createLimiterForDomainVerify } from "../rateLimit";
+import { logger } from "../logger";
 
-function makeReq(ip: string): Request {
-  return {
-    headers: { "x-forwarded-for": ip },
-    socket: { remoteAddress: ip },
-  } as unknown as Request;
+type FakeReq = Request & {
+  abort: () => void;
+};
+
+function makeReq(ip: string): FakeReq {
+  const ee = new EventEmitter();
+  const req = ee as unknown as FakeReq;
+  req.headers = { "x-forwarded-for": ip };
+  req.socket = { remoteAddress: ip } as Request["socket"];
+  req.abort = () => ee.emit("aborted");
+  return req;
 }
 
 type FakeRes = Response & {
@@ -31,6 +38,7 @@ type FakeRes = Response & {
   jsonBody?: unknown;
   outHeaders: Record<string, unknown>;
   finish: () => void;
+  close: () => void;
 };
 
 function makeRes(): FakeRes {
@@ -55,11 +63,13 @@ function makeRes(): FakeRes {
   }) as unknown as FakeRes["json"];
   // Helper to simulate the connection finishing (drains the semaphore).
   res.finish = () => ee.emit("finish");
+  res.close = () => ee.emit("close");
   return res;
 }
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 // ─── createLimiter (sliding window) ──────────────────────────────────────────
@@ -177,6 +187,7 @@ describe("aiBuilderLimiter semaphore + queue", () => {
   });
 
   it("drains the next queued request when an active slot finishes", () => {
+    const logSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const ip = "10.0.0.4";
     const active: FakeRes[] = [];
     for (let i = 0; i < 3; i++) {
@@ -192,6 +203,101 @@ describe("aiBuilderLimiter semaphore + queue", () => {
     // One active request completes → the queued request is drained.
     active[0].finish();
     expect(queuedNext).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "release", reason: "finish" }),
+      "AI builder semaphore event",
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "queue-drain" }),
+      "AI builder semaphore event",
+    );
+  });
+
+  it("releases an aborted active request and drains the next queued request", () => {
+    const logSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const ip = "10.0.0.6";
+    const active: FakeRes[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = makeRes();
+      aiBuilderLimiter(makeReq(ip), res, vi.fn() as NextFunction);
+      active.push(res);
+    }
+
+    const queuedRes = makeRes();
+    const queuedNext = vi.fn();
+    aiBuilderLimiter(makeReq(ip), queuedRes, queuedNext as NextFunction);
+    expect(queuedNext).not.toHaveBeenCalled();
+
+    active[0].close();
+
+    expect(queuedNext).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "release", reason: "close" }),
+      "AI builder semaphore event",
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "queue-drain" }),
+      "AI builder semaphore event",
+    );
+  });
+
+  it("removes aborted or closed queued requests and clears their timers", () => {
+    vi.useFakeTimers();
+    vi.spyOn(logger, "info").mockImplementation(() => undefined);
+
+    for (const signal of ["abort", "close"] as const) {
+      const ip = signal === "abort" ? "10.0.0.7" : "10.0.0.8";
+      const active: FakeRes[] = [];
+      for (let i = 0; i < 3; i++) {
+        const res = makeRes();
+        aiBuilderLimiter(makeReq(ip), res, vi.fn() as NextFunction);
+        active.push(res);
+      }
+
+      const queuedReq = makeReq(ip);
+      const queuedRes = makeRes();
+      const queuedNext = vi.fn();
+      const timersBeforeQueue = vi.getTimerCount();
+      aiBuilderLimiter(queuedReq, queuedRes, queuedNext as NextFunction);
+      expect(vi.getTimerCount()).toBe(timersBeforeQueue + 1);
+
+      if (signal === "abort") queuedReq.abort();
+      else queuedRes.close();
+
+      expect(vi.getTimerCount()).toBe(timersBeforeQueue);
+      active[0].finish();
+      expect(queuedNext).not.toHaveBeenCalled();
+
+      const replacementNext = vi.fn();
+      aiBuilderLimiter(makeReq(ip), makeRes(), replacementNext as NextFunction);
+      expect(replacementNext).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("releases exactly once when finish is followed by close", () => {
+    const logSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const ip = "10.0.0.9";
+    const active: FakeRes[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = makeRes();
+      aiBuilderLimiter(makeReq(ip), res, vi.fn() as NextFunction);
+      active.push(res);
+    }
+
+    const firstQueuedNext = vi.fn();
+    const secondQueuedNext = vi.fn();
+    aiBuilderLimiter(makeReq(ip), makeRes(), firstQueuedNext as NextFunction);
+    aiBuilderLimiter(makeReq(ip), makeRes(), secondQueuedNext as NextFunction);
+
+    active[0].finish();
+    active[0].close();
+
+    expect(firstQueuedNext).toHaveBeenCalledTimes(1);
+    expect(secondQueuedNext).not.toHaveBeenCalled();
+    const releaseLogs = logSpy.mock.calls.filter(
+      ([fields]) => (fields as { event?: string }).event === "release",
+    );
+    expect(releaseLogs).toHaveLength(1);
   });
 
   it("429s a queued request after the queue-wait timeout elapses", () => {

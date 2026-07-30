@@ -19,6 +19,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import { isRedisEnabled, redisIncrementWindow, noteRedisFallback } from "./redisClient";
+import { logger } from "./logger";
 
 interface Window {
   count: number;
@@ -147,6 +148,8 @@ interface PendingEntry {
   res: Response;
   position: number;
   timer: ReturnType<typeof setTimeout>;
+  closed?: boolean;
+  detachQueuedListeners?: () => void;
 }
 
 interface SemaphoreEntry {
@@ -156,17 +159,98 @@ interface SemaphoreEntry {
 
 const semaphoreStore = new Map<string, SemaphoreEntry>();
 
-function releaseSlot(key: string): void {
+type ReleaseReason = "finish" | "close";
+
+function isBuilderSemaphore(key: string): boolean {
+  return key.startsWith("ai_sem:");
+}
+
+function logBuilderSemaphore(
+  event: "release" | "queue-drain",
+  fields: Record<string, string | number>,
+): void {
+  logger.info(
+    {
+      component: "ai-builder-limiter",
+      event,
+      ...fields,
+    },
+    "AI builder semaphore event",
+  );
+}
+
+function attachBuilderRelease(key: string, res: Response): void {
+  let released = false;
+
+  const release = (reason: ReleaseReason): void => {
+    if (released) return;
+    released = true;
+    res.off("finish", onFinish);
+    res.off("close", onClose);
+    releaseSlot(key, reason);
+  };
+  const onFinish = (): void => release("finish");
+  const onClose = (): void => release("close");
+
+  res.once("finish", onFinish);
+  res.once("close", onClose);
+}
+
+function removeQueuedEntry(key: string, pending: PendingEntry): void {
+  if (pending.closed) return;
+  pending.closed = true;
+  clearTimeout(pending.timer);
+  pending.detachQueuedListeners?.();
+
+  const entry = semaphoreStore.get(key);
+  if (!entry) return;
+  entry.pending = entry.pending.filter((candidate) => candidate !== pending);
+  if (entry.active === 0 && entry.pending.length === 0) {
+    semaphoreStore.delete(key);
+  }
+}
+
+function releaseSlot(key: string, reason: ReleaseReason = "finish"): void {
   const entry = semaphoreStore.get(key);
   if (!entry) return;
   entry.active = Math.max(0, entry.active - 1);
+  if (isBuilderSemaphore(key)) {
+    logBuilderSemaphore("release", {
+      reason,
+      active: entry.active,
+      queued: entry.pending.length,
+    });
+  }
   // Drain the next waiting request (skip any whose response already closed)
   while (entry.pending.length > 0) {
     const pend = entry.pending.shift()!;
     clearTimeout(pend.timer);
-    if (!pend.res.headersSent) {
+    pend.detachQueuedListeners?.();
+    const builderSemaphore = isBuilderSemaphore(key);
+    const responseState = builderSemaphore
+      ? (pend.res as Response & {
+          destroyed?: boolean;
+          writableEnded?: boolean;
+        })
+      : undefined;
+    const canDrain = builderSemaphore
+      ? !pend.closed &&
+        !pend.res.headersSent &&
+        !responseState?.destroyed &&
+        !responseState?.writableEnded
+      : !pend.res.headersSent;
+    if (canDrain) {
       entry.active += 1;
-      pend.res.once("finish", () => releaseSlot(key));
+      if (builderSemaphore) {
+        attachBuilderRelease(key, pend.res);
+        logBuilderSemaphore("queue-drain", {
+          position: pend.position,
+          active: entry.active,
+          queued: entry.pending.length,
+        });
+      } else {
+        pend.res.once("finish", () => releaseSlot(key));
+      }
       pend.nextFn();
       return;
     }
@@ -197,7 +281,7 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
   if (entry.active < MAX_CONCURRENT) {
     // Slot available — proceed immediately.
     entry.active += 1;
-    res.once("finish", () => releaseSlot(key));
+    attachBuilderRelease(key, res);
     next();
     return;
   }
@@ -220,8 +304,7 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
   res.setHeader("X-Estimated-Wait-Ms", position * 20_000);
 
   const timer = setTimeout(() => {
-    const e = semaphoreStore.get(key);
-    if (e) e.pending = e.pending.filter((p) => p !== pendingEntry);
+    removeQueuedEntry(key, pendingEntry);
     if (!res.headersSent) {
       res.status(429).json({
         error: "Queue wait timeout. Too many concurrent AI builds in progress. Please try again.",
@@ -233,7 +316,21 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
   // `let` so the variable is captured by the timer closure above.
   // eslint-disable-next-line prefer-const
   let pendingEntry: PendingEntry;
-  pendingEntry = { nextFn: next, res, position, timer };
+  const onQueuedClose = (): void => removeQueuedEntry(key, pendingEntry);
+  const onQueuedAbort = (): void => removeQueuedEntry(key, pendingEntry);
+  pendingEntry = {
+    nextFn: next,
+    res,
+    position,
+    timer,
+    closed: false,
+    detachQueuedListeners: () => {
+      res.off("close", onQueuedClose);
+      req.off("aborted", onQueuedAbort);
+    },
+  };
+  res.once("close", onQueuedClose);
+  req.once("aborted", onQueuedAbort);
   entry.pending.push(pendingEntry);
   // Do NOT call next() here — the request physically waits until releaseSlot() drains it.
 };
