@@ -1,3 +1,4 @@
+- [admin.ts merge revert pattern](admin-ts-merge-revert-pattern.md) — task-agent merges repeatedly revert 8 known fixes; always typecheck+lint before firing gate after any auto-merge of admin.ts.
 - [EAS build #55 activity-trace](eas-build-55-trace.md) — build d88e492e queued 2026-07-25; autoIncrement:false pin pattern; final GitHub HEAD 21a22366.
 - [Ora isolation rule](ora-isolation-rule.md) / [builder isolation](ora-builder-isolation.md) / [builder separation](ora-builder-separation.md) — permanent: zero Builder relationship/handoff on ANY Ora surface; only scope='user' knowledge; enforced by ora-isolation.test.ts.
 - [Ora credit/quota isolation](ora-credit-quota-isolation.md) / [superuser allowlist](superuser-allowlist.md) — Ora metered by quotas not Builder credits; every balance/role/plan gate must consult isSuperuser.
