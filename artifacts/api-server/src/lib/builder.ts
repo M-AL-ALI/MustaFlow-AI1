@@ -1702,6 +1702,8 @@ async function callWithRetry(
   // so legacy callers that don't know their stage keep working unchanged.
   stage: "build" | "refine" | "plan" = "build",
   agentMode: AgentMode = "power",
+  taskId?: number,
+  taskMode?: string,
 ): Promise<Record<string, unknown>> {
   let lastError: Error = new Error("Unknown error");
 
@@ -1721,6 +1723,8 @@ async function callWithRetry(
         messages,
         response_format: { type: "json_object" },
         signal,
+        taskId,
+        taskMode,
       });
 
       const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
@@ -1775,6 +1779,8 @@ async function streamAndAccumulate(
   stage: "build" | "refine" | "plan",
   agentMode: AgentMode,
   onToken?: (delta: string) => void,
+  taskId?: number,
+  taskMode?: string,
 ): Promise<Record<string, unknown>> {
   const { streamChatCompletion, resolveStageProvider } = await import("./ai-providers");
   const { provider, model: effectiveModel } = resolveStageProvider(stage, agentMode, model);
@@ -1800,7 +1806,17 @@ async function streamAndAccumulate(
       throw new Error("Build cancelled", { cause: err });
     }
     logger.warn({ err, label }, "Streaming failed — falling back to batch completion");
-    return callWithRetry(messages, model, maxTokens, label, signal, stage, agentMode);
+    return callWithRetry(
+      messages,
+      model,
+      maxTokens,
+      label,
+      signal,
+      stage,
+      agentMode,
+      taskId,
+      taskMode,
+    );
   }
 
   const stripped = accumulated
@@ -1816,7 +1832,17 @@ async function streamAndAccumulate(
       { label, preview: accumulated.slice(0, 200) },
       "Streamed JSON parse failed — falling back to batch completion",
     );
-    return callWithRetry(messages, model, maxTokens, label, signal, stage, agentMode);
+    return callWithRetry(
+      messages,
+      model,
+      maxTokens,
+      label,
+      signal,
+      stage,
+      agentMode,
+      taskId,
+      taskMode,
+    );
   }
 }
 
@@ -2455,6 +2481,9 @@ export async function runBuildPipeline(args: {
   /** Called with each streamed token delta during the primary code-generation call. */
   onToken?: (delta: string) => void;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 }): Promise<BuilderResult> {
   const {
     projectName,
@@ -2472,6 +2501,8 @@ export async function runBuildPipeline(args: {
     onEvent,
     onToken,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   // ── Dev-only build stub ────────────────────────────────────────────────────
@@ -2630,6 +2661,8 @@ export async function runBuildPipeline(args: {
     "build",
     agentMode,
     onToken,
+    taskId,
+    taskMode,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -2937,6 +2970,9 @@ export async function runRefinePipeline(args: {
   /** Called with each streamed token delta during the primary code-generation call. */
   onToken?: (delta: string) => void;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
@@ -2965,6 +3001,8 @@ export async function runRefinePipeline(args: {
     onEvent,
     onToken,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
@@ -3059,6 +3097,8 @@ export async function runRefinePipeline(args: {
     "refine",
     agentMode,
     onToken,
+    taskId,
+    taskMode,
   );
 
   // Build changedFiles from full replacements returned by AI
@@ -3575,6 +3615,9 @@ export async function runReactViteBuildPipeline(args: {
   imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 }): Promise<BuilderResult> {
   const {
     projectName,
@@ -3590,6 +3633,8 @@ export async function runReactViteBuildPipeline(args: {
     imageAttachments,
     onEvent,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
@@ -3680,6 +3725,8 @@ export async function runReactViteBuildPipeline(args: {
     signal,
     "build",
     agentMode,
+    taskId,
+    taskMode,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -3834,6 +3881,9 @@ export async function runReactViteRefinePipeline(args: {
   imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
@@ -3860,6 +3910,8 @@ export async function runReactViteRefinePipeline(args: {
     imageAttachments,
     onEvent,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
@@ -3952,6 +4004,8 @@ export async function runReactViteRefinePipeline(args: {
     signal,
     "refine",
     agentMode,
+    taskId,
+    taskMode,
   );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
@@ -5242,6 +5296,9 @@ type StackBuildArgs = {
   imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 };
 
 type StackRefineArgs = {
@@ -5260,6 +5317,9 @@ type StackRefineArgs = {
   imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 };
 
 async function runStackBuildPipeline(
@@ -5280,6 +5340,8 @@ async function runStackBuildPipeline(
     imageAttachments,
     onEvent,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
@@ -5353,6 +5415,8 @@ async function runStackBuildPipeline(
     signal,
     "build",
     agentMode,
+    taskId,
+    taskMode,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -5739,6 +5803,9 @@ export async function runMobileBuildPipeline(args: {
   imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 }): Promise<MobileBuilderResult> {
   const {
     projectName,
@@ -5752,6 +5819,8 @@ export async function runMobileBuildPipeline(args: {
     imageAttachments,
     onEvent,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   // Intent detection — classify which power modules are needed
@@ -5802,6 +5871,8 @@ export async function runMobileBuildPipeline(args: {
     signal,
     "build",
     agentMode,
+    taskId,
+    taskMode,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -6162,6 +6233,9 @@ export async function runMobileRefinePipeline(args: {
   imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
+  /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
+  taskId?: number;
+  taskMode?: string;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
@@ -6186,6 +6260,8 @@ export async function runMobileRefinePipeline(args: {
     imageAttachments,
     onEvent,
     signal,
+    taskId,
+    taskMode,
   } = args;
 
   // Intent detection — detect modules to add or remove for this refine request
@@ -6233,6 +6309,8 @@ export async function runMobileRefinePipeline(args: {
     signal,
     "refine",
     agentMode,
+    taskId,
+    taskMode,
   );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
@@ -6340,6 +6418,11 @@ export async function runMobileRefinePipeline(args: {
         modelFor(agentMode),
         32000,
         "mobile-refine-ts-correction",
+        signal,
+        "refine",
+        agentMode,
+        taskId,
+        taskMode,
       );
       const tsCorrectedRaw = Array.isArray(tsCorrected.files) ? tsCorrected.files : [];
       const tsCorrectedFiles: BuilderFile[] = tsCorrectedRaw

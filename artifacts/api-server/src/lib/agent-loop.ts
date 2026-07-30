@@ -3546,6 +3546,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             tools: toolsForLoop,
             tool_choice: "auto",
             signal: input.signal,
+            // NabuFlow R2 Phase D: include fix-turn tokens in per-build telemetry.
+            taskId: input.taskId ?? undefined,
+            taskMode: input.agentMode,
           });
           totalTokens += fixResp.usage?.total_tokens ?? 0;
           const fixChoice = fixResp.choices[0];
