@@ -266,6 +266,15 @@ export function creditCostFor(
   return Math.max(1, adjusted);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-build token telemetry accumulator — NabuFlow R2 Phase D.
+//
+// Every createChatCompletion call that carries a taskId adds its prompt +
+// completion token counts to this map. flushBuildTokenTelemetry() is called
+// once at build completion to upsert one row to build_token_telemetry and
+// clear the in-memory entry.
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface BuildTokenAccumulator {
   mode: string;
   provider: string;
@@ -448,6 +457,7 @@ export async function* streamChatCompletion(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   if (params.provider === "openai") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stream: any = await ai.models.generateContentStream({
     model: params.model,
     contents,
@@ -484,12 +494,16 @@ async function* streamDeepSeek(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
   const client = getDeepSeekClient();
-  const stream: any = await ai.models.generateContentStream({
-    model: params.model,
-    contents,
-    config,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await client.chat.completions.create(
+    {
+      model: params.model,
+      messages: params.messages,
+      stream: true as const,
+      max_tokens: params.max_completion_tokens,
+    },
+    { signal: params.signal },
+  );
   for await (const chunk of stream) {
     if (params.signal?.aborted) return;
     const delta = chunk.choices[0]?.delta?.content;
@@ -527,6 +541,7 @@ async function* streamAnthropic(
     }
   }
 
+  const defaultMaxTokens = /haiku/i.test(params.model) ? 8192 : 16000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stream: any = await ai.models.generateContentStream({
     model: params.model,

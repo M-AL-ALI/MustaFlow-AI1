@@ -52,7 +52,14 @@ router.use("/admin", requireAdmin);
 // ── GET /api/admin/me ─────────────────────────────────────────────────────────
 router.get("/admin/me", async (req, res): Promise<void> => {
   const userId = req.userId!;
-  const [row] = await db.select().from(userRolesTable).where(eq(userRolesTable.userId, userId));
+  const [row] = await db
+    .insert(userRolesTable)
+    .values({ userId: userId.trim(), role: role!, grantedBy: req.userId ?? "system" })
+    .onConflictDoUpdate({
+      target: userRolesTable.userId,
+      set: { role: role!, grantedBy: req.userId ?? "system", updatedAt: new Date() },
+    })
+    .returning();
 
   const adminViaEnv = Boolean(
     (process.env.ADMIN_USER_IDS ?? "")
@@ -314,20 +321,15 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
 // Read-only. No business logic is changed by this endpoint.
 router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
   try {
-    const rows = await db.execute<{
-      mode: string;
-      build_count: string;
-      avg_actual_cost_usd: string | null;
-    }>(sql`
-      SELECT
-        mode,
-        COUNT(*)::int                      AS build_count,
-        AVG(computed_usd_cost::float)      AS avg_actual_cost_usd
-      FROM build_token_telemetry
-      WHERE recorded_at > now() - interval '7 days'
-      GROUP BY mode
-      ORDER BY mode
-    `);
+  const rows = await db
+    .select({
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
+    })
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
 
     const MODES = ["lite", "eco", "power", "pro"] as const;
     type ModeName = (typeof MODES)[number];
@@ -342,7 +344,6 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
       // ratio = charge / actual_cost. When ratio >= 1.15 we have at least 15%
       // headroom (charge covers cost with margin). When ratio < 1.15 the mode
       // is underpriced relative to actual AI cost → flag for recalibration.
-      // Using chargeUsd in the numerator avoids flagging low-cost modes as risky.
       const ratio = avgActualCostUsd > 0 ? chargeUsd / avgActualCostUsd : null;
       return {
         mode,
@@ -385,27 +386,16 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
 router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
   const { agentInboxTable, projectsTable } = await import("@workspace/db");
   const { eq, desc, sql } = await import("drizzle-orm");
-  const limit = Math.min(
-    100,
-    Math.max(1, Number(req.query.limit) > 0 ? Math.floor(Number(req.query.limit)) : 25),
-  );
+  const limit = Math.min(Number(req.query.limit ?? 100), 500);
   const rows = await db
     .select({
-      id: agentInboxTable.id,
-      projectId: agentInboxTable.projectId,
-      projectName: projectsTable.name,
-      category: agentInboxTable.category,
-      severity: agentInboxTable.severity,
-      description: agentInboxTable.description,
-      screenshotUrl: agentInboxTable.screenshotUrl,
-      status: agentInboxTable.status,
-      createdAt: agentInboxTable.createdAt,
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
     })
-    .from(agentInboxTable)
-    .leftJoin(projectsTable, eq(projectsTable.id, agentInboxTable.projectId))
-    .where(eq(agentInboxTable.status, "unread"))
-    .orderBy(desc(agentInboxTable.createdAt))
-    .limit(limit);
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
   const [{ n }] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(agentInboxTable)
@@ -424,7 +414,7 @@ router.get("/admin/eval-results", async (_req, res): Promise<void> => {
     const { readFile } = await import("fs/promises");
     const { join } = await import("path");
     const path = join(process.cwd(), "scripts", "eval-results", "latest.json");
-    const raw = await readFile(path, "utf8");
+  const raw = await readDraftRaw(name);
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     res.json({ ran: true, ...parsed });
   } catch {
@@ -623,7 +613,15 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
 
 // ── GET /api/admin/roles ──────────────────────────────────────────────────────
 router.get("/admin/roles", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(userRolesTable);
+  const rows = await db
+    .select({
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
+    })
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
   res.json({ roles: rows });
 });
 
@@ -672,8 +670,8 @@ router.get("/admin/audit-log", async (req, res): Promise<void> => {
   const rawLimit = Number(req.query["limit"] ?? 50);
   const rawOffset = Number(req.query["offset"] ?? 0);
 
-  const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200);
-  const offset = Math.max(0, isNaN(rawOffset) ? 0 : rawOffset);
+  const limit = Math.min(Number(req.query.limit ?? 100), 500);
+  const offset = Number(req.query.offset ?? 0);
 
   const [entries, [totalRow]] = await Promise.all([
     db
@@ -750,7 +748,7 @@ router.patch("/admin/skills/:name", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid skill name" });
     return;
   }
-  const body = (req.body ?? {}) as { enabled?: unknown };
+  const body = (req.body ?? {}) as { reason?: string };
   if (typeof body.enabled !== "boolean") {
     res.status(400).json({ error: "Body must include { enabled: boolean }" });
     return;
@@ -782,7 +780,7 @@ router.get("/admin/skills/drafts/:name", async (req, res): Promise<void> => {
 // Body: { raw: string }. Overwrites the draft's SKILL.md file in place.
 router.patch("/admin/skills/drafts/:name", async (req, res): Promise<void> => {
   const name = String(req.params.name ?? "").trim();
-  const body = (req.body ?? {}) as { raw?: unknown };
+  const body = (req.body ?? {}) as { reason?: string };
   if (typeof body.raw !== "string" || body.raw.length === 0) {
     res.status(400).json({ error: "Body must include { raw: string }" });
     return;
@@ -864,12 +862,14 @@ router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
   const offset = Number(req.query.offset ?? 0);
 
   const rows = await db
-    .select()
-    .from(abuseReportsTable)
-    .where(statusFilter ? eq(abuseReportsTable.status, statusFilter) : undefined)
-    .orderBy(desc(abuseReportsTable.createdAt))
-    .limit(limit)
-    .offset(offset);
+    .select({
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
+    })
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
 
   const [totals] = await db
     .select({
@@ -903,7 +903,7 @@ router.post("/admin/abuse-reports/:id/resolve", async (req, res): Promise<void> 
     res.status(400).json({ error: "Invalid report ID" });
     return;
   }
-  const body = (req.body ?? {}) as { action?: string };
+  const body = (req.body ?? {}) as { reason?: string };
   await db
     .update(abuseReportsTable)
     .set({ status: "resolved", resolvedBy: req.userId ?? "admin", resolvedAt: new Date() })

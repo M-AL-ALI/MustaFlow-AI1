@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
+import { CheckCircle2, Zap, ArrowRight, Star, Building2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from "@/lib/auth-state-context";
 import { MobileAppBanner } from "@/components/mobile-app-banner";
+import { nabuflowLadderLines } from "@/lib/nabuflow-billing";
 
 // Ora-only plan tier (mirrors the server's ORA_TIERS_META / OpenAPI OraTierMeta).
 // Contains ONLY Ora features — never AI Builder credits, concurrent builds,
@@ -23,6 +24,33 @@ interface OraTierMeta {
   features: string[];
   available: boolean;
   current?: boolean;
+}
+
+// Shape returned by GET /api/billing/nabuflow/plans → publicPlanShape.
+interface NabuflowPublicPlan {
+  id: string;
+  name: string;
+  available: boolean;
+  priceUsd: number | null;
+  includedMonthlyCredits: number;
+  overageUsdPerCredit: number;
+  rolloverCycles: number;
+  rolloverMaxCredits: number;
+  parallelBuildLimit: number;
+  queuePriority: number;
+  defaultSpendCapUsdCents: number;
+  maxSpendCapUsdCents: number;
+  ladder: {
+    proBuildsPerCycle: number | null;
+    deepBuildsPerCycle: number | null;
+    proDeepCombo: boolean;
+  };
+}
+
+interface NabuflowModeCost {
+  mode: string;
+  credits: number;
+  desc: string;
 }
 
 // Fallback used until GET /api/billing/ora-plans resolves. Must mirror the
@@ -99,6 +127,176 @@ const ORA_PLAN_LIMITS = [
 // or already included in a higher tier they hold.
 const TIER_RANK: Record<string, number> = { free: 0, core: 1, wave: 2 };
 
+/** "$0.012" style per-credit overage price without trailing zeros. */
+function fmtPerCredit(v: number): string {
+  const s = v.toFixed(v < 0.095 ? 3 : 2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  return `$${s}`;
+}
+
+function NabuFlowPlansSection({
+  plans,
+  modeCosts,
+  isSignedIn,
+}: {
+  plans: NabuflowPublicPlan[];
+  modeCosts: NabuflowModeCost[];
+  isSignedIn: boolean;
+}) {
+  const [, navigate] = useLocation();
+
+  function buildFeatureBullets(plan: NabuflowPublicPlan): string[] {
+    const bullets: string[] = [];
+    // Credits
+    if (plan.includedMonthlyCredits > 0) {
+      bullets.push(`${plan.includedMonthlyCredits.toLocaleString()} build credits / month`);
+    }
+    // Ladder lines
+    const ladderLines = nabuflowLadderLines(plan, plans);
+    for (const line of ladderLines) {
+      bullets.push(line.text);
+    }
+    // Rollover
+    if (plan.rolloverCycles > 0) {
+      bullets.push("Unused credits roll over one cycle");
+    }
+    // Overage rate
+    if (plan.priceUsd !== null) {
+      bullets.push(`Pay-as-you-go overage at ${fmtPerCredit(plan.overageUsdPerCredit)}/credit`);
+    }
+    // Spend cap control
+    if (plan.maxSpendCapUsdCents > 0) {
+      const maxUsd = Math.round(plan.maxSpendCapUsdCents / 100);
+      bullets.push(`Spend cap control up to $${maxUsd}/month`);
+    }
+    // Parallel builds
+    if (plan.parallelBuildLimit > 1) {
+      bullets.push(`${plan.parallelBuildLimit} concurrent builds`);
+    }
+    return bullets;
+  }
+
+  function handlePlanCta(planId: string) {
+    const dest = `/billing-usage/plans?highlight=${encodeURIComponent(planId)}`;
+    if (!isSignedIn) {
+      navigate(`/sign-up?redirect=${encodeURIComponent(dest)}`);
+    } else {
+      navigate(dest);
+    }
+  }
+
+  const purchasable = plans.filter((p) => p.available);
+  const enterprise = plans.filter((p) => !p.available);
+
+  // Find the "Most popular" plan — second cheapest purchasable (Comet)
+  const popularPlanId = purchasable.length > 1 ? purchasable[1]?.id : null;
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 mb-16" id="nabuflow-plans">
+      <div className="text-center mb-10">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
+          <Zap className="h-3 w-3" />
+          NabuFlow Builder
+        </div>
+        <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-3">
+          Plans for every builder
+        </h2>
+        <p className="text-muted-foreground text-sm max-w-lg mx-auto">
+          Credit-based builder plans — change your plan anytime and unused included credits roll over.
+          Pay-as-you-go overage kicks in only when your monthly bucket runs out.
+        </p>
+      </div>
+
+      {/* Purchasable plan cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        {purchasable.map((plan) => {
+          const isPopular = plan.id === popularPlanId;
+          const bullets = buildFeatureBullets(plan);
+          return (
+            <div
+              key={plan.id}
+              id={`nabuflow-plan-${plan.id}`}
+              className={`relative rounded-2xl p-7 flex flex-col gap-5 transition-all duration-300 ${
+                isPopular
+                  ? "border-2 border-primary bg-primary/5 shadow-lg"
+                  : "border border-border bg-card"
+              }`}
+            >
+              {isPopular && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full bg-primary text-primary-foreground whitespace-nowrap">
+                  <Star className="h-3 w-3" />
+                  Most popular
+                </div>
+              )}
+
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-1 ${isPopular ? "text-primary/80" : "text-muted-foreground"}`}>
+                  {plan.name}
+                </p>
+                <div className="flex items-baseline gap-1 mb-1">
+                  <span className="text-4xl font-extrabold">
+                    {plan.priceUsd !== null ? `$${plan.priceUsd}` : "Custom"}
+                  </span>
+                  {plan.priceUsd !== null && (
+                    <span className="text-sm text-muted-foreground">/month</span>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">Cancel anytime</p>
+              </div>
+
+              <ul className="space-y-2 flex-1">
+                {bullets.map((b) => (
+                  <li key={b} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className={`h-4 w-4 shrink-0 mt-0.5 ${isPopular ? "text-primary" : "text-green-500"}`} />
+                    {b}
+                  </li>
+                ))}
+              </ul>
+
+              <Button
+                className="w-full gap-2"
+                variant={isPopular ? "default" : "outline"}
+                onClick={() => handlePlanCta(plan.id)}
+              >
+                {isSignedIn ? "View plan" : "Get started"}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Constellation enterprise card */}
+      {enterprise.map((plan) => (
+        <div
+          key={plan.id}
+          className="rounded-2xl border border-border bg-card p-7 flex flex-col sm:flex-row items-start sm:items-center gap-6"
+        >
+          <div className="flex items-center gap-4 flex-1 min-w-0">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-muted/40 border border-border">
+              <Building2 className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
+                {plan.name} — Enterprise
+              </p>
+              <p className="font-semibold text-foreground">Custom pricing · unlimited builds · dedicated support</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Pool-based credit purchasing, org-wide spend caps, RBAC seat management, and priority queue access.
+              </p>
+            </div>
+          </div>
+          <Button variant="outline" className="shrink-0 gap-2" asChild>
+            <a href="mailto:enterprise@mustaflow.ai">
+              Contact us
+              <ArrowRight className="h-4 w-4" />
+            </a>
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PricingPage() {
   const { isSignedIn } = useAuthState();
   const [, navigate] = useLocation();
@@ -111,6 +309,8 @@ export default function PricingPage() {
   const scrolledRef = useRef(false);
   // The signed-in user's current Ora tier (null until known / when signed out).
   const [currentTier, setCurrentTier] = useState<string | null>(null);
+  const [nabuflowPlans, setNabuflowPlans] = useState<NabuflowPublicPlan[]>([]);
+  const [nabuflowModeCosts, setNabuflowModeCosts] = useState<NabuflowModeCost[]>([]);
 
   // Server (ORA_TIERS_META) is the single source of truth. Fall back to the
   // hardcoded Ora-only tiers until the public endpoint resolves.
@@ -124,6 +324,30 @@ export default function PricingPage() {
         if (!cancelled && data.tiers?.length) setOraTiers(data.tiers);
       } catch {
         // keep fallback
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch NabuFlow plans config (public endpoint — no auth required).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch("/api/billing/nabuflow/plans");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          plans?: NabuflowPublicPlan[];
+          modeCosts?: NabuflowModeCost[];
+        };
+        if (!cancelled) {
+          if (data.plans?.length) setNabuflowPlans(data.plans);
+          if (data.modeCosts?.length) setNabuflowModeCosts(data.modeCosts);
+        }
+      } catch {
+        // leave empty — section renders nothing until resolved
       }
     })();
     return () => {
@@ -416,6 +640,17 @@ export default function PricingPage() {
         </div>
       </div>
 
+      {/* NabuFlow Builder plans */}
+      {nabuflowPlans.length > 0 && (
+        <div className="border-t border-border bg-background pt-16">
+          <NabuFlowPlansSection
+            plans={nabuflowPlans}
+            modeCosts={nabuflowModeCosts}
+            isSignedIn={isSignedIn}
+          />
+        </div>
+      )}
+
       {/* Credit costs reference */}
       <div className="border-t border-border bg-muted/20">
         <div className="max-w-3xl mx-auto px-6 py-16">
@@ -453,28 +688,25 @@ export default function PricingPage() {
               are always unlimited.
             </p>
           </div>
-          <div className="border border-border rounded-xl bg-card overflow-hidden">
-            <div className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30">
-              NabuFlow — credits per build
+          {nabuflowModeCosts.length > 0 && (
+            <div className="border border-border rounded-xl bg-card overflow-hidden">
+              <div className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30">
+                NabuFlow — credits per build
+              </div>
+              <div className="divide-y divide-border">
+                {nabuflowModeCosts.map((row) => (
+                  <div key={row.mode} className="flex items-center justify-between px-5 py-3 text-sm">
+                    <span className="text-muted-foreground">
+                      <span className="font-semibold text-foreground">{row.mode}</span> — {row.desc}
+                    </span>
+                    <span className="font-semibold shrink-0 ml-4">
+                      {row.credits} credit{row.credits !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="divide-y divide-border">
-              {[
-                { mode: "Lite", cost: 1, desc: "Fast, lightweight builds" },
-                { mode: "Eco", cost: 2, desc: "Balanced quality and speed" },
-                { mode: "Power", cost: 5, desc: "High-quality multi-file builds" },
-                { mode: "Pro", cost: 10, desc: "Maximum quality, extended context" },
-              ].map((row) => (
-                <div key={row.mode} className="flex items-center justify-between px-5 py-3 text-sm">
-                  <span className="text-muted-foreground">
-                    <span className="font-semibold text-foreground">{row.mode}</span> — {row.desc}
-                  </span>
-                  <span className="font-semibold shrink-0 ml-4">
-                    {row.cost} credit{row.cost !== 1 ? "s" : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
           <p className="text-center text-xs text-muted-foreground mt-4">
             Building heavily? Top up Builder credits anytime from your{" "}
             <Link href="/billing/legacy" className="text-primary hover:underline">
