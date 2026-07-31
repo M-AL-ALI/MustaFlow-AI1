@@ -5569,24 +5569,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             }
             const review = dispatchResult.review;
 
-            // Charge credits (best-effort — never block the build).
+            // Settle credits durably after delivered work — never block the build.
             let creditsCharged = 0;
             if (project.ownerId) {
-              try {
-                const debit = await deductCreditsAtomic(project.ownerId, ARCHITECT_CREDIT_COST, {
+              const debit = await settleCreditsDurably({
+                ownerId: project.ownerId,
+                amount: ARCHITECT_CREDIT_COST,
+                taskId,
+                opts: {
                   projectId,
                   taskId,
                   type: "architect",
                   description: `Architect review for task #${taskId} (verdict: ${review.verdict}, findings: ${review.findings.length})`,
-                });
-                if (!("insufficient" in debit)) {
-                  creditsCharged = debit.charged;
-                }
-              } catch (creditErr) {
-                logger.warn(
-                  { err: creditErr, projectId, taskId },
-                  "Architect credit deduction failed (non-fatal)",
-                );
+                  source: "architect",
+                },
+              });
+              if (!("insufficient" in debit) && !("deferred" in debit)) {
+                creditsCharged = debit.charged;
               }
             }
 
@@ -7759,35 +7758,37 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     tags: ["staged-review", "applied"],
   });
 
-  // Credit deduction (post-success, non-fatal).
+  // Durable credit settlement (post-success, non-fatal).
   // Background jobs (Task #509) reserved credits at enqueue — skip double-charging.
   if (project.ownerId && task.creditsReserved === null) {
     const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
     const { provider: costProvider } = resolveStageProvider("refine", agentMode);
     const creditCost = creditCostFor(agentMode, costProvider, task.deepReasoning ?? false);
-    void deductCreditsAtomic(project.ownerId, creditCost, {
-      type: "refine",
-      description: `Staged review apply - Task #${taskId}, project ${projectId}`,
-      projectId,
-      engineMode: agentMode,
-      deepReasoning: task.deepReasoning ?? false,
+    const result = await settleCreditsDurably({
+      ownerId: project.ownerId,
+      amount: creditCost,
       taskId,
-      source: "pipeline",
-    })
-      .then((result) => {
-        if ("insufficient" in result) {
-          logger.warn(
-            { projectId, taskId, creditCost, agentMode },
-            "Staged review apply credit deduction: insufficient balance - changes already applied",
-          );
-          void emitEvent(
-            taskId,
-            "credit_insufficient",
-            `Insufficient credits to charge for staged review apply - balance ${result.balance} < ${creditCost}`,
-          );
-        }
-      })
-      .catch((err) => logger.warn({ err }, "Credit deduction failed after apply (non-fatal)"));
+      opts: {
+        type: "refine",
+        description: `Staged review apply - Task #${taskId}, project ${projectId}`,
+        projectId,
+        engineMode: agentMode,
+        deepReasoning: task.deepReasoning ?? false,
+        taskId,
+        source: "staged-review",
+      },
+    });
+    if ("insufficient" in result) {
+      logger.warn(
+        { projectId, taskId, creditCost, agentMode },
+        "Staged review apply credit deduction: insufficient balance - changes already applied",
+      );
+      void emitEvent(
+        taskId,
+        "credit_insufficient",
+        `Insufficient credits to charge for staged review apply - balance ${result.balance} < ${creditCost}`,
+      );
+    }
   }
 
   logger.info({ taskId, projectId, fileCount: stagingFiles.length }, "Staged review applied");

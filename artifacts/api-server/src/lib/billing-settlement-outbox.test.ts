@@ -90,6 +90,24 @@ describe("durable billing settlement", () => {
     );
   });
 
+  it("routes delivered architect and staged-review charges through durable settlement", () => {
+    const jobs = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const architectCharge = jobs.slice(
+      jobs.indexOf("let creditsCharged = 0"),
+      jobs.indexOf("// Decide auto-fix."),
+    );
+    const stagedReviewCharge = jobs.slice(
+      jobs.indexOf("// Background jobs (Task #509) reserved credits"),
+      jobs.indexOf('"Staged review applied");'),
+    );
+
+    expect(architectCharge).toContain("await settleCreditsDurably");
+    expect(architectCharge).not.toContain("await deductCreditsAtomic");
+    expect(stagedReviewCharge).toContain("await settleCreditsDurably");
+    expect(stagedReviewCharge).toContain('source: "staged-review"');
+    expect(stagedReviewCharge).not.toContain("void deductCreditsAtomic");
+  });
+
   it("recovers a queued settlement through the sweeper", async () => {
     const record: BillingSettlementRecord = {
       id: 12,
