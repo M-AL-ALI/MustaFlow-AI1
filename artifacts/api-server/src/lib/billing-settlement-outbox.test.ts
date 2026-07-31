@@ -5,6 +5,8 @@ const h = vi.hoisted(() => ({
   poolQuery: vi.fn(),
   clientQuery: vi.fn(),
   deductCreditsAtomic: vi.fn(),
+  loggerInfo: vi.fn(),
+  loggerDebug: vi.fn(),
 }));
 
 vi.mock("@workspace/db", () => ({
@@ -22,11 +24,18 @@ vi.mock("../routes/credits", () => ({
 }));
 
 vi.mock("./logger", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: {
+    info: h.loggerInfo,
+    debug: h.loggerDebug,
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 import {
   settleCreditsDurably,
+  startBillingSettlementSweeper,
+  stopBillingSettlementSweeper,
   sweepBillingSettlements,
   type BillingSettlementRecord,
   type SettlementHandlers,
@@ -106,6 +115,30 @@ describe("durable billing settlement", () => {
     expect(stagedReviewCharge).toContain("await settleCreditsDurably");
     expect(stagedReviewCharge).toContain('source: "staged-review"');
     expect(stagedReviewCharge).not.toContain("void deductCreditsAtomic");
+  });
+
+  it("logs the settlement sweeper interval once when it starts", () => {
+    vi.useFakeTimers();
+    try {
+      startBillingSettlementSweeper();
+      expect(h.loggerInfo).toHaveBeenCalledWith(
+        { intervalMs: 30_000 },
+        "billing settlement sweeper started, interval 30s",
+      );
+    } finally {
+      stopBillingSettlementSweeper();
+      vi.useRealTimers();
+    }
+  });
+
+  it("emits a debug heartbeat when a settlement sweep is empty", async () => {
+    h.clientQuery.mockResolvedValue({ rows: [] });
+
+    await expect(sweepBillingSettlements()).resolves.toEqual({
+      completed: 0,
+      deferred: 0,
+    });
+    expect(h.loggerDebug).toHaveBeenCalledWith({ claimed: 0 }, "billing settlement sweep empty");
   });
 
   it("recovers a queued settlement through the sweeper", async () => {

@@ -226,6 +226,8 @@ export async function sweepBillingSettlements(
       { claimed: records.length, completed, deferred },
       "billing settlement sweep complete",
     );
+  } else {
+    logger.debug({ claimed: 0 }, "billing settlement sweep empty");
   }
   return { completed, deferred };
 }
@@ -235,6 +237,10 @@ let initialTimer: NodeJS.Timeout | null = null;
 
 export function startBillingSettlementSweeper(): void {
   if (sweepTimer || initialTimer) return;
+  logger.info(
+    { intervalMs: SWEEP_INTERVAL_MS },
+    "billing settlement sweeper started, interval 30s",
+  );
   const run = () =>
     void sweepBillingSettlements().catch((err) =>
       logger.error({ err }, "billing settlement sweep failed"),
