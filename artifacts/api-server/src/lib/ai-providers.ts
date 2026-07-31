@@ -221,24 +221,12 @@ function warnOnce(message: string): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Credit cost per (agent-mode, provider) — Task #533 step 5.
+// Flat NabuFlow credit cost per agent mode.
 //
-// Anchored to OpenAI's pricing as the baseline (multiplier 1.0). Anthropic's
-// premium tiers (Sonnet 4 / Opus 4) cost ~1.5–2.5× more per token than the
-// gpt-5 family at the equivalent quality level; Gemini Pro is cheaper than
-// gpt-5.4 at long-context coding. These multipliers approximate parity so an
-// operator can flip the env var without giving away credits or surprise-
-// billing users.
+// Provider choice affects internal model cost and telemetry, never the
+// published customer price. Keep the provider argument on creditCostFor so
+// existing stage-aware call sites remain source-compatible.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const PROVIDER_COST_MULTIPLIER: Record<Provider, number> = {
-  openai: 1.0,
-  anthropic: 1.6,
-  gemini: 0.7,
-  // DeepSeek is markedly cheaper per token than the gpt-5 family at comparable
-  // quality, so it carries the lowest multiplier.
-  deepseek: 0.5,
-};
 
 const BASE_COST: Record<AgentMode, number> = {
   lite: 13,
@@ -258,12 +246,11 @@ export function creditCostFor(
   provider: Provider = "openai",
   deepReasoning = false,
 ): number {
+  void provider;
   if (deepReasoning && mode !== "lite") {
     return DEEP_REASONING_CREDIT_COST[mode] ?? BASE_COST[mode];
   }
-  const base = BASE_COST[mode] ?? 1;
-  const adjusted = Math.round(base * (PROVIDER_COST_MULTIPLIER[provider] ?? 1));
-  return Math.max(1, adjusted);
+  return BASE_COST[mode];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

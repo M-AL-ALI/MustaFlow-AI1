@@ -12,9 +12,9 @@
 // NabuFlow has NO free tier. Only the owner allow-list (BUILDER_ALLOWLIST) and
 // superusers bypass billing.
 //
-// Credit calibration (margin protection): builds charge exactly what
-// `creditCostFor` in ai-providers.ts returns today — Pro 475 (760 on Anthropic),
-// Pro+Deep 850, Power 160/290, Eco 34/60, Lite 13. Included buckets are sized so
+// Credit calibration (margin protection): builds charge the provider-independent
+// `creditCostFor` prices — Pro 475, Pro+Deep 850, Power 160/290, Eco 34/60,
+// Lite 13. Included buckets are sized so
 // the bucket's dollar value at the plan's own overage rate stays below the plan
 // price (Orbit 1,600 cr × $0.015 = $24 marginal value on a $20 plan with only 3
 // Pro builds; Comet 4,000 × $0.013 = $52; Nova 8,000 × $0.012 = $96) — margin

@@ -62,7 +62,16 @@ const h = vi.hoisted(() => {
           onConflictDoUpdate: (opts: unknown) => { returning: () => Promise<unknown[]> };
           returning: () => Promise<unknown[]>;
         };
-        p.onConflictDoNothing = () => ({ returning: () => Promise.resolve([]) });
+        p.onConflictDoNothing = () => {
+          const settlementKey = v.settlementKey;
+          if (
+            typeof settlementKey === "string" &&
+            state.inserted.filter((row) => row.settlementKey === settlementKey).length > 1
+          ) {
+            state.inserted.splice(state.inserted.lastIndexOf(v), 1);
+          }
+          return { returning: () => Promise.resolve([]) };
+        };
         // Upsert returns the row as the DB would: schema defaults + values.
         p.onConflictDoUpdate = () => ({
           returning: () =>
@@ -253,8 +262,8 @@ afterEach(() => {
 
 // ─── Plans config sanity ─────────────────────────────────────────────────────
 describe("zero-charge usage ledger", () => {
-  it("records the actual zero with task attribution and no billable amounts", async () => {
-    await recordZeroChargeUsage("owner-1", {
+  it("records one idempotent actual zero with task attribution and no billable amounts", async () => {
+    const opts = {
       projectId: 47,
       taskId: 176,
       type: "build",
@@ -263,7 +272,10 @@ describe("zero-charge usage ledger", () => {
       deepReasoning: false,
       source: "pipeline",
       settlementKey: "task-credit:176:pipeline",
-    });
+    } as const;
+
+    await recordZeroChargeUsage("owner-1", opts);
+    await recordZeroChargeUsage("owner-1", opts);
 
     expect(h.state.inserted).toHaveLength(1);
     const [row] = h.state.inserted;

@@ -66,6 +66,18 @@ function endpointCosts(
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe("provider-parity: credit costs match build gate charges", () => {
+  it("anthropic Lite uses the approved flat 13-credit price", () => {
+    expect(creditCostFor("lite", "anthropic")).toBe(13);
+  });
+
+  it("all providers expose the same approved standard cost table", () => {
+    const expected = { lite: 13, eco: 34, power: 160, pro: 475 };
+
+    for (const provider of ["openai", "anthropic", "gemini", "deepseek"] as const) {
+      expect(makeCostTable(provider).standard).toEqual(expected);
+    }
+  });
+
   it("openai — build and refine costs equal gate charges for every mode", () => {
     const costs = endpointCosts("openai", "openai");
     for (const mode of ["lite", "eco", "power", "pro"] as const) {
@@ -75,7 +87,7 @@ describe("provider-parity: credit costs match build gate charges", () => {
     }
   });
 
-  it("anthropic — standard costs equal gate charges (multiplier 1.6)", () => {
+  it("anthropic — standard costs equal flat gate charges", () => {
     const costs = endpointCosts("anthropic", "anthropic");
     for (const mode of ["lite", "eco", "power", "pro"] as const) {
       const expected = creditCostFor(mode, "anthropic");
@@ -84,7 +96,7 @@ describe("provider-parity: credit costs match build gate charges", () => {
     }
   });
 
-  it("gemini — standard costs equal gate charges (multiplier 0.7)", () => {
+  it("gemini — standard costs equal flat gate charges", () => {
     const costs = endpointCosts("gemini", "gemini");
     for (const mode of ["lite", "eco", "power", "pro"] as const) {
       const expected = creditCostFor(mode, "gemini");
@@ -93,7 +105,7 @@ describe("provider-parity: credit costs match build gate charges", () => {
     }
   });
 
-  it("deepseek — standard costs equal gate charges (multiplier 0.5)", () => {
+  it("deepseek — standard costs equal flat gate charges", () => {
     const costs = endpointCosts("deepseek", "deepseek");
     for (const mode of ["lite", "eco", "power", "pro"] as const) {
       const expected = creditCostFor(mode, "deepseek");
@@ -102,14 +114,14 @@ describe("provider-parity: credit costs match build gate charges", () => {
     }
   });
 
-  it("build=openai, refine=anthropic — stage costs are independently resolved", () => {
+  it("build=openai, refine=anthropic — stage resolution keeps flat prices", () => {
     const costs = endpointCosts("openai", "anthropic");
     for (const mode of ["eco", "power", "pro"] as const) {
       const buildExpected = creditCostFor(mode, "openai");
       const refineExpected = creditCostFor(mode, "anthropic");
       expect(costs.build.standard[mode]).toBe(buildExpected);
       expect(costs.refine.standard[mode]).toBe(refineExpected);
-      expect(costs.build.standard[mode]).not.toBe(costs.refine.standard[mode]);
+      expect(costs.build.standard[mode]).toBe(costs.refine.standard[mode]);
     }
   });
 

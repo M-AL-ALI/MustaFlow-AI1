@@ -178,9 +178,29 @@ export async function deductCreditsAtomic(
 ): Promise<CreditDeductionResult> {
   const credits = await getOrCreateCredits(userId);
 
-  // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. No
-  // deduction, no transaction row, never "insufficient".
+  // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. Record
+  // the authorized zero-value operation so Usage and telemetry stay complete;
+  // no deduction, no transaction row, never "insufficient".
   if (await isSuperuser(userId)) {
+    try {
+      const nabuflow = await import("../lib/nabuflow-billing");
+      await nabuflow.recordZeroChargeUsage(userId, {
+        projectId: opts.projectId ?? null,
+        taskId: opts.taskId ?? null,
+        type: opts.type,
+        description: opts.description,
+        engineMode: opts.engineMode ?? null,
+        deepReasoning: opts.deepReasoning ?? false,
+        source: opts.source ?? null,
+        settlementKey: opts.settlementKey ?? null,
+      });
+    } catch (err) {
+      logger.error(
+        { err, userId, taskId: opts.taskId ?? null, settlementKey: opts.settlementKey ?? null },
+        "Failed to record superuser zero-charge usage",
+      );
+      if (opts.settlementKey) throw err;
+    }
     return { newBalance: credits.balance, charged: 0 };
   }
 

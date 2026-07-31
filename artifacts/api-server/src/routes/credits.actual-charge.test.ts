@@ -186,19 +186,82 @@ describe("deductCreditsAtomic actual charge reporting", () => {
       }),
     ).resolves.toEqual({ newBalance: 50, charged: 0 });
     expect(mocks.isBuilderAllowlistExempt).not.toHaveBeenCalled();
+    expect(mocks.recordZeroChargeUsage).not.toHaveBeenCalled();
   });
 
-  it("returns an actual charge of zero for a superuser", async () => {
+  it("records one idempotent zero-value usage event for a retried superuser build", async () => {
+    const usageRows = new Map<string, { userId: string; opts: Record<string, unknown> }>();
     mocks.isSuperuser.mockResolvedValue(true);
+    mocks.recordZeroChargeUsage.mockImplementation(
+      async (userId: string, opts: Record<string, unknown>) => {
+        const settlementKey = opts.settlementKey;
+        if (typeof settlementKey === "string" && !usageRows.has(settlementKey)) {
+          usageRows.set(settlementKey, { userId, opts });
+        }
+      },
+    );
+    const deductCreditsAtomic = await loadDeduction(true);
+    const opts = {
+      type: "build" as const,
+      description: "Lite build",
+      projectId: 47,
+      taskId: 177,
+      engineMode: "lite",
+      deepReasoning: false,
+      source: "pipeline",
+      settlementKey: "task-credit:177:pipeline",
+    };
+
+    await expect(deductCreditsAtomic("owner-1", 13, opts)).resolves.toEqual({
+      newBalance: 50,
+      charged: 0,
+    });
+    await expect(deductCreditsAtomic("owner-1", 13, opts)).resolves.toEqual({
+      newBalance: 50,
+      charged: 0,
+    });
+
+    expect(mocks.recordZeroChargeUsage).toHaveBeenCalledTimes(2);
+    expect(usageRows).toEqual(
+      new Map([
+        [
+          "task-credit:177:pipeline",
+          {
+            userId: "owner-1",
+            opts,
+          },
+        ],
+      ]),
+    );
+    expect(mocks.isBuilderAllowlistExempt).not.toHaveBeenCalled();
+    expect(mocks.updateReturning).not.toHaveBeenCalled();
+  });
+
+  it("keeps a best-effort superuser ledger failure non-blocking without a settlement key", async () => {
+    mocks.isSuperuser.mockResolvedValue(true);
+    mocks.recordZeroChargeUsage.mockRejectedValueOnce(new Error("ledger unavailable"));
     const deductCreditsAtomic = await loadDeduction(true);
 
     await expect(
-      deductCreditsAtomic("owner-1", 5, {
+      deductCreditsAtomic("owner-1", 13, {
         type: "build",
-        description: "Power build",
+        description: "Lite build",
       }),
     ).resolves.toEqual({ newBalance: 50, charged: 0 });
-    expect(mocks.isBuilderAllowlistExempt).not.toHaveBeenCalled();
+  });
+
+  it("throws a superuser ledger failure when durable settlement can retry it", async () => {
+    mocks.isSuperuser.mockResolvedValue(true);
+    mocks.recordZeroChargeUsage.mockRejectedValueOnce(new Error("ledger unavailable"));
+    const deductCreditsAtomic = await loadDeduction(true);
+
+    await expect(
+      deductCreditsAtomic("owner-1", 13, {
+        type: "build",
+        description: "Lite build",
+        settlementKey: "task-credit:178:pipeline",
+      }),
+    ).rejects.toThrow("ledger unavailable");
   });
 
   it("returns the unchanged actual amount for a charged non-exempt owner", async () => {
