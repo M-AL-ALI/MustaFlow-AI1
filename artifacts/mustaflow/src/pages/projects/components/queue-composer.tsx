@@ -1203,6 +1203,7 @@ export function QueueComposer({
           body: JSON.stringify({
             messages: variantMessages,
             agentMode,
+            deepReasoning,
             planMode,
             agentIdentity: agentType,
           }),
@@ -1264,7 +1265,13 @@ export function QueueComposer({
       const res = await authFetch(`/api/projects/${projectId}/queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, agentMode, planMode, agentIdentity: agentType }),
+        body: JSON.stringify({
+          messages,
+          agentMode,
+          deepReasoning,
+          planMode,
+          agentIdentity: agentType,
+        }),
         credentials: "include",
       });
       if (!res.ok) {

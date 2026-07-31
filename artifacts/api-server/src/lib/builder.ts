@@ -4,6 +4,7 @@ import { checkSyntax } from "./checks/syntax-checker";
 import { runTsCheck, formatTsErrors } from "./checks/ts-checker";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
+import { creditCostFor, resolveStageProvider } from "./ai-providers";
 import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
@@ -7914,7 +7915,14 @@ export type ConverseResult = {
   };
 };
 
-const MUSTAFLOW_PLATFORM_PRIMER = `MUSTAFLOW PLATFORM KNOWLEDGE — you are the in-app assistant inside MustaFlow, an AI app builder for non-technical users. Know these features cold and reference them by their real names so users can find them in the UI.
+function createMustaflowPlatformPrimer(): string {
+  const { provider } = resolveStageProvider("build", "eco");
+  const liteCost = creditCostFor("lite", provider);
+  const ecoCost = creditCostFor("eco", provider);
+  const powerCost = creditCostFor("power", provider);
+  const proCost = creditCostFor("pro", provider);
+
+  return `MUSTAFLOW PLATFORM KNOWLEDGE — you are the in-app assistant inside MustaFlow, an AI app builder for non-technical users. Know these features cold and reference them by their real names so users can find them in the UI.
 
 WHAT MUSTAFLOW BUILDS
 - Web apps: static HTML/CSS/JS using Tailwind + lucide via CDN (the default and most reliable kind).
@@ -7927,11 +7935,11 @@ WORKSPACE LAYOUT (so you can point users at the right place)
 - Bottom: the NabuFlow chat (where you live). It has a Plan Mode toggle and a Lite / Eco / Power / Pro agent-mode picker.
 
 AGENT MODES (route to different OpenAI models, different cost in credits)
-- Lite (1 credit) — fastest, smallest model. Quick tweaks, tiny UI changes.
-- Eco (2 credits) — balanced. Default for most refines.
-- Power (5 credits) — higher-quality model + a critique pass for holistic review.
-- Pro (10 credits) — top-tier model + critique pass. Best for complex multi-page or backend work.
-- New users get 100 starter credits. Recommend higher modes only when the request genuinely needs them.
+- Lite (${liteCost} credits) — fastest, smallest model. Quick tweaks, tiny UI changes.
+- Eco (${ecoCost} credits) — balanced. Default for most refines.
+- Power (${powerCost} credits) — higher-quality model + a critique pass for holistic review.
+- Pro (${proCost} credits) — top-tier model + critique pass. Best for complex multi-page or backend work.
+- Recommend higher modes only when the request genuinely needs them.
 
 PLAN MODE
 - The agent automatically detects planning requests. When a user asks to "plan", "design", "architect", "outline", or "create a spec/blueprint/roadmap", the agent produces a structured plan card (sitemap, pages, data model, integrations, risks, test plan) without writing files.
@@ -7973,6 +7981,7 @@ HELPING USERS BUILD THEIR OWN APPS
 - When a user is stuck, recommend the concrete tab/button to click in MustaFlow, not just generic web advice.
 - If a request is genuinely beyond what static previews can do (real auth, persistent DB, file uploads to S3), say so honestly and suggest the React+Vite or backend kinds, or external services they can integrate.
 - Cite the user's own files and existing code when answering. Be specific, not generic.`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Developer-intent system prompts
@@ -8048,11 +8057,12 @@ Structure your explanation:
 
 Use code blocks to illustrate specific points. Keep explanations precise; avoid over-simplifying for non-technical readers unless the user's question is clearly non-technical.`;
 
-export const CONVERSE_SYSTEM_PROMPT = `You are the MustaFlow AI assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through MustaFlow's features. In this mode you are explaining, not editing — but you ARE a full-capability builder in other modes.
+export function createConverseSystemPrompt(): string {
+  return `You are the MustaFlow AI assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through MustaFlow's features. In this mode you are explaining, not editing — but you ARE a full-capability builder in other modes.
 
 ${DEVELOPER_TONE_ADAPTIVE}
 
-${MUSTAFLOW_PLATFORM_PRIMER}
+${createMustaflowPlatformPrimer()}
 
 CRITICAL — do not misrepresent your capabilities:
 - You CAN build, edit, and refine apps. You have a real tool-calling agent loop that reads/writes files, runs commands inside the project's container, runs tests, and iterates until checks pass. You are NOT an "advisory copilot that cannot modify files."
@@ -8085,6 +8095,10 @@ Your responses:
 - Never produce JSON, build reports, or file modifications in this mode
 - Keep responses focused — 2-4 paragraphs for explanations, shorter for simple questions
 - If the user asks something you genuinely don't know about their codebase, say so and tell them which file or tab to check`;
+}
+
+/** Static compatibility export for prompt-evaluation tooling. Runtime paths use the factory. */
+export const CONVERSE_SYSTEM_PROMPT = createConverseSystemPrompt();
 
 const CLARIFY_SYSTEM_PROMPT = `You are the MustaFlow AI assistant. The user's request is ambiguous — it could mean different things. Ask ONE short, friendly clarifying question and provide 2-3 specific quick-reply options.
 
@@ -8168,7 +8182,7 @@ export async function runConversePipeline(args: {
           .join("\n\n")
       : "No files yet — the app hasn't been built.";
 
-  const effectiveSystemPrompt = systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT;
+  const effectiveSystemPrompt = systemPromptOverride ?? createConverseSystemPrompt();
   const model = modelFor(agentMode);
 
   type TextPart = { type: "text"; text: string };
@@ -8343,7 +8357,7 @@ export async function runConverseStreamPipeline(
       : "No project files yet — starting fresh.";
 
   const model = modelFor(agentMode);
-  const _effectiveSystemPromptStream = systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT;
+  const _effectiveSystemPromptStream = systemPromptOverride ?? createConverseSystemPrompt();
 
   type TextPart = { type: "text"; text: string };
   type ImagePart = { type: "image_url"; image_url: { url: string } };
@@ -8352,7 +8366,7 @@ export async function runConverseStreamPipeline(
     | { role: "user"; content: string | Array<TextPart | ImagePart> };
 
   const messages: ChatMsg[] = [
-    { role: "system", content: systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT },
+    { role: "system", content: systemPromptOverride ?? createConverseSystemPrompt() },
     {
       role: "system",
       content: `Project: "${projectName}"\n\nCurrent files:\n${fileContext}`,

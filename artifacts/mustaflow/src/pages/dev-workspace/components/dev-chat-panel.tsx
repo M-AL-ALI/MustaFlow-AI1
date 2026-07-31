@@ -37,6 +37,7 @@ import {
   getListTaskEventsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -214,16 +215,14 @@ function PersistedToolEvents({
 const AGENT_MODES: {
   value: AgentMode;
   label: string;
-  credits: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { value: "lite", label: "Lite", credits: "1 cr", icon: Zap },
-  { value: "eco", label: "Eco", credits: "2 cr", icon: Layers2 },
-  { value: "power", label: "Power", credits: "5 cr", icon: Brain },
+  { value: "lite", label: "Lite", icon: Zap },
+  { value: "eco", label: "Eco", icon: Layers2 },
+  { value: "power", label: "Power", icon: Brain },
   {
     value: "pro",
     label: "Pro",
-    credits: "10 cr",
     icon: DynamicAtom as React.ComponentType<{ className?: string }>,
   },
 ];
@@ -236,6 +235,7 @@ interface DevChatPanelProps {
 export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const creditCosts = useBuilderCreditCosts();
 
   const [prompt, setPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<AgentMode>(loadPersistedMode);
@@ -640,7 +640,15 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
     [doSend],
   );
 
-  const currentMode = AGENT_MODES.find((m) => m.value === agentMode) ?? AGENT_MODES[2]!;
+  const agentModes = useMemo(
+    () =>
+      AGENT_MODES.map((mode) => ({
+        ...mode,
+        credits: `${creditCosts.standard[mode.value]} cr`,
+      })),
+    [creditCosts],
+  );
+  const currentMode = agentModes.find((m) => m.value === agentMode) ?? agentModes[2]!;
 
   return (
     <div className="flex flex-col h-full bg-zinc-950 min-w-0 overflow-hidden">
@@ -972,7 +980,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                   </Tooltip>
                   {showModeMenu && (
                     <div className="absolute bottom-full left-0 mb-1 z-50 bg-zinc-900 border border-border rounded-xl shadow-xl overflow-hidden min-w-[140px]">
-                      {AGENT_MODES.map(({ value, label, credits }) => (
+                      {agentModes.map(({ value, label, credits }) => (
                         <button
                           key={value}
                           onClick={() => {

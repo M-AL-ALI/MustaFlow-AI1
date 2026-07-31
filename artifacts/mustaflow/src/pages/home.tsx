@@ -50,6 +50,7 @@ import {
   useCreateProject,
   getListProjectsQueryKey,
   getGetProjectQueryKey,
+  useListNabuflowPlans,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -283,6 +284,19 @@ const HOW_IT_WORKS = [
 
 export default function HomePage() {
   const { isSignedIn } = useAuthState();
+  const { data: nabuflowPlansData } = useListNabuflowPlans();
+  const nabuflowPlans = (nabuflowPlansData?.plans ?? []).filter(
+    (plan): plan is typeof plan & { priceUsd: number } =>
+      plan.available && typeof plan.priceUsd === "number",
+  );
+  const cheapestNabuflowPlan = nabuflowPlans.reduce<typeof nabuflowPlans[number] | null>(
+    (cheapest, plan) => (!cheapest || plan.priceUsd < cheapest.priceUsd ? plan : cheapest),
+    null,
+  );
+  const rolloverPlanNames = nabuflowPlans
+    .filter((plan) => plan.rolloverCycles > 0)
+    .map((plan) => plan.name)
+    .join(" and ");
   const [, setLocation] = useLocation();
   const [prompt, setPrompt] = useState("");
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
@@ -1137,19 +1151,20 @@ export default function HomePage() {
                     Pick a plan and start shipping
                   </h2>
                   <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
-                    Orbit, Comet, and Nova — credit-based builder plans from $20/month. Unused credits roll over.
-                    Pay-as-you-go overage only when your monthly bucket runs out.
-                    Enterprise teams get Constellation with pooled credits and org-wide spend caps.
+                    {nabuflowPlans.length > 0 && cheapestNabuflowPlan
+                      ? `${nabuflowPlans.map((plan) => plan.name).join(", ")} — credit-based builder plans from $${cheapestNabuflowPlan.priceUsd}/month.`
+                      : "Credit-based builder plans with included monthly credits."}{" "}
+                    {rolloverPlanNames
+                      ? `Unused credits roll over on ${rolloverPlanNames}.`
+                      : "Rollover is available on eligible plans."}{" "}
+                    Pay-as-you-go overage only when your monthly bucket runs out. Enterprise teams get
+                    Constellation with pooled credits and org-wide spend caps.
                   </p>
                   <div className="flex flex-wrap gap-3 mt-4 text-xs text-muted-foreground">
-                    {[
-                      "Orbit · $20 / 1,600 credits",
-                      "Comet · $50 / 4,000 credits",
-                      "Nova · $100 / 8,000 credits",
-                    ].map((label) => (
-                      <span key={label} className="flex items-center gap-1.5">
+                    {nabuflowPlans.map((plan) => (
+                      <span key={plan.id} className="flex items-center gap-1.5">
                         <CheckCircle2 className="h-3 w-3 text-primary/60 shrink-0" />
-                        {label}
+                        {plan.name} · ${plan.priceUsd} / {plan.includedMonthlyCredits.toLocaleString()} credits
                       </span>
                     ))}
                   </div>

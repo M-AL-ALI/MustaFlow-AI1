@@ -179,7 +179,7 @@ function NabuFlowPlansSection({
   }
 
   function handlePlanCta(planId: string) {
-    const dest = `/billing-usage/plans?highlight=${encodeURIComponent(planId)}`;
+    const dest = `/billing/plans?highlight=${encodeURIComponent(planId)}`;
     if (!isSignedIn) {
       navigate(`/sign-up?redirect=${encodeURIComponent(dest)}`);
     } else {
@@ -752,7 +752,11 @@ export default function PricingPage() {
           },
           {
             q: "What if a build fails?",
-            a: "Credits are only deducted for successful builds. Platform errors are not charged.",
+            // Audit: jobs.ts charges standard builds/refines and staged applies
+            // post-success; jobs.ts architect review, agent-loop.ts search/media,
+            // background reservations, and builds.ts Mobile/EAS work charge when
+            // their service is used or started.
+            a: "Build and refine credits are deducted after successful completion. Architecture reviews, AI tools such as search and media, background work, and Mobile builds are charged when those services are used or started and aren't refundable.",
           },
           {
             q: "How does credit rollover work on NabuFlow Builder plans?",
@@ -779,12 +783,10 @@ export default function PricingPage() {
         <div className="rounded-2xl bg-primary/5 border border-primary/20 p-10 space-y-4">
           <Zap className="h-8 w-8 text-primary mx-auto" />
           <h2 className="text-2xl font-bold">Start building today</h2>
-          <p className="text-sm text-muted-foreground">
-            100 free credits on sign-up. No credit card required.
-          </p>
+          <p className="text-sm text-muted-foreground">Start your first build in minutes.</p>
           <Button asChild size="lg" className="gap-2">
             <Link href={isSignedIn ? "/projects" : "/sign-up"}>
-              {isSignedIn ? "Go to dashboard" : "Get started for free"}
+              {isSignedIn ? "Go to dashboard" : "Get started"}
               <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>

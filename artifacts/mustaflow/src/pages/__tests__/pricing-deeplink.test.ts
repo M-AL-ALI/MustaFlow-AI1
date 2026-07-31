@@ -9,6 +9,12 @@ function readPage(relPath: string): string {
 }
 
 describe("pricing and ora-settings deep-link wiring", () => {
+  it("sends every NabuFlow plan CTA to the registered billing plans route", () => {
+    const pricing = readPage("pricing.tsx");
+    expect(pricing).toContain("`/billing/plans?highlight=${encodeURIComponent(planId)}`");
+    expect(pricing).not.toContain("/billing-usage/plans");
+  });
+
   it("pricing page reads tier param from URL search string", () => {
     const pricing = readPage("pricing.tsx");
     expect(pricing).toContain("useSearch");

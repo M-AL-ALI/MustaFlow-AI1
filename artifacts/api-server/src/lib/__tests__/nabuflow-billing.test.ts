@@ -47,7 +47,13 @@ const h = vi.hoisted(() => {
   };
 
   const mockDb = {
-    select: () => ({ from: () => ({ where: () => makeWhereResult() }) }),
+    select: () => ({
+      from: () => ({
+        where: () => makeWhereResult(),
+        innerJoin: () => ({ where: () => makeWhereResult() }),
+        leftJoin: () => ({ where: () => makeWhereResult() }),
+      }),
+    }),
     insert: () => ({
       values: (v: Record<string, unknown>) => {
         state.inserted.push(v);
@@ -123,6 +129,14 @@ vi.mock("../emailClient", async () => ({
 vi.mock("../nabuflow-stripe", async () => ({
   createNabuflowOverageInvoiceItem: vi.fn(async () => ({ id: "ii_test" })),
   deleteNabuflowInvoiceItem: vi.fn(async () => undefined),
+}));
+
+vi.mock("../nabuflow-org", async () => ({
+  resolveNabuflowOrgContext: vi.fn(async () => null),
+  getNabuflowOrgSeatContext: vi.fn(async () => null),
+  buildNabuflowOrgGateInfo: vi.fn(async () => null),
+  chargeNabuflowOrgPool: vi.fn(async () => ({ poolCredits: 0 })),
+  refundNabuflowOrgPool: vi.fn(async () => 0),
 }));
 
 import {
@@ -448,7 +462,7 @@ describe("spend cap", () => {
 
   it("blocks when projected overage would exceed the cap — honest message, never mid-flight", () => {
     // Bucket exhausted; existing overage $24.00 of a $25.00 cap; 100 more
-    // credits at Orbit's $0.012 = $1.20 projected → over.
+    // credits at Orbit's configured rate push the request above the cap.
     const d = evalGate(
       gateState("orbit", {}, { usedIncludedCredits: 1800, overageUsdCents: 2400 }),
       { engineMode: "power", projectedCredits: 100 },
@@ -458,16 +472,32 @@ describe("spend cap", () => {
   });
 
   it("allows when projected overage stays within the cap (partial bucket split)", () => {
-    // 50 credits left in bucket, 100 projected → only 50 metered = $0.60.
+    const plan = NABUFLOW_PLANS.orbit;
+    const projectedCredits = 100;
+    const remainingIncluded = 50;
+    const projectedOverageCents = nabuflowOverageCents(
+      plan,
+      projectedCredits - remainingIncluded,
+    );
+    const safeExistingOverage = 2500 - projectedOverageCents;
+
+    // The request consumes the last included credits, then bills only the
+    // remainder. Derive the boundary from the current configured rate.
     const d = evalGate(
-      gateState("orbit", {}, { usedIncludedCredits: 1750, overageUsdCents: 2440 }),
-      { engineMode: "power", projectedCredits: 100 },
+      gateState("orbit", {}, {
+        usedIncludedCredits: plan.includedMonthlyCredits - remainingIncluded,
+        overageUsdCents: safeExistingOverage,
+      }),
+      { engineMode: "power", projectedCredits },
     );
     expect(d.allowed).toBe(true);
 
     const over = evalGate(
-      gateState("orbit", {}, { usedIncludedCredits: 1750, overageUsdCents: 2441 }),
-      { engineMode: "power", projectedCredits: 100 },
+      gateState("orbit", {}, {
+        usedIncludedCredits: plan.includedMonthlyCredits - remainingIncluded,
+        overageUsdCents: safeExistingOverage + 1,
+      }),
+      { engineMode: "power", projectedCredits },
     );
     expectBlocked(over, "spend_cap_reached");
   });
@@ -483,16 +513,22 @@ describe("cycle math", () => {
   });
 
   it("rollover: Orbit none; Comet one cycle capped at a month's allotment", () => {
-    expect(computeNabuflowRollover(NABUFLOW_PLANS.orbit, 1800, 500)).toBe(0);
-    expect(computeNabuflowRollover(NABUFLOW_PLANS.comet, 4800, 3800)).toBe(1000);
-    expect(computeNabuflowRollover(NABUFLOW_PLANS.comet, 9600, 0)).toBe(4800);
-    expect(computeNabuflowRollover(NABUFLOW_PLANS.comet, 4800, 6000)).toBe(0);
+    const orbit = NABUFLOW_PLANS.orbit;
+    const comet = NABUFLOW_PLANS.comet;
+    expect(computeNabuflowRollover(orbit, orbit.includedMonthlyCredits, 500)).toBe(0);
+    expect(computeNabuflowRollover(comet, comet.includedMonthlyCredits, 3800)).toBe(
+      Math.min(comet.includedMonthlyCredits - 3800, comet.rolloverMaxCredits),
+    );
+    expect(computeNabuflowRollover(comet, comet.includedMonthlyCredits * 2, 0)).toBe(
+      comet.rolloverMaxCredits,
+    );
+    expect(computeNabuflowRollover(comet, comet.includedMonthlyCredits, comet.includedMonthlyCredits + 1)).toBe(0);
   });
 
-  it("overage pricing per plan: $0.012 / $0.011 / $0.010 per credit", () => {
-    expect(nabuflowOverageCents(NABUFLOW_PLANS.orbit, 100)).toBe(120);
-    expect(nabuflowOverageCents(NABUFLOW_PLANS.comet, 100)).toBe(110);
-    expect(nabuflowOverageCents(NABUFLOW_PLANS.nova, 100)).toBe(100);
+  it("overage pricing per plan follows the live plan configuration", () => {
+    for (const plan of [NABUFLOW_PLANS.orbit, NABUFLOW_PLANS.comet, NABUFLOW_PLANS.nova]) {
+      expect(nabuflowOverageCents(plan, 100)).toBe(Math.round(plan.overageUsdPerCredit * 100 * 100));
+    }
   });
 
   it("spend-cap clamping: null → default, user value clamped to tier max", () => {
@@ -551,13 +587,19 @@ describe("simulated cycle rollover", () => {
   });
 
   it("chains through skipped idle cycles and stays capped at one month's allotment", () => {
+    const comet = NABUFLOW_PLANS.comet;
     const next = simulateNabuflowCycleAdvance(
-      NABUFLOW_PLANS.comet,
-      { cycleStart: JUL1, cycleEnd: AUG1, includedCredits: 4800, usedIncludedCredits: 3800 },
+      comet,
+      {
+        cycleStart: JUL1,
+        cycleEnd: AUG1,
+        includedCredits: comet.includedMonthlyCredits,
+        usedIncludedCredits: comet.includedMonthlyCredits - 1000,
+      },
       new Date("2026-09-10T00:00:00Z"), // skips the entire August cycle
     );
     expect(next.cycleStart.toISOString()).toBe("2026-09-01T00:00:00.000Z");
-    expect(next.rolloverCredits).toBe(4800); // min(4800 + 1000, cap 4800)
+    expect(next.rolloverCredits).toBe(comet.rolloverMaxCredits);
   });
 });
 

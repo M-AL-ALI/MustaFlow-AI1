@@ -11,6 +11,8 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL ?? "postgres://noop@localhost:5432/noop";
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +160,35 @@ test("missing provider credentials fall back to openai for both stages", () => {
   const fallback = creditCostFor("power", "openai");
   assert.equal(costs.build.standard.power, fallback, "build fallback");
   assert.equal(costs.refine.standard.power, fallback, "refine fallback");
+});
+
+// 8. The frontend's synchronous fallback tables must stay aligned with the
+// OpenAI server defaults used while the live endpoint is loading.
+test("frontend fallback cost tables equal OpenAI server costs", () => {
+  const source = readFileSync(
+    resolve(process.cwd(), "../mustaflow/src/lib/builder-followup-submit.ts"),
+    "utf8",
+  );
+  const standard = source.match(
+    /export const BUILDER_CREDIT_COST = \{\s*lite:\s*(\d+),\s*eco:\s*(\d+),\s*power:\s*(\d+),\s*pro:\s*(\d+),\s*\}/s,
+  );
+  const deep = source.match(
+    /export const DEEP_BUILDER_CREDIT_COST = \{\s*eco:\s*(\d+),\s*power:\s*(\d+),\s*pro:\s*(\d+),\s*\}/s,
+  );
+  assert.ok(standard, "could not read frontend standard fallback table");
+  assert.ok(deep, "could not read frontend Deep fallback table");
+
+  const modes = ["lite", "eco", "power", "pro"] as const;
+  for (const [index, mode] of modes.entries()) {
+    assert.equal(Number(standard[index + 1]), creditCostFor(mode, "openai"), `standard.${mode}`);
+  }
+  for (const [index, mode] of (["eco", "power", "pro"] as const).entries()) {
+    assert.equal(
+      Number(deep[index + 1]),
+      DEEP_REASONING_CREDIT_COST[mode],
+      `deep.${mode}`,
+    );
+  }
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed`);

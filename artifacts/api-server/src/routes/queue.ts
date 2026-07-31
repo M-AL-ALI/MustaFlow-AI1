@@ -7,23 +7,18 @@ import { logger } from "../lib/logger";
 import { z } from "zod";
 import type { AgentMode } from "../lib/ai";
 import type { AgentIdentity } from "../lib/jobs";
+import { estimateQueueCreditCost } from "../lib/queue-credit-costs";
 
 const router: IRouter = Router();
 
 const SubmitQueueBody = z.object({
   messages: z.array(z.string().min(1)).min(1).max(20),
   agentMode: z.enum(["lite", "eco", "power", "pro"]),
+  deepReasoning: z.boolean().optional().default(false),
   planMode: z.boolean().optional().default(false),
   /** Legacy client hint. New queued work always executes through Main Agent. */
   agentIdentity: z.enum(["planning", "task", "main"]).optional().default("main"),
 });
-
-const CREDIT_COST: Record<string, number> = {
-  lite: 1,
-  eco: 2,
-  power: 5,
-  pro: 10,
-};
 
 router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = parseInt(String(req.params.id ?? ""), 10);
@@ -44,22 +39,31 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
     return;
   }
 
-  const { messages, agentMode, planMode } = parsed.data;
+  const { messages, agentMode, deepReasoning, planMode } = parsed.data;
   const mode = agentMode as AgentMode;
   const batchAgentIdentity: AgentIdentity = "main";
 
-  // NabuFlow billing gate (Task #1516) — batch preflight. Refuses the whole
-  // batch when the plan/card/cap/ladder can't support it; each task is also
-  // re-gated at drain time in runJob (authoritative, per-build).
+  const [existing] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
+  const hasFiles = (existing?.c ?? 0) > 0;
+
+  const totalCost = estimateQueueCreditCost({
+    taskCount: messages.length,
+    hasFiles,
+    agentMode: mode,
+    deepReasoning,
+  });
+
+  // NabuFlow billing gate — batch preflight. Refuses the whole batch when the
+  // plan/card/cap/ladder cannot support it; each task is also re-gated at drain
+  // time in runJob (authoritative, per-build).
   if (project.ownerId) {
-    const { creditCostFor, resolveStageProvider } = await import("../lib/ai-providers");
-    const { provider } = resolveStageProvider("build", mode);
-    const perBuildCost = creditCostFor(mode, provider, false);
     const { nabuflowGateHttpError } = await import("../lib/nabuflow-billing");
     const gateErr = await nabuflowGateHttpError(project.ownerId, {
       engineMode: mode,
-      deepReasoning: false,
-      projectedCredits: perBuildCost * messages.length,
+      deepReasoning,
+      projectedCredits: totalCost,
       source: "queue",
     });
     if (gateErr) {
@@ -70,11 +74,6 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
 
   const batchId = crypto.randomUUID();
   const taskIds: number[] = [];
-
-  const [existing] = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
-  const hasFiles = (existing?.c ?? 0) > 0;
 
   for (let i = 0; i < messages.length; i++) {
     const content = messages[i]!;
@@ -107,6 +106,8 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
         prompt: content,
         queueBatchId: batchId,
         queueIndex: i,
+        taskAgentMode: mode,
+        deepReasoning,
         agentIdentity: batchAgentIdentity,
       })
       .returning();
@@ -142,14 +143,12 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
         kind,
         userPrompt: content,
         agentMode: mode,
+        deepReasoning,
         agentIdentity: batchAgentIdentity,
         conversationHistory,
       });
     }
   }
-
-  const creditCost = CREDIT_COST[mode] ?? 1;
-  const totalCost = creditCost * messages.length;
 
   await db
     .update(projectsTable)

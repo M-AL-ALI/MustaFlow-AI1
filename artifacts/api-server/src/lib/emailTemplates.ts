@@ -49,13 +49,13 @@ export function welcomeTemplate(opts: {
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">You're all set.</h2>
   <p>${greeting}</p>
-  <p>Your account is ready and you have <strong>100 credits</strong> to get started. Just describe what you want to build and MustaFlow will plan, write, and preview it for you — no code required.</p>
+  <p>Your account is ready to get started. Just describe what you want to build and MustaFlow will plan, write, and preview it for you — no code required.</p>
   ${ctaButton("Build your first app", ctaUrl)}
   <p style="font-size:13px;color:#4b5563">
     Not sure what to build? Try something like <em>"a personal expense tracker"</em> or <em>"a landing page for my bakery."</em>
   </p>`);
 
-  const text = `${greeting}\n\nYour MustaFlow account is ready. You have 100 credits to start building.\n\nDescribe your first app idea here: ${ctaUrl}`;
+  const text = `${greeting}\n\nYour MustaFlow account is ready to start building.\n\nDescribe your first app idea here: ${ctaUrl}`;
 
   return { subject, html, text };
 }
@@ -115,10 +115,10 @@ export function lowCreditTemplate(opts: { balance: number; topUpUrl: string }): 
   const html = wrap(`
   <h2 style="margin-top:0;color:#d97706">Running low on credits</h2>
   <p>Your MustaFlow account has <strong>${balance} credit${balance === 1 ? "" : "s"}</strong> remaining.</p>
-  <p>Each build uses 1–10 credits depending on the mode you choose. Top up now to keep building without interruption.</p>
+  <p>Each build uses credits based on the mode you choose. Top up now to keep building without interruption.</p>
   ${ctaButton("Top up credits", topUpUrl, "#d97706")}
   <p style="font-size:13px;color:#4b5563">
-    Current costs: Lite = 1, Eco = 2, Power = 5, Pro = 10 credits per build.
+    Check your plan's current credit costs in billing settings.
   </p>`);
 
   const text = `You have ${balance} credit${balance === 1 ? "" : "s"} left on MustaFlow.\n\nTop up here: ${topUpUrl}`;
