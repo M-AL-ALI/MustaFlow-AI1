@@ -32,6 +32,7 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { Link, useSearch } from "wouter";
+import { BuilderCreditCostList } from "@/components/billing/builder-credit-cost-list";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -744,23 +745,7 @@ function OverviewTab({
             Credit costs per build
           </h3>
         </div>
-        <div className="divide-y divide-border">
-          {[
-            { mode: "Lite", cost: 1, desc: "Minimal correct change, fastest" },
-            { mode: "Eco", cost: 2, desc: "Clean typed code, no over-engineering" },
-            { mode: "Power", cost: 5, desc: "Production-ready TypeScript, full error handling" },
-            { mode: "Pro", cost: 10, desc: "Security-first strict mode, architectural clarity" },
-          ].map((row) => (
-            <div key={row.mode} className="flex items-center justify-between px-4 py-2.5 text-sm">
-              <span className="text-muted-foreground">
-                {row.mode} — {row.desc}
-              </span>
-              <span className="font-semibold">
-                {row.cost} credit{row.cost !== 1 ? "s" : ""}
-              </span>
-            </div>
-          ))}
-        </div>
+        <BuilderCreditCostList />
       </div>
 
       {/* Credit packs */}

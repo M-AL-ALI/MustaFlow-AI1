@@ -55,6 +55,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { BuilderCreditCostList } from "@/components/billing/builder-credit-cost-list";
 
 interface UserPrefs {
   emailBuildComplete?: boolean;
@@ -937,23 +938,7 @@ function CreditsTab() {
             Credit costs per build
           </h3>
         </div>
-        <div className="divide-y divide-border">
-          {[
-            { mode: "Lite", cost: 1, desc: "Fast, lightweight builds" },
-            { mode: "Eco", cost: 2, desc: "Balanced quality and speed" },
-            { mode: "Power", cost: 5, desc: "High-quality multi-file builds" },
-            { mode: "Pro", cost: 10, desc: "Maximum quality, extended context" },
-          ].map((row) => (
-            <div key={row.mode} className="flex items-center justify-between px-4 py-2.5 text-sm">
-              <span className="text-muted-foreground">
-                {row.mode} mode — {row.desc}
-              </span>
-              <span className="font-semibold">
-                {row.cost} credit{row.cost !== 1 ? "s" : ""}
-              </span>
-            </div>
-          ))}
-        </div>
+        <BuilderCreditCostList />
       </div>
 
       {/* Transaction history */}

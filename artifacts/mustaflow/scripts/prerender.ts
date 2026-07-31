@@ -316,7 +316,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
   </section>
   <section aria-label="Builder credits">
     <h2>Builder credits</h2>
-    <p>Builder credits are used when the AI builds or refines your project. Credit costs: Lite mode = 1 credit, Eco mode = 2 credits, Power mode = 5 credits, Pro mode = 10 credits.</p>
+    <p>Builder credits are used when the AI builds or refines your project. Current build credit costs are shown on the live pricing page.</p>
   </section>
   <section aria-label="Ora usage limits">
     <h2>Ora AI assistant limits by plan</h2>
