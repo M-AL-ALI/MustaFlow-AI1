@@ -153,6 +153,7 @@ import {
   handleNabuflowSubscriptionEvent,
   handleNabuflowInvoicePaid,
   _clearNabuflowAllowlistCache,
+  isBuilderAllowlistExempt,
   type NabuflowGateState,
   type NabuflowGateRequest,
 } from "../nabuflow-billing";
@@ -164,6 +165,7 @@ import {
 } from "../nabuflow-plans";
 import { isSuperuser } from "../superusers";
 import { getClerkUserById } from "../clerk-users";
+import { hasBuilderAccess } from "../builder-access";
 
 const NOW = new Date("2026-07-30T12:00:00Z");
 const CYCLE_END = new Date("2026-08-15T00:00:00Z");
@@ -209,7 +211,10 @@ function evalGate(state: NabuflowGateState, request: NabuflowGateRequest = {}) {
 function expectBlocked(
   decision: ReturnType<typeof evaluateNabuflowGate>,
   code: string,
-): asserts decision is { allowed: false; error: NonNullable<Parameters<typeof nabuflowGateHttpBody>[0]> } {
+): asserts decision is {
+  allowed: false;
+  error: NonNullable<Parameters<typeof nabuflowGateHttpBody>[0]>;
+} {
   expect(decision.allowed).toBe(false);
   if (!decision.allowed) expect(decision.error.code).toBe(code);
 }
@@ -218,6 +223,7 @@ const ENV_KEYS = [
   "CREDITS_ENFORCEMENT",
   "NABUFLOW_BILLING_TEST_BYPASS",
   "BUILDER_ALLOWLIST",
+  "BILLING_EXEMPT_ALLOWLIST",
   "REPLIT_DEPLOYMENT",
 ] as const;
 let savedEnv: Record<string, string | undefined>;
@@ -453,10 +459,10 @@ describe("gate matrix", () => {
 // ─── Spend cap ───────────────────────────────────────────────────────────────
 describe("spend cap", () => {
   it("builds covered by the included bucket never hit the cap", () => {
-    const d = evalGate(
-      gateState("orbit", {}, { usedIncludedCredits: 0, overageUsdCents: 2499 }),
-      { engineMode: "power", projectedCredits: 100 },
-    );
+    const d = evalGate(gateState("orbit", {}, { usedIncludedCredits: 0, overageUsdCents: 2499 }), {
+      engineMode: "power",
+      projectedCredits: 100,
+    });
     expect(d.allowed).toBe(true);
   });
 
@@ -475,28 +481,33 @@ describe("spend cap", () => {
     const plan = NABUFLOW_PLANS.orbit;
     const projectedCredits = 100;
     const remainingIncluded = 50;
-    const projectedOverageCents = nabuflowOverageCents(
-      plan,
-      projectedCredits - remainingIncluded,
-    );
+    const projectedOverageCents = nabuflowOverageCents(plan, projectedCredits - remainingIncluded);
     const safeExistingOverage = 2500 - projectedOverageCents;
 
     // The request consumes the last included credits, then bills only the
     // remainder. Derive the boundary from the current configured rate.
     const d = evalGate(
-      gateState("orbit", {}, {
-        usedIncludedCredits: plan.includedMonthlyCredits - remainingIncluded,
-        overageUsdCents: safeExistingOverage,
-      }),
+      gateState(
+        "orbit",
+        {},
+        {
+          usedIncludedCredits: plan.includedMonthlyCredits - remainingIncluded,
+          overageUsdCents: safeExistingOverage,
+        },
+      ),
       { engineMode: "power", projectedCredits },
     );
     expect(d.allowed).toBe(true);
 
     const over = evalGate(
-      gateState("orbit", {}, {
-        usedIncludedCredits: plan.includedMonthlyCredits - remainingIncluded,
-        overageUsdCents: safeExistingOverage + 1,
-      }),
+      gateState(
+        "orbit",
+        {},
+        {
+          usedIncludedCredits: plan.includedMonthlyCredits - remainingIncluded,
+          overageUsdCents: safeExistingOverage + 1,
+        },
+      ),
       { engineMode: "power", projectedCredits },
     );
     expectBlocked(over, "spend_cap_reached");
@@ -522,12 +533,20 @@ describe("cycle math", () => {
     expect(computeNabuflowRollover(comet, comet.includedMonthlyCredits * 2, 0)).toBe(
       comet.rolloverMaxCredits,
     );
-    expect(computeNabuflowRollover(comet, comet.includedMonthlyCredits, comet.includedMonthlyCredits + 1)).toBe(0);
+    expect(
+      computeNabuflowRollover(
+        comet,
+        comet.includedMonthlyCredits,
+        comet.includedMonthlyCredits + 1,
+      ),
+    ).toBe(0);
   });
 
   it("overage pricing per plan follows the live plan configuration", () => {
     for (const plan of [NABUFLOW_PLANS.orbit, NABUFLOW_PLANS.comet, NABUFLOW_PLANS.nova]) {
-      expect(nabuflowOverageCents(plan, 100)).toBe(Math.round(plan.overageUsdPerCredit * 100 * 100));
+      expect(nabuflowOverageCents(plan, 100)).toBe(
+        Math.round(plan.overageUsdPerCredit * 100 * 100),
+      );
     }
   });
 
@@ -641,12 +660,44 @@ describe("enforcement & bypass", () => {
     expect(d).toEqual({ allowed: true, bypass: "superuser" });
   });
 
-  it("BUILDER_ALLOWLIST owner builds freely with no card and no charge", async () => {
+  it("lets an allowlisted payer build while keeping that account chargeable", async () => {
+    process.env.CREDITS_ENFORCEMENT = "true";
+    process.env.BUILDER_ALLOWLIST = "owner@x.com,payer@x.com";
+    process.env.BILLING_EXEMPT_ALLOWLIST = "owner@x.com";
+    vi.mocked(getClerkUserById).mockResolvedValue({ email: "payer@x.com" } as never);
+
+    expect(hasBuilderAccess("payer@x.com")).toBe(true);
+    await expect(isBuilderAllowlistExempt("user_payer")).resolves.toBe(false);
+    const d = await resolveNabuflowBuildGate("user_payer", {});
+    expect(d.allowed).toBe(false);
+  });
+
+  it("keeps the explicit billing owner exempt", async () => {
+    process.env.CREDITS_ENFORCEMENT = "true";
+    process.env.BUILDER_ALLOWLIST = "owner@x.com,payer@x.com";
+    process.env.BILLING_EXEMPT_ALLOWLIST = "owner@x.com";
+    vi.mocked(getClerkUserById).mockResolvedValue({ email: " Owner@X.com " } as never);
+
+    const d = await resolveNabuflowBuildGate("user_owner", { engineMode: "pro" });
+    expect(d).toEqual({ allowed: true, bypass: "allowlist" });
+  });
+
+  it("falls back to BUILDER_ALLOWLIST when BILLING_EXEMPT_ALLOWLIST is unset", async () => {
     process.env.CREDITS_ENFORCEMENT = "true";
     process.env.BUILDER_ALLOWLIST = "owner@x.com";
     vi.mocked(getClerkUserById).mockResolvedValue({ email: " Owner@X.com " } as never);
     const d = await resolveNabuflowBuildGate("user_owner", { engineMode: "pro" });
     expect(d).toEqual({ allowed: true, bypass: "allowlist" });
+  });
+
+  it("fails closed when BILLING_EXEMPT_ALLOWLIST contains a malformed entry", async () => {
+    process.env.CREDITS_ENFORCEMENT = "true";
+    process.env.BUILDER_ALLOWLIST = "owner@x.com";
+    process.env.BILLING_EXEMPT_ALLOWLIST = "owner@x.com,not-an-email";
+    vi.mocked(getClerkUserById).mockResolvedValue({ email: "owner@x.com" } as never);
+
+    const d = await resolveNabuflowBuildGate("user_owner", {});
+    expect(d.allowed).toBe(false);
   });
 
   it("allowlist lookup failure degrades CLOSED (no free builds on Clerk outage)", async () => {

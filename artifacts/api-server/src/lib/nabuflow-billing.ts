@@ -4,7 +4,7 @@
 // Single server-side authority for:
 //   • the canBuild gate — plan ∧ card-on-file ∧ under spend cap ∧ not
 //     dunning-paused ∧ engine-mode ladder (Pro/Deep counters) — with
-//     BUILDER_ALLOWLIST / superuser full bypass,
+//     BILLING_EXEMPT_ALLOWLIST / superuser full bypass,
 //   • cycle accounting — included credits drawn first (honoring rollover),
 //     then metered pay-as-you-go overage recorded for Stripe invoicing,
 //   • Pro/Deep metered counters (atomic with the charge),
@@ -44,7 +44,6 @@ import {
   type NabuflowPlanId,
 } from "./nabuflow-plans";
 import { isSuperuser } from "./superusers";
-import { parseBuilderAllowlist } from "./builder-access";
 import { getClerkUserById } from "./clerk-users";
 import { logger } from "./logger";
 import { enqueueBillingSettlement } from "./billing-settlement-outbox";
@@ -80,7 +79,7 @@ export function nabuflowTestBypassActive(): boolean {
   return process.env.NABUFLOW_BILLING_TEST_BYPASS === "true";
 }
 
-// Allowlist exemption cache: userId → { exempt, expiresAt } (5 min TTL).
+// Billing-exemption cache: userId → { exempt, expiresAt } (5 min TTL).
 const allowlistCache = new Map<string, { exempt: boolean; expiresAt: number }>();
 const ALLOWLIST_CACHE_TTL_MS = 5 * 60_000;
 
@@ -90,14 +89,39 @@ export function _clearNabuflowAllowlistCache(): void {
 }
 
 /**
- * True when the user's email is on the explicit BUILDER_ALLOWLIST. This is the
- * owner allow-list that bypasses billing entirely (no card, no charge).
+ * Parse the billing-only exemption list. An unset BILLING_EXEMPT_ALLOWLIST
+ * falls back to BUILDER_ALLOWLIST for deployment compatibility. An explicitly
+ * empty value exempts nobody. Any malformed entry disables all exemptions so
+ * configuration mistakes fail closed.
+ */
+export function parseBillingExemptAllowlist(
+  raw: string | undefined = process.env.BILLING_EXEMPT_ALLOWLIST,
+  fallbackRaw: string | undefined = process.env.BUILDER_ALLOWLIST,
+): Set<string> {
+  const source = raw === undefined ? fallbackRaw : raw;
+  if (!source?.trim()) return new Set();
+
+  const entries = source.split(",").map((email) => email.trim().toLowerCase());
+  const validEmail = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+  if (entries.some((email) => !email || !validEmail.test(email))) {
+    logger.error(
+      { source: raw === undefined ? "BUILDER_ALLOWLIST fallback" : "BILLING_EXEMPT_ALLOWLIST" },
+      "Invalid billing exemption allowlist; exemptions disabled",
+    );
+    return new Set();
+  }
+  return new Set(entries);
+}
+
+/**
+ * True when the user's email is on BILLING_EXEMPT_ALLOWLIST (or, only while
+ * that variable is unset, the backward-compatible BUILDER_ALLOWLIST fallback).
  *
  * Deliberately does NOT honor BUILDER_OPEN_TO_ALL — opening builder ACCESS to
  * everyone must not exempt everyone from BILLING.
  */
 export async function isBuilderAllowlistExempt(userId: string): Promise<boolean> {
-  const allowlist = parseBuilderAllowlist(process.env.BUILDER_ALLOWLIST);
+  const allowlist = parseBillingExemptAllowlist();
   if (allowlist.size === 0) return false;
 
   const cached = allowlistCache.get(userId);
@@ -114,7 +138,7 @@ export async function isBuilderAllowlistExempt(userId: string): Promise<boolean>
   return exempt;
 }
 
-/** Superuser OR explicit builder allowlist — full billing bypass. */
+/** Superuser OR explicit billing exemption allowlist — full billing bypass. */
 export async function isNabuflowBillingExempt(userId: string): Promise<boolean> {
   if (await isSuperuser(userId)) return true;
   return isBuilderAllowlistExempt(userId);
