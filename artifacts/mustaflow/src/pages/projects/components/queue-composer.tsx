@@ -1305,6 +1305,7 @@ export function QueueComposer({
     stopVoiceDictation,
     hasCompletedTask,
     routingHint?.agentIdentity,
+    deepReasoning,
   ]);
 
   const handleKeyDown = useCallback(
