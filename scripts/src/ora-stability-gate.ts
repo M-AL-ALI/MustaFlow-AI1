@@ -347,7 +347,16 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     id: "account-billing-plans",
     title: "Account sync, billing tiers, quotas, iOS-safe plan display, and pricing links",
     ownerSurfaces: ["api", "website", "mobile"],
-    fileHints: [/billing/i, /pricing/i, /subscription/i, /plan/i, /tier/i, /quota/i, /settings/i],
+    fileHints: [
+      /billing/i,
+      /pricing/i,
+      /subscription/i,
+      /plan/i,
+      /tier/i,
+      /quota/i,
+      /settings/i,
+      /proration/i,
+    ],
     manualWebsite: "Verify tier/usage/paywall/deep links and paid-user quota behavior.",
     manualMobile:
       "Verify plan sync and iOS compliance: no external checkout links, clear read-only plan info.",
