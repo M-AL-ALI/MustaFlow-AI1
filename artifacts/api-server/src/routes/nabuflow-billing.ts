@@ -318,6 +318,7 @@ router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
         : null,
       cycle: cycle
         ? {
+            id: cycle.id,
             includedCredits: cycle.includedCredits,
             rolloverCredits: cycle.rolloverCredits,
             usedIncludedCredits: cycle.usedIncludedCredits,

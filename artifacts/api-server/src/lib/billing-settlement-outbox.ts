@@ -34,6 +34,10 @@ const STALE_LOCK_MS = 5 * 60_000;
 const MAX_BACKOFF_MS = 6 * 60 * 60_000;
 const ENQUEUE_ATTEMPTS = 3;
 
+export function taskCreditSettlementKey(taskId: number, source: string): string {
+  return `task-credit:${taskId}:${source}`;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000);
 }
@@ -114,12 +118,36 @@ const defaultHandlers: SettlementHandlers = {
     if (!record.owner_id || !record.amount) throw new Error("credit settlement payload incomplete");
     const opts = record.context["opts"] as Parameters<typeof deductCreditsAtomic>[2] | undefined;
     if (!opts) throw new Error("credit settlement options missing");
+    const isReservation = record.context["reservation"] === true;
+    if (isReservation && record.task_id != null) {
+      const taskState = await pool.query<{ status: string }>(
+        "SELECT status FROM agent_tasks WHERE id = $1 LIMIT 1",
+        [record.task_id],
+      );
+      const status = taskState.rows[0]?.status;
+      if (!status || ["canceled", "failed", "discarded"].includes(status)) {
+        logger.info(
+          { taskId: record.task_id, status: status ?? "missing", dedupeKey: record.dedupe_key },
+          "billing reservation settlement skipped for terminal task",
+        );
+        return;
+      }
+    }
     const result = await deductCreditsAtomic(record.owner_id, record.amount, {
       ...opts,
       settlementKey: record.dedupe_key,
     });
     if ("insufficient" in result) {
       throw new Error(`insufficient credits: ${result.balance} < ${record.amount}`);
+    }
+    if (isReservation && record.task_id != null && result.charged > 0) {
+      await pool.query(
+        `UPDATE agent_tasks
+            SET credits_reserved = $2
+          WHERE id = $1
+            AND status IN ('queued', 'planning', 'building')`,
+        [record.task_id, result.charged],
+      );
     }
   },
 
@@ -265,6 +293,7 @@ export async function settleCreditsDurably(input: {
   ownerId: string;
   amount: number;
   taskId: number;
+  reservation?: boolean;
   opts: Omit<
     Parameters<typeof import("../routes/credits").deductCreditsAtomic>[2],
     "settlementKey"
@@ -272,7 +301,10 @@ export async function settleCreditsDurably(input: {
 }): Promise<
   Awaited<ReturnType<typeof import("../routes/credits").deductCreditsAtomic>> | { deferred: true }
 > {
-  const dedupeKey = `task-credit:${input.taskId}:${input.opts.source ?? input.opts.type}`;
+  const dedupeKey = taskCreditSettlementKey(
+    input.taskId,
+    input.opts.source ?? input.opts.type,
+  );
   try {
     const { deductCreditsAtomic } = await import("../routes/credits");
     const result = await deductCreditsAtomic(input.ownerId, input.amount, {
@@ -286,7 +318,7 @@ export async function settleCreditsDurably(input: {
         taskId: input.taskId,
         ownerId: input.ownerId,
         amount: input.amount,
-        context: { opts: input.opts },
+        context: { opts: input.opts, reservation: input.reservation === true },
         error: `insufficient credits: ${result.balance} < ${input.amount}`,
       });
     }
@@ -299,7 +331,7 @@ export async function settleCreditsDurably(input: {
         taskId: input.taskId,
         ownerId: input.ownerId,
         amount: input.amount,
-        context: { opts: input.opts },
+        context: { opts: input.opts, reservation: input.reservation === true },
         error,
       });
     } catch {

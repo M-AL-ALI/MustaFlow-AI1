@@ -5785,6 +5785,7 @@ export type GetNabuflowBillingState200SpendCap = {
 } | null;
 
 export type GetNabuflowBillingState200Cycle = {
+  id: number;
   includedCredits: number;
   rolloverCredits: number;
   usedIncludedCredits: number;

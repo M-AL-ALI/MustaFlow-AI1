@@ -65,7 +65,6 @@ import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
 import {
   getOrCreateCredits,
-  deductCreditsAtomic,
   refundCredits,
   CREDITS_ENFORCEMENT_ENABLED,
 } from "../routes/credits";
@@ -100,11 +99,10 @@ import {
   shouldTriggerAutoFix,
   buildAutoFixPrompt,
   toReportShape as architectToReportShape,
-  ARCHITECT_CREDIT_COST,
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
 import { persistArchitectAutoFixLink } from "./architect-auto-fix-link";
-import { settleCreditsDurably } from "./billing-settlement-outbox";
+import { settleCreditsDurably, taskCreditSettlementKey } from "./billing-settlement-outbox";
 import { encryptionService } from "./encryption";
 import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 import {
@@ -123,48 +121,6 @@ import {
   builderValidationAwareCompletionSummary,
 } from "./builder-task-completion";
 
-type CreativeBillingTool =
-  | "generate_image"
-  | "generate_video"
-  | "generate_audio"
-  | "remove_image_background";
-
-async function deductCreativeCreditsForProject(
-  ownerId: string,
-  projectId: number,
-  credits: number,
-  tool: CreativeBillingTool,
-): Promise<number> {
-  try {
-    const balance = await getOrCreateCredits(ownerId);
-    if (balance.balance < credits) {
-      const { nabuflowChargeActive } = await import("./nabuflow-billing");
-      if (!(await nabuflowChargeActive(ownerId))) {
-        logger.warn(
-          { projectId, credits, tool, balance: balance.balance },
-          "credits_exhausted: skipping creative deduction — insufficient balance",
-        );
-        return 0;
-      }
-    }
-    const result = await deductCreditsAtomic(ownerId, credits, {
-      type: "creative",
-      description: `Agent ${tool} — project ${projectId}`,
-      projectId,
-    });
-    if ("insufficient" in result) {
-      logger.warn(
-        { projectId, credits, tool },
-        "Creative credit deduction: insufficient balance — work already delivered",
-      );
-      return 0;
-    }
-    return result.charged;
-  } catch (err) {
-    logger.warn({ err, projectId, tool }, "Creative credit deduction failed (non-fatal)");
-    return 0;
-  }
-}
 import {
   buildPreviewRepairObservation,
   collectPreviewRuntimeObservation,
@@ -2971,48 +2927,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
                   signal,
-                  onBillableSenseBatch: (credits, total) => {
-                    if (!project.ownerId) return;
-                    void getOrCreateCredits(project.ownerId)
-                      .then(async (bal) => {
-                        if (bal.balance < credits) {
-                          // NabuFlow plan users charge via cycle accounting —
-                          // the wallet balance is irrelevant (Task #1516).
-                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
-                          if (!(await nabuflowChargeActive(project.ownerId!))) {
-                            logger.warn(
-                              { projectId, credits, balance: bal.balance },
-                              "credits_exhausted: skipping senses deduction — insufficient balance",
-                            );
-                            return;
-                          }
-                        }
-                        return deductCreditsAtomic(project.ownerId!, credits, {
-                          type: "senses",
-                          description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                          projectId,
-                        }).then((result) => {
-                          if ("insufficient" in result) {
-                            logger.warn(
-                              { projectId, credits },
-                              "Sense credit deduction: insufficient balance — work already delivered",
-                            );
-                          }
-                        });
-                      })
-                      .catch((err) =>
-                        logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                      );
-                  },
-                  onBillableCreativeCall: (credits, tool) => {
-                    if (!project.ownerId) return 0;
-                    return deductCreativeCreditsForProject(
-                      project.ownerId,
-                      projectId,
-                      credits,
-                      tool,
-                    );
-                  },
                 });
                 return loopResultToBuildResult(loopRes, userPrompt, project.name);
               })()
@@ -3527,48 +3441,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
                   signal,
-                  onBillableSenseBatch: (credits, total) => {
-                    if (!project.ownerId) return;
-                    void getOrCreateCredits(project.ownerId)
-                      .then(async (bal) => {
-                        if (bal.balance < credits) {
-                          // NabuFlow plan users charge via cycle accounting —
-                          // the wallet balance is irrelevant (Task #1516).
-                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
-                          if (!(await nabuflowChargeActive(project.ownerId!))) {
-                            logger.warn(
-                              { projectId, credits, balance: bal.balance },
-                              "credits_exhausted: skipping senses deduction — insufficient balance",
-                            );
-                            return;
-                          }
-                        }
-                        return deductCreditsAtomic(project.ownerId!, credits, {
-                          type: "senses",
-                          description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                          projectId,
-                        }).then((result) => {
-                          if ("insufficient" in result) {
-                            logger.warn(
-                              { projectId, credits },
-                              "Sense credit deduction: insufficient balance — work already delivered",
-                            );
-                          }
-                        });
-                      })
-                      .catch((err) =>
-                        logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                      );
-                  },
-                  onBillableCreativeCall: (credits, tool) => {
-                    if (!project.ownerId) return 0;
-                    return deductCreativeCreditsForProject(
-                      project.ownerId,
-                      projectId,
-                      credits,
-                      tool,
-                    );
-                  },
                 });
                 return loopResultToRefineResult(loopRes, userPrompt);
               })()
@@ -3855,36 +3727,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
-                onBillableSenseBatch: (credits, total) => {
-                  if (!project.ownerId) return;
-                  void getOrCreateCredits(project.ownerId)
-                    .then(async (bal) => {
-                      if (bal.balance < credits) {
-                        // NabuFlow plan users charge via cycle accounting —
-                        // the wallet balance is irrelevant (Task #1516).
-                        const { nabuflowChargeActive } = await import("./nabuflow-billing");
-                        if (!(await nabuflowChargeActive(project.ownerId!))) {
-                          logger.warn(
-                            { projectId, credits, balance: bal.balance },
-                            "credits_exhausted: skipping senses deduction — insufficient balance",
-                          );
-                          return;
-                        }
-                      }
-                      return deductCreditsAtomic(project.ownerId!, credits, {
-                        type: "senses",
-                        description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                        projectId,
-                      });
-                    })
-                    .catch((err) =>
-                      logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                    );
-                },
-                onBillableCreativeCall: (credits, tool) => {
-                  if (!project.ownerId) return 0;
-                  return deductCreativeCreditsForProject(project.ownerId, projectId, credits, tool);
-                },
               });
               const retryResult = loopResultToRefineResult(retryLoopRes, stricterPrompt);
               const retryEmpty =
@@ -5518,7 +5360,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       //   - Trivial edit (≤ARCHITECT_LINE_THRESHOLD lines touched, no sensitive
       //     paths) → skipped:"trivial-edit".
       //
-      // Credits: flat ARCHITECT_CREDIT_COST per review (best-effort, non-fatal).
+      // Architect review is included in the published flat build price.
       {
         const isArchitectAutoFix = (input.userPrompt ?? "").startsWith(
           "The Architect Reviewer flagged this build",
@@ -5635,25 +5477,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             }
             const review = dispatchResult.review;
 
-            // Settle credits durably after delivered work — never block the build.
-            let creditsCharged = 0;
-            if (project.ownerId) {
-              const debit = await settleCreditsDurably({
-                ownerId: project.ownerId,
-                amount: ARCHITECT_CREDIT_COST,
-                taskId,
-                opts: {
-                  projectId,
-                  taskId,
-                  type: "architect",
-                  description: `Architect review for task #${taskId} (verdict: ${review.verdict}, findings: ${review.findings.length})`,
-                  source: "architect",
-                },
-              });
-              if (!("insufficient" in debit) && !("deferred" in debit)) {
-                creditsCharged = debit.charged;
-              }
-            }
+            const creditsCharged = 0;
 
             // Decide auto-fix.
             //   - Normal task with fail/critical verdict → queue ONE auto-fix
@@ -6381,10 +6205,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
       }
 
-      // --- Task #529: web sense credits are now charged in-loop ---
-      // See `onBillableSenseBatch` passed to runAgentLoop above. Each completed
-      // batch of 5 (web_fetch + web_search + extract_branding) deducts 1 credit
-      // at use time so usage is billed even on cancel/failure paths.
+      // Web senses and creative tools used by this build are included in its
+      // published flat price. Standalone Image Studio jobs remain separately priced.
 
       // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
       void maybeEscalateWarnings(projectId, report.warnings ?? []);
@@ -6672,6 +6494,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         if (cancelTx.reserved > 0 && project.ownerId) {
           void refundCredits(project.ownerId, cancelTx.reserved, {
             projectId,
+            taskId,
+            settlementKey: taskCreditSettlementKey(taskId, "pipeline"),
             description: `Background task #${taskId} canceled mid-run`,
           }).catch((err) =>
             logger.warn({ err, taskId }, "Credit refund failed on abort (non-fatal)"),
@@ -7841,7 +7665,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         engineMode: agentMode,
         deepReasoning: task.deepReasoning ?? false,
         taskId,
-        source: "staged-review",
+        source: "pipeline",
       },
     });
     if ("insufficient" in result) {
@@ -7901,6 +7725,8 @@ export async function discardTaskAgentStaging(taskId: number, projectId: number)
     if (proj?.ownerId) {
       void refundCredits(proj.ownerId, task.creditsReserved, {
         projectId,
+        taskId,
+        settlementKey: taskCreditSettlementKey(taskId, "pipeline"),
         description: `Background task #${taskId} discarded`,
       }).catch((err) => logger.warn({ err, taskId }, "Credit refund failed (non-fatal)"));
     }
@@ -8909,6 +8735,8 @@ export async function failStuckBackgroundTasksOnBoot(): Promise<void> {
         if (proj?.ownerId) {
           void refundCredits(proj.ownerId, t.creditsReserved, {
             projectId: t.projectId,
+            taskId: t.id,
+            settlementKey: taskCreditSettlementKey(t.id, "pipeline"),
             description: `Background task #${t.id} interrupted by server restart`,
           }).catch((err) =>
             logger.warn({ err, taskId: t.id }, "Boot-scan refund failed (non-fatal)"),

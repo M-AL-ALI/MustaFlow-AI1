@@ -35,6 +35,7 @@ import {
 import { formatResetDate, formatUsdCents } from "@/lib/nabuflow-billing";
 import { useBuilderCreditCosts, getCreditCost } from "@/lib/builder-followup-submit";
 import { MeterBar, SectionCard, useNabuflowState, usePrefersReducedMotion } from "./shared";
+import { filterUsageEventsForPreset, type UsageCyclePreset } from "./usage-cycle-filter";
 
 const MODE_LABELS: Record<string, string> = {
   lite: "Lite",
@@ -57,8 +58,6 @@ const COLOR_STANDARD = "#64748b";
 const COLOR_INCLUDED = "#38bdf8";
 const COLOR_PAYG = "#f59e0b";
 const COLOR_POOL = "#8b5cf6";
-
-type CyclePreset = "current" | "last" | "custom";
 
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -89,7 +88,7 @@ export function UsageSection() {
   const reducedMotion = usePrefersReducedMotion();
   const creditCosts = useBuilderCreditCosts();
 
-  const [preset, setPreset] = useState<CyclePreset>("current");
+  const [preset, setPreset] = useState<UsageCyclePreset>("current");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
 
@@ -118,16 +117,17 @@ export function UsageSection() {
   const allEvents = useMemo(() => usageData?.events ?? [], [usageData?.events]);
 
   const { events, reversedCount } = useMemo(() => {
-    const inRange = allEvents.filter((e) => {
-      if (!e.createdAt) return false;
-      const t = new Date(e.createdAt).getTime();
-      return t >= range.start.getTime() && t < range.end.getTime();
+    const inRange = filterUsageEventsForPreset(allEvents, {
+      preset,
+      currentCycleId: cycle?.id ?? null,
+      start: range.start,
+      end: range.end,
     });
     return {
       events: inRange.filter((e) => !e.reversedAt),
       reversedCount: inRange.filter((e) => !!e.reversedAt).length,
     };
-  }, [allEvents, range]);
+  }, [allEvents, cycle?.id, preset, range]);
 
   const daily = useMemo(() => {
     const byDay = new Map<
@@ -305,7 +305,7 @@ export function UsageSection() {
   const empty = events.length === 0;
   const hasPool = totals.pool > 0;
 
-  const presetBtn = (id: CyclePreset, label: string) => (
+  const presetBtn = (id: UsageCyclePreset, label: string) => (
     <button
       type="button"
       onClick={() => setPreset(id)}

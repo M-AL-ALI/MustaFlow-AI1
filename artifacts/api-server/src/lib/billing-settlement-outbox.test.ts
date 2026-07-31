@@ -33,6 +33,7 @@ vi.mock("./logger", () => ({
 }));
 
 import {
+  processBillingSettlementRecord,
   settleCreditsDurably,
   startBillingSettlementSweeper,
   stopBillingSettlementSweeper,
@@ -99,7 +100,54 @@ describe("durable billing settlement", () => {
     );
   });
 
-  it("routes delivered architect and staged-review charges through durable settlement", () => {
+  it("does not drain a deferred reservation into a canceled task", async () => {
+    const record: BillingSettlementRecord = {
+      id: 21,
+      kind: "credit_deduction",
+      dedupe_key: "task-credit:902:pipeline",
+      task_id: 902,
+      owner_id: "owner-bw1",
+      amount: 13,
+      context: { opts: creditInput.opts, reservation: true },
+      attempts: 0,
+    };
+    h.poolQuery.mockResolvedValueOnce({ rows: [{ status: "canceled" }] });
+
+    await processBillingSettlementRecord(record);
+
+    expect(h.deductCreditsAtomic).not.toHaveBeenCalled();
+  });
+
+  it("records a successfully retried reservation on a live task", async () => {
+    const record: BillingSettlementRecord = {
+      id: 22,
+      kind: "credit_deduction",
+      dedupe_key: "task-credit:903:pipeline",
+      task_id: 903,
+      owner_id: "owner-bw1",
+      amount: 13,
+      context: { opts: creditInput.opts, reservation: true },
+      attempts: 1,
+    };
+    h.poolQuery
+      .mockResolvedValueOnce({ rows: [{ status: "queued" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    h.deductCreditsAtomic.mockResolvedValueOnce({ newBalance: 1_587, charged: 13 });
+
+    await processBillingSettlementRecord(record);
+
+    expect(h.deductCreditsAtomic).toHaveBeenCalledWith(
+      "owner-bw1",
+      13,
+      expect.objectContaining({ settlementKey: "task-credit:903:pipeline" }),
+    );
+    expect(h.poolQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining("SET credits_reserved = $2"),
+      [903, 13],
+    );
+  });
+
+  it("includes architect review and keys staged-review apply to the same pipeline settlement", () => {
     const jobs = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
     const architectCharge = jobs.slice(
       jobs.indexOf("let creditsCharged = 0"),
@@ -110,10 +158,10 @@ describe("durable billing settlement", () => {
       jobs.indexOf('"Staged review applied");'),
     );
 
-    expect(architectCharge).toContain("await settleCreditsDurably");
+    expect(architectCharge).not.toContain("await settleCreditsDurably");
     expect(architectCharge).not.toContain("await deductCreditsAtomic");
     expect(stagedReviewCharge).toContain("await settleCreditsDurably");
-    expect(stagedReviewCharge).toContain('source: "staged-review"');
+    expect(stagedReviewCharge).toContain('source: "pipeline"');
     expect(stagedReviewCharge).not.toContain("void deductCreditsAtomic");
   });
 

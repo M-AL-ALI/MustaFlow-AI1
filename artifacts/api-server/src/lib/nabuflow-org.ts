@@ -385,7 +385,12 @@ export async function refundNabuflowOrgPool(
   orgId: number,
   userId: string,
   amount: number,
-  opts: { projectId?: number | null; description?: string },
+  opts: {
+    projectId?: number | null;
+    taskId?: number | null;
+    settlementKey?: string;
+    description?: string;
+  },
 ): Promise<number> {
   const cutoff = new Date(Date.now() - 48 * 60 * 60_000);
   const conditions = [
@@ -397,6 +402,12 @@ export async function refundNabuflowOrgPool(
   ];
   if (opts.projectId != null) {
     conditions.push(eq(nabuflowUsageEventsTable.projectId, opts.projectId));
+  }
+  if (opts.taskId != null) {
+    conditions.push(eq(nabuflowUsageEventsTable.taskId, opts.taskId));
+  }
+  if (opts.settlementKey) {
+    conditions.push(eq(nabuflowUsageEventsTable.settlementKey, opts.settlementKey));
   }
   const [event] = await db
     .select()

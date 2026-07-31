@@ -6,8 +6,8 @@
 // Returns: structured JSON (verdict, severity-ranked findings, next actions).
 //
 // Triggered from runJob after the version snapshot is written, before the task
-// is marked completed. Charged at a separate flat rate (ARCHITECT_CREDIT_COST)
-// via deductCredits(type="architect"). Per-project disable toggle:
+// is marked completed. Build-scoped review is included in the published flat
+// build price. Per-project disable toggle:
 // projects.architect_review_enabled.
 //
 // One auto-fix turn: when verdict==="fail" or any finding has severity
@@ -21,9 +21,6 @@ import { logger } from "./logger";
 import { createChatCompletion, resolveStageProvider } from "./ai-providers";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
-
-/** Flat credit cost for one architect review pass. */
-export const ARCHITECT_CREDIT_COST = 2;
 
 /** Title prefix used for architect-triggered auto-fix tasks (recursion guard). */
 export const ARCHITECT_AUTOFIX_TITLE_PREFIX = "Architect Auto-fix:";

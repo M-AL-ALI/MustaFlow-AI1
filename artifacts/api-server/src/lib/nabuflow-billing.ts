@@ -1193,7 +1193,12 @@ export async function maybeChargeNabuflow(
 export async function maybeRefundNabuflow(
   userId: string,
   amount: number,
-  opts: { projectId?: number | null; description?: string },
+  opts: {
+    projectId?: number | null;
+    taskId?: number | null;
+    settlementKey?: string;
+    description?: string;
+  },
 ): Promise<number | null> {
   if (amount <= 0) return null;
 
@@ -1222,6 +1227,12 @@ export async function maybeRefundNabuflow(
   ];
   if (opts.projectId != null) {
     conditions.push(eq(nabuflowUsageEventsTable.projectId, opts.projectId));
+  }
+  if (opts.taskId != null) {
+    conditions.push(eq(nabuflowUsageEventsTable.taskId, opts.taskId));
+  }
+  if (opts.settlementKey) {
+    conditions.push(eq(nabuflowUsageEventsTable.settlementKey, opts.settlementKey));
   }
   const [event] = await db
     .select()

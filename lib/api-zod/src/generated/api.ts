@@ -6259,6 +6259,7 @@ export const GetNabuflowBillingStateResponse = zod.object({
   "maxUsdCents": zod.number()
 }).nullish(),
   "cycle": zod.object({
+  "id": zod.number(),
   "includedCredits": zod.number(),
   "rolloverCredits": zod.number(),
   "usedIncludedCredits": zod.number(),

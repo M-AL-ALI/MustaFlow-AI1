@@ -375,7 +375,12 @@ export async function deductCreditsAtomic(
 export async function refundCredits(
   userId: string,
   amount: number,
-  opts: { projectId?: number; description: string },
+  opts: {
+    projectId?: number;
+    taskId?: number;
+    settlementKey?: string;
+    description: string;
+  },
 ): Promise<number> {
   if (amount <= 0) {
     const c = await getOrCreateCredits(userId);
@@ -390,6 +395,8 @@ export async function refundCredits(
     if (await nabuflowChargeActive(userId)) {
       const remaining = await maybeRefundNabuflow(userId, amount, {
         projectId: opts.projectId ?? null,
+        taskId: opts.taskId ?? null,
+        settlementKey: opts.settlementKey,
         description: opts.description,
       });
       if (remaining !== null) return remaining;

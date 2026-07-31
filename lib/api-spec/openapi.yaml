@@ -5354,6 +5354,7 @@ paths:
                     nullable: true
                     required:
                       [
+                        id,
                         includedCredits,
                         rolloverCredits,
                         usedIncludedCredits,
@@ -5364,6 +5365,7 @@ paths:
                         deepBuildsUsed,
                       ]
                     properties:
+                      id: { type: integer }
                       includedCredits: { type: integer }
                       rolloverCredits: { type: integer }
                       usedIncludedCredits: { type: integer }

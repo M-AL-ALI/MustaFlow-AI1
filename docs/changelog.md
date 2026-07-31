@@ -508,7 +508,7 @@ The intended user journey is: Login → create project → build app → preview
 - Output: `TaskReport.architectReview` with `verdict` (pass | partial | fail), severity-ranked findings, recommended next actions, plus `isReReview` and `completedWithWarnings` flags. Rendered as `ArchitectReviewCard` in `chat-history.tsx`.
 - Auto-fix on `fail` or any `critical` finding: ONE chained refine task is enqueued via the standard `enqueueJob` path with a sentinel prompt (prefix `"The Architect Reviewer flagged this build"`). That task runs the normal refine pipeline, then re-runs the architect exactly once (no further fixes). If the re-review still fails, the report sets `completedWithWarnings = true`.
 - `completedWithWarnings` is report-scoped only — task status remains `"completed"`. The flag drives the warning banner in the architect card; there is no separate task status value.
-- Credits: flat `ARCHITECT_CREDIT_COST = 2` per architect run, deducted with `credit_transactions.type = "architect"` (separate row from the build's deduction) for per-task audit.
+- Credits: architect review is included in the published flat build price; build-scoped reviews do not create a separate ledger deduction.
 - Per-project toggle: `projects.architectReviewEnabled` (default true). UI lives in the Quality panel (`quality-panel.tsx`) alongside the auto-fix toggles.
 - Admin metrics: `GET /api/admin/stats` returns `architectReviews` (30-day window): `reviewed`, `avgFindingsPerBuild`, `passCount/partialCount/failCount`, `autoFixesQueued`. Rendered as the Architect Review tile in `/admin`.
 - OpenAPI: `architectReviewEnabled` on Project + ProjectUpdate; `AdminStats.architectReviews` is a required typed object (no client-side casts).

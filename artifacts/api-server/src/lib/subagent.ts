@@ -2,10 +2,13 @@
  * Task #535 — Specialist subagents + isolated parallel sub-tasks.
  *
  * Roles:
- *   • designer   — media generation + writing media files (3 credits)
- *   • explorer   — read-only investigation (1 credit)
- *   • tester     — Playwright E2E (2 credits)
- *   • reviewer   — architect code review (2 credits)
+ *   • designer   — media generation + writing media files
+ *   • explorer   — read-only investigation
+ *   • tester     — Playwright E2E
+ *   • reviewer   — architect code review
+ *
+ * All dispatches run inside a build/refine and are included in that build's
+ * published flat price. There is no standalone subagent billing path.
  *
  * Two surfaces:
  *   - `dispatchSubagentFromTool(ctx, args)` — handler for the
@@ -20,11 +23,9 @@
 
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat";
 import type { E2eRunSummary } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { db, projectsTable, taskEventsTable } from "@workspace/db";
+import { db, taskEventsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { publishTaskEvent } from "./event-bus";
-import { deductCreditsAtomic } from "../routes/credits";
 import {
   runArchitectReview,
   type ArchitectInput,
@@ -51,13 +52,6 @@ function nz(n: number | null | undefined): number | undefined {
 }
 
 export type SubagentRole = "designer" | "explorer" | "tester" | "reviewer";
-
-export const ROLE_CREDIT_COST: Record<SubagentRole, number> = {
-  designer: 3,
-  explorer: 1,
-  tester: 2,
-  reviewer: 2,
-};
 
 const ROLE_STEP_CAP: Record<SubagentRole, number> = {
   designer: 8,
@@ -171,44 +165,6 @@ async function persistReviewerContextEvent(input: {
       { err, taskId: input.taskId, reviewPath: input.reviewPath },
       "Failed to persist reviewer context instrumentation",
     );
-  }
-}
-
-async function lookupOwnerId(projectId: number): Promise<string | null> {
-  try {
-    const rows = await db
-      .select({ ownerId: projectsTable.ownerId })
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId))
-      .limit(1);
-    return rows[0]?.ownerId ?? null;
-  } catch (err) {
-    logger.warn({ err, projectId }, "subagent: ownerId lookup failed");
-    return null;
-  }
-}
-
-async function chargeRoleCredits(
-  input: AgentLoopInput,
-  role: SubagentRole,
-  taskId: number | null | undefined,
-): Promise<{ ok: true; charged: number } | { ok: false; reason: string }> {
-  const ownerId = await lookupOwnerId(input.projectId);
-  const cost = ROLE_CREDIT_COST[role];
-  if (!ownerId) return { ok: true, charged: 0 };
-  try {
-    const debit = await deductCreditsAtomic(ownerId, cost, {
-      projectId: input.projectId,
-      type: "architect",
-      description: `Subagent dispatch (${role}) for task #${taskId ?? "?"}`,
-    });
-    if ("insufficient" in debit) {
-      return { ok: false, reason: `insufficient credits (need ${cost}, have ${debit.balance})` };
-    }
-    return { ok: true, charged: debit.charged };
-  } catch (err) {
-    logger.warn({ err, role }, "Subagent credit deduction failed (non-fatal)");
-    return { ok: true, charged: 0 };
   }
 }
 
@@ -551,7 +507,7 @@ export interface DispatchOpts {
   scenarios?: unknown[];
   /** Reviewer-specific: diff/commands/excerpts injected from the caller. */
   reviewer?: Omit<ReviewerOpts, "parentInput" | "taskId" | "brief">;
-  /** When true, dispatchSubagent skips its own credit charge (caller charges). */
+  /** Deprecated compatibility flag; all build-scoped dispatches are included. */
   skipCredits?: boolean;
 }
 
@@ -610,13 +566,7 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
     };
   }
 
-  const charge = opts.skipCredits
-    ? ({ ok: true, charged: 0 } as const)
-    : await chargeRoleCredits(parentCtx.input, role, taskId);
-  if (!charge.ok) {
-    emitSubagentEvent(taskId, parentCtx.input.projectId, "done", role, `aborted: ${charge.reason}`);
-    return { ok: false, observation: `ERROR: ${charge.reason}`, role, creditsCharged: 0 };
-  }
+  const charge = { charged: 0 } as const;
 
   try {
     if (role === "reviewer" && reviewerContext && reviewerStats) {
@@ -721,7 +671,7 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
  * Standalone dispatch entry point for callers that don't have a full
  * ToolCtx (e.g. `jobs.ts` invoking the architect after a build). Currently
  * supports the `reviewer` role only — that's the only path `jobs.ts` exercises.
- * Goes through the same emit/credit machinery as the tool-driven dispatcher.
+ * Goes through the same emit/included-cost machinery as the tool-driven dispatcher.
  */
 export async function dispatchReviewerStandalone(args: {
   input: AgentLoopInput;
@@ -768,13 +718,7 @@ export async function dispatchReviewerStandalone(args: {
       reviewerAssembledPromptStats,
     };
   }
-  const charge = args.skipCredits
-    ? ({ ok: true, charged: 0 } as const)
-    : await chargeRoleCredits(args.input, role, taskId);
-  if (!charge.ok) {
-    emitSubagentEvent(taskId, args.input.projectId, "done", role, `aborted: ${charge.reason}`);
-    return { ok: false, observation: `ERROR: ${charge.reason}`, role, creditsCharged: 0 };
-  }
+  const charge = { charged: 0 } as const;
   try {
     const r = await runReviewer({
       parentInput: args.input,
@@ -850,7 +794,7 @@ export async function dispatchSubagentFromTool(
   }
   const scenarios = Array.isArray(args.scenarios) ? (args.scenarios as unknown[]) : undefined;
   const result = await dispatchSubagent({ role, brief, parentCtx: ctx, scenarios });
-  const header = `[${role} subagent · ${result.creditsCharged} credits · ${subagentDispatchOutcomeLabel(result)}]`;
+  const header = `[${role} subagent · included in build · ${subagentDispatchOutcomeLabel(result)}]`;
   return { ok: result.ok, observation: `${header}\n${result.observation}` };
 }
 
@@ -1048,7 +992,6 @@ export async function planSubtasksFromTool(
     observation: string;
   }> = [];
   let totalConflicts = 0;
-  let totalCharged = 0;
 
   for (const st of ordered) {
     if (ctx.input.signal.aborted) break;
@@ -1058,7 +1001,6 @@ export async function planSubtasksFromTool(
     if (st.role === "tester" || st.role === "reviewer") {
       // These roles operate on live workspace (no merge needed).
       const r = await dispatchSubagent({ role: st.role, brief: st.brief, parentCtx: ctx });
-      totalCharged += r.creditsCharged;
       results.push({
         id: st.id,
         title: st.title,
@@ -1078,7 +1020,6 @@ export async function planSubtasksFromTool(
       parentCtx: ctx,
       workspace: clone,
     });
-    totalCharged += r.creditsCharged;
     const branch = new Map<string, string>();
     for (const f of clone.snapshot()) branch.set(f.path, f.content);
     const merge = threeWayMerge(subBase, branch, ctx.workspace, st.id);
@@ -1094,7 +1035,7 @@ export async function planSubtasksFromTool(
   }
 
   const lines: string[] = [
-    `plan_subtasks: ran ${results.length}/${ordered.length} subtasks (${totalCharged} credits, ${totalConflicts} conflicts)`,
+    `plan_subtasks: ran ${results.length}/${ordered.length} subtasks (included in build, ${totalConflicts} conflicts)`,
   ];
   for (const r of results) {
     const m = r.merge

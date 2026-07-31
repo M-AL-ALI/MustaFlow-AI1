@@ -324,11 +324,15 @@ describe("deductCreditsAtomic actual charge reporting", () => {
     expect(mocks.transactionUpdateReturning).not.toHaveBeenCalled();
   });
 
-  it("persists the deduction result instead of the architect price constant", () => {
+  it("records zero for build-scoped architect review because it is included", () => {
     const jobsSource = readFileSync(new URL("../lib/jobs.ts", import.meta.url), "utf8");
 
-    expect(jobsSource).toContain("creditsCharged = debit.charged");
-    expect(jobsSource).not.toContain("creditsCharged = ARCHITECT_CREDIT_COST");
+    const architectSection = jobsSource.slice(
+      jobsSource.indexOf("const { dispatchReviewerStandalone }"),
+      jobsSource.indexOf("// Decide auto-fix."),
+    );
+    expect(architectSection).toContain("const creditsCharged = 0");
+    expect(architectSection).not.toContain("settleCreditsDurably");
   });
 
   it("uses the returned actual charge at every audited recording/refund site", () => {
@@ -339,8 +343,10 @@ describe("deductCreditsAtomic actual charge reporting", () => {
     );
     const subagentSource = readFileSync(new URL("../lib/subagent.ts", import.meta.url), "utf8");
 
-    expect(messagesSource).toContain("reservedCredits = deduct.charged");
+    expect(messagesSource).toContain(".set({ creditsReserved: reservation.charged })");
+    expect(messagesSource).toContain('source: "pipeline"');
     expect(imageJobsSource.match(/deduction\.charged > 0/g)).toHaveLength(2);
-    expect(subagentSource).toContain("return { ok: true, charged: debit.charged }");
+    expect(subagentSource).toContain("const charge = { charged: 0 } as const");
+    expect(subagentSource).not.toContain("deductCreditsAtomic");
   });
 });

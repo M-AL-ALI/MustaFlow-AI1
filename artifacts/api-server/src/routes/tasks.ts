@@ -36,6 +36,7 @@ import {
 import { refundCredits } from "./credits";
 import { logger } from "../lib/logger";
 import { publishTaskEvent } from "../lib/event-bus";
+import { taskCreditSettlementKey } from "../lib/billing-settlement-outbox";
 
 const TERMINAL_TASK_EVENT_TYPES = ["completed", "failed", "cancelled"];
 
@@ -312,6 +313,8 @@ router.post(
       if (proj?.ownerId) {
         void refundCredits(proj.ownerId, cancelResult.reserved, {
           projectId: params.data.id,
+          taskId: task.id,
+          settlementKey: taskCreditSettlementKey(task.id, "pipeline"),
           description: `Background task #${task.id} canceled`,
         }).catch((err) => logger.warn({ err, taskId: task.id }, "Credit refund failed"));
       }

@@ -18,6 +18,19 @@ interface StripeCredentials {
 let cached: { creds: StripeCredentials; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
 
+export function resolveEnvStripePublishableKey(
+  env: Record<string, string | undefined>,
+): string {
+  for (const value of [
+    env.STRIPE_PUBLISHABLE_KEY,
+    env.STRIPE_TEST_PUBLISHABLE_KEY,
+    env.VITE_STRIPE_PUBLISHABLE_KEY,
+  ]) {
+    if (value?.trim()) return value.trim();
+  }
+  return "";
+}
+
 async function fetchCredentialsFromConnector(): Promise<StripeCredentials | null> {
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   if (!hostname) return null;
@@ -70,7 +83,7 @@ async function getCredentials(): Promise<StripeCredentials | null> {
   const envSecret = process.env.STRIPE_SECRET_KEY;
   if (envSecret) {
     const creds: StripeCredentials = {
-      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
+      publishableKey: resolveEnvStripePublishableKey(process.env),
       secretKey: envSecret,
     };
     cached = { creds, expiresAt: Date.now() + CACHE_TTL_MS };
