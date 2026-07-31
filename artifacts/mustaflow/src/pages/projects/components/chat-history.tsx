@@ -67,6 +67,9 @@ import {
   useListProjectFiles,
   useGetProjectFile,
   useRestoreCheckpoint,
+  useListNabuflowUsage,
+  getListNabuflowUsageQueryKey,
+  type NabuflowUsageEvent,
 } from "@workspace/api-client-react";
 import { unifiedDiff } from "@/lib/line-diff";
 import {
@@ -857,8 +860,10 @@ const TESTS_PENDING_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 // ─────────────────────────────────────────────────────────────────────────────
 export function ArchitectReviewCard({
   review,
+  actualCreditsCharged,
 }: {
   review: NonNullable<TaskReport["architectReview"]>;
+  actualCreditsCharged?: number;
 }) {
   const [open, setOpen] = useState(false);
   const verdictStyle = {
@@ -886,7 +891,7 @@ export function ArchitectReviewCard({
     low: "bg-sky-500/15 text-sky-400 border-sky-500/30",
   };
   const findingCount = review.findings.length;
-  const creditsCharged = review.creditsCharged ?? 0;
+  const creditsCharged = actualCreditsCharged ?? 0;
 
   return (
     <div className="pt-1.5 border-t border-border">
@@ -996,6 +1001,19 @@ export function ArchitectReviewCard({
   );
 }
 
+export function architectCreditsFromLedger(
+  events: NabuflowUsageEvent[],
+  taskId: number | undefined,
+): number {
+  if (!taskId) return 0;
+  return events
+    .filter(
+      (event) =>
+        event.taskId === taskId && event.source === "architect" && event.reversedAt == null,
+    )
+    .reduce((total, event) => total + event.credits, 0);
+}
+
 function InlineReportCard({
   report,
   onViewFile,
@@ -1023,6 +1041,17 @@ function InlineReportCard({
   const [qualityGateOpen, setQualityGateOpen] = useState(false);
   const rerunTests = useRerunTaskTests();
   const queryClient = useQueryClient();
+  const { data: usageData } = useListNabuflowUsage(
+    { limit: 200 },
+    {
+      query: {
+        enabled: !!taskId && !!report.architectReview && !report.architectReview.skipped,
+        queryKey: getListNabuflowUsageQueryKey({ limit: 200 }),
+        staleTime: 30_000,
+      },
+    },
+  );
+  const actualArchitectCredits = architectCreditsFromLedger(usageData?.events ?? [], taskId);
 
   const { data: testRunHistory } = useListTestRuns(projectId ?? 0, undefined, {
     query: {
@@ -1095,7 +1124,10 @@ function InlineReportCard({
         </div>
       )}
       {report.architectReview && !report.architectReview.skipped && (
-        <ArchitectReviewCard review={report.architectReview} />
+        <ArchitectReviewCard
+          review={report.architectReview}
+          actualCreditsCharged={actualArchitectCredits}
+        />
       )}
       {report.agentLoop?.skillsLoaded && report.agentLoop.skillsLoaded.length > 0 && (
         <div className="pt-1.5 border-t border-border/40">

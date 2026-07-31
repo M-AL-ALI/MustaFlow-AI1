@@ -18,6 +18,7 @@ vi.mock("@workspace/api-client-react", () => ({
   getGetProjectQueryKey: (projectId: number) => ["project", projectId],
   getListCheckpointsQueryKey: (projectId: number) => ["checkpoints", projectId],
   getListMessagesQueryKey: (projectId: number) => ["messages", projectId],
+  getListNabuflowUsageQueryKey: (params: { limit: number }) => ["nabuflow-usage", params],
   getListProjectFilesQueryKey: (projectId: number) => ["files", projectId],
   getListTaskEventsQueryKey: (projectId: number, taskId: number) => [
     "task-events",
@@ -52,6 +53,7 @@ vi.mock("@workspace/api-client-react", () => ({
   }),
   useCancelTask: () => ({ mutate: vi.fn(), isPending: false }),
   useListProjectFiles: () => ({ data: [] }),
+  useListNabuflowUsage: () => ({ data: { events: [] } }),
   useListTaskEvents: taskEventsApi.useListTaskEvents,
   useListTasks: () => ({ data: [] }),
   useListTestRuns: () => ({ data: [] }),
