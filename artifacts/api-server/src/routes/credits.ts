@@ -196,6 +196,27 @@ export async function deductCreditsAtomic(
   try {
     const nabuflow = await import("../lib/nabuflow-billing");
     if (await nabuflow.isBuilderAllowlistExempt(userId)) {
+      try {
+        await nabuflow.recordZeroChargeUsage(userId, {
+          projectId: opts.projectId ?? null,
+          taskId: opts.taskId ?? null,
+          type: opts.type,
+          description: opts.description,
+          engineMode: opts.engineMode ?? null,
+          deepReasoning: opts.deepReasoning ?? false,
+          source: opts.source ?? null,
+          settlementKey: opts.settlementKey ?? null,
+        });
+      } catch (err) {
+        logger.error(
+          { err, userId, taskId: opts.taskId ?? null, settlementKey: opts.settlementKey ?? null },
+          "Failed to record exempt zero-charge usage",
+        );
+        // Durable task settlements retry through the existing outbox. A
+        // best-effort charge without a stable settlement key must remain free;
+        // an observability failure can never revoke a proven exemption.
+        if (opts.settlementKey) throw err;
+      }
       return { newBalance: credits.balance, charged: 0 };
     }
     const nabuCharge = await nabuflow.maybeChargeNabuflow(userId, amount, {

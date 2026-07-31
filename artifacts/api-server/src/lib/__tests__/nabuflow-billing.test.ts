@@ -154,6 +154,7 @@ import {
   handleNabuflowInvoicePaid,
   _clearNabuflowAllowlistCache,
   isBuilderAllowlistExempt,
+  recordZeroChargeUsage,
   type NabuflowGateState,
   type NabuflowGateRequest,
 } from "../nabuflow-billing";
@@ -251,6 +252,41 @@ afterEach(() => {
 });
 
 // ─── Plans config sanity ─────────────────────────────────────────────────────
+describe("zero-charge usage ledger", () => {
+  it("records the actual zero with task attribution and no billable amounts", async () => {
+    await recordZeroChargeUsage("owner-1", {
+      projectId: 47,
+      taskId: 176,
+      type: "build",
+      description: "Lite build",
+      engineMode: "lite",
+      deepReasoning: false,
+      source: "pipeline",
+      settlementKey: "task-credit:176:pipeline",
+    });
+
+    expect(h.state.inserted).toHaveLength(1);
+    const [row] = h.state.inserted;
+    expect(row).toMatchObject({
+      userId: "owner-1",
+      cycleId: null,
+      projectId: 47,
+      taskId: 176,
+      source: "pipeline",
+      engineMode: "lite",
+      deepReasoning: false,
+      credits: 0,
+      includedCredits: 0,
+      overageCredits: 0,
+      overageUsdCents: 0,
+      usdValueCents: 0,
+      settlementKey: "task-credit:176:pipeline",
+    });
+    expect((row.cycleStart as Date).getUTCDate()).toBe(1);
+    expect((row.cycleStart as Date).getUTCHours()).toBe(0);
+  });
+});
+
 describe("plans config", () => {
   it("prices the family Orbit $20 / Comet $50 / Nova $100", () => {
     expect(NABUFLOW_PLANS.orbit.priceUsd).toBe(20);

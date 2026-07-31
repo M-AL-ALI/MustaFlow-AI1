@@ -916,6 +916,44 @@ function sourceForCharge(opts: NabuflowChargeOpts): string {
   }
 }
 
+/**
+ * Record an authorized builder operation whose actual charge was zero.
+ *
+ * Exempt owners still need a ledger row so Usage, Full History, calibration,
+ * and reconciliation all describe the same real operation. A settlement key
+ * makes durable retries idempotent; zero-valued rows never touch cycle counters
+ * or Stripe.
+ */
+export async function recordZeroChargeUsage(
+  userId: string,
+  opts: NabuflowChargeOpts,
+): Promise<void> {
+  const now = new Date();
+  const cycleStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  await db
+    .insert(nabuflowUsageEventsTable)
+    .values({
+      userId,
+      cycleId: null,
+      cycleStart,
+      projectId: opts.projectId ?? null,
+      taskId: opts.taskId ?? null,
+      source: sourceForCharge(opts),
+      engineMode: opts.engineMode ?? null,
+      deepReasoning: !!opts.deepReasoning,
+      credits: 0,
+      includedCredits: 0,
+      overageCredits: 0,
+      overageUsdCents: 0,
+      usdValueCents: 0,
+      attribution: "included",
+      description: opts.description,
+      settlementKey: opts.settlementKey ?? null,
+    })
+    .onConflictDoNothing();
+}
+
 /** Only real builds tick the ladder counters (never senses/architect/etc.). */
 function countsTowardLadder(opts: NabuflowChargeOpts): boolean {
   return opts.type === "build" || opts.type === "refine";

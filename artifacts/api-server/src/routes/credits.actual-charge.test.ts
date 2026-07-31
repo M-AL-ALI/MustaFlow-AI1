@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const mocks = vi.hoisted(() => ({
   isSuperuser: vi.fn(),
   isBuilderAllowlistExempt: vi.fn(),
+  recordZeroChargeUsage: vi.fn(),
   maybeChargeNabuflow: vi.fn(),
   selectWhere: vi.fn(),
   updateReturning: vi.fn(),
@@ -95,6 +96,7 @@ vi.mock("../lib/logger", () => ({
 
 vi.mock("../lib/nabuflow-billing", () => ({
   isBuilderAllowlistExempt: mocks.isBuilderAllowlistExempt,
+  recordZeroChargeUsage: mocks.recordZeroChargeUsage,
   maybeChargeNabuflow: mocks.maybeChargeNabuflow,
 }));
 
@@ -144,17 +146,34 @@ describe("deductCreditsAtomic actual charge reporting", () => {
     }
   });
 
-  it("returns an actual charge of zero for an allowlist-exempt owner", async () => {
+  it("returns and records an actual charge of zero for an allowlist-exempt owner", async () => {
     mocks.isBuilderAllowlistExempt.mockResolvedValue(true);
+    mocks.recordZeroChargeUsage.mockResolvedValue(undefined);
     const deductCreditsAtomic = await loadDeduction(true);
 
     await expect(
       deductCreditsAtomic("owner-1", 2, {
         type: "architect",
         description: "Architect review for task #175",
+        projectId: 47,
+        taskId: 175,
+        engineMode: "power",
+        deepReasoning: false,
+        source: "architect",
+        settlementKey: "task-credit:175:architect",
       }),
     ).resolves.toEqual({ newBalance: 50, charged: 0 });
     expect(mocks.updateReturning).not.toHaveBeenCalled();
+    expect(mocks.recordZeroChargeUsage).toHaveBeenCalledWith("owner-1", {
+      projectId: 47,
+      taskId: 175,
+      type: "architect",
+      description: "Architect review for task #175",
+      engineMode: "power",
+      deepReasoning: false,
+      source: "architect",
+      settlementKey: "task-credit:175:architect",
+    });
   });
 
   it("returns an actual charge of zero when enforcement is disabled", async () => {
