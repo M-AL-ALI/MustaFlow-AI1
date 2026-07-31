@@ -39,7 +39,7 @@ vi.mock("./container", () => ({
   execInContainer: containerMocks.execInContainer,
 }));
 
-vi.mock("./agent-prompts", () => ({
+vi.mock("./agent-prompts", async () => ({
   createPrompt: promptMocks.createPrompt,
 }));
 
@@ -100,6 +100,10 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("ZERO_SANDBOX_SHELL_ENABLED", "false");
+    // Prevent E2E auto-approve from bypassing the createPrompt gate in tests
+    // that verify deploy-shaped command approval (E2E_TEST_ENABLED may be set
+    // in the Vitest process environment).
+    vi.stubEnv("E2E_TEST_ENABLED", "");
     promptMocks.createPrompt.mockReturnValue({
       promptId: "prompt-1",
       promise: Promise.resolve({ canceled: false, response: false }),

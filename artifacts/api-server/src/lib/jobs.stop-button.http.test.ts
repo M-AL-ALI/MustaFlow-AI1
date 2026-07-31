@@ -408,6 +408,9 @@ vi.mock("../routes/credits", () => ({
 vi.mock("./ai-providers", () => ({
   creditCostFor: vi.fn().mockReturnValue(1),
   resolveStageProvider: vi.fn().mockReturnValue({ provider: "openai" }),
+  accumulateBuildTokens: vi.fn(),
+  clearBuildTokenAccumulator: vi.fn(),
+  flushBuildTokenTelemetry: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("./artifacts", () => ({ resolveArtifactId: vi.fn().mockResolvedValue(null) }));
 vi.mock("./durable-queue", () => ({
