@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   selectWhere: vi.fn(),
   updateReturning: vi.fn(),
   insertValues: vi.fn(),
+  transactionExistingRows: vi.fn(),
+  transactionUpdateReturning: vi.fn(),
+  transactionInsertValues: vi.fn(),
 }));
 
 vi.mock("express", () => ({
@@ -38,9 +41,36 @@ vi.mock("@workspace/db", () => ({
     insert: vi.fn(() => ({
       values: mocks.insertValues,
     })),
+    transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: mocks.transactionExistingRows,
+            })),
+          })),
+        })),
+        update: vi.fn(() => ({
+          set: vi.fn(() => ({
+            where: vi.fn(() => ({
+              returning: mocks.transactionUpdateReturning,
+            })),
+          })),
+        })),
+        insert: vi.fn(() => ({
+          values: mocks.transactionInsertValues,
+        })),
+      }),
+    ),
   },
   userCreditsTable: { userId: "user_id" },
-  creditTransactionsTable: { userId: "user_id", createdAt: "created_at" },
+  creditTransactionsTable: {
+    userId: "user_id",
+    createdAt: "created_at",
+    settlementKey: "settlement_key",
+    balanceAfter: "balance_after",
+    amount: "amount",
+  },
 }));
 
 vi.mock("../lib/emailClient", () => ({
@@ -101,6 +131,9 @@ describe("deductCreditsAtomic actual charge reporting", () => {
     mocks.insertValues.mockReturnValue({
       returning: vi.fn().mockResolvedValue([]),
     });
+    mocks.transactionExistingRows.mockResolvedValue([]);
+    mocks.transactionUpdateReturning.mockResolvedValue([{ balance: 45 }]);
+    mocks.transactionInsertValues.mockResolvedValue(undefined);
   });
 
   afterAll(() => {
@@ -171,6 +204,42 @@ describe("deductCreditsAtomic actual charge reporting", () => {
       }),
     ).resolves.toEqual({ newBalance: 45, charged: 5 });
     expect(mocks.updateReturning).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates a durable wallet settlement without a second balance update", async () => {
+    const deductCreditsAtomic = await loadDeduction(true);
+    const opts = {
+      type: "build" as const,
+      description: "Eco build",
+      settlementKey: "task-credit:901:pipeline",
+    };
+
+    await expect(deductCreditsAtomic("owner-1", 5, opts)).resolves.toEqual({
+      newBalance: 45,
+      charged: 5,
+    });
+    expect(mocks.transactionUpdateReturning).toHaveBeenCalledTimes(1);
+
+    mocks.transactionExistingRows.mockResolvedValueOnce([{ balanceAfter: 45, amount: -5 }]);
+    await expect(deductCreditsAtomic("owner-1", 5, opts)).resolves.toEqual({
+      newBalance: 45,
+      charged: 5,
+    });
+    expect(mocks.transactionUpdateReturning).toHaveBeenCalledTimes(1);
+  });
+
+  it("never wallet-fallbacks an ambiguous durable NabuFlow settlement", async () => {
+    mocks.maybeChargeNabuflow.mockRejectedValueOnce(new Error("response lost after commit"));
+    const deductCreditsAtomic = await loadDeduction(true);
+
+    await expect(
+      deductCreditsAtomic("owner-1", 5, {
+        type: "build",
+        description: "Eco build",
+        settlementKey: "task-credit:902:pipeline",
+      }),
+    ).rejects.toThrow("response lost after commit");
+    expect(mocks.transactionUpdateReturning).not.toHaveBeenCalled();
   });
 
   it("persists the deduction result instead of the architect price constant", () => {

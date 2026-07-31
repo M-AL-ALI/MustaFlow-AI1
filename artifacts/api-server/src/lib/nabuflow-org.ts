@@ -114,10 +114,7 @@ export async function listNabuflowOrgSeats(orgId: number): Promise<NabuflowOrgSe
 
 /** Org-wide monthly spend cap in cents — NULL falls back to the Constellation default, always clamped to the plan max. */
 export function nabuflowOrgEffectiveCapCents(org: NabuflowOrg): number {
-  return nabuflowEffectiveSpendCapCents(
-    NABUFLOW_PLANS.constellation,
-    org.monthlySpendCapUsdCents,
-  );
+  return nabuflowEffectiveSpendCapCents(NABUFLOW_PLANS.constellation, org.monthlySpendCapUsdCents);
 }
 
 /** Effective per-seat sub-cap in cents (never above the org cap), or null when the seat has none. */
@@ -228,6 +225,7 @@ export interface NabuflowOrgChargeOpts {
   engineMode?: string | null;
   deepReasoning?: boolean;
   source?: string | null;
+  settlementKey?: string | null;
 }
 
 export interface NabuflowOrgChargeResult {
@@ -351,6 +349,7 @@ export async function chargeNabuflowOrgPool(
         usdValueCents: drawValueCents,
         attribution: "pool",
         description: opts.description,
+        settlementKey: opts.settlementKey ?? null,
       })
       .returning();
 
@@ -723,9 +722,8 @@ export async function registerNabuflowOrg(
     );
   }
 
-  const { createNabuflowOrgStripeCustomer, linkNabuflowOrgCustomer } = await import(
-    "./nabuflow-org-stripe"
-  );
+  const { createNabuflowOrgStripeCustomer, linkNabuflowOrgCustomer } =
+    await import("./nabuflow-org-stripe");
   const customer = await createNabuflowOrgStripeCustomer({
     companyName: input.companyName,
     billingContactName: input.billingContactName ?? null,

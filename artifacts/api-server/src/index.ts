@@ -28,6 +28,7 @@ import { initSpendLedger } from "./lib/public-ai/ora-spend-cap";
 import { startWorkspaceSweeper } from "./lib/public-ai/repo-workspace";
 import { pool } from "@workspace/db";
 import { auditImageProviderConfig } from "./lib/image-provider";
+import { startBillingSettlementSweeper } from "./lib/billing-settlement-outbox";
 
 const execFileAsync = promisify(execFile);
 
@@ -301,13 +302,14 @@ void runStartupMigrations()
     // Non-fatal: log and continue — a partial schema is better than no server.
     logger.error({ err }, "startup-migrations: unexpected error (continuing)");
   })
-  .then(() =>
-    runContainerSelfCheck().catch((err: unknown) => {
+  .then(() => {
+    startBillingSettlementSweeper();
+    return runContainerSelfCheck().catch((err: unknown) => {
       // Non-fatal: log and continue — a degraded container subsystem is better
       // than a stopped server. The health endpoint will reflect the error status.
       logger.warn({ err }, "container subsystem: self-check threw unexpectedly");
-    }),
-  )
+    });
+  })
   .finally(() => {
     logger.info({ port }, "Startup migrations and container self-check complete");
   });

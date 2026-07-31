@@ -4963,9 +4963,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(
         `ALTER TABLE nabuflow_usage_events ADD COLUMN IF NOT EXISTS org_id INTEGER`,
       );
-      await client.query(
-        `ALTER TABLE nabuflow_usage_events ALTER COLUMN cycle_id DROP NOT NULL`,
-      );
+      await client.query(`ALTER TABLE nabuflow_usage_events ALTER COLUMN cycle_id DROP NOT NULL`);
       await client.query(
         `CREATE INDEX IF NOT EXISTS nabuflow_usage_events_org_idx
            ON nabuflow_usage_events (org_id, created_at)`,
@@ -5005,6 +5003,64 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(
         `CREATE INDEX IF NOT EXISTS build_token_telemetry_recorded_at_idx
            ON build_token_telemetry(recorded_at)`,
+      );
+    },
+  },
+
+  // ── migrate-bw1-money-path-durability ────────────────────────────────────
+  // Additive/idempotent durability rails for post-build settlement and
+  // all-outcome token telemetry.
+  {
+    name: "migrate-bw1-money-path-durability",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE build_token_telemetry
+           ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed'`,
+      );
+      await client.query(
+        `ALTER TABLE credit_transactions
+           ADD COLUMN IF NOT EXISTS settlement_key TEXT`,
+      );
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS credit_transactions_settlement_key_unique
+           ON credit_transactions(settlement_key)
+           WHERE settlement_key IS NOT NULL`,
+      );
+      await client.query(
+        `ALTER TABLE nabuflow_usage_events
+           ADD COLUMN IF NOT EXISTS settlement_key TEXT`,
+      );
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS nabuflow_usage_events_settlement_key_unique
+           ON nabuflow_usage_events(settlement_key)
+           WHERE settlement_key IS NOT NULL`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS billing_settlement_outbox (
+          id            SERIAL PRIMARY KEY,
+          kind          TEXT NOT NULL,
+          dedupe_key    TEXT NOT NULL,
+          task_id       INTEGER,
+          owner_id      TEXT,
+          amount        INTEGER,
+          context       JSONB NOT NULL DEFAULT '{}'::jsonb,
+          attempts      INTEGER NOT NULL DEFAULT 0,
+          next_retry_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          locked_at     TIMESTAMPTZ,
+          completed_at  TIMESTAMPTZ,
+          last_error    TEXT,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT billing_settlement_outbox_dedupe_key_unique UNIQUE (dedupe_key)
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS billing_settlement_outbox_due_idx
+           ON billing_settlement_outbox(completed_at, next_retry_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS billing_settlement_outbox_task_idx
+           ON billing_settlement_outbox(task_id)`,
       );
     },
   },

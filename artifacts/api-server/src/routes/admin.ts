@@ -4,6 +4,7 @@
 //   GET  /api/admin/me                          — current user's admin status
 //   GET  /api/admin/stats                       — platform-wide stats (incl. buildTokenTelemetry)
 //   GET  /api/admin/telemetry/calibration       — 7-day per-mode cost calibration report
+//   GET  /api/admin/billing/settlement-reconciliation — unsettled NabuFlow overage ledger
 //   GET  /api/admin/launch-readiness            — launch checklist
 //   GET  /api/admin/roles                       — list all role grants
 //   POST /api/admin/roles                       — grant or update a role
@@ -317,45 +318,61 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
   try {
     const bttRows = await db.execute<{
       mode: string;
+      status: string;
       build_count: string;
       avg_actual_cost_usd: string | null;
     }>(sql`
       SELECT
         mode,
+        status,
         COUNT(*)::int                   AS build_count,
         AVG(computed_usd_cost::float)   AS avg_actual_cost_usd
       FROM build_token_telemetry
       WHERE recorded_at > now() - interval '7 days'
-      GROUP BY mode
+      GROUP BY mode, status
     `);
 
     const MODES = ["lite", "eco", "power", "pro"] as const;
     type ModeName = (typeof MODES)[number];
 
-    const report = bttRows.rows.map((r) => {
-      const mode = r.mode as ModeName;
-      const avgActualCostUsd = r.avg_actual_cost_usd
+    const statusSegments = bttRows.rows.map((r) => ({
+      mode: r.mode,
+      status: r.status,
+      buildCount: Number(r.build_count),
+      avgActualCostUsd: r.avg_actual_cost_usd
         ? Number(Number(r.avg_actual_cost_usd).toFixed(6))
-        : 0;
-      // charge_usd = credits × minimum overage rate (Nova: $0.012/credit).
-      // Using the lowest published rate is conservative: if actual cost exceeds
-      // 1.15× this floor, the mode is underpriced on EVERY plan. Plans with
-      // higher overage rates (Orbit $0.015, Comet $0.013) generate more revenue.
-      const chargeUsd = creditCostFor(mode) * NABUFLOW_MIN_OVERAGE_RATE_USD;
-      // ratio = charge / actual_cost. When ratio >= 1.15 we have at least 15%
-      // headroom (charge covers cost with margin). When ratio < 1.15 the mode
-      // is underpriced relative to actual AI cost → flag for recalibration.
-      const ratio = avgActualCostUsd > 0 ? chargeUsd / avgActualCostUsd : null;
-      return {
-        mode,
-        buildCount: Number(r.build_count),
-        avgActualCostUsd,
-        chargeUsd: Number(chargeUsd.toFixed(6)),
-        ratio: ratio !== null ? Number(ratio.toFixed(4)) : null,
-        // Flag when charge covers less than 1.15× actual cost (margin too thin).
-        flagged: ratio !== null && ratio < 1.15,
-      };
-    });
+        : 0,
+    }));
+
+    // Pricing calibration remains based on completed runs; canceled and failed
+    // spend is returned separately so operators can measure it without
+    // distorting completed-build unit economics.
+    const report = bttRows.rows
+      .filter((r) => r.status === "completed")
+      .map((r) => {
+        const mode = r.mode as ModeName;
+        const avgActualCostUsd = r.avg_actual_cost_usd
+          ? Number(Number(r.avg_actual_cost_usd).toFixed(6))
+          : 0;
+        // charge_usd = credits × minimum overage rate (Nova: $0.012/credit).
+        // Using the lowest published rate is conservative: if actual cost exceeds
+        // 1.15× this floor, the mode is underpriced on EVERY plan. Plans with
+        // higher overage rates (Orbit $0.015, Comet $0.013) generate more revenue.
+        const chargeUsd = creditCostFor(mode) * NABUFLOW_MIN_OVERAGE_RATE_USD;
+        // ratio = charge / actual_cost. When ratio >= 1.15 we have at least 15%
+        // headroom (charge covers cost with margin). When ratio < 1.15 the mode
+        // is underpriced relative to actual AI cost → flag for recalibration.
+        const ratio = avgActualCostUsd > 0 ? chargeUsd / avgActualCostUsd : null;
+        return {
+          mode,
+          buildCount: Number(r.build_count),
+          avgActualCostUsd,
+          chargeUsd: Number(chargeUsd.toFixed(6)),
+          ratio: ratio !== null ? Number(ratio.toFixed(4)) : null,
+          // Flag when charge covers less than 1.15× actual cost (margin too thin).
+          flagged: ratio !== null && ratio < 1.15,
+        };
+      });
 
     // Fill in modes that have no telemetry yet with placeholder rows.
     const reportModes = new Set(report.map((r: (typeof report)[0]) => r.mode));
@@ -377,10 +394,54 @@ router.get("/admin/telemetry/calibration", async (_req, res): Promise<void> => {
         MODES.indexOf(a.mode as ModeName) - MODES.indexOf(b.mode as ModeName),
     );
 
-    res.json({ windowDays: 7, report });
+    res.json({ windowDays: 7, report, statusSegments });
   } catch (err) {
     logger.error({ err }, "admin/telemetry/calibration: query failed");
     res.status(500).json({ error: "Failed to generate calibration report" });
+  }
+});
+
+// ── GET /api/admin/billing/settlement-reconciliation ────────────────────────
+// Read-only operator view: ledger-authoritative overage rows that do not yet
+// carry the Stripe invoice-item receipt, including their durable retry state.
+router.get("/admin/billing/settlement-reconciliation", async (_req, res): Promise<void> => {
+  try {
+    const rows = await db.execute<{
+      event_id: number;
+      task_id: number | null;
+      user_id: string;
+      overage_credits: number;
+      overage_usd_cents: number;
+      created_at: Date;
+      outbox_id: number | null;
+      attempts: number | null;
+      next_retry_at: Date | null;
+      last_error: string | null;
+    }>(sql`
+        SELECT
+          usage.id                  AS event_id,
+          usage.task_id             AS task_id,
+          usage.user_id             AS user_id,
+          usage.overage_credits     AS overage_credits,
+          usage.overage_usd_cents   AS overage_usd_cents,
+          usage.created_at          AS created_at,
+          outbox.id                 AS outbox_id,
+          outbox.attempts           AS attempts,
+          outbox.next_retry_at      AS next_retry_at,
+          outbox.last_error         AS last_error
+        FROM nabuflow_usage_events AS usage
+        LEFT JOIN billing_settlement_outbox AS outbox
+          ON outbox.dedupe_key = ('overage-stripe:' || usage.id::text)
+         AND outbox.completed_at IS NULL
+        WHERE usage.overage_credits > 0
+          AND usage.stripe_invoice_item_id IS NULL
+          AND usage.reversed_at IS NULL
+        ORDER BY usage.created_at ASC
+      `);
+    res.json({ count: rows.rows.length, rows: rows.rows });
+  } catch (err) {
+    logger.error({ err }, "admin billing settlement reconciliation query failed");
+    res.status(500).json({ error: "Failed to load billing settlement reconciliation" });
   }
 });
 
