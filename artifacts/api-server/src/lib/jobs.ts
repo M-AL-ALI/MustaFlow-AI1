@@ -104,6 +104,7 @@ import {
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
 import { persistArchitectAutoFixLink } from "./architect-auto-fix-link";
+import { settleCreditsDurably } from "./billing-settlement-outbox";
 import { encryptionService } from "./encryption";
 import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 import {
@@ -121,6 +122,49 @@ import {
   builderPersistedCompletionSummary,
   builderValidationAwareCompletionSummary,
 } from "./builder-task-completion";
+
+type CreativeBillingTool =
+  | "generate_image"
+  | "generate_video"
+  | "generate_audio"
+  | "remove_image_background";
+
+async function deductCreativeCreditsForProject(
+  ownerId: string,
+  projectId: number,
+  credits: number,
+  tool: CreativeBillingTool,
+): Promise<number> {
+  try {
+    const balance = await getOrCreateCredits(ownerId);
+    if (balance.balance < credits) {
+      const { nabuflowChargeActive } = await import("./nabuflow-billing");
+      if (!(await nabuflowChargeActive(ownerId))) {
+        logger.warn(
+          { projectId, credits, tool, balance: balance.balance },
+          "credits_exhausted: skipping creative deduction — insufficient balance",
+        );
+        return 0;
+      }
+    }
+    const result = await deductCreditsAtomic(ownerId, credits, {
+      type: "creative",
+      description: `Agent ${tool} — project ${projectId}`,
+      projectId,
+    });
+    if ("insufficient" in result) {
+      logger.warn(
+        { projectId, credits, tool },
+        "Creative credit deduction: insufficient balance — work already delivered",
+      );
+      return 0;
+    }
+    return result.charged;
+  } catch (err) {
+    logger.warn({ err, projectId, tool }, "Creative credit deduction failed (non-fatal)");
+    return 0;
+  }
+}
 import {
   buildPreviewRepairObservation,
   collectPreviewRuntimeObservation,
@@ -2895,37 +2939,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       );
                   },
                   onBillableCreativeCall: (credits, tool) => {
-                    if (!project.ownerId) return;
-                    void getOrCreateCredits(project.ownerId)
-                      .then(async (bal) => {
-                        if (bal.balance < credits) {
-                          // NabuFlow plan users charge via cycle accounting —
-                          // the wallet balance is irrelevant (Task #1516).
-                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
-                          if (!(await nabuflowChargeActive(project.ownerId!))) {
-                            logger.warn(
-                              { projectId, credits, tool, balance: bal.balance },
-                              "credits_exhausted: skipping creative deduction — insufficient balance",
-                            );
-                            return;
-                          }
-                        }
-                        return deductCreditsAtomic(project.ownerId!, credits, {
-                          type: "creative",
-                          description: `Agent ${tool} — project ${projectId}`,
-                          projectId,
-                        }).then((result) => {
-                          if ("insufficient" in result) {
-                            logger.warn(
-                              { projectId, credits, tool },
-                              "Creative credit deduction: insufficient balance — work already delivered",
-                            );
-                          }
-                        });
-                      })
-                      .catch((err) =>
-                        logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                      );
+                    if (!project.ownerId) return 0;
+                    return deductCreativeCreditsForProject(
+                      project.ownerId,
+                      projectId,
+                      credits,
+                      tool,
+                    );
                   },
                 });
                 return loopResultToBuildResult(loopRes, userPrompt, project.name);
@@ -3475,37 +3495,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       );
                   },
                   onBillableCreativeCall: (credits, tool) => {
-                    if (!project.ownerId) return;
-                    void getOrCreateCredits(project.ownerId)
-                      .then(async (bal) => {
-                        if (bal.balance < credits) {
-                          // NabuFlow plan users charge via cycle accounting —
-                          // the wallet balance is irrelevant (Task #1516).
-                          const { nabuflowChargeActive } = await import("./nabuflow-billing");
-                          if (!(await nabuflowChargeActive(project.ownerId!))) {
-                            logger.warn(
-                              { projectId, credits, tool, balance: bal.balance },
-                              "credits_exhausted: skipping creative deduction — insufficient balance",
-                            );
-                            return;
-                          }
-                        }
-                        return deductCreditsAtomic(project.ownerId!, credits, {
-                          type: "creative",
-                          description: `Agent ${tool} — project ${projectId}`,
-                          projectId,
-                        }).then((result) => {
-                          if ("insufficient" in result) {
-                            logger.warn(
-                              { projectId, credits, tool },
-                              "Creative credit deduction: insufficient balance — work already delivered",
-                            );
-                          }
-                        });
-                      })
-                      .catch((err) =>
-                        logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                      );
+                    if (!project.ownerId) return 0;
+                    return deductCreativeCreditsForProject(
+                      project.ownerId,
+                      projectId,
+                      credits,
+                      tool,
+                    );
                   },
                 });
                 return loopResultToRefineResult(loopRes, userPrompt);
@@ -3820,30 +3816,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     );
                 },
                 onBillableCreativeCall: (credits, tool) => {
-                  if (!project.ownerId) return;
-                  void getOrCreateCredits(project.ownerId)
-                    .then(async (bal) => {
-                      if (bal.balance < credits) {
-                        // NabuFlow plan users charge via cycle accounting —
-                        // the wallet balance is irrelevant (Task #1516).
-                        const { nabuflowChargeActive } = await import("./nabuflow-billing");
-                        if (!(await nabuflowChargeActive(project.ownerId!))) {
-                          logger.warn(
-                            { projectId, credits, tool, balance: bal.balance },
-                            "credits_exhausted: skipping creative deduction — insufficient balance",
-                          );
-                          return;
-                        }
-                      }
-                      return deductCreditsAtomic(project.ownerId!, credits, {
-                        type: "creative",
-                        description: `Agent ${tool} — project ${projectId}`,
-                        projectId,
-                      });
-                    })
-                    .catch((err) =>
-                      logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                    );
+                  if (!project.ownerId) return 0;
+                  return deductCreativeCreditsForProject(project.ownerId, projectId, credits, tool);
                 },
               });
               const retryResult = loopResultToRefineResult(retryLoopRes, stricterPrompt);
@@ -5746,7 +5720,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // queryable telemetry row are written at the same logical completion point.
       const { flushBuildTokenTelemetry } = await import("./ai-providers");
       const [, flushedTelemetryTokenCount] = await Promise.all([
-        flushBuildTokenTelemetry(taskId),
+        flushBuildTokenTelemetry(taskId, "completed"),
         Promise.resolve(flushTokenCount(taskId)),
       ]);
       await db
@@ -6315,29 +6289,31 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // --- Deduct credits after a successful AI build/refine ---
       // Skip when credits were reserved upfront (background jobs — Task #509).
       if (project.ownerId && !creditsAlreadyReserved) {
-        void deductCreditsAtomic(project.ownerId, creditCost, {
-          type: kind,
-          description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
-          projectId,
-          engineMode: agentMode,
-          deepReasoning: input.deepReasoning ?? false,
+        const result = await settleCreditsDurably({
+          ownerId: project.ownerId,
+          amount: creditCost,
           taskId,
-          source: "pipeline",
-        })
-          .then((result) => {
-            if ("insufficient" in result) {
-              logger.warn(
-                { projectId, taskId, creditCost, agentMode },
-                "Post-build credit deduction: insufficient balance — build was already delivered",
-              );
-              void emitEvent(
-                taskId,
-                "credit_insufficient",
-                `Insufficient credits to charge for this ${kind} — balance ${result.balance} < ${creditCost}`,
-              );
-            }
-          })
-          .catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
+          opts: {
+            type: kind,
+            description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
+            projectId,
+            engineMode: agentMode,
+            deepReasoning: input.deepReasoning ?? false,
+            taskId,
+            source: "pipeline",
+          },
+        });
+        if ("insufficient" in result) {
+          logger.warn(
+            { projectId, taskId, creditCost, agentMode },
+            "Post-build credit deduction: insufficient balance — durable retry queued",
+          );
+          void emitEvent(
+            taskId,
+            "credit_insufficient",
+            `Insufficient credits to charge for this ${kind} — balance ${result.balance} < ${creditCost}`,
+          );
+        }
       }
 
       // --- Task #529: web sense credits are now charged in-loop ---
@@ -6602,11 +6578,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         (err.message === "Build cancelled" || abortController.signal.aborted)
       ) {
         await emitEvent(taskId, "cancelled", "Build cancelled by user.");
-        // Clear the telemetry accumulator so the in-memory Map doesn't grow
-        // unbounded on cancel paths (no partial telemetry row written — that
-        // data would skew the calibration report).
-        const { clearBuildTokenAccumulator } = await import("./ai-providers");
-        clearBuildTokenAccumulator(taskId);
+        // Canceled work still consumed provider tokens. Persist it with an
+        // explicit status so calibration can include or filter it honestly.
+        const { flushBuildTokenTelemetry } = await import("./ai-providers");
+        await flushBuildTokenTelemetry(taskId, "canceled");
         // Flush the token counter before entering the transaction so we can
         // persist the partial count even for mid-run cancellations.
         const canceledTokenCount = flushTokenCount(taskId);
@@ -6670,12 +6645,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
       }
 
-      // Clear the telemetry accumulator on failure so the in-memory Map doesn't
-      // grow unbounded. No partial telemetry row is written on failure paths —
-      // incomplete data would skew the calibration averages.
+      // Failed work still consumed provider tokens. Persist it separately from
+      // completed builds rather than deleting paid usage.
       {
-        const { clearBuildTokenAccumulator } = await import("./ai-providers");
-        clearBuildTokenAccumulator(taskId);
+        const { flushBuildTokenTelemetry } = await import("./ai-providers");
+        await flushBuildTokenTelemetry(taskId, "failed");
       }
       // Generate specific fix suggestions via AI (parallel with DB writes)
       const finalTokenCount = flushTokenCount(taskId);

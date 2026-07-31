@@ -13,10 +13,9 @@ import { agentTasksTable } from "./tasks";
 /**
  * Per-build token telemetry — NabuFlow R2 Phase D.
  *
- * One row per completed build (upserted on task_id). Captures the aggregate
- * token economics for the build so the 7-day calibration report can compare
- * actual loaded cost against the credit charge basis and flag modes where the
- * ratio drops below 1.15×.
+ * One row per terminal build (upserted on task_id), including canceled and
+ * failed work because those provider calls still incur cost. Captures the
+ * aggregate token economics so calibration can segment by terminal status.
  *
  * `computed_usd_cost` is derived from static per-model pricing constants and
  * is for internal calibration only — it is NOT used for billing or invoicing.
@@ -34,6 +33,8 @@ export const buildTokenTelemetryTable = pgTable(
     provider: text("provider").notNull(),
     /** Canonical model identifier as sent to the provider SDK. */
     model: text("model").notNull(),
+    /** Terminal task outcome; canceled/failed calls still incur provider cost. */
+    status: text("status").notNull().default("completed"),
     /** Total prompt/input tokens across all model calls in this build. */
     inputTokens: integer("input_tokens").notNull().default(0),
     /** Total completion/output tokens across all model calls in this build. */

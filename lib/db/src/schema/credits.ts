@@ -1,4 +1,5 @@
-import { pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, serial, text, integer, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // Per-user credit balance. Created on first use with a default starter balance.
 export const userCreditsTable = pgTable("user_credits", {
@@ -27,17 +28,27 @@ export const CREDIT_TRANSACTION_TYPES = [
 export type CreditTransactionType = (typeof CREDIT_TRANSACTION_TYPES)[number];
 
 // Transaction log — debit (negative amount) or credit (positive amount).
-export const creditTransactionsTable = pgTable("credit_transactions", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  projectId: integer("project_id"),
-  type: text("type").notNull().default("build"),
-  amount: integer("amount").notNull(),
-  description: text("description"),
-  balanceAfter: integer("balance_after").notNull(),
-  receiptUrl: text("receipt_url"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const creditTransactionsTable = pgTable(
+  "credit_transactions",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    projectId: integer("project_id"),
+    type: text("type").notNull().default("build"),
+    amount: integer("amount").notNull(),
+    description: text("description"),
+    balanceAfter: integer("balance_after").notNull(),
+    receiptUrl: text("receipt_url"),
+    /** Stable idempotency key for retryable post-build settlements. */
+    settlementKey: text("settlement_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("credit_transactions_settlement_key_unique")
+      .on(t.settlementKey)
+      .where(sql`${t.settlementKey} IS NOT NULL`),
+  ],
+);
 
 export type UserCredit = typeof userCreditsTable.$inferSelect;
 export type CreditTransaction = typeof creditTransactionsTable.$inferSelect;

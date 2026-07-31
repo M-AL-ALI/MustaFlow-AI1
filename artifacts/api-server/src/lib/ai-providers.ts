@@ -277,10 +277,6 @@ export function creditCostFor(
 
 interface BuildTokenAccumulator {
   mode: string;
-  /** Provider of the most-recent call (stored for audit; cost is pre-computed). */
-  provider: string;
-  /** Model of the most-recent call (stored for audit; cost is pre-computed). */
-  model: string;
   inputTokens: number;
   outputTokens: number;
   /**
@@ -289,6 +285,20 @@ interface BuildTokenAccumulator {
    * cheap planner is followed by an expensive code-generation call (or vice
    * versa); the total is correct regardless of call order.
    */
+  computedUsdCost: number;
+  attribution: Map<string, { provider: string; model: string; tokens: number }>;
+}
+
+export type BuildTokenTelemetryStatus = "completed" | "canceled" | "failed";
+
+export interface BuildTokenTelemetrySnapshot {
+  taskId: number;
+  mode: string;
+  provider: string;
+  model: string;
+  status: BuildTokenTelemetryStatus;
+  inputTokens: number;
+  outputTokens: number;
   computedUsdCost: number;
 }
 export interface CreateChatCompletionParams {
@@ -1312,17 +1322,30 @@ export function accumulateBuildTokens(
   // rates. This prevents multi-model builds (planner → code-gen, escalation,
   // correction passes) from mispricing all tokens at the final model's rate.
   const callCost = computeModelUsdCost(opts.model, opts.inputTokens, opts.outputTokens);
+  const attributionKey = `${opts.provider}\u0000${opts.model}`;
+  const callTokens = opts.inputTokens + opts.outputTokens;
   const existing = buildTokenAccumulators.get(taskId);
   if (existing) {
     existing.inputTokens += opts.inputTokens;
     existing.outputTokens += opts.outputTokens;
     existing.computedUsdCost += callCost;
-    // Last-used provider/model stored for audit; cost is already pre-computed.
-    existing.provider = opts.provider;
-    existing.model = opts.model;
+    const currentAttribution = existing.attribution.get(attributionKey);
+    existing.attribution.set(attributionKey, {
+      provider: opts.provider,
+      model: opts.model,
+      tokens: (currentAttribution?.tokens ?? 0) + callTokens,
+    });
     if (opts.mode) existing.mode = opts.mode;
   } else {
-    buildTokenAccumulators.set(taskId, { ...opts, computedUsdCost: callCost });
+    buildTokenAccumulators.set(taskId, {
+      mode: opts.mode,
+      inputTokens: opts.inputTokens,
+      outputTokens: opts.outputTokens,
+      computedUsdCost: callCost,
+      attribution: new Map([
+        [attributionKey, { provider: opts.provider, model: opts.model, tokens: callTokens }],
+      ]),
+    });
   }
 }
 
@@ -1337,61 +1360,112 @@ function lookupUsdPer1K(model: string, side: "input" | "output"): number {
   return side === "input" ? FALLBACK_USD_INPUT : FALLBACK_USD_OUTPUT;
 }
 
-/**
- * Upsert the accumulated token telemetry for a build to `build_token_telemetry`
- * and clear the in-memory accumulator. No-op when no tokens were recorded.
- *
- * Safe to call on failure — the upsert overwrites any stale row for the same
- * task_id. The existing `agent_tasks.token_count` column is unaffected.
- */
-/**
- * Removes a task's accumulator entry without writing to the DB.
- * Call on all non-success terminal paths (cancel, fail) so the Map
- * does not grow unbounded in long-running workers.
- */
+/** Removes a task's accumulator without persistence (tests/emergency cleanup). */
 export function clearBuildTokenAccumulator(taskId: number): void {
   buildTokenAccumulators.delete(taskId);
 }
-export async function flushBuildTokenTelemetry(taskId: number): Promise<void> {
+
+export function dominantBuildTokenAttribution(
+  attribution: ReadonlyMap<string, { provider: string; model: string; tokens: number }>,
+): { provider: string; model: string } {
+  const ranked = [...attribution.values()].sort(
+    (a, b) =>
+      b.tokens - a.tokens || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
+  );
+  return {
+    provider: ranked[0]?.provider ?? "unknown",
+    model: ranked[0]?.model ?? "unknown",
+  };
+}
+
+export async function persistBuildTokenTelemetrySnapshot(
+  snapshot: BuildTokenTelemetrySnapshot,
+): Promise<void> {
+  const { pool } = await import("@workspace/db");
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO build_token_telemetry
+         (task_id, mode, provider, model, status, input_tokens, output_tokens,
+          computed_usd_cost, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       ON CONFLICT (task_id) DO UPDATE SET
+         mode              = EXCLUDED.mode,
+         provider          = EXCLUDED.provider,
+         model             = EXCLUDED.model,
+         status            = EXCLUDED.status,
+         input_tokens      = EXCLUDED.input_tokens,
+         output_tokens     = EXCLUDED.output_tokens,
+         computed_usd_cost = EXCLUDED.computed_usd_cost,
+         recorded_at       = now()`,
+      [
+        snapshot.taskId,
+        snapshot.mode,
+        snapshot.provider,
+        snapshot.model,
+        snapshot.status,
+        snapshot.inputTokens,
+        snapshot.outputTokens,
+        snapshot.computedUsdCost.toFixed(8),
+      ],
+    );
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Flush every terminal outcome. DB writes get a bounded retry; exhaustion is
+ * handed to the durable settlement outbox before the accumulator is cleared.
+ */
+export async function flushBuildTokenTelemetry(
+  taskId: number,
+  status: BuildTokenTelemetryStatus = "completed",
+): Promise<void> {
   const acc = buildTokenAccumulators.get(taskId);
-  buildTokenAccumulators.delete(taskId);
   if (!acc) return;
 
-  // Use the pre-accumulated cost (summed per-call at capture time) rather than
-  // recomputing from the final model's rates, which would misprice multi-model builds.
-  const computedUsdCost = acc.computedUsdCost;
+  const dominant = dominantBuildTokenAttribution(acc.attribution);
+  const snapshot: BuildTokenTelemetrySnapshot = {
+    taskId,
+    mode: acc.mode,
+    provider: dominant.provider,
+    model: dominant.model,
+    status,
+    inputTokens: acc.inputTokens,
+    outputTokens: acc.outputTokens,
+    computedUsdCost: acc.computedUsdCost,
+  };
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await persistBuildTokenTelemetrySnapshot(snapshot);
+      buildTokenAccumulators.delete(taskId);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 25));
+      }
+    }
+  }
 
   try {
-    const { pool } = await import("@workspace/db");
-    const client = await pool.connect();
-    try {
-      await client.query(
-        `INSERT INTO build_token_telemetry
-           (task_id, mode, provider, model, input_tokens, output_tokens, computed_usd_cost, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-         ON CONFLICT (task_id) DO UPDATE SET
-           mode              = EXCLUDED.mode,
-           provider          = EXCLUDED.provider,
-           model             = EXCLUDED.model,
-           input_tokens      = EXCLUDED.input_tokens,
-           output_tokens     = EXCLUDED.output_tokens,
-           computed_usd_cost = EXCLUDED.computed_usd_cost,
-           recorded_at       = now()`,
-        [
-          taskId,
-          acc.mode,
-          acc.provider,
-          acc.model,
-          acc.inputTokens,
-          acc.outputTokens,
-          computedUsdCost.toFixed(8),
-        ],
-      );
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    logger.warn({ err, taskId }, "flushBuildTokenTelemetry: upsert failed (non-fatal)");
+    const { enqueueBillingSettlement } = await import("./billing-settlement-outbox");
+    await enqueueBillingSettlement({
+      kind: "build_token_telemetry",
+      dedupeKey: `build-token-telemetry:${taskId}`,
+      taskId,
+      context: snapshot as unknown as Record<string, unknown>,
+      error: lastError,
+    });
+    buildTokenAccumulators.delete(taskId);
+  } catch (outboxError) {
+    logger.error(
+      { err: outboxError, cause: lastError, taskId, status },
+      "flushBuildTokenTelemetry: DB retries and durable enqueue failed",
+    );
   }
 }
 

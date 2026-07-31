@@ -357,20 +357,23 @@ export async function createNabuflowOverageInvoiceItem(opts: {
     );
     return null;
   }
-  const item = await stripe.invoiceItems.create({
-    customer: opts.customerId,
-    ...(opts.subscriptionId ? { subscription: opts.subscriptionId } : {}),
-    amount: opts.amountCents,
-    currency: "usd",
-    description: `NabuFlow pay-as-you-go: ${opts.credits} credits over included (${opts.planId})`,
-    metadata: {
-      surface: "nabuflow",
-      plan: opts.planId,
-      userId: opts.userId,
-      usageEventId: String(opts.eventId),
-      credits: String(opts.credits),
+  const item = await stripe.invoiceItems.create(
+    {
+      customer: opts.customerId,
+      ...(opts.subscriptionId ? { subscription: opts.subscriptionId } : {}),
+      amount: opts.amountCents,
+      currency: "usd",
+      description: `NabuFlow pay-as-you-go: ${opts.credits} credits over included (${opts.planId})`,
+      metadata: {
+        surface: "nabuflow",
+        plan: opts.planId,
+        userId: opts.userId,
+        usageEventId: String(opts.eventId),
+        credits: String(opts.credits),
+      },
     },
-  });
+    { idempotencyKey: `nabuflow-overage-event-${opts.eventId}` },
+  );
   return item.id;
 }
 

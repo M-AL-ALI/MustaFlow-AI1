@@ -47,6 +47,7 @@ import { isSuperuser } from "./superusers";
 import { parseBuilderAllowlist } from "./builder-access";
 import { getClerkUserById } from "./clerk-users";
 import { logger } from "./logger";
+import { enqueueBillingSettlement } from "./billing-settlement-outbox";
 import {
   getNabuflowOrgSeatContext,
   buildNabuflowOrgGateInfo,
@@ -472,10 +473,7 @@ export function evaluateNabuflowGate(
     }
 
     // Org-wide monthly spend cap (draw value at the Constellation rate).
-    if (
-      projectedValueCents > 0 &&
-      org.monthDrawnUsdCents + projectedValueCents > org.capUsdCents
-    ) {
+    if (projectedValueCents > 0 && org.monthDrawnUsdCents + projectedValueCents > org.capUsdCents) {
       return block({
         code: "org_spend_cap_reached",
         message: `This build would take ${org.companyName} past its monthly spend cap. Your billing admin can raise it, or it resets on ${resetDay}.`,
@@ -514,8 +512,7 @@ export function evaluateNabuflowGate(
   if (!isChargeableNabuflowStatus(sub.status)) {
     return block({
       code: "subscription_inactive",
-      message:
-        "Your NabuFlow subscription isn't active. Reactivate a plan to keep building.",
+      message: "Your NabuFlow subscription isn't active. Reactivate a plan to keep building.",
       planId: sub.planId,
       upgradeTarget: sub.planId,
     });
@@ -589,7 +586,11 @@ export function evaluateNabuflowGate(
     }
 
     // Metered Pro-build counter.
-    if (mode === "pro" && ladder.proBuildsPerCycle !== null && proUsed >= ladder.proBuildsPerCycle) {
+    if (
+      mode === "pro" &&
+      ladder.proBuildsPerCycle !== null &&
+      proUsed >= ladder.proBuildsPerCycle
+    ) {
       return block({
         code: "mode_limit_reached",
         message: `You've used all ${ladder.proBuildsPerCycle} Pro builds for this cycle. They reset ${resetsAt ? `on ${resetsAt.slice(0, 10)}` : "next cycle"}, or upgrade for unlimited Pro builds.`,
@@ -711,10 +712,7 @@ export async function nabuflowGateHttpError(
 // Cycle materialization
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function getCycleRow(
-  userId: string,
-  cycleStart: Date,
-): Promise<NabuflowBillingCycle | null> {
+async function getCycleRow(userId: string, cycleStart: Date): Promise<NabuflowBillingCycle | null> {
   const [row] = await db
     .select()
     .from(nabuflowBillingCyclesTable)
@@ -873,6 +871,7 @@ export interface NabuflowChargeOpts {
   engineMode?: string | null;
   deepReasoning?: boolean;
   source?: string | null;
+  settlementKey?: string | null;
 }
 
 function sourceForCharge(opts: NabuflowChargeOpts): string {
@@ -938,8 +937,7 @@ export async function chargeNabuflowCycle(
     );
     const overageUsdCents = nabuflowOverageCents(plan, overageDelta);
     const usdValueCents = nabuflowOverageCents(plan, amount);
-    const attribution =
-      overageDelta === 0 ? "included" : includedDelta === 0 ? "overage" : "mixed";
+    const attribution = overageDelta === 0 ? "included" : includedDelta === 0 ? "overage" : "mixed";
 
     const [updatedCycle] = await tx
       .update(nabuflowBillingCyclesTable)
@@ -972,6 +970,7 @@ export async function chargeNabuflowCycle(
         usdValueCents,
         attribution,
         description: opts.description,
+        settlementKey: opts.settlementKey ?? null,
       })
       .returning();
 
@@ -988,15 +987,37 @@ export async function chargeNabuflowCycle(
     };
   });
 
-  // Metered overage → pending Stripe invoice item (swept into the cycle-close
-  // invoice). Best-effort + async: a Stripe hiccup must never fail the build;
-  // the ledger row keeps the amount for reconciliation either way.
+  // Metered overage -> pending Stripe invoice item (swept into the cycle-close
+  // invoice). Stripe remains off the build path, but failures are durably
+  // retried instead of surviving only as an operator log.
   if (result.overageDelta > 0 && sub.stripeCustomerId) {
-    void reportNabuflowOverageToStripe(sub, plan, result).catch((err) => {
+    const payload: NabuflowOverageSettlementPayload = {
+      customerId: sub.stripeCustomerId,
+      subscriptionId: sub.stripeSubscriptionId,
+      amountCents: result.overageUsdCents,
+      credits: result.overageDelta,
+      planId: plan.id,
+      userId: sub.userId,
+      eventId: result.event.id,
+    };
+    void reportNabuflowOveragePayload(payload).catch(async (err) => {
       logger.error(
         { err, userId: sub.userId, eventId: result.event.id },
-        "nabuflow: overage invoice item failed (ledger retained)",
+        "nabuflow: overage invoice item failed; enqueueing durable retry",
       );
+      try {
+        await enqueueBillingSettlement({
+          kind: "overage_invoice_item",
+          dedupeKey: `overage-stripe:${result.event.id}`,
+          taskId: result.event.taskId,
+          ownerId: sub.userId,
+          amount: result.overageUsdCents,
+          context: payload as unknown as Record<string, unknown>,
+          error: err,
+        });
+      } catch {
+        // Enqueue exhaustion is already logged by the outbox helper.
+      }
     });
   }
 
@@ -1008,27 +1029,34 @@ export async function chargeNabuflowCycle(
   return result;
 }
 
-async function reportNabuflowOverageToStripe(
-  sub: NabuflowSubscription,
-  plan: NabuflowPlanConfig,
-  charge: NabuflowChargeResult,
+export interface NabuflowOverageSettlementPayload {
+  customerId: string;
+  subscriptionId: string | null;
+  amountCents: number;
+  credits: number;
+  planId: string;
+  userId: string;
+  eventId: number;
+}
+
+export async function reportNabuflowOveragePayload(
+  payload: NabuflowOverageSettlementPayload,
 ): Promise<void> {
+  const [existing] = await db
+    .select({ stripeInvoiceItemId: nabuflowUsageEventsTable.stripeInvoiceItemId })
+    .from(nabuflowUsageEventsTable)
+    .where(eq(nabuflowUsageEventsTable.id, payload.eventId))
+    .limit(1);
+  if (!existing) throw new Error(`NabuFlow usage event ${payload.eventId} not found`);
+  if (existing?.stripeInvoiceItemId) return;
+
   const { createNabuflowOverageInvoiceItem } = await import("./nabuflow-stripe");
-  const itemId = await createNabuflowOverageInvoiceItem({
-    customerId: sub.stripeCustomerId!,
-    subscriptionId: sub.stripeSubscriptionId,
-    amountCents: charge.overageUsdCents,
-    credits: charge.overageDelta,
-    planId: plan.id,
-    userId: sub.userId,
-    eventId: charge.event.id,
-  });
-  if (itemId) {
-    await db
-      .update(nabuflowUsageEventsTable)
-      .set({ stripeInvoiceItemId: itemId, stripeReportedAt: sql`now()` })
-      .where(eq(nabuflowUsageEventsTable.id, charge.event.id));
-  }
+  const itemId = await createNabuflowOverageInvoiceItem(payload);
+  if (!itemId) throw new Error("Stripe unavailable for NabuFlow overage settlement");
+  await db
+    .update(nabuflowUsageEventsTable)
+    .set({ stripeInvoiceItemId: itemId, stripeReportedAt: sql`now()` })
+    .where(eq(nabuflowUsageEventsTable.id, payload.eventId));
 }
 
 /**
@@ -1045,24 +1073,53 @@ export async function maybeChargeNabuflow(
 ): Promise<{ newBalance: number } | null> {
   if (amount <= 0) return null;
 
+  if (opts.settlementKey) {
+    const [existing] = await db
+      .select({ id: nabuflowUsageEventsTable.id })
+      .from(nabuflowUsageEventsTable)
+      .where(eq(nabuflowUsageEventsTable.settlementKey, opts.settlementKey))
+      .limit(1);
+    if (existing) return { newBalance: 0 };
+  }
+
   // Enterprise seats draw from the org's shared pool — same charge pipeline,
   // same credit amounts, pool accounting instead of personal cycles. Never
   // fails a started build (the pool may dip below zero; the gate blocks new
   // builds pre-start).
-  const orgCtx = await getNabuflowOrgSeatContext(userId);
-  if (orgCtx) {
-    const drawn = await chargeNabuflowOrgPool(orgCtx.org.id, userId, amount, opts);
-    return { newBalance: Math.max(drawn.poolCredits, 0) };
+  try {
+    const orgCtx = await getNabuflowOrgSeatContext(userId);
+    if (orgCtx) {
+      const drawn = await chargeNabuflowOrgPool(orgCtx.org.id, userId, amount, opts);
+      return { newBalance: Math.max(drawn.poolCredits, 0) };
+    }
+
+    const sub = await getNabuflowSubscription(userId);
+    if (!sub || !isChargeableNabuflowStatus(sub.status)) return null;
+    const plan = getNabuflowPlan(sub.planId);
+    if (!plan) return null;
+
+    const cycle = await ensureCurrentNabuflowCycle(sub, plan);
+    const charged = await chargeNabuflowCycle(sub, plan, cycle.id, amount, opts);
+    return { newBalance: charged.remainingIncluded };
+  } catch (error) {
+    // A concurrent retry may win the unique settlement-key insert after the
+    // preflight lookup. Its transaction is the authoritative successful debit.
+    if (
+      opts.settlementKey &&
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "23505"
+    ) {
+      const [existing] = await db
+        .select({ id: nabuflowUsageEventsTable.id })
+        .from(nabuflowUsageEventsTable)
+        .where(eq(nabuflowUsageEventsTable.settlementKey, opts.settlementKey))
+        .limit(1);
+      if (existing) return { newBalance: 0 };
+    }
+    throw error;
   }
-
-  const sub = await getNabuflowSubscription(userId);
-  if (!sub || !isChargeableNabuflowStatus(sub.status)) return null;
-  const plan = getNabuflowPlan(sub.planId);
-  if (!plan) return null;
-
-  const cycle = await ensureCurrentNabuflowCycle(sub, plan);
-  const charged = await chargeNabuflowCycle(sub, plan, cycle.id, amount, opts);
-  return { newBalance: charged.remainingIncluded };
 }
 
 /**
@@ -1324,6 +1381,8 @@ export async function notifyNabuflowThresholds(
 // state (client calls never mutate these directly).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Stripe webhook payloads span API versions and are narrowed at each access.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>;
 
 /** True when a Stripe subscription object belongs to NabuFlow. */
@@ -1346,8 +1405,7 @@ export function nabuflowInvoiceLinkage(invoice: AnyObj): {
     invoice?.parent?.subscription_details?.subscription ??
     invoice?.subscription_details?.subscription ??
     null;
-  const subscriptionId =
-    typeof subRef === "string" ? subRef : ((subRef as AnyObj)?.id ?? null);
+  const subscriptionId = typeof subRef === "string" ? subRef : ((subRef as AnyObj)?.id ?? null);
   const meta =
     invoice?.subscription_details?.metadata ??
     invoice?.parent?.subscription_details?.metadata ??
@@ -1723,9 +1781,8 @@ export async function handleNabuflowSetupIntentSucceeded(si: AnyObj): Promise<vo
 
   let pm: AnyObj | null = null;
   try {
-    const { setNabuflowDefaultPaymentMethod, retrieveNabuflowPaymentMethod } = await import(
-      "./nabuflow-stripe"
-    );
+    const { setNabuflowDefaultPaymentMethod, retrieveNabuflowPaymentMethod } =
+      await import("./nabuflow-stripe");
     await setNabuflowDefaultPaymentMethod(customerId, pmId);
     pm = await retrieveNabuflowPaymentMethod(pmId);
   } catch (err) {

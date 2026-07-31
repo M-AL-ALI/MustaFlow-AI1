@@ -172,6 +172,8 @@ export async function deductCreditsAtomic(
     deepReasoning?: boolean;
     taskId?: number | null;
     source?: string | null;
+    /** Stable idempotency key used by durable post-build settlement retries. */
+    settlementKey?: string | null;
   },
 ): Promise<CreditDeductionResult> {
   const credits = await getOrCreateCredits(userId);
@@ -204,40 +206,97 @@ export async function deductCreditsAtomic(
       engineMode: opts.engineMode ?? null,
       deepReasoning: opts.deepReasoning ?? false,
       source: opts.source ?? null,
+      settlementKey: opts.settlementKey ?? null,
     });
     if (nabuCharge) return { ...nabuCharge, charged: amount };
   } catch (err) {
     logger.error(
       { err, userId, amount },
-      "NabuFlow charge delegation failed — falling back to wallet path",
+      opts.settlementKey
+        ? "NabuFlow charge delegation failed — deferring idempotent settlement"
+        : "NabuFlow charge delegation failed — falling back to wallet path",
     );
+    // A durable settlement may have committed its NabuFlow ledger transaction
+    // before the caller lost the response. Never cross-fallback to the legacy
+    // wallet in that ambiguous state; the retry will resolve by settlement key.
+    if (opts.settlementKey) throw err;
   }
 
-  if (credits.balance < amount) {
-    return { insufficient: true, balance: credits.balance };
+  let updated: { balance: number } | undefined;
+  if (opts.settlementKey) {
+    // The balance movement and settlement receipt share one transaction. A
+    // retry can therefore distinguish "committed but response was lost" from
+    // "never charged" without risking a second debit.
+    const walletResult = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({
+          balanceAfter: creditTransactionsTable.balanceAfter,
+          amount: creditTransactionsTable.amount,
+        })
+        .from(creditTransactionsTable)
+        .where(eq(creditTransactionsTable.settlementKey, opts.settlementKey!))
+        .limit(1);
+      if (existing) {
+        return {
+          duplicate: true as const,
+          balance: existing.balanceAfter,
+          charged: Math.abs(existing.amount),
+        };
+      }
+
+      const [deducted] = await tx
+        .update(userCreditsTable)
+        .set({ balance: sql`balance - ${amount}`, updatedAt: sql`now()` })
+        .where(and(eq(userCreditsTable.userId, userId), sql`balance >= ${amount}`))
+        .returning({ balance: userCreditsTable.balance });
+      if (!deducted) return { insufficient: true as const };
+
+      await tx.insert(creditTransactionsTable).values({
+        userId,
+        projectId: opts.projectId ?? null,
+        type: opts.type,
+        amount: -amount,
+        description: opts.description,
+        balanceAfter: deducted.balance,
+        settlementKey: opts.settlementKey,
+      });
+      return { duplicate: false as const, balance: deducted.balance, charged: amount };
+    });
+    if ("insufficient" in walletResult) {
+      const current = await getOrCreateCredits(userId);
+      return { insufficient: true, balance: current.balance };
+    }
+    if (walletResult.duplicate) {
+      return { newBalance: walletResult.balance, charged: walletResult.charged };
+    }
+    updated = { balance: walletResult.balance };
+  } else {
+    if (credits.balance < amount) {
+      return { insufficient: true, balance: credits.balance };
+    }
+
+    // Single conditional UPDATE — only succeeds if balance is still >= amount
+    [updated] = await db
+      .update(userCreditsTable)
+      .set({ balance: sql`balance - ${amount}`, updatedAt: sql`now()` })
+      .where(and(eq(userCreditsTable.userId, userId), sql`balance >= ${amount}`))
+      .returning({ balance: userCreditsTable.balance });
+
+    if (!updated) {
+      // Concurrent request won the race — re-read and report insufficient
+      const current = await getOrCreateCredits(userId);
+      return { insufficient: true, balance: current.balance };
+    }
+
+    await db.insert(creditTransactionsTable).values({
+      userId,
+      projectId: opts.projectId ?? null,
+      type: opts.type,
+      amount: -amount,
+      description: opts.description,
+      balanceAfter: updated.balance,
+    });
   }
-
-  // Single conditional UPDATE — only succeeds if balance is still >= amount
-  const [updated] = await db
-    .update(userCreditsTable)
-    .set({ balance: sql`balance - ${amount}`, updatedAt: sql`now()` })
-    .where(and(eq(userCreditsTable.userId, userId), sql`balance >= ${amount}`))
-    .returning({ balance: userCreditsTable.balance });
-
-  if (!updated) {
-    // Concurrent request won the race — re-read and report insufficient
-    const current = await getOrCreateCredits(userId);
-    return { insufficient: true, balance: current.balance };
-  }
-
-  await db.insert(creditTransactionsTable).values({
-    userId,
-    projectId: opts.projectId ?? null,
-    type: opts.type,
-    amount: -amount,
-    description: opts.description,
-    balanceAfter: updated.balance,
-  });
 
   // Fire-and-forget low-balance warning email when balance crosses below threshold
   if (updated.balance < LOW_CREDIT_THRESHOLD) {

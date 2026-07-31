@@ -45,6 +45,7 @@ import {
   previewNabuflowPlanSwitch,
   createNabuflowStripeSubscription,
   resolveNabuflowPriceId,
+  createNabuflowOverageInvoiceItem,
   NabuflowStripeError,
   _clearNabuflowPriceCache,
 } from "../nabuflow-stripe";
@@ -57,6 +58,7 @@ const stripeStub = {
   paymentMethods: { retrieve: vi.fn() },
   prices: { list: vi.fn(), create: vi.fn() },
   products: { create: vi.fn() },
+  invoiceItems: { create: vi.fn() },
 };
 
 const PRICE_ENV_KEYS = [
@@ -216,10 +218,7 @@ describe("createNabuflowStripeSubscription", () => {
 describe("resolveNabuflowPriceId", () => {
   it("prefers the env-scoped price id (test vs live) over any Stripe lookup", async () => {
     process.env[NABUFLOW_PLANS.nova.stripePriceIdEnv] = "price_nova_env";
-    const id = await resolveNabuflowPriceId(
-      stripeStub as never,
-      NABUFLOW_PLANS.nova,
-    );
+    const id = await resolveNabuflowPriceId(stripeStub as never, NABUFLOW_PLANS.nova);
     expect(id).toBe("price_nova_env");
     expect(stripeStub.prices.list).not.toHaveBeenCalled();
   });
@@ -253,5 +252,31 @@ describe("resolveNabuflowPriceId", () => {
     await expect(
       resolveNabuflowPriceId(stripeStub as never, NABUFLOW_PLANS.constellation),
     ).rejects.toMatchObject({ code: "plan_unavailable" });
+  });
+});
+
+describe("createNabuflowOverageInvoiceItem", () => {
+  it("uses the usage event as Stripe's idempotency key", async () => {
+    stripeStub.invoiceItems.create.mockResolvedValue({ id: "ii_bw1" });
+
+    await expect(
+      createNabuflowOverageInvoiceItem({
+        customerId: "cus_shared_1",
+        subscriptionId: "sub_nf_1",
+        amountCents: 128,
+        credits: 10,
+        planId: "orbit",
+        userId: "u_bw1",
+        eventId: 456,
+      }),
+    ).resolves.toBe("ii_bw1");
+
+    expect(stripeStub.invoiceItems.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 128,
+        metadata: expect.objectContaining({ usageEventId: "456" }),
+      }),
+      { idempotencyKey: "nabuflow-overage-event-456" },
+    );
   });
 });

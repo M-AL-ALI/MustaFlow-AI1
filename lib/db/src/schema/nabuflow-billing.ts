@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   serial,
@@ -7,6 +8,7 @@ import {
   integer,
   index,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +157,8 @@ export const nabuflowUsageEventsTable = pgTable(
     usdValueCents: integer("usd_value_cents").notNull().default(0),
     attribution: text("attribution").notNull().default("included"),
     description: text("description"),
+    /** Stable idempotency key for retryable charge settlement. */
+    settlementKey: text("settlement_key"),
     /** Pending invoice item created for the overage portion (cycle-close billing). */
     stripeInvoiceItemId: text("stripe_invoice_item_id"),
     stripeReportedAt: timestamp("stripe_reported_at", { withTimezone: true }),
@@ -166,6 +170,9 @@ export const nabuflowUsageEventsTable = pgTable(
     index("nabuflow_usage_events_user_idx").on(t.userId, t.createdAt),
     index("nabuflow_usage_events_cycle_idx").on(t.cycleId),
     index("nabuflow_usage_events_org_idx").on(t.orgId, t.createdAt),
+    uniqueIndex("nabuflow_usage_events_settlement_key_unique")
+      .on(t.settlementKey)
+      .where(sql`${t.settlementKey} IS NOT NULL`),
   ],
 );
 

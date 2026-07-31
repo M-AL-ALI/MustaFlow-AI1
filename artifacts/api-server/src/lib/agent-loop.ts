@@ -89,6 +89,7 @@ import {
   sandboxShellEnabled,
   type SandboxShellSession,
 } from "./sandbox-shell";
+import { creativeChargeFields } from "./creative-charge-honesty";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -172,7 +173,7 @@ export interface AgentLoopInput {
   onBillableCreativeCall?: (
     credits: number,
     tool: "generate_image" | "generate_video" | "generate_audio" | "remove_image_background",
-  ) => void;
+  ) => number | Promise<number>;
   /**
    * Optional hook invoked just before a risky operation (package install or a
    * shell command matching a migration/destructive pattern) so the caller can
@@ -7774,9 +7775,10 @@ async function executeCreativeTool(
 
   ctx.creativeCounts[counterKey] += 1;
   const credits = CREATIVE_CREDIT_COST[tool];
+  let creditsCharged = 0;
   if (input.onBillableCreativeCall) {
     try {
-      input.onBillableCreativeCall(credits, tool);
+      creditsCharged = await input.onBillableCreativeCall(credits, tool);
     } catch {
       // billing must not break the loop
     }
@@ -7809,7 +7811,7 @@ async function executeCreativeTool(
       path: writePath,
       mimeType: result.mimeType,
       bytes: result.bytes,
-      creditsCharged: credits,
+      ...creativeChargeFields(credits, creditsCharged),
       budgetRemaining: ctx.creativeBudget.remaining,
     }),
   };
