@@ -27,6 +27,7 @@ const {
   emittedEventRows,
   insertIdCounter,
   updateCallCount,
+  routeTaskStatus,
   mockRunBuildPipeline,
   makeSelectChain: _makeSelectChain,
   makeUpdateChain: _makeUpdateChain,
@@ -70,6 +71,7 @@ const {
 
   const insertIdCounter = { value: 1 };
   const updateCallCount = { value: 0 };
+  const routeTaskStatus = { value: "building" };
 
   const mockProject = {
     id: PROJECT_ID,
@@ -140,11 +142,16 @@ const {
       case "agent_tasks":
         // Return a "building" task so the cancel route proceeds (not alreadyTerminal)
         return makeSelectChain([
-          { id: TASK_ID, status: "building", creditsReserved: null, queueBatchId: null },
+          {
+            id: TASK_ID,
+            status: routeTaskStatus.value,
+            creditsReserved: null,
+            queueBatchId: null,
+          },
         ]);
       case "task_events":
         // Empty replay history — live events arrive via real event-bus subscriptions
-        return makeSelectChain([]);
+        return makeSelectChain(emittedEventRows);
       default:
         return makeSelectChain([]);
     }
@@ -209,21 +216,36 @@ const {
     const transactionMock = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
       const tx = {
         select: (_shape?: unknown) => ({
-          from: (_table: { __id?: string }) =>
-            makeSelectChain([{ id: TASK_ID, status: "building", creditsReserved: null }]),
-        }),
-        update: (_table: unknown) => ({
-          set: (_vals: unknown) => ({
-            where: (..._args: unknown[]) => ({
-              returning: () =>
-                Promise.resolve([
+          from: (table: { __id?: string }) =>
+            table.__id === "task_events"
+              ? makeSelectChain(
+                  emittedEventRows.filter((row) =>
+                    ["completed", "failed", "cancelled"].includes(row.eventType),
+                  ),
+                )
+              : makeSelectChain([
                   {
                     id: TASK_ID,
-                    status: "canceled",
-                    completedAt: new Date(),
+                    status: routeTaskStatus.value,
                     creditsReserved: null,
                   },
                 ]),
+        }),
+        update: (_table: unknown) => ({
+          set: (vals: unknown) => ({
+            where: (..._args: unknown[]) => ({
+              returning: () => {
+                const status = (vals as { status?: string }).status;
+                if (status) routeTaskStatus.value = status;
+                return Promise.resolve([
+                  {
+                    id: TASK_ID,
+                    status: routeTaskStatus.value,
+                    completedAt: new Date(),
+                    creditsReserved: null,
+                  },
+                ]);
+              },
             }),
           }),
         }),
@@ -265,6 +287,7 @@ const {
     emittedEventRows,
     insertIdCounter,
     updateCallCount,
+    routeTaskStatus,
     mockRunBuildPipeline,
     makeSelectChain,
     makeUpdateChain,
@@ -458,7 +481,7 @@ vi.mock("./builder", () => ({
 import express from "express";
 import tasksRouter from "../routes/tasks";
 import eventsRouter from "../routes/events";
-import { runJob } from "./jobs";
+import { runCancellablePlanTask, runJob } from "./jobs";
 
 // ── Test server helpers ───────────────────────────────────────────────────────
 
@@ -580,6 +603,7 @@ afterEach(() => {
   emittedEventRows.length = 0;
   insertIdCounter.value = 1;
   updateCallCount.value = 0;
+  routeTaskStatus.value = "building";
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -642,18 +666,85 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     });
   }, 15_000);
 
-  it("POST .../cancel returns HTTP 200 with task shape even without a live in-flight job", async () => {
-    // cancelActiveJob returns false when no AbortController is registered
-    // (no live runJob was started for this task ID). The route's DB
-    // transaction still updates the status — this verifies the cancel
-    // endpoint does NOT silently 404 when the in-process job map doesn't
-    // know about the task (e.g. after a server restart). The DB mock always
-    // returns a "building" task, so the transaction always yields "canceled".
+  it("cancels a never-started queued task with exactly one cancelled event", async () => {
+    routeTaskStatus.value = "queued";
+    const cancelledEventPromise = waitForSseEvent<{ eventType: string; taskId: number }>(
+      `${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/events/stream`,
+      (event) => event.eventType === "cancelled",
+    );
+
     const resp = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/cancel`, {
       method: "POST",
     });
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as { id: number; status: string };
     expect(body).toMatchObject({ id: TASK_ID, status: "canceled" });
+
+    await expect(cancelledEventPromise).resolves.toMatchObject({
+      taskId: TASK_ID,
+      eventType: "cancelled",
+    });
+    expect(emittedEventRows.filter((row) => row.eventType === "cancelled")).toHaveLength(1);
+  }, 5_000);
+
+  it("returns success when plan cleanup wins the status race and writes one terminal event", async () => {
+    routeTaskStatus.value = "planning";
+    const terminalEvents: string[] = [];
+    let planStarted = false;
+    const planPromise = runCancellablePlanTask({
+      taskId: TASK_ID,
+      run: (signal) => {
+        planStarted = true;
+        return new Promise<never>((_, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("Plan cancelled")), {
+            once: true,
+          });
+        });
+      },
+      commitCompleted: async () => false,
+      commitCanceled: async () => {
+        routeTaskStatus.value = "canceled";
+      },
+      commitFailed: async () => false,
+      emitTerminal: async (kind) => {
+        terminalEvents.push(kind);
+        emittedEventRows.push({
+          id: insertIdCounter.value++,
+          taskId: TASK_ID,
+          eventType: kind,
+          message: "Plan cancelled by user.",
+          filePath: null,
+          createdAt: new Date(),
+        });
+      },
+    });
+    await vi.waitFor(() => expect(planStarted).toBe(true));
+
+    const resp = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/cancel`, {
+      method: "POST",
+    });
+    expect(resp.status).toBe(200);
+    await expect(resp.json()).resolves.toMatchObject({ id: TASK_ID, status: "canceled" });
+    await expect(planPromise).resolves.toEqual({ status: "canceled" });
+    expect(terminalEvents).toEqual(["cancelled"]);
+    expect(emittedEventRows.filter((row) => row.eventType === "cancelled")).toHaveLength(1);
+  });
+
+  it("does not duplicate a queued cancellation when a terminal event already exists", async () => {
+    routeTaskStatus.value = "queued";
+    emittedEventRows.push({
+      id: insertIdCounter.value++,
+      taskId: TASK_ID,
+      eventType: "cancelled",
+      message: "Task cancelled by user.",
+      filePath: null,
+      createdAt: new Date(),
+    });
+
+    const resp = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/cancel`, {
+      method: "POST",
+    });
+    expect(resp.status).toBe(200);
+    expect(emittedEventRows.filter((row) => row.eventType === "cancelled")).toHaveLength(1);
   }, 5_000);
 });

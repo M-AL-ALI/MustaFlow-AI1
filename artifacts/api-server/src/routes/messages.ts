@@ -32,6 +32,7 @@ import {
   resolveAgentIdentity,
   type AgentIdentity,
   backgroundWallClockFor,
+  runCancellablePlanTask,
 } from "../lib/jobs";
 import { deductCreditsAtomic, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
 import { logger } from "../lib/logger";
@@ -42,6 +43,7 @@ import {
   backgroundPlanStepStatus,
   shouldStageBackgroundPlanStep,
 } from "../lib/background-plan-step";
+import { publishTaskEvent } from "../lib/event-bus";
 
 const router: IRouter = Router();
 
@@ -111,7 +113,21 @@ idempotencyCleanupTimer.unref?.();
 
 async function emitPlanEvent(taskId: number, eventType: string, message: string): Promise<void> {
   try {
-    await db.insert(taskEventsTable).values({ taskId, eventType, message, filePath: null });
+    const [row] = await db
+      .insert(taskEventsTable)
+      .values({ taskId, eventType, message, filePath: null })
+      .returning();
+    if (row) {
+      publishTaskEvent({
+        id: row.id,
+        taskId: row.taskId,
+        eventType: row.eventType,
+        message: row.message,
+        filePath: row.filePath ?? null,
+        data: (row.data as Record<string, unknown> | undefined) ?? undefined,
+        createdAt: row.createdAt,
+      });
+    }
   } catch (err) {
     logger.warn({ err, taskId, eventType }, "Failed to emit plan task event");
   }
@@ -630,69 +646,103 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
     const taskId = planTask?.id ?? 0;
 
-    try {
-      await emitPlanEvent(taskId, "queued", "Plan request received…");
-      await emitPlanEvent(taskId, "planning", "Analysing project and requirements…");
-      await emitPlanEvent(taskId, "generating_blueprint", "Generating structured plan with AI…");
+    const planOutcome = await runCancellablePlanTask({
+      taskId,
+      run: async (signal) => {
+        await emitPlanEvent(taskId, "queued", "Plan request received…");
+        await emitPlanEvent(taskId, "planning", "Analysing project and requirements…");
+        await emitPlanEvent(taskId, "generating_blueprint", "Generating structured plan with AI…");
 
-      const result = await runPlanPipeline({
-        projectName: project.name,
-        projectKind: project.kind,
-        userPrompt: content,
-        agentMode: mode,
-        conversationHistory,
-        currentFiles: currentProjectFiles.map((f) => ({
-          path: f.path,
-          content: f.content,
-          mimeType: f.mimeType,
-        })),
-        conversationSummary,
-        deepReasoning,
-      });
-
-      const planPageCount = Array.isArray(
-        (result.plan as Record<string, unknown> | null)?.["pages"],
-      )
-        ? ((result.plan as Record<string, unknown>)["pages"] as unknown[]).length
-        : 0;
-      await emitPlanEvent(
-        taskId,
-        "completed",
-        planPageCount > 0
-          ? `Plan ready: ${planPageCount} page(s) outlined.`
-          : "Plan ready — review the structured plan above.",
-      );
-
-      if (planTask) {
-        await db
+        return runPlanPipeline({
+          projectName: project.name,
+          projectKind: project.kind,
+          userPrompt: content,
+          agentMode: mode,
+          conversationHistory,
+          currentFiles: currentProjectFiles.map((f) => ({
+            path: f.path,
+            content: f.content,
+            mimeType: f.mimeType,
+          })),
+          conversationSummary,
+          deepReasoning,
+          signal,
+        });
+      },
+      commitCompleted: async (result) => {
+        if (!planTask) return false;
+        const [completedTask] = await db
           .update(agentTasksTable)
           .set({ status: "completed", result: result.summary, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, planTask.id));
-      }
+          .where(and(eq(agentTasksTable.id, planTask.id), eq(agentTasksTable.status, "planning")))
+          .returning({ id: agentTasksTable.id });
+        return Boolean(completedTask);
+      },
+      commitCanceled: async () => {
+        if (!planTask) return;
+        await db
+          .update(agentTasksTable)
+          .set({ status: "canceled", completedAt: sql`now()` })
+          .where(and(eq(agentTasksTable.id, planTask.id), eq(agentTasksTable.status, "planning")));
+      },
+      commitFailed: async (error) => {
+        if (!planTask) return false;
+        const message = error instanceof Error ? error.message : "Plan generation failed";
+        const [failedTask] = await db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: message, completedAt: sql`now()` })
+          .where(and(eq(agentTasksTable.id, planTask.id), eq(agentTasksTable.status, "planning")))
+          .returning({ id: agentTasksTable.id });
+        return Boolean(failedTask);
+      },
+      emitTerminal: async (kind, value) => {
+        if (kind === "cancelled") {
+          await emitPlanEvent(taskId, "cancelled", "Plan cancelled by user.");
+          return;
+        }
+        if (kind === "failed") {
+          const message = value instanceof Error ? value.message : "Plan generation failed";
+          await emitPlanEvent(taskId, "failed", message);
+          return;
+        }
 
-      assistantContent = result.summary;
-      plan = result.plan;
+        const result = value as Awaited<ReturnType<typeof runPlanPipeline>>;
+        const planPageCount = Array.isArray(
+          (result.plan as Record<string, unknown> | null)?.["pages"],
+        )
+          ? ((result.plan as Record<string, unknown>)["pages"] as unknown[]).length
+          : 0;
+        await emitPlanEvent(
+          taskId,
+          "completed",
+          planPageCount > 0
+            ? `Plan ready: ${planPageCount} page(s) outlined.`
+            : "Plan ready — review the structured plan above.",
+        );
+      },
+    });
+
+    if (planOutcome.status === "completed") {
+      assistantContent = planOutcome.value.summary;
+      plan = planOutcome.value.plan;
       rememberCompletedAgentTask({
         projectId: project.id,
         userId: req.userId ?? project.ownerId,
         taskId,
         intent: "plan",
         userPrompt: content,
-        assistantSummary: result.summary,
+        assistantSummary: planOutcome.value.summary,
         category: "plan",
         tags: ["plan"],
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Plan generation failed";
-      await emitPlanEvent(taskId, "failed", msg);
-      if (planTask) {
-        await db
-          .update(agentTasksTable)
-          .set({ status: "failed", result: msg, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, planTask.id));
-      }
-      assistantContent = `Plan generation failed: ${msg}`;
-      plan = { kind: "error", message: msg };
+    } else if (planOutcome.status === "canceled") {
+      assistantContent = "Plan cancelled by user.";
+      plan = { kind: "cancelled", taskId };
+    } else {
+      const message =
+        planOutcome.error instanceof Error ? planOutcome.error.message : "Plan generation failed";
+      assistantContent = `Plan generation failed: ${message}`;
+      plan = { kind: "error", message };
     }
   } else {
     // Determine if this is an initial build or a refinement

@@ -752,6 +752,72 @@ export function cancelActiveJob(taskId: number): boolean {
   return false;
 }
 
+export type CancellablePlanTaskOutcome<T> =
+  | { status: "completed"; value: T }
+  | { status: "canceled" }
+  | { status: "failed"; error: unknown };
+
+/**
+ * Run a plan task through the same in-flight AbortController registry as builds.
+ * The executing pipeline remains the sole writer of terminal events. Database
+ * callbacks are supplied by the route so completion/cancellation transitions
+ * stay compare-and-set operations in the same layer that owns the task row.
+ */
+export async function runCancellablePlanTask<T>(input: {
+  taskId: number;
+  run: (signal: AbortSignal) => Promise<T>;
+  commitCompleted: (value: T) => Promise<boolean>;
+  commitCanceled: () => Promise<void>;
+  commitFailed: (error: unknown) => Promise<boolean>;
+  emitTerminal: (kind: "completed" | "cancelled" | "failed", value?: T | unknown) => Promise<void>;
+}): Promise<CancellablePlanTaskOutcome<T>> {
+  const abortController = new AbortController();
+  activeJobControllers.set(input.taskId, abortController);
+  let terminalEvent: "completed" | "cancelled" | "failed" | null = null;
+
+  const emitTerminalOnce = async (
+    kind: "completed" | "cancelled" | "failed",
+    value?: T | unknown,
+  ): Promise<void> => {
+    if (terminalEvent !== null) return;
+    terminalEvent = kind;
+    await input.emitTerminal(kind, value);
+  };
+
+  try {
+    const value = await input.run(abortController.signal);
+    const completionCommitted = await input.commitCompleted(value);
+    if (!completionCommitted) {
+      // Cancellation may win just after the provider resolves. The plan must
+      // not emit a late completed event or overwrite the canceled task row.
+      if (abortController.signal.aborted) {
+        await input.commitCanceled();
+        await emitTerminalOnce("cancelled");
+      }
+      return { status: "canceled" };
+    }
+
+    await emitTerminalOnce("completed", value);
+    return { status: "completed", value };
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      await input.commitCanceled();
+      await emitTerminalOnce("cancelled");
+      return { status: "canceled" };
+    }
+
+    const failureCommitted = await input.commitFailed(error);
+    if (failureCommitted) await emitTerminalOnce("failed", error);
+    return { status: "failed", error };
+  } finally {
+    // cancelActiveJob removes the controller before aborting it. Keep cleanup
+    // identity-safe in case a later execution ever reuses the task id.
+    if (activeJobControllers.get(input.taskId) === abortController) {
+      activeJobControllers.delete(input.taskId);
+    }
+  }
+}
+
 export type JobKind = "build" | "refine";
 
 export type AgentIdentity = "planning" | "task" | "main";

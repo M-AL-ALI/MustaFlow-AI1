@@ -3057,7 +3057,24 @@ export default function ProjectWorkspacePage() {
     ],
   );
 
-  const cancelTask = useCancelTask();
+  const cancelTask = useCancelTask({
+    mutation: {
+      onSuccess: () => {
+        // Stop closes the SSE connection before the mutation returns. Mark the
+        // run terminal locally so the workspace never waits on a frame it can
+        // no longer receive, then reconcile both persisted surfaces.
+        setLiveRunTerminalEvent("cancelled");
+        setPendingBuildStartedAt(null);
+        pendingIsPlanRef.current = false;
+        setPendingIsPlan(false);
+        pendingIsConverseRef.current = false;
+        setPendingIsConverse(false);
+        pendingFeedTaskIdRef.current = null;
+        void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+      },
+    },
+  });
   const handleStopStream = useCallback(() => {
     if (streamAbortRef.current) {
       streamAbortRef.current.abort();
@@ -4759,8 +4776,16 @@ export default function ProjectWorkspacePage() {
                     </span>
                     <span className="text-muted-foreground/50">·</span>
                     <span>
-                      {getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning)}{" "}
-                      {getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning) === 1
+                      {getCreditCost(
+                        liveCreditCosts,
+                        agentMode,
+                        agentMode !== "lite" && deepReasoning,
+                      )}{" "}
+                      {getCreditCost(
+                        liveCreditCosts,
+                        agentMode,
+                        agentMode !== "lite" && deepReasoning,
+                      ) === 1
                         ? "credit"
                         : "credits"}
                     </span>
@@ -4770,7 +4795,11 @@ export default function ProjectWorkspacePage() {
                         <span
                           className={
                             nabuflowBillingState.cycle.remainingIncludedCredits <
-                            getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning)
+                            getCreditCost(
+                              liveCreditCosts,
+                              agentMode,
+                              agentMode !== "lite" && deepReasoning,
+                            )
                               ? "text-amber-500"
                               : ""
                           }
@@ -4790,7 +4819,11 @@ export default function ProjectWorkspacePage() {
                     nabuflowBillingState?.cycle?.remainingIncludedCredits != null &&
                     nabuflowBillingState.cycle.remainingIncludedCredits >= 0 &&
                     nabuflowBillingState.cycle.remainingIncludedCredits <
-                      getCreditCost(liveCreditCosts, agentMode, agentMode !== "lite" && deepReasoning) && (
+                      getCreditCost(
+                        liveCreditCosts,
+                        agentMode,
+                        agentMode !== "lite" && deepReasoning,
+                      ) && (
                       <div
                         data-testid="overage-crossing-notice"
                         role="alert"

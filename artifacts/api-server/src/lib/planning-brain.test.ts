@@ -56,6 +56,23 @@ describe("unified Builder planning brain", () => {
     expect(createChatCompletion.mock.calls[0]?.[0].reasoning_effort).toBe("high");
   });
 
+  it("passes the caller AbortSignal to every provider planning pass", async () => {
+    const controller = new AbortController();
+
+    await runPlanningBrain({
+      entryPoint: "planning_agent",
+      mode: "power",
+      systemPrompt: "Return JSON.",
+      messages: [{ role: "user", content: "Plan an app" }],
+      maxCompletionTokens: 1000,
+      signal: controller.signal,
+    });
+
+    expect(createChatCompletion).toHaveBeenCalledTimes(2);
+    expect(createChatCompletion.mock.calls[0]?.[0].signal).toBe(controller.signal);
+    expect(createChatCompletion.mock.calls[1]?.[0].signal).toBe(controller.signal);
+  });
+
   it("is the landing point for all four legacy planner entry points", () => {
     const builder = readFileSync(new URL("./builder.ts", import.meta.url), "utf8");
     const subagent = readFileSync(new URL("./subagent.ts", import.meta.url), "utf8");

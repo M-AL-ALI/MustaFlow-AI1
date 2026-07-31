@@ -464,7 +464,7 @@ vi.mock("./builder", () => ({
 }));
 
 // ── Imports from the module under test (must come after all vi.mock() calls) ──
-import { runJob, cancelActiveJob } from "./jobs";
+import { runJob, cancelActiveJob, runCancellablePlanTask } from "./jobs";
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
@@ -506,6 +506,85 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
   it("cancelActiveJob returns false when no in-flight job matches the taskId", () => {
     const result = cancelActiveJob(999_999);
     expect(result).toBe(false);
+  });
+
+  it("cancels an in-flight plan with exactly one cancelled terminal event", async () => {
+    let taskStatus = "planning";
+    const terminalEvents: string[] = [];
+    let signalSeen: AbortSignal | null = null;
+
+    const planPromise = runCancellablePlanTask({
+      taskId: TASK_ID,
+      run: (signal) => {
+        signalSeen = signal;
+        return new Promise<never>((_, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("Plan cancelled")), {
+            once: true,
+          });
+        });
+      },
+      commitCompleted: async () => {
+        if (taskStatus !== "planning") return false;
+        taskStatus = "completed";
+        return true;
+      },
+      commitCanceled: async () => {
+        if (taskStatus === "planning") taskStatus = "canceled";
+      },
+      commitFailed: async () => {
+        if (taskStatus !== "planning") return false;
+        taskStatus = "failed";
+        return true;
+      },
+      emitTerminal: async (kind) => {
+        terminalEvents.push(kind);
+      },
+    });
+
+    await vi.waitFor(() => expect(signalSeen).not.toBeNull());
+    expect(cancelActiveJob(TASK_ID)).toBe(true);
+    // Mirrors the cancel route's compare-and-set winning before provider cleanup.
+    taskStatus = "canceled";
+
+    await expect(planPromise).resolves.toEqual({ status: "canceled" });
+    expect(taskStatus).toBe("canceled");
+    expect(terminalEvents).toEqual(["cancelled"]);
+  });
+
+  it("does not emit completed when cancellation wins after the plan provider resolves", async () => {
+    let taskStatus = "planning";
+    const terminalEvents: string[] = [];
+    let resolvePlan: ((value: { summary: string }) => void) | null = null;
+
+    const planPromise = runCancellablePlanTask({
+      taskId: TASK_ID,
+      run: () =>
+        new Promise<{ summary: string }>((resolve) => {
+          resolvePlan = resolve;
+        }),
+      commitCompleted: async () => {
+        if (taskStatus !== "planning") return false;
+        taskStatus = "completed";
+        return true;
+      },
+      commitCanceled: async () => {
+        if (taskStatus === "planning") taskStatus = "canceled";
+      },
+      commitFailed: async () => false,
+      emitTerminal: async (kind) => {
+        terminalEvents.push(kind);
+      },
+    });
+
+    await vi.waitFor(() => expect(resolvePlan).not.toBeNull());
+    expect(cancelActiveJob(TASK_ID)).toBe(true);
+    taskStatus = "canceled";
+    resolvePlan!({ summary: "late provider response" });
+
+    await expect(planPromise).resolves.toEqual({ status: "canceled" });
+    expect(taskStatus).toBe("canceled");
+    expect(terminalEvents).toEqual(["cancelled"]);
+    expect(terminalEvents).not.toContain("completed");
   });
 
   // ── Integration: full click → cancel → 'cancelled' SSE event path ─────────

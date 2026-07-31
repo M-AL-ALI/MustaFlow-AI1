@@ -6795,6 +6795,7 @@ export async function runPlanPipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the planner long-range context. */
   conversationSummary?: string;
   deepReasoning?: boolean;
+  signal?: AbortSignal;
 }): Promise<{
   summary: string;
   plan: Record<string, unknown> | null;
@@ -6810,6 +6811,7 @@ export async function runPlanPipeline(args: {
     currentFiles,
     conversationSummary,
     deepReasoning = false,
+    signal,
   } = args;
 
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
@@ -6848,6 +6850,7 @@ export async function runPlanPipeline(args: {
       systemPrompt: planPrompt,
       messages: messages.slice(1),
       maxCompletionTokens: 8000,
+      signal,
     });
 
     // Retry once if required new fields are missing
@@ -6869,9 +6872,13 @@ export async function runPlanPipeline(args: {
         systemPrompt: planPrompt,
         messages: messages.slice(1),
         maxCompletionTokens: 8000,
+        signal,
       });
     }
-  } catch {
+  } catch (error) {
+    // Cancellation must escape the fallback path so the task owner can write
+    // one cancelled terminal event instead of retrying or returning a fallback.
+    if (signal?.aborted) throw error;
     plan = null;
   }
 

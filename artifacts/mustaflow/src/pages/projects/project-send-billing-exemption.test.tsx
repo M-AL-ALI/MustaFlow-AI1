@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectWorkspacePage from "./[id]";
 
 const testState = vi.hoisted(() => ({
@@ -24,7 +24,26 @@ const testState = vi.hoisted(() => ({
     isError: false,
   },
   sendMessageMutate: vi.fn(),
+  cancelTaskMutate: vi.fn(),
   clearComposer: vi.fn(),
+  tasks: [] as Array<Record<string, unknown>>,
+  messages: [
+    {
+      id: 1,
+      role: "user",
+      content: "Existing project",
+      plan: null,
+      planMode: false,
+      createdAt: "2026-07-30T00:00:00.000Z",
+    },
+  ] as Array<Record<string, unknown>>,
+  eventSources: [] as Array<{
+    url: string;
+    onmessage: ((event: MessageEvent<string>) => void) | null;
+    onerror: (() => void) | null;
+    close: ReturnType<typeof vi.fn>;
+  }>,
+  queryClient: null as QueryClient | null,
 }));
 
 vi.mock("wouter", () => ({
@@ -45,6 +64,11 @@ vi.mock("@workspace/api-client-react", () => ({
   getListMessagesQueryKey: (projectId: number) => ["messages", projectId],
   getListProjectFilesQueryKey: (projectId: number) => ["files", projectId],
   getListSuggestionsQueryKey: (projectId: number) => ["suggestions", projectId],
+  getListTaskEventsQueryKey: (projectId: number, taskId: number) => [
+    "task-events",
+    projectId,
+    taskId,
+  ],
   getListTasksQueryKey: (projectId: number) => ["tasks", projectId],
   getListVersionsQueryKey: (projectId: number) => ["versions", projectId],
   getAuthToken: vi.fn().mockResolvedValue(null),
@@ -58,7 +82,25 @@ vi.mock("@workspace/api-client-react", () => ({
   stopContainer: vi.fn().mockResolvedValue(undefined),
   submitProjectQueue: vi.fn().mockResolvedValue(undefined),
   useAcknowledgeCveScan: () => ({ mutate: vi.fn() }),
-  useCancelTask: () => ({ mutate: vi.fn(), isPending: false }),
+  useCancelTask: (options?: {
+    mutation?: {
+      onSuccess?: (
+        data: { id: number; status: string },
+        variables: { id: number; taskId: number },
+        context: unknown,
+      ) => void;
+    };
+  }) => ({
+    mutate: (variables: { id: number; taskId: number }) => {
+      testState.cancelTaskMutate(variables);
+      options?.mutation?.onSuccess?.(
+        { id: variables.taskId, status: "canceled" },
+        variables,
+        undefined,
+      );
+    },
+    isPending: false,
+  }),
   useGetCveScanStatus: () => ({ data: undefined }),
   useGetMyPreferences: () => ({
     data: { dismissedOnboarding: true, containerLayerConfigured: false },
@@ -80,21 +122,11 @@ vi.mock("@workspace/api-client-react", () => ({
     refetch: vi.fn(),
   }),
   useGetUserCredits: () => ({ data: { balance: 1600 }, isLoading: false }),
-  useListMessages: () => ({
-    data: [
-      {
-        id: 1,
-        role: "user",
-        content: "Existing project",
-        plan: null,
-        planMode: false,
-        createdAt: "2026-07-30T00:00:00.000Z",
-      },
-    ],
-  }),
+  useListMessages: () => ({ data: testState.messages }),
   useListProjectFiles: () => ({ data: [] }),
   useListSuggestions: () => ({ data: [] }),
-  useListTasks: () => ({ data: [] }),
+  useListTaskEvents: () => ({ data: [] }),
+  useListTasks: () => ({ data: testState.tasks }),
   useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
   useSendMessage: () => ({ mutate: testState.sendMessageMutate, isPending: false }),
   useUpdateMyPreferences: () => ({ mutate: vi.fn() }),
@@ -126,8 +158,12 @@ vi.mock("./components/queue-composer", () => ({
   QueueComposer: ({
     agentMode,
     onSingleSend,
+    disabled,
+    promptValue,
   }: {
     agentMode: string;
+    disabled?: boolean;
+    promptValue?: string;
     onSingleSend: (
       content: string,
       intent: "build",
@@ -136,22 +172,26 @@ vi.mock("./components/queue-composer", () => ({
       clearComposer: () => void,
     ) => void;
   }) => (
-    <button
-      type="button"
-      data-testid="real-send-path"
-      data-agent-mode={agentMode}
-      onClick={() =>
-        onSingleSend(
-          "Migrate the shared status API across the project",
-          "build",
-          undefined,
-          undefined,
-          testState.clearComposer,
-        )
-      }
-    >
-      Send Power build
-    </button>
+    <div>
+      <output data-testid="composer-value">{promptValue ?? ""}</output>
+      <button
+        type="button"
+        data-testid="real-send-path"
+        data-agent-mode={agentMode}
+        disabled={disabled}
+        onClick={() =>
+          onSingleSend(
+            "Migrate the shared status API across the project",
+            "build",
+            undefined,
+            undefined,
+            testState.clearComposer,
+          )
+        }
+      >
+        Send Power build
+      </button>
+    </div>
   ),
 }));
 
@@ -230,12 +270,45 @@ function renderPage() {
       mutations: { retry: false },
     },
   });
+  testState.queryClient = queryClient;
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectWorkspacePage />
     </QueryClientProvider>,
   );
 }
+
+function installCapturedTaskEventSource() {
+  testState.eventSources = [];
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        testState.eventSources.push(this);
+      }
+    },
+  );
+}
+
+afterEach(() => {
+  testState.tasks = [];
+  testState.messages = [
+    {
+      id: 1,
+      role: "user",
+      content: "Existing project",
+      plan: null,
+      planMode: false,
+      createdAt: "2026-07-30T00:00:00.000Z",
+    },
+  ];
+  testState.eventSources = [];
+  testState.queryClient = null;
+});
 
 async function sendPowerBuild() {
   const user = userEvent.setup();
@@ -248,6 +321,18 @@ describe("project send — no confirmation dialog", () => {
   beforeEach(() => {
     testState.sendMessageMutate.mockReset();
     testState.clearComposer.mockReset();
+    testState.cancelTaskMutate.mockReset();
+    testState.tasks = [];
+    testState.messages = [
+      {
+        id: 1,
+        role: "user",
+        content: "Existing project",
+        plan: null,
+        planMode: false,
+        createdAt: "2026-07-30T00:00:00.000Z",
+      },
+    ];
     testState.billing = {
       data: undefined,
       isLoading: false,
@@ -389,6 +474,104 @@ describe("project send — no confirmation dialog", () => {
       expect(testState.clearComposer).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("project Stop with captured task 189 planning traffic", () => {
+  beforeEach(() => {
+    testState.cancelTaskMutate.mockReset();
+    testState.tasks = [
+      {
+        id: 189,
+        projectId: 47,
+        kind: "plan",
+        status: "planning",
+        title: "Plan: Run 8 Activity Scratch B 2026-07-31",
+        prompt: "Analyze this project idea and create a structured plan",
+        createdAt: "2026-07-31T06:32:09.379Z",
+      },
+    ];
+    testState.messages = [
+      {
+        id: 1890,
+        role: "user",
+        content: "Analyze this project idea and create a structured plan",
+        plan: null,
+        planMode: true,
+        createdAt: "2026-07-31T06:32:09.379Z",
+      },
+    ];
+    testState.billing = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+    };
+    localStorage.clear();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    installCapturedTaskEventSource();
+  });
+
+  it("terminalizes locally after cancel and makes the captured user message editable again", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const taskStream = await waitFor(() => {
+      const stream = testState.eventSources.find((source) =>
+        source.url.includes("/tasks/189/events/stream"),
+      );
+      expect(stream).toBeDefined();
+      return stream!;
+    });
+
+    // Real production task 189 frames 7949-7951, captured before Stop.
+    await act(async () => {
+      for (const frame of [
+        { id: 7949, taskId: 189, eventType: "queued", message: "Plan request received..." },
+        {
+          id: 7950,
+          taskId: 189,
+          eventType: "planning",
+          message: "Analysing project and requirements...",
+        },
+        {
+          id: 7951,
+          taskId: 189,
+          eventType: "generating_blueprint",
+          message: "Generating structured plan with AI...",
+        },
+      ]) {
+        taskStream.onmessage?.(
+          new MessageEvent("message", {
+            data: JSON.stringify(frame),
+          }),
+        );
+      }
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Stop" }));
+
+    expect(testState.cancelTaskMutate).toHaveBeenCalledWith({ id: 47, taskId: 189 });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument(),
+    );
+    const edit = await screen.findByRole("button", { name: "Edit and resend this message" });
+    await user.click(edit);
+    expect(screen.getByTestId("composer-value")).toHaveTextContent(
+      "Analyze this project idea and create a structured plan",
+    );
+    expect(screen.getByTestId("real-send-path")).toBeEnabled();
+  });
 });
 
 describe("composer credit counter", () => {

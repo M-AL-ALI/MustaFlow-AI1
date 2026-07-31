@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { db, projectsTable, agentTasksTable, chatMessagesTable } from "@workspace/db";
+import {
+  db,
+  projectsTable,
+  agentTasksTable,
+  chatMessagesTable,
+  taskEventsTable,
+} from "@workspace/db";
 import {
   ListTasksParams,
   ListTasksResponse,
@@ -29,6 +35,9 @@ import {
 } from "../lib/jobs";
 import { refundCredits } from "./credits";
 import { logger } from "../lib/logger";
+import { publishTaskEvent } from "../lib/event-bus";
+
+const TERMINAL_TASK_EVENT_TYPES = ["completed", "failed", "cancelled"];
 
 const router: IRouter = Router();
 
@@ -198,7 +207,7 @@ router.post(
 
     // For building/planning tasks, abort the in-flight AI call first so the
     // pipeline can clean up gracefully, then fall through to the DB update.
-    cancelActiveJob(params.data.taskId);
+    const executionWasActive = cancelActiveJob(params.data.taskId);
 
     // Attempt a conditional update: cancel if the task is queued, building, or planning.
     // IMPORTANT: capture the pre-update reserved-credits amount in the SAME UPDATE
@@ -222,9 +231,9 @@ router.post(
         )
         .limit(1);
 
-      if (!pre) return { task: null, reserved: 0 };
+      if (!pre) return { task: null, reserved: 0, queuedCancellationEvent: null };
       if (!["queued", "building", "planning"].includes(pre.status)) {
-        return { task: pre, reserved: 0, alreadyTerminal: true };
+        return { task: pre, reserved: 0, alreadyTerminal: true, queuedCancellationEvent: null };
       }
 
       const [updated] = await tx
@@ -233,10 +242,65 @@ router.post(
         .where(eq(agentTasksTable.id, pre.id))
         .returning();
 
-      return { task: updated ?? pre, reserved: pre.creditsReserved ?? 0 };
+      let queuedCancellationEvent: typeof taskEventsTable.$inferSelect | null = null;
+      // Running pipelines own their terminal event. The route writes one only
+      // for a queued task that never acquired an execution controller.
+      if (pre.status === "queued" && !executionWasActive) {
+        const [existingTerminal] = await tx
+          .select({ id: taskEventsTable.id })
+          .from(taskEventsTable)
+          .where(
+            and(
+              eq(taskEventsTable.taskId, pre.id),
+              inArray(taskEventsTable.eventType, TERMINAL_TASK_EVENT_TYPES),
+            ),
+          )
+          .limit(1);
+        if (!existingTerminal) {
+          const [event] = await tx
+            .insert(taskEventsTable)
+            .values({
+              taskId: pre.id,
+              eventType: "cancelled",
+              message: "Task cancelled by user.",
+              filePath: null,
+            })
+            .returning();
+          queuedCancellationEvent = event ?? null;
+        }
+      }
+
+      return {
+        task: updated ?? pre,
+        reserved: pre.creditsReserved ?? 0,
+        queuedCancellationEvent,
+      };
     });
 
-    const task = cancelResult.task && !cancelResult.alreadyTerminal ? cancelResult.task : null;
+    // The abort listener can win the DB race and commit `canceled` before this
+    // route's transaction reads the row. That is still a successful response
+    // to this cancel request, not an "already terminal" conflict.
+    const activeExecutionCommittedCancellation =
+      executionWasActive &&
+      cancelResult.alreadyTerminal === true &&
+      cancelResult.task?.status === "canceled";
+    const task =
+      cancelResult.task && (!cancelResult.alreadyTerminal || activeExecutionCommittedCancellation)
+        ? cancelResult.task
+        : null;
+
+    if (cancelResult.queuedCancellationEvent) {
+      const event = cancelResult.queuedCancellationEvent;
+      publishTaskEvent({
+        id: event.id,
+        taskId: event.taskId,
+        eventType: event.eventType,
+        message: event.message,
+        filePath: event.filePath ?? null,
+        data: (event.data as Record<string, unknown> | undefined) ?? undefined,
+        createdAt: event.createdAt,
+      });
+    }
 
     // Refund the captured pre-update amount (Task #509 — background jobs).
     if (task && cancelResult.reserved > 0) {
