@@ -5554,8 +5554,38 @@ paths:
                 type: object
                 properties:
                   preview:
+                    type: object
                     nullable: true
-                    description: Proration preview (amount due, currency, line items) when confirm=false.
+                    description: Immediate proration preview and next-cycle recurring charge when confirm=false.
+                    required:
+                      - currentPlanId
+                      - targetPlanId
+                      - amountDueCents
+                      - nextCycleAmountCents
+                      - nextCycleStartsAt
+                      - currency
+                      - periodEnd
+                      - lines
+                    properties:
+                      currentPlanId: { type: string }
+                      targetPlanId: { type: string }
+                      amountDueCents:
+                        type: integer
+                        description: Immediate proration charge, or credit when negative, in cents.
+                      nextCycleAmountCents:
+                        type: integer
+                        description: Recurring amount for the target plan's next full cycle, in cents.
+                      nextCycleStartsAt: { type: string, format: date-time, nullable: true }
+                      currency: { type: string }
+                      periodEnd: { type: string, format: date-time, nullable: true }
+                      lines:
+                        type: array
+                        items:
+                          type: object
+                          required: [description, amountCents]
+                          properties:
+                            description: { type: string, nullable: true }
+                            amountCents: { type: integer }
                   ok: { type: boolean }
                   planId: { type: string }
                   status: { type: string }

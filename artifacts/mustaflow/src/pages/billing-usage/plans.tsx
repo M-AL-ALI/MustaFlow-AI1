@@ -416,6 +416,15 @@ export function PlansSection() {
                   {formatUsdCents(Math.abs(previewState.preview.amountDueCents))}
                 </span>
               </div>
+              {previewState.preview.nextCycleAmountCents > 0 && (
+                <p className="text-xs text-muted-foreground" data-testid="next-cycle-charge">
+                  Then {formatUsdCents(previewState.preview.nextCycleAmountCents)}/mo
+                  {previewState.preview.nextCycleStartsAt
+                    ? ` starting ${formatResetDate(previewState.preview.nextCycleStartsAt)}`
+                    : " at the next renewal"}
+                  .
+                </p>
+              )}
               <p className="text-[11px] leading-snug text-muted-foreground">
                 Upgrades take effect immediately and bump this cycle's credits. Downgrades keep your
                 current plan until the cycle ends.

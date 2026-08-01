@@ -6372,7 +6372,19 @@ export const SwitchNabuflowPlanBody = zod.object({
 })
 
 export const SwitchNabuflowPlanResponse = zod.object({
-  "preview": zod.unknown().nullish().describe('Proration preview (amount due, currency, line items) when confirm=false.'),
+  "preview": zod.object({
+  "currentPlanId": zod.string(),
+  "targetPlanId": zod.string(),
+  "amountDueCents": zod.number().describe('Immediate proration charge, or credit when negative, in cents.'),
+  "nextCycleAmountCents": zod.number().describe('Recurring amount for the target plan\'s next full cycle, in cents.'),
+  "nextCycleStartsAt": zod.coerce.date().nullable(),
+  "currency": zod.string(),
+  "periodEnd": zod.coerce.date().nullable(),
+  "lines": zod.array(zod.object({
+  "description": zod.string().nullable(),
+  "amountCents": zod.number()
+}))
+}).nullish().describe('Immediate proration preview and next-cycle recurring charge when confirm=false.'),
   "ok": zod.boolean().optional(),
   "planId": zod.string().optional(),
   "status": zod.string().optional(),

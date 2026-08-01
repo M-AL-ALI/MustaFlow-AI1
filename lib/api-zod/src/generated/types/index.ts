@@ -596,6 +596,8 @@ export * from './supportTicketSummary';
 export * from './supportTicketSummaryEmailStatus';
 export * from './supportTicketSummaryStatus';
 export * from './switchNabuflowPlan200';
+export * from './switchNabuflowPlan200Preview';
+export * from './switchNabuflowPlan200PreviewLinesItem';
 export * from './switchNabuflowPlanBody';
 export * from './switchNabuflowPlanBodyPlanId';
 export * from './taskEvent';

@@ -557,6 +557,9 @@ router.post("/billing/nabuflow/switch", async (req, res): Promise<void> => {
       }
     }
 
+    // Stripe charges an upgrade's proration before returning. Nothing below
+    // runs when the card is declined, so subscription state and entitlements
+    // cannot move ahead of payment.
     const updated = await switchNabuflowStripePlan(sub, targetPlan);
     await handleNabuflowSubscriptionEvent("customer.subscription.updated", updated as never);
 
@@ -568,6 +571,7 @@ router.post("/billing/nabuflow/switch", async (req, res): Promise<void> => {
       await db
         .update(nabuflowBillingCyclesTable)
         .set({
+          planId: targetPlan.id,
           includedCredits: sql`${nabuflowBillingCyclesTable.includedCredits} + ${allotmentDiff}`,
           updatedAt: sql`now()`,
         })

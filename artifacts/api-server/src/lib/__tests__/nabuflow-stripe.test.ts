@@ -43,6 +43,7 @@ vi.mock("../logger", () => ({
 import type { NabuflowSubscription } from "@workspace/db";
 import {
   previewNabuflowPlanSwitch,
+  switchNabuflowStripePlan,
   createNabuflowStripeSubscription,
   resolveNabuflowPriceId,
   createNabuflowOverageInvoiceItem,
@@ -106,13 +107,32 @@ describe("previewNabuflowPlanSwitch", () => {
     process.env[NABUFLOW_PLANS.comet.stripePriceIdEnv] = "price_comet_env";
     const periodEndSec = 1_786_492_800; // 2026-08-12T00:00:00Z
     stripeStub.invoices.createPreview.mockResolvedValue({
-      amount_due: 1234,
+      amount_due: 6234,
       currency: "usd",
       period_end: periodEndSec,
       lines: {
         data: [
-          { description: "Unused time on NabuFlow Orbit", amount: -500 },
-          { description: "Remaining time on NabuFlow Comet", amount: 1734 },
+          {
+            description: "Unused time on NabuFlow Orbit",
+            amount: -500,
+            parent: {
+              subscription_item_details: { subscription_item: "si_nf_1", proration: true },
+            },
+          },
+          {
+            description: "Remaining time on NabuFlow Comet",
+            amount: 1734,
+            parent: {
+              subscription_item_details: { subscription_item: "si_nf_1", proration: true },
+            },
+          },
+          {
+            description: "1 x NabuFlow Comet ($50.00 / month)",
+            amount: 5000,
+            parent: {
+              subscription_item_details: { subscription_item: "si_nf_1", proration: false },
+            },
+          },
         ],
       },
     });
@@ -131,6 +151,8 @@ describe("previewNabuflowPlanSwitch", () => {
       currentPlanId: "orbit",
       targetPlanId: "comet",
       amountDueCents: 1234,
+      nextCycleAmountCents: 5000,
+      nextCycleStartsAt: new Date(periodEndSec * 1000).toISOString(),
       currency: "usd",
       periodEnd: new Date(periodEndSec * 1000).toISOString(),
       lines: [
@@ -148,6 +170,40 @@ describe("previewNabuflowPlanSwitch", () => {
       previewNabuflowPlanSwitch(sub({ stripeItemId: null }), NABUFLOW_PLANS.comet),
     ).rejects.toMatchObject({ code: "no_subscription" });
     expect(stripeStub.invoices.createPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe("switchNabuflowStripePlan", () => {
+  beforeEach(() => {
+    process.env[NABUFLOW_PLANS.comet.stripePriceIdEnv] = "price_comet_env";
+  });
+
+  it("immediately invoices the upgrade proration with error-if-incomplete payment semantics", async () => {
+    const paidSubscription = {
+      id: "sub_nf_1",
+      status: "active",
+      latest_invoice: { id: "in_upgrade", status: "paid" },
+    };
+    stripeStub.subscriptions.update.mockResolvedValue(paidSubscription);
+
+    await expect(
+      switchNabuflowStripePlan(sub(), NABUFLOW_PLANS.comet),
+    ).resolves.toBe(paidSubscription);
+
+    expect(stripeStub.subscriptions.update).toHaveBeenCalledWith("sub_nf_1", {
+      items: [{ id: "si_nf_1", price: "price_comet_env" }],
+      proration_behavior: "always_invoice",
+      payment_behavior: "error_if_incomplete",
+      metadata: { surface: "nabuflow", plan: "comet", userId: "u_switch" },
+    });
+  });
+
+  it("turns an immediate upgrade-invoice decline into a calm payment_failed error", async () => {
+    stripeStub.subscriptions.update.mockRejectedValue(new Error("Your card was declined."));
+
+    await expect(
+      switchNabuflowStripePlan(sub(), NABUFLOW_PLANS.comet),
+    ).rejects.toMatchObject({ code: "payment_failed" });
   });
 });
 

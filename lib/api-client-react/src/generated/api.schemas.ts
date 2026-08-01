@@ -5898,9 +5898,30 @@ export type SwitchNabuflowPlanBody = {
   confirm?: boolean;
 };
 
+export type SwitchNabuflowPlan200PreviewLinesItem = {
+  description: string | null;
+  amountCents: number;
+};
+
+/**
+ * Immediate proration preview and next-cycle recurring charge when confirm=false.
+ */
+export type SwitchNabuflowPlan200Preview = {
+  currentPlanId: string;
+  targetPlanId: string;
+  /** Immediate proration charge, or credit when negative, in cents. */
+  amountDueCents: number;
+  /** Recurring amount for the target plan's next full cycle, in cents. */
+  nextCycleAmountCents: number;
+  nextCycleStartsAt: string | null;
+  currency: string;
+  periodEnd: string | null;
+  lines: SwitchNabuflowPlan200PreviewLinesItem[];
+} | null;
+
 export type SwitchNabuflowPlan200 = {
-  /** Proration preview (amount due, currency, line items) when confirm=false. */
-  preview?: unknown | null;
+  /** Immediate proration preview and next-cycle recurring charge when confirm=false. */
+  preview?: SwitchNabuflowPlan200Preview;
   ok?: boolean;
   planId?: string;
   status?: string;

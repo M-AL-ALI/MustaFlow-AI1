@@ -5,10 +5,11 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { SwitchNabuflowPlan200Preview } from './switchNabuflowPlan200Preview';
 
 export type SwitchNabuflowPlan200 = {
-  /** Proration preview (amount due, currency, line items) when confirm=false. */
-  preview?: unknown | null;
+  /** Immediate proration preview and next-cycle recurring charge when confirm=false. */
+  preview?: SwitchNabuflowPlan200Preview;
   ok?: boolean;
   planId?: string;
   status?: string;

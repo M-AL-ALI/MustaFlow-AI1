@@ -231,6 +231,10 @@ export interface NabuflowProrationPreview {
   targetPlanId: NabuflowPlanId;
   /** Amount due immediately (or credited, negative) in cents. */
   amountDueCents: number;
+  /** Recurring amount for the target plan on the next full billing cycle. */
+  nextCycleAmountCents: number;
+  /** When the next full-cycle recurring amount starts. */
+  nextCycleStartsAt: string | null;
   currency: string;
   periodEnd: string | null;
   lines: Array<{ description: string | null; amountCents: number }>;
@@ -259,13 +263,32 @@ export async function previewNabuflowPlanSwitch(
     },
   });
 
+  const previewLines = preview.lines?.data ?? [];
+  const isThisSubscriptionItem = (line: Stripe.InvoiceLineItem): boolean =>
+    line.parent?.subscription_item_details?.subscription_item === sub.stripeItemId;
+  const prorationLines = previewLines.filter(
+    (line) =>
+      isThisSubscriptionItem(line) &&
+      line.parent?.subscription_item_details?.proration === true,
+  );
+  const nextCycleLines = previewLines.filter(
+    (line) =>
+      isThisSubscriptionItem(line) &&
+      line.parent?.subscription_item_details?.proration === false,
+  );
+  const periodEnd = preview.period_end
+    ? new Date(preview.period_end * 1000).toISOString()
+    : null;
+
   return {
     currentPlanId: sub.planId,
     targetPlanId: targetPlan.id,
-    amountDueCents: preview.amount_due ?? 0,
+    amountDueCents: prorationLines.reduce((total, line) => total + line.amount, 0),
+    nextCycleAmountCents: nextCycleLines.reduce((total, line) => total + line.amount, 0),
+    nextCycleStartsAt: periodEnd,
     currency: preview.currency ?? "usd",
-    periodEnd: preview.period_end ? new Date(preview.period_end * 1000).toISOString() : null,
-    lines: (preview.lines?.data ?? []).map((l) => ({
+    periodEnd,
+    lines: prorationLines.map((l) => ({
       description: l.description ?? null,
       amountCents: l.amount ?? 0,
     })),
@@ -288,7 +311,7 @@ export async function switchNabuflowStripePlan(
   try {
     return await stripe.subscriptions.update(sub.stripeSubscriptionId, {
       items: [{ id: sub.stripeItemId, price: priceId }],
-      proration_behavior: "create_prorations",
+      proration_behavior: "always_invoice",
       payment_behavior: "error_if_incomplete",
       metadata: { surface: "nabuflow", plan: targetPlan.id, userId: sub.userId },
     });
