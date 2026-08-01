@@ -6242,6 +6242,8 @@ export const GetNabuflowBillingStateResponse = zod.object({
   "subscription": zod.object({
   "status": zod.string(),
   "cancelAtPeriodEnd": zod.boolean(),
+  "pendingPlanId": zod.string().nullish().describe('Lower-tier plan scheduled for the next renewal, or null.'),
+  "pendingEffectiveAt": zod.coerce.date().nullish().describe('Stripe period boundary when pendingPlanId takes effect.'),
   "currentCycleStart": zod.coerce.date().nullish(),
   "currentCycleEnd": zod.coerce.date().nullish(),
   "dunningStatus": zod.string().nullish(),
@@ -6388,6 +6390,8 @@ export const SwitchNabuflowPlanResponse = zod.object({
   "ok": zod.boolean().optional(),
   "planId": zod.string().optional(),
   "status": zod.string().optional(),
+  "pendingPlanId": zod.string().nullish(),
+  "pendingEffectiveAt": zod.coerce.date().nullish(),
   "upgradedCreditsGranted": zod.number().optional()
 })
 

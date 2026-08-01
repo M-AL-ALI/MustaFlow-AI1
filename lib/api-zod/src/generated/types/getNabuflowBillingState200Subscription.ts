@@ -9,6 +9,10 @@
 export type GetNabuflowBillingState200Subscription = {
   status: string;
   cancelAtPeriodEnd: boolean;
+  /** Lower-tier plan scheduled for the next renewal, or null. */
+  pendingPlanId?: string | null;
+  /** Stripe period boundary when pendingPlanId takes effect. */
+  pendingEffectiveAt?: Date | null;
   currentCycleStart?: Date | null;
   currentCycleEnd?: Date | null;
   dunningStatus?: string | null;

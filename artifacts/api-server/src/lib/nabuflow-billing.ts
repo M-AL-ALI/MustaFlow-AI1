@@ -1612,9 +1612,27 @@ export async function handleNabuflowSubscriptionEvent(
       ? "canceled"
       : mapStripeStatus(subscription?.status);
   const itemId: string | null = subscription?.items?.data?.[0]?.id ?? null;
-  const planId = (metaPlan?.id ?? sub.planId) as NabuflowPlanId;
-  const plan = getNabuflowPlan(planId);
   const { periodStart, periodEnd } = extractNabuflowPeriod(subscription);
+  let planId = (metaPlan?.id ?? sub.planId) as NabuflowPlanId;
+  const clearsPendingPlan = eventType === "customer.subscription.deleted";
+
+  if (sub.pendingPlanId && metaPlan && metaPlan.id !== sub.planId) {
+    // Schedule-related subscription updates are not payment proof. The paid
+    // subscription_cycle invoice below is the sole writer that lands a
+    // pending downgrade and its new entitlement bucket.
+    planId = sub.planId as NabuflowPlanId;
+    logger.warn(
+      {
+        userId: sub.userId,
+        currentPlanId: sub.planId,
+        pendingPlanId: sub.pendingPlanId,
+        incomingPlanId: metaPlan.id,
+        eventType,
+      },
+      "nabuflow: scheduled plan transition waiting for paid renewal",
+    );
+  }
+  const plan = getNabuflowPlan(planId);
 
   await db
     .update(nabuflowSubscriptionsTable)
@@ -1625,11 +1643,21 @@ export async function handleNabuflowSubscriptionEvent(
       ...(customerId ? { stripeCustomerId: customerId } : {}),
       ...(itemId ? { stripeItemId: itemId } : {}),
       cancelAtPeriodEnd: !!subscription?.cancel_at_period_end,
+      ...(clearsPendingPlan ? { pendingPlanId: null, pendingEffectiveAt: null } : {}),
       updatedAt: sql`now()`,
     })
     .where(eq(nabuflowSubscriptionsTable.id, sub.id));
 
-  if (status === "active" && plan && periodStart && periodEnd) {
+  // Preserve the existing subscription-sync behavior except while a
+  // downgrade schedule is pending. Schedule creation and phase-transition
+  // updates are not payment proof; the renewal invoice owns that bucket.
+  if (
+    status === "active" &&
+    plan &&
+    periodStart &&
+    periodEnd &&
+    !(eventType === "customer.subscription.updated" && sub.pendingPlanId)
+  ) {
     const fresh = await getNabuflowSubscription(sub.userId);
     if (fresh) await grantNabuflowCycle(fresh, plan, periodStart, periodEnd);
   }
@@ -1667,9 +1695,6 @@ export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> 
     }
   }
   if (!sub) return;
-  const plan = getNabuflowPlan(sub.planId);
-  if (!plan) return;
-
   // Prefer the subscription line's period (the renewal window).
   const lines: AnyObj[] = invoice?.lines?.data ?? [];
   const subLine =
@@ -1685,8 +1710,64 @@ export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> 
     billingReason === "subscription_threshold" ||
     billingReason === "manual";
 
-  if (grantsCycle && periodStart && periodEnd && periodEnd.getTime() > periodStart.getTime()) {
-    await grantNabuflowCycle(sub, plan, periodStart, periodEnd);
+  let effectiveSub = sub;
+  let plan = getNabuflowPlan(sub.planId);
+  let cycleGrantAllowed = grantsCycle;
+  if (billingReason === "subscription_cycle" && sub.pendingPlanId) {
+    const pendingPlan = getNabuflowPlan(sub.pendingPlanId);
+    const pendingAt = sub.pendingEffectiveAt?.getTime() ?? Number.NaN;
+    const cycleStartsAt = periodStart?.getTime() ?? Number.NaN;
+    const invoiceConfirmsPendingPlan = metaPlanId === sub.pendingPlanId;
+    if (
+      pendingPlan &&
+      invoiceConfirmsPendingPlan &&
+      Number.isFinite(pendingAt) &&
+      Number.isFinite(cycleStartsAt) &&
+      cycleStartsAt >= pendingAt
+    ) {
+      await db
+        .update(nabuflowSubscriptionsTable)
+        .set({
+          planId: pendingPlan.id,
+          pendingPlanId: null,
+          pendingEffectiveAt: null,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(nabuflowSubscriptionsTable.id, sub.id));
+      effectiveSub = {
+        ...sub,
+        planId: pendingPlan.id,
+        pendingPlanId: null,
+        pendingEffectiveAt: null,
+      };
+      plan = pendingPlan;
+    } else {
+      cycleGrantAllowed = false;
+      logger.warn(
+        {
+          invoiceId: invoice?.id ?? null,
+          userId: sub.userId,
+          currentPlanId: sub.planId,
+          pendingPlanId: sub.pendingPlanId,
+          invoicePlanId: metaPlanId,
+          pendingEffectiveAt: sub.pendingEffectiveAt ?? null,
+          periodStart,
+        },
+        "nabuflow: pending downgrade renewal could not be verified - cycle grant skipped",
+      );
+    }
+  }
+  if (!plan) return;
+
+  let cycleGranted = false;
+  if (
+    cycleGrantAllowed &&
+    periodStart &&
+    periodEnd &&
+    periodEnd.getTime() > periodStart.getTime()
+  ) {
+    await grantNabuflowCycle(effectiveSub, plan, periodStart, periodEnd);
+    cycleGranted = true;
   }
   if (!grantsCycle && !knownNonCycleReason) {
     logger.warn(
@@ -1702,8 +1783,8 @@ export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> 
   if (sub.dunningStatus !== "none") await clearNabuflowDunning(sub.id);
 
   logger.info(
-    { userId: sub.userId, planId: plan.id, billingReason, cycleGranted: grantsCycle },
-    grantsCycle
+    { userId: sub.userId, planId: plan.id, billingReason, cycleGranted },
+    cycleGranted
       ? "nabuflow: invoice paid — cycle granted"
       : "nabuflow: invoice paid — payment health synced without cycle grant",
   );

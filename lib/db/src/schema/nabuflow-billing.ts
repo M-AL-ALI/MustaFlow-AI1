@@ -47,6 +47,10 @@ export const nabuflowSubscriptionsTable = pgTable(
     stripeItemId: text("stripe_item_id"),
     status: text("status").notNull().default("incomplete"),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    /** Lower-tier plan scheduled to start at the next Stripe renewal. */
+    pendingPlanId: text("pending_plan_id"),
+    /** Stripe-authoritative period boundary when pendingPlanId takes effect. */
+    pendingEffectiveAt: timestamp("pending_effective_at", { withTimezone: true }),
     /** Anchor of the current billing cycle (webhook-driven, lazily advanced). */
     currentCycleStart: timestamp("current_cycle_start", { withTimezone: true }),
     currentCycleEnd: timestamp("current_cycle_end", { withTimezone: true }),

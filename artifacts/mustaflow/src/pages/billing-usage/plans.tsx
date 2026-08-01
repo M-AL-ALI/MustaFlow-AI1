@@ -60,7 +60,10 @@ function apiErrorMessage(err: unknown): string {
 
 /** "$0.012" style per-credit overage price without trailing zeros. */
 function fmtPerCredit(v: number): string {
-  const s = v.toFixed(v < 0.095 ? 3 : 2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  const s = v
+    .toFixed(v < 0.095 ? 3 : 2)
+    .replace(/(\.\d*?)0+$/, "$1")
+    .replace(/\.$/, "");
   return `$${s}`;
 }
 
@@ -95,6 +98,19 @@ export function PlansSection() {
   const sub = state?.subscription ?? null;
   const hasActiveSub = !!sub && !!state?.plan && ACTIVE_SUB_STATUSES.has(sub.status);
   const currentPlanId = hasActiveSub ? (state?.plan?.id ?? null) : null;
+  const pendingPlan = sub?.pendingPlanId
+    ? (plans.find((plan) => plan.id === sub.pendingPlanId) ?? null)
+    : null;
+  const previewCurrentPlan = previewState?.preview
+    ? plans.find((plan) => plan.id === previewState.preview?.currentPlanId)
+    : null;
+  const previewTargetPlan = previewState?.preview
+    ? plans.find((plan) => plan.id === previewState.preview?.targetPlanId)
+    : null;
+  const previewIsDowngrade =
+    previewCurrentPlan?.priceUsd != null &&
+    previewTargetPlan?.priceUsd != null &&
+    previewTargetPlan.priceUsd < previewCurrentPlan.priceUsd;
 
   useEffect(() => {
     if (highlight && highlightRef.current) {
@@ -111,11 +127,18 @@ export function PlansSection() {
       { data: { planId: planId as SubscribeNabuflowPlanBody["planId"] } },
       {
         onSuccess: () => {
-          toast({ title: `Welcome to ${planName}`, description: "Your plan is active — happy building." });
+          toast({
+            title: `Welcome to ${planName}`,
+            description: "Your plan is active — happy building.",
+          });
           invalidate();
         },
         onError: (err) =>
-          toast({ title: "Couldn't start the plan", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Couldn't start the plan",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
         onSettled: () => setPendingPlanId(null),
       },
     );
@@ -128,11 +151,17 @@ export function PlansSection() {
       {
         onSuccess: (res) =>
           setPreviewState((prev) =>
-            prev?.planId === plan.id ? { ...prev, preview: parseProrationPreview(res.preview) } : prev,
+            prev?.planId === plan.id
+              ? { ...prev, preview: parseProrationPreview(res.preview) }
+              : prev,
           ),
         onError: (err) => {
           setPreviewState(null);
-          toast({ title: "Couldn't preview the switch", description: apiErrorMessage(err), variant: "destructive" });
+          toast({
+            title: "Couldn't preview the switch",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          });
         },
       },
     );
@@ -146,10 +175,12 @@ export function PlansSection() {
       {
         onSuccess: (res) => {
           const granted = res.upgradedCreditsGranted ?? 0;
+          const scheduled = !!res.pendingPlanId;
           toast({
-            title: `Switched to ${planName}`,
-            description:
-              granted > 0
+            title: scheduled ? `${planName} scheduled` : `Switched to ${planName}`,
+            description: scheduled
+              ? `Your current plan stays active until ${formatResetDate(res.pendingEffectiveAt) ?? "the next renewal"}.`
+              : granted > 0
                 ? `${granted.toLocaleString()} credits were added to this cycle right away.`
                 : preview && preview.amountDueCents <= 0
                   ? "Your change applies at the next renewal."
@@ -159,7 +190,11 @@ export function PlansSection() {
           invalidate();
         },
         onError: (err) =>
-          toast({ title: "Couldn't switch plans", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Couldn't switch plans",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
       },
     );
   };
@@ -194,6 +229,7 @@ export function PlansSection() {
       <div className="grid items-stretch gap-4 md:grid-cols-3">
         {selfServe.map((plan) => {
           const isCurrent = plan.id === currentPlanId;
+          const isPendingTarget = plan.id === sub?.pendingPlanId;
           const isHighlight = highlight === plan.id && !isCurrent;
           const ladder = nabuflowLadderLines(plan, plans);
           const priceHigher = (plan.priceUsd ?? 0) > (state?.plan?.priceUsd ?? 0);
@@ -222,9 +258,22 @@ export function PlansSection() {
                 </Badge>
               )}
 
+              {isCurrent && pendingPlan && (
+                <div
+                  className="mb-4 mt-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
+                  data-testid="pending-plan-note"
+                >
+                  Switching to {pendingPlan.name} on{" "}
+                  {formatResetDate(sub?.pendingEffectiveAt) ?? "your next renewal"}. Your{" "}
+                  {plan.name} entitlements stay active until then.
+                </div>
+              )}
+
               <h3 className="text-base font-bold text-foreground">{plan.name}</h3>
               <p className="mt-1.5">
-                <span className="text-2xl font-bold tabular-nums text-foreground">${plan.priceUsd}</span>
+                <span className="text-2xl font-bold tabular-nums text-foreground">
+                  ${plan.priceUsd}
+                </span>
                 <span className="text-xs text-muted-foreground">/month</span>
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -271,7 +320,10 @@ export function PlansSection() {
                         onClick={() =>
                           resumeMutation.mutate(undefined, {
                             onSuccess: () => {
-                              toast({ title: "Auto-renew resumed", description: "Your plan will keep renewing." });
+                              toast({
+                                title: "Auto-renew resumed",
+                                description: "Your plan will keep renewing.",
+                              });
                               invalidate();
                             },
                             onError: (err) =>
@@ -284,11 +336,14 @@ export function PlansSection() {
                         }
                         data-testid="plan-resume-btn"
                       >
-                        {resumeMutation.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                        {resumeMutation.isPending && (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        )}
                         Resume auto-renew
                       </Button>
                       <p className="text-center text-[11px] text-muted-foreground">
-                        Currently set to end on {formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}.
+                        Currently set to end on{" "}
+                        {formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}.
                       </p>
                     </div>
                   ) : (
@@ -311,7 +366,7 @@ export function PlansSection() {
                     size="sm"
                     className="w-full"
                     variant={!hasActiveSub || priceHigher ? "default" : "outline"}
-                    disabled={busy}
+                    disabled={busy || isPendingTarget}
                     onClick={() => choosePlan(plan)}
                     data-testid={`plan-cta-${plan.id}`}
                   >
@@ -320,11 +375,13 @@ export function PlansSection() {
                     ) : (
                       <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                     )}
-                    {hasActiveSub
-                      ? priceHigher
-                        ? `Upgrade to ${plan.name}`
-                        : `Downgrade to ${plan.name}`
-                      : `Choose ${plan.name}`}
+                    {isPendingTarget
+                      ? `${plan.name} scheduled`
+                      : hasActiveSub
+                        ? priceHigher
+                          ? `Upgrade to ${plan.name}`
+                          : `Downgrade to ${plan.name}`
+                        : `Choose ${plan.name}`}
                   </Button>
                 )}
               </div>
@@ -368,8 +425,8 @@ export function PlansSection() {
       ))}
 
       <p className="text-[11px] text-muted-foreground">
-        Every paid plan keeps a card on file. Metered Pro/Deep counters and included credits reset at
-        the start of each billing cycle.
+        Every paid plan keeps a card on file. Metered Pro/Deep counters and included credits reset
+        at the start of each billing cycle.
       </p>
 
       {/* Proration preview dialog */}
@@ -381,8 +438,14 @@ export function PlansSection() {
       >
         <DialogContent className="max-w-md" data-testid="proration-dialog">
           <DialogHeader>
-            <DialogTitle>Switch to {previewState?.planName}</DialogTitle>
-            <DialogDescription>Review the mid-cycle proration before confirming.</DialogDescription>
+            <DialogTitle>
+              {previewIsDowngrade ? "Schedule" : "Switch to"} {previewState?.planName}
+            </DialogTitle>
+            <DialogDescription>
+              {previewIsDowngrade
+                ? "Your current plan stays active through this billing cycle."
+                : "Review the mid-cycle proration before confirming."}
+            </DialogDescription>
           </DialogHeader>
 
           {previewState && !previewState.preview ? (
@@ -411,7 +474,9 @@ export function PlansSection() {
                 </ul>
               )}
               <div className="flex justify-between text-sm font-semibold text-foreground">
-                <span>{previewState.preview.amountDueCents >= 0 ? "Due now" : "Credit applied"}</span>
+                <span>
+                  {previewState.preview.amountDueCents >= 0 ? "Due now" : "Credit applied"}
+                </span>
                 <span className="tabular-nums" data-testid="proration-total">
                   {formatUsdCents(Math.abs(previewState.preview.amountDueCents))}
                 </span>
@@ -453,7 +518,7 @@ export function PlansSection() {
               {switchMutation.isPending && previewState?.preview && (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               )}
-              Confirm switch
+              {previewIsDowngrade ? "Schedule downgrade" : "Confirm switch"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -466,8 +531,9 @@ export function PlansSection() {
             <AlertDialogTitle>Cancel your plan?</AlertDialogTitle>
             <AlertDialogDescription>
               Your plan stays active until{" "}
-              {formatResetDate(sub?.currentCycleEnd) ?? "the end of the current cycle"} — credits and
-              metered builds keep working until then. You can resume auto-renew any time before that.
+              {formatResetDate(sub?.currentCycleEnd) ?? "the end of the current cycle"} — credits
+              and metered builds keep working until then. You can resume auto-renew any time before
+              that.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -483,7 +549,11 @@ export function PlansSection() {
                     invalidate();
                   },
                   onError: (err) =>
-                    toast({ title: "Couldn't cancel", description: apiErrorMessage(err), variant: "destructive" }),
+                    toast({
+                      title: "Couldn't cancel",
+                      description: apiErrorMessage(err),
+                      variant: "destructive",
+                    }),
                 })
               }
               data-testid="plan-cancel-confirm"

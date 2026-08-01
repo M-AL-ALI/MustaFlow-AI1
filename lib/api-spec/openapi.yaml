@@ -5329,6 +5329,15 @@ paths:
                     properties:
                       status: { type: string }
                       cancelAtPeriodEnd: { type: boolean }
+                      pendingPlanId:
+                        type: string
+                        nullable: true
+                        description: Lower-tier plan scheduled for the next renewal, or null.
+                      pendingEffectiveAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                        description: Stripe period boundary when pendingPlanId takes effect.
                       currentCycleStart: { type: string, format: date-time, nullable: true }
                       currentCycleEnd: { type: string, format: date-time, nullable: true }
                       dunningStatus: { type: string, nullable: true }
@@ -5589,6 +5598,8 @@ paths:
                   ok: { type: boolean }
                   planId: { type: string }
                   status: { type: string }
+                  pendingPlanId: { type: string, nullable: true }
+                  pendingEffectiveAt: { type: string, format: date-time, nullable: true }
                   upgradedCreditsGranted: { type: integer }
         "404":
           description: No active plan to switch
@@ -5687,8 +5698,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [companyName, billingContactEmail, addressLine1, city, postalCode, country]
+              required: [companyName, billingContactEmail, addressLine1, city, postalCode, country]
               properties:
                 companyName: { type: string, minLength: 2, maxLength: 200 }
                 billingContactName: { type: string, maxLength: 200 }
