@@ -11,6 +11,14 @@ const testState = vi.hoisted(() => ({
   createIntent: vi.fn(),
   getBillingState: vi.fn(),
   subscribe: vi.fn(),
+  switchPlan: vi.fn(),
+  billingState: {
+    card: null,
+    cycle: null,
+    org: null,
+    plan: null,
+    subscription: null,
+  } as Record<string, unknown>,
 }));
 
 vi.mock("@stripe/stripe-js", () => ({
@@ -56,13 +64,29 @@ vi.mock("@workspace/api-client-react", () => ({
           parallelBuildLimit: 1,
           overageUsdPerCredit: 0.015,
         },
+        {
+          id: "comet",
+          name: "Comet",
+          available: true,
+          priceUsd: 50,
+          includedMonthlyCredits: 4000,
+          ladder: {
+            proBuildsPerCycle: null,
+            deepBuildsPerCycle: 10,
+            proDeepCombo: false,
+          },
+          rolloverCycles: 1,
+          rolloverMaxCredits: 4000,
+          parallelBuildLimit: 3,
+          overageUsdPerCredit: 0.013,
+        },
       ],
     },
     isLoading: false,
   }),
   useResumeNabuflowSubscription: () => ({ isPending: false, mutate: vi.fn() }),
   useSubscribeNabuflowPlan: () => ({ isPending: false, mutate: testState.subscribe }),
-  useSwitchNabuflowPlan: () => ({ isPending: false, mutate: vi.fn() }),
+  useSwitchNabuflowPlan: () => ({ isPending: false, mutate: testState.switchPlan }),
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
@@ -71,13 +95,7 @@ vi.mock("@/hooks/use-toast", () => ({
 
 vi.mock("./shared", () => ({
   useNabuflowState: () => ({
-    data: {
-      card: null,
-      cycle: null,
-      org: null,
-      plan: null,
-      subscription: null,
-    },
+    data: testState.billingState,
   }),
 }));
 
@@ -119,6 +137,14 @@ beforeEach(() => {
   });
   testState.getBillingState.mockReset().mockResolvedValue({ card: { last4: "4242" } });
   testState.subscribe.mockReset();
+  testState.switchPlan.mockReset();
+  testState.billingState = {
+    card: null,
+    cycle: null,
+    org: null,
+    plan: null,
+    subscription: null,
+  };
   document.body.style.removeProperty("pointer-events");
 });
 
@@ -209,5 +235,68 @@ describe("Plans card setup dialog — captured staging pointer race", () => {
 
     await act(async () => state.resolve({ card: { last4: "4242" } }));
     await waitFor(() => expect(screen.queryByTestId("card-setup-dialog")).not.toBeInTheDocument());
+  });
+});
+
+describe("Plans deferred downgrade state", () => {
+  it("shows zero due now and the lower recurring price at period end", async () => {
+    testState.billingState = {
+      card: { last4: "4242" },
+      cycle: { includedCredits: 4000 },
+      org: null,
+      plan: { id: "comet", name: "Comet", priceUsd: 50 },
+      subscription: { status: "active", cancelAtPeriodEnd: false },
+    };
+    testState.switchPlan.mockImplementationOnce(
+      (_input: unknown, options: { onSuccess: (value: Record<string, unknown>) => void }) =>
+        options.onSuccess({
+          preview: {
+            currentPlanId: "comet",
+            targetPlanId: "orbit",
+            amountDueCents: 0,
+            nextCycleAmountCents: 2000,
+            nextCycleStartsAt: "2026-10-01T17:24:22.000Z",
+            currency: "usd",
+            periodEnd: "2026-10-01T17:24:22.000Z",
+            lines: [],
+          },
+        }),
+    );
+    const user = userEvent.setup();
+    renderPlans();
+
+    await user.click(screen.getByTestId("plan-cta-orbit"));
+
+    expect(screen.getByTestId("proration-total")).toHaveTextContent("$0");
+    expect(screen.getByTestId("next-cycle-charge")).toHaveTextContent(
+      "Then $20/mo starting Oct 1, 2026",
+    );
+    expect(screen.getByTestId("proration-confirm")).toHaveTextContent("Schedule downgrade");
+    expect(
+      screen.getByText(/Downgrades keep your current plan until the cycle ends/),
+    ).toBeVisible();
+  });
+
+  it("shows the current plan and its scheduled lower-tier change together", () => {
+    testState.billingState = {
+      card: { last4: "4242" },
+      cycle: { includedCredits: 4000 },
+      org: null,
+      plan: { id: "comet", name: "Comet", priceUsd: 50 },
+      subscription: {
+        status: "active",
+        cancelAtPeriodEnd: false,
+        pendingPlanId: "orbit",
+        pendingEffectiveAt: "2026-10-01T17:24:22.000Z",
+      },
+    };
+
+    renderPlans();
+
+    expect(screen.getByTestId("pending-plan-note")).toHaveTextContent(
+      /Switching to Orbit on Oct 1, 2026.*Comet entitlements stay active until then/,
+    );
+    expect(screen.getByTestId("plan-cta-orbit")).toBeDisabled();
+    expect(screen.getByTestId("plan-cta-orbit")).toHaveTextContent("Orbit scheduled");
   });
 });

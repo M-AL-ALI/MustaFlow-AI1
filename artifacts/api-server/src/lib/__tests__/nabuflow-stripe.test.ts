@@ -43,6 +43,8 @@ vi.mock("../logger", () => ({
 import type { NabuflowSubscription } from "@workspace/db";
 import {
   previewNabuflowPlanSwitch,
+  cancelPendingNabuflowPlanDowngrade,
+  scheduleNabuflowPlanDowngrade,
   switchNabuflowStripePlan,
   createNabuflowStripeSubscription,
   resolveNabuflowPriceId,
@@ -54,7 +56,13 @@ import { NABUFLOW_PLANS } from "../nabuflow-plans";
 
 const stripeStub = {
   invoices: { createPreview: vi.fn() },
-  subscriptions: { create: vi.fn(), update: vi.fn() },
+  subscriptions: { create: vi.fn(), retrieve: vi.fn(), update: vi.fn() },
+  subscriptionSchedules: {
+    create: vi.fn(),
+    retrieve: vi.fn(),
+    update: vi.fn(),
+    release: vi.fn(),
+  },
   customers: { retrieve: vi.fn(), update: vi.fn() },
   paymentMethods: { retrieve: vi.fn() },
   prices: { list: vi.fn(), create: vi.fn() },
@@ -78,6 +86,8 @@ const sub = (over: Partial<NabuflowSubscription> = {}): NabuflowSubscription =>
     stripeCustomerId: "cus_shared_1",
     stripeItemId: "si_nf_1",
     status: "active",
+    currentCycleStart: new Date("2026-08-01T00:00:00.000Z"),
+    currentCycleEnd: new Date("2026-09-01T00:00:00.000Z"),
     ...over,
   }) as unknown as NabuflowSubscription;
 
@@ -171,6 +181,181 @@ describe("previewNabuflowPlanSwitch", () => {
     ).rejects.toMatchObject({ code: "no_subscription" });
     expect(stripeStub.invoices.createPreview).not.toHaveBeenCalled();
   });
+
+  it("previews a downgrade as zero due now without asking Stripe for an invoice", async () => {
+    const preview = await previewNabuflowPlanSwitch(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit);
+
+    expect(preview).toEqual({
+      currentPlanId: "comet",
+      targetPlanId: "orbit",
+      amountDueCents: 0,
+      nextCycleAmountCents: 2000,
+      nextCycleStartsAt: "2026-09-01T00:00:00.000Z",
+      currency: "usd",
+      periodEnd: "2026-09-01T00:00:00.000Z",
+      lines: [],
+    });
+    expect(stripeStub.invoices.createPreview).not.toHaveBeenCalled();
+    expect(stripeStub.prices.list).not.toHaveBeenCalled();
+  });
+});
+
+describe("deferred plan downgrades", () => {
+  beforeEach(() => {
+    process.env[NABUFLOW_PLANS.orbit.stripePriceIdEnv] = "price_orbit_env";
+    stripeStub.subscriptions.retrieve.mockResolvedValue({
+      id: "sub_nf_1",
+      schedule: null,
+      items: {
+        data: [
+          {
+            id: "si_nf_1",
+            price: { id: "price_comet_env" },
+            quantity: 1,
+            current_period_start: 1_785_542_400,
+            current_period_end: 1_788_220_800,
+          },
+        ],
+      },
+    });
+    stripeStub.subscriptionSchedules.create.mockResolvedValue({
+      id: "sub_sched_1",
+      status: "active",
+      metadata: null,
+      current_phase: { start_date: 1_785_542_400, end_date: 1_788_220_800 },
+    });
+    stripeStub.subscriptionSchedules.update.mockResolvedValue({ id: "sub_sched_1" });
+  });
+
+  it("schedules the lower price at period end with no proration or immediate invoice", async () => {
+    const scheduled = await scheduleNabuflowPlanDowngrade(
+      sub({ planId: "comet" }),
+      NABUFLOW_PLANS.orbit,
+    );
+
+    expect(scheduled).toEqual({
+      scheduleId: "sub_sched_1",
+      effectiveAt: new Date(1_788_220_800 * 1000),
+    });
+    expect(stripeStub.subscriptionSchedules.create).toHaveBeenCalledWith(
+      {
+        from_subscription: "sub_nf_1",
+        metadata: {
+          surface: "nabuflow",
+          purpose: "nabuflow_deferred_downgrade",
+          userId: "u_switch",
+        },
+      },
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
+    expect(stripeStub.subscriptionSchedules.update).toHaveBeenCalledWith(
+      "sub_sched_1",
+      expect.objectContaining({
+        end_behavior: "release",
+        proration_behavior: "none",
+        phases: [
+          expect.objectContaining({
+            end_date: 1_788_220_800,
+            items: [{ price: "price_comet_env", quantity: 1 }],
+            proration_behavior: "none",
+          }),
+          expect.objectContaining({
+            start_date: 1_788_220_800,
+            items: [{ price: "price_orbit_env", quantity: 1 }],
+            proration_behavior: "none",
+          }),
+        ],
+      }),
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
+    expect(stripeStub.subscriptions.update).not.toHaveBeenCalled();
+    expect(stripeStub.invoices.createPreview).not.toHaveBeenCalled();
+  });
+
+  it("replaces an existing owned downgrade schedule instead of creating another", async () => {
+    stripeStub.subscriptions.retrieve.mockResolvedValueOnce({
+      id: "sub_nf_1",
+      schedule: "sub_sched_existing",
+      items: {
+        data: [
+          {
+            id: "si_nf_1",
+            price: { id: "price_comet_env" },
+            quantity: 1,
+            current_period_start: 1_785_542_400,
+            current_period_end: 1_788_220_800,
+          },
+        ],
+      },
+    });
+    stripeStub.subscriptionSchedules.retrieve.mockResolvedValueOnce({
+      id: "sub_sched_existing",
+      status: "active",
+      metadata: {
+        surface: "nabuflow",
+        purpose: "nabuflow_deferred_downgrade",
+        userId: "u_switch",
+      },
+      current_phase: { start_date: 1_785_542_400, end_date: 1_788_220_800 },
+    });
+
+    await scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit);
+
+    expect(stripeStub.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(stripeStub.subscriptionSchedules.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed rather than replacing an unrelated Stripe schedule", async () => {
+    stripeStub.subscriptions.retrieve.mockResolvedValueOnce({
+      id: "sub_nf_1",
+      schedule: {
+        id: "sub_sched_other",
+        status: "active",
+        metadata: { purpose: "someone_else" },
+      },
+      items: {
+        data: [
+          {
+            id: "si_nf_1",
+            price: { id: "price_comet_env" },
+            quantity: 1,
+            current_period_start: 1_785_542_400,
+            current_period_end: 1_788_220_800,
+          },
+        ],
+      },
+    });
+
+    await expect(
+      scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit),
+    ).rejects.toMatchObject({ code: "stripe_error" });
+    expect(stripeStub.subscriptionSchedules.update).not.toHaveBeenCalled();
+  });
+
+  it("releases an ID-verified owned schedule before a superseding upgrade", async () => {
+    stripeStub.subscriptions.retrieve.mockResolvedValueOnce({
+      id: "sub_nf_1",
+      schedule: {
+        id: "sub_sched_owned",
+        status: "active",
+        metadata: {
+          surface: "nabuflow",
+          purpose: "nabuflow_deferred_downgrade",
+          userId: "u_switch",
+        },
+      },
+      items: { data: [] },
+    });
+    stripeStub.subscriptionSchedules.release.mockResolvedValue({ id: "sub_sched_owned" });
+
+    await cancelPendingNabuflowPlanDowngrade(sub({ planId: "comet", pendingPlanId: "orbit" }));
+
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledWith(
+      "sub_sched_owned",
+      { preserve_cancel_date: true },
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
+  });
 });
 
 describe("switchNabuflowStripePlan", () => {
@@ -186,9 +371,9 @@ describe("switchNabuflowStripePlan", () => {
     };
     stripeStub.subscriptions.update.mockResolvedValue(paidSubscription);
 
-    await expect(
-      switchNabuflowStripePlan(sub(), NABUFLOW_PLANS.comet),
-    ).resolves.toBe(paidSubscription);
+    await expect(switchNabuflowStripePlan(sub(), NABUFLOW_PLANS.comet)).resolves.toBe(
+      paidSubscription,
+    );
 
     expect(stripeStub.subscriptions.update).toHaveBeenCalledWith("sub_nf_1", {
       items: [{ id: "si_nf_1", price: "price_comet_env" }],
@@ -201,9 +386,9 @@ describe("switchNabuflowStripePlan", () => {
   it("turns an immediate upgrade-invoice decline into a calm payment_failed error", async () => {
     stripeStub.subscriptions.update.mockRejectedValue(new Error("Your card was declined."));
 
-    await expect(
-      switchNabuflowStripePlan(sub(), NABUFLOW_PLANS.comet),
-    ).rejects.toMatchObject({ code: "payment_failed" });
+    await expect(switchNabuflowStripePlan(sub(), NABUFLOW_PLANS.comet)).rejects.toMatchObject({
+      code: "payment_failed",
+    });
   });
 });
 

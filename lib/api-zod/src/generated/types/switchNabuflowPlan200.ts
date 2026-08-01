@@ -13,5 +13,7 @@ export type SwitchNabuflowPlan200 = {
   ok?: boolean;
   planId?: string;
   status?: string;
+  pendingPlanId?: string | null;
+  pendingEffectiveAt?: Date | null;
   upgradedCreditsGranted?: number;
 };

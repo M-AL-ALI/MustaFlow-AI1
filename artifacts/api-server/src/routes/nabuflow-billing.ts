@@ -18,6 +18,7 @@ import {
   nabuflowOrgLedgerTable,
   nabuflowOrgPurchasesTable,
   nabuflowOrgsTable,
+  nabuflowSubscriptionsTable,
   nabuflowUsageEventsTable,
   notificationsTable,
   type NabuflowOrg,
@@ -64,12 +65,15 @@ import {
 } from "../lib/nabuflow-org-stripe";
 import {
   NabuflowStripeError,
+  cancelPendingNabuflowPlanDowngrade,
   cancelNabuflowStripeSubscription,
   createNabuflowSetupIntent,
   createNabuflowStripeSubscription,
+  nabuflowPlanSwitchDirection,
   previewNabuflowPlanSwitch,
   requireStripe,
   resumeNabuflowStripeSubscription,
+  scheduleNabuflowPlanDowngrade,
   snapshotCustomerCard,
   switchNabuflowStripePlan,
 } from "../lib/nabuflow-stripe";
@@ -295,6 +299,8 @@ router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
         ? {
             status: sub.status,
             cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+            pendingPlanId: sub.pendingPlanId,
+            pendingEffectiveAt: sub.pendingEffectiveAt?.toISOString() ?? null,
             currentCycleStart: sub.currentCycleStart?.toISOString() ?? null,
             currentCycleEnd: sub.currentCycleEnd?.toISOString() ?? null,
             dunningStatus: sub.dunningStatus,
@@ -526,26 +532,67 @@ router.post("/billing/nabuflow/switch", async (req, res): Promise<void> => {
   }
 
   try {
-    const sub = await getNabuflowSubscription(userId);
-    if (!sub || !isChargeableNabuflowStatus(sub.status)) {
+    const foundSub = await getNabuflowSubscription(userId);
+    if (!foundSub || !isChargeableNabuflowStatus(foundSub.status)) {
       res.status(404).json({
         error: "No active NabuFlow plan to switch — subscribe first.",
         code: "no_subscription",
       });
       return;
     }
+    let sub = foundSub;
     if (sub.planId === targetPlan.id) {
       res.status(400).json({ error: `You're already on ${targetPlan.name}.` });
       return;
     }
 
+    const currentPlan = getNabuflowPlan(sub.planId);
+    let direction: "upgrade" | "downgrade";
+    try {
+      direction = nabuflowPlanSwitchDirection(currentPlan, targetPlan);
+    } catch (err) {
+      handleNabuflowError(res, err, "Failed to classify NabuFlow plan switch");
+      return;
+    }
     if (!parsed.data.confirm) {
       const preview = await previewNabuflowPlanSwitch(sub, targetPlan);
       res.json({ preview });
       return;
     }
 
-    const currentPlan = getNabuflowPlan(sub.planId);
+    if (direction === "downgrade") {
+      const scheduled = await scheduleNabuflowPlanDowngrade(sub, targetPlan);
+      await db
+        .update(nabuflowSubscriptionsTable)
+        .set({
+          pendingPlanId: targetPlan.id,
+          pendingEffectiveAt: scheduled.effectiveAt,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(nabuflowSubscriptionsTable.id, sub.id));
+      res.json({
+        ok: true,
+        planId: sub.planId,
+        status: sub.status,
+        pendingPlanId: targetPlan.id,
+        pendingEffectiveAt: scheduled.effectiveAt.toISOString(),
+        upgradedCreditsGranted: 0,
+      });
+      return;
+    }
+
+    // An immediate upgrade supersedes a pending downgrade. Release only the
+    // NabuFlow-owned schedule, clear local pending state, then run the exact
+    // same charge-now path as an ordinary upgrade.
+    if (sub.pendingPlanId) {
+      await cancelPendingNabuflowPlanDowngrade(sub);
+      await db
+        .update(nabuflowSubscriptionsTable)
+        .set({ pendingPlanId: null, pendingEffectiveAt: null, updatedAt: sql`now()` })
+        .where(eq(nabuflowSubscriptionsTable.id, sub.id));
+      sub = { ...sub, pendingPlanId: null, pendingEffectiveAt: null };
+    }
+
     // Pin the pre-switch cycle row so the upgrade bump below can never
     // double-grant against a cycle materialized with the new allotment.
     let preCycleId: number | null = null;

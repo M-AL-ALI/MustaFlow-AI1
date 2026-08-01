@@ -5765,6 +5765,10 @@ export type ListNabuflowPlans200 = {
 export type GetNabuflowBillingState200Subscription = {
   status: string;
   cancelAtPeriodEnd: boolean;
+  /** Lower-tier plan scheduled for the next renewal, or null. */
+  pendingPlanId?: string | null;
+  /** Stripe period boundary when pendingPlanId takes effect. */
+  pendingEffectiveAt?: string | null;
   currentCycleStart?: string | null;
   currentCycleEnd?: string | null;
   dunningStatus?: string | null;
@@ -5925,6 +5929,8 @@ export type SwitchNabuflowPlan200 = {
   ok?: boolean;
   planId?: string;
   status?: string;
+  pendingPlanId?: string | null;
+  pendingEffectiveAt?: string | null;
   upgradedCreditsGranted?: number;
 };
 

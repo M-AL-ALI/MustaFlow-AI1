@@ -5064,6 +5064,22 @@ const MIGRATION_STEPS: MigrationStep[] = [
       );
     },
   },
+
+  // Deferred NabuFlow plan downgrades keep the paid current tier active until
+  // Stripe's renewal boundary. Additive and idempotent for existing installs.
+  {
+    name: "migrate-nabuflow-deferred-downgrades",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE nabuflow_subscriptions
+           ADD COLUMN IF NOT EXISTS pending_plan_id TEXT`,
+      );
+      await client.query(
+        `ALTER TABLE nabuflow_subscriptions
+           ADD COLUMN IF NOT EXISTS pending_effective_at TIMESTAMPTZ`,
+      );
+    },
+  },
 ];
 
 /**

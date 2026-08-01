@@ -1,0 +1,30 @@
+{
+  "source": "PD-1 Phase 1 rerun 8, Item 8",
+  "capturedAt": "2026-08-01",
+  "livemode": false,
+  "subscription": {
+    "id": "sub_1TzhX6DCzx2AknNDTGqKRzn2",
+    "beforePlanId": "comet",
+    "afterPlanId": "orbit",
+    "currentCyclePlanIdAfter": "comet",
+    "currentCycleEnd": "2026-10-01T17:24:22.000Z"
+  },
+  "immediateStripeInvoice": {
+    "id": "in_1TziT9DCzx2AknND2FHMovkR",
+    "orbitRemainingChargeCents": 1997,
+    "cometUnusedCreditCents": -4993,
+    "pendingOverageCents": 17,
+    "totalCents": -2979,
+    "customerBalanceCreditCents": 2979
+  },
+  "observedEntitlementDefect": {
+    "deepDisabledImmediately": true,
+    "expectedCurrentPlanThroughPeriodEnd": "comet"
+  },
+  "sourceSha256": {
+    "previewDom": "333f8db929f452a829a493e7b6f3fe351d93939e8ec423042c340f17d5dbab1c",
+    "database": "017e98c3787af92751dcf18f9bead0ce291da8f68d886685cb64e1755482d878",
+    "invoiceDom": "23473ea1aa8ea882121fe8f076b737968a69820cc41c17a5a6d8de0a50dd4c16",
+    "postDowngradeUi": "444ba9ca7b4d5376d92778183fc0b46d2d66e8b9ea8283639dd9b3522af9a73b"
+  }
+}

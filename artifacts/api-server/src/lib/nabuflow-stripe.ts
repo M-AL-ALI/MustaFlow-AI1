@@ -16,6 +16,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, nabuflowSubscriptionsTable, type NabuflowSubscription } from "@workspace/db";
 import { getUncachableStripeClient } from "./stripeClient";
 import {
+  getNabuflowPlan,
   nabuflowPriceIdFromEnv,
   type NabuflowPlanConfig,
   type NabuflowPlanId,
@@ -240,6 +241,38 @@ export interface NabuflowProrationPreview {
   lines: Array<{ description: string | null; amountCents: number }>;
 }
 
+const DEFERRED_DOWNGRADE_PURPOSE = "nabuflow_deferred_downgrade";
+
+function stripeObjectId(value: string | { id?: string } | null | undefined): string | null {
+  if (typeof value === "string") return value;
+  return value?.id ?? null;
+}
+
+function planPriceCents(plan: NabuflowPlanConfig): number | null {
+  return typeof plan.priceUsd === "number" && Number.isFinite(plan.priceUsd)
+    ? Math.round(plan.priceUsd * 100)
+    : null;
+}
+
+/**
+ * Compare two self-serve plans. Unknown/custom plan prices fail closed instead
+ * of accidentally entering either the immediate-charge or deferred path.
+ */
+export function nabuflowPlanSwitchDirection(
+  currentPlan: NabuflowPlanConfig | null,
+  targetPlan: NabuflowPlanConfig,
+): "upgrade" | "downgrade" {
+  const currentCents = currentPlan ? planPriceCents(currentPlan) : null;
+  const targetCents = planPriceCents(targetPlan);
+  if (currentCents === null || targetCents === null || currentCents === targetCents) {
+    throw new NabuflowStripeError(
+      "This plan change can't be scheduled safely. Refresh and try again.",
+      "plan_unavailable",
+    );
+  }
+  return targetCents > currentCents ? "upgrade" : "downgrade";
+}
+
 /**
  * Proration preview for a mid-cycle plan switch — what Stripe would invoice
  * if the switch were confirmed right now. Read-only.
@@ -248,6 +281,28 @@ export async function previewNabuflowPlanSwitch(
   sub: NabuflowSubscription,
   targetPlan: NabuflowPlanConfig,
 ): Promise<NabuflowProrationPreview> {
+  const currentPlan = getNabuflowPlan(sub.planId);
+  const direction = nabuflowPlanSwitchDirection(currentPlan, targetPlan);
+  if (direction === "downgrade") {
+    const nextCycleStartsAt = sub.currentCycleEnd?.toISOString() ?? null;
+    if (!nextCycleStartsAt) {
+      throw new NabuflowStripeError(
+        "The current billing period isn't available yet. Refresh and try again.",
+        "stripe_error",
+      );
+    }
+    return {
+      currentPlanId: sub.planId,
+      targetPlanId: targetPlan.id,
+      amountDueCents: 0,
+      nextCycleAmountCents: planPriceCents(targetPlan)!,
+      nextCycleStartsAt,
+      currency: "usd",
+      periodEnd: nextCycleStartsAt,
+      lines: [],
+    };
+  }
+
   const stripe = await requireStripe();
   if (!sub.stripeSubscriptionId || !sub.stripeCustomerId || !sub.stripeItemId) {
     throw new NabuflowStripeError("No active NabuFlow subscription to switch.", "no_subscription");
@@ -268,17 +323,13 @@ export async function previewNabuflowPlanSwitch(
     line.parent?.subscription_item_details?.subscription_item === sub.stripeItemId;
   const prorationLines = previewLines.filter(
     (line) =>
-      isThisSubscriptionItem(line) &&
-      line.parent?.subscription_item_details?.proration === true,
+      isThisSubscriptionItem(line) && line.parent?.subscription_item_details?.proration === true,
   );
   const nextCycleLines = previewLines.filter(
     (line) =>
-      isThisSubscriptionItem(line) &&
-      line.parent?.subscription_item_details?.proration === false,
+      isThisSubscriptionItem(line) && line.parent?.subscription_item_details?.proration === false,
   );
-  const periodEnd = preview.period_end
-    ? new Date(preview.period_end * 1000).toISOString()
-    : null;
+  const periodEnd = preview.period_end ? new Date(preview.period_end * 1000).toISOString() : null;
 
   return {
     currentPlanId: sub.planId,
@@ -293,6 +344,165 @@ export async function previewNabuflowPlanSwitch(
       amountCents: l.amount ?? 0,
     })),
   };
+}
+
+export interface ScheduledNabuflowDowngrade {
+  scheduleId: string;
+  effectiveAt: Date;
+}
+
+function assertOwnedDowngradeSchedule(
+  schedule: Stripe.SubscriptionSchedule,
+  sub: NabuflowSubscription,
+): void {
+  const metadata = schedule.metadata ?? {};
+  if (
+    metadata.surface !== "nabuflow" ||
+    metadata.purpose !== DEFERRED_DOWNGRADE_PURPOSE ||
+    metadata.userId !== sub.userId
+  ) {
+    throw new NabuflowStripeError(
+      "This subscription already has an unrelated scheduled change. Contact support before switching plans.",
+      "stripe_error",
+    );
+  }
+  if (schedule.status !== "active" && schedule.status !== "not_started") {
+    throw new NabuflowStripeError(
+      "The existing scheduled change is no longer active. Refresh and try again.",
+      "stripe_error",
+    );
+  }
+}
+
+/**
+ * Schedule a lower tier for the current period boundary. This never updates
+ * the live subscription item and uses `proration_behavior:none`, so Stripe
+ * creates no immediate invoice, proration, or customer-balance credit.
+ */
+export async function scheduleNabuflowPlanDowngrade(
+  sub: NabuflowSubscription,
+  targetPlan: NabuflowPlanConfig,
+): Promise<ScheduledNabuflowDowngrade> {
+  const currentPlan = getNabuflowPlan(sub.planId);
+  if (nabuflowPlanSwitchDirection(currentPlan, targetPlan) !== "downgrade") {
+    throw new NabuflowStripeError("Only lower-tier changes can be scheduled.", "stripe_error");
+  }
+  const stripe = await requireStripe();
+  if (!sub.stripeSubscriptionId || !sub.stripeItemId) {
+    throw new NabuflowStripeError("No active NabuFlow subscription to switch.", "no_subscription");
+  }
+
+  const live = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+  const legacyPeriod = live as Stripe.Subscription & {
+    current_period_start?: number;
+    current_period_end?: number;
+  };
+  const liveItems = live.items?.data ?? [];
+  const currentItem = liveItems.find((item) => item.id === sub.stripeItemId) ?? liveItems[0];
+  const periodStart = currentItem?.current_period_start ?? legacyPeriod.current_period_start;
+  const periodEnd = currentItem?.current_period_end ?? legacyPeriod.current_period_end;
+  if (
+    !currentItem ||
+    typeof periodStart !== "number" ||
+    typeof periodEnd !== "number" ||
+    periodEnd <= periodStart
+  ) {
+    throw new NabuflowStripeError(
+      "Stripe did not return a valid current billing period. Refresh and try again.",
+      "stripe_error",
+    );
+  }
+
+  const targetPriceId = await resolveNabuflowPriceId(stripe, targetPlan);
+  const attachedScheduleId = stripeObjectId(live.schedule);
+  let schedule: Stripe.SubscriptionSchedule;
+  if (attachedScheduleId) {
+    schedule =
+      typeof live.schedule === "object" && live.schedule !== null
+        ? live.schedule
+        : await stripe.subscriptionSchedules.retrieve(attachedScheduleId);
+    assertOwnedDowngradeSchedule(schedule, sub);
+  } else {
+    schedule = await stripe.subscriptionSchedules.create(
+      {
+        from_subscription: sub.stripeSubscriptionId,
+        metadata: {
+          surface: "nabuflow",
+          purpose: DEFERRED_DOWNGRADE_PURPOSE,
+          userId: sub.userId,
+        },
+      },
+      { idempotencyKey: `nabuflow-downgrade-schedule:${sub.id}:${periodEnd}` },
+    );
+  }
+
+  const currentItems = liveItems.map((item) => ({
+    price: item.price.id,
+    ...(item.quantity ? { quantity: item.quantity } : {}),
+  }));
+  const futureItems = liveItems.map((item) => ({
+    price: item.id === currentItem.id ? targetPriceId : item.price.id,
+    ...(item.quantity ? { quantity: item.quantity } : {}),
+  }));
+  const phaseStart = schedule.current_phase?.start_date ?? periodStart;
+
+  await stripe.subscriptionSchedules.update(
+    schedule.id,
+    {
+      end_behavior: "release",
+      proration_behavior: "none",
+      metadata: {
+        surface: "nabuflow",
+        purpose: DEFERRED_DOWNGRADE_PURPOSE,
+        userId: sub.userId,
+      },
+      phases: [
+        {
+          start_date: phaseStart,
+          end_date: periodEnd,
+          items: currentItems,
+          proration_behavior: "none",
+          metadata: { surface: "nabuflow", plan: sub.planId, userId: sub.userId },
+        },
+        {
+          start_date: periodEnd,
+          duration: { interval: "month", interval_count: 1 },
+          items: futureItems,
+          proration_behavior: "none",
+          metadata: { surface: "nabuflow", plan: targetPlan.id, userId: sub.userId },
+        },
+      ],
+    },
+    { idempotencyKey: `nabuflow-downgrade:${sub.id}:${targetPlan.id}:${periodEnd}` },
+  );
+
+  return { scheduleId: schedule.id, effectiveAt: new Date(periodEnd * 1000) };
+}
+
+/** Release only the schedule created by the deferred-downgrade path. */
+export async function cancelPendingNabuflowPlanDowngrade(sub: NabuflowSubscription): Promise<void> {
+  const stripe = await requireStripe();
+  if (!sub.stripeSubscriptionId) {
+    throw new NabuflowStripeError("No active NabuFlow subscription to switch.", "no_subscription");
+  }
+  const live = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+  const scheduleId = stripeObjectId(live.schedule);
+  if (!scheduleId) {
+    throw new NabuflowStripeError(
+      "The pending plan change could not be verified. Refresh and try again.",
+      "stripe_error",
+    );
+  }
+  const schedule =
+    typeof live.schedule === "object" && live.schedule !== null
+      ? live.schedule
+      : await stripe.subscriptionSchedules.retrieve(scheduleId);
+  assertOwnedDowngradeSchedule(schedule, sub);
+  await stripe.subscriptionSchedules.release(
+    schedule.id,
+    { preserve_cancel_date: true },
+    { idempotencyKey: `nabuflow-downgrade-release:${sub.id}:${schedule.id}` },
+  );
 }
 
 /**
@@ -333,13 +543,21 @@ export async function cancelNabuflowStripeSubscription(
   if (!sub.stripeSubscriptionId) {
     throw new NabuflowStripeError("No active NabuFlow subscription to cancel.", "no_subscription");
   }
+  if (sub.pendingPlanId) {
+    await cancelPendingNabuflowPlanDowngrade(sub);
+  }
   if (opts.immediately) {
     await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
   } else {
     await stripe.subscriptions.update(sub.stripeSubscriptionId, { cancel_at_period_end: true });
     await db
       .update(nabuflowSubscriptionsTable)
-      .set({ cancelAtPeriodEnd: true, updatedAt: sql`now()` })
+      .set({
+        cancelAtPeriodEnd: true,
+        pendingPlanId: null,
+        pendingEffectiveAt: null,
+        updatedAt: sql`now()`,
+      })
       .where(eq(nabuflowSubscriptionsTable.id, sub.id));
   }
 }

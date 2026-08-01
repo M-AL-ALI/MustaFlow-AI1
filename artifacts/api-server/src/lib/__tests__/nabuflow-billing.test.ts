@@ -398,6 +398,16 @@ describe("ladder matrix", () => {
     }
   });
 
+  it("keeps Comet Deep entitlement while an Orbit downgrade is pending", () => {
+    const state = gateState("comet", {
+      pendingPlanId: "orbit",
+      pendingEffectiveAt: CYCLE_END,
+    } as Partial<NonNullable<NabuflowGateState["subscription"]>>);
+    const decision = evalGate(state, { engineMode: "power", deepReasoning: true });
+
+    expect(decision.allowed).toBe(true);
+  });
+
   it("Pro+Deep combo is Nova-exclusive", () => {
     const comet = evalGate(gateState("comet"), { engineMode: "pro", deepReasoning: true });
     expectBlocked(comet, "combo_not_available");
@@ -929,6 +939,79 @@ describe("invoice.paid cycle-grant reasons", () => {
     });
   });
 
+  it("lands a scheduled Comet-to-Orbit downgrade at renewal with 1,600 credits and zero rollover", async () => {
+    h.state.selectQueue = [
+      [
+        subRow({
+          pendingPlanId: "orbit",
+          pendingEffectiveAt: new Date(PS * 1000),
+        }),
+      ],
+      [{ includedCredits: 4000, usedIncludedCredits: 1000 }],
+      [{ id: 9003, includedCredits: 1600, rolloverCredits: 0 }],
+    ];
+
+    await handleNabuflowInvoicePaid({
+      id: "in_rerun8_deferred_renewal",
+      billing_reason: "subscription_cycle",
+      subscription: "sub_paid",
+      parent: {
+        subscription_details: {
+          subscription: "sub_paid",
+          metadata: { surface: "nabuflow", plan: "orbit", userId: "u_paid" },
+        },
+      },
+      lines: { data: [{ subscription: "sub_paid", period: { start: PS, end: PE } }] },
+    } as never);
+
+    expect(h.state.updates).toContainEqual(
+      expect.objectContaining({
+        planId: "orbit",
+        pendingPlanId: null,
+        pendingEffectiveAt: null,
+      }),
+    );
+    const cycle = h.state.inserted.find((row) => "includedCredits" in row);
+    expect(cycle).toMatchObject({
+      planId: "orbit",
+      includedCredits: 1600,
+      rolloverCredits: 0,
+    });
+  });
+
+  it("fails closed when a pending renewal invoice does not prove the scheduled target", async () => {
+    h.state.selectQueue = [
+      [
+        subRow({
+          pendingPlanId: "orbit",
+          pendingEffectiveAt: new Date(PS * 1000),
+        }),
+      ],
+    ];
+
+    await handleNabuflowInvoicePaid({
+      id: "in_unknown_pending_transition",
+      billing_reason: "subscription_cycle",
+      subscription: "sub_paid",
+      parent: {
+        subscription_details: {
+          subscription: "sub_paid",
+          metadata: { surface: "nabuflow", plan: "comet", userId: "u_paid" },
+        },
+      },
+      lines: { data: [{ subscription: "sub_paid", period: { start: PS, end: PE } }] },
+    } as never);
+
+    expect(h.state.inserted).toHaveLength(0);
+    expect(h.state.updates).not.toContainEqual(
+      expect.objectContaining({ planId: "orbit", pendingPlanId: null }),
+    );
+    expect(h.loggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: "in_unknown_pending_transition" }),
+      expect.stringContaining("could not be verified"),
+    );
+  });
+
   it.each([undefined, "unexpected_reason"])(
     "billing reason %s grants no cycle and logs a warning",
     async (billingReason) => {
@@ -1056,6 +1139,38 @@ describe("first-time subscription materialization", () => {
     } as never);
     expect(h.state.inserted).toHaveLength(0);
     expect(h.state.updates).toHaveLength(0);
+  });
+
+  it("keeps current entitlements when a scheduled target subscription update arrives before renewal payment", async () => {
+    h.state.selectQueue = [
+      [
+        {
+          id: 77,
+          userId: "u_paid",
+          planId: "comet",
+          pendingPlanId: "orbit",
+          pendingEffectiveAt: new Date(PE * 1000),
+          stripeSubscriptionId: "sub_paid",
+          dunningStatus: "none",
+        },
+      ],
+    ];
+
+    await handleNabuflowSubscriptionEvent("customer.subscription.updated", {
+      id: "sub_paid",
+      status: "active",
+      customer: "cus_paid",
+      metadata: { surface: "nabuflow", plan: "orbit", userId: "u_paid" },
+      items: {
+        data: [{ id: "si_paid", current_period_start: PE, current_period_end: PE + 2_592_000 }],
+      },
+    } as never);
+
+    expect(h.state.inserted).toHaveLength(0);
+    expect(h.state.updates).toContainEqual(expect.objectContaining({ planId: "comet" }));
+    expect(h.state.updates).not.toContainEqual(
+      expect.objectContaining({ pendingPlanId: null, pendingEffectiveAt: null }),
+    );
   });
 
   it("invoice.paid racing ahead of subscription.created materializes the row and grants the cycle", async () => {
