@@ -1,0 +1,11 @@
+{
+  "source": "PD-1 staging diagnostic attempt D",
+  "capturedAt": "2026-08-01T05:25:55.563Z",
+  "sourceEvidenceSha256": "c4b6997dc79a5b4f8869326efc71c00670895e831bcddf691700b5d1d429a7c0",
+  "confirmFired": false,
+  "events": [
+    { "type": "pointerdown", "target": "HTML" },
+    { "type": "window-focus", "target": null },
+    { "type": "click", "target": "HTML" }
+  ]
+}

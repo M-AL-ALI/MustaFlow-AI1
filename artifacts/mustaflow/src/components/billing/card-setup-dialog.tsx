@@ -33,10 +33,12 @@ function isDarkMode(): boolean {
 function SetupForm({
   onComplete,
   onCancel,
+  onSubmittingChange,
   submitLabel,
 }: {
   onComplete: () => void;
   onCancel: () => void;
+  onSubmittingChange: (submitting: boolean) => void;
   submitLabel: string;
 }) {
   const stripe = useStripe();
@@ -49,6 +51,7 @@ function SetupForm({
       e.preventDefault();
       if (!stripe || !elements || submitting) return;
       setSubmitting(true);
+      onSubmittingChange(true);
       setFormError(null);
       try {
         const { error, setupIntent } = await stripe.confirmSetup({
@@ -71,9 +74,10 @@ function SetupForm({
         setFormError("Something went wrong saving your card. Please try again.");
       } finally {
         setSubmitting(false);
+        onSubmittingChange(false);
       }
     },
-    [stripe, elements, submitting, onComplete],
+    [stripe, elements, submitting, onComplete, onSubmittingChange],
   );
 
   return (
@@ -148,16 +152,71 @@ export function CardSetupDialog({
   const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"form" | "finishing">("form");
+  const [submitting, setSubmitting] = useState(false);
+  const bodyPointerStyleRef = useRef<{ value: string; priority: string } | null>(null);
   // Latest-value refs so inline arrow props don't retrigger the setup effect.
   const createIntentRef = useRef(createIntent);
   createIntentRef.current = createIntent;
   const verifySavedRef = useRef(verifySaved);
   verifySavedRef.current = verifySaved;
 
+  // Radix's modal DismissableLayer sets body pointer-events to none. That can
+  // make the first parent-document click after leaving a cross-origin Stripe
+  // iframe hit <html> instead of the intended submit button. Capture the body
+  // style before the modal commits so it can be restored exactly on close.
+  if (open && bodyPointerStyleRef.current === null && typeof document !== "undefined") {
+    bodyPointerStyleRef.current = {
+      value: document.body.style.getPropertyValue("pointer-events"),
+      priority: document.body.style.getPropertyPriority("pointer-events"),
+    };
+  }
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const body = document.body;
+    const previous = bodyPointerStyleRef.current ?? {
+      value: body.style.getPropertyValue("pointer-events"),
+      priority: body.style.getPropertyPriority("pointer-events"),
+    };
+    bodyPointerStyleRef.current = previous;
+    const keepPointerEventsEnabled = () => {
+      if (
+        body.style.getPropertyValue("pointer-events") !== "auto" ||
+        body.style.getPropertyPriority("pointer-events") !== "important"
+      ) {
+        body.style.setProperty("pointer-events", "auto", "important");
+      }
+    };
+    keepPointerEventsEnabled();
+    const observer = new MutationObserver(keepPointerEventsEnabled);
+    observer.observe(body, { attributes: true, attributeFilter: ["style"] });
+
+    return () => {
+      observer.disconnect();
+      const restorePointerEvents = () => {
+        if (previous.value) {
+          body.style.setProperty("pointer-events", previous.value, previous.priority);
+        } else {
+          body.style.removeProperty("pointer-events");
+        }
+      };
+      restorePointerEvents();
+      bodyPointerStyleRef.current = null;
+      // Radix restores the value it observed when its layer mounted. Its
+      // cleanup can run after this parent effect and write "auto" back, so
+      // restore once more after the current effect-cleanup turn. A new open
+      // captures a fresh ref and prevents the stale cleanup from winning.
+      queueMicrotask(() => {
+        if (bodyPointerStyleRef.current === null) restorePointerEvents();
+      });
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) {
       setClientSecret(null);
       setPhase("form");
+      setSubmitting(false);
       setLoadError(null);
       return;
     }
@@ -229,8 +288,17 @@ export function CardSetupDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && phase !== "finishing" && onClose()}>
-      <DialogContent className="max-w-md" data-testid="card-setup-dialog">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => !next && !submitting && phase !== "finishing" && onClose()}
+    >
+      <DialogContent
+        className="max-w-md"
+        data-testid="card-setup-dialog"
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onFocusOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -251,7 +319,12 @@ export function CardSetupDialog({
           </div>
         ) : clientSecret && publishableKey && elementsOptions ? (
           <Elements stripe={getStripePromise(publishableKey)} options={elementsOptions}>
-            <SetupForm onComplete={() => void finishAndPoll()} onCancel={onClose} submitLabel={submitLabel} />
+            <SetupForm
+              onComplete={() => void finishAndPoll()}
+              onCancel={onClose}
+              onSubmittingChange={setSubmitting}
+              submitLabel={submitLabel}
+            />
           </Elements>
         ) : (
           <div className="flex items-center justify-center py-10">
