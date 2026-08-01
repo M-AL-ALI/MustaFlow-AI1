@@ -108,7 +108,7 @@ const h = vi.hoisted(() => {
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb),
   };
 
-  return { state, mockDb };
+  return { state, mockDb, loggerWarn: vi.fn() };
 });
 
 vi.mock("@workspace/db", async () => {
@@ -125,7 +125,7 @@ vi.mock("../clerk-users", async () => ({
 }));
 
 vi.mock("../logger", () => ({
-  logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+  logger: { info: () => {}, warn: h.loggerWarn, error: () => {}, debug: () => {} },
 }));
 
 // Async factories: nabuflow-billing pulls these via dynamic import() at call
@@ -176,6 +176,7 @@ import {
 import { isSuperuser } from "../superusers";
 import { getClerkUserById } from "../clerk-users";
 import { hasBuilderAccess } from "../builder-access";
+import { RERUN7_SUBSCRIPTION_UPDATE_INVOICE_PAID } from "./rerun7-subscription-update-invoice-paid.fixture";
 
 const NOW = new Date("2026-07-30T12:00:00Z");
 const CYCLE_END = new Date("2026-08-15T00:00:00Z");
@@ -248,6 +249,7 @@ beforeEach(() => {
   h.state.selectQueue = [];
   h.state.updates = [];
   h.state.inserted = [];
+  h.loggerWarn.mockClear();
   _clearNabuflowAllowlistCache();
   vi.mocked(isSuperuser).mockResolvedValue(false);
   vi.mocked(getClerkUserById).mockResolvedValue(null as never);
@@ -839,6 +841,116 @@ describe("dunning transitions", () => {
   });
 });
 
+describe("invoice.paid cycle-grant reasons", () => {
+  const PS = Math.floor(new Date("2026-09-01T00:00:00Z").getTime() / 1000);
+  const PE = Math.floor(new Date("2026-10-01T00:00:00Z").getTime() / 1000);
+  const subRow = (over: Record<string, unknown> = {}) => ({
+    id: 77,
+    userId: "u_paid",
+    planId: "comet",
+    stripeSubscriptionId: "sub_paid",
+    rolloverCredits: 0,
+    dunningStatus: "none",
+    dunningAttemptCount: 0,
+    dunningStartedAt: null,
+    dunningGraceUntil: null,
+    dunningPausedAt: null,
+    ...over,
+  });
+
+  it("rerun-7 subscription_update payment keeps payment health but grants no cycle", async () => {
+    h.state.selectQueue = [
+      [
+        subRow({
+          userId: "user_3HIbv5LHwRz3W7yTFycbZ2NqzfZ",
+          stripeSubscriptionId: "sub_1TzUdXDCzx2AknNDyCGR56fn",
+          dunningStatus: "retrying",
+        }),
+      ],
+    ];
+
+    await handleNabuflowInvoicePaid(RERUN7_SUBSCRIPTION_UPDATE_INVOICE_PAID as never);
+
+    expect(h.state.inserted).toHaveLength(0);
+    expect(h.state.updates).toContainEqual(expect.objectContaining({ status: "active" }));
+    expect(h.state.updates).toContainEqual(
+      expect.objectContaining({
+        dunningStatus: "none",
+        dunningStartedAt: null,
+        dunningGraceUntil: null,
+        dunningPausedAt: null,
+        dunningAttemptCount: 0,
+      }),
+    );
+  });
+
+  it("subscription_create payment grants the first cycle", async () => {
+    h.state.selectQueue = [
+      [subRow()],
+      [],
+      [{ id: 9001, includedCredits: NABUFLOW_PLANS.comet.includedMonthlyCredits }],
+    ];
+
+    await handleNabuflowInvoicePaid({
+      id: "in_create",
+      billing_reason: "subscription_create",
+      subscription: "sub_paid",
+      lines: { data: [{ subscription: "sub_paid", period: { start: PS, end: PE } }] },
+    } as never);
+
+    const cycle = h.state.inserted.find((row) => "includedCredits" in row);
+    expect(cycle).toMatchObject({
+      userId: "u_paid",
+      planId: "comet",
+      includedCredits: NABUFLOW_PLANS.comet.includedMonthlyCredits,
+      rolloverCredits: 0,
+    });
+  });
+
+  it("subscription_cycle payment grants Comet rollover from the preceding cycle", async () => {
+    h.state.selectQueue = [
+      [subRow()],
+      [{ includedCredits: 4000, usedIncludedCredits: 1000 }],
+      [{ id: 9002, includedCredits: 7000, rolloverCredits: 3000 }],
+    ];
+
+    await handleNabuflowInvoicePaid({
+      id: "in_cycle",
+      billing_reason: "subscription_cycle",
+      subscription: "sub_paid",
+      lines: { data: [{ subscription: "sub_paid", period: { start: PS, end: PE } }] },
+    } as never);
+
+    const cycle = h.state.inserted.find((row) => "includedCredits" in row);
+    expect(cycle).toMatchObject({
+      planId: "comet",
+      includedCredits: 7000,
+      rolloverCredits: 3000,
+    });
+  });
+
+  it.each([undefined, "unexpected_reason"])(
+    "billing reason %s grants no cycle and logs a warning",
+    async (billingReason) => {
+      h.state.selectQueue = [[subRow()]];
+
+      await handleNabuflowInvoicePaid({
+        id: "in_unknown",
+        billing_reason: billingReason,
+        subscription: "sub_paid",
+        lines: { data: [{ subscription: "sub_paid", period: { start: PS, end: PE } }] },
+      } as never);
+
+      expect(h.state.inserted).toHaveLength(0);
+      expect(h.state.updates).toContainEqual(expect.objectContaining({ status: "active" }));
+      expect(h.loggerWarn).toHaveBeenCalledWith(
+        expect.objectContaining({ invoiceId: "in_unknown", billingReason }),
+        expect.stringContaining("unknown billing reason"),
+      );
+    },
+  );
+});
+
 // ─── First-time subscription materialization ─────────────────────────────────
 // A brand-new subscriber has NO local nabuflow_subscriptions row when the
 // first Stripe event (or the subscribe route's direct sync) arrives. The
@@ -954,6 +1066,7 @@ describe("first-time subscription materialization", () => {
     ];
 
     await handleNabuflowInvoicePaid({
+      billing_reason: "subscription_create",
       customer: "cus_shared_9",
       parent: {
         subscription_details: {

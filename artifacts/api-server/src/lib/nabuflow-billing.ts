@@ -1643,7 +1643,7 @@ export async function handleNabuflowSubscriptionEvent(
   );
 }
 
-/** invoice.paid for a NabuFlow subscription: renew cycle + clear dunning. */
+/** invoice.paid for a NabuFlow subscription: grant true cycles + clear dunning. */
 export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> {
   const { subscriptionId, markedNabuflow, metaUserId, metaPlanId } =
     nabuflowInvoiceLinkage(invoice);
@@ -1677,9 +1677,22 @@ export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> 
   const periodStart =
     stripeTsToDate(subLine?.period?.start) ?? stripeTsToDate(invoice?.period_start);
   const periodEnd = stripeTsToDate(subLine?.period?.end) ?? stripeTsToDate(invoice?.period_end);
+  const billingReason: unknown = invoice?.billing_reason;
+  const grantsCycle =
+    billingReason === "subscription_create" || billingReason === "subscription_cycle";
+  const knownNonCycleReason =
+    billingReason === "subscription_update" ||
+    billingReason === "subscription_threshold" ||
+    billingReason === "manual";
 
-  if (periodStart && periodEnd && periodEnd.getTime() > periodStart.getTime()) {
+  if (grantsCycle && periodStart && periodEnd && periodEnd.getTime() > periodStart.getTime()) {
     await grantNabuflowCycle(sub, plan, periodStart, periodEnd);
+  }
+  if (!grantsCycle && !knownNonCycleReason) {
+    logger.warn(
+      { invoiceId: invoice?.id ?? null, billingReason, userId: sub.userId },
+      "nabuflow: paid invoice has unknown billing reason — cycle grant skipped",
+    );
   }
 
   await db
@@ -1688,7 +1701,12 @@ export async function handleNabuflowInvoicePaid(invoice: AnyObj): Promise<void> 
     .where(eq(nabuflowSubscriptionsTable.id, sub.id));
   if (sub.dunningStatus !== "none") await clearNabuflowDunning(sub.id);
 
-  logger.info({ userId: sub.userId, planId: plan.id }, "nabuflow: invoice paid — cycle granted");
+  logger.info(
+    { userId: sub.userId, planId: plan.id, billingReason, cycleGranted: grantsCycle },
+    grantsCycle
+      ? "nabuflow: invoice paid — cycle granted"
+      : "nabuflow: invoice paid — payment health synced without cycle grant",
+  );
 }
 
 /**
