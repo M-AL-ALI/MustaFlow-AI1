@@ -38,11 +38,21 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 # (.agents/memory is always safe to commit and stays in the neutral list)
+#
+# IMPORTANT: .replit is intentionally excluded — it is auto-modified by the
+# Replit workspace for port/workflow config and must NEVER be auto-committed
+# here. If a wave intentionally changes .replit, add it explicitly in a
+# per-wave block and remove it again when done.
 git add \
   .agents/memory \
   docs/changelog.md \
-  scripts/push-to-github.sh \
-  .replit 2>/dev/null || true
+  scripts/push-to-github.sh 2>/dev/null || true
+
+# Clear the commit-message template after staging so a stale message from a
+# previous wave can never be reused by a subsequent push.
+if [ -f ".local/.commit_message" ]; then
+  truncate -s 0 ".local/.commit_message" 2>/dev/null || true
+fi
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
