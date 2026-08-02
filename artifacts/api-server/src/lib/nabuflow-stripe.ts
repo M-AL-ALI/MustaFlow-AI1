@@ -363,7 +363,7 @@ function assertOwnedDowngradeSchedule(
     metadata.userId !== sub.userId
   ) {
     throw new NabuflowStripeError(
-      "This subscription already has an unrelated scheduled change. Contact support before switching plans.",
+      "This NabuFlow subscription is managed by an unrelated Stripe schedule. Contact support before changing it.",
       "stripe_error",
     );
   }
@@ -373,6 +373,47 @@ function assertOwnedDowngradeSchedule(
       "stripe_error",
     );
   }
+}
+
+async function releaseAttachedOwnedNabuflowSchedule(
+  stripe: Stripe,
+  sub: NabuflowSubscription,
+  opts: { requireSchedule?: boolean } = {},
+): Promise<boolean> {
+  const live = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId!);
+  const scheduleId = stripeObjectId(live.schedule);
+  if (!scheduleId) {
+    if (opts.requireSchedule) {
+      throw new NabuflowStripeError(
+        "The pending plan change could not be verified. Refresh and try again.",
+        "stripe_error",
+      );
+    }
+    return false;
+  }
+
+  const schedule =
+    typeof live.schedule === "object" && live.schedule !== null
+      ? live.schedule
+      : await stripe.subscriptionSchedules.retrieve(scheduleId);
+  assertOwnedDowngradeSchedule(schedule, sub);
+  await stripe.subscriptionSchedules.release(
+    schedule.id,
+    { preserve_cancel_date: true },
+    { idempotencyKey: `nabuflow-downgrade-release:${sub.id}:${schedule.id}` },
+  );
+
+  if (sub.pendingPlanId || sub.pendingEffectiveAt) {
+    await db
+      .update(nabuflowSubscriptionsTable)
+      .set({
+        pendingPlanId: null,
+        pendingEffectiveAt: null,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(nabuflowSubscriptionsTable.id, sub.id));
+  }
+  return true;
 }
 
 /**
@@ -496,24 +537,7 @@ export async function cancelPendingNabuflowPlanDowngrade(sub: NabuflowSubscripti
   if (!sub.stripeSubscriptionId) {
     throw new NabuflowStripeError("No active NabuFlow subscription to switch.", "no_subscription");
   }
-  const live = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
-  const scheduleId = stripeObjectId(live.schedule);
-  if (!scheduleId) {
-    throw new NabuflowStripeError(
-      "The pending plan change could not be verified. Refresh and try again.",
-      "stripe_error",
-    );
-  }
-  const schedule =
-    typeof live.schedule === "object" && live.schedule !== null
-      ? live.schedule
-      : await stripe.subscriptionSchedules.retrieve(scheduleId);
-  assertOwnedDowngradeSchedule(schedule, sub);
-  await stripe.subscriptionSchedules.release(
-    schedule.id,
-    { preserve_cancel_date: true },
-    { idempotencyKey: `nabuflow-downgrade-release:${sub.id}:${schedule.id}` },
-  );
+  await releaseAttachedOwnedNabuflowSchedule(stripe, sub, { requireSchedule: true });
 }
 
 /**
@@ -554,9 +578,7 @@ export async function cancelNabuflowStripeSubscription(
   if (!sub.stripeSubscriptionId) {
     throw new NabuflowStripeError("No active NabuFlow subscription to cancel.", "no_subscription");
   }
-  if (sub.pendingPlanId) {
-    await cancelPendingNabuflowPlanDowngrade(sub);
-  }
+  await releaseAttachedOwnedNabuflowSchedule(stripe, sub);
   if (opts.immediately) {
     await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
   } else {
@@ -579,6 +601,7 @@ export async function resumeNabuflowStripeSubscription(sub: NabuflowSubscription
   if (!sub.stripeSubscriptionId) {
     throw new NabuflowStripeError("No NabuFlow subscription to resume.", "no_subscription");
   }
+  await releaseAttachedOwnedNabuflowSchedule(stripe, sub);
   await stripe.subscriptions.update(sub.stripeSubscriptionId, { cancel_at_period_end: false });
   await db
     .update(nabuflowSubscriptionsTable)

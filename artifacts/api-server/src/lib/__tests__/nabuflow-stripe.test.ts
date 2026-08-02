@@ -17,14 +17,16 @@ import { readFileSync } from "node:fs";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const h = vi.hoisted(() => {
+  const dbUpdateWhere = vi.fn(() => Promise.resolve(undefined));
+  const dbUpdateSet = vi.fn(() => ({ where: dbUpdateWhere }));
   const mockDb = {
     select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
     insert: () => ({ values: () => Promise.resolve(undefined) }),
-    update: () => ({ set: () => ({ where: () => Promise.resolve(undefined) }) }),
+    update: vi.fn(() => ({ set: dbUpdateSet })),
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb),
   };
   const getStripeClientMock = vi.fn();
-  return { mockDb, getStripeClientMock };
+  return { mockDb, dbUpdateSet, dbUpdateWhere, getStripeClientMock };
 });
 
 vi.mock("@workspace/db", async () => {
@@ -44,7 +46,9 @@ vi.mock("../logger", () => ({
 import type { NabuflowSubscription } from "@workspace/db";
 import {
   previewNabuflowPlanSwitch,
+  cancelNabuflowStripeSubscription,
   cancelPendingNabuflowPlanDowngrade,
+  resumeNabuflowStripeSubscription,
   scheduleNabuflowPlanDowngrade,
   switchNabuflowStripePlan,
   createNabuflowStripeSubscription,
@@ -83,6 +87,23 @@ const rerun9ScheduleUpdateIdempotencyFailure = JSON.parse(
     response: { status: number; body: { error: { message: string; type: string } } };
   };
   cleanup: { requestId: string; endpoint: string; status: number };
+};
+
+const rerun9CancelManagedScheduleFailure = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/pd1-rerun9-subscription-cancel-managed-schedule-400.json", import.meta.url),
+    "utf8",
+  ),
+) as {
+  sourceSha256: { screenshot: string; dom: string };
+  request: { id: string; endpoint: string; body: { cancel_at_period_end: string } };
+  subscription: { id: string; schedule: string; livemode: boolean };
+  schedule: {
+    id: string;
+    status: string;
+    metadata: { surface: string; purpose: string; userId: string };
+  };
+  response: { status: number; body: { error: { message: string; type: string } } };
 };
 
 const stripeStub = {
@@ -132,6 +153,9 @@ beforeEach(() => {
   for (const group of Object.values(stripeStub)) {
     for (const fn of Object.values(group)) fn.mockReset();
   }
+  h.mockDb.update.mockClear();
+  h.dbUpdateSet.mockClear();
+  h.dbUpdateWhere.mockClear();
   h.getStripeClientMock.mockResolvedValue(stripeStub);
 });
 
@@ -566,6 +590,145 @@ describe("deferred plan downgrades", () => {
       { preserve_cancel_date: true },
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     );
+  });
+});
+
+describe("cancel/resume attached schedule guard", () => {
+  const ownedSchedule = {
+    id: rerun9CancelManagedScheduleFailure.schedule.id,
+    status: rerun9CancelManagedScheduleFailure.schedule.status,
+    metadata: rerun9CancelManagedScheduleFailure.schedule.metadata,
+  };
+
+  beforeEach(() => {
+    stripeStub.subscriptionSchedules.release.mockResolvedValue({ id: ownedSchedule.id });
+    stripeStub.subscriptions.update.mockResolvedValue({
+      id: rerun9CancelManagedScheduleFailure.subscription.id,
+    });
+  });
+
+  it("replays Item 8(d): releases the landed owned schedule before canceling", async () => {
+    const landed = sub({
+      id: 10,
+      userId: ownedSchedule.metadata.userId,
+      planId: "orbit",
+      pendingPlanId: null,
+      pendingEffectiveAt: null,
+      stripeSubscriptionId: rerun9CancelManagedScheduleFailure.subscription.id,
+    });
+    stripeStub.subscriptions.retrieve.mockResolvedValue({
+      id: landed.stripeSubscriptionId,
+      schedule: ownedSchedule.id,
+    });
+    stripeStub.subscriptionSchedules.retrieve.mockResolvedValue(ownedSchedule);
+
+    await cancelNabuflowStripeSubscription(landed);
+
+    expect(rerun9CancelManagedScheduleFailure).toMatchObject({
+      sourceSha256: {
+        screenshot: "266098debb0c90f48bf456e9f45e5812a9bc256136e413bde65cf1476574d556",
+        dom: "e2cfe83472d219098215dadbbe5e242c691e40a13b5231cbb4492e4c9ffee800",
+      },
+      request: { id: "req_JJYIjjdDIb61sJ", body: { cancel_at_period_end: "true" } },
+      response: { status: 400, body: { error: { type: "invalid_request_error" } } },
+      subscription: { livemode: false },
+    });
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledWith(
+      ownedSchedule.id,
+      { preserve_cancel_date: true },
+      { idempotencyKey: `nabuflow-downgrade-release:10:${ownedSchedule.id}` },
+    );
+    expect(stripeStub.subscriptions.update).toHaveBeenCalledWith(landed.stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
+    expect(stripeStub.subscriptionSchedules.release.mock.invocationCallOrder[0]).toBeLessThan(
+      stripeStub.subscriptions.update.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("releases an attached owned schedule before resuming", async () => {
+    const landed = sub({
+      id: 11,
+      userId: ownedSchedule.metadata.userId,
+      planId: "orbit",
+      pendingPlanId: null,
+      stripeSubscriptionId: rerun9CancelManagedScheduleFailure.subscription.id,
+      cancelAtPeriodEnd: true,
+    });
+    stripeStub.subscriptions.retrieve.mockResolvedValue({
+      id: landed.stripeSubscriptionId,
+      schedule: ownedSchedule,
+    });
+
+    await resumeNabuflowStripeSubscription(landed);
+
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledWith(
+      ownedSchedule.id,
+      { preserve_cancel_date: true },
+      { idempotencyKey: `nabuflow-downgrade-release:11:${ownedSchedule.id}` },
+    );
+    expect(stripeStub.subscriptions.update).toHaveBeenCalledWith(landed.stripeSubscriptionId, {
+      cancel_at_period_end: false,
+    });
+  });
+
+  it("fails closed for a foreign schedule without releasing or updating", async () => {
+    const current = sub({ id: 12, planId: "orbit" });
+    stripeStub.subscriptions.retrieve.mockResolvedValue({
+      id: current.stripeSubscriptionId,
+      schedule: {
+        id: "sub_sched_foreign",
+        status: "active",
+        metadata: { surface: "other", purpose: "someone_else", userId: current.userId },
+      },
+    });
+
+    await expect(cancelNabuflowStripeSubscription(current)).rejects.toMatchObject({
+      code: "stripe_error",
+    });
+    expect(stripeStub.subscriptionSchedules.release).not.toHaveBeenCalled();
+    expect(stripeStub.subscriptions.update).not.toHaveBeenCalled();
+    expect(h.mockDb.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain cancel path unchanged when no schedule is attached", async () => {
+    const current = sub({ id: 13, planId: "orbit" });
+    stripeStub.subscriptions.retrieve.mockResolvedValue({
+      id: current.stripeSubscriptionId,
+      schedule: null,
+    });
+
+    await cancelNabuflowStripeSubscription(current);
+
+    expect(stripeStub.subscriptionSchedules.retrieve).not.toHaveBeenCalled();
+    expect(stripeStub.subscriptionSchedules.release).not.toHaveBeenCalled();
+    expect(stripeStub.subscriptions.update).toHaveBeenCalledWith(current.stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
+  });
+
+  it("preserves pending downgrade cleanup before canceling", async () => {
+    const pending = sub({
+      id: 14,
+      userId: ownedSchedule.metadata.userId,
+      planId: "comet",
+      pendingPlanId: "orbit",
+      pendingEffectiveAt: new Date("2026-10-01T00:00:00.000Z"),
+    });
+    stripeStub.subscriptions.retrieve.mockResolvedValue({
+      id: pending.stripeSubscriptionId,
+      schedule: ownedSchedule,
+    });
+
+    await cancelNabuflowStripeSubscription(pending);
+
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledTimes(1);
+    expect(h.dbUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ pendingPlanId: null, pendingEffectiveAt: null }),
+    );
+    expect(stripeStub.subscriptions.update).toHaveBeenCalledWith(pending.stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
   });
 });
 

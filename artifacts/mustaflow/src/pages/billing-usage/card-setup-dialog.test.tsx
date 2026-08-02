@@ -10,6 +10,7 @@ const testState = vi.hoisted(() => ({
   confirmSetup: vi.fn(),
   createIntent: vi.fn(),
   getBillingState: vi.fn(),
+  cancel: vi.fn(),
   subscribe: vi.fn(),
   switchPlan: vi.fn(),
   billingState: {
@@ -44,7 +45,7 @@ vi.mock("@workspace/api-client-react", () => ({
   createNabuflowSetupIntent: testState.createIntent,
   getGetNabuflowBillingStateQueryKey: () => ["nabuflow-billing-state"],
   getNabuflowBillingState: testState.getBillingState,
-  useCancelNabuflowSubscription: () => ({ isPending: false, mutate: vi.fn() }),
+  useCancelNabuflowSubscription: () => ({ isPending: false, mutate: testState.cancel }),
   useListNabuflowPlans: () => ({
     data: {
       plans: [
@@ -136,6 +137,7 @@ beforeEach(() => {
     setupIntentId: "seti_pd1",
   });
   testState.getBillingState.mockReset().mockResolvedValue({ card: { last4: "4242" } });
+  testState.cancel.mockReset();
   testState.subscribe.mockReset();
   testState.switchPlan.mockReset();
   testState.billingState = {
@@ -298,5 +300,36 @@ describe("Plans deferred downgrade state", () => {
     );
     expect(screen.getByTestId("plan-cta-orbit")).toBeDisabled();
     expect(screen.getByTestId("plan-cta-orbit")).toHaveTextContent("Orbit scheduled");
+  });
+});
+
+describe("Plans cancellation confirmation", () => {
+  it("keeps the page-level dialog open and renders the backend failure inline", async () => {
+    testState.billingState = {
+      card: { last4: "4242" },
+      cycle: { includedCredits: 1600 },
+      org: null,
+      plan: { id: "orbit", name: "Orbit", priceUsd: 20 },
+      subscription: {
+        status: "active",
+        cancelAtPeriodEnd: false,
+        currentCycleEnd: "2026-11-01T00:00:00.000Z",
+      },
+    };
+    const backendMessage =
+      "The subscription is managed by a NabuFlow schedule. Please refresh and try again.";
+    testState.cancel.mockImplementationOnce(
+      (_input: unknown, options: { onError: (error: unknown) => void }) =>
+        options.onError({ data: { error: backendMessage } }),
+    );
+    const user = userEvent.setup();
+    renderPlans();
+
+    await user.click(screen.getByTestId("plan-cancel-link"));
+    await user.click(screen.getByTestId("plan-cancel-confirm"));
+
+    expect(testState.cancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alertdialog", { name: "Cancel your plan?" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(backendMessage);
   });
 });
