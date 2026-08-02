@@ -1,0 +1,30 @@
+{
+  "source": "PD-1 Phase 1 rerun 9 Item 8",
+  "sourceScreenshotSha256": "ea1a8d12fcb756ee777b8b1b731e2ae5dcf5b18fda6350c3eaa20a7bcd92c39e",
+  "stripeAccountId": "acct_1TaeY5DCzx2AknND",
+  "livemode": false,
+  "request": {
+    "id": "req_TKHMZp0LKjAJ1e",
+    "method": "POST",
+    "endpoint": "/v1/subscription_schedules",
+    "apiVersion": "2025-11-17.clover",
+    "idempotencyKey": "nabuflow-downgrade-schedule:10:1790908530",
+    "body": {
+      "from_subscription": "sub_1TzmNJDCzx2AknND5OabjwDC",
+      "metadata": {
+        "purpose": "nabuflow_deferred_downgrade",
+        "surface": "nabuflow",
+        "userId": "user_3HKnZMD1LzUpEy1gccFWGb8CNdn"
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "error": {
+        "message": "You cannot set `metadata` if `from_subscription` is set.",
+        "type": "invalid_request_error"
+      }
+    }
+  }
+}

@@ -12,6 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type Stripe from "stripe";
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db, nabuflowSubscriptionsTable, type NabuflowSubscription } from "@workspace/db";
 import { getUncachableStripeClient } from "./stripeClient";
@@ -416,6 +417,7 @@ export async function scheduleNabuflowPlanDowngrade(
   const targetPriceId = await resolveNabuflowPriceId(stripe, targetPlan);
   const attachedScheduleId = stripeObjectId(live.schedule);
   let schedule: Stripe.SubscriptionSchedule;
+  let createdScheduleId: string | null = null;
   if (attachedScheduleId) {
     schedule =
       typeof live.schedule === "object" && live.schedule !== null
@@ -424,16 +426,12 @@ export async function scheduleNabuflowPlanDowngrade(
     assertOwnedDowngradeSchedule(schedule, sub);
   } else {
     schedule = await stripe.subscriptionSchedules.create(
+      { from_subscription: sub.stripeSubscriptionId },
       {
-        from_subscription: sub.stripeSubscriptionId,
-        metadata: {
-          surface: "nabuflow",
-          purpose: DEFERRED_DOWNGRADE_PURPOSE,
-          userId: sub.userId,
-        },
+        idempotencyKey: `nabuflow-downgrade-schedule:${sub.id}:${periodEnd}:${randomUUID()}`,
       },
-      { idempotencyKey: `nabuflow-downgrade-schedule:${sub.id}:${periodEnd}` },
     );
+    createdScheduleId = schedule.id;
   }
 
   const currentItems = liveItems.map((item) => ({
@@ -446,35 +444,46 @@ export async function scheduleNabuflowPlanDowngrade(
   }));
   const phaseStart = schedule.current_phase?.start_date ?? periodStart;
 
-  await stripe.subscriptionSchedules.update(
-    schedule.id,
-    {
-      end_behavior: "release",
-      proration_behavior: "none",
-      metadata: {
-        surface: "nabuflow",
-        purpose: DEFERRED_DOWNGRADE_PURPOSE,
-        userId: sub.userId,
+  try {
+    await stripe.subscriptionSchedules.update(
+      schedule.id,
+      {
+        end_behavior: "release",
+        proration_behavior: "none",
+        metadata: {
+          surface: "nabuflow",
+          purpose: DEFERRED_DOWNGRADE_PURPOSE,
+          userId: sub.userId,
+        },
+        phases: [
+          {
+            start_date: phaseStart,
+            end_date: periodEnd,
+            items: currentItems,
+            proration_behavior: "none",
+            metadata: { surface: "nabuflow", plan: sub.planId, userId: sub.userId },
+          },
+          {
+            start_date: periodEnd,
+            duration: { interval: "month", interval_count: 1 },
+            items: futureItems,
+            proration_behavior: "none",
+            metadata: { surface: "nabuflow", plan: targetPlan.id, userId: sub.userId },
+          },
+        ],
       },
-      phases: [
-        {
-          start_date: phaseStart,
-          end_date: periodEnd,
-          items: currentItems,
-          proration_behavior: "none",
-          metadata: { surface: "nabuflow", plan: sub.planId, userId: sub.userId },
-        },
-        {
-          start_date: periodEnd,
-          duration: { interval: "month", interval_count: 1 },
-          items: futureItems,
-          proration_behavior: "none",
-          metadata: { surface: "nabuflow", plan: targetPlan.id, userId: sub.userId },
-        },
-      ],
-    },
-    { idempotencyKey: `nabuflow-downgrade:${sub.id}:${targetPlan.id}:${periodEnd}` },
-  );
+      { idempotencyKey: `nabuflow-downgrade:${sub.id}:${targetPlan.id}:${periodEnd}` },
+    );
+  } catch (error) {
+    if (createdScheduleId) {
+      await stripe.subscriptionSchedules.release(
+        createdScheduleId,
+        { preserve_cancel_date: true },
+        { idempotencyKey: `nabuflow-downgrade-cleanup:${sub.id}:${createdScheduleId}` },
+      );
+    }
+    throw error;
+  }
 
   return { scheduleId: schedule.id, effectiveAt: new Date(periodEnd * 1000) };
 }
