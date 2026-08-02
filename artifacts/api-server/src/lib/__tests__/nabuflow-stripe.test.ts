@@ -13,6 +13,7 @@
  *   - non-purchasable plans (Constellation stub) refusing self-serve signup.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const h = vi.hoisted(() => {
@@ -53,6 +54,16 @@ import {
   _clearNabuflowPriceCache,
 } from "../nabuflow-stripe";
 import { NABUFLOW_PLANS } from "../nabuflow-plans";
+
+const rerun9ScheduleCreateFailure = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/pd1-rerun9-subscription-schedule-create-400.json", import.meta.url),
+    "utf8",
+  ),
+) as {
+  request: { body: { from_subscription: string; metadata: Record<string, string> } };
+  response: { status: number; body: { error: { message: string; type: string } } };
+};
 
 const stripeStub = {
   invoices: { createPreview: vi.fn() },
@@ -238,16 +249,28 @@ describe("deferred plan downgrades", () => {
       effectiveAt: new Date(1_788_220_800 * 1000),
     });
     expect(stripeStub.subscriptionSchedules.create).toHaveBeenCalledWith(
-      {
-        from_subscription: "sub_nf_1",
-        metadata: {
-          surface: "nabuflow",
-          purpose: "nabuflow_deferred_downgrade",
-          userId: "u_switch",
+      { from_subscription: "sub_nf_1" },
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(
+          /^nabuflow-downgrade-schedule:1:1788220800:[0-9a-f-]{36}$/,
+        ),
+      }),
+    );
+    const [createParams] = stripeStub.subscriptionSchedules.create.mock.calls[0]!;
+    expect(createParams).not.toHaveProperty("metadata");
+    expect(rerun9ScheduleCreateFailure).toMatchObject({
+      response: {
+        status: 400,
+        body: {
+          error: {
+            message: "You cannot set `metadata` if `from_subscription` is set.",
+            type: "invalid_request_error",
+          },
         },
       },
-      expect.objectContaining({ idempotencyKey: expect.any(String) }),
-    );
+    });
+    expect(rerun9ScheduleCreateFailure.request.body).toHaveProperty("from_subscription");
+    expect(rerun9ScheduleCreateFailure.request.body).toHaveProperty("metadata");
     expect(stripeStub.subscriptionSchedules.update).toHaveBeenCalledWith(
       "sub_sched_1",
       expect.objectContaining({
@@ -270,6 +293,42 @@ describe("deferred plan downgrades", () => {
     );
     expect(stripeStub.subscriptions.update).not.toHaveBeenCalled();
     expect(stripeStub.invoices.createPreview).not.toHaveBeenCalled();
+  });
+
+  it("releases a schedule created by this attempt when its update fails, then rethrows", async () => {
+    const updateError = new Error("phase update failed");
+    stripeStub.subscriptionSchedules.update.mockRejectedValueOnce(updateError);
+    stripeStub.subscriptionSchedules.release.mockResolvedValueOnce({ id: "sub_sched_1" });
+
+    await expect(
+      scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit),
+    ).rejects.toBe(updateError);
+
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledWith(
+      "sub_sched_1",
+      { preserve_cancel_date: true },
+      expect.objectContaining({
+        idempotencyKey: "nabuflow-downgrade-cleanup:1:sub_sched_1",
+      }),
+    );
+  });
+
+  it("uses a fresh create idempotency key after a failed attempt is cleaned up", async () => {
+    stripeStub.subscriptionSchedules.update.mockRejectedValue(new Error("phase update failed"));
+    stripeStub.subscriptionSchedules.release.mockResolvedValue({ id: "sub_sched_1" });
+
+    await expect(
+      scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit),
+    ).rejects.toThrow("phase update failed");
+    await expect(
+      scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit),
+    ).rejects.toThrow("phase update failed");
+
+    const createKeys = stripeStub.subscriptionSchedules.create.mock.calls.map(
+      ([, options]) => options.idempotencyKey,
+    );
+    expect(createKeys).toHaveLength(2);
+    expect(createKeys[0]).not.toBe(createKeys[1]);
   });
 
   it("replaces an existing owned downgrade schedule instead of creating another", async () => {
@@ -303,6 +362,41 @@ describe("deferred plan downgrades", () => {
 
     expect(stripeStub.subscriptionSchedules.create).not.toHaveBeenCalled();
     expect(stripeStub.subscriptionSchedules.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("never releases a pre-existing attached schedule when its update fails", async () => {
+    stripeStub.subscriptions.retrieve.mockResolvedValueOnce({
+      id: "sub_nf_1",
+      schedule: "sub_sched_existing",
+      items: {
+        data: [
+          {
+            id: "si_nf_1",
+            price: { id: "price_comet_env" },
+            quantity: 1,
+            current_period_start: 1_785_542_400,
+            current_period_end: 1_788_220_800,
+          },
+        ],
+      },
+    });
+    stripeStub.subscriptionSchedules.retrieve.mockResolvedValueOnce({
+      id: "sub_sched_existing",
+      status: "active",
+      metadata: {
+        surface: "nabuflow",
+        purpose: "nabuflow_deferred_downgrade",
+        userId: "u_switch",
+      },
+      current_phase: { start_date: 1_785_542_400, end_date: 1_788_220_800 },
+    });
+    stripeStub.subscriptionSchedules.update.mockRejectedValueOnce(new Error("phase update failed"));
+
+    await expect(
+      scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit),
+    ).rejects.toThrow("phase update failed");
+
+    expect(stripeStub.subscriptionSchedules.release).not.toHaveBeenCalled();
   });
 
   it("fails closed rather than replacing an unrelated Stripe schedule", async () => {
