@@ -289,12 +289,16 @@ export default function HomePage() {
     (plan): plan is typeof plan & { priceUsd: number } =>
       plan.available && typeof plan.priceUsd === "number",
   );
-  const cheapestNabuflowPlan = nabuflowPlans.reduce<typeof nabuflowPlans[number] | null>(
+  const cheapestNabuflowPlan = nabuflowPlans.reduce<(typeof nabuflowPlans)[number] | null>(
     (cheapest, plan) => (!cheapest || plan.priceUsd < cheapest.priceUsd ? plan : cheapest),
     null,
   );
   const rolloverPlanNames = nabuflowPlans
     .filter((plan) => plan.rolloverCycles > 0)
+    .map((plan) => plan.name)
+    .join(" and ");
+  const noRolloverPlanNames = nabuflowPlans
+    .filter((plan) => plan.rolloverCycles === 0)
     .map((plan) => plan.name)
     .join(" and ");
   const [, setLocation] = useLocation();
@@ -1155,16 +1159,20 @@ export default function HomePage() {
                       ? `${nabuflowPlans.map((plan) => plan.name).join(", ")} — credit-based builder plans from $${cheapestNabuflowPlan.priceUsd}/month.`
                       : "Credit-based builder plans with included monthly credits."}{" "}
                     {rolloverPlanNames
-                      ? `Unused credits roll over on ${rolloverPlanNames}.`
+                      ? `Unused included credits roll over one cycle on ${rolloverPlanNames}.`
                       : "Rollover is available on eligible plans."}{" "}
-                    Pay-as-you-go overage only when your monthly bucket runs out. Enterprise teams get
-                    Constellation with pooled credits and org-wide spend caps.
+                    {noRolloverPlanNames ? `${noRolloverPlanNames} credits do not roll over. ` : ""}
+                    Builds use one flat mode price with planning, review and checks included. If
+                    your bucket runs out, builds continue at your plan&apos;s overage rate until
+                    your spending limit is reached. Enterprise teams get Constellation with pooled
+                    credits and organization-wide spending limits.
                   </p>
                   <div className="flex flex-wrap gap-3 mt-4 text-xs text-muted-foreground">
                     {nabuflowPlans.map((plan) => (
                       <span key={plan.id} className="flex items-center gap-1.5">
                         <CheckCircle2 className="h-3 w-3 text-primary/60 shrink-0" />
-                        {plan.name} · ${plan.priceUsd} / {plan.includedMonthlyCredits.toLocaleString()} credits
+                        {plan.name} · ${plan.priceUsd} /{" "}
+                        {plan.includedMonthlyCredits.toLocaleString()} credits
                       </span>
                     ))}
                   </div>

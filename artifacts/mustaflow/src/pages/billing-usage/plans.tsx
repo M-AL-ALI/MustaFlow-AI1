@@ -266,7 +266,8 @@ export function PlansSection() {
                 >
                   Switching to {pendingPlan.name} on{" "}
                   {formatResetDate(sub?.pendingEffectiveAt) ?? "your next renewal"}. Your{" "}
-                  {plan.name} entitlements stay active until then.
+                  {plan.name} plan, credits and engine access stay active until then. There is no
+                  charge, refund or credit note now; upgrading before renewal cancels this change.
                 </div>
               )}
 
@@ -297,8 +298,8 @@ export function PlansSection() {
                 <li className="flex items-start gap-2 text-xs text-muted-foreground">
                   <Check className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
                   {plan.rolloverCycles > 0
-                    ? `Unused credits roll over (up to ${plan.rolloverMaxCredits.toLocaleString()})`
-                    : "No credit rollover"}
+                    ? `Unused included credits roll over one cycle (up to ${plan.rolloverMaxCredits.toLocaleString()})`
+                    : `${plan.name} credits do not roll over`}
                 </li>
                 <li className="flex items-start gap-2 text-xs text-muted-foreground">
                   <Check className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
@@ -323,7 +324,8 @@ export function PlansSection() {
                             onSuccess: () => {
                               toast({
                                 title: "Auto-renew resumed",
-                                description: "Your plan will keep renewing.",
+                                description:
+                                  "Your plan will keep renewing and your access continues without interruption.",
                               });
                               invalidate();
                             },
@@ -344,7 +346,8 @@ export function PlansSection() {
                       </Button>
                       <p className="text-center text-[11px] text-muted-foreground">
                         Currently set to end on{" "}
-                        {formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}.
+                        {formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}. Full access
+                        remains available until then.
                       </p>
                     </div>
                   ) : (
@@ -429,8 +432,9 @@ export function PlansSection() {
       ))}
 
       <p className="text-[11px] text-muted-foreground">
-        Every paid plan keeps a card on file. Metered Pro/Deep counters and included credits reset
-        at the start of each billing cycle.
+        Every paid plan keeps a card on file. Each cycle grants the plan&apos;s included-credit
+        bucket. Pro and Deep counters reset each cycle and never roll over; included credits roll
+        over only where the plan card says they do.
       </p>
 
       {/* Proration preview dialog */}
@@ -447,8 +451,8 @@ export function PlansSection() {
             </DialogTitle>
             <DialogDescription>
               {previewIsDowngrade
-                ? "Your current plan stays active through this billing cycle."
-                : "Review the mid-cycle proration before confirming."}
+                ? "No charge, refund or credit note now. Your current plan stays active through this billing cycle."
+                : "You are charged now, prorated for the days remaining in this billing cycle."}
             </DialogDescription>
           </DialogHeader>
 
@@ -495,8 +499,9 @@ export function PlansSection() {
                 </p>
               )}
               <p className="text-[11px] leading-snug text-muted-foreground">
-                Upgrades take effect immediately and bump this cycle's credits. Downgrades keep your
-                current plan until the cycle ends.
+                {previewIsDowngrade
+                  ? "Your current plan, credits and engine access continue until renewal. The new plan and price start then; upgrading before renewal cancels this pending change."
+                  : "The new plan and its credits start immediately. Any usage charges from this cycle that haven't been billed yet are included on this invoice, so the charged total can be slightly higher than the preview."}
                 {previewState.preview.periodEnd
                   ? ` Current period ends ${formatResetDate(previewState.preview.periodEnd)}.`
                   : ""}
@@ -543,7 +548,7 @@ export function PlansSection() {
               Your plan stays active until{" "}
               {formatResetDate(sub?.currentCycleEnd) ?? "the end of the current cycle"} — credits
               and metered builds keep working until then. You can resume auto-renew any time before
-              that.
+              that. There are no partial-cycle refunds.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {cancelError ? (
@@ -562,7 +567,7 @@ export function PlansSection() {
                     setConfirmCancel(false);
                     toast({
                       title: "Plan set to cancel",
-                      description: `Active until ${formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}.`,
+                      description: `Full access stays active until ${formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}; there is no partial-cycle refund.`,
                     });
                     invalidate();
                   },

@@ -58,7 +58,9 @@ export function OverviewSection() {
   if (isError || !state) {
     return (
       <SectionCard title="Couldn't load billing">
-        <p className="text-sm text-muted-foreground">Something went wrong loading your billing state.</p>
+        <p className="text-sm text-muted-foreground">
+          Something went wrong loading your billing state.
+        </p>
         <Button variant="outline" size="sm" className="mt-3" onClick={() => void refetch()}>
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Try again
         </Button>
@@ -85,13 +87,18 @@ export function OverviewSection() {
 
   // Spend warning banner (client display preference; server always records
   // its notifications). Skip 100% when the blocked card already says it.
-  const spentPct = cap && cap.usdCents > 0 && cycle ? (cycle.overageUsdCents / cap.usdCents) * 100 : 0;
+  const spentPct =
+    cap && cap.usdCents > 0 && cycle ? (cycle.overageUsdCents / cap.usdCents) * 100 : 0;
   const disabledWarnings = getDisabledSpendWarnings(user?.id);
-  const crossedThreshold = state.enforcementEnabled && !state.exempt && plan
-    ? [...SPEND_WARNING_THRESHOLDS].reverse().find((t) => spentPct >= t && !disabledWarnings.includes(t)) ?? null
-    : null;
+  const crossedThreshold =
+    state.enforcementEnabled && !state.exempt && plan
+      ? ([...SPEND_WARNING_THRESHOLDS]
+          .reverse()
+          .find((t) => spentPct >= t && !disabledWarnings.includes(t)) ?? null)
+      : null;
   const showSpendWarning =
-    crossedThreshold != null && !(crossedThreshold >= 100 && blockedReason?.code === "spend_cap_reached");
+    crossedThreshold != null &&
+    !(crossedThreshold >= 100 && blockedReason?.code === "spend_cap_reached");
 
   const notifications = (notifData?.notifications ?? []).slice(0, 5);
 
@@ -106,8 +113,8 @@ export function OverviewSection() {
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            You've used {Math.min(Math.floor(spentPct), 100)}% of your {formatUsdCents(cap?.usdCents)} monthly
-            spend cap.{" "}
+            You've used {Math.min(Math.floor(spentPct), 100)}% of your{" "}
+            {formatUsdCents(cap?.usdCents)} monthly spend cap.{" "}
             <Link href="/billing/limits" className="font-medium underline underline-offset-2">
               Review limits
             </Link>
@@ -123,7 +130,10 @@ export function OverviewSection() {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-bold text-foreground">{plan.name}</h2>
-                  <SubscriptionStatusBadge status={sub?.status} cancelAtPeriodEnd={sub?.cancelAtPeriodEnd} />
+                  <SubscriptionStatusBadge
+                    status={sub?.status}
+                    cancelAtPeriodEnd={sub?.cancelAtPeriodEnd}
+                  />
                 </div>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   {plan.priceUsd != null ? `$${plan.priceUsd}/month · ` : ""}
@@ -131,8 +141,9 @@ export function OverviewSection() {
                 </p>
                 {sub?.currentCycleEnd && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {sub.cancelAtPeriodEnd ? "Plan ends" : "Cycle renews"} on{" "}
+                    {sub.cancelAtPeriodEnd ? "Full access continues until" : "Cycle renews on"}{" "}
                     {formatResetDate(sub.currentCycleEnd)}
+                    {sub.cancelAtPeriodEnd ? "; there is no partial-cycle refund" : ""}
                   </p>
                 )}
               </div>
@@ -217,23 +228,34 @@ export function OverviewSection() {
             />
             {cycle.rolloverCredits > 0 && (
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Includes {cycle.rolloverCredits.toLocaleString()} credits rolled over from last cycle.
+                Includes {cycle.rolloverCredits.toLocaleString()} credits rolled over from last
+                cycle.
               </p>
             )}
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {plan.rolloverCycles > 0
+                ? "Unused included credits can roll into the next cycle once."
+                : `${plan.name} included credits do not roll over.`}
+            </p>
           </SectionCard>
 
           <SectionCard
             title="Spend vs cap"
             testId="overview-spend"
             action={
-              <Link href="/billing/limits" className="text-xs font-medium text-primary hover:underline">
+              <Link
+                href="/billing/limits"
+                className="text-xs font-medium text-primary hover:underline"
+              >
                 Edit limit
               </Link>
             }
           >
             <p className="mb-3 text-2xl font-bold tabular-nums text-foreground">
               {formatUsdCents(cycle.overageUsdCents)}
-              <span className="ml-1.5 text-xs font-normal text-muted-foreground">overage so far</span>
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                overage so far
+              </span>
             </p>
             <MeterBar
               label="Pay-as-you-go spend"
@@ -242,6 +264,10 @@ export function OverviewSection() {
               formatValue={(u, t) => `${formatUsdCents(u)} of ${formatUsdCents(t)} cap`}
               sublabel={resetDate ? `Cap resets on ${resetDate}` : null}
             />
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              When included credits run out, builds continue at your plan&apos;s overage rate until
+              this spending limit is reached.
+            </p>
           </SectionCard>
         </div>
       )}
@@ -249,7 +275,7 @@ export function OverviewSection() {
       {plan && cycle && (
         <SectionCard
           title="Metered engine modes"
-          description="Pro and Deep builds are metered per cycle on some plans."
+          description="Pro and Deep builds are metered per cycle on some plans; their counters reset each cycle and never roll over."
           testId="overview-modes"
         >
           <div className="grid gap-4 sm:grid-cols-2">
@@ -327,7 +353,13 @@ export function OverviewSection() {
                 <AlertTriangle className="mr-1.5 h-3.5 w-3.5" /> Spending limits
               </Link>
             </Button>
-            <Button asChild variant="outline" size="sm" className="justify-start" data-testid="legacy-packs-link">
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="justify-start"
+              data-testid="legacy-packs-link"
+            >
               <Link href="/billing/legacy">
                 <Package className="mr-1.5 h-3.5 w-3.5" /> Credit packs
               </Link>

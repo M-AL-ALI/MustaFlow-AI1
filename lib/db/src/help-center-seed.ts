@@ -64,7 +64,7 @@ export const HELP_ARTICLE_SEED: HelpArticleSeed[] = [
     slug: "billing-credits",
     category: "billing",
     title: "How credits work",
-    body: "New accounts start with a credit balance. Each Builder task costs credits based on the mode used: Lite costs the least and Pro costs the most. A task runs a pre-flight check and will not start if your balance is too low. Image generation and some tools draw on separate daily allowances depending on your plan.",
+    body: "NabuFlow charges one flat price for each Builder task based on the selected mode. Build-scoped planning, coding, review, and checks are included with no hidden side charges; current standard and Deep prices appear in Billing & Usage. Each plan grants an included credit bucket per cycle. When that bucket runs out, builds continue at the plan's overage rate until the spending limit pauses new work. Unused included credits roll into the next cycle on Comet and Nova only; Orbit credits do not roll over. Pro and Deep build counters reset each cycle and never roll over.",
     tags: ["credits", "billing", "cost", "balance", "pricing", "payment"],
     isFaq: false,
     sortOrder: 1,

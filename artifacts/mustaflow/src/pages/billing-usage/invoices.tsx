@@ -28,7 +28,9 @@ interface InvoiceRow {
   lines?: InvoiceLine[];
 }
 
-function statusVariant(status: string | null | undefined): "default" | "secondary" | "destructive" | "outline" {
+function statusVariant(
+  status: string | null | undefined,
+): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "paid":
       return "default";
@@ -89,7 +91,8 @@ export function InvoicesSection() {
           <FileText className="h-6 w-6 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">No invoices yet</p>
           <p className="text-xs text-muted-foreground">
-            Invoices appear here after your first subscription or overage charge.
+            Invoices appear here after your first subscription, renewal, immediate upgrade or
+            overage charge.
           </p>
         </div>
       </SectionCard>
@@ -98,8 +101,13 @@ export function InvoicesSection() {
 
   return (
     <div className="space-y-3" data-testid="billing-invoices">
+      <p className="text-xs text-muted-foreground">
+        A mid-cycle upgrade invoice shows its prorated plan change and may also include usage
+        charges from this cycle that had not been billed yet.
+      </p>
       {invoices.map((inv) => {
-        const amountCents = (inv.amountPaid ?? 0) > 0 ? (inv.amountPaid ?? 0) : (inv.amountDue ?? 0);
+        const amountCents =
+          (inv.amountPaid ?? 0) > 0 ? (inv.amountPaid ?? 0) : (inv.amountDue ?? 0);
         const lines = (inv.lines ?? []).filter((l) => l.description || l.amount !== 0);
         return (
           <div
@@ -112,13 +120,17 @@ export function InvoicesSection() {
                 <p className="text-sm font-semibold text-foreground">
                   {inv.number ?? inv.description ?? "Invoice"}
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{formatInvoiceDate(inv.created)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {formatInvoiceDate(inv.created)}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold tabular-nums text-foreground">
                   {formatUsdCents(amountCents)}
                   {inv.currency && inv.currency.toLowerCase() !== "usd" && (
-                    <span className="ml-1 text-[10px] uppercase text-muted-foreground">{inv.currency}</span>
+                    <span className="ml-1 text-[10px] uppercase text-muted-foreground">
+                      {inv.currency}
+                    </span>
                   )}
                 </span>
                 <Badge variant={statusVariant(inv.status)} className="capitalize">
@@ -134,11 +146,15 @@ export function InvoicesSection() {
                     <span className="min-w-0 flex-1 truncate text-muted-foreground">
                       {l.description ?? "Line item"}
                     </span>
-                    <span className="tabular-nums text-muted-foreground">{formatUsdCents(l.amount)}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {formatUsdCents(l.amount)}
+                    </span>
                   </li>
                 ))}
                 {lines.length > 6 && (
-                  <li className="text-[10px] text-muted-foreground">+{lines.length - 6} more line items on the PDF</li>
+                  <li className="text-[10px] text-muted-foreground">
+                    +{lines.length - 6} more line items on the PDF
+                  </li>
                 )}
               </ul>
             )}
