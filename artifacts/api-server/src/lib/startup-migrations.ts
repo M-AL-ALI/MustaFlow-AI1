@@ -20,6 +20,28 @@ type MigrationStep = {
   run: (client: import("pg").PoolClient) => Promise<void>;
 };
 
+const BILLING_CREDITS_HELP_SLUG = "billing-credits";
+
+/** One-time BC-2 content refresh; the seed remains the only owner of the article body. */
+export async function refreshBillingCreditsHelpArticle(
+  client: Pick<import("pg").PoolClient, "query">,
+): Promise<void> {
+  const { HELP_ARTICLE_SEED } = await import("@workspace/db");
+  const article = HELP_ARTICLE_SEED.find((entry) => entry.slug === BILLING_CREDITS_HELP_SLUG);
+  if (!article) {
+    throw new Error(`Missing help-center seed article: ${BILLING_CREDITS_HELP_SLUG}`);
+  }
+
+  await client.query(
+    `UPDATE help_articles
+        SET body = $1,
+            updated_at = now()
+      WHERE slug = $2
+        AND body IS DISTINCT FROM $1`,
+    [article.body, article.slug],
+  );
+}
+
 const MIGRATION_STEPS: MigrationStep[] = [
   // ── migrate-containers ──────────────────────────────────────────────────────
   {
@@ -5078,6 +5100,15 @@ const MIGRATION_STEPS: MigrationStep[] = [
         `ALTER TABLE nabuflow_subscriptions
            ADD COLUMN IF NOT EXISTS pending_effective_at TIMESTAMPTZ`,
       );
+    },
+  },
+
+  // BC-2: refresh the single deployed Help Center article whose original seed
+  // was preserved by ON CONFLICT DO NOTHING. No general seed re-sync.
+  {
+    name: "migrate-refresh-billing-credits-help-copy",
+    async run(client) {
+      await refreshBillingCreditsHelpArticle(client);
     },
   },
 ];
