@@ -88,6 +88,7 @@ export function PlansSection() {
     preview: NabuflowProrationPreview | null;
   } | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [orgSetupOpen, setOrgSetupOpen] = useState(false);
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
@@ -354,7 +355,10 @@ export function PlansSection() {
                       <button
                         type="button"
                         className="text-[11px] text-muted-foreground transition-colors hover:text-destructive"
-                        onClick={() => setConfirmCancel(true)}
+                        onClick={() => {
+                          setCancelError(null);
+                          setConfirmCancel(true);
+                        }}
                         data-testid="plan-cancel-link"
                       >
                         Cancel at period end
@@ -525,7 +529,13 @@ export function PlansSection() {
       </Dialog>
 
       {/* Cancel confirmation */}
-      <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+      <AlertDialog
+        open={confirmCancel}
+        onOpenChange={(open) => {
+          setConfirmCancel(open);
+          if (!open) setCancelError(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel your plan?</AlertDialogTitle>
@@ -536,28 +546,33 @@ export function PlansSection() {
               that.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {cancelError ? (
+            <p role="alert" className="text-sm text-muted-foreground">
+              {cancelError}
+            </p>
+          ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep my plan</AlertDialogCancel>
+            <AlertDialogCancel disabled={cancelMutation.isPending}>Keep my plan</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() =>
+              onClick={(event) => {
+                event.preventDefault();
+                setCancelError(null);
                 cancelMutation.mutate(undefined, {
                   onSuccess: () => {
+                    setConfirmCancel(false);
                     toast({
                       title: "Plan set to cancel",
                       description: `Active until ${formatResetDate(sub?.currentCycleEnd) ?? "cycle close"}.`,
                     });
                     invalidate();
                   },
-                  onError: (err) =>
-                    toast({
-                      title: "Couldn't cancel",
-                      description: apiErrorMessage(err),
-                      variant: "destructive",
-                    }),
-                })
-              }
+                  onError: (err) => setCancelError(apiErrorMessage(err)),
+                });
+              }}
+              disabled={cancelMutation.isPending}
               data-testid="plan-cancel-confirm"
             >
+              {cancelMutation.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               Cancel at period end
             </AlertDialogAction>
           </AlertDialogFooter>

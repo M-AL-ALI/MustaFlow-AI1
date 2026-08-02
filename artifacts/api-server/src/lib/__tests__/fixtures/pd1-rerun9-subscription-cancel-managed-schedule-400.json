@@ -1,0 +1,37 @@
+{
+  "source": "PD-1 rerun 9 Item 8(d) Stripe Workbench capture",
+  "sourceSha256": {
+    "screenshot": "266098debb0c90f48bf456e9f45e5812a9bc256136e413bde65cf1476574d556",
+    "dom": "e2cfe83472d219098215dadbbe5e242c691e40a13b5231cbb4492e4c9ffee800"
+  },
+  "request": {
+    "id": "req_JJYIjjdDIb61sJ",
+    "endpoint": "/v1/subscriptions/sub_1TzmNJDCzx2AknND5OabjwDC",
+    "body": {
+      "cancel_at_period_end": "true"
+    }
+  },
+  "subscription": {
+    "id": "sub_1TzmNJDCzx2AknND5OabjwDC",
+    "schedule": "sub_sched_1U02tUDCzx2AknND7IouyTLo",
+    "livemode": false
+  },
+  "schedule": {
+    "id": "sub_sched_1U02tUDCzx2AknND7IouyTLo",
+    "status": "active",
+    "metadata": {
+      "surface": "nabuflow",
+      "purpose": "nabuflow_deferred_downgrade",
+      "userId": "user_3HKnZMD1LzUpEy1gccFWGb8CNdn"
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "error": {
+        "message": "The subscription is managed by the subscription schedule `sub_sched_1U02tUDCzx2AknND7IouyTLo`, and updating any cancelation behavior directly is not allowed. Please update the schedule instead.",
+        "type": "invalid_request_error"
+      }
+    }
+  }
+}
