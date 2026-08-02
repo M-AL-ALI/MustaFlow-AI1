@@ -1,0 +1,32 @@
+{
+  "source": "PD-1 Phase 1 rerun 9 Item 8(c)",
+  "sourceScreenshotSha256": "11160ac564a2bf2c2d2a9a63156d10e4ed2736109d5261030ea31bd4b664d909",
+  "evidenceSha256": "288328f6d6481ae93cafc86cd84cb9396ec5b4e971b3c6737c75b07212927688",
+  "stripeAccountId": "acct_1TaeY5DCzx2AknND",
+  "livemode": false,
+  "firstAttempt": {
+    "scheduleId": "sub_sched_1U01cHDCzx2AknNDaenQhK8Z",
+    "updateRequestId": "req_oQrKFH3itlpD52",
+    "endpoint": "/v1/subscription_schedules/sub_sched_1U01cHDCzx2AknNDaenQhK8Z"
+  },
+  "secondAttempt": {
+    "scheduleId": "sub_sched_1U01g5DCzx2AknNDrsVr75H2",
+    "updateRequestId": "req_TVIxkrJGHHdM1Q",
+    "endpoint": "/v1/subscription_schedules/sub_sched_1U01g5DCzx2AknNDrsVr75H2",
+    "idempotencyKey": "nabuflow-downgrade:10:orbit:1790908530",
+    "response": {
+      "status": 400,
+      "body": {
+        "error": {
+          "message": "Keys for idempotent requests can only be used for the same endpoint they were first used for ('/v1/subscription_schedules/sub_sched_1U01g5DCzx2AknNDrsVr75H2' vs '/v1/subscription_schedules/sub_sched_1U01cHDCzx2AknNDaenQhK8Z'). Try using a key other than 'nabuflow-downgrade:10:orbit:1790908530' if you meant to execute a different request.",
+          "type": "idempotency_error"
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "requestId": "req_nVRQ0o02qpdl3s",
+    "endpoint": "/v1/subscription_schedules/sub_sched_1U01g5DCzx2AknNDrsVr75H2/release",
+    "status": 200
+  }
+}

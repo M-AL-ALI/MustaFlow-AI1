@@ -472,7 +472,9 @@ export async function scheduleNabuflowPlanDowngrade(
           },
         ],
       },
-      { idempotencyKey: `nabuflow-downgrade:${sub.id}:${targetPlan.id}:${periodEnd}` },
+      {
+        idempotencyKey: `nabuflow-downgrade:${sub.id}:${schedule.id}:${targetPlan.id}:${periodEnd}`,
+      },
     );
   } catch (error) {
     if (createdScheduleId) {

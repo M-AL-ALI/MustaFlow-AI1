@@ -65,6 +65,26 @@ const rerun9ScheduleCreateFailure = JSON.parse(
   response: { status: number; body: { error: { message: string; type: string } } };
 };
 
+const rerun9ScheduleUpdateIdempotencyFailure = JSON.parse(
+  readFileSync(
+    new URL(
+      "./fixtures/pd1-rerun9-subscription-schedule-update-idempotency-400.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as {
+  firstAttempt: { scheduleId: string; updateRequestId: string; endpoint: string };
+  secondAttempt: {
+    scheduleId: string;
+    updateRequestId: string;
+    endpoint: string;
+    idempotencyKey: string;
+    response: { status: number; body: { error: { message: string; type: string } } };
+  };
+  cleanup: { requestId: string; endpoint: string; status: number };
+};
+
 const stripeStub = {
   invoices: { createPreview: vi.fn() },
   subscriptions: { create: vi.fn(), retrieve: vi.fn(), update: vi.fn() },
@@ -329,6 +349,103 @@ describe("deferred plan downgrades", () => {
     );
     expect(createKeys).toHaveLength(2);
     expect(createKeys[0]).not.toBe(createKeys[1]);
+  });
+
+  it("scopes the update key to the replacement schedule after an upgrade releases the first", async () => {
+    const firstScheduleId = rerun9ScheduleUpdateIdempotencyFailure.firstAttempt.scheduleId;
+    const secondScheduleId = rerun9ScheduleUpdateIdempotencyFailure.secondAttempt.scheduleId;
+    const liveItems = {
+      data: [
+        {
+          id: "si_nf_1",
+          price: { id: "price_comet_env" },
+          quantity: 1,
+          current_period_start: 1_785_542_400,
+          current_period_end: 1_788_220_800,
+        },
+      ],
+    };
+
+    stripeStub.subscriptions.retrieve
+      .mockResolvedValueOnce({ id: "sub_nf_1", schedule: null, items: liveItems })
+      .mockResolvedValueOnce({
+        id: "sub_nf_1",
+        schedule: {
+          id: firstScheduleId,
+          status: "active",
+          metadata: {
+            surface: "nabuflow",
+            purpose: "nabuflow_deferred_downgrade",
+            userId: "u_switch",
+          },
+        },
+        items: liveItems,
+      })
+      .mockResolvedValueOnce({ id: "sub_nf_1", schedule: null, items: liveItems });
+    stripeStub.subscriptionSchedules.create
+      .mockResolvedValueOnce({
+        id: firstScheduleId,
+        status: "active",
+        metadata: null,
+        current_phase: { start_date: 1_785_542_400, end_date: 1_788_220_800 },
+      })
+      .mockResolvedValueOnce({
+        id: secondScheduleId,
+        status: "active",
+        metadata: null,
+        current_phase: { start_date: 1_785_542_400, end_date: 1_788_220_800 },
+      });
+    const scheduleByUpdateKey = new Map<string, string>();
+    stripeStub.subscriptionSchedules.update.mockImplementation(
+      async (scheduleId: string, _params: unknown, options: { idempotencyKey: string }) => {
+        const originalScheduleId = scheduleByUpdateKey.get(options.idempotencyKey);
+        if (originalScheduleId && originalScheduleId !== scheduleId) {
+          throw Object.assign(
+            new Error(
+              rerun9ScheduleUpdateIdempotencyFailure.secondAttempt.response.body.error.message,
+            ),
+            {
+              type: rerun9ScheduleUpdateIdempotencyFailure.secondAttempt.response.body.error.type,
+            },
+          );
+        }
+        scheduleByUpdateKey.set(options.idempotencyKey, scheduleId);
+        return { id: scheduleId };
+      },
+    );
+    stripeStub.subscriptionSchedules.release.mockResolvedValueOnce({ id: firstScheduleId });
+
+    await scheduleNabuflowPlanDowngrade(sub({ planId: "comet" }), NABUFLOW_PLANS.orbit);
+    await cancelPendingNabuflowPlanDowngrade(sub({ planId: "comet", pendingPlanId: "orbit" }));
+    await scheduleNabuflowPlanDowngrade(sub({ planId: "nova" }), NABUFLOW_PLANS.orbit);
+
+    const updateKeys = stripeStub.subscriptionSchedules.update.mock.calls.map(
+      ([scheduleId, , options]) => ({ scheduleId, key: options.idempotencyKey }),
+    );
+    expect(rerun9ScheduleUpdateIdempotencyFailure).toMatchObject({
+      secondAttempt: {
+        updateRequestId: "req_TVIxkrJGHHdM1Q",
+        response: { status: 400, body: { error: { type: "idempotency_error" } } },
+      },
+      cleanup: { status: 200 },
+    });
+    expect(updateKeys).toEqual([
+      {
+        scheduleId: firstScheduleId,
+        key: `nabuflow-downgrade:1:${firstScheduleId}:orbit:1788220800`,
+      },
+      {
+        scheduleId: secondScheduleId,
+        key: `nabuflow-downgrade:1:${secondScheduleId}:orbit:1788220800`,
+      },
+    ]);
+    expect(updateKeys[0]!.key).not.toBe(updateKeys[1]!.key);
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledTimes(1);
+    expect(stripeStub.subscriptionSchedules.release).toHaveBeenCalledWith(
+      firstScheduleId,
+      { preserve_cancel_date: true },
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
   });
 
   it("replaces an existing owned downgrade schedule instead of creating another", async () => {
