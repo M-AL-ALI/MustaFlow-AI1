@@ -60,8 +60,8 @@ export function LimitsSection() {
     return (
       <SectionCard title="Spending limits" testId="limits-no-plan">
         <p className="text-sm text-muted-foreground">
-          Spending limits apply once you're on a NabuFlow plan — they cap how much pay-as-you-go
-          overage can be charged per cycle.
+          When included credits run out, builds continue at your plan&apos;s pay-as-you-go rate. A
+          spending limit caps how much overage can be charged per cycle.
         </p>
         <Button asChild size="sm" className="mt-3">
           <Link href="/billing/plans">See plans</Link>
@@ -72,7 +72,8 @@ export function LimitsSection() {
 
   const parsed = Number.parseFloat(input);
   const parsedCents = Number.isFinite(parsed) ? Math.round(parsed * 100) : NaN;
-  const inBounds = Number.isFinite(parsedCents) && parsedCents >= 0 && parsedCents <= cap.maxUsdCents;
+  const inBounds =
+    Number.isFinite(parsedCents) && parsedCents >= 0 && parsedCents <= cap.maxUsdCents;
   const unchanged = Number.isFinite(parsedCents) && parsedCents === cap.usdCents;
 
   const saveCap = (cents: number | null) => {
@@ -80,7 +81,8 @@ export function LimitsSection() {
       { data: { spendCapUsdCents: cents } },
       {
         onSuccess: (res) => {
-          const effective = res.effectiveSpendCapUsdCents ?? res.spendCapUsdCents ?? cents ?? cap.defaultUsdCents;
+          const effective =
+            res.effectiveSpendCapUsdCents ?? res.spendCapUsdCents ?? cents ?? cap.defaultUsdCents;
           toast({
             title: "Spending limit updated",
             description: `Pay-as-you-go overage is now capped at ${formatUsdCents(effective)} per cycle.`,
@@ -88,7 +90,11 @@ export function LimitsSection() {
           void queryClient.invalidateQueries({ queryKey: getGetNabuflowBillingStateQueryKey() });
         },
         onError: (err) =>
-          toast({ title: "Couldn't update the limit", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Couldn't update the limit",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
       },
     );
   };
@@ -102,7 +108,7 @@ export function LimitsSection() {
     <div className="space-y-4" data-testid="billing-limits">
       <SectionCard
         title="Monthly spending cap"
-        description="Hard ceiling for pay-as-you-go overage per cycle — builds pause when it's reached, nothing is charged beyond it."
+        description="Hard ceiling for pay-as-you-go overage per cycle — when it is reached, the next build is paused before it starts and nothing is charged beyond it."
         testId="limits-cap"
       >
         {cycle && (
@@ -118,7 +124,10 @@ export function LimitsSection() {
 
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label htmlFor="spend-cap-input" className="mb-1 block text-xs font-medium text-foreground">
+            <label
+              htmlFor="spend-cap-input"
+              className="mb-1 block text-xs font-medium text-foreground"
+            >
               Cap (USD per cycle)
             </label>
             <div className="flex items-center gap-1.5">
@@ -158,8 +167,8 @@ export function LimitsSection() {
 
         <p className="mt-2 text-[11px] text-muted-foreground">
           Your {plan.name} plan allows between $0 and {formatUsdCents(cap.maxUsdCents)} — the plan
-          default is {formatUsdCents(cap.defaultUsdCents)}. A $0 cap disables pay-as-you-go overage
-          entirely.
+          default is {formatUsdCents(cap.defaultUsdCents)}. A $0 cap disables pay-as-you-go overage,
+          so new builds pause once the included bucket is empty.
         </p>
         {!inBounds && input !== "" && (
           <p className="mt-1 text-[11px] text-destructive" data-testid="spend-cap-error">

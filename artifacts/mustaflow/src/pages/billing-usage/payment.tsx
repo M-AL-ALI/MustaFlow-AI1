@@ -37,7 +37,7 @@ export function PaymentSection() {
     <div className="space-y-4" data-testid="billing-payment">
       <SectionCard
         title="Card on file"
-        description="Your NabuFlow subscription and any pay-as-you-go overage are charged to this card."
+        description="Your NabuFlow subscription, immediate upgrade prorations and pay-as-you-go overage are charged to this card."
         testId="payment-card"
       >
         {card?.last4 ? (
@@ -60,7 +60,12 @@ export function PaymentSection() {
                 </p>
               </div>
             </div>
-            <Button size="sm" variant={expired ? "default" : "outline"} onClick={() => setSetupOpen(true)} data-testid="payment-replace-btn">
+            <Button
+              size="sm"
+              variant={expired ? "default" : "outline"}
+              onClick={() => setSetupOpen(true)}
+              data-testid="payment-replace-btn"
+            >
               Replace card
             </Button>
           </div>
@@ -77,7 +82,8 @@ export function PaymentSection() {
       <SectionCard title="Billing address">
         <p className="text-xs leading-relaxed text-muted-foreground">
           Your billing address is collected securely together with your card and stored by Stripe —
-          it appears on every invoice. To change it, replace your card and enter the updated address.
+          it appears on every invoice. To change it, replace your card and enter the updated
+          address.
         </p>
       </SectionCard>
 
@@ -89,11 +95,18 @@ export function PaymentSection() {
           </li>
           <li className="flex items-start gap-2">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-            Your plan renews monthly on this card; pay-as-you-go overage is billed up to your spending cap.
+            Your plan renews monthly on this card; pay-as-you-go overage is billed up to your
+            spending cap.
+          </li>
+          <li className="flex items-start gap-2">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />A mid-cycle upgrade
+            is charged immediately for the days remaining. Its invoice also includes any usage
+            charges from this cycle that have not been billed yet.
           </li>
           <li className="flex items-start gap-2">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-            If a charge fails we retry for a few days before pausing builds — you'll see it here first.
+            If a charge fails we retry for a few days before pausing builds — you'll see it here
+            first.
           </li>
         </ul>
       </SectionCard>

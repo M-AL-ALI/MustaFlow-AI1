@@ -275,7 +275,46 @@ describe("Plans deferred downgrade state", () => {
     );
     expect(screen.getByTestId("proration-confirm")).toHaveTextContent("Schedule downgrade");
     expect(
-      screen.getByText(/Downgrades keep your current plan until the cycle ends/),
+      screen.getByText(/Your current plan, credits and engine access continue until renewal/),
+    ).toBeVisible();
+  });
+
+  it("separates upgrade due-now and renewal amounts and discloses unbilled usage", async () => {
+    testState.billingState = {
+      card: { last4: "4242" },
+      cycle: { includedCredits: 1600 },
+      org: null,
+      plan: { id: "orbit", name: "Orbit", priceUsd: 20 },
+      subscription: { status: "active", cancelAtPeriodEnd: false },
+    };
+    testState.switchPlan.mockImplementationOnce(
+      (_input: unknown, options: { onSuccess: (value: Record<string, unknown>) => void }) =>
+        options.onSuccess({
+          preview: {
+            currentPlanId: "orbit",
+            targetPlanId: "comet",
+            amountDueCents: 2996,
+            nextCycleAmountCents: 5000,
+            nextCycleStartsAt: "2026-10-01T17:24:22.000Z",
+            currency: "usd",
+            periodEnd: "2026-10-01T17:24:22.000Z",
+            lines: [],
+          },
+        }),
+    );
+    const user = userEvent.setup();
+    renderPlans();
+
+    await user.click(screen.getByTestId("plan-cta-comet"));
+
+    expect(screen.getByTestId("proration-total")).toHaveTextContent("$29.96");
+    expect(screen.getByTestId("next-cycle-charge")).toHaveTextContent(
+      "Then $50/mo starting Oct 1, 2026",
+    );
+    expect(
+      screen.getByText(
+        /Any usage charges from this cycle that haven't been billed yet are included/,
+      ),
     ).toBeVisible();
   });
 
@@ -296,7 +335,7 @@ describe("Plans deferred downgrade state", () => {
     renderPlans();
 
     expect(screen.getByTestId("pending-plan-note")).toHaveTextContent(
-      /Switching to Orbit on Oct 1, 2026.*Comet entitlements stay active until then/,
+      /Switching to Orbit on Oct 1, 2026.*Comet plan, credits and engine access stay active until then.*no charge, refund or credit note now.*upgrading before renewal cancels this change/i,
     );
     expect(screen.getByTestId("plan-cta-orbit")).toBeDisabled();
     expect(screen.getByTestId("plan-cta-orbit")).toHaveTextContent("Orbit scheduled");
@@ -331,5 +370,8 @@ describe("Plans cancellation confirmation", () => {
     expect(testState.cancel).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("alertdialog", { name: "Cancel your plan?" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(backendMessage);
+    expect(screen.getByRole("alertdialog", { name: "Cancel your plan?" })).toHaveTextContent(
+      "There are no partial-cycle refunds",
+    );
   });
 });

@@ -160,7 +160,9 @@ function NabuFlowPlansSection({
     }
     // Rollover
     if (plan.rolloverCycles > 0) {
-      bullets.push("Unused credits roll over one cycle");
+      bullets.push("Unused included credits roll over one cycle");
+    } else {
+      bullets.push(`${plan.name} credits do not roll over`);
     }
     // Overage rate
     if (plan.priceUsd !== null) {
@@ -204,8 +206,9 @@ function NabuFlowPlansSection({
           Plans for every builder
         </h2>
         <p className="text-muted-foreground text-sm max-w-lg mx-auto">
-          Credit-based builder plans — change your plan anytime and unused included credits roll
-          over. Pay-as-you-go overage kicks in only when your monthly bucket runs out.
+          Each cycle grants the included credits shown below. Comet and Nova roll unused included
+          credits into the next cycle; Orbit does not. If your bucket runs out, builds keep going at
+          your plan&apos;s pay-as-you-go rate until your spending limit is reached.
         </p>
       </div>
 
@@ -721,7 +724,8 @@ export default function PricingPage() {
             </div>
           )}
           <p className="text-center text-xs text-muted-foreground mt-4">
-            Building heavily? Top up Builder credits anytime from your{" "}
+            Each build has one flat mode price that includes its planning, coding, review and checks
+            — no hidden build-side charges. Manage credits and spending limits from your{" "}
             <Link href="/billing/legacy" className="text-primary hover:underline">
               billing dashboard
             </Link>
@@ -736,7 +740,7 @@ export default function PricingPage() {
         {[
           {
             q: "Do credits expire?",
-            a: "No. Credits you purchase stay in your account indefinitely.",
+            a: "NabuFlow included credits reset each billing cycle. Unused included credits roll into the next cycle on Comet and Nova only; Orbit credits do not roll over. Pro and Deep build counters also reset each cycle and never roll over.",
           },
           {
             q: "What is the badge on published apps?",
@@ -752,23 +756,23 @@ export default function PricingPage() {
           },
           {
             q: "What if a build fails?",
-            // Audit: jobs.ts charges standard builds/refines and staged applies
-            // post-success; jobs.ts architect review, agent-loop.ts search/media,
-            // background reservations, and builds.ts Mobile/EAS work charge when
-            // their service is used or started.
-            a: "Build and refine credits are deducted after successful completion. Architecture reviews, AI tools such as search and media, background work, and Mobile builds are charged when those services are used or started and aren't refundable.",
+            a: "Every NabuFlow build has one flat price for its selected mode. Build-scoped planning, coding, architecture review and checks are included in that price, with no hidden side charges. You always see the exact flat price in the builder when you choose a mode.",
           },
           {
             q: "How does credit rollover work on NabuFlow Builder plans?",
-            a: "Any unused included credits from your monthly allocation roll over into the next billing cycle — up to a plan-specific maximum. Rolled-over credits are used first, before that month's fresh allocation. Credits purchased as pay-as-you-go overage never expire and are not subject to the rollover cap.",
+            a: "Comet and Nova carry unused included credits into the next billing cycle, up to the limit shown for the plan. Orbit does not roll unused credits over. Pro and Deep build counters reset each cycle and do not roll over.",
           },
           {
             q: "When does overage kick in, and how does the spend cap protect me?",
-            a: "Overage billing starts automatically the moment your monthly included credits (plus any rolled-over credits) run out. Each additional build is charged at the per-credit overage rate shown on your plan. The spend cap puts a hard ceiling on how much overage you can accrue in a single month — once the cap is reached, new builds are paused rather than charged further. You can raise or lower the cap at any time from your billing dashboard, up to the maximum your plan allows.",
+            a: "When your included bucket runs out, builds continue without interruption and extra credits are billed at the per-credit rate shown on your plan. Your spending limit is the hard ceiling: once it is reached, the next build is paused before it starts instead of adding more charges. You can adjust the limit from Billing & Usage.",
           },
           {
             q: "What happens to my credits if I switch NabuFlow plans mid-cycle?",
-            a: "When you upgrade, the new plan's higher included-credit allocation takes effect immediately and your remaining credits from the old allocation are carried forward. When you downgrade, the switch takes effect at the start of your next billing cycle so you keep your current plan's credits for the remainder of the period. Rolled-over credits already in your balance are preserved across plan changes, subject to the new plan's rollover maximum.",
+            a: "An upgrade is charged immediately, prorated for the days left in your current cycle, and the new plan and credits start right away. Any usage charges from this cycle that haven't been billed yet are included on that invoice, so its total can be slightly higher than the proration preview. A downgrade is scheduled for renewal with no immediate charge, refund or credit note: you keep your current plan, credits and engine access until then. The pending downgrade is shown in Billing & Usage, and upgrading before renewal cancels it.",
+          },
+          {
+            q: "What happens if I cancel or resume a NabuFlow plan?",
+            a: "Cancellation takes effect at the end of your paid period, so you keep full access until that date. There are no partial-cycle refunds. You can resume auto-renew any time before the period ends.",
           },
         ].map((item) => (
           <div key={item.q} className="border-b border-border pb-5">

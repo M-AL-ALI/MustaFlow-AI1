@@ -378,7 +378,9 @@ export function UsageSection() {
         <SectionCard
           title="Metered Pro / Deep counters"
           description={
-            resetDate ? `Live counters for the current cycle — reset on ${resetDate}.` : undefined
+            resetDate
+              ? `Live counters for the current cycle — reset on ${resetDate} and never roll over.`
+              : "Live counters reset each cycle and never roll over."
           }
           testId="usage-counters"
         >
@@ -634,10 +636,10 @@ export function UsageSection() {
               </div>
             </SectionCard>
 
-            {/* 5. Deep reasoning share + surcharge (required) */}
+            {/* 5. Deep reasoning share + flat-price difference */}
             <SectionCard
               title="Deep-reasoning builds"
-              description="Count, share and the Deep surcharge in this window"
+              description="Count, share and the Deep portion of each flat build price in this window"
               testId="chart-deep"
             >
               <div className="flex items-center gap-4">
@@ -673,15 +675,16 @@ export function UsageSection() {
                     </span>
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Deep surcharge:{" "}
+                    Deep price difference:{" "}
                     <span className="font-semibold text-foreground">
                       ≈{deepStats.surchargeCredits.toLocaleString()} credits (
                       {formatUsdCents(deepStats.surchargeUsd)})
                     </span>{" "}
-                    on top of the base mode cost.
+                    within the flat Deep build price.
                   </p>
                   <p className="text-[10px] text-muted-foreground">
                     Deep builds consumed {deepStats.deepCredits.toLocaleString()} credits total.
+                    Each Deep build is one flat charge; this comparison is not a separate surcharge.
                   </p>
                 </div>
               </div>
