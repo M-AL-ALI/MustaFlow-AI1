@@ -31,6 +31,7 @@ import {
   Github,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SupportErrorMessage } from "@/components/support-report-link";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
 import { useOraConversations } from "@/hooks/ora-conversations-context";
@@ -752,9 +753,11 @@ function AccountSyncSection() {
               <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  {tokenMismatch
-                    ? "You appear signed in on this device, but the server did not recognize your account. Sign out and back in to re-sync."
-                    : "Your billing plan and chat plan do not match. Reload the app; if it persists, contact support."}
+                  {tokenMismatch ? (
+                    "You appear signed in on this device, but the server did not recognize your account. Sign out and back in to re-sync."
+                  ) : (
+                    <SupportErrorMessage message="Your billing plan and chat plan do not match. Reload the app; if it persists," />
+                  )}
                 </span>
               </div>
             )}

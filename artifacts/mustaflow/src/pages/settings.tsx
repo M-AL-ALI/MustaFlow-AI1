@@ -56,6 +56,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { BuilderCreditCostList } from "@/components/billing/builder-credit-cost-list";
+import { SupportErrorMessage } from "@/components/support-report-link";
 
 interface UserPrefs {
   emailBuildComplete?: boolean;
@@ -1144,14 +1145,14 @@ function PrivacyTab() {
       } else {
         toast({
           title: "Deletion failed",
-          description: "Please contact support.",
+          description: <SupportErrorMessage message="We could not delete your account." />,
           variant: "destructive",
         });
       }
     } catch {
       toast({
         title: "Deletion failed",
-        description: "Please contact support.",
+        description: <SupportErrorMessage message="We could not delete your account." />,
         variant: "destructive",
       });
     } finally {

@@ -33,6 +33,7 @@ import { enqueueGdprErasure, isDurableQueueReady } from "../lib/durable-queue";
 import { sendGdprDeletionConfirmation } from "../lib/emailClient";
 import { getClerkUserById, deleteClerkUser } from "../lib/clerk-users";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -111,7 +112,7 @@ router.get("/me/export", async (req, res): Promise<void> => {
         "Secret values are intentionally excluded for security.",
         "Signed upload download URLs expire 7 days from export time.",
         "Generated file binaries are excluded from ora-chat.json; only file metadata is included.",
-        "To request account deletion or cancel a pending erasure: privacy@mustaflow.app",
+        `To request account deletion or cancel a pending erasure: ${SUPPORT_EMAIL_ADDRESS}`,
         "Data Processing Agreement: https://www.mustaflow.com/privacy",
       ].join("\n"),
     );
@@ -436,8 +437,7 @@ router.delete("/me", async (req, res): Promise<void> => {
     // Guard: durable queue must be available to guarantee the erasure will run.
     if (!isDurableQueueReady()) {
       res.status(503).json({
-        error:
-          "Erasure queue is temporarily unavailable. Please try again in a few minutes, or contact privacy@mustaflow.app to initiate account deletion manually.",
+        error: `Erasure queue is temporarily unavailable. Please try again in a few minutes, or contact ${SUPPORT_EMAIL_ADDRESS} to initiate account deletion manually.`,
       });
       return;
     }
@@ -544,11 +544,13 @@ router.delete("/me", async (req, res): Promise<void> => {
       credentialsDeleted: clerkDeleted,
       erasureScheduledFor: erasureDate.toISOString(),
       erasureJobId: jobId,
-      note: "Your account credentials have been deleted and your data is scheduled for permanent erasure within 30 days. Contact privacy@mustaflow.app with any questions.",
+      note: `Your account credentials have been deleted and your data is scheduled for permanent erasure within 30 days. Contact ${SUPPORT_EMAIL_ADDRESS} with any questions.`,
     });
   } catch (err) {
     logger.error({ err, userId }, "GDPR account deletion failed");
-    res.status(500).json({ error: "Deletion request failed. Please contact support." });
+    res.status(500).json({
+      error: "Deletion request failed. Report this issue at /help?mode=report.",
+    });
   }
 });
 

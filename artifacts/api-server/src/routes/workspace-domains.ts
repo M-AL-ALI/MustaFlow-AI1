@@ -406,7 +406,7 @@ router.post("/workspaces/:id/domains", requireWorkspaceOwner, async (req, res): 
     if (pgErr.code === "23505") {
       res.status(409).json({
         error:
-          "This domain is already claimed by another workspace. Contact support if you believe this is an error.",
+          "This domain is already claimed by another workspace. Report this issue at /help?mode=report if you believe this is an error.",
       });
       return;
     }

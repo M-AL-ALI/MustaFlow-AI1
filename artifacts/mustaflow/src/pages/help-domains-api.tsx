@@ -416,8 +416,8 @@ mustaflow token revoke 7`}
 
         <div className="border-t border-border pt-8 text-xs text-muted-foreground text-center">
           Questions?{" "}
-          <a href="mailto:support@mustaflow.app" className="underline hover:text-foreground">
-            support@mustaflow.app
+          <a href="mailto:support@mustaflow.com" className="underline hover:text-foreground">
+            support@mustaflow.com
           </a>
         </div>
       </div>

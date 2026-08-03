@@ -56,6 +56,7 @@ import { DomainAnalyticsCard } from "./domain-analytics-card";
 import { DomainPurchaseWidget } from "./domain-purchase-widget";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
+import { SupportReportLink } from "@/components/support-report-link";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -4805,9 +4806,17 @@ export function PublishingTab({
                         >
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                           <span>
-                            {bandwidthData.atHardCap
-                              ? "Hard cap reached. Contact support to increase your bandwidth allowance."
-                              : "Approaching bandwidth limit (80%+ used this month)."}
+                            {bandwidthData.atHardCap ? (
+                              <>
+                                Hard cap reached.{" "}
+                                <SupportReportLink>
+                                  Ask support to increase the allowance
+                                </SupportReportLink>
+                                .
+                              </>
+                            ) : (
+                              "Approaching bandwidth limit (80%+ used this month)."
+                            )}
                           </span>
                         </div>
                       )}

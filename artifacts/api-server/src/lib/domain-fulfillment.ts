@@ -15,6 +15,7 @@ import { namecheapEnabled, register, getPricing, type WhoisContact } from "./nam
 import { publishDomainEvent } from "./event-bus";
 import { logger } from "./logger";
 import { randomBytes } from "crypto";
+import { SUPPORT_EMAIL_ADDRESS } from "./support-contact";
 
 function randomHex(): string {
   return randomBytes(12).toString("hex");
@@ -23,7 +24,7 @@ function randomHex(): string {
 const DEFAULT_CONTACT: WhoisContact = {
   firstName: "MustaFlow",
   lastName: "User",
-  email: "noreply@mustaflow.app",
+  email: SUPPORT_EMAIL_ADDRESS,
   phone: "+1.5005550001",
   address: "1 Main St",
   city: "San Francisco",
@@ -109,7 +110,7 @@ export async function fulfillDomainPurchase(
         "Namecheap registration failed after payment",
       );
       throw new Error(
-        `Domain registration failed: ${result?.error ?? "Unknown Namecheap error"}. Your payment was captured — contact support.`,
+        `Domain registration failed: ${result?.error ?? "Unknown Namecheap error"}. Your payment was captured — report this issue at /help?mode=report.`,
       );
     }
     namecheapOrderId = result.orderId;

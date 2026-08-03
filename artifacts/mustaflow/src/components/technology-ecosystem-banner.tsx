@@ -401,26 +401,6 @@ const BRANDS: Brand[] = [
       );
     },
   },
-  {
-    id: "mechconnect",
-    label: "MechConnect — built on this platform",
-    render: () => (
-      <div className="flex items-center gap-3">
-        <img
-          src={`${import.meta.env.BASE_URL}logos/mechconnect.jpg`}
-          alt=""
-          aria-hidden="true"
-          className="h-8 w-8 rounded-lg object-contain"
-        />
-        <span
-          className="text-2xl font-bold tracking-tight whitespace-nowrap"
-          style={{ color: "hsl(213 90% 48%)" }}
-        >
-          MechConnect
-        </span>
-      </div>
-    ),
-  },
 ];
 
 const SEPARATOR = (

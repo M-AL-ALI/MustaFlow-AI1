@@ -372,7 +372,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         "Content safety scan blocked publish",
       );
       res.status(422).json({
-        error: `Publish blocked: content safety scan found ${scanResult.violations.filter((v) => v.severity === "block").length} violation(s). Review or contact support if this is a false positive.`,
+        error: `Publish blocked: content safety scan found ${scanResult.violations.filter((v) => v.severity === "block").length} violation(s). Review it or report a false positive at /help?mode=report.`,
         code: "content_safety_violation",
         violations: scanResult.violations
           .filter((v) => v.severity === "block")

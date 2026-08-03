@@ -34,11 +34,12 @@ import { r2GetObject } from "../lib/cloudflare";
 import { logger } from "../lib/logger";
 import { subscribeDomainEvents } from "../lib/event-bus";
 import { recordHostnameSighting } from "../routes/domains";
+import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
 // Static 451 page returned for suspended domains
-const SUSPENDED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Content Unavailable</title><style>body{font-family:system-ui,sans-serif;padding:48px;color:#9ca3af;background:#0a0f1c;max-width:600px;margin:0 auto}h1{color:#fff}a{color:#6366f1}</style></head><body><h1>Content Unavailable</h1><p>This site has been suspended for a violation of our <a href="https://mustaflow.app/terms">Terms of Service</a>.</p><p>If you believe this is an error, please contact <a href="mailto:support@mustaflow.app">support@mustaflow.app</a>.</p><p style="font-size:0.8rem;margin-top:2rem;opacity:0.5">HTTP 451 — Unavailable For Legal Reasons</p></body></html>`;
+const SUSPENDED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Content Unavailable</title><style>body{font-family:system-ui,sans-serif;padding:48px;color:#9ca3af;background:#0a0f1c;max-width:600px;margin:0 auto}h1{color:#fff}a{color:#6366f1}</style></head><body><h1>Content Unavailable</h1><p>This site has been suspended for a violation of our <a href="https://mustaflow.app/terms">Terms of Service</a>.</p><p>If you believe this is an error, please contact <a href="mailto:${SUPPORT_EMAIL_ADDRESS}">${SUPPORT_EMAIL_ADDRESS}</a>.</p><p style="font-size:0.8rem;margin-top:2rem;opacity:0.5">HTTP 451 — Unavailable For Legal Reasons</p></body></html>`;
 
 // ── In-memory routing table ──────────────────────────────────────────────────
 // Map from hostname to project row data.

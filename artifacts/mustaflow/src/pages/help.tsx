@@ -533,10 +533,10 @@ function SupportChat() {
           ticket.
         </p>
         <a
-          href="mailto:support@mustaflow.app"
+          href="mailto:support@mustaflow.com"
           className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
-          Email support@mustaflow.app
+          Email support@mustaflow.com
         </a>
         <div>
           <button
@@ -683,7 +683,7 @@ function SupportChat() {
                   : escalateResult.emailStatus === "failed"
                     ? `Ticket #${escalateResult.ticketId} created, but email notification failed; staff can still see it in the support inbox.`
                     : escalateResult.emailStatus === "skipped"
-                      ? `Ticket #${escalateResult.ticketId} created, but support email is not configured; staff must review the support inbox.`
+                      ? `Ticket #${escalateResult.ticketId} created, but email delivery was unavailable; staff can still see it in the support inbox.`
                       : `Ticket #${escalateResult.ticketId} created. Our team will review it shortly.`}
               </p>
               <Link

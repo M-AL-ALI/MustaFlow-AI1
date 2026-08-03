@@ -67,7 +67,7 @@ function TestEmailButton() {
         setDetail(body.error ?? "Email delivery is not configured.");
       } else if (body.ok && body.emailStatus === "sent") {
         setState("ok");
-        setDetail(`Sent to ${body.recipient ?? "SUPPORT_EMAIL"}.`);
+        setDetail(`Sent to ${body.recipient ?? "support@mustaflow.com"}.`);
       } else {
         setState("err");
         setDetail(body.error ?? `Resend returned: ${body.emailStatus ?? "unknown"}`);
@@ -96,7 +96,7 @@ function TestEmailButton() {
         onClick={() => void handleClick()}
         disabled={state === "loading"}
         className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-        title="Send a diagnostic test email to SUPPORT_EMAIL"
+        title="Send a diagnostic test email to the support inbox"
       >
         {icon}
         Test email

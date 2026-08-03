@@ -116,7 +116,10 @@ export function Sidebar() {
       </nav>
 
       <div style={{ padding: "8px 8px 12px", borderTop: "1px solid var(--border)" }}>
-        <button
+        <a
+          href="https://www.mustaflow.com/help?mode=report"
+          target="_blank"
+          rel="noreferrer"
           style={{
             display: "flex",
             alignItems: "center",
@@ -131,11 +134,12 @@ export function Sidebar() {
             border: "none",
             textAlign: "left",
             marginBottom: 2,
+            textDecoration: "none",
           }}
         >
           <HelpCircle size={15} />
           Help &amp; Support
-        </button>
+        </a>
         <button
           onClick={() => void signOut()}
           style={{

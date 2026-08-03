@@ -38,6 +38,7 @@ import {
   invalidateStripeCredentialCache,
 } from "../lib/stripeClient";
 import { activateSslForDomain } from "./ssl";
+import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
 import { publishDomainEvent } from "../lib/event-bus";
 import { logger } from "../lib/logger";
 
@@ -519,7 +520,7 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
   const defaultContact: WhoisContact = contact ?? {
     firstName: "MustaFlow",
     lastName: "User",
-    email: "noreply@mustaflow.app",
+    email: SUPPORT_EMAIL_ADDRESS,
     phone: "+1.5005550001",
     address: "1 Main St",
     city: "San Francisco",
@@ -542,7 +543,7 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
       res.status(502).json({
         error: `Domain registration failed: ${result?.error ?? "Unknown Namecheap error"}`,
         paymentSucceeded: true,
-        note: "Your payment was captured. Please contact support to complete the registration.",
+        note: "Your payment was captured. Report this issue at /help?mode=report to complete the registration.",
       });
       return;
     }
@@ -923,7 +924,7 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
   const defaultContact: WhoisContact = contact ?? {
     firstName: "MustaFlow",
     lastName: "User",
-    email: "noreply@mustaflow.app",
+    email: SUPPORT_EMAIL_ADDRESS,
     phone: "+1.5005550001",
     address: "1 Main St",
     city: "San Francisco",
@@ -941,7 +942,7 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
       res.status(502).json({
         error: `Transfer initiation failed: ${result?.error ?? "Unknown Namecheap error"}`,
         paymentSucceeded: true,
-        note: "Your payment was captured. Please contact support.",
+        note: "Your payment was captured. Report this issue at /help?mode=report.",
       });
       return;
     }
@@ -1048,7 +1049,7 @@ router.patch("/domains/purchased/:id/whois", async (req, res): Promise<void> => 
   const fullContact: WhoisContact = {
     firstName: contact.firstName ?? domain.whoisFirstName ?? "MustaFlow",
     lastName: contact.lastName ?? domain.whoisLastName ?? "User",
-    email: contact.email ?? domain.whoisEmail ?? "noreply@mustaflow.app",
+    email: contact.email ?? domain.whoisEmail ?? SUPPORT_EMAIL_ADDRESS,
     phone: contact.phone ?? domain.whoisPhone ?? "+1.5005550001",
     address: contact.address ?? domain.whoisAddress ?? "1 Main St",
     city: contact.city ?? domain.whoisCity ?? "San Francisco",

@@ -35,6 +35,7 @@ import { recordHealthCheck } from "./prodLogs";
 import { writeKnowledge } from "./knowledge";
 import { parseCron, nextCronTick } from "./cron-eval";
 import { enqueueJob } from "./jobs";
+import { resolveDefaultSender } from "./support-contact";
 
 const SWEEP_INTERVAL_MS = 60_000;
 const UPTIME_INTERVAL_MS = 5 * 60_000;
@@ -346,7 +347,7 @@ async function maybeSendUptimeAlert(opts: {
   }
 
   try {
-    const fromAddr = process.env.RESEND_FROM ?? "alerts@mustaflow.app";
+    const fromAddr = resolveDefaultSender("RESEND_FROM");
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {

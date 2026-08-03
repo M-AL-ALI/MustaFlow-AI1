@@ -475,7 +475,7 @@ describe("POST /help/support/escalate", () => {
 
   it("persists the ticket BEFORE attempting email and returns the email status", async () => {
     authedUser();
-    process.env.SUPPORT_EMAIL = "help@mustaflow.app";
+    process.env.SUPPORT_EMAIL = "support-override@example.com";
     dbResults.push([{ id: 555 }]); // insert ticket returning
     dbResults.push([]); // update emailStatus
     const app = await buildApp();
@@ -495,7 +495,7 @@ describe("POST /help/support/escalate", () => {
     expect(insertCallOrder).toBeLessThan(emailOrder);
   });
 
-  it("persists with email_status='skipped' when email is unconfigured", async () => {
+  it("persists with email_status='skipped' when the email client skips delivery", async () => {
     authedUser();
     vi.mocked(sendEmailWithStatus).mockResolvedValue("skipped");
     dbResults.push([{ id: 1 }]);
@@ -508,7 +508,7 @@ describe("POST /help/support/escalate", () => {
     expect(res.body.emailStatus).toBe("skipped");
   });
 
-  it("saves ticket with null supportEmailUsed when SUPPORT_EMAIL is unset (no fallback)", async () => {
+  it("uses the company support address when SUPPORT_EMAIL is unset", async () => {
     authedUser();
     dbResults.push([{ id: 9 }]);
     dbResults.push([]);
@@ -517,20 +517,22 @@ describe("POST /help/support/escalate", () => {
       .post("/help/support/escalate")
       .send({ subject: "x", transcript: [] });
     expect(res.status).toBe(201);
-    expect(res.body.supportEmailUsed).toBeNull();
-    expect(res.body.emailStatus).toBe("skipped");
+    expect(res.body.supportEmailUsed).toBe("support@mustaflow.com");
+    expect(vi.mocked(sendEmailWithStatus)).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "support@mustaflow.com" }),
+    );
   });
 
   it("honours SUPPORT_EMAIL when configured", async () => {
     authedUser();
-    process.env.SUPPORT_EMAIL = "team@mustaflow.app";
+    process.env.SUPPORT_EMAIL = "support-override@example.com";
     dbResults.push([{ id: 9 }]);
     dbResults.push([]);
     const app = await buildApp();
     const res = await request(app)
       .post("/help/support/escalate")
       .send({ subject: "x", transcript: [] });
-    expect(res.body.supportEmailUsed).toBe("team@mustaflow.app");
+    expect(res.body.supportEmailUsed).toBe("support-override@example.com");
   });
 
   it("drops a foreign projectId (ownership not verified)", async () => {

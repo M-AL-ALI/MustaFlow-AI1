@@ -199,7 +199,16 @@ export function SettingsScreen() {
           </button>
           {diagnosticsPath && (
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Saved to {diagnosticsPath}
+              Saved to {diagnosticsPath}. Send it to{" "}
+              <a
+                href="mailto:support@mustaflow.com"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "var(--accent)" }}
+              >
+                support@mustaflow.com
+              </a>
+              .
             </span>
           )}
         </div>
