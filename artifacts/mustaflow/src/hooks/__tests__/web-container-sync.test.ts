@@ -12,6 +12,7 @@ function payload(
 ): ProjectFilesChangedPayload {
   return {
     projectId: 34,
+    revision: 75,
     operationType: "build",
     changedPaths: Object.keys(files),
     removedPaths: [],
@@ -22,6 +23,8 @@ function payload(
     requiresRestart: Object.keys(files).some(
       (path) => path.startsWith("vite.config.") || path.startsWith("tsconfig"),
     ),
+    generatedAt: "2026-07-29T15:24:06.132Z",
+    authoritative: false,
     ...options,
   };
 }
@@ -106,10 +109,7 @@ describe("WebContainerSyncController", () => {
     controller.seed([{ path: "src/App.tsx", content: "old" }]);
 
     const queued = controller.enqueue(
-      payload(
-        { "src/App.tsx": "new" },
-        { requiresInstall: true, requiresRestart: true },
-      ),
+      payload({ "src/App.tsx": "new" }, { requiresInstall: true, requiresRestart: true }),
     );
     const result = await controller.flushNow();
     await queued;
@@ -132,6 +132,40 @@ describe("WebContainerSyncController", () => {
 
     expect(adapter.installDependencies).toHaveBeenCalledOnce();
     expect(adapter.restartDevServer).not.toHaveBeenCalled();
+  });
+
+  it("removes paths absent from an authoritative revision and reports sync readiness", async () => {
+    const adapter = createAdapter();
+    const timing = vi.fn();
+    const controller = new WebContainerSyncController(adapter, {
+      debounceMs: 1_000,
+      now: () => Date.parse("2026-08-02T23:17:21.398Z"),
+      onTiming: timing,
+    });
+    controller.seed([
+      { path: "src/App.tsx", content: "old" },
+      { path: "src/Removed.tsx", content: "remove me" },
+    ]);
+
+    const queued = controller.enqueue(
+      payload({ "src/App.tsx": "new" }, { revision: 81, authoritative: true }),
+    );
+    await controller.flushNow();
+    await queued;
+
+    expect(adapter.removeFile).toHaveBeenCalledWith("src/Removed.tsx");
+    expect(timing).toHaveBeenNthCalledWith(
+      1,
+      "sync_finish",
+      expect.objectContaining({ revision: 81 }),
+      "2026-08-02T23:17:21.398Z",
+    );
+    expect(timing).toHaveBeenNthCalledWith(
+      2,
+      "webcontainer_ready",
+      expect.objectContaining({ revision: 81 }),
+      "2026-08-02T23:17:21.398Z",
+    );
   });
 
   it("engages one safety warning after three lifecycle cycles in a minute", async () => {

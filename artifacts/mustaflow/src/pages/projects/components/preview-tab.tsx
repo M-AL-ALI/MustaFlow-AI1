@@ -45,6 +45,7 @@ import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-container";
 import type { ProjectFilesChangedPayload } from "@/lib/event-types";
+import { logPreviewTiming } from "@/lib/preview-reconciliation";
 import { cn } from "@/lib/utils";
 import {
   useListProjectFiles,
@@ -157,6 +158,10 @@ type PreviewTabProps = {
   filesPayloadRef?: React.RefObject<ProjectFilesChangedPayload | null>;
   /** Increments each time a new files payload arrives — triggers the WC sync effect. */
   filesPayloadSeq?: number;
+  /** Called only after file sync, dependency install, and dev-server readiness complete. */
+  onPreviewRevisionApplied?: (payload: ProjectFilesChangedPayload) => void;
+  /** Called when an authoritative revision cannot be applied to the WebContainer. */
+  onPreviewRevisionFailed?: (payload: ProjectFilesChangedPayload) => void;
   /** A page-map card can request a concrete route without coupling to Preview internals. */
   navigationRequest?: { path: string; requestId: number } | null;
   /**
@@ -199,6 +204,8 @@ export function PreviewTab({
   refreshTrigger,
   filesPayloadRef,
   filesPayloadSeq,
+  onPreviewRevisionApplied,
+  onPreviewRevisionFailed,
   navigationRequest,
   isTaskStaged,
 }: PreviewTabProps) {
@@ -244,6 +251,45 @@ export function PreviewTab({
   const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>(isMobile ? "mobile" : "desktop");
   const [iframeKey, setIframeKey] = useState(0);
+  const activePreviewSyncRef = useRef<Promise<void> | null>(null);
+  const syncFromBackend = wc.syncFromBackend;
+  const syncPreviewPayload = useCallback(
+    (payload: ProjectFilesChangedPayload, reloadAfter = false): Promise<void> => {
+      const run = async (): Promise<void> => {
+        const syncStartedAt = new Date().toISOString();
+        logPreviewTiming({
+          phase: "sync_start",
+          projectId: payload.projectId,
+          revision: payload.revision,
+          backendEmittedAt: payload.generatedAt,
+          syncStartedAt,
+        });
+        try {
+          // Resolves only after writes, dependency installation, and any required
+          // dev-server restart have reached WebContainer readiness.
+          await syncFromBackend(payload);
+          onPreviewRevisionApplied?.(payload);
+          if (reloadAfter) setIframeKey((key) => key + 1);
+        } catch (error) {
+          logPreviewTiming({
+            phase: "sync_failed",
+            projectId: payload.projectId,
+            revision: payload.revision,
+            syncStartedAt,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          onPreviewRevisionFailed?.(payload);
+        }
+      };
+      const active = run();
+      activePreviewSyncRef.current = active;
+      void active.finally(() => {
+        if (activePreviewSyncRef.current === active) activePreviewSyncRef.current = null;
+      });
+      return active;
+    },
+    [onPreviewRevisionApplied, onPreviewRevisionFailed, syncFromBackend],
+  );
   const prevRefreshTriggerRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (refreshTrigger === undefined) return;
@@ -261,14 +307,14 @@ export function PreviewTab({
       const remaining = filesPayloadRef?.current ?? null;
       if (remaining && wc.status === "ready") {
         if (filesPayloadRef) filesPayloadRef.current = null;
-        void wc.syncFromBackend(remaining).then(() => {
-          setIframeKey((k) => k + 1);
-        });
+        void syncPreviewPayload(remaining, true);
+      } else if (activePreviewSyncRef.current) {
+        void activePreviewSyncRef.current.then(() => setIframeKey((key) => key + 1));
       } else {
         setIframeKey((k) => k + 1);
       }
     }
-  }, [refreshTrigger, filesPayloadRef, wc]);
+  }, [refreshTrigger, filesPayloadRef, syncPreviewPayload, wc.status]);
 
   // When a project_files_changed SSE event arrives, sync files into the WebContainer
   // filesystem so Vite HMR can deliver the update without a full iframe reload.
@@ -279,13 +325,13 @@ export function PreviewTab({
   useEffect(() => {
     if (filesPayloadSeq === undefined) return;
     if (prevFilesPayloadSeqRef.current === filesPayloadSeq) return;
-    prevFilesPayloadSeqRef.current = filesPayloadSeq;
     if (!filesPayloadRef?.current) return;
     if (wc.status !== "ready") return;
+    prevFilesPayloadSeqRef.current = filesPayloadSeq;
     const payload = filesPayloadRef.current;
     filesPayloadRef.current = null; // clear before await — prevents double-apply
-    void wc.syncFromBackend(payload);
-  }, [filesPayloadSeq, filesPayloadRef, wc]);
+    void syncPreviewPayload(payload);
+  }, [filesPayloadSeq, filesPayloadRef, syncPreviewPayload, wc.status]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -457,12 +503,15 @@ export function PreviewTab({
                 const content = await fileRes.text();
                 await wc.syncFromBackend({
                   projectId: project.id,
+                  revision: 0,
                   changedPaths: [json.filePath],
                   files: { [json.filePath]: content },
                   removedPaths: [],
                   operationType: "visual-edit",
                   requiresInstall: false,
                   requiresRestart: false,
+                  generatedAt: new Date().toISOString(),
+                  authoritative: false,
                 });
               }
             } catch {

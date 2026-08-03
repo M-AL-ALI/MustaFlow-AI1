@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { WebContainer, FileSystemTree } from "@webcontainer/api";
 import { getProjectAllFileContent } from "@workspace/api-client-react";
 import type { ProjectFilesChangedPayload } from "@/lib/event-types";
+import { logPreviewTiming } from "@/lib/preview-reconciliation";
 import {
   hashWebContainerContent,
   isDevServerConfigPath,
@@ -31,6 +32,7 @@ export type WebContainerLog = {
  */
 export interface BackendFilesPayload {
   projectId: number;
+  revision: number;
   operationType: string;
   /** All paths that changed (includes files excluded from `files` map due to size/binary). */
   changedPaths: string[];
@@ -43,6 +45,7 @@ export interface BackendFilesPayload {
   /** True when a config that requires a dev-server restart changed. */
   requiresRestart: boolean;
   generatedAt: string;
+  authoritative?: boolean;
 }
 
 export interface UseWebContainerResult {
@@ -214,79 +217,94 @@ export function useWebContainer({
             stopListening = wc.on("server-ready", finish);
           });
 
-        const syncController = new WebContainerSyncController({
-          writeFile: async (path, content) => {
-            const segments = path.split("/");
-            if (segments.length > 1) {
-              await wc.fs.mkdir(segments.slice(0, -1).join("/"), { recursive: true });
-            }
-            await wc.fs.writeFile(path, content);
-          },
-          removeFile: async (path) => {
-            await wc.fs.rm(path);
-          },
-          installDependencies: async (changedFiles) => {
-            addLog("[WC] Dependency manifest changed — running npm install once…");
-            try {
-              const installProcess = await wc.spawn("npm", ["install"]);
-              installProcess.output.pipeTo(
-                new WritableStream({
-                  write(chunk: string) {
-                    addLog(chunk);
-                  },
-                }),
-              );
-              const exitCode = await installProcess.exit;
-              if (!mountedRef.current || projectIdRef.current !== pid) return false;
-              if (exitCode !== 0) {
-                addLog("[WC] npm install failed — keeping the current dev server running.");
+        const syncController = new WebContainerSyncController(
+          {
+            writeFile: async (path, content) => {
+              const segments = path.split("/");
+              if (segments.length > 1) {
+                await wc.fs.mkdir(segments.slice(0, -1).join("/"), { recursive: true });
+              }
+              await wc.fs.writeFile(path, content);
+            },
+            removeFile: async (path) => {
+              await wc.fs.rm(path);
+            },
+            installDependencies: async (changedFiles) => {
+              addLog("[WC] Dependency manifest changed — running npm install once…");
+              try {
+                const installProcess = await wc.spawn("npm", ["install"]);
+                installProcess.output.pipeTo(
+                  new WritableStream({
+                    write(chunk: string) {
+                      addLog(chunk);
+                    },
+                  }),
+                );
+                const exitCode = await installProcess.exit;
+                if (!mountedRef.current || projectIdRef.current !== pid) return false;
+                if (exitCode !== 0) {
+                  addLog("[WC] npm install failed — keeping the current dev server running.");
+                  return false;
+                }
+
+                const packageJson = changedFiles.find((file) => file.path === "package.json");
+                if (packageJson?.content !== undefined) {
+                  _installHashCache.set(pid, hashWebContainerContent(packageJson.content));
+                }
+                return true;
+              } catch (err) {
+                addLog(
+                  `[WC] npm install error — keeping the current dev server running: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                );
                 return false;
               }
+            },
+            restartDevServer: async () => {
+              devProcessRef.current?.kill();
+              devProcessRef.current = null;
+              if (!mountedRef.current || projectIdRef.current !== pid) return;
 
-              const packageJson = changedFiles.find((file) => file.path === "package.json");
-              if (packageJson?.content !== undefined) {
-                _installHashCache.set(pid, hashWebContainerContent(packageJson.content));
+              setStatus("starting");
+              addLog("[WC] Dev-server config changed — restarting once…");
+              try {
+                const ready = waitForServerReady();
+                const devProcess = await wc.spawn("npm", ["run", "dev"]);
+                devProcessRef.current = devProcess;
+                devProcess.output.pipeTo(
+                  new WritableStream({
+                    write(chunk: string) {
+                      addLog(chunk);
+                    },
+                  }),
+                );
+                await ready;
+              } catch (err) {
+                setStatus("error");
+                addLog(
+                  `[WC] Dev server restart failed: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                );
               }
-              return true;
-            } catch (err) {
-              addLog(
-                `[WC] npm install error — keeping the current dev server running: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
-              return false;
-            }
+            },
+            warn: addLog,
           },
-          restartDevServer: async () => {
-            devProcessRef.current?.kill();
-            devProcessRef.current = null;
-            if (!mountedRef.current || projectIdRef.current !== pid) return;
-
-            setStatus("starting");
-            addLog("[WC] Dev-server config changed — restarting once…");
-            try {
-              const ready = waitForServerReady();
-              const devProcess = await wc.spawn("npm", ["run", "dev"]);
-              devProcessRef.current = devProcess;
-              devProcess.output.pipeTo(
-                new WritableStream({
-                  write(chunk: string) {
-                    addLog(chunk);
-                  },
-                }),
-              );
-              await ready;
-            } catch (err) {
-              setStatus("error");
-              addLog(
-                `[WC] Dev server restart failed: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
-            }
+          {
+            onTiming: (phase, payload, timestamp) => {
+              if (payload.revision <= 0) return;
+              logPreviewTiming({
+                phase,
+                projectId: payload.projectId,
+                revision: payload.revision,
+                ...(phase === "sync_finish"
+                  ? { syncFinishedAt: timestamp }
+                  : { webContainerReadyAt: timestamp }),
+              });
+            },
           },
-          warn: addLog,
-        });
+        );
         syncController.seed(files);
         syncControllerRef.current = syncController;
 
@@ -358,12 +376,15 @@ export function useWebContainer({
   const syncFile = useCallback(async (path: string, content: string) => {
     await syncControllerRef.current?.enqueue({
       projectId: projectIdRef.current,
+      revision: 0,
       operationType: "manual-save",
       changedPaths: [path],
       removedPaths: [],
       files: { [path]: content },
       requiresInstall: isPackageDependencyPath(path),
       requiresRestart: isDevServerConfigPath(path),
+      generatedAt: new Date().toISOString(),
+      authoritative: false,
     });
   }, []);
 

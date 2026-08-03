@@ -12,6 +12,7 @@ const readSource = (path: string): string => readFileSync(resolve(repoRoot, path
 const jobsSource = readSource("artifacts/api-server/src/lib/jobs.ts");
 const versionsSource = readSource("artifacts/api-server/src/routes/versions.ts");
 const filesSource = readSource("artifacts/api-server/src/routes/files.ts");
+const eventsSource = readSource("artifacts/api-server/src/routes/events.ts");
 const previewEnvSource = readSource("artifacts/api-server/src/routes/preview-env.ts");
 const livePreviewProxySource = readSource("artifacts/api-server/src/lib/livePreviewProxy.ts");
 const projectFilesPreviewSource = readSource(
@@ -28,6 +29,7 @@ describe("Preview Architecture Fix regression coverage", () => {
   it("builds the project_files_changed payload shape consumed by the frontend", () => {
     const payload = buildProjectFilesChangedPayload(
       1,
+      75,
       [{ path: "src/App.tsx", content: "export default null;" }],
       ["src/Old.tsx"],
       "apply",
@@ -35,6 +37,7 @@ describe("Preview Architecture Fix regression coverage", () => {
 
     expect(payload).toMatchObject({
       projectId: 1,
+      revision: 75,
       operationType: "apply",
       changedPaths: ["src/App.tsx"],
       removedPaths: ["src/Old.tsx"],
@@ -43,6 +46,14 @@ describe("Preview Architecture Fix regression coverage", () => {
       requiresRestart: false,
     });
     expect(payload.generatedAt).toEqual(expect.any(String));
+  });
+
+  it("exposes monotonic preview metadata and blocks staged review reconciliation", () => {
+    expect(eventsSource).toContain('"/projects/:id/preview-state"');
+    expect(eventsSource).toContain("projectVersionsTable.id");
+    expect(eventsSource).toContain("STAGED_PREVIEW_STATUSES");
+    expect(eventsSource).toContain("reconciliationAllowed: !stagedTask");
+    expect(eventsSource).toContain('res.setHeader("Cache-Control", "no-store")');
   });
 
   it("manual editor save publishes project_files_changed", () => {
@@ -64,7 +75,7 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(jobsSource).toContain("const currentFileRows = await db");
     expect(jobsSource).toContain("const appliedPathSet = new Set(builderFiles.map((f) => f.path))");
     expect(jobsSource).toContain(
-      'emitFilesChangedEvent(taskId, projectId, builderFiles, removedPaths, "apply")',
+      'emitFilesChangedEvent(taskId, projectId, version.id, builderFiles, removedPaths, "apply")',
     );
   });
 
@@ -77,6 +88,7 @@ describe("Preview Architecture Fix regression coverage", () => {
   it("Apply payloads keep removed files out of files and in removedPaths", () => {
     const payload = buildProjectFilesChangedPayload(
       1,
+      76,
       [{ path: "src/App.tsx", content: "new" }],
       ["src/Deleted.tsx"],
       "apply",
@@ -88,6 +100,7 @@ describe("Preview Architecture Fix regression coverage", () => {
   it("Rollback payloads keep removed files out of files and in removedPaths", () => {
     const payload = buildProjectFilesChangedPayload(
       1,
+      77,
       [{ path: "src/App.tsx", content: "restored" }],
       ["src/Newer.tsx"],
       "rollback",
@@ -99,6 +112,7 @@ describe("Preview Architecture Fix regression coverage", () => {
   it("safe payload builder strips secret, binary, and oversized content", () => {
     const payload = buildProjectFilesChangedPayload(
       1,
+      78,
       [
         { path: ".env", content: "SECRET=value" },
         { path: "public/logo.png", content: "png\0bytes" },
@@ -196,7 +210,7 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(jobsSource).toContain("syncAgenticPreviewRuntime");
     expect(jobsSource).toContain("Syncing project files to preview container");
     expect(jobsSource).toContain("pollPreviewReachability");
-    expect(jobsSource).toContain("publishPreviewReady(opts.projectId)");
+    expect(jobsSource).toContain("publishPreviewReady(opts.projectId, opts.revision)");
   });
 
   it("Agent Zero build/refine syncs and restarts the live preview runtime", () => {

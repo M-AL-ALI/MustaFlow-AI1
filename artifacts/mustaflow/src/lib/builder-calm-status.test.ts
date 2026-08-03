@@ -21,6 +21,15 @@ describe("builder calm status", () => {
     );
   });
 
+  it("keeps preview reconciliation visible until WebContainer readiness", () => {
+    expect(
+      getCalmBuilderStatus({
+        phase: "idle",
+        previewSyncPending: true,
+      }),
+    ).toBe("Updating preview\u2026");
+  });
+
   it("collapses internal task events into one calm phase", () => {
     expect(calmPhaseForTaskEvent("file_diff")).toBe("building");
     expect(calmPhaseForTaskEvent("command_output")).toBe("testing");

@@ -63,11 +63,7 @@ import { logger } from "./logger";
 import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
-import {
-  getOrCreateCredits,
-  refundCredits,
-  CREDITS_ENFORCEMENT_ENABLED,
-} from "../routes/credits";
+import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
 import { isSuperuser } from "./superusers";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
@@ -920,6 +916,7 @@ async function finalizeAgentTaskWithEvent(input: {
 function emitFilesChangedEvent(
   taskId: number,
   projectId: number,
+  revision: number,
   files: BuilderFile[],
   removedPaths: string[],
   operationType: ProjectFilesChangedPayload["operationType"],
@@ -927,6 +924,7 @@ function emitFilesChangedEvent(
   try {
     const payload = publishProjectFilesChanged(
       projectId,
+      revision,
       files.map((f) => ({ path: f.path, content: f.content })),
       removedPaths,
       operationType,
@@ -3189,7 +3187,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const { injectHealthEndpoint } = await import("./health-inject");
           const filesWithHealth = injectHealthEndpoint(result.files, project.stack ?? null);
           await writeFiles(projectId, filesWithHealth, true);
-          emitFilesChangedEvent(taskId, projectId, filesWithHealth, [], "build");
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
         diffSummary = computeBuildDiff(result.files);
@@ -3922,19 +3919,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             await deleteFiles(projectId, result.removedPaths);
           }
         }
-        // Emit project_files_changed after both writeFiles and deleteFiles complete
-        // so removedPaths are accurate and the WebContainer FS doesn't drift.
         if (
           agentIdentity !== "task" &&
           (result.changedFiles.length > 0 || result.removedPaths.length > 0)
         ) {
-          emitFilesChangedEvent(
-            taskId,
-            projectId,
-            result.changedFiles,
-            result.removedPaths,
-            "refine",
-          );
           void staleDraftCandidate(projectId, "refine").catch(() => {});
         }
         if (agentIdentity === "task") {
@@ -4070,7 +4058,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           if (repairLoopResult) {
             if (repairLoopResult.changedFiles.length > 0) {
               await writeFiles(projectId, repairLoopResult.changedFiles, false);
-              emitFilesChangedEvent(taskId, projectId, repairLoopResult.changedFiles, [], "refine");
               repairChangedPaths.push(...repairLoopResult.changedFiles.map((f) => f.path));
               filesToSmellScan = repairLoopResult.changedFiles;
               for (const f of repairLoopResult.changedFiles) {
@@ -4873,37 +4860,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         });
       }
 
-      // ── Emit project_files_changed before preview refresh ──────────────────
-      // Always publish to the project-level preview channel so every open tab
-      // receives the FS update regardless of whether the AI Builder panel is open.
-      // Also attach the structured payload to the task event so reconnecting
-      // clients can replay it from the task event history.
-      if (filesToSmellScan.length > 0) {
-        try {
-          const removedPathsForEvent = diffSummary?.filesRemoved ?? [];
-          const filesPayload = publishProjectFilesChanged(
-            projectId,
-            filesToSmellScan.map((f) => ({ path: f.path, content: f.content })),
-            removedPathsForEvent,
-            "build",
-          );
-          // Also store the payload on the task event so SSE replay includes it
-          await emitEvent(
-            taskId,
-            "project_files_changed",
-            `${filesToSmellScan.length} file(s) updated`,
-            undefined,
-            filesPayload as unknown as Record<string, unknown>,
-          );
-        } catch (previewEmitErr) {
-          logger.warn(
-            { err: previewEmitErr, projectId, taskId },
-            "project_files_changed emit failed (non-fatal)",
-          );
-        }
-      }
-      // ── End project_files_changed emit ───────────────────────────────────────
-
       await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
       // ── Preview reachability verification ───────────────────────────────────
@@ -4922,6 +4878,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         const runtimePreviewResult = await syncAgenticPreviewRuntime({
           projectId,
           taskId,
+          revision: version?.id ?? null,
+          publishLifecycleEvents: false,
           containerId: project.containerId,
           containerStatus: project.containerStatus,
           containerUrl: project.containerUrl,
@@ -5135,13 +5093,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 await deleteFiles(projectId, appliedRemovedPaths);
               }
               if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
-                emitFilesChangedEvent(
-                  taskId,
-                  projectId,
-                  appliedChangedFiles,
-                  appliedRemovedPaths,
-                  "refine",
-                );
                 for (const file of appliedChangedFiles) {
                   await emitEvent(taskId, "editing_files", `Repairing ${file.path}`, file.path);
                 }
@@ -5182,6 +5133,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   const runtimePreviewResult = await syncAgenticPreviewRuntime({
                     projectId,
                     taskId,
+                    revision: version?.id ?? null,
+                    publishLifecycleEvents: false,
                     containerId: project.containerId,
                     containerStatus: report.previewUpdated ? "running" : project.containerStatus,
                     containerUrl: project.containerUrl,
@@ -5310,6 +5263,46 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               })
               .where(eq(projectVersionsTable.id, version.id));
           }
+        }
+      }
+
+      // Publish exactly one authoritative browser-preview payload for this
+      // committed version. Earlier generation/repair bursts are intentionally
+      // consolidated so reconnecting clients never apply multiple contents for
+      // the same monotonic revision.
+      if (version?.id) {
+        try {
+          const filesPayload = publishProjectFilesChanged(
+            projectId,
+            version.id,
+            snapshot.map((file) => ({ path: file.path, content: file.content })),
+            diffSummary?.filesRemoved ?? [],
+            kind === "build" ? "build" : "refine",
+          );
+          await emitEvent(
+            taskId,
+            "project_files_changed",
+            `${snapshot.length} file(s) synchronized at preview revision ${version.id}`,
+            undefined,
+            filesPayload as unknown as Record<string, unknown>,
+          );
+
+          if (project.containerId || project.containerUrl) {
+            if (report.previewUpdated === true) {
+              publishPreviewReady(projectId, version.id);
+            } else if (report.previewSyncFailed === true) {
+              publishPreviewSyncFailed(
+                projectId,
+                version.id,
+                "Preview runtime sync did not reach a ready state.",
+              );
+            }
+          }
+        } catch (previewEmitErr) {
+          logger.warn(
+            { err: previewEmitErr, projectId, taskId, revision: version.id },
+            "Authoritative project_files_changed emit failed (non-fatal)",
+          );
         }
       }
 
@@ -6900,6 +6893,8 @@ function isRuntimeManifestPath(path: string): boolean {
 async function syncAgenticPreviewRuntime(opts: {
   projectId: number;
   taskId: number;
+  revision: number | null;
+  publishLifecycleEvents?: boolean;
   containerId: string | null;
   containerStatus: string | null;
   containerUrl: string | null;
@@ -6915,11 +6910,15 @@ async function syncAgenticPreviewRuntime(opts: {
     previewSyncFailed: false,
     warnings: [],
   };
+  const publishFailure = (warning: string): void => {
+    if (opts.publishLifecycleEvents === false || !opts.revision) return;
+    publishPreviewSyncFailed(opts.projectId, opts.revision, warning);
+  };
 
   if (!opts.containerUrl) {
     if (opts.containerId) {
       const warning = "Preview sync failed: this container-backed project has no preview URL.";
-      publishPreviewSyncFailed(opts.projectId, warning);
+      publishFailure(warning);
       return { ...base, previewSyncFailed: true, warnings: [warning] };
     }
     return { ...base, previewUpdated: true, previewSyncQueued: true };
@@ -6984,7 +6983,7 @@ async function syncAgenticPreviewRuntime(opts: {
       });
       if (!installResult.ok) {
         const warning = `Preview sync failed: dependency install did not complete (${installResult.output.slice(0, 300)}).`;
-        publishPreviewSyncFailed(opts.projectId, warning);
+        publishFailure(warning);
         return { ...base, previewSyncFailed: true, warnings: [warning] };
       }
     }
@@ -6999,7 +6998,7 @@ async function syncAgenticPreviewRuntime(opts: {
       );
       if (!pipResult.ok) {
         const warning = `Preview sync failed: Python dependency install failed (${pipResult.output.slice(0, 300)}).`;
-        publishPreviewSyncFailed(opts.projectId, warning);
+        publishFailure(warning);
         return { ...base, previewSyncFailed: true, warnings: [warning] };
       }
     }
@@ -7033,19 +7032,21 @@ async function syncAgenticPreviewRuntime(opts: {
       intervalMs: 5_000,
     });
     if (previewCheck.reachable) {
-      publishPreviewReady(opts.projectId);
+      if (opts.publishLifecycleEvents !== false && opts.revision) {
+        publishPreviewReady(opts.projectId, opts.revision);
+      }
       // Agentic confirmation: /healthz returned 200 after file sync and server restart.
       return { ...base, previewUpdated: true };
     }
 
     const warning = `Preview sync failed: container health check did not pass (${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}).`;
-    publishPreviewSyncFailed(opts.projectId, warning);
+    publishFailure(warning);
     return { ...base, previewSyncFailed: true, warnings: [warning] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const warning = `Preview sync failed: ${message.slice(0, 300)}`;
     logger.warn({ err, projectId: opts.projectId, taskId: opts.taskId }, warning);
-    publishPreviewSyncFailed(opts.projectId, warning);
+    publishFailure(warning);
     return { ...base, previewSyncFailed: true, warnings: [warning] };
   }
 }
@@ -7388,7 +7389,6 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       : false,
   );
   await writeFiles(projectId, builderFiles, true);
-  emitFilesChangedEvent(taskId, projectId, builderFiles, removedPaths, "apply");
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
@@ -7407,19 +7407,8 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     }
   }
 
-  const applyPreviewResult = await syncAgenticPreviewRuntime({
-    projectId,
-    taskId,
-    containerId: project.containerId,
-    containerStatus: project.containerStatus,
-    containerUrl: project.containerUrl,
-    stack: project.stack,
-    files: builderFiles.map((file) => ({ path: file.path, content: file.content })),
-    removedPaths,
-    packageManifestChanged,
-  });
-
-  // Save version snapshot
+  // Commit the promoted file set before emitting any preview payload. This id
+  // is the authoritative monotonic revision used by live delivery and replay.
   void emitEvent(taskId, "narration", "Saving version snapshot…");
   const snapshot = await snapshotFilesForVersion(projectId);
   const planSnapshot = await loadLatestPlanSnapshot(projectId);
@@ -7446,6 +7435,33 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       { err: snapErr, projectId, taskId },
       "Failed to save apply-stage version snapshot (non-fatal — files already persisted)",
     );
+  }
+
+  const applyPreviewResult = await syncAgenticPreviewRuntime({
+    projectId,
+    taskId,
+    revision: version?.id ?? null,
+    publishLifecycleEvents: false,
+    containerId: project.containerId,
+    containerStatus: project.containerStatus,
+    containerUrl: project.containerUrl,
+    stack: project.stack,
+    files: builderFiles.map((file) => ({ path: file.path, content: file.content })),
+    removedPaths,
+    packageManifestChanged,
+  });
+
+  if (version?.id) {
+    emitFilesChangedEvent(taskId, projectId, version.id, builderFiles, removedPaths, "apply");
+    if (applyPreviewResult.previewUpdated) {
+      publishPreviewReady(projectId, version.id);
+    } else if (applyPreviewResult.previewSyncFailed) {
+      publishPreviewSyncFailed(
+        projectId,
+        version.id,
+        applyPreviewResult.warnings[0] ?? "Preview runtime sync did not reach a ready state.",
+      );
+    }
   }
 
   // Task #538 — Unified Checkpoints: capture DB snapshot tied to apply version.
@@ -8258,7 +8274,20 @@ export async function runAppTestingJob(
     if (fixedFiles && fixedFiles.length > 0) {
       // Write the patched files to DB (partial update — replaceAll=false)
       await writeFiles(projectId, fixedFiles, false);
-      emitFilesChangedEvent(taskId, projectId, fixedFiles, [], "refine");
+      const fixedSnapshot = await snapshotFilesForVersion(projectId);
+      const [fixVersion] = await db
+        .insert(projectVersionsTable)
+        .values({
+          projectId,
+          label: `Browser test auto-fix for Task #${taskId}`.slice(0, 200),
+          note: "Snapshot after browser-test auto-fix.",
+          changelogEntry: `Browser-test auto-fix updated ${fixedFiles.length} file(s).`,
+          filesSnapshot: fixedSnapshot,
+        })
+        .returning({ id: projectVersionsTable.id });
+      if (fixVersion?.id) {
+        emitFilesChangedEvent(taskId, projectId, fixVersion.id, fixedFiles, [], "refine");
+      }
       autoFixed = true;
       logger.info(
         { projectId, taskId, patchedFiles: fixedFiles.map((f) => f.path) },

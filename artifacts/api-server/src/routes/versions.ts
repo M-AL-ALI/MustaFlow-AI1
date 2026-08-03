@@ -345,11 +345,35 @@ router.post(
       );
     }
 
+    let rollbackRevisionId: number | null = null;
+    try {
+      const [rollbackRevision] = await db
+        .insert(projectVersionsTable)
+        .values({
+          projectId,
+          label: `Restored "${version.label}"`.slice(0, 200),
+          note: `Authoritative preview revision restored from version #${version.id}.`,
+          changelogEntry: `Restored ${snapshot.length} file(s) from version #${version.id}.`,
+          filesSnapshot: snapshot,
+          planSnapshot: version.planSnapshot ?? undefined,
+          validationStatus: version.validationStatus,
+        })
+        .returning({ id: projectVersionsTable.id });
+      rollbackRevisionId = rollbackRevision?.id ?? null;
+    } catch (revisionErr) {
+      logger.warn(
+        { err: revisionErr, projectId, taskId, sourceVersionId: version.id },
+        "rollback: failed to create authoritative preview revision",
+      );
+    }
+
     // Emit project_files_changed so any active SSE subscriber can sync the
     // WebContainer filesystem without a full page reload.
     try {
+      if (!rollbackRevisionId) throw new Error("Rollback preview revision was not created");
       const filesChangedPayload = publishProjectFilesChanged(
         projectId,
+        rollbackRevisionId,
         snapshot.map((f) => ({ path: f.path, content: f.content })),
         rollbackRemovedPaths,
         "rollback",

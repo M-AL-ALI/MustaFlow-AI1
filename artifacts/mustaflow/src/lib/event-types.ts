@@ -15,6 +15,8 @@ export const EventTypes = {
  */
 export interface ProjectFilesChangedPayload {
   projectId: number;
+  /** Monotonic committed project version represented by this payload. */
+  revision: number;
   changedPaths: string[];
   files: Record<string, string>;
   removedPaths: string[];
@@ -26,9 +28,13 @@ export interface ProjectFilesChangedPayload {
     | "visual-edit"
     | "manual-save"
     | "qa-auto-fix"
-    | "delete-reinsert";
+    | "delete-reinsert"
+    | "reconcile";
   requiresInstall: boolean;
   requiresRestart: boolean;
+  generatedAt: string;
+  /** Full authoritative file set; paths absent from `files` must be removed. */
+  authoritative?: boolean;
 }
 
 export type ProjectFilesChangedFrame = {
@@ -46,6 +52,7 @@ export function projectFilesChangedPayloadFromFrame(
   const data = event.data ?? {};
   return {
     projectId: data.projectId ?? event.projectId ?? fallbackProjectId,
+    revision: data.revision ?? 0,
     operationType: (data.operationType ??
       "manual-save") as ProjectFilesChangedPayload["operationType"],
     changedPaths: data.changedPaths ?? [],
@@ -53,5 +60,7 @@ export function projectFilesChangedPayloadFromFrame(
     files: data.files ?? {},
     requiresInstall: data.requiresInstall ?? false,
     requiresRestart: data.requiresRestart ?? false,
+    generatedAt: data.generatedAt ?? new Date(0).toISOString(),
+    authoritative: data.authoritative ?? false,
   };
 }

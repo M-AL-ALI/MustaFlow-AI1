@@ -236,6 +236,7 @@ import type {
   ProjectFileUpdate,
   ProjectHealthResponse,
   ProjectInput,
+  ProjectPreviewState,
   ProjectSuggestion,
   ProjectUpdate,
   ProjectUpload,
@@ -14531,6 +14532,87 @@ export function useStreamProjectPreviewEvents<TData = Awaited<ReturnType<typeof 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getStreamProjectPreviewEventsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetProjectPreviewStateUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-state`
+}
+
+/**
+ * Returns the latest committed project version id used as the monotonic preview
+revision. Reconciliation is disabled while a task has staged `needs_review`
+or `needs_fix` output that has not been promoted to live project files.
+
+ * @summary Get the authoritative live preview revision and reconciliation guard
+ */
+export const getProjectPreviewState = async (id: number, options?: RequestInit): Promise<ProjectPreviewState> => {
+
+  return customFetch<ProjectPreviewState>(getGetProjectPreviewStateUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectPreviewStateQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/preview-state`
+    ] as const;
+    }
+
+
+export const getGetProjectPreviewStateQueryOptions = <TData = Awaited<ReturnType<typeof getProjectPreviewState>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPreviewState>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectPreviewStateQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectPreviewState>>> = ({ signal }) => getProjectPreviewState(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectPreviewState>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectPreviewStateQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectPreviewState>>>
+export type GetProjectPreviewStateQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the authoritative live preview revision and reconciliation guard
+ */
+
+export function useGetProjectPreviewState<TData = Awaited<ReturnType<typeof getProjectPreviewState>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPreviewState>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectPreviewStateQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
