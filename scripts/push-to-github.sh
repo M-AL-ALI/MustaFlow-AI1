@@ -46,7 +46,9 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 git add \
   .agents/memory \
   docs/changelog.md \
-  scripts/push-to-github.sh 2>/dev/null || true
+  scripts/push-to-github.sh \
+  artifacts/api-server/src/lib/terminal.ts \
+  artifacts/api-server/src/lib/__tests__/terminal-auth.test.ts 2>/dev/null || true
 
 # Clear the commit-message template after staging so a stale message from a
 # previous wave can never be reused by a subsequent push.

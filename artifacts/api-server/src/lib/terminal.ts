@@ -61,7 +61,15 @@ export function createTerminalServer(): TerminalServer {
       const auth = getAuth(req as unknown as Parameters<typeof getAuth>[0]);
       userId = auth?.userId ?? null;
     } catch {
-      // dev: allow without auth
+      // safety net — getAuth() should not throw, but guard against SDK misconfiguration
+    }
+
+    // Require authentication — unauthenticated connections are never allowed,
+    // even in development. The catch above is only a safety net for a throwing SDK.
+    if (!userId) {
+      sendControl(ws, { type: "error", message: "Unauthorized" });
+      ws.close(4001, "Unauthorized");
+      return;
     }
 
     sendControl(ws, { type: "status", status: "connecting" });
@@ -82,7 +90,7 @@ export function createTerminalServer(): TerminalServer {
       return;
     }
 
-    if (userId && project.ownerId !== userId) {
+    if (project.ownerId !== userId) {
       sendControl(ws, { type: "error", message: "Forbidden" });
       ws.close(4003, "Forbidden");
       return;
