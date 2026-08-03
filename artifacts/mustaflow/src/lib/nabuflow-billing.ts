@@ -231,8 +231,7 @@ export function parseProrationPreview(value: unknown): NabuflowProrationPreview 
     currentPlanId: typeof v.currentPlanId === "string" ? v.currentPlanId : "",
     targetPlanId: v.targetPlanId,
     amountDueCents: v.amountDueCents,
-    nextCycleAmountCents:
-      typeof v.nextCycleAmountCents === "number" ? v.nextCycleAmountCents : 0,
+    nextCycleAmountCents: typeof v.nextCycleAmountCents === "number" ? v.nextCycleAmountCents : 0,
     nextCycleStartsAt: stringOrNull(v.nextCycleStartsAt) ?? null,
     currency: typeof v.currency === "string" ? v.currency : "usd",
     periodEnd: stringOrNull(v.periodEnd) ?? null,

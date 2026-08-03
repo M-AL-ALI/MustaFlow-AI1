@@ -36,7 +36,9 @@ export function OraChatMockup() {
               </div>
               <div className="flex gap-2">
                 <span className="font-semibold shrink-0">Activation</span>
-                <span className="text-muted-foreground">get users to their "aha" moment faster</span>
+                <span className="text-muted-foreground">
+                  get users to their "aha" moment faster
+                </span>
               </div>
               <div className="flex gap-2">
                 <span className="font-semibold shrink-0">Expansion</span>

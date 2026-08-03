@@ -34,11 +34,7 @@ describe("BuilderChunkErrorBoundary", () => {
     const removeItem = vi.fn();
 
     render(
-      <BuilderChunkErrorBoundary
-        pathname="/projects/44"
-        storage={{ removeItem }}
-        reload={reload}
-      >
+      <BuilderChunkErrorBoundary pathname="/projects/44" storage={{ removeItem }} reload={reload}>
         <ThrowError error={new BuilderChunkRecoveryError()} />
       </BuilderChunkErrorBoundary>,
     );

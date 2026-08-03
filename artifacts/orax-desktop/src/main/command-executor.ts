@@ -119,10 +119,7 @@ async function nodeApiCommand(command: string, cwd?: string): Promise<CommandRes
 
 // ── Main executor ────────────────────────────────────────────────────────────
 
-export async function executeCommand(
-  command: string,
-  cwd?: string,
-): Promise<CommandResult> {
+export async function executeCommand(command: string, cwd?: string): Promise<CommandResult> {
   const trimmed = command.trim();
 
   const nodeResult = await nodeApiCommand(trimmed, cwd);

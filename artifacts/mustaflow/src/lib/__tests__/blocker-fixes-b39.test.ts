@@ -30,8 +30,8 @@ describe("Blocker 1 — server session rate limiter auth bypass", () => {
 
   it("sessionRateLimiter imports and calls getAuth from @clerk/express", () => {
     const src = readFile(SESSION_ROUTE);
-    expect(src).toContain('getAuth');
-    expect(src).toContain('@clerk/express');
+    expect(src).toContain("getAuth");
+    expect(src).toContain("@clerk/express");
   });
 
   it("sessionRateLimiter skips oraSessionLimiter when getAuth(req).userId is present", () => {

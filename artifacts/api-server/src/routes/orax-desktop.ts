@@ -254,9 +254,7 @@ router.post("/orax/hosts/register", async (req, res) => {
     const [existing] = await db
       .select()
       .from(oraxHostsTable)
-      .where(
-        and(eq(oraxHostsTable.userId, userId), eq(oraxHostsTable.installId, d.installId)),
-      )
+      .where(and(eq(oraxHostsTable.userId, userId), eq(oraxHostsTable.installId, d.installId)))
       .limit(1);
 
     if (existing) {
@@ -324,9 +322,7 @@ router.get("/orax/hosts", async (req, res) => {
     const hosts = await db
       .select()
       .from(oraxHostsTable)
-      .where(
-        and(eq(oraxHostsTable.userId, userId), isNull(oraxHostsTable.revokedAt)),
-      )
+      .where(and(eq(oraxHostsTable.userId, userId), isNull(oraxHostsTable.revokedAt)))
       .orderBy(desc(oraxHostsTable.lastSeenAt));
     res.json({ hosts: hosts.map(toHostSummary) });
   } catch (err) {
@@ -785,10 +781,7 @@ router.get("/orax/hosts/:hostId/actions", async (req, res) => {
       .select()
       .from(oraxDesktopActionsTable)
       .where(
-        and(
-          eq(oraxDesktopActionsTable.userId, userId),
-          eq(oraxDesktopActionsTable.hostId, hostId),
-        ),
+        and(eq(oraxDesktopActionsTable.userId, userId), eq(oraxDesktopActionsTable.hostId, hostId)),
       )
       .orderBy(desc(oraxDesktopActionsTable.createdAt))
       .limit(50);
@@ -885,10 +878,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       .select()
       .from(oraxDesktopActionsTable)
       .where(
-        and(
-          eq(oraxDesktopActionsTable.id, actionId),
-          eq(oraxDesktopActionsTable.userId, userId),
-        ),
+        and(eq(oraxDesktopActionsTable.id, actionId), eq(oraxDesktopActionsTable.userId, userId)),
       )
       .limit(1);
 
@@ -941,14 +931,19 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
           fileReadSummary?: Array<{ relativePath: string; truncated: boolean; reason: string }>;
           suggestedPlan?: string;
           warnings?: string[];
-          selectedFiles?: Array<{ relativePath: string; category: string; reason: string; score: number }>;
+          selectedFiles?: Array<{
+            relativePath: string;
+            category: string;
+            reason: string;
+            score: number;
+          }>;
         };
 
         const hasFileReads = Array.isArray(p.fileReadSummary) && p.fileReadSummary.length > 0;
 
         if (hasFileReads) {
-          const fileList = p.fileReadSummary!
-            .map((f) => `- ${f.relativePath}${f.truncated ? " (truncated)" : ""}`)
+          const fileList = p
+            .fileReadSummary!.map((f) => `- ${f.relativePath}${f.truncated ? " (truncated)" : ""}`)
             .join("\n");
           const planSection = p.suggestedPlan ? `\n\n${p.suggestedPlan}` : "";
           const warnSection =
@@ -988,7 +983,11 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
             verificationPlan: string[];
             draftGeneratedAt: string;
           };
-          filePreviews?: Array<{ relativePath: string; contentPreview: string; originalHash: string }>;
+          filePreviews?: Array<{
+            relativePath: string;
+            contentPreview: string;
+            originalHash: string;
+          }>;
           userMessage?: string;
           warnings?: string[];
         };
@@ -1100,7 +1099,10 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         const fileList = changed.map((f) => `- ${f.relativePath} (${f.operation})`).join("\n");
         const warnNote =
           (ap.warnings ?? []).length > 0
-            ? `\n\nWarnings:\n${ap.warnings!.slice(0, 3).map((w) => `- ${w}`).join("\n")}`
+            ? `\n\nWarnings:\n${ap
+                .warnings!.slice(0, 3)
+                .map((w) => `- ${w}`)
+                .join("\n")}`
             : "";
         const checkpointNote = ap.checkpointPath
           ? `\n\nOriginals backed up in .orax/checkpoints.`
@@ -1331,8 +1333,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
           eventType = "project_pr_blocked";
           role = "assistant";
         } else {
-          const prLabel =
-            prNumber != null ? `, PR #${prNumber} created` : " pushed";
+          const prLabel = prNumber != null ? `, PR #${prNumber} created` : " pushed";
           content = prUrl
             ? `Branch \`${branchName}\`${prLabel}. ${blockerType === "api_create_failed" ? "PR creation failed — open manually." : "Pull request ready."}`
             : `Branch \`${branchName}\` committed (${shortSha}). No remote push — open a PR manually.`;
@@ -1497,7 +1498,10 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
           },
         })
         .catch((err: unknown) => {
-          logger.warn({ component: "orax-desktop", err, actionId }, "Failed to write command audit log");
+          logger.warn(
+            { component: "orax-desktop", err, actionId },
+            "Failed to write command audit log",
+          );
         });
 
       void db
@@ -1518,14 +1522,14 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
           },
         })
         .catch((err: unknown) => {
-          logger.warn({ component: "orax-desktop", err, actionId }, "Failed to write command usage event");
+          logger.warn(
+            { component: "orax-desktop", err, actionId },
+            "Failed to write command usage event",
+          );
         });
     }
 
-    logger.info(
-      { component: "orax-desktop", actionId, type, newStatus },
-      "Action event recorded",
-    );
+    logger.info({ component: "orax-desktop", actionId, type, newStatus }, "Action event recorded");
     res.json({ ok: true });
   } catch (err) {
     logger.error({ component: "orax-desktop", err, actionId }, "Failed to post action event");

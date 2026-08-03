@@ -28,7 +28,9 @@ export function PairingScreen() {
     const tick = () => setCountdown(formatCountdown(pairingState.expiresAt!));
     tick();
     timerRef.current = setInterval(tick, 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [pairingState?.expiresAt]);
 
   const isExpired = pairingState?.expiresAt
@@ -67,14 +69,25 @@ export function PairingScreen() {
   return (
     <div style={{ maxWidth: 480, display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>Pair a Device</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
+          Pair a Device
+        </h1>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>
           Generate a code to pair your phone or browser with this computer.
         </p>
       </div>
 
       {error && (
-        <div style={{ background: "var(--danger-dim)", border: "1px solid var(--danger)", borderRadius: "var(--radius-sm)", padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
+        <div
+          style={{
+            background: "var(--danger-dim)",
+            border: "1px solid var(--danger)",
+            borderRadius: "var(--radius-sm)",
+            padding: "10px 14px",
+            fontSize: 13,
+            color: "var(--danger)",
+          }}
+        >
           {error}
         </div>
       )}
@@ -83,14 +96,16 @@ export function PairingScreen() {
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
             <div className="label">Pairing Code</div>
-            <div style={{
-              fontFamily: "monospace",
-              fontSize: 40,
-              fontWeight: 700,
-              color: "var(--accent)",
-              letterSpacing: "0.25em",
-              marginTop: 8,
-            }}>
+            <div
+              style={{
+                fontFamily: "monospace",
+                fontSize: 40,
+                fontWeight: 700,
+                color: "var(--accent)",
+                letterSpacing: "0.25em",
+                marginTop: 8,
+              }}
+            >
               {pairingState.code}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 8 }}>
@@ -99,28 +114,63 @@ export function PairingScreen() {
           </div>
 
           {pairingState.qrPayload && (
-            <div style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", padding: 16 }}>
+            <div
+              style={{
+                background: "var(--bg-elevated)",
+                borderRadius: "var(--radius-sm)",
+                padding: 16,
+              }}
+            >
               <div className="label">QR Payload</div>
-              <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)", wordBreak: "break-all", marginTop: 6, lineHeight: 1.5 }}>
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  wordBreak: "break-all",
+                  marginTop: 6,
+                  lineHeight: 1.5,
+                }}
+              >
                 {pairingState.qrPayload}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-                Scan this QR payload with your phone or enter the code manually on mobile or the website.
+                Scan this QR payload with your phone or enter the code manually on mobile or the
+                website.
               </div>
             </div>
           )}
 
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-secondary" onClick={() => void handleCreate()} disabled={busy} style={{ flex: 1, justifyContent: "center" }}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => void handleCreate()}
+              disabled={busy}
+              style={{ flex: 1, justifyContent: "center" }}
+            >
               <RefreshCw size={13} /> Refresh
             </button>
-            <button className="btn btn-danger" onClick={() => void handleCancel()} disabled={busy} style={{ flex: 1, justifyContent: "center" }}>
+            <button
+              className="btn btn-danger"
+              onClick={() => void handleCancel()}
+              disabled={busy}
+              style={{ flex: 1, justifyContent: "center" }}
+            >
               <X size={13} /> Cancel
             </button>
           </div>
         </div>
       ) : (
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center", textAlign: "center" }}>
+        <div
+          className="card"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            alignItems: "center",
+            textAlign: "center",
+          }}
+        >
           <Unplug size={32} color="var(--text-muted)" />
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>
@@ -144,8 +194,8 @@ export function PairingScreen() {
       )}
 
       <div className="card" style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
-        Pairing codes expire after 10 minutes. They are account-bound and single-use.
-        Revoke trusted devices at any time from the website or desktop app.
+        Pairing codes expire after 10 minutes. They are account-bound and single-use. Revoke trusted
+        devices at any time from the website or desktop app.
       </div>
     </div>
   );

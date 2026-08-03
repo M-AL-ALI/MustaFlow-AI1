@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
-import { AddressElement, Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import {
+  AddressElement,
+  Elements,
+  PaymentElement,
+  useElements,
+  useStripe,
+} from "@stripe/react-stripe-js";
 import { Loader2, ShieldCheck } from "lucide-react";
 import {
   Dialog,
@@ -106,7 +112,12 @@ function SetupForm({
           <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={!stripe || submitting} data-testid="card-setup-submit">
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!stripe || submitting}
+            data-testid="card-setup-submit"
+          >
             {submitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             {submitLabel}
           </Button>

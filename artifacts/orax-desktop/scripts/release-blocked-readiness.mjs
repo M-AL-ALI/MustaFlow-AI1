@@ -43,13 +43,22 @@ requireFile("artifacts/mustaflow/src/pages/orax-devices.tsx");
 requireFile("artifacts/ora-mobile/app/(home)/orax.tsx");
 
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Release not public yet");
-requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Nothing is wrong with your account");
-requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "The installer appears here only after signing");
+requireContains(
+  "artifacts/mustaflow/src/pages/orax-product.tsx",
+  "Nothing is wrong with your account",
+);
+requireContains(
+  "artifacts/mustaflow/src/pages/orax-product.tsx",
+  "The installer appears here only after signing",
+);
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Windows smoke testing");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "manifest validation");
 
 requireContains("artifacts/mustaflow/src/pages/orax-devices.tsx", "No desktop connected");
-requireContains("artifacts/mustaflow/src/pages/orax-devices.tsx", "This page will show your paired desktops");
+requireContains(
+  "artifacts/mustaflow/src/pages/orax-devices.tsx",
+  "This page will show your paired desktops",
+);
 requireContains("artifacts/mustaflow/src/pages/orax-devices.tsx", "Check installer status");
 requireContains("artifacts/mustaflow/src/pages/orax-devices.tsx", "signed release");
 requireContains("artifacts/mustaflow/src/pages/orax-devices.tsx", "confirm the desktop is online");
@@ -57,7 +66,10 @@ requireContains("artifacts/mustaflow/src/pages/orax-devices.tsx", "confirm the d
 requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "Orax Mobile is a remote controller");
 requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "not the execution machine");
 requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "monitors and approves desktop work");
-requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "resume local execution from this phone");
+requireContains(
+  "artifacts/ora-mobile/app/(home)/orax.tsx",
+  "resume local execution from this phone",
+);
 
 requireNotContains("artifacts/mustaflow/src/pages/orax-product.tsx", 'href="/downloads/');
 requireNotContains("artifacts/mustaflow/src/pages/orax-product.tsx", 'href="/support/tickets"');

@@ -103,13 +103,16 @@ describe("loadBrandKit helper", () => {
 
   it("returns a BrandKit when DB has a matching row", async () => {
     const { db } = await import("@workspace/db");
-    vi.mocked(db.select).mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([mockBrandKitRow]),
-        }),
-      }),
-    }) as never);
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([mockBrandKitRow]),
+            }),
+          }),
+        }) as never,
+    );
 
     const { loadBrandKit } = await import("../../lib/brand-kit-loader");
     const kit = await loadBrandKit("user_test123", null);
@@ -123,13 +126,16 @@ describe("loadBrandKit helper", () => {
 
   it("returns null when DB has no row for the user", async () => {
     const { db } = await import("@workspace/db");
-    vi.mocked(db.select).mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    }) as never);
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }) as never,
+    );
 
     const { loadBrandKit } = await import("../../lib/brand-kit-loader");
     const kit = await loadBrandKit("user_no_kit", null);
@@ -144,13 +150,16 @@ describe("GET /ora/brand-kit response shape", () => {
 
   it("returns { kit: { primaryColor, accentColor, ... } } when a kit exists", async () => {
     const { db } = await import("@workspace/db");
-    vi.mocked(db.select).mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([mockBrandKitRow]),
-        }),
-      }),
-    }) as never);
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([mockBrandKitRow]),
+            }),
+          }),
+        }) as never,
+    );
 
     const { default: router } = await import("../ora-brand-kit");
     const app = buildTestApp();
@@ -168,13 +177,16 @@ describe("GET /ora/brand-kit response shape", () => {
 
   it("returns { kit: null } when no row exists for the user", async () => {
     const { db } = await import("@workspace/db");
-    vi.mocked(db.select).mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    }) as never);
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }) as never,
+    );
 
     const { default: router } = await import("../ora-brand-kit");
     const app = buildTestApp();
@@ -188,13 +200,16 @@ describe("GET /ora/brand-kit response shape", () => {
 
   it("kit.logoPreviewUrl is set when logoAssetId is present", async () => {
     const { db } = await import("@workspace/db");
-    vi.mocked(db.select).mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ ...mockBrandKitRow, logoAssetId: 7 }]),
-        }),
-      }),
-    }) as never);
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ ...mockBrandKitRow, logoAssetId: 7 }]),
+            }),
+          }),
+        }) as never,
+    );
 
     const { default: router } = await import("../ora-brand-kit");
     const app = buildTestApp();
@@ -210,13 +225,16 @@ describe("GET /ora/brand-kit response shape", () => {
 
   it("does NOT return a flat primaryColor at the root level", async () => {
     const { db } = await import("@workspace/db");
-    vi.mocked(db.select).mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([mockBrandKitRow]),
-        }),
-      }),
-    }) as never);
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([mockBrandKitRow]),
+            }),
+          }),
+        }) as never,
+    );
 
     const { default: router } = await import("../ora-brand-kit");
     const app = buildTestApp();
@@ -239,9 +257,7 @@ describe("PUT /ora/brand-kit validation", () => {
     const app = buildTestApp();
     app.use(router);
 
-    const res = await request(app)
-      .put("/ora/brand-kit")
-      .send({ primaryColor: "not-a-color" });
+    const res = await request(app).put("/ora/brand-kit").send({ primaryColor: "not-a-color" });
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty("error");
   });
@@ -251,9 +267,7 @@ describe("PUT /ora/brand-kit validation", () => {
     const app = buildTestApp();
     app.use(router);
 
-    const res = await request(app)
-      .put("/ora/brand-kit")
-      .send({ headingFont: "Comic Sans MS" });
+    const res = await request(app).put("/ora/brand-kit").send({ headingFont: "Comic Sans MS" });
     expect(res.status).toBe(400);
   });
 });
@@ -347,10 +361,7 @@ describe("brand-kit migration index parity", () => {
     const { fileURLToPath } = await import("node:url");
     const dir = path.dirname(fileURLToPath(import.meta.url));
 
-    const thisFileText = fs.readFileSync(
-      path.resolve(dir, "brand-kit-api.test.ts"),
-      "utf8",
-    );
+    const thisFileText = fs.readFileSync(path.resolve(dir, "brand-kit-api.test.ts"), "utf8");
     const startupText = fs.readFileSync(
       path.resolve(dir, "../../lib/startup-migrations.ts"),
       "utf8",
@@ -381,13 +392,9 @@ describe("brand-kit migration index parity", () => {
 
     // Both files must define the two unique partial indexes with correct WHERE clauses
     for (const src of [startupText, standaloneText]) {
-      expect(src).toContain(
-        "CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_personal_idx",
-      );
+      expect(src).toContain("CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_personal_idx");
       expect(src).toContain("WHERE ora_project_id IS NULL");
-      expect(src).toContain(
-        "CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_project_idx",
-      );
+      expect(src).toContain("CREATE UNIQUE INDEX IF NOT EXISTS brand_kits_user_project_idx");
       expect(src).toContain("WHERE ora_project_id IS NOT NULL");
     }
   });

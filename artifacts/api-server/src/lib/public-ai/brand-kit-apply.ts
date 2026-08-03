@@ -75,10 +75,7 @@ export function lightenArgb(argb: string | null | undefined): string | null {
  * ships with Helvetica, Times, and Courier families; everything else falls
  * back to Helvetica/Helvetica-Bold.
  */
-export function toPdfFont(
-  fontName: string | null | undefined,
-  bold = false,
-): string {
+export function toPdfFont(fontName: string | null | undefined, bold = false): string {
   if (!fontName) return bold ? "Helvetica-Bold" : "Helvetica";
   const n = fontName.toLowerCase();
   if (n.includes("times") || n.includes("georgia")) {

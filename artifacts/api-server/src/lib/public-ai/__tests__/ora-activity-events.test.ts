@@ -42,7 +42,8 @@ describe("Ora activity events — shared contract", () => {
   });
 
   it("never leaks raw internals (providers, model ids, filesystem paths)", () => {
-    const forbidden = /openai|gpt-|anthropic|claude|gemini|grok|xai|azure|\/home\/|\/tmp\/|node_modules|Error:/i;
+    const forbidden =
+      /openai|gpt-|anthropic|claude|gemini|grok|xai|azure|\/home\/|\/tmp\/|node_modules|Error:/i;
     for (const tool of ORA_ACTIVITY_TOOLS) {
       for (const phase of ORA_ACTIVITY_PHASES) {
         expect(ORA_ACTIVITY_TEXT[tool][phase]).not.toMatch(forbidden);
@@ -71,7 +72,12 @@ describe("Ora activity events — shared contract", () => {
 
   it("parseOraActivityStep accepts valid frames and rejects malformed ones", () => {
     expect(
-      parseOraActivityStep({ type: "activity", tool: "web-search", phase: "start", text: "Searching the web…" }),
+      parseOraActivityStep({
+        type: "activity",
+        tool: "web-search",
+        phase: "start",
+        text: "Searching the web…",
+      }),
     ).toEqual({ tool: "web-search", phase: "start", text: "Searching the web…" });
     expect(parseOraActivityStep(null)).toBeNull();
     expect(parseOraActivityStep({ tool: "nope", phase: "start", text: "x" })).toBeNull();
@@ -124,7 +130,7 @@ describe("Ora activity events — emitter lifecycle", () => {
     const { wire, emitter } = collectingEmitter();
     emitter.start("repo-analysis", "Fetching owner/repo snapshot…");
     emitter.start("repo-analysis", "Reading model-router.ts…");
-    emitter.start("repo-analysis", "Searching for \"quota\"…");
+    emitter.start("repo-analysis", 'Searching for "quota"…');
     emitter.ok("repo-analysis", "Analysis complete — writing up findings…");
     emitter.ok("repo-analysis");
     expect(wire.map((e) => e.phase)).toEqual(["start", "start", "start", "ok"]);
@@ -193,14 +199,7 @@ describe("Ora activity events — withOraActivity wrapper", () => {
     writeSSE({ type: "done", payload: { reply: "It still answers." } });
 
     const types = wire.map((e) => `${String(e.type)}${e.phase ? `:${String(e.phase)}` : ""}`);
-    expect(types).toEqual([
-      "activity:start",
-      "activity:fail",
-      "token",
-      "token",
-      "token",
-      "done",
-    ]);
+    expect(types).toEqual(["activity:start", "activity:fail", "token", "token", "token", "done"]);
     // Exactly one terminal, and it is honest about the failure.
     expect(wire.filter((e) => e.phase === "fail" || e.phase === "ok")).toHaveLength(1);
   });
@@ -211,7 +210,7 @@ describe("Ora activity events — chat route wiring", () => {
   const analyst = read("../repo-analyst.ts");
 
   it("streaming route emits BOTH legacy status and typed activity for repo narration", () => {
-    const onStatusIdx = chat.indexOf('onStatus: (text, phase) => {');
+    const onStatusIdx = chat.indexOf("onStatus: (text, phase) => {");
     expect(onStatusIdx).toBeGreaterThan(-1);
     const body = chat.slice(onStatusIdx, onStatusIdx + 400);
     expect(body).toContain('writeSSE(res, { type: "status", text })');

@@ -62,7 +62,7 @@ The same run then selected Lite. Before and after reload:
 Across Power, Eco + Deep, and Lite, the fixture's final raw counters were:
 
 ```json
-{"projectMode":"eco","projectPatchCount":5,"messagePostCount":0}
+{ "projectMode": "eco", "projectPatchCount": 5, "messagePostCount": 0 }
 ```
 
 The final `projectMode` shown in that snapshot was taken after returning to Eco

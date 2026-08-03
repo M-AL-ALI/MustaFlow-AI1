@@ -294,7 +294,11 @@ function OraLibraryInner() {
           </div>
 
           {/* Project-space filter: All / Personal / one chip per project. */}
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by project">
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="group"
+            aria-label="Filter by project"
+          >
             {(
               [
                 { key: "all" as const, label: "All" },

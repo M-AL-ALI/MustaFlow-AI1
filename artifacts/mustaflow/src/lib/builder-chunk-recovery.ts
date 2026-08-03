@@ -278,11 +278,7 @@ export async function retryBuilderChunkImport<T>(
 
     try {
       if (assetUrl) {
-        const retryUrl = cacheBustedChunkUrl(
-          assetUrl,
-          runtime.retryToken(),
-          runtime.origin,
-        );
+        const retryUrl = cacheBustedChunkUrl(assetUrl, runtime.retryToken(), runtime.origin);
         return await runtime.importModule<T>(retryUrl);
       }
       return await importer();

@@ -53,10 +53,22 @@ requireContains(".github/workflows/orax-desktop-release.yml", "windows-latest");
 requireContains(".github/workflows/orax-desktop-release.yml", "ORAX_WINDOWS_CSC_LINK");
 requireContains(".github/workflows/orax-desktop-release.yml", "ORAX_WINDOWS_CSC_KEY_PASSWORD");
 requireContains(".github/workflows/orax-desktop-release.yml", "ORAX_DESKTOP_RELEASE_S3_URI");
-requireContains(".github/workflows/orax-desktop-release.yml", "pnpm --filter @workspace/orax-desktop run package:win");
-requireContains(".github/workflows/orax-desktop-release.yml", "pnpm --filter @workspace/orax-desktop run release:manifest");
-requireContains(".github/workflows/orax-desktop-release.yml", "pnpm --filter @workspace/orax-desktop run release:upload");
-requireContains("artifacts/orax-desktop/scripts/release-upload.mjs", "ORAX_DESKTOP_RELEASE_PUBLISH");
+requireContains(
+  ".github/workflows/orax-desktop-release.yml",
+  "pnpm --filter @workspace/orax-desktop run package:win",
+);
+requireContains(
+  ".github/workflows/orax-desktop-release.yml",
+  "pnpm --filter @workspace/orax-desktop run release:manifest",
+);
+requireContains(
+  ".github/workflows/orax-desktop-release.yml",
+  "pnpm --filter @workspace/orax-desktop run release:upload",
+);
+requireContains(
+  "artifacts/orax-desktop/scripts/release-upload.mjs",
+  "ORAX_DESKTOP_RELEASE_PUBLISH",
+);
 requireContains("artifacts/orax-desktop/scripts/release-upload.mjs", "ORAX_DESKTOP_RELEASE_S3_URI");
 requireContains("artifacts/orax-desktop/scripts/release-upload.mjs", "aws");
 requireContains("docs/orax-desktop-release-channel.md", "GitHub Actions release workflow");

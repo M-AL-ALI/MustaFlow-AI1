@@ -59,8 +59,6 @@ export function clearedOraActivity(): OraActivityTraceStep[] {
 }
 
 /** The step the UI should render prominently right now (newest), or null. */
-export function currentOraActivityStep(
-  steps: OraActivityTraceStep[],
-): OraActivityTraceStep | null {
+export function currentOraActivityStep(steps: OraActivityTraceStep[]): OraActivityTraceStep | null {
   return steps[steps.length - 1] ?? null;
 }

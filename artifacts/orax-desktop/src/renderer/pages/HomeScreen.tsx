@@ -26,7 +26,9 @@ export function HomeScreen() {
   return (
     <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>Orax Desktop</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
+          Orax Desktop
+        </h1>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>
           This computer is registered as a trusted Orax host.
         </p>
@@ -35,7 +37,9 @@ export function HomeScreen() {
       <div className="card" style={{ display: "flex", alignItems: "center", gap: 16 }}>
         <span className={`status-dot ${hostState.status}`} style={{ width: 12, height: 12 }} />
         <div>
-          <div style={{ fontWeight: 600, fontSize: 15, color: "var(--text-primary)" }}>{statusLabel}</div>
+          <div style={{ fontWeight: 600, fontSize: 15, color: "var(--text-primary)" }}>
+            {statusLabel}
+          </div>
           <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
             Heartbeat every 30 seconds
           </div>
@@ -47,7 +51,9 @@ export function HomeScreen() {
           <div className="label">Device</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
             <Monitor size={14} color="var(--text-secondary)" />
-            <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{hostState.deviceName}</span>
+            <span style={{ fontSize: 13, color: "var(--text-primary)" }}>
+              {hostState.deviceName}
+            </span>
           </div>
         </div>
 
@@ -55,7 +61,9 @@ export function HomeScreen() {
           <div className="label">Platform</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
             <Cpu size={14} color="var(--text-secondary)" />
-            <span style={{ fontSize: 13, color: "var(--text-primary)", textTransform: "capitalize" }}>
+            <span
+              style={{ fontSize: 13, color: "var(--text-primary)", textTransform: "capitalize" }}
+            >
               {hostState.platform}
             </span>
           </div>
@@ -66,7 +74,9 @@ export function HomeScreen() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
             <Shield size={14} color="var(--text-secondary)" />
             <span style={{ fontSize: 13, color: "var(--text-primary)" }}>
-              {PERMISSION_MODE_LABELS[hostState.permissionMode as keyof typeof PERMISSION_MODE_LABELS] ?? hostState.permissionMode}
+              {PERMISSION_MODE_LABELS[
+                hostState.permissionMode as keyof typeof PERMISSION_MODE_LABELS
+              ] ?? hostState.permissionMode}
             </span>
           </div>
         </div>
@@ -82,7 +92,15 @@ export function HomeScreen() {
       {hostState.hostId && (
         <div className="card">
           <div className="label">Host ID</div>
-          <div style={{ fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)", marginTop: 4, wordBreak: "break-all" }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontFamily: "monospace",
+              color: "var(--text-secondary)",
+              marginTop: 4,
+              wordBreak: "break-all",
+            }}
+          >
             {hostState.hostId}
           </div>
         </div>
@@ -91,9 +109,7 @@ export function HomeScreen() {
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <Radio size={13} color="var(--text-secondary)" />
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-            Relay
-          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Relay</div>
           {relayState && (
             <span
               style={{

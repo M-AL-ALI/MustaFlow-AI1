@@ -105,10 +105,9 @@ export class OraxApiClient {
     type: "acknowledged" | "running" | "progress" | "completed" | "failed",
     payload: Record<string, unknown>,
   ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/orax/relay/actions/${encodeURIComponent(actionId)}/events`,
-      { type, payload },
-    );
+    await this.request("POST", `/api/orax/relay/actions/${encodeURIComponent(actionId)}/events`, {
+      type,
+      payload,
+    });
   }
 }

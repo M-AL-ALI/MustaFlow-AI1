@@ -57,10 +57,19 @@ requireContains("artifacts/orax-desktop/src/renderer/App.tsx", "HealthScreen");
 requireContains("artifacts/orax-desktop/src/renderer/context/AppContext.tsx", '"health"');
 requireContains("artifacts/orax-desktop/src/renderer/components/Sidebar.tsx", 'label: "Health"');
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health Check");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "NextBestActionPanel");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "getNextHealthAction");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "NextBestActionPanel",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "getNextHealthAction",
+);
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Next best action");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Everything looks ready");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Everything looks ready",
+);
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Sign-in status");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Host registration");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Heartbeat status");
@@ -68,8 +77,14 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "R
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Pairing readiness");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Release channel");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Diagnostics export");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Export Support Diagnostics");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "support.exportDiagnostics");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Export Support Diagnostics",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "support.exportDiagnostics",
+);
 requireContains("docs/orax-desktop-update-recovery.md", "Health Check Panel");
 requireContains("docs/orax-desktop-update-recovery.md", "Sign-in status");
 requireContains("docs/orax-desktop-update-recovery.md", "Relay polling");
@@ -82,7 +97,10 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "S
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Reconnect host");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Restart relay");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Open pairing");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Check release status");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Check release status",
+);
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "redactForDisplay");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "lastAttempted");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "registerHost");
@@ -110,10 +128,7 @@ requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "SupportDiagnosticsHealthTimelineEntry",
 );
-requireContains(
-  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
-  "sanitizeHealthTimeline",
-);
+requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "sanitizeHealthTimeline");
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
   "MAX_HEALTH_TIMELINE_ENTRIES",
@@ -124,7 +139,10 @@ requireContains(
 );
 requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "options?.healthTimeline");
 requireContains("artifacts/orax-desktop/src/preload/index.ts", "SupportDiagnosticsExportOptions");
-requireContains("artifacts/orax-desktop/src/renderer/lib/ipc.ts", "SupportDiagnosticsExportOptions");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/lib/ipc.ts",
+  "SupportDiagnosticsExportOptions",
+);
 requireContains("docs/orax-desktop-update-recovery.md", "diagnostics payload may include");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3p");
 
@@ -160,15 +178,33 @@ requireContains("docs/orax-desktop-update-recovery.md", "Settings export may hav
 
 // --- Phase 3R: Health Smoke Checklist ---
 
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "HealthSmokeChecklist");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "smokeChecklistItems");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health smoke checklist");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Sign in with MustaFlow AI");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "HealthSmokeChecklist",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "smokeChecklistItems",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Health smoke checklist",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Sign in with MustaFlow AI",
+);
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Register host");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Confirm heartbeat");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Confirm relay polling");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Confirm relay polling",
+);
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Open pairing");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Export support diagnostics");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Export support diagnostics",
+);
 requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "Confirm diagnostics success/cancel messages",
@@ -179,11 +215,17 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "m
 requireNotContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "diagnosticsJson");
 requireContains("docs/orax-desktop-update-recovery.md", "Health Smoke Checklist");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3r");
-requireContains("docs/orax-desktop-update-recovery.md", "Confirm diagnostics success/cancel messages");
+requireContains(
+  "docs/orax-desktop-update-recovery.md",
+  "Confirm diagnostics success/cancel messages",
+);
 
 // --- Phase 3S: Health Checklist Action Shortcuts ---
 
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "onClick: handleSignIn");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "onClick: handleSignIn",
+);
 requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "onClick: handleReconnectHost",
@@ -192,14 +234,17 @@ requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "onClick: handleRestartRelay",
 );
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "onClick: handleOpenPairing");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "onClick: handleOpenPairing",
+);
 requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   "onClick: handleExportDiagnostics",
 );
 requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
-  "item.action && item.status !== \"ready\"",
+  'item.action && item.status !== "ready"',
 );
 requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Action Shortcuts");
 requireContains("docs/orax-desktop-update-recovery.md", "verify:phase3s");
@@ -208,9 +253,18 @@ requireContains("docs/orax-desktop-update-recovery.md", "No new IPC APIs");
 // --- Phase 3T: Health Checklist Completion Summary ---
 
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3t"');
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "getSmokeChecklistSummary");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "SmokeChecklistSummary");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Windows smoke checklist complete");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "getSmokeChecklistSummary",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "SmokeChecklistSummary",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Windows smoke checklist complete",
+);
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "checks ready");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "need action");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "summary.manual");
@@ -241,9 +295,18 @@ requireContains(
   "markManualChecklistConfirmation",
 );
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "manualConfirmation");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Mark pairing checked");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Mark diagnostics checked");
-requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Mark result copy checked");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Mark pairing checked",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Mark diagnostics checked",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
+  "Mark result copy checked",
+);
 requireContains(
   "artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx",
   'item.status === "manual"',

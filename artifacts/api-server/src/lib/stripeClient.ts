@@ -18,9 +18,7 @@ interface StripeCredentials {
 let cached: { creds: StripeCredentials; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
 
-export function resolveEnvStripePublishableKey(
-  env: Record<string, string | undefined>,
-): string {
+export function resolveEnvStripePublishableKey(env: Record<string, string | undefined>): string {
   for (const value of [
     env.STRIPE_PUBLISHABLE_KEY,
     env.STRIPE_TEST_PUBLISHABLE_KEY,

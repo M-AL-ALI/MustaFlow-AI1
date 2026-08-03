@@ -301,10 +301,7 @@ export async function settleCreditsDurably(input: {
 }): Promise<
   Awaited<ReturnType<typeof import("../routes/credits").deductCreditsAtomic>> | { deferred: true }
 > {
-  const dedupeKey = taskCreditSettlementKey(
-    input.taskId,
-    input.opts.source ?? input.opts.type,
-  );
+  const dedupeKey = taskCreditSettlementKey(input.taskId, input.opts.source ?? input.opts.type);
   try {
     const { deductCreditsAtomic } = await import("../routes/credits");
     const result = await deductCreditsAtomic(input.ownerId, input.amount, {

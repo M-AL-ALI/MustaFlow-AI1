@@ -11,15 +11,15 @@ The local harness only substitutes captured project 45 GET responses and authent
 
 ## Results
 
-| Measurement | Before | After | Change |
-| --- | ---: | ---: | ---: |
-| Chat usable | 4,423 ms | 2,246 ms | -49.2% |
-| Preview visible | 4,479 ms | 2,246 ms | -49.9% |
-| Chat + preview TTI | 4,479 ms | 2,246 ms | **-2,233 ms (-49.9%)** |
-| Critical-window resources | 158 | 111 | -29.7% |
-| Critical transfer | 4,797,492 bytes | 3,324,186 bytes | -30.7% |
-| Project route bundle | 2,174.29 kB | 807.41 kB | -62.9% |
-| Project route gzip | 554.73 kB | 221.21 kB | -60.1% |
+| Measurement               |          Before |           After |                 Change |
+| ------------------------- | --------------: | --------------: | ---------------------: |
+| Chat usable               |        4,423 ms |        2,246 ms |                 -49.2% |
+| Preview visible           |        4,479 ms |        2,246 ms |                 -49.9% |
+| Chat + preview TTI        |        4,479 ms |        2,246 ms | **-2,233 ms (-49.9%)** |
+| Critical-window resources |             158 |             111 |                 -29.7% |
+| Critical transfer         | 4,797,492 bytes | 3,324,186 bytes |                 -30.7% |
+| Project route bundle      |     2,174.29 kB |       807.41 kB |                 -62.9% |
+| Project route gzip        |       554.73 kB |       221.21 kB |                 -60.1% |
 
 The signed-in production cold baseline was independently measured at 1,995 ms TTI. Its raw waterfall is retained as the production reference.
 

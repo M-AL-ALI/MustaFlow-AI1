@@ -68,7 +68,9 @@ export class BuilderChunkErrorBoundary extends Component<Props, State> {
         data-testid="builder-chunk-fallback"
       >
         <section className="max-w-md text-center">
-          <h1 className="text-base font-semibold">NabuFlow couldn’t finish loading this workspace.</h1>
+          <h1 className="text-base font-semibold">
+            NabuFlow couldn’t finish loading this workspace.
+          </h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             The app may have been updated while this page was open. Reload to reconnect to the
             latest version.

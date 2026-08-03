@@ -26,10 +26,7 @@ import { executeCommand } from "./command-executor";
 import { isCommandPermitted } from "./permission-gate";
 import { inspectLocalProject } from "./project-inspector";
 import type { ProjectInspectionResult } from "./project-inspector";
-import {
-  selectRelevantProjectFiles,
-  type SelectedProjectFile,
-} from "./project-file-selector";
+import { selectRelevantProjectFiles, type SelectedProjectFile } from "./project-file-selector";
 import { readSelectedProjectFiles } from "./project-file-reader";
 import type { FileReadEntry } from "./project-file-reader";
 import { draftProjectPatch } from "./project-patch-drafter";
@@ -304,20 +301,22 @@ export class RelayClient {
         }
         fs.writeFileSync(
           projectJsonPath,
-          JSON.stringify({ projectId, executionSourceId, boundAt: new Date().toISOString() }, null, 2),
+          JSON.stringify(
+            { projectId, executionSourceId, boundAt: new Date().toISOString() },
+            null,
+            2,
+          ),
           "utf8",
         );
 
-        const userMessage =
-          typeof payload.userMessage === "string" ? payload.userMessage : "";
+        const userMessage = typeof payload.userMessage === "string" ? payload.userMessage : "";
 
         // Inspect the local project safely — no shell, no secrets
         let projectInspection: ProjectInspectionResult | { error: string } | null = null;
         try {
           projectInspection = await inspectLocalProject(sourceLocalPath);
         } catch (inspErr) {
-          const msg =
-            inspErr instanceof Error ? inspErr.message : "Inspection failed";
+          const msg = inspErr instanceof Error ? inspErr.message : "Inspection failed";
           projectInspection = { error: msg };
         }
 
@@ -332,8 +331,7 @@ export class RelayClient {
         let suggestedPlan: string | undefined;
         const fileWarnings: string[] = [];
 
-        const inspectionOk =
-          projectInspection !== null && !("error" in projectInspection);
+        const inspectionOk = projectInspection !== null && !("error" in projectInspection);
 
         if (inspectionOk && userMessage.trim().length > 0) {
           try {
@@ -370,9 +368,7 @@ export class RelayClient {
               }
             }
           } catch (selErr) {
-            fileWarnings.push(
-              selErr instanceof Error ? selErr.message : "File selection failed",
-            );
+            fileWarnings.push(selErr instanceof Error ? selErr.message : "File selection failed");
           }
         }
 
@@ -410,8 +406,7 @@ export class RelayClient {
           typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
         const sourceLocalPath =
           typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
-        const userMessage =
-          typeof payload.userMessage === "string" ? payload.userMessage : "";
+        const userMessage = typeof payload.userMessage === "string" ? payload.userMessage : "";
         const rawSelectedFiles = Array.isArray(payload.selectedFiles)
           ? (payload.selectedFiles as unknown[])
           : [];
@@ -487,9 +482,7 @@ export class RelayClient {
               for (const w of selection.warnings) patchWarnings.push(w.message);
             }
           } catch (selErr) {
-            patchWarnings.push(
-              selErr instanceof Error ? selErr.message : "File selection failed",
-            );
+            patchWarnings.push(selErr instanceof Error ? selErr.message : "File selection failed");
           }
         }
 
@@ -770,14 +763,10 @@ export class RelayClient {
           githubToken?: unknown;
         };
 
-        const projectId =
-          typeof payload.projectId === "string" ? payload.projectId : null;
-        const threadId =
-          typeof payload.threadId === "string" ? payload.threadId : null;
+        const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
         const executionSourceId =
-          typeof payload.executionSourceId === "string"
-            ? payload.executionSourceId
-            : null;
+          typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
         const sourceLocalPath =
           typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
 
@@ -798,16 +787,11 @@ export class RelayClient {
         }
 
         const changedFiles = Array.isArray(payload.changedFiles)
-          ? (payload.changedFiles as unknown[]).filter(
-              (f): f is string => typeof f === "string",
-            )
+          ? (payload.changedFiles as unknown[]).filter((f): f is string => typeof f === "string")
           : [];
         const commitMessage =
-          typeof payload.commitMessage === "string"
-            ? payload.commitMessage
-            : "Orax approved patch";
-        const projectSlug =
-          typeof payload.projectSlug === "string" ? payload.projectSlug : "patch";
+          typeof payload.commitMessage === "string" ? payload.commitMessage : "Orax approved patch";
+        const projectSlug = typeof payload.projectSlug === "string" ? payload.projectSlug : "patch";
         const githubToken =
           typeof payload.githubToken === "string" ? payload.githubToken : undefined;
 

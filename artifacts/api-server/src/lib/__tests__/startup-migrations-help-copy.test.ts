@@ -11,9 +11,8 @@ vi.mock("@workspace/db", async () => {
 });
 
 const { HELP_ARTICLE_SEED } = await import("../../../../../lib/db/src/help-center-seed");
-const { refreshBillingCreditsHelpArticle, refreshNabuflowHelpArticles } = await import(
-  "../startup-migrations"
-);
+const { refreshBillingCreditsHelpArticle, refreshNabuflowHelpArticles } =
+  await import("../startup-migrations");
 
 describe("BC-2 billing help copy migration", () => {
   it("updates only billing-credits from the shared seed and is idempotent", async () => {

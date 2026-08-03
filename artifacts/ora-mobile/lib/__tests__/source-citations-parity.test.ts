@@ -40,9 +40,7 @@ describe("Mobile Ora — file citations parity with the website", () => {
   });
 
   it("the stream-done path maps fileCitations onto the assistant message", () => {
-    expect(index).toContain(
-      "streamResult.fileCitations && streamResult.fileCitations.length > 0",
-    );
+    expect(index).toContain("streamResult.fileCitations && streamResult.fileCitations.length > 0");
     expect(index).toContain("{ fileCitations: streamResult.fileCitations }");
   });
 

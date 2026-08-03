@@ -4,12 +4,12 @@
 
 No recovery behavior or event schema changed.
 
-| Existing event | Existing payload/message | Inline recovery phase |
-| --- | --- | --- |
-| `qa_step` | `data.phase: "repair"`, `status: "running"` | Try |
-| `editing_files` | message beginning `Repairing ...` | Adapt |
-| `qa_step` | `data.phase: "repair"`, `status: "passed"` | Observe (resolved) |
-| `qa_step` | `data.phase: "repair"`, `status: "failed"` | Observe (needs action) |
+| Existing event  | Existing payload/message                    | Inline recovery phase  |
+| --------------- | ------------------------------------------- | ---------------------- |
+| `qa_step`       | `data.phase: "repair"`, `status: "running"` | Try                    |
+| `editing_files` | message beginning `Repairing ...`           | Adapt                  |
+| `qa_step`       | `data.phase: "repair"`, `status: "passed"`  | Observe (resolved)     |
+| `qa_step`       | `data.phase: "repair"`, `status: "failed"`  | Observe (needs action) |
 
 `recoveryStepForEvent` reads those existing values, preserves event-id order, and
 deduplicates replayed SSE events. Repair-phase QA rows are removed from the generic QA

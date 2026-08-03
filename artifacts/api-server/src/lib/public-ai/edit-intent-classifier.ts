@@ -35,8 +35,7 @@ const STRONG_CONTENT_VERBS =
  * dominates. "change the title to Alpha" → content_edit because "title" alone
  * is not a visual property keyword.
  */
-const MODERATE_CONTENT_VERBS =
-  /\b(?:change|update|edit|modify|shorten|expand|revise)\b/i;
+const MODERATE_CONTENT_VERBS = /\b(?:change|update|edit|modify|shorten|expand|revise)\b/i;
 
 /**
  * Layout verbs describe repositioning/ordering of existing elements.
@@ -49,8 +48,7 @@ const LAYOUT_VERBS =
 /**
  * Structure verbs describe adding or removing discrete document elements.
  */
-const STRUCTURE_VERBS =
-  /\b(?:add(?:ing)?|insert(?:ing)?|append(?:ing)?|remove|delete|drop)\b/i;
+const STRUCTURE_VERBS = /\b(?:add(?:ing)?|insert(?:ing)?|append(?:ing)?|remove|delete|drop)\b/i;
 
 // ─── Content-domain patterns ──────────────────────────────────────────────────
 
@@ -128,9 +126,7 @@ export function classifyEditIntent(message: string): EditIntent {
   // ── Tier 9: bare revision anchor + quality/polish keyword ────────────────
   const hasRevisionAnchor = REVISION_ANCHORS.test(message);
   if (hasRevisionAnchor) {
-    if (
-      /\b(?:improve|polish|clean|better|nicer|prettier|professional|sharper)\b/i.test(lower)
-    ) {
+    if (/\b(?:improve|polish|clean|better|nicer|prettier|professional|sharper)\b/i.test(lower)) {
       return "style_edit";
     }
     return "revision_ambiguous";

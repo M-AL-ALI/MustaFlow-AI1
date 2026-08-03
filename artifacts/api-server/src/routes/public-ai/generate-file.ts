@@ -190,9 +190,8 @@ router.post("/public-ai/generate-file", async (req, res) => {
   // new-creation or full-redesign intents so "create a new deck about AI"
   // doesn't accidentally revise the tracked artifact.
   if (activeAssetBuffer && activeAssetFileName) {
-    const { classifyEditIntent, isRevisionIntent } = await import(
-      "../../lib/public-ai/edit-intent-classifier"
-    );
+    const { classifyEditIntent, isRevisionIntent } =
+      await import("../../lib/public-ai/edit-intent-classifier");
     if (!isRevisionIntent(classifyEditIntent(message))) {
       activeAssetBuffer = null;
       activeAssetFileName = null;

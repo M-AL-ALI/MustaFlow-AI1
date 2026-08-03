@@ -1144,10 +1144,7 @@ function parseBullets(content: string): string[] {
     .filter(Boolean);
 }
 
-export async function buildDocx(
-  data: DocumentData,
-  brandKit?: BrandKit | null,
-): Promise<Buffer> {
+export async function buildDocx(data: DocumentData, brandKit?: BrandKit | null): Promise<Buffer> {
   const ACCENT = toDocxColor(brandKit?.accentColor) ?? "6366F1";
   const DARK = toDocxColor(brandKit?.primaryColor) ?? "1E1B4B";
   const GRAY = "6B7280";
@@ -1427,10 +1424,7 @@ export async function buildDocx(
 // PDF builder
 // ---------------------------------------------------------------------------
 
-export async function buildPdf(
-  data: DocumentData,
-  brandKit?: BrandKit | null,
-): Promise<Buffer> {
+export async function buildPdf(data: DocumentData, brandKit?: BrandKit | null): Promise<Buffer> {
   const PDFDocument = (await import("pdfkit")).default;
   const sectionChartImages = await Promise.all(
     data.sections.map((section) =>
@@ -2460,8 +2454,7 @@ export async function generateFileFromPrompt(
 
   // Cap each provider attempt so the full fallback chain finishes before any
   // browser client disconnects (~300 s). Default: 70 s × 3 providers = 210 s max.
-  const fileGenAttemptTimeoutMs =
-    Number(process.env.ORA_FILE_GEN_ATTEMPT_TIMEOUT_MS) || 70_000;
+  const fileGenAttemptTimeoutMs = Number(process.env.ORA_FILE_GEN_ATTEMPT_TIMEOUT_MS) || 70_000;
 
   const chain = await runCandidateChain(candidates, async (candidate) => {
     const result = await Promise.race([
@@ -2475,10 +2468,7 @@ export async function generateFileFromPrompt(
         max_completion_tokens: quality.maxCompletionTokens,
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("file-gen-attempt-timeout")),
-          fileGenAttemptTimeoutMs,
-        ),
+        setTimeout(() => reject(new Error("file-gen-attempt-timeout")), fileGenAttemptTimeoutMs),
       ),
     ]);
 
@@ -2546,7 +2536,8 @@ export async function generateFileFromPrompt(
         "Could not build a document from your file. Please try again, or re-upload it.",
       );
     }
-    fileBuffer = format === "docx" ? await buildDocx(data, brandKit) : await buildPdf(data, brandKit);
+    fileBuffer =
+      format === "docx" ? await buildDocx(data, brandKit) : await buildPdf(data, brandKit);
   }
 
   const formatLabel = format.toUpperCase();

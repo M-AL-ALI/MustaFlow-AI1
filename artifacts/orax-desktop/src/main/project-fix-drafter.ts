@@ -11,11 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import type { FileReadEntry } from "./project-file-reader";
-import type {
-  DraftFilePatch,
-  DraftProjectPatch,
-  FilePatchPreview,
-} from "./project-patch-drafter";
+import type { DraftFilePatch, DraftProjectPatch, FilePatchPreview } from "./project-patch-drafter";
 
 // ── Public types ─────────────────────────────────────────────────────────────
 

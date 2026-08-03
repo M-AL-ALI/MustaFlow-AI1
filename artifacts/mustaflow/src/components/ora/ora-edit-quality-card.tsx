@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileCheck2, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  FileCheck2,
+  Sparkles,
+} from "lucide-react";
 import type { OraFileEditQuality } from "@workspace/ora-contracts";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +92,9 @@ export function OraEditQualityCard({
       )}
     >
       <div className="flex items-start gap-2">
-        <Icon className={cn("shrink-0 mt-0.5", compact ? "h-3.5 w-3.5" : "h-4 w-4", mode.iconClass)} />
+        <Icon
+          className={cn("shrink-0 mt-0.5", compact ? "h-3.5 w-3.5" : "h-4 w-4", mode.iconClass)}
+        />
         <div className="flex-1 min-w-0">
           <p className={cn("font-medium text-foreground", compact ? "text-[11px]" : "text-xs")}>
             {mode.label}

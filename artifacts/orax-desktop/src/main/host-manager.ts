@@ -84,8 +84,7 @@ export class HostManager {
         this.emit();
       }
     } catch {
-      this.state.status =
-        this.state.status === "reconnecting" ? "offline" : "reconnecting";
+      this.state.status = this.state.status === "reconnecting" ? "offline" : "reconnecting";
       this.emit();
     }
   }

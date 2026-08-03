@@ -28,14 +28,8 @@ const kitBodySchema = z.object({
     .transform((v) => `#${v.replace(/^#/, "").toUpperCase()}`)
     .nullable()
     .optional(),
-  headingFont: z
-    .enum(SAFE_FONTS)
-    .nullable()
-    .optional(),
-  bodyFont: z
-    .enum(SAFE_FONTS)
-    .nullable()
-    .optional(),
+  headingFont: z.enum(SAFE_FONTS).nullable().optional(),
+  bodyFont: z.enum(SAFE_FONTS).nullable().optional(),
   logoAssetId: z.number().int().positive().nullable().optional(),
   oraProjectId: z.number().int().positive().nullable().optional(),
 });
@@ -102,8 +96,15 @@ router.put("/ora/brand-kit", async (req, res) => {
     return;
   }
 
-  const { primaryColor, secondaryColor, accentColor, headingFont, bodyFont, logoAssetId, oraProjectId } =
-    parsed.data;
+  const {
+    primaryColor,
+    secondaryColor,
+    accentColor,
+    headingFont,
+    bodyFont,
+    logoAssetId,
+    oraProjectId,
+  } = parsed.data;
 
   if (logoAssetId != null) {
     const [asset] = await db
@@ -129,7 +130,11 @@ router.put("/ora/brand-kit", async (req, res) => {
 
   try {
     const scopeFilter = buildScopeFilter(userId, oraProjectId ?? null);
-    const [existing] = await db.select({ id: brandKitsTable.id }).from(brandKitsTable).where(scopeFilter).limit(1);
+    const [existing] = await db
+      .select({ id: brandKitsTable.id })
+      .from(brandKitsTable)
+      .where(scopeFilter)
+      .limit(1);
 
     const now = new Date();
     if (existing) {
@@ -225,7 +230,9 @@ router.post("/ora/brand-kit/logo", async (req, res) => {
     });
 
     if (assetId == null) {
-      res.status(507).json({ error: "Storage capacity exceeded — delete some library files and try again" });
+      res
+        .status(507)
+        .json({ error: "Storage capacity exceeded — delete some library files and try again" });
       return;
     }
 

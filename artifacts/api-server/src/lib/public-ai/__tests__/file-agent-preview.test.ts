@@ -194,10 +194,9 @@ describe("Phase 9C — before/after content changes in confirmation preview", ()
   });
 
   it("caps contentChanges at 5 even with many quoted pairs", () => {
-    const pairs = Array.from(
-      { length: 8 },
-      (_, i) => `Replace "term${i}" with "new${i}"`,
-    ).join(". ");
+    const pairs = Array.from({ length: 8 }, (_, i) => `Replace "term${i}" with "new${i}"`).join(
+      ". ",
+    );
     const preview = buildFileEditConfirmationPreview({
       format: "docx",
       fileNames: ["doc.docx"],

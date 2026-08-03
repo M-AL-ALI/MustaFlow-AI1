@@ -1012,7 +1012,7 @@ describe("tryApplyLayoutPreservingFileEdit", () => {
     const sessionId = crypto.randomUUID();
     const docXml = [
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
-      '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Quarterly sum</w:t></w:r><w:r><w:t>mary intro</w:t></w:r></w:p>',
+      "<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Quarterly sum</w:t></w:r><w:r><w:t>mary intro</w:t></w:r></w:p>",
       "</w:body></w:document>",
     ].join("");
     const base64 = zipBase64({
@@ -1198,9 +1198,7 @@ describe("editQuality card metadata", () => {
     });
 
     expect(result?.editQuality?.editMode).toBe("original_edited");
-    expect(result?.editQuality?.changes).toEqual([
-      'Replaced: "Old Pricing" → "Refreshed Pricing"',
-    ]);
+    expect(result?.editQuality?.changes).toEqual(['Replaced: "Old Pricing" → "Refreshed Pricing"']);
   });
 
   it("stamps failed_safe with a warning when in-place ops cannot be located", async () => {

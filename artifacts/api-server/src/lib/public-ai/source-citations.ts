@@ -170,7 +170,13 @@ export function deriveFileCitations(
     for (const sheetName of entry.sheets) {
       if (!replyMentions(reply, sheetName)) continue;
       const owners = allowList.filter((e) => e.sheets.includes(sheetName));
-      if (owners.length > 1 && !(mentionedFiles.has(entry.filename) && owners.filter((e) => mentionedFiles.has(e.filename)).length === 1)) {
+      if (
+        owners.length > 1 &&
+        !(
+          mentionedFiles.has(entry.filename) &&
+          owners.filter((e) => mentionedFiles.has(e.filename)).length === 1
+        )
+      ) {
         continue;
       }
       push({ file: entry.filename, locator: sheetName, kind: "sheet" });

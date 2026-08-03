@@ -52,9 +52,7 @@ describe("InlineRecoveryLoop", () => {
     render(<InlineRecoveryLoop steps={steps} onRetry={retry} />);
 
     expect(
-      screen.getAllByTestId("inline-recovery-step").map((step) =>
-        step.getAttribute("data-phase"),
-      ),
+      screen.getAllByTestId("inline-recovery-step").map((step) => step.getAttribute("data-phase")),
     ).toEqual(["try", "adapt", "observe"]);
     fireEvent.click(screen.getByText("Try another fix"));
     expect(retry).toHaveBeenCalledOnce();

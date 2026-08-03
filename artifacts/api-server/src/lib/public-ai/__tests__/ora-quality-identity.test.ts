@@ -24,18 +24,14 @@ vi.mock("../model-router", () => ({
   openAiModelForOraMemory: vi.fn(() => "gpt-4o-mini"),
   oraImageQualityForPlan: vi.fn(() => "standard"),
   runCandidateChain: vi.fn(),
-  selectOraFileModelRoute: vi.fn(() => [
-    { model: "gpt-4o-mini", provider: "openai", priority: 1 },
-  ]),
+  selectOraFileModelRoute: vi.fn(() => [{ model: "gpt-4o-mini", provider: "openai", priority: 1 }]),
   selectOraMemoryModelRoute: vi.fn(() => [
     { model: "gpt-4o-mini", provider: "openai", priority: 1 },
   ]),
   selectOraVisionModelRoute: vi.fn(() => [
     { model: "gpt-4o-mini", provider: "openai", priority: 1 },
   ]),
-  selectOraModelRoute: vi.fn(() => [
-    { model: "gpt-4o-mini", provider: "openai", priority: 1 },
-  ]),
+  selectOraModelRoute: vi.fn(() => [{ model: "gpt-4o-mini", provider: "openai", priority: 1 }]),
   classifyProviderError: vi.fn(() => "unknown"),
   MODEL_DEFAULTS: { openai: { fast: "gpt-4o-mini", premium: "gpt-4o", deep: "o3-mini" } },
   isDeepSeekAvailable: vi.fn(() => false),

@@ -180,9 +180,7 @@ export function OraVersionHistoryDialog({
           </div>
         )}
 
-        {!loading && error && (
-          <p className="py-4 text-center text-xs text-destructive">{error}</p>
-        )}
+        {!loading && error && <p className="py-4 text-center text-xs text-destructive">{error}</p>}
 
         {!loading && !error && versions.length > 0 && (
           <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">

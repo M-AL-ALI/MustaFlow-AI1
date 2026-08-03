@@ -1,10 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import {
-  chatMessagesTable,
-  db,
-  projectSuggestionsTable,
-  projectsTable,
-} from "@workspace/db";
+import { chatMessagesTable, db, projectSuggestionsTable, projectsTable } from "@workspace/db";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 import { createChatCompletion } from "./ai-providers";
 import { logger } from "./logger";
@@ -105,10 +100,9 @@ function normalizeSuggestion(value: unknown): PostBuildSuggestion | null {
   };
 }
 
-function usageFrom(response: ChatCompletion): Pick<
-  SuggestionDiagnostic,
-  "finish_reason" | "reasoning_tokens" | "output_tokens"
-> {
+function usageFrom(
+  response: ChatCompletion,
+): Pick<SuggestionDiagnostic, "finish_reason" | "reasoning_tokens" | "output_tokens"> {
   return {
     finish_reason: response.choices[0]?.finish_reason ?? null,
     reasoning_tokens: response.usage?.completion_tokens_details?.reasoning_tokens ?? null,

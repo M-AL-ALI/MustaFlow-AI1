@@ -70,25 +70,25 @@ describe("Builder Wave 7B completion honesty", () => {
     mocks.insertReturning.mockResolvedValue([]);
     mocks.architectReview.mockImplementation(
       async (input: { fileExcerpts?: Array<{ path: string; content: string }> }) => {
-      const excerpts = input.fileExcerpts ?? [];
-      const excerptBlock = excerpts
-        .map((file: { path: string; content: string }) => `--- ${file.path} ---\n${file.content}`)
-        .join("\n\n");
-      return {
-        verdict: "pass",
-        summary: "The scaffold satisfies the request.",
-        findings: [],
-        nextActions: [],
-        model: "test-reviewer",
-        reviewerAssembledPromptStats: {
-          excerptCount: excerpts.length,
-          totalExcerptChars: excerpts.reduce(
-            (total: number, excerpt: { content: string }) => total + excerpt.content.length,
-            0,
-          ),
-          excerptBlockChars: excerptBlock.length,
-          selectedPaths: excerpts.map((excerpt: { path: string }) => excerpt.path),
-        },
+        const excerpts = input.fileExcerpts ?? [];
+        const excerptBlock = excerpts
+          .map((file: { path: string; content: string }) => `--- ${file.path} ---\n${file.content}`)
+          .join("\n\n");
+        return {
+          verdict: "pass",
+          summary: "The scaffold satisfies the request.",
+          findings: [],
+          nextActions: [],
+          model: "test-reviewer",
+          reviewerAssembledPromptStats: {
+            excerptCount: excerpts.length,
+            totalExcerptChars: excerpts.reduce(
+              (total: number, excerpt: { content: string }) => total + excerpt.content.length,
+              0,
+            ),
+            excerptBlockChars: excerptBlock.length,
+            selectedPaths: excerpts.map((excerpt: { path: string }) => excerpt.path),
+          },
         };
       },
     );
@@ -117,14 +117,12 @@ describe("Builder Wave 7B completion honesty", () => {
   });
 
   it("composes honest persisted task and chat summaries for step-cap and finalized runs", () => {
-    expect(
-      builderPersistedCompletionSummary("step_cap", "Built 15 files via agentic loop."),
-    ).toBe(
+    expect(builderPersistedCompletionSummary("step_cap", "Built 15 files via agentic loop.")).toBe(
       "Built 15 files via agentic loop — reached the step limit — you can continue with a follow-up prompt.",
     );
-    expect(
-      builderPersistedCompletionSummary("finalized", "Built 15 files via agentic loop."),
-    ).toBe("Built 15 files via agentic loop.");
+    expect(builderPersistedCompletionSummary("finalized", "Built 15 files via agentic loop.")).toBe(
+      "Built 15 files via agentic loop.",
+    );
 
     const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
     expect(jobsSource).toContain("result: persistedAssistantSummary");
@@ -137,15 +135,11 @@ describe("Builder Wave 7B completion honesty", () => {
     const optimisticSummary = "The Daily Inspiration app is fully scaffolded.";
 
     expect(
-      builderValidationAwareCompletionSummary(
-        optimisticSummary,
-        "passed_with_warnings",
-        warning,
-      ),
+      builderValidationAwareCompletionSummary(optimisticSummary, "passed_with_warnings", warning),
     ).toBe(`${optimisticSummary} ${warning}`);
-    expect(
-      builderValidationAwareCompletionSummary(optimisticSummary, "passed", warning),
-    ).toBe(optimisticSummary);
+    expect(builderValidationAwareCompletionSummary(optimisticSummary, "passed", warning)).toBe(
+      optimisticSummary,
+    );
 
     const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
     expect(jobsSource).toContain("builderValidationAwareCompletionSummary(");

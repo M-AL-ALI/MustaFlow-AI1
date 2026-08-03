@@ -53,7 +53,10 @@ requireContains(
 );
 requireContains("artifacts/mustaflow/src/lib/orax-desktop-release.ts", "downloadUrl");
 requireContains("artifacts/mustaflow/src/lib/orax-desktop-release.ts", "sha256");
-requireContains("artifacts/mustaflow/src/lib/orax-desktop-release.ts", "isValidOraxDesktopManifest");
+requireContains(
+  "artifacts/mustaflow/src/lib/orax-desktop-release.ts",
+  "isValidOraxDesktopManifest",
+);
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Public download disabled");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Release manifest unavailable");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Download for Windows");
@@ -67,10 +70,7 @@ requireContains(
   "docs/orax-desktop-release-channel.md",
   "VITE_ORAX_DESKTOP_PUBLIC_DOWNLOAD_ENABLED=true",
 );
-requireContains(
-  "docs/orax-desktop-release-channel.md",
-  "VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL",
-);
+requireContains("docs/orax-desktop-release-channel.md", "VITE_ORAX_DESKTOP_RELEASE_MANIFEST_URL");
 requireNotContains("artifacts/mustaflow/src/pages/orax-product.tsx", 'href="/downloads/');
 requireNotContains("artifacts/mustaflow/src/pages/orax-product.tsx", 'href="/support/tickets"');
 

@@ -14,27 +14,27 @@ The final menu has nine actions in three plain-language groups:
 
 ## Before/after inventory
 
-| Original entry | Result | Reason and working proof |
-| --- | --- | --- |
-| Generate image | Kept under Create | Opened the inline image prompt; one `Describe an image` input appeared. No generation request is sent until Generate is pressed. |
-| Brainstorm | Kept under Create | Opened the project-aware `Brainstorm your idea` panel for project 45. |
-| Add queued task | Kept under Run | Added a second row and rendered `Queue - 2 tasks`. This is multi-request composition, not background execution. |
-| Plan first | Kept under Plan | Toggled immediately and the menu returned `Plan first on`. |
-| Work in background | Kept under Run | Toggled immediately and the menu returned `Work in background on`. It remains distinct from adding multiple queued prompts. |
-| Templates | Kept under Create | Opened the `Plan Templates` dialog with search and template selection. |
-| Generate variants | Removed from menu; contextual action kept | It duplicated a specialized switch. Typing `Redesign the landing page layout` rendered the existing `Generate 2 variants` action, now outside the unrelated issue-count gate. |
-| Plan history | Kept under Plan | Opened the `Plan History` dialog and its honest empty state. |
-| Debug project | Collapsed into Fix or improve... | A generic editable fix prompt lets Zero choose the relevant diagnosis instead of exposing an internal route. |
-| Review project | Collapsed into Fix or improve... | Same Zero-decides flow; specific review machinery remains available behind the prompt. |
-| Explain project | Renamed Explain my app | Prefilled `Explain how this app works in plain language, including its pages, data flow, and important behavior.` |
-| Improve project | Collapsed into Fix or improve... | Prefilled the editable `Fix or improve this app: ` prompt. |
-| Fix tests | Collapsed into Fix or improve... | Zero chooses the appropriate fix; the contextual Fix Issues surface still offers the specific test action when a failing test is actually detected. |
-| Fix TypeScript | Collapsed into Fix or improve... | Zero chooses the appropriate fix; the contextual Fix Issues surface still offers the TypeScript action when detected. |
-| Fix lint | Collapsed into Fix or improve... | Zero chooses the appropriate fix; the contextual Fix Issues surface still offers the lint action when detected. |
-| Lite | Removed from plus menu | Available only in the dedicated Mode control. |
-| Eco | Removed from plus menu | Available only in the dedicated Mode control. |
-| Power | Removed from plus menu | Available only in the dedicated Mode control. |
-| Pro | Removed from plus menu | Available only in the dedicated Mode control. |
+| Original entry     | Result                                    | Reason and working proof                                                                                                                                                      |
+| ------------------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Generate image     | Kept under Create                         | Opened the inline image prompt; one `Describe an image` input appeared. No generation request is sent until Generate is pressed.                                              |
+| Brainstorm         | Kept under Create                         | Opened the project-aware `Brainstorm your idea` panel for project 45.                                                                                                         |
+| Add queued task    | Kept under Run                            | Added a second row and rendered `Queue - 2 tasks`. This is multi-request composition, not background execution.                                                               |
+| Plan first         | Kept under Plan                           | Toggled immediately and the menu returned `Plan first on`.                                                                                                                    |
+| Work in background | Kept under Run                            | Toggled immediately and the menu returned `Work in background on`. It remains distinct from adding multiple queued prompts.                                                   |
+| Templates          | Kept under Create                         | Opened the `Plan Templates` dialog with search and template selection.                                                                                                        |
+| Generate variants  | Removed from menu; contextual action kept | It duplicated a specialized switch. Typing `Redesign the landing page layout` rendered the existing `Generate 2 variants` action, now outside the unrelated issue-count gate. |
+| Plan history       | Kept under Plan                           | Opened the `Plan History` dialog and its honest empty state.                                                                                                                  |
+| Debug project      | Collapsed into Fix or improve...          | A generic editable fix prompt lets Zero choose the relevant diagnosis instead of exposing an internal route.                                                                  |
+| Review project     | Collapsed into Fix or improve...          | Same Zero-decides flow; specific review machinery remains available behind the prompt.                                                                                        |
+| Explain project    | Renamed Explain my app                    | Prefilled `Explain how this app works in plain language, including its pages, data flow, and important behavior.`                                                             |
+| Improve project    | Collapsed into Fix or improve...          | Prefilled the editable `Fix or improve this app: ` prompt.                                                                                                                    |
+| Fix tests          | Collapsed into Fix or improve...          | Zero chooses the appropriate fix; the contextual Fix Issues surface still offers the specific test action when a failing test is actually detected.                           |
+| Fix TypeScript     | Collapsed into Fix or improve...          | Zero chooses the appropriate fix; the contextual Fix Issues surface still offers the TypeScript action when detected.                                                         |
+| Fix lint           | Collapsed into Fix or improve...          | Zero chooses the appropriate fix; the contextual Fix Issues surface still offers the lint action when detected.                                                               |
+| Lite               | Removed from plus menu                    | Available only in the dedicated Mode control.                                                                                                                                 |
+| Eco                | Removed from plus menu                    | Available only in the dedicated Mode control.                                                                                                                                 |
+| Power              | Removed from plus menu                    | Available only in the dedicated Mode control.                                                                                                                                 |
+| Pro                | Removed from plus menu                    | Available only in the dedicated Mode control.                                                                                                                                 |
 
 No audited action was wired to nothing. `Add queued task` and `Work in
 background` were retained separately because they control different behavior:

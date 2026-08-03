@@ -378,10 +378,7 @@ function ConversationRow({
           <DropdownMenuContent align="end" className="w-52">
             {!archived && onPin && (
               <>
-                <DropdownMenuItem
-                  onSelect={() => onPin(!isPinned)}
-                  className="text-xs"
-                >
+                <DropdownMenuItem onSelect={() => onPin(!isPinned)} className="text-xs">
                   {isPinned ? (
                     <>
                       <PinOff className="mr-2 h-3.5 w-3.5" />
@@ -439,7 +436,10 @@ function ConversationRow({
                   <Pencil className="mr-2 h-3.5 w-3.5" />
                   Rename
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={onDelete} className="text-xs text-destructive focus:text-destructive">
+                <DropdownMenuItem
+                  onSelect={onDelete}
+                  className="text-xs text-destructive focus:text-destructive"
+                >
                   <Archive className="mr-2 h-3.5 w-3.5" />
                   Archive
                 </DropdownMenuItem>
@@ -630,11 +630,15 @@ function ArchivedSection({ close }: { close: () => void }) {
                 active={false}
                 archived
                 projects={projects}
-                onMove={() => {/* n/a for archived */}}
+                onMove={() => {
+                  /* n/a for archived */
+                }}
                 onSelect={() => {}}
                 onRename={() => {}}
                 onDelete={() => {
-                  if (window.confirm("Permanently delete this conversation? This cannot be undone.")) {
+                  if (
+                    window.confirm("Permanently delete this conversation? This cannot be undone.")
+                  ) {
                     void permanentDeleteConversation(c.id).then(() => {
                       setArchived((prev) => prev.filter((x) => x.id !== c.id));
                     });
@@ -647,7 +651,9 @@ function ArchivedSection({ close }: { close: () => void }) {
                   });
                 }}
                 onPermanentDelete={() => {
-                  if (window.confirm("Permanently delete this conversation? This cannot be undone.")) {
+                  if (
+                    window.confirm("Permanently delete this conversation? This cannot be undone.")
+                  ) {
                     void permanentDeleteConversation(c.id).then(() => {
                       setArchived((prev) => prev.filter((x) => x.id !== c.id));
                     });
@@ -885,7 +891,13 @@ function ProjectsSection({ close }: { close: () => void }) {
  * created from the "New conversation" button (projectId === null) had no home in
  * the sidebar and appeared to "disappear" from history.
  */
-function RecentConversationsSection({ close, searchQuery }: { close: () => void; searchQuery: string }) {
+function RecentConversationsSection({
+  close,
+  searchQuery,
+}: {
+  close: () => void;
+  searchQuery: string;
+}) {
   const BASE_URL = import.meta.env.BASE_URL.replace(/\/$/, "");
   const {
     projects,
@@ -915,8 +927,10 @@ function RecentConversationsSection({ close, searchQuery }: { close: () => void;
     setSearchLoading(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      void authFetch(`${BASE_URL}/api/ora/conversations?q=${encodeURIComponent(searchQuery)}&limit=30`)
-        .then((res) => res.ok ? res.json() : null)
+      void authFetch(
+        `${BASE_URL}/api/ora/conversations?q=${encodeURIComponent(searchQuery)}&limit=30`,
+      )
+        .then((res) => (res.ok ? res.json() : null))
         .then((data: { conversations: OraConversationSummary[] } | null) => {
           if (data) setSearchResults(data.conversations);
         })

@@ -1370,9 +1370,9 @@ export default function HomePage() {
                   The AI that gets better with every build
                 </h2>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-5">
-                  Every project teaches NabuFlow something new. Lessons are captured automatically
-                  — what worked, what didn't, your preferences — and injected into every future
-                  build so the AI always improves.
+                  Every project teaches NabuFlow something new. Lessons are captured automatically —
+                  what worked, what didn't, your preferences — and injected into every future build
+                  so the AI always improves.
                 </p>
                 <ul className="space-y-2.5">
                   {[

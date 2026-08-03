@@ -52,15 +52,7 @@ function formatResetsIn(resetsAt: string): string {
 
 type Colors = ReturnType<typeof useColors>;
 
-function SectionHeader({
-  label,
-  onPlus,
-  c,
-}: {
-  label: string;
-  onPlus?: () => void;
-  c: Colors;
-}) {
+function SectionHeader({ label, onPlus, c }: { label: string; onPlus?: () => void; c: Colors }) {
   return (
     <View
       style={{
@@ -238,20 +230,12 @@ function NewProjectModal({
   }, [onClose]);
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={handleClose}
-    >
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
       >
-        <Pressable
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
-          onPress={handleClose}
-        />
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} onPress={handleClose} />
         <View
           style={{
             backgroundColor: c.background,
@@ -277,23 +261,19 @@ function NewProjectModal({
               <FolderOpen size={20} color={c.accentForeground} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text
-                style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
-              >
+              <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}>
                 New project
               </Text>
               <Text style={{ color: c.mutedForeground, fontSize: 13, marginTop: 2 }}>
-                Group related conversations together. Give your project a name and,
-                optionally, a short description.
+                Group related conversations together. Give your project a name and, optionally, a
+                short description.
               </Text>
             </View>
           </View>
 
           {/* Project name */}
           <View style={{ gap: 6 }}>
-            <Text
-              style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}
-            >
+            <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
               Project name
             </Text>
             <TextInput
@@ -319,13 +299,9 @@ function NewProjectModal({
 
           {/* Description */}
           <View style={{ gap: 6 }}>
-            <Text
-              style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}
-            >
+            <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
               Description{" "}
-              <Text
-                style={{ color: c.mutedForeground, fontFamily: "Inter_400Regular" }}
-              >
+              <Text style={{ color: c.mutedForeground, fontFamily: "Inter_400Regular" }}>
                 (optional)
               </Text>
             </Text>
@@ -362,13 +338,8 @@ function NewProjectModal({
           </View>
 
           {/* Buttons */}
-          <View
-            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12, marginTop: 4 }}
-          >
-            <Pressable
-              onPress={handleClose}
-              style={{ paddingVertical: 12, paddingHorizontal: 20 }}
-            >
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12, marginTop: 4 }}>
+            <Pressable onPress={handleClose} style={{ paddingVertical: 12, paddingHorizontal: 20 }}>
               <Text
                 style={{
                   color: c.mutedForeground,
@@ -452,7 +423,9 @@ function CustomDrawer(props: DrawerContentComponentProps) {
     const nav = props.navigation as any;
     if (typeof nav.addListener === "function") {
       const unsub = nav.addListener("drawerOpen", refresh);
-      return () => { unsub(); };
+      return () => {
+        unsub();
+      };
     }
   }, [props.navigation, refresh]);
 
@@ -563,9 +536,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
                 transition={150}
               />
             </View>
-            <Text
-              style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 16 }}
-            >
+            <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 16 }}>
               Ora
             </Text>
           </View>
@@ -602,11 +573,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
           <>
             {/* ── Recent conversations ── */}
             <View style={{ paddingHorizontal: 6, marginTop: 2 }}>
-              <SectionHeader
-                label="RECENT CONVERSATIONS"
-                onPlus={handleNewConversation}
-                c={c}
-              />
+              <SectionHeader label="RECENT CONVERSATIONS" onPlus={handleNewConversation} c={c} />
               {conversations.length === 0 ? (
                 <Text
                   style={{
@@ -632,11 +599,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
 
             {/* ── Projects ── */}
             <View style={{ paddingHorizontal: 6, marginTop: 10 }}>
-              <SectionHeader
-                label="PROJECTS"
-                onPlus={() => setShowNewProject(true)}
-                c={c}
-              />
+              <SectionHeader label="PROJECTS" onPlus={() => setShowNewProject(true)} c={c} />
               {projects.map((project) => (
                 <ProjRow
                   key={project.id}
@@ -674,7 +637,10 @@ function CustomDrawer(props: DrawerContentComponentProps) {
               }
               onPress={() => {
                 if (item.tab) {
-                  router.push({ pathname: `/(home)/${item.name}`, params: { tab: item.tab } } as never);
+                  router.push({
+                    pathname: `/(home)/${item.name}`,
+                    params: { tab: item.tab },
+                  } as never);
                 } else {
                   props.navigation.navigate(item.name);
                 }
@@ -762,10 +728,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
                 >
                   {user?.fullName || user?.username || "Signed in"}
                 </Text>
-                <Text
-                  numberOfLines={1}
-                  style={{ color: c.mutedForeground, fontSize: 12 }}
-                >
+                <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
                   {user?.primaryEmailAddress?.emailAddress ?? ""}
                 </Text>
               </View>
@@ -799,9 +762,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
           </>
         ) : (
           <>
-            <Text
-              style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}
-            >
+            <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
               Sign in to unlock Memory, Library, and Orax.
             </Text>
             <Pressable

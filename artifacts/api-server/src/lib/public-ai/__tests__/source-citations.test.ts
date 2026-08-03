@@ -131,7 +131,7 @@ describe("deriveFileCitations", () => {
 
   it("does not treat a generic base name as a file mention", () => {
     const generic = buildFileCitationAllowList(
-      ['File: presentation.pptx', '"""', 'Slide 1: Hello', '"""'].join("\n"),
+      ["File: presentation.pptx", '"""', "Slide 1: Hello", '"""'].join("\n"),
     );
     // "presentation" alone is too generic to count as citing presentation.pptx…
     expect(deriveFileCitations("Nice presentation overall.", generic)).toEqual([]);

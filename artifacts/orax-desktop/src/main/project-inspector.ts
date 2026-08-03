@@ -107,9 +107,7 @@ function readPackageJsonScripts(pkgPath: string): ProjectInspectionScript[] {
   }
 }
 
-function detectPackageManager(
-  rootPath: string,
-): "pnpm" | "yarn" | "npm" | "bun" | null {
+function detectPackageManager(rootPath: string): "pnpm" | "yarn" | "npm" | "bun" | null {
   if (fs.existsSync(path.join(rootPath, "pnpm-lock.yaml"))) return "pnpm";
   if (fs.existsSync(path.join(rootPath, "yarn.lock"))) return "yarn";
   if (fs.existsSync(path.join(rootPath, "bun.lockb"))) return "bun";
@@ -120,18 +118,13 @@ function detectPackageManager(
 function detectFrameworks(rootPath: string, topEntries: string[]): string[] {
   const hints: string[] = [];
   const hasEntry = (name: string) => topEntries.includes(name);
-  const hasFile = (name: string) =>
-    hasEntry(name) || fs.existsSync(path.join(rootPath, name));
+  const hasFile = (name: string) => hasEntry(name) || fs.existsSync(path.join(rootPath, name));
 
   if (hasFile("pnpm-workspace.yaml") || hasFile("turbo.json")) {
     hints.push("pnpm monorepo");
   }
   if (hasFile("vite.config.ts") || hasFile("vite.config.js")) hints.push("Vite");
-  if (
-    hasFile("next.config.js") ||
-    hasFile("next.config.ts") ||
-    hasFile("next.config.mjs")
-  ) {
+  if (hasFile("next.config.js") || hasFile("next.config.ts") || hasFile("next.config.mjs")) {
     hints.push("Next.js");
   }
 
@@ -139,9 +132,7 @@ function detectFrameworks(rootPath: string, topEntries: string[]): string[] {
   const appJsonPath = path.join(rootPath, "app.json");
   if (fs.existsSync(appJsonPath)) {
     try {
-      const appJson = JSON.parse(
-        fs.readFileSync(appJsonPath, "utf8"),
-      ) as { expo?: unknown };
+      const appJson = JSON.parse(fs.readFileSync(appJsonPath, "utf8")) as { expo?: unknown };
       if (appJson.expo) hints.push("Expo / React Native");
     } catch {
       /* skip malformed */
@@ -166,7 +157,7 @@ function readGitBranch(rootPath: string): string | null {
     if (!fs.existsSync(headPath)) return null;
     const content = fs.readFileSync(headPath, "utf8").trim();
     const match = content.match(/^ref: refs\/heads\/(.+)$/);
-    return match ? match[1] ?? null : content.slice(0, 12) || null;
+    return match ? (match[1] ?? null) : content.slice(0, 12) || null;
   } catch {
     return null;
   }
@@ -203,9 +194,7 @@ function collectTopLevelEntries(
   return { entries: result, fileCount };
 }
 
-function buildSummaryText(
-  result: Omit<ProjectInspectionResult, "summaryText">,
-): string {
+function buildSummaryText(result: Omit<ProjectInspectionResult, "summaryText">): string {
   const lines: string[] = [
     `Orax connected to ${result.rootName} and inspected the local workspace.`,
     "",
@@ -246,29 +235,20 @@ function buildSummaryText(
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export async function inspectLocalProject(
-  localPath: string,
-): Promise<ProjectInspectionResult> {
+export async function inspectLocalProject(localPath: string): Promise<ProjectInspectionResult> {
   const rootName = path.basename(localPath);
   const ignored: string[] = [];
 
-  const { entries: topLevelEntries, fileCount } = collectTopLevelEntries(
-    localPath,
-    ignored,
-  );
+  const { entries: topLevelEntries, fileCount } = collectTopLevelEntries(localPath, ignored);
 
   const hasGit = fs.existsSync(path.join(localPath, ".git"));
   const gitBranch = hasGit ? readGitBranch(localPath) : null;
   const packageManager = detectPackageManager(localPath);
   const frameworkHints = detectFrameworks(localPath, topLevelEntries);
-  const keyFiles = [...SAFE_CONFIG_FILES].filter((f) =>
-    topLevelEntries.includes(f),
-  );
+  const keyFiles = [...SAFE_CONFIG_FILES].filter((f) => topLevelEntries.includes(f));
 
   const pkgPath = path.join(localPath, "package.json");
-  const scripts = fs.existsSync(pkgPath)
-    ? readPackageJsonScripts(pkgPath)
-    : [];
+  const scripts = fs.existsSync(pkgPath) ? readPackageJsonScripts(pkgPath) : [];
 
   // README preview (first MAX_README_BYTES only, ignored in summaryText)
   const readmePath = path.join(localPath, "README.md");

@@ -97,10 +97,15 @@ export default function BillingUsagePage() {
 
   const dunning = state?.subscription?.dunningStatus;
   const showDunningBanner =
-    !!state?.enforcementEnabled && !state.exempt && (dunning === "retrying" || dunning === "paused");
+    !!state?.enforcementEnabled &&
+    !state.exempt &&
+    (dunning === "retrying" || dunning === "paused");
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-4 md:px-8" data-testid="billing-usage-page">
+    <div
+      className="mx-auto w-full max-w-6xl px-4 pb-16 pt-4 md:px-8"
+      data-testid="billing-usage-page"
+    >
       <header className="mb-5">
         <h1 className="text-xl font-bold tracking-tight text-foreground">Billing &amp; Usage</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -127,7 +132,8 @@ export default function BillingUsagePage() {
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            A payment didn't go through{dunning === "paused" ? " and builds are paused" : " — we're retrying"}.{" "}
+            A payment didn't go through
+            {dunning === "paused" ? " and builds are paused" : " — we're retrying"}.{" "}
             <Link href="/billing/payment" className="font-medium underline underline-offset-2">
               Update your card
             </Link>{" "}
@@ -146,7 +152,11 @@ export default function BillingUsagePage() {
       <div className="flex gap-8">
         {/* Desktop: left rail */}
         <aside className="hidden w-52 shrink-0 md:block">
-          <NavLinks sections={visibleSections} active={active} className="sticky top-4 flex flex-col gap-1" />
+          <NavLinks
+            sections={visibleSections}
+            active={active}
+            className="sticky top-4 flex flex-col gap-1"
+          />
         </aside>
 
         <main className="min-w-0 flex-1">

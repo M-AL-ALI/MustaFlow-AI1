@@ -24,14 +24,7 @@ describe("InlineIdeas", () => {
     const onDismiss = vi.fn();
     const ideas = [idea(1, "Keyboard shortcuts"), idea(2, "Empty state")];
 
-    render(
-      <InlineIdeas
-        ideas={ideas}
-        onBuild={onBuild}
-        onSave={onSave}
-        onDismiss={onDismiss}
-      />,
-    );
+    render(<InlineIdeas ideas={ideas} onBuild={onBuild} onSave={onSave} onDismiss={onDismiss} />);
 
     expect(screen.getAllByTestId("inline-idea")).toHaveLength(2);
     fireEvent.click(screen.getAllByTitle("Save in Ideas")[0]!);
@@ -54,13 +47,7 @@ describe("InlineIdeas", () => {
 
   it("uses one quiet loading line while ideas are being generated", () => {
     render(
-      <InlineIdeas
-        ideas={[]}
-        loading
-        onBuild={vi.fn()}
-        onSave={vi.fn()}
-        onDismiss={vi.fn()}
-      />,
+      <InlineIdeas ideas={[]} loading onBuild={vi.fn()} onSave={vi.fn()} onDismiss={vi.fn()} />,
     );
 
     expect(screen.getByText("Finding useful next ideas...")).toBeVisible();
@@ -74,12 +61,7 @@ describe("InlineIdeas", () => {
       "Review the most recent build task against the current project files. Make one focused improvement only if project evidence supports it.";
 
     render(
-      <InlineIdeas
-        ideas={[fallback]}
-        onBuild={vi.fn()}
-        onSave={vi.fn()}
-        onDismiss={vi.fn()}
-      />,
+      <InlineIdeas ideas={[fallback]} onBuild={vi.fn()} onSave={vi.fn()} onDismiss={vi.fn()} />,
     );
 
     expect(screen.getByText("Review the latest task")).toBeVisible();

@@ -16,9 +16,7 @@ describe("InlineBuilderError", () => {
     expect(screen.getByText("I couldn't finish this step.")).toBeVisible();
     expect(screen.getByText(/port 3000 was unavailable/)).toBeVisible();
     fireEvent.click(screen.getByText("Try this"));
-    expect(tryFix).toHaveBeenCalledWith(
-      "Use the configured preview port and start the app again.",
-    );
+    expect(tryFix).toHaveBeenCalledWith("Use the configured preview port and start the app again.");
     expect(container.firstElementChild).not.toHaveClass(
       "border",
       "bg-destructive/10",

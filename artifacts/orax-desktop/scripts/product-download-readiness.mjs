@@ -47,7 +47,10 @@ requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Why download 
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "No support-ticket detour");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Users do not configure GitHub");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "What happens after install");
-requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "PowerShell, Git, Node.js, npm, and pnpm");
+requireContains(
+  "artifacts/mustaflow/src/pages/orax-product.tsx",
+  "PowerShell, Git, Node.js, npm, and pnpm",
+);
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Signed installer required");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Manifest controls the link");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Windows smoke test required");

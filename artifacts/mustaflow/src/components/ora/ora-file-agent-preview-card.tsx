@@ -189,10 +189,7 @@ export function OraFileAgentPreviewCard({
                 <span>Content being changed</span>
               </div>
               {preview.contentChanges.map((change, i) => (
-                <div
-                  key={`cc-${i}`}
-                  className="flex flex-wrap items-center gap-1.5 leading-snug"
-                >
+                <div key={`cc-${i}`} className="flex flex-wrap items-center gap-1.5 leading-snug">
                   <span className="text-[11px] font-medium text-muted-foreground">
                     {change.label}
                   </span>

@@ -55,7 +55,10 @@ requireContains("artifacts/mustaflow/src/pages/orax.tsx", "/orax/devices");
 requireContains("artifacts/mustaflow/src/pages/orax.tsx", "Open device manager");
 requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "Desktop online");
 requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "Desktop offline");
-requireContains("artifacts/ora-mobile/app/(home)/orax.tsx", "before asking Orax to work on local files");
+requireContains(
+  "artifacts/ora-mobile/app/(home)/orax.tsx",
+  "before asking Orax to work on local files",
+);
 
 for (const relPath of [
   "artifacts/mustaflow/src/pages/orax.tsx",

@@ -158,12 +158,7 @@ export const nabuflowOrgPurchasesTable = pgTable(
   (t) => [index("nabuflow_org_purchases_org_idx").on(t.orgId, t.createdAt)],
 );
 
-export const NABUFLOW_ORG_LEDGER_TYPES = [
-  "purchase",
-  "draw",
-  "reversal",
-  "adjustment",
-] as const;
+export const NABUFLOW_ORG_LEDGER_TYPES = ["purchase", "draw", "reversal", "adjustment"] as const;
 export type NabuflowOrgLedgerType = (typeof NABUFLOW_ORG_LEDGER_TYPES)[number];
 
 // Append-only shared-pool ledger. Every pool movement (bulk purchase in, seat

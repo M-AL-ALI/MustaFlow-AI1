@@ -13,10 +13,7 @@ import { resolveAuthedOraUser } from "../lib/public-ai/authed-user";
 import { scanUserInput, ORA_SUPPORT_SYSTEM_PROMPT } from "../lib/public-ai/prompt";
 import { persistOraAsset } from "../lib/ora-assets";
 import { sendEmailWithStatus, type EmailDeliveryStatus } from "../lib/emailClient";
-import {
-  supportTicketTemplate,
-  supportTicketConfirmationTemplate,
-} from "../lib/emailTemplates";
+import { supportTicketTemplate, supportTicketConfirmationTemplate } from "../lib/emailTemplates";
 import { getClerkUserById } from "../lib/clerk-users";
 import { broadcastNewTicket } from "../lib/support-alerts";
 import { supportChatLimiter, supportEscalateLimiter } from "../lib/rateLimit";

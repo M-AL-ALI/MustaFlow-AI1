@@ -71,6 +71,8 @@ describe("Mobile Ora — file version history parity (Phase 2)", () => {
       'onShowHistory={a.kind === "file" ? () => setHistoryAssetId(a.id) : undefined}',
     );
     expect(library).toContain("onRestored={() => void reload()}");
-    expect(library).toContain('import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";');
+    expect(library).toContain(
+      'import { VersionHistorySheet } from "@/components/ora/VersionHistorySheet";',
+    );
   });
 });

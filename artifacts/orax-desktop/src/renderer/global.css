@@ -1,4 +1,6 @@
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -26,7 +28,9 @@
   --radius-lg: 12px;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   width: 100%;
   overflow: hidden;
@@ -55,7 +59,8 @@ button:disabled {
   cursor: not-allowed;
 }
 
-input, select {
+input,
+select {
   font-family: inherit;
   font-size: inherit;
   background: var(--bg-input);
@@ -67,7 +72,8 @@ input, select {
   width: 100%;
 }
 
-input:focus, select:focus {
+input:focus,
+select:focus {
   border-color: var(--accent);
 }
 
@@ -79,7 +85,9 @@ input:focus, select:focus {
   border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: 13px;
-  transition: background 0.15s, opacity 0.15s;
+  transition:
+    background 0.15s,
+    opacity 0.15s;
   white-space: nowrap;
 }
 
@@ -138,14 +146,29 @@ input:focus, select:focus {
   flex-shrink: 0;
 }
 
-.status-dot.online   { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.status-dot.offline  { background: var(--text-muted); }
-.status-dot.reconnecting { background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
-.status-dot.unregistered { background: var(--text-muted); }
+.status-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+.status-dot.offline {
+  background: var(--text-muted);
+}
+.status-dot.reconnecting {
+  background: var(--warning);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.status-dot.unregistered {
+  background: var(--text-muted);
+}
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .section-title {

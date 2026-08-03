@@ -18,12 +18,12 @@ completion-collapse behavior.
 The same arrays remain in memory and persistence for every mode. Only the default live
 window changes:
 
-| Mode | Density | Default live treatment |
-| --- | --- | --- |
-| Lite | Minimal | Group closed; opening shows the current activity/narration row |
-| Eco | Standard | Open; six most recent rows |
-| Power | Standard | Open; six most recent rows |
-| Pro | Detailed | Open; full 12-row live window and exact `loop:step` progress in the anchor |
+| Mode  | Density  | Default live treatment                                                     |
+| ----- | -------- | -------------------------------------------------------------------------- |
+| Lite  | Minimal  | Group closed; opening shows the current activity/narration row             |
+| Eco   | Standard | Open; six most recent rows                                                 |
+| Power | Standard | Open; six most recent rows                                                 |
+| Pro   | Detailed | Open; full 12-row live window and exact `loop:step` progress in the anchor |
 
 Completed replays still start collapsed in every mode, keeping history scannable.
 Expanding a persisted replay uses detailed history, so the stored story is never lost.

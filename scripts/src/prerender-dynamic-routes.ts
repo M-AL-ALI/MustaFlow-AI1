@@ -248,8 +248,7 @@ async function run(): Promise<void> {
           ? `${profile.display_name} (@${profile.username}) | ${SITE_NAME}`
           : `@${profile.username} | ${SITE_NAME}`,
         description:
-          profile.bio ??
-          `See the public apps and projects built by ${displayName} on NabuFlow.`,
+          profile.bio ?? `See the public apps and projects built by ${displayName} on NabuFlow.`,
         body: `
 <main>
   <article>

@@ -4,13 +4,13 @@
 
 Mode identity now uses one shared icon mapping throughout the NabuFlow Builder:
 
-| Mode | Lucide icon |
-| --- | --- |
-| Lite | Feather |
-| Eco | Leaf |
-| Power | Zap |
-| Pro | Gem |
-| Deep Reasoning | Brain |
+| Mode           | Lucide icon |
+| -------------- | ----------- |
+| Lite           | Feather     |
+| Eco            | Leaf        |
+| Power          | Zap         |
+| Pro            | Gem         |
+| Deep Reasoning | Brain       |
 
 The shared `builder-mode-icon.tsx` component is used by the composer Mode
 trigger and panel, Power/Pro credit confirmation, plan mode controls, plan

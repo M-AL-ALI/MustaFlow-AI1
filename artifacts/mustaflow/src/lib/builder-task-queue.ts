@@ -21,8 +21,6 @@ export function selectLingeringCompletedTask<T extends BuilderQueueTask>(
   if (hasActiveTask) return undefined;
   const mostRecentStartedTask = tasks
     .filter((task) => !NOT_STARTED_STATUSES.has(task.status))
-    .sort(
-      (a, b) => taskSequenceTimestamp(b) - taskSequenceTimestamp(a) || b.id - a.id,
-    )[0];
+    .sort((a, b) => taskSequenceTimestamp(b) - taskSequenceTimestamp(a) || b.id - a.id)[0];
   return mostRecentStartedTask?.status === "completed" ? mostRecentStartedTask : undefined;
 }

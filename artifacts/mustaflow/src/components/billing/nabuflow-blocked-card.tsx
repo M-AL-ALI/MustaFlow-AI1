@@ -139,12 +139,24 @@ export function NabuflowBlockedCard({
       )}
     >
       <div className="flex items-start gap-2.5">
-        <Icon className={cn("shrink-0 text-primary", compact ? "mt-0.5 h-3.5 w-3.5" : "mt-0.5 h-4 w-4")} />
+        <Icon
+          className={cn("shrink-0 text-primary", compact ? "mt-0.5 h-3.5 w-3.5" : "mt-0.5 h-4 w-4")}
+        />
         <div className="min-w-0 flex-1 space-y-1">
-          <p className={cn("font-semibold leading-tight text-foreground", compact ? "text-[11px]" : "text-[12px]")}>
+          <p
+            className={cn(
+              "font-semibold leading-tight text-foreground",
+              compact ? "text-[11px]" : "text-[12px]",
+            )}
+          >
             {copy.title}
           </p>
-          <p className={cn("leading-snug text-muted-foreground", compact ? "text-[10px]" : "text-[11px]")}>
+          <p
+            className={cn(
+              "leading-snug text-muted-foreground",
+              compact ? "text-[10px]" : "text-[11px]",
+            )}
+          >
             {error.message}
           </p>
 

@@ -4,17 +4,17 @@
 
 The builder consumes existing task events; it does not invent a parallel state model.
 
-| Existing event source | Existing values | Inline state | Lucide icon |
-| --- | --- | --- | --- |
-| Agent-loop lifecycle | `queued`, `started`, `thinking`, `analyzing_request` | Thinking | `Loader` |
-| Context/file reads | `loading_context`, `reading_files` | Reading | `Eye` |
-| Planner | `planning`, `planning_changes`, `generating_blueprint` | Planning | `ListChecks` |
-| File generation | `generating_code`, `editing_files`, `file_diff`, `saving_files`, `project_files_changed` | Writing code | `Code` |
-| Existing validators/QA | `validating_output`, `testing`, `qa_step`, `qa_done`, `command_output`, `check_result`, `typecheck_result`, `build_result`, `test_result`, `health_check_result` | Checking | `Eye` |
-| Existing version event | `saving_version` | Saving a checkpoint → Checkpoint saved | `GitCommit` → `Check` |
-| Existing preview events | `updating_preview`, `preview_ready` | Refreshing preview → Preview ready | `Globe` → `Check` |
-| Existing terminal events | `finalized`, `completed`, `cancelled` | Done / Stopped | `Check` |
-| Existing failure events | `failed`, `aborted`, `preflight_error`, `container_unavailable`, `qa_timeout` | Plain-language attention state | `AlertTriangle` |
+| Existing event source    | Existing values                                                                                                                                                  | Inline state                           | Lucide icon           |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------- |
+| Agent-loop lifecycle     | `queued`, `started`, `thinking`, `analyzing_request`                                                                                                             | Thinking                               | `Loader`              |
+| Context/file reads       | `loading_context`, `reading_files`                                                                                                                               | Reading                                | `Eye`                 |
+| Planner                  | `planning`, `planning_changes`, `generating_blueprint`                                                                                                           | Planning                               | `ListChecks`          |
+| File generation          | `generating_code`, `editing_files`, `file_diff`, `saving_files`, `project_files_changed`                                                                         | Writing code                           | `Code`                |
+| Existing validators/QA   | `validating_output`, `testing`, `qa_step`, `qa_done`, `command_output`, `check_result`, `typecheck_result`, `build_result`, `test_result`, `health_check_result` | Checking                               | `Eye`                 |
+| Existing version event   | `saving_version`                                                                                                                                                 | Saving a checkpoint → Checkpoint saved | `GitCommit` → `Check` |
+| Existing preview events  | `updating_preview`, `preview_ready`                                                                                                                              | Refreshing preview → Preview ready     | `Globe` → `Check`     |
+| Existing terminal events | `finalized`, `completed`, `cancelled`                                                                                                                            | Done / Stopped                         | `Check`               |
+| Existing failure events  | `failed`, `aborted`, `preflight_error`, `container_unavailable`, `qa_timeout`                                                                                    | Plain-language attention state         | `AlertTriangle`       |
 
 `narration` is intentionally excluded from the activity mapper because Task 2 renders
 its message as streamed prose. Unknown event types are ignored.

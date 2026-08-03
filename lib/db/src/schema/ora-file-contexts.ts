@@ -1,4 +1,13 @@
-import { pgTable, serial, text, integer, jsonb, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  text,
+  integer,
+  jsonb,
+  timestamp,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 /**
  * Durable, text-only mirror of an uploaded Ora file's extracted context.

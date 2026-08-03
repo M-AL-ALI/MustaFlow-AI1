@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, Cloud, FolderOpen, GitBranch, Plus, RefreshCw, Trash2, Unlink } from "lucide-react";
+import {
+  AlertCircle,
+  Cloud,
+  FolderOpen,
+  GitBranch,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Unlink,
+} from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { project } from "../lib/ipc";
 
@@ -32,7 +41,7 @@ export function ProjectsScreen() {
   async function loadCloudProjects() {
     setCloudLoading(true);
     try {
-      const result = await project.listCloudProjects() as { projects: CloudProject[] };
+      const result = (await project.listCloudProjects()) as { projects: CloudProject[] };
       setCloudProjects(result.projects ?? []);
     } catch {
       // cloud not reachable — show empty state
@@ -71,7 +80,9 @@ export function ProjectsScreen() {
     if (!newProjectName.trim()) return;
     setBusy(true);
     try {
-      const result = await project.createCloudProject(newProjectName.trim()) as { project: CloudProject };
+      const result = (await project.createCloudProject(newProjectName.trim())) as {
+        project: CloudProject;
+      };
       setCloudProjects((prev) => [result.project, ...prev]);
       setNewProjectName("");
       setShowNewProject(false);
@@ -97,9 +108,7 @@ export function ProjectsScreen() {
 
   function isMissingLocal(source: CloudProjectSource): boolean {
     if (source.kind !== "local_folder") return false;
-    return (
-      !localProjects.some((lp) => lp.localPath === source.localPath)
-    );
+    return !localProjects.some((lp) => lp.localPath === source.localPath);
   }
 
   return (
@@ -152,10 +161,7 @@ export function ProjectsScreen() {
       )}
 
       {showNewProject && (
-        <div
-          className="card"
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
-        >
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
             New Cloud Project
           </div>
@@ -209,7 +215,14 @@ export function ProjectsScreen() {
         ) : cloudProjects.length === 0 ? (
           <div
             className="card"
-            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", padding: 28 }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+              textAlign: "center",
+              padding: 28,
+            }}
           >
             <Cloud size={28} color="var(--text-muted)" />
             <div>
@@ -223,7 +236,11 @@ export function ProjectsScreen() {
           </div>
         ) : (
           cloudProjects.map((proj) => (
-            <div key={proj.id} className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div
+              key={proj.id}
+              className="card"
+              style={{ display: "flex", flexDirection: "column", gap: 10 }}
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <Cloud size={15} color="var(--accent)" style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, overflow: "hidden" }}>
@@ -284,7 +301,10 @@ export function ProjectsScreen() {
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {src.displayName ?? src.localPath ?? src.githubRepoUrl ?? "Unknown source"}
+                          {src.displayName ??
+                            src.localPath ??
+                            src.githubRepoUrl ??
+                            "Unknown source"}
                         </span>
                         {missing && (
                           <span
@@ -340,7 +360,12 @@ export function ProjectsScreen() {
             <FolderOpen size={12} />
             Local Folders
           </div>
-          <button className="btn btn-secondary" onClick={() => void handleAdd()} disabled={busy} style={{ fontSize: 12, padding: "4px 10px" }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => void handleAdd()}
+            disabled={busy}
+            style={{ fontSize: 12, padding: "4px 10px" }}
+          >
             <Plus size={12} /> Add Folder
           </button>
         </div>
@@ -348,7 +373,14 @@ export function ProjectsScreen() {
         {localProjects.length === 0 ? (
           <div
             className="card"
-            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", padding: 28 }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+              textAlign: "center",
+              padding: 28,
+            }}
           >
             <FolderOpen size={28} color="var(--text-muted)" />
             <div>

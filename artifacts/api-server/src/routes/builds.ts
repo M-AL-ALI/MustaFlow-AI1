@@ -75,9 +75,7 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
     // NabuFlow billing gate (Task #1516): EAS builds are charged builds, so
     // they pass the same plan/card/cap/dunning resolver as the pipeline. EAS
     // runs aren't engine-mode builds, so the mode ladder doesn't apply.
-    const { nabuflowGateHttpError, nabuflowChargeActive } = await import(
-      "../lib/nabuflow-billing"
-    );
+    const { nabuflowGateHttpError, nabuflowChargeActive } = await import("../lib/nabuflow-billing");
     const gateErr = await nabuflowGateHttpError(project.ownerId, {
       engineMode: null,
       deepReasoning: false,

@@ -1,6 +1,14 @@
 import { useAuth } from "@clerk/expo";
 import { Image } from "expo-image";
-import { Download, FileText, FolderOpen, HardDrive, History, Share2, Trash2 } from "lucide-react-native";
+import {
+  Download,
+  FileText,
+  FolderOpen,
+  HardDrive,
+  History,
+  Share2,
+  Trash2,
+} from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

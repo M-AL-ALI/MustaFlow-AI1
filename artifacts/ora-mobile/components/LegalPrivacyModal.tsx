@@ -78,9 +78,7 @@ export function LegalPrivacyModal({ visible, onClose }: LegalPrivacyModalProps) 
               >
                 {heading}
               </Text>
-              <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 20 }}>
-                {body}
-              </Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 20 }}>{body}</Text>
             </View>
           ))}
         </ScrollView>

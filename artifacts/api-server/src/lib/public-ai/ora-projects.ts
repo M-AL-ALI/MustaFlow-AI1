@@ -12,9 +12,7 @@ import { db, oraProjectsTable } from "@workspace/db";
  * belongs to the calling user, and is not archived.
  */
 
-export type OraProjectCheck =
-  | { ok: true }
-  | { ok: false; status: 404 | 400; error: string };
+export type OraProjectCheck = { ok: true } | { ok: false; status: 404 | 400; error: string };
 
 /**
  * Validate that `projectId` is usable as a write target for `userId`.

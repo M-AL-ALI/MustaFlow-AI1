@@ -89,14 +89,15 @@ export function MeterBar({
   testId?: string;
 }) {
   const pct = total > 0 ? Math.min((used / total) * 100, 100) : 0;
-  const tone =
-    pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-500" : "bg-primary";
+  const tone = pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-500" : "bg-primary";
   return (
     <div data-testid={testId}>
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-xs font-medium text-foreground">{label}</p>
         <p className="text-xs tabular-nums text-muted-foreground">
-          {formatValue ? formatValue(used, total) : `${used.toLocaleString()} of ${total.toLocaleString()}`}
+          {formatValue
+            ? formatValue(used, total)
+            : `${used.toLocaleString()} of ${total.toLocaleString()}`}
         </p>
       </div>
       <div
@@ -108,7 +109,10 @@ export function MeterBar({
         aria-label={label}
       >
         <div
-          className={cn("h-full rounded-full transition-[width] motion-reduce:transition-none", tone)}
+          className={cn(
+            "h-full rounded-full transition-[width] motion-reduce:transition-none",
+            tone,
+          )}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -120,7 +124,9 @@ export function MeterBar({
 export function cardIsExpired(expMonth?: number | null, expYear?: number | null): boolean {
   if (!expMonth || !expYear) return false;
   const now = new Date();
-  return expYear < now.getFullYear() || (expYear === now.getFullYear() && expMonth < now.getMonth() + 1);
+  return (
+    expYear < now.getFullYear() || (expYear === now.getFullYear() && expMonth < now.getMonth() + 1)
+  );
 }
 
 export function SubscriptionStatusBadge({
@@ -131,7 +137,8 @@ export function SubscriptionStatusBadge({
   cancelAtPeriodEnd?: boolean;
 }) {
   if (!status) return null;
-  const label = cancelAtPeriodEnd && status === "active" ? "Cancels at period end" : status.replace(/_/g, " ");
+  const label =
+    cancelAtPeriodEnd && status === "active" ? "Cancels at period end" : status.replace(/_/g, " ");
   const variant =
     status === "active" || status === "trialing"
       ? cancelAtPeriodEnd

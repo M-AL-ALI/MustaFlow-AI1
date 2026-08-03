@@ -1,14 +1,6 @@
 import { Check, Download, History, RotateCcw, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
@@ -124,10 +116,7 @@ export function VersionHistorySheet({
         // Reload the chain against the NEW head so the badge moves.
         await load(res.assetId);
       } catch (err) {
-        Alert.alert(
-          "Restore failed",
-          err instanceof Error ? err.message : "Something went wrong.",
-        );
+        Alert.alert("Restore failed", err instanceof Error ? err.message : "Something went wrong.");
       } finally {
         setRestoringId(null);
       }

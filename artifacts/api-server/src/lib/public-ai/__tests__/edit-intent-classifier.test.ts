@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  classifyEditIntent,
-  isRevisionIntent,
-} from "../edit-intent-classifier";
+import { classifyEditIntent, isRevisionIntent } from "../edit-intent-classifier";
 
 describe("classifyEditIntent", () => {
   describe("full_redesign", () => {

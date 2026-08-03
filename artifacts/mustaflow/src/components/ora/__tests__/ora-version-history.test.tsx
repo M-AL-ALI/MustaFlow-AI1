@@ -6,8 +6,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { OraVersionHistoryDialog } from "../ora-version-history";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const readSource = (relativePath: string) =>
-  readFileSync(resolve(here, relativePath), "utf8");
+const readSource = (relativePath: string) => readFileSync(resolve(here, relativePath), "utf8");
 
 const mockToast = vi.fn();
 vi.mock("@/hooks/use-toast", () => ({
@@ -89,9 +88,7 @@ describe("OraVersionHistoryDialog", () => {
       expect.stringContaining("/api/ora/assets/12/versions"),
     );
 
-    const versionLabels = screen
-      .getAllByText(/^Version \d+$/)
-      .map((el) => el.textContent);
+    const versionLabels = screen.getAllByText(/^Version \d+$/).map((el) => el.textContent);
     expect(versionLabels).toEqual(["Version 3", "Version 2", "Version 1"]);
 
     expect(screen.getByText("Current")).toBeTruthy();
@@ -148,9 +145,7 @@ describe("OraVersionHistoryDialog", () => {
     expect(mockAuthFetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/ora/assets/13/versions"),
     );
-    expect(mockToast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Version restored" }),
-    );
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Version restored" }));
     await waitFor(() => {
       expect(screen.getByText("Version 4")).toBeTruthy();
     });

@@ -360,8 +360,7 @@ describe("Phase 9E — PDF format regressions", () => {
 // ── ZIP guard ─────────────────────────────────────────────────────────────────
 
 describe("Phase 9E — ZIP analysis guard regressions", () => {
-  const ZIP_DOCS =
-    "File: project.zip\nContent:\nsrc/index.ts\nsrc/utils.ts\npackage.json";
+  const ZIP_DOCS = "File: project.zip\nContent:\nsrc/index.ts\nsrc/utils.ts\npackage.json";
 
   it("ZIP context routes to zip_analysis_guard regardless of edit intent", () => {
     const result = resolveFinalOraRoute({
@@ -475,10 +474,9 @@ describe("Phase 9E — cross-format safety invariants", () => {
         operations: ["delete"],
         requestedPreview: false,
       });
-      expect(
-        preview.contentChanges == null || preview.contentChanges.length === 0,
-        format,
-      ).toBe(true);
+      expect(preview.contentChanges == null || preview.contentChanges.length === 0, format).toBe(
+        true,
+      );
     }
   });
 });

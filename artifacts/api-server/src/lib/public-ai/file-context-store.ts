@@ -183,9 +183,7 @@ export async function relinkFileContextAfterRestore(opts: {
       .set({
         assetId: opts.assetId,
         updatedAt: new Date(),
-        ...(extractedText !== undefined
-          ? { extractedText, charCount: extractedText.length }
-          : {}),
+        ...(extractedText !== undefined ? { extractedText, charCount: extractedText.length } : {}),
       })
       .where(
         and(

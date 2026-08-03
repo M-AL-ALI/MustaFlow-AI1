@@ -22,8 +22,14 @@ const dbResults: unknown[] = [];
 function makeChain() {
   const chain: Record<string, unknown> = {};
   const passthrough = [
-    "from", "where", "orderBy", "limit", "set", "returning",
-    "onConflictDoNothing", "onConflictDoUpdate",
+    "from",
+    "where",
+    "orderBy",
+    "limit",
+    "set",
+    "returning",
+    "onConflictDoNothing",
+    "onConflictDoUpdate",
   ];
   for (const m of passthrough) chain[m] = vi.fn(() => chain);
   chain.select = vi.fn(() => chain);
@@ -137,8 +143,8 @@ async function buildApp() {
 
 function seedInsert(ticketId: number) {
   dbResults.push([{ id: ticketId }]); // INSERT returning id
-  dbResults.push([]);                 // UPDATE emailStatus
-  dbResults.push([]);                 // broadcastNewTicket
+  dbResults.push([]); // UPDATE emailStatus
+  dbResults.push([]); // broadcastNewTicket
 }
 
 const TRANSCRIPT = [
@@ -252,8 +258,7 @@ describe("Escalation → supportTicketTemplate fidelity (no live network)", () =
 // Suite 2: live Resend delivery (skipped when env vars absent)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const LIVE_ENABLED =
-  Boolean(process.env.RESEND_API_KEY) && Boolean(process.env.SUPPORT_EMAIL);
+const LIVE_ENABLED = Boolean(process.env.RESEND_API_KEY) && Boolean(process.env.SUPPORT_EMAIL);
 
 describe.skipIf(!LIVE_ENABLED)(
   "Escalation → live Resend delivery (RESEND_API_KEY + SUPPORT_EMAIL set)",
@@ -284,43 +289,39 @@ describe.skipIf(!LIVE_ENABLED)(
       };
     });
 
-    it(
-      "delivers escalation email end-to-end and emailStatus is sent",
-      async () => {
-        seedInsert(1);
+    it("delivers escalation email end-to-end and emailStatus is sent", async () => {
+      seedInsert(1);
 
-        const res = await request(app)
-          .post("/help/support/escalate")
-          .send({
-            subject: "[Integration test] Escalation delivery check",
-            category: "general",
-            transcript: [
-              {
-                role: "user" as const,
-                content: "Automated integration test — please ignore.",
-              },
-              {
-                role: "assistant" as const,
-                content: "Received. Escalation email path is confirmed working.",
-              },
-            ],
-          });
+      const res = await request(app)
+        .post("/help/support/escalate")
+        .send({
+          subject: "[Integration test] Escalation delivery check",
+          category: "general",
+          transcript: [
+            {
+              role: "user" as const,
+              content: "Automated integration test — please ignore.",
+            },
+            {
+              role: "assistant" as const,
+              content: "Received. Escalation email path is confirmed working.",
+            },
+          ],
+        });
 
-        // Ticket must persist regardless of email outcome
-        expect(res.status).toBe(201);
-        expect(typeof res.body.ticketId).toBe("number");
+      // Ticket must persist regardless of email outcome
+      expect(res.status).toBe(201);
+      expect(typeof res.body.ticketId).toBe("number");
 
-        // Core acceptance criterion: Resend accepted the email
-        expect(res.body.emailStatus).toBe("sent");
+      // Core acceptance criterion: Resend accepted the email
+      expect(res.body.emailStatus).toBe("sent");
 
-        // Sent to the correct SUPPORT_EMAIL inbox
-        expect(capturedSendCalls).toHaveLength(1);
-        expect(capturedSendCalls[0]!.to).toBe(process.env.SUPPORT_EMAIL);
-        expect(capturedSendCalls[0]!.subject).toMatch(
-          /^\[Support #\d+\] \[Integration test\] Escalation delivery check$/,
-        );
-      },
-      30_000,
-    );
+      // Sent to the correct SUPPORT_EMAIL inbox
+      expect(capturedSendCalls).toHaveLength(1);
+      expect(capturedSendCalls[0]!.to).toBe(process.env.SUPPORT_EMAIL);
+      expect(capturedSendCalls[0]!.subject).toMatch(
+        /^\[Support #\d+\] \[Integration test\] Escalation delivery check$/,
+      );
+    }, 30_000);
   },
 );

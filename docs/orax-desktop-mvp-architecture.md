@@ -103,20 +103,20 @@ The existing MustaFlow API server, extended with Orax-specific routes. It:
 
 ### Comparison
 
-| Criterion | Electron | Tauri | Plain Node Daemon |
-|---|---|---|---|
-| Windows support | Excellent — ships Chromium | Good — WebView2 required | Excellent — Node is cross-platform |
-| PowerShell execution | `child_process.exec` natively | Sidecar or shell plugin | `child_process.exec` natively |
-| File-system access | Node `fs` natively | Rust `fs` + JS bridge | Node `fs` natively |
-| Git/GitHub CLI | Shell + `isomorphic-git` | Shell plugin | Shell + `isomorphic-git` |
-| React/TS UI reuse | Direct — same stack as web | Needs Tauri React adapter | Requires separate renderer process |
-| Auto-update | `electron-updater` (mature) | Tauri updater (newer) | Manual or custom |
-| Code signing | Mature tooling | Supported | N/A |
-| Installer | `electron-builder` (NSIS/MSI/MSIX) | Tauri bundler (.msi, .exe) | N/A |
-| App size | Large (~100–150 MB) | Small (~15 MB) | Very small, but no UI |
-| Development speed | Fastest — reuses entire web stack | Medium — Rust adds overhead | Slowest (headless only) |
-| Security model | Chromium sandbox; Node in main process | Rust core; JS renderer limited | No UI attack surface |
-| macOS/Linux later | Yes, first-class | Yes, first-class | Yes |
+| Criterion            | Electron                               | Tauri                          | Plain Node Daemon                  |
+| -------------------- | -------------------------------------- | ------------------------------ | ---------------------------------- |
+| Windows support      | Excellent — ships Chromium             | Good — WebView2 required       | Excellent — Node is cross-platform |
+| PowerShell execution | `child_process.exec` natively          | Sidecar or shell plugin        | `child_process.exec` natively      |
+| File-system access   | Node `fs` natively                     | Rust `fs` + JS bridge          | Node `fs` natively                 |
+| Git/GitHub CLI       | Shell + `isomorphic-git`               | Shell plugin                   | Shell + `isomorphic-git`           |
+| React/TS UI reuse    | Direct — same stack as web             | Needs Tauri React adapter      | Requires separate renderer process |
+| Auto-update          | `electron-updater` (mature)            | Tauri updater (newer)          | Manual or custom                   |
+| Code signing         | Mature tooling                         | Supported                      | N/A                                |
+| Installer            | `electron-builder` (NSIS/MSI/MSIX)     | Tauri bundler (.msi, .exe)     | N/A                                |
+| App size             | Large (~100–150 MB)                    | Small (~15 MB)                 | Very small, but no UI              |
+| Development speed    | Fastest — reuses entire web stack      | Medium — Rust adds overhead    | Slowest (headless only)            |
+| Security model       | Chromium sandbox; Node in main process | Rust core; JS renderer limited | No UI attack surface               |
+| macOS/Linux later    | Yes, first-class                       | Yes, first-class               | Yes                                |
 
 ### Recommendation: Electron (Phase 2C through 2E)
 
@@ -204,11 +204,11 @@ Capabilities are self-reported by the desktop at registration and updated on rec
 
 ### Key field distinctions
 
-| Field | Meaning |
-|---|---|
-| `user_id` | MustaFlow account. Owns billing, usage, and all data. |
-| `install_id` | Stable per-machine UUID. Written to OS keychain on first install. Survives app updates; reset only on explicit uninstall or keychain clear. |
-| `id` (hostId) | Database row ID for this registration. Changes only if the user explicitly removes and re-registers the device. |
+| Field         | Meaning                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_id`     | MustaFlow account. Owns billing, usage, and all data.                                                                                       |
+| `install_id`  | Stable per-machine UUID. Written to OS keychain on first install. Survives app updates; reset only on explicit uninstall or keychain clear. |
+| `id` (hostId) | Database row ID for this registration. Changes only if the user explicitly removes and re-registers the device.                             |
 
 ### Multiple devices under one account
 
@@ -243,7 +243,7 @@ Orax Desktop authenticates the user via MustaFlow's existing Clerk session. The 
 interface OraxUsageEvent {
   id: string;
   userId: string;
-  hostId: string;          // which desktop performed the work
+  hostId: string; // which desktop performed the work
   projectId: string | null;
   threadId: string | null;
   actionType: OraxActionType;
@@ -251,25 +251,25 @@ interface OraxUsageEvent {
   inputTokens: number | null;
   outputTokens: number | null;
   computeMs: number | null;
-  status: 'success' | 'failure' | 'cancelled';
-  timestamp: string;       // ISO 8601
+  status: "success" | "failure" | "cancelled";
+  timestamp: string; // ISO 8601
   metadata: Record<string, unknown>;
 }
 
 type OraxActionType =
-  | 'model_call'
-  | 'screenshot_analysis'
-  | 'file_analysis'
-  | 'repository_analysis'
-  | 'command_execution'
-  | 'approval_event'
-  | 'relay_event'
-  | 'git_commit'
-  | 'git_push'
-  | 'github_pr_created'
-  | 'typecheck_run'
-  | 'test_run'
-  | 'build_run';
+  | "model_call"
+  | "screenshot_analysis"
+  | "file_analysis"
+  | "repository_analysis"
+  | "command_execution"
+  | "approval_event"
+  | "relay_event"
+  | "git_commit"
+  | "git_push"
+  | "github_pr_created"
+  | "typecheck_run"
+  | "test_run"
+  | "build_run";
 ```
 
 Usage events are written by the cloud on confirmation from the desktop, not self-reported by the client (to prevent spoofing). The desktop reports completion; the cloud records the event and charges credits if applicable.
@@ -369,41 +369,41 @@ Do not expose the desktop directly to the public internet. All traffic flows thr
 
 ```typescript
 interface RelayMessage {
-  id: string;              // UUID, for deduplication
-  idempotencyKey: string;  // client-set, safe to replay
+  id: string; // UUID, for deduplication
+  idempotencyKey: string; // client-set, safe to replay
   type: RelayEventType;
   hostId: string;
   threadId: string | null;
   payload: unknown;
-  timestamp: string;       // ISO 8601
-  sequenceNum: number;     // monotonic per host session, for ordering
+  timestamp: string; // ISO 8601
+  sequenceNum: number; // monotonic per host session, for ordering
 }
 ```
 
 ### Event types
 
-| Event | Direction | Description |
-|---|---|---|
-| `host_online` | Cloud → Web/Mobile | Desktop connected to relay |
-| `host_offline` | Cloud → Web/Mobile | Desktop heartbeat timed out |
-| `host_paired` | Cloud → Desktop | A new device paired to this host |
-| `project_list_updated` | Desktop → Cloud | Local project list changed |
-| `thread_message_created` | Both | New message in a thread |
-| `action_requested` | Web/Mobile → Desktop (via cloud) | User submitted a task prompt |
-| `action_started` | Desktop → Cloud | Desktop began executing |
-| `action_progress` | Desktop → Cloud | Progress update |
-| `action_approval_required` | Desktop → Cloud | Execution paused, needs approval |
-| `action_approved` | Web/Mobile → Cloud → Desktop | User approved a pending action |
-| `action_denied` | Web/Mobile → Cloud → Desktop | User denied a pending action |
-| `action_completed` | Desktop → Cloud | Task finished successfully |
-| `action_failed` | Desktop → Cloud | Task failed |
-| `action_cancelled` | Web/Mobile → Cloud → Desktop | User cancelled a running task |
-| `command_output_chunk` | Desktop → Cloud | Streaming stdout/stderr line(s) |
-| `file_diff_ready` | Desktop → Cloud | File edits are available to display |
-| `checks_started` | Desktop → Cloud | Typecheck/test run started |
-| `checks_completed` | Desktop → Cloud | Typecheck/test run result |
-| `pr_ready` | Desktop → Cloud | PR body/branch ready to push |
-| `pr_created` | Desktop → Cloud | GitHub PR was created, URL available |
+| Event                      | Direction                        | Description                          |
+| -------------------------- | -------------------------------- | ------------------------------------ |
+| `host_online`              | Cloud → Web/Mobile               | Desktop connected to relay           |
+| `host_offline`             | Cloud → Web/Mobile               | Desktop heartbeat timed out          |
+| `host_paired`              | Cloud → Desktop                  | A new device paired to this host     |
+| `project_list_updated`     | Desktop → Cloud                  | Local project list changed           |
+| `thread_message_created`   | Both                             | New message in a thread              |
+| `action_requested`         | Web/Mobile → Desktop (via cloud) | User submitted a task prompt         |
+| `action_started`           | Desktop → Cloud                  | Desktop began executing              |
+| `action_progress`          | Desktop → Cloud                  | Progress update                      |
+| `action_approval_required` | Desktop → Cloud                  | Execution paused, needs approval     |
+| `action_approved`          | Web/Mobile → Cloud → Desktop     | User approved a pending action       |
+| `action_denied`            | Web/Mobile → Cloud → Desktop     | User denied a pending action         |
+| `action_completed`         | Desktop → Cloud                  | Task finished successfully           |
+| `action_failed`            | Desktop → Cloud                  | Task failed                          |
+| `action_cancelled`         | Web/Mobile → Cloud → Desktop     | User cancelled a running task        |
+| `command_output_chunk`     | Desktop → Cloud                  | Streaming stdout/stderr line(s)      |
+| `file_diff_ready`          | Desktop → Cloud                  | File edits are available to display  |
+| `checks_started`           | Desktop → Cloud                  | Typecheck/test run started           |
+| `checks_completed`         | Desktop → Cloud                  | Typecheck/test run result            |
+| `pr_ready`                 | Desktop → Cloud                  | PR body/branch ready to push         |
+| `pr_created`               | Desktop → Cloud                  | GitHub PR was created, URL available |
 
 ### Reliability
 
@@ -425,6 +425,7 @@ Permission mode is stored per host in `orax_hosts.permission_mode` and can be ov
 ### Modes
 
 #### 1. Read Only
+
 - File read: approved project folders only
 - File edit: blocked
 - Shell commands: blocked
@@ -435,6 +436,7 @@ Permission mode is stored per host in `orax_hosts.permission_mode` and can be ov
 - Deployment: blocked
 
 #### 2. Ask Before Everything
+
 - File read: approved folders, asks first
 - File edit: asks before each edit
 - Shell commands: asks before every command
@@ -444,6 +446,7 @@ Permission mode is stored per host in `orax_hosts.permission_mode` and can be ov
 - Deployment: blocked unless explicitly unlocked
 
 #### 3. Ask for Risky Actions (default)
+
 - File read: approved folders, no prompt
 - File edit: prompts for edits outside safe list (non-source files, config, `*.*rc`, `.env*`)
 - Shell commands: prompts for commands flagged as destructive (see destructive patterns below)
@@ -453,6 +456,7 @@ Permission mode is stored per host in `orax_hosts.permission_mode` and can be ov
 - Deployment: prompts
 
 #### 4. Trusted Project Mode
+
 - Applies only to projects in `trusted_project_ids`.
 - File read/edit: approved project folders, no prompt.
 - Shell commands: pre-approved command list, no prompt. Unlisted commands ask.
@@ -461,6 +465,7 @@ Permission mode is stored per host in `orax_hosts.permission_mode` and can be ov
 - Deployment: prompts.
 
 #### 5. Full Access / Advanced Mode
+
 - File read/edit: all approved folders, no prompts.
 - Shell commands: no prompts (except explicitly blocked commands).
 - Git: no prompts.
@@ -470,21 +475,22 @@ Permission mode is stored per host in `orax_hosts.permission_mode` and can be ov
 - **Audit log still runs for all actions.**
 
 #### 6. Custom Mode
+
 User-configurable via a settings UI. Fields:
 
 ```typescript
 interface CustomPermissions {
-  allowedFolders: string[];        // absolute paths
+  allowedFolders: string[]; // absolute paths
   blockedFolders: string[];
-  allowedCommands: string[];       // exact or glob patterns
+  allowedCommands: string[]; // exact or glob patterns
   blockedCommands: string[];
   commandsRequiringApproval: string[];
-  packageInstallPolicy: 'allow' | 'ask' | 'block';
-  gitCommitPolicy: 'allow' | 'ask';
-  gitPushPolicy: 'allow' | 'ask' | 'block';
-  envFilePolicy: 'ask' | 'block';
-  secretsPolicy: 'ask' | 'block';
-  networkCommandPolicy: 'allow' | 'ask' | 'block';
+  packageInstallPolicy: "allow" | "ask" | "block";
+  gitCommitPolicy: "allow" | "ask";
+  gitPushPolicy: "allow" | "ask" | "block";
+  envFilePolicy: "ask" | "block";
+  secretsPolicy: "ask" | "block";
+  networkCommandPolicy: "allow" | "ask" | "block";
   browserEnabled: boolean;
   computerUseEnabled: boolean;
 }
@@ -600,16 +606,16 @@ CREATE TABLE orax_pending_approvals (
 
 ### Supported runtimes (MVP: Windows)
 
-| Runtime | Support | Notes |
-|---|---|---|
-| PowerShell | Primary | `powershell.exe -NonInteractive -Command ...` |
-| CMD | Secondary | Simple command fallback |
-| Git | Required | System `git` or bundled `git` |
-| GitHub CLI | Required | System `gh` or bundled |
-| Node/npm/pnpm/yarn | Required | System PATH |
-| Python | Best-effort | System PATH |
-| .NET | Best-effort | System PATH |
-| WSL | Future | Phase 3+ |
+| Runtime            | Support     | Notes                                         |
+| ------------------ | ----------- | --------------------------------------------- |
+| PowerShell         | Primary     | `powershell.exe -NonInteractive -Command ...` |
+| CMD                | Secondary   | Simple command fallback                       |
+| Git                | Required    | System `git` or bundled `git`                 |
+| GitHub CLI         | Required    | System `gh` or bundled                        |
+| Node/npm/pnpm/yarn | Required    | System PATH                                   |
+| Python             | Best-effort | System PATH                                   |
+| .NET               | Best-effort | System PATH                                   |
+| WSL                | Future      | Phase 3+                                      |
 
 ### Execution lifecycle
 
@@ -663,13 +669,13 @@ The cloud AI layer can propose a follow-up command when a command fails (non-zer
 
 ### Conventions
 
-| Item | Convention |
-|---|---|
-| Branch name | `orax/<threadId>/<slug>` e.g. `orax/abc123/fix-auth-redirect` |
-| Commit message | Generated by the AI layer; follows Conventional Commits |
-| PR title | First line of commit message |
-| PR body | Task description + checklist of changes + link to Orax thread |
-| PR label | `orax-desktop` (created if missing) |
+| Item           | Convention                                                    |
+| -------------- | ------------------------------------------------------------- |
+| Branch name    | `orax/<threadId>/<slug>` e.g. `orax/abc123/fix-auth-redirect` |
+| Commit message | Generated by the AI layer; follows Conventional Commits       |
+| PR title       | First line of commit message                                  |
+| PR body        | Task description + checklist of changes + link to Orax thread |
+| PR label       | `orax-desktop` (created if missing)                           |
 
 ### Failure handling
 
@@ -683,20 +689,20 @@ The cloud AI layer can propose a follow-up command when a command fails (non-zer
 
 ### State matrix
 
-| State | Web copy | Mobile copy |
-|---|---|---|
-| No desktop installed | "Download Orax Desktop to run local coding tasks." | "Install Orax Desktop on your computer to get started." |
-| Desktop not paired | "Open Orax Desktop on your computer and scan the pairing code." | "Connect Orax Desktop — Install and open Orax Desktop on your computer, then scan the QR code to pair this phone." |
-| Desktop offline | "Orax Desktop is offline. Start the app on your computer to continue." | "Keep Orax Desktop open and your computer awake to continue local coding tasks from mobile." |
-| Desktop online | Host name, platform badge, capabilities shown. | Host name, online indicator, project list. |
-| Project missing on device | "This project's folder is not available on this computer. Reconnect the folder or clone from GitHub." | Same. |
-| Project connected | Project name, branch, last activity. | Project name, branch chip. |
-| Task running | Real-time event log, progress indicator, Stop button. | Progress indicator, event stream, Stop button. |
-| Approval needed | Approval card: description + command preview + Approve / Deny. | Approval card with Approve / Deny. |
-| Command running | Collapsible terminal output stream. | Collapsible output stream. |
-| Checks running | "Running typecheck + tests…" with live status. | "Running checks…" |
-| PR ready | PR branch + body preview + "Push and create PR" button. | "PR ready — view on GitHub." |
-| Task complete | Summary, diff viewer, PR link if applicable. | Summary, PR link. |
+| State                     | Web copy                                                                                              | Mobile copy                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| No desktop installed      | "Download Orax Desktop to run local coding tasks."                                                    | "Install Orax Desktop on your computer to get started."                                                            |
+| Desktop not paired        | "Open Orax Desktop on your computer and scan the pairing code."                                       | "Connect Orax Desktop — Install and open Orax Desktop on your computer, then scan the QR code to pair this phone." |
+| Desktop offline           | "Orax Desktop is offline. Start the app on your computer to continue."                                | "Keep Orax Desktop open and your computer awake to continue local coding tasks from mobile."                       |
+| Desktop online            | Host name, platform badge, capabilities shown.                                                        | Host name, online indicator, project list.                                                                         |
+| Project missing on device | "This project's folder is not available on this computer. Reconnect the folder or clone from GitHub." | Same.                                                                                                              |
+| Project connected         | Project name, branch, last activity.                                                                  | Project name, branch chip.                                                                                         |
+| Task running              | Real-time event log, progress indicator, Stop button.                                                 | Progress indicator, event stream, Stop button.                                                                     |
+| Approval needed           | Approval card: description + command preview + Approve / Deny.                                        | Approval card with Approve / Deny.                                                                                 |
+| Command running           | Collapsible terminal output stream.                                                                   | Collapsible output stream.                                                                                         |
+| Checks running            | "Running typecheck + tests…" with live status.                                                        | "Running checks…"                                                                                                  |
+| PR ready                  | PR branch + body preview + "Push and create PR" button.                                               | "PR ready — view on GitHub."                                                                                       |
+| Task complete             | Summary, diff viewer, PR link if applicable.                                                          | Summary, PR link.                                                                                                  |
 
 ### First-time mobile copy (already in mobile placeholder UI)
 
@@ -711,20 +717,20 @@ The cloud AI layer can propose a follow-up command when a command fails (non-zer
 
 ## 13. Security and Privacy
 
-| Requirement | Implementation |
-|---|---|
-| Raw password never stored/displayed | OAuth/token flow only; Clerk handles credential input |
-| Desktop tokens stored securely | Windows Credential Manager (MVP); macOS Keychain; Linux Secret Service (later) |
-| Pairing code expiry | 10 minutes; single-use; account-bound |
-| Revocation | `DELETE /api/orax/hosts/:hostId`; relay closes connection immediately |
-| Project folder allowlist | Desktop enforces; unapproved paths rejected at `fs-agent` level |
-| Command approvals | Approval gate before any shell execution in non-full-access modes |
-| Secret redaction | Regex scan on all output before relay; `[REDACTED]` substitution |
-| No raw secrets in cloud logs | Desktop strips before sending; cloud logs store only redacted output |
-| Audit log | Every sensitive action: userId, hostId, projectId, action, outcome, timestamp |
-| Local-only secrets remain local | `.env` files are read locally; contents are never transmitted to cloud except as approved file edits |
-| Cloud stores metadata/events only | Thread messages, event payloads, diffs — not raw filesystem contents beyond approved edits |
-| Support logs | Require explicit user approval before inclusion; sensitive lines redacted |
+| Requirement                         | Implementation                                                                                       |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Raw password never stored/displayed | OAuth/token flow only; Clerk handles credential input                                                |
+| Desktop tokens stored securely      | Windows Credential Manager (MVP); macOS Keychain; Linux Secret Service (later)                       |
+| Pairing code expiry                 | 10 minutes; single-use; account-bound                                                                |
+| Revocation                          | `DELETE /api/orax/hosts/:hostId`; relay closes connection immediately                                |
+| Project folder allowlist            | Desktop enforces; unapproved paths rejected at `fs-agent` level                                      |
+| Command approvals                   | Approval gate before any shell execution in non-full-access modes                                    |
+| Secret redaction                    | Regex scan on all output before relay; `[REDACTED]` substitution                                     |
+| No raw secrets in cloud logs        | Desktop strips before sending; cloud logs store only redacted output                                 |
+| Audit log                           | Every sensitive action: userId, hostId, projectId, action, outcome, timestamp                        |
+| Local-only secrets remain local     | `.env` files are read locally; contents are never transmitted to cloud except as approved file edits |
+| Cloud stores metadata/events only   | Thread messages, event payloads, diffs — not raw filesystem contents beyond approved edits           |
+| Support logs                        | Require explicit user approval before inclusion; sensitive lines redacted                            |
 
 ---
 
@@ -732,14 +738,14 @@ The cloud AI layer can propose a follow-up command when a command fails (non-zer
 
 Notifications are sent for the following trigger events:
 
-| Event | Channel | Recipient |
-|---|---|---|
-| `action_approval_required` | Push (mobile) + in-app badge (web) | User |
-| `action_completed` | Push (mobile, if not currently viewing) | User |
-| `action_failed` | Push (mobile) + in-app alert (web) | User |
-| `host_offline` | In-app banner (web/mobile) | User |
-| `pr_created` | Push (mobile) + thread message | User |
-| `checks_failed` | Push (mobile) + thread message | User |
+| Event                      | Channel                                 | Recipient |
+| -------------------------- | --------------------------------------- | --------- |
+| `action_approval_required` | Push (mobile) + in-app badge (web)      | User      |
+| `action_completed`         | Push (mobile, if not currently viewing) | User      |
+| `action_failed`            | Push (mobile) + in-app alert (web)      | User      |
+| `host_offline`             | In-app banner (web/mobile)              | User      |
+| `pr_created`               | Push (mobile) + thread message          | User      |
+| `checks_failed`            | Push (mobile) + thread message          | User      |
 
 ### Mobile push
 
@@ -753,62 +759,65 @@ Notifications are sent for the following trigger events:
 
 ### Backend (Phase 2B+)
 
-| Test | Description |
-|---|---|
-| Host registration | `POST /api/orax/hosts/register` creates a row, returns hostId |
-| Host heartbeat | Heartbeat updates `last_seen_at`; missing heartbeat marks `offline` after 90s |
-| Host revoke | `DELETE /api/orax/hosts/:hostId` sets `revoked_at`, closes relay socket |
-| Pairing code creation | Code is unique, 6 chars, expires in 10 min |
-| Pairing code expiry | Expired code returns 410 |
-| Cross-account pairing rejection | Code belonging to user A cannot be redeemed by user B's session |
-| Host offline state | Relay disconnection propagates `host_offline` event to paired devices |
-| Thread sync | Messages written by desktop appear in `GET /api/orax/threads/:id/messages` |
-| Action relay | `action_requested` sent from web reaches desktop socket; `action_completed` propagates back |
-| Usage event creation | Completed action creates a row in `orax_usage_events` |
-| Audit log creation | Sensitive command creates a row in `orax_audit_log` |
+| Test                            | Description                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| Host registration               | `POST /api/orax/hosts/register` creates a row, returns hostId                               |
+| Host heartbeat                  | Heartbeat updates `last_seen_at`; missing heartbeat marks `offline` after 90s               |
+| Host revoke                     | `DELETE /api/orax/hosts/:hostId` sets `revoked_at`, closes relay socket                     |
+| Pairing code creation           | Code is unique, 6 chars, expires in 10 min                                                  |
+| Pairing code expiry             | Expired code returns 410                                                                    |
+| Cross-account pairing rejection | Code belonging to user A cannot be redeemed by user B's session                             |
+| Host offline state              | Relay disconnection propagates `host_offline` event to paired devices                       |
+| Thread sync                     | Messages written by desktop appear in `GET /api/orax/threads/:id/messages`                  |
+| Action relay                    | `action_requested` sent from web reaches desktop socket; `action_completed` propagates back |
+| Usage event creation            | Completed action creates a row in `orax_usage_events`                                       |
+| Audit log creation              | Sensitive command creates a row in `orax_audit_log`                                         |
 
 ### Desktop agent (Phase 2C+)
 
-| Test | Description |
-|---|---|
-| Token stored securely | After sign-in, token is readable from OS credential store |
-| Lists approved projects | Returns only projects in the local registry |
-| Denies unapproved folder access | File read outside `allowedFolders` returns permission error |
-| Runs approved command | Approved command executes, stdout streamed, exit 0 returns success |
-| Blocks destructive command | `rm -rf /` returns block error without executing |
-| Redacts secrets | Output containing `sk-...` or `AKIA...` is replaced with `[REDACTED]` |
-| Streams command output | Long-running command emits multiple `command_output_chunk` events |
-| Handles cancellation | `action_cancelled` kills the process group within 5s |
+| Test                            | Description                                                           |
+| ------------------------------- | --------------------------------------------------------------------- |
+| Token stored securely           | After sign-in, token is readable from OS credential store             |
+| Lists approved projects         | Returns only projects in the local registry                           |
+| Denies unapproved folder access | File read outside `allowedFolders` returns permission error           |
+| Runs approved command           | Approved command executes, stdout streamed, exit 0 returns success    |
+| Blocks destructive command      | `rm -rf /` returns block error without executing                      |
+| Redacts secrets                 | Output containing `sk-...` or `AKIA...` is replaced with `[REDACTED]` |
+| Streams command output          | Long-running command emits multiple `command_output_chunk` events     |
+| Handles cancellation            | `action_cancelled` kills the process group within 5s                  |
 
 ### Web / Mobile (Phase 2D+)
 
-| Test | Description |
-|---|---|
-| No-host state | Page renders "Download Orax Desktop" CTA when no hosts registered |
-| QR pairing state | QR code and 6-digit code rendered; polling begins after code issued |
-| Host online/offline state | Status indicator changes within 5s of host connect/disconnect |
-| Approval UI | Approval card renders with Approve/Deny; resolving sends `action_approved`/`action_denied` |
-| Thread sync | Messages appear in correct order across page refreshes |
-| Offline history | Thread history readable when host offline; "Resume" button disabled |
-| No fake execution when host offline | Sending a prompt while host offline shows "Host offline" error; no action enqueued |
+| Test                                | Description                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| No-host state                       | Page renders "Download Orax Desktop" CTA when no hosts registered                          |
+| QR pairing state                    | QR code and 6-digit code rendered; polling begins after code issued                        |
+| Host online/offline state           | Status indicator changes within 5s of host connect/disconnect                              |
+| Approval UI                         | Approval card renders with Approve/Deny; resolving sends `action_approved`/`action_denied` |
+| Thread sync                         | Messages appear in correct order across page refreshes                                     |
+| Offline history                     | Thread history readable when host offline; "Resume" button disabled                        |
+| No fake execution when host offline | Sending a prompt while host offline shows "Host offline" error; no action enqueued         |
 
 ---
 
 ## 16. Phased Implementation Plan
 
 ### Phase 2A — Architecture (current)
+
 - This document.
 - Schema proposals (above).
 - Endpoint proposals (see below).
 - Desktop runtime decision: **Electron**.
 
 ### Phase 2B — Backend schema and endpoints
+
 - DB tables: `orax_hosts`, `orax_pairing_codes`, `orax_paired_devices`, `orax_projects`, `orax_threads`, `orax_thread_messages`, `orax_pending_approvals`, `orax_usage_events`, `orax_audit_log`.
 - Routes: `POST /api/orax/hosts/register`, `GET /api/orax/hosts`, `DELETE /api/orax/hosts/:id`, `POST /api/orax/pairing-codes`, `POST /api/orax/pairing-codes/redeem`.
 - Relay: `GET /api/orax/relay` (WebSocket upgrade), heartbeat handler, `host_online`/`host_offline` propagation.
 - Wiring tests updated for new routes.
 
 ### Phase 2C — Desktop agent skeleton
+
 - New artifact: `artifacts/orax-desktop` (Electron + Vite React).
 - Electron main process: relay client, credential store, basic IPC.
 - UI: sign-in page, host status indicator, pairing code display.
@@ -816,17 +825,20 @@ Notifications are sent for the following trigger events:
 - Project folder list (local only, not yet synced).
 
 ### Phase 2D — Web/mobile host list and pairing UI
+
 - Web: host list page, online/offline badges, QR scan placeholder, revoke button.
 - Mobile: `DesktopConnectionCard` wired to real `/api/orax/hosts` data (currently placeholder).
 - Pairing flows wired to backend endpoints.
 
 ### Phase 2E — Action relay MVP
+
 - Relay routes: `POST /api/orax/threads/:id/actions`, approval endpoints.
 - Desktop: `executor.ts` — runs approved shell commands, streams output.
 - Desktop: `permission-gate.ts` — enforces `ask_risky` mode.
 - Web/mobile: event stream display, approval card, Stop button.
 
 ### Phase 2F — Project file access and Git status
+
 - Desktop: `fs-agent.ts` — read/write within approved folders.
 - Desktop: `git-agent.ts` — branch, commit, push, PR.
 - Thread: full read → edit → commit → push → PR flow.
@@ -867,10 +879,11 @@ GET    /api/orax/usage-events
 ```
 
 All `/api/orax/*` routes must:
+
 - Be added to `KNOWN_PREFIXES` in `routes/index.ts` before the auth wall (returns 401, not 404, for unauthenticated callers).
 - Use the existing `requireAuth` middleware.
 - Desktop calls use a long-lived token (not a browser Clerk session); the auth middleware must accept both.
 
 ---
 
-*End of Phase 2A design document. No implementation should begin before Phase 2B is reviewed and approved.*
+_End of Phase 2A design document. No implementation should begin before Phase 2B is reviewed and approved._

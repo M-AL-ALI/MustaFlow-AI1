@@ -145,9 +145,7 @@ export async function materializeGeneratedFileToCache(
     }
     return { uri: result.uri, mimeType: file.mimeType };
   }
-  throw new FileSaveError(
-    "These file contents are no longer available. Regenerate it to view.",
-  );
+  throw new FileSaveError("These file contents are no longer available. Regenerate it to view.");
 }
 
 /**

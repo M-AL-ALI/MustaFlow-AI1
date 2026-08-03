@@ -331,7 +331,11 @@ router.post("/orax/projects/:projectId/sources/github", async (req, res) => {
   }
 
   const { repoUrl, displayName, branch, hostId } = parse.data;
-  const repoName = repoUrl.split("/").slice(-2).join("/").replace(/\.git$/, "");
+  const repoName = repoUrl
+    .split("/")
+    .slice(-2)
+    .join("/")
+    .replace(/\.git$/, "");
 
   const [source] = await db
     .insert(oraxProjectSourcesTable)
@@ -385,10 +389,7 @@ router.patch("/orax/projects/:projectId/sources/:sourceId", async (req, res) => 
     .update(oraxProjectSourcesTable)
     .set(patch)
     .where(
-      and(
-        eq(oraxProjectSourcesTable.id, source.id),
-        eq(oraxProjectSourcesTable.userId, userId),
-      ),
+      and(eq(oraxProjectSourcesTable.id, source.id), eq(oraxProjectSourcesTable.userId, userId)),
     )
     .returning();
 
@@ -414,10 +415,7 @@ router.delete("/orax/projects/:projectId/sources/:sourceId", async (req, res) =>
   await db
     .delete(oraxProjectSourcesTable)
     .where(
-      and(
-        eq(oraxProjectSourcesTable.id, source.id),
-        eq(oraxProjectSourcesTable.userId, userId),
-      ),
+      and(eq(oraxProjectSourcesTable.id, source.id), eq(oraxProjectSourcesTable.userId, userId)),
     );
 
   res.json({ ok: true });
@@ -436,12 +434,7 @@ router.get("/orax/projects/:projectId/threads", async (req, res) => {
   const threads = await db
     .select()
     .from(oraxThreadsTable)
-    .where(
-      and(
-        eq(oraxThreadsTable.projectId, project.id),
-        eq(oraxThreadsTable.userId, userId),
-      ),
-    )
+    .where(and(eq(oraxThreadsTable.projectId, project.id), eq(oraxThreadsTable.userId, userId)))
     .orderBy(desc(oraxThreadsTable.updatedAt));
 
   res.json({ threads });
@@ -577,8 +570,20 @@ type SourceRow = {
 
 type ExecContext =
   | { canExecute: false; mode: "chat_only"; source: null; host: null; blockReason: string }
-  | { canExecute: false; mode: "local" | "cloud"; source: SourceRow; host: { id: string; deviceName: string; status: string } | null; blockReason: string }
-  | { canExecute: true; mode: "local" | "cloud"; source: SourceRow; host: { id: string; deviceName: string; status: string } | null; blockReason: null };
+  | {
+      canExecute: false;
+      mode: "local" | "cloud";
+      source: SourceRow;
+      host: { id: string; deviceName: string; status: string } | null;
+      blockReason: string;
+    }
+  | {
+      canExecute: true;
+      mode: "local" | "cloud";
+      source: SourceRow;
+      host: { id: string; deviceName: string; status: string } | null;
+      blockReason: null;
+    };
 
 /**
  * Resolves the active execution source for a project thread.
@@ -983,585 +988,553 @@ const applyPatchBodySchema = z.object({
  *  6. Queue apply_project_patch action to that host.
  *  7. Write project_patch_apply_queued system message.
  */
-router.post(
-  "/api/orax/projects/:projectId/threads/:threadId/apply-patch",
-  async (req, res) => {
-    const userId = req.userId!;
-    const { projectId, threadId } = req.params;
+router.post("/api/orax/projects/:projectId/threads/:threadId/apply-patch", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params;
 
-    const parsed = applyPatchBodySchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+  const parsed = applyPatchBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+    return;
+  }
+  const { messageId } = parsed.data;
+
+  try {
+    const project = await requireProject(projectId, userId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
       return;
     }
-    const { messageId } = parsed.data;
 
-    try {
-      const project = await requireProject(projectId, userId);
-      if (!project) {
-        res.status(404).json({ error: "Project not found" });
-        return;
-      }
-
-      const thread = await requireThread(threadId, userId);
-      if (!thread || thread.projectId !== projectId) {
-        res.status(404).json({ error: "Thread not found" });
-        return;
-      }
-
-      // Look up the project_patch_drafted message
-      const [msg] = await db
-        .select()
-        .from(oraxThreadMessagesTable)
-        .where(
-          and(
-            eq(oraxThreadMessagesTable.id, messageId),
-            eq(oraxThreadMessagesTable.threadId, threadId),
-          ),
-        )
-        .limit(1);
-
-      if (!msg) {
-        res.status(404).json({ error: "Message not found" });
-        return;
-      }
-
-      if (
-        msg.eventType !== "project_patch_drafted" &&
-        msg.eventType !== "project_fix_drafted"
-      ) {
-        res
-          .status(422)
-          .json({ error: "Message is not a project_patch_drafted or project_fix_drafted event" });
-        return;
-      }
-
-      const msgPayload = (msg.payload ?? {}) as {
-        draftPatch?: {
-          changedFiles?: Array<{
-            relativePath: string;
-            operation: string;
-            newContent?: string;
-            originalHash?: string;
-          }>;
-        };
-        sourceLocalPath?: string | null;
-      };
-
-      const changedFiles = msgPayload.draftPatch?.changedFiles ?? [];
-      const enrichedFiles = changedFiles.filter((f) => f.newContent);
-      if (enrichedFiles.length === 0) {
-        res.status(422).json({
-          error:
-            "Patch has no AI-generated file content. Wait for patch generation to complete or re-trigger the thread.",
-        });
-        return;
-      }
-
-      const sourceLocalPath = msgPayload.sourceLocalPath ?? null;
-
-      // Find the host from the most recent desktop action for this thread
-      const [recentAction] = await db
-        .select()
-        .from(oraxDesktopActionsTable)
-        .where(
-          and(
-            eq(oraxDesktopActionsTable.threadId, threadId),
-            eq(oraxDesktopActionsTable.userId, userId),
-          ),
-        )
-        .orderBy(desc(oraxDesktopActionsTable.createdAt))
-        .limit(1);
-
-      if (!recentAction?.hostId) {
-        res.status(422).json({
-          error: "No desktop host found for this thread. Re-run the thread to bind a host.",
-        });
-        return;
-      }
-
-      // Check host exists and belongs to user
-      const [host] = await db
-        .select()
-        .from(oraxHostsTable)
-        .where(
-          and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)),
-        )
-        .limit(1);
-
-      if (!host) {
-        res.status(404).json({ error: "Host not found" });
-        return;
-      }
-
-      const iKey = `apply-patch:${threadId}:${messageId}`;
-      const now = new Date();
-
-      const [action] = await db
-        .insert(oraxDesktopActionsTable)
-        .values({
-          userId,
-          hostId: recentAction.hostId,
-          threadId,
-          type: "apply_project_patch",
-          status: "queued",
-          payload: {
-            projectId,
-            threadId,
-            messageId,
-            sourceLocalPath,
-            patches: enrichedFiles.map((f) => ({
-              relativePath: f.relativePath,
-              operation: f.operation,
-              newContent: f.newContent!,
-              originalHash: f.originalHash ?? null,
-            })),
-          },
-          idempotencyKey: iKey,
-        })
-        .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
-        .returning();
-
-      const [sysmsg] = await db
-        .insert(oraxThreadMessagesTable)
-        .values({
-          threadId,
-          role: "system",
-          content: `Patch apply queued — ${enrichedFiles.length} file${enrichedFiles.length === 1 ? "" : "s"} on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
-          eventType: "project_patch_apply_queued",
-          createdAt: new Date(now.getTime() + 1),
-          payload: { actionId: action?.id, hostId: recentAction.hostId, messageId },
-        })
-        .returning();
-
-      logger.info(
-        { component: "orax-projects", userId, projectId, threadId, actionId: action?.id },
-        "apply_project_patch queued",
-      );
-
-      res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
-    } catch (err) {
-      logger.error({ component: "orax-projects", err, projectId, threadId }, "apply-patch failed");
-      res.status(500).json({ error: "Failed to queue patch apply" });
+    const thread = await requireThread(threadId, userId);
+    if (!thread || thread.projectId !== projectId) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
     }
-  },
-);
+
+    // Look up the project_patch_drafted message
+    const [msg] = await db
+      .select()
+      .from(oraxThreadMessagesTable)
+      .where(
+        and(
+          eq(oraxThreadMessagesTable.id, messageId),
+          eq(oraxThreadMessagesTable.threadId, threadId),
+        ),
+      )
+      .limit(1);
+
+    if (!msg) {
+      res.status(404).json({ error: "Message not found" });
+      return;
+    }
+
+    if (msg.eventType !== "project_patch_drafted" && msg.eventType !== "project_fix_drafted") {
+      res
+        .status(422)
+        .json({ error: "Message is not a project_patch_drafted or project_fix_drafted event" });
+      return;
+    }
+
+    const msgPayload = (msg.payload ?? {}) as {
+      draftPatch?: {
+        changedFiles?: Array<{
+          relativePath: string;
+          operation: string;
+          newContent?: string;
+          originalHash?: string;
+        }>;
+      };
+      sourceLocalPath?: string | null;
+    };
+
+    const changedFiles = msgPayload.draftPatch?.changedFiles ?? [];
+    const enrichedFiles = changedFiles.filter((f) => f.newContent);
+    if (enrichedFiles.length === 0) {
+      res.status(422).json({
+        error:
+          "Patch has no AI-generated file content. Wait for patch generation to complete or re-trigger the thread.",
+      });
+      return;
+    }
+
+    const sourceLocalPath = msgPayload.sourceLocalPath ?? null;
+
+    // Find the host from the most recent desktop action for this thread
+    const [recentAction] = await db
+      .select()
+      .from(oraxDesktopActionsTable)
+      .where(
+        and(
+          eq(oraxDesktopActionsTable.threadId, threadId),
+          eq(oraxDesktopActionsTable.userId, userId),
+        ),
+      )
+      .orderBy(desc(oraxDesktopActionsTable.createdAt))
+      .limit(1);
+
+    if (!recentAction?.hostId) {
+      res.status(422).json({
+        error: "No desktop host found for this thread. Re-run the thread to bind a host.",
+      });
+      return;
+    }
+
+    // Check host exists and belongs to user
+    const [host] = await db
+      .select()
+      .from(oraxHostsTable)
+      .where(and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)))
+      .limit(1);
+
+    if (!host) {
+      res.status(404).json({ error: "Host not found" });
+      return;
+    }
+
+    const iKey = `apply-patch:${threadId}:${messageId}`;
+    const now = new Date();
+
+    const [action] = await db
+      .insert(oraxDesktopActionsTable)
+      .values({
+        userId,
+        hostId: recentAction.hostId,
+        threadId,
+        type: "apply_project_patch",
+        status: "queued",
+        payload: {
+          projectId,
+          threadId,
+          messageId,
+          sourceLocalPath,
+          patches: enrichedFiles.map((f) => ({
+            relativePath: f.relativePath,
+            operation: f.operation,
+            newContent: f.newContent!,
+            originalHash: f.originalHash ?? null,
+          })),
+        },
+        idempotencyKey: iKey,
+      })
+      .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+      .returning();
+
+    const [sysmsg] = await db
+      .insert(oraxThreadMessagesTable)
+      .values({
+        threadId,
+        role: "system",
+        content: `Patch apply queued — ${enrichedFiles.length} file${enrichedFiles.length === 1 ? "" : "s"} on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
+        eventType: "project_patch_apply_queued",
+        createdAt: new Date(now.getTime() + 1),
+        payload: { actionId: action?.id, hostId: recentAction.hostId, messageId },
+      })
+      .returning();
+
+    logger.info(
+      { component: "orax-projects", userId, projectId, threadId, actionId: action?.id },
+      "apply_project_patch queued",
+    );
+
+    res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
+  } catch (err) {
+    logger.error({ component: "orax-projects", err, projectId, threadId }, "apply-patch failed");
+    res.status(500).json({ error: "Failed to queue patch apply" });
+  }
+});
 
 // ── Phase 2M: prepare-fix endpoint ──────────────────────────────────────────
 
-router.post(
-  "/orax/projects/:projectId/threads/:threadId/prepare-fix",
-  async (req, res) => {
-    const userId = req.userId!;
-    const { projectId, threadId } = req.params as {
-      projectId: string;
-      threadId: string;
-    };
+router.post("/orax/projects/:projectId/threads/:threadId/prepare-fix", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params as {
+    projectId: string;
+    threadId: string;
+  };
 
-    try {
-      // Verify project ownership
-      const [project] = await db
-        .select()
-        .from(oraxProjectsTable)
-        .where(
-          and(
-            eq(oraxProjectsTable.id, projectId),
-            eq(oraxProjectsTable.userId, userId),
-          ),
-        )
-        .limit(1);
-      if (!project) {
-        res.status(404).json({ error: "Project not found" });
-        return;
-      }
-
-      // Verify thread belongs to project
-      const [thread] = await db
-        .select()
-        .from(oraxThreadsTable)
-        .where(
-          and(
-            eq(oraxThreadsTable.id, threadId),
-            eq(oraxThreadsTable.projectId, projectId),
-            eq(oraxThreadsTable.userId, userId),
-          ),
-        )
-        .limit(1);
-      if (!thread) {
-        res.status(404).json({ error: "Thread not found" });
-        return;
-      }
-
-      // Find sourceLocalPath + hostId from most recent desktop action for this thread
-      const [recentAction] = await db
-        .select()
-        .from(oraxDesktopActionsTable)
-        .where(
-          and(
-            eq(oraxDesktopActionsTable.threadId, threadId),
-            eq(oraxDesktopActionsTable.userId, userId),
-          ),
-        )
-        .orderBy(desc(oraxDesktopActionsTable.createdAt))
-        .limit(1);
-
-      if (!recentAction?.hostId) {
-        res.status(422).json({
-          error: "No desktop host found for this thread. Re-run the thread to bind a host.",
-        });
-        return;
-      }
-
-      const actionPayload = (recentAction.payload ?? {}) as {
-        sourceLocalPath?: string;
-        executionSourceId?: string;
-        projectId?: string;
-        userMessage?: string;
-      };
-      const sourceLocalPath = actionPayload.sourceLocalPath ?? null;
-
-      // Get most recent user message for context
-      const [recentUserMsg] = await db
-        .select()
-        .from(oraxThreadMessagesTable)
-        .where(
-          and(
-            eq(oraxThreadMessagesTable.threadId, threadId),
-            eq(oraxThreadMessagesTable.role, "user"),
-          ),
-        )
-        .orderBy(desc(oraxThreadMessagesTable.createdAt))
-        .limit(1);
-      const userMessage = recentUserMsg?.content ?? "";
-
-      // Check host exists and belongs to user
-      const [host] = await db
-        .select()
-        .from(oraxHostsTable)
-        .where(
-          and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)),
-        )
-        .limit(1);
-
-      if (!host) {
-        res.status(404).json({ error: "Host not found" });
-        return;
-      }
-
-      // Phase 2N: check whether the most recent thread message is a verification failure.
-      // If so, queue draft_project_fix (auto-fix loop) with the failed check output.
-      // Otherwise fall back to draft_project_patch (re-draft from scratch).
-      const [latestVerifyFailMsg] = await db
-        .select()
-        .from(oraxThreadMessagesTable)
-        .where(
-          and(
-            eq(oraxThreadMessagesTable.threadId, threadId),
-            eq(oraxThreadMessagesTable.eventType, "project_patch_verification_failed"),
-          ),
-        )
-        .orderBy(desc(oraxThreadMessagesTable.createdAt))
-        .limit(1);
-
-      const failedChecks = latestVerifyFailMsg
-        ? ((latestVerifyFailMsg.payload as { checks?: unknown })?.checks ?? [])
-        : null;
-
-      // Find the most recent drafted patch for changedFiles + summary context
-      const [latestDraftMsg] = await db
-        .select()
-        .from(oraxThreadMessagesTable)
-        .where(
-          and(
-            eq(oraxThreadMessagesTable.threadId, threadId),
-            inArray(oraxThreadMessagesTable.eventType, [
-              "project_patch_drafted",
-              "project_fix_drafted",
-            ]),
-          ),
-        )
-        .orderBy(desc(oraxThreadMessagesTable.createdAt))
-        .limit(1);
-
-      const latestDraftPayload = (latestDraftMsg?.payload ?? {}) as {
-        draftPatch?: { summary?: string; changedFiles?: Array<{ relativePath: string; operation: string }> };
-      };
-      const changedFiles = latestDraftPayload.draftPatch?.changedFiles ?? [];
-      const previousPatchSummary = latestDraftPayload.draftPatch?.summary ?? "";
-
-      const useAutoFix = failedChecks !== null && Array.isArray(failedChecks) && changedFiles.length > 0;
-      const actionType = useAutoFix ? "draft_project_fix" : "draft_project_patch";
-
-      const iKey = `prepare-fix:${threadId}:${Date.now()}`;
-      const [action] = await db
-        .insert(oraxDesktopActionsTable)
-        .values({
-          userId,
-          hostId: recentAction.hostId,
-          threadId,
-          type: actionType,
-          status: "queued",
-          payload: useAutoFix
-            ? {
-                projectId,
-                threadId,
-                executionSourceId: actionPayload.executionSourceId ?? null,
-                sourceLocalPath,
-                userMessage,
-                originalUserMessage: userMessage,
-                previousPatchSummary,
-                failedChecks,
-                changedFiles,
-              }
-            : {
-                projectId,
-                threadId,
-                executionSourceId: actionPayload.executionSourceId ?? null,
-                sourceLocalPath,
-                userMessage,
-                preparingFix: true,
-              },
-          idempotencyKey: iKey,
-        })
-        .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
-        .returning();
-
-      const [sysmsg] = await db
-        .insert(oraxThreadMessagesTable)
-        .values({
-          threadId,
-          role: "system",
-          content: useAutoFix
-            ? `Preparing auto-fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`
-            : `Preparing fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
-          eventType: "project_patch_fix_queued",
-          payload: { actionId: action?.id ?? null, hostId: recentAction.hostId },
-        })
-        .returning();
-
-      logger.info(
-        { component: "orax-projects", userId, projectId, threadId, actionId: action?.id, actionType },
-        "prepare-fix queued draft_project_patch",
-      );
-
-      res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
-    } catch (err) {
-      logger.error(
-        { component: "orax-projects", err, projectId, threadId },
-        "prepare-fix failed",
-      );
-      res.status(500).json({ error: "Failed to queue fix preparation" });
+  try {
+    // Verify project ownership
+    const [project] = await db
+      .select()
+      .from(oraxProjectsTable)
+      .where(and(eq(oraxProjectsTable.id, projectId), eq(oraxProjectsTable.userId, userId)))
+      .limit(1);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
     }
-  },
-);
+
+    // Verify thread belongs to project
+    const [thread] = await db
+      .select()
+      .from(oraxThreadsTable)
+      .where(
+        and(
+          eq(oraxThreadsTable.id, threadId),
+          eq(oraxThreadsTable.projectId, projectId),
+          eq(oraxThreadsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (!thread) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
+    }
+
+    // Find sourceLocalPath + hostId from most recent desktop action for this thread
+    const [recentAction] = await db
+      .select()
+      .from(oraxDesktopActionsTable)
+      .where(
+        and(
+          eq(oraxDesktopActionsTable.threadId, threadId),
+          eq(oraxDesktopActionsTable.userId, userId),
+        ),
+      )
+      .orderBy(desc(oraxDesktopActionsTable.createdAt))
+      .limit(1);
+
+    if (!recentAction?.hostId) {
+      res.status(422).json({
+        error: "No desktop host found for this thread. Re-run the thread to bind a host.",
+      });
+      return;
+    }
+
+    const actionPayload = (recentAction.payload ?? {}) as {
+      sourceLocalPath?: string;
+      executionSourceId?: string;
+      projectId?: string;
+      userMessage?: string;
+    };
+    const sourceLocalPath = actionPayload.sourceLocalPath ?? null;
+
+    // Get most recent user message for context
+    const [recentUserMsg] = await db
+      .select()
+      .from(oraxThreadMessagesTable)
+      .where(
+        and(
+          eq(oraxThreadMessagesTable.threadId, threadId),
+          eq(oraxThreadMessagesTable.role, "user"),
+        ),
+      )
+      .orderBy(desc(oraxThreadMessagesTable.createdAt))
+      .limit(1);
+    const userMessage = recentUserMsg?.content ?? "";
+
+    // Check host exists and belongs to user
+    const [host] = await db
+      .select()
+      .from(oraxHostsTable)
+      .where(and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)))
+      .limit(1);
+
+    if (!host) {
+      res.status(404).json({ error: "Host not found" });
+      return;
+    }
+
+    // Phase 2N: check whether the most recent thread message is a verification failure.
+    // If so, queue draft_project_fix (auto-fix loop) with the failed check output.
+    // Otherwise fall back to draft_project_patch (re-draft from scratch).
+    const [latestVerifyFailMsg] = await db
+      .select()
+      .from(oraxThreadMessagesTable)
+      .where(
+        and(
+          eq(oraxThreadMessagesTable.threadId, threadId),
+          eq(oraxThreadMessagesTable.eventType, "project_patch_verification_failed"),
+        ),
+      )
+      .orderBy(desc(oraxThreadMessagesTable.createdAt))
+      .limit(1);
+
+    const failedChecks = latestVerifyFailMsg
+      ? ((latestVerifyFailMsg.payload as { checks?: unknown })?.checks ?? [])
+      : null;
+
+    // Find the most recent drafted patch for changedFiles + summary context
+    const [latestDraftMsg] = await db
+      .select()
+      .from(oraxThreadMessagesTable)
+      .where(
+        and(
+          eq(oraxThreadMessagesTable.threadId, threadId),
+          inArray(oraxThreadMessagesTable.eventType, [
+            "project_patch_drafted",
+            "project_fix_drafted",
+          ]),
+        ),
+      )
+      .orderBy(desc(oraxThreadMessagesTable.createdAt))
+      .limit(1);
+
+    const latestDraftPayload = (latestDraftMsg?.payload ?? {}) as {
+      draftPatch?: {
+        summary?: string;
+        changedFiles?: Array<{ relativePath: string; operation: string }>;
+      };
+    };
+    const changedFiles = latestDraftPayload.draftPatch?.changedFiles ?? [];
+    const previousPatchSummary = latestDraftPayload.draftPatch?.summary ?? "";
+
+    const useAutoFix =
+      failedChecks !== null && Array.isArray(failedChecks) && changedFiles.length > 0;
+    const actionType = useAutoFix ? "draft_project_fix" : "draft_project_patch";
+
+    const iKey = `prepare-fix:${threadId}:${Date.now()}`;
+    const [action] = await db
+      .insert(oraxDesktopActionsTable)
+      .values({
+        userId,
+        hostId: recentAction.hostId,
+        threadId,
+        type: actionType,
+        status: "queued",
+        payload: useAutoFix
+          ? {
+              projectId,
+              threadId,
+              executionSourceId: actionPayload.executionSourceId ?? null,
+              sourceLocalPath,
+              userMessage,
+              originalUserMessage: userMessage,
+              previousPatchSummary,
+              failedChecks,
+              changedFiles,
+            }
+          : {
+              projectId,
+              threadId,
+              executionSourceId: actionPayload.executionSourceId ?? null,
+              sourceLocalPath,
+              userMessage,
+              preparingFix: true,
+            },
+        idempotencyKey: iKey,
+      })
+      .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+      .returning();
+
+    const [sysmsg] = await db
+      .insert(oraxThreadMessagesTable)
+      .values({
+        threadId,
+        role: "system",
+        content: useAutoFix
+          ? `Preparing auto-fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`
+          : `Preparing fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
+        eventType: "project_patch_fix_queued",
+        payload: { actionId: action?.id ?? null, hostId: recentAction.hostId },
+      })
+      .returning();
+
+    logger.info(
+      { component: "orax-projects", userId, projectId, threadId, actionId: action?.id, actionType },
+      "prepare-fix queued draft_project_patch",
+    );
+
+    res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
+  } catch (err) {
+    logger.error({ component: "orax-projects", err, projectId, threadId }, "prepare-fix failed");
+    res.status(500).json({ error: "Failed to queue fix preparation" });
+  }
+});
 
 // ── Phase 3B: prepare pull request endpoint ───────────────────────────────────
 
-router.post(
-  "/orax/projects/:projectId/threads/:threadId/prepare-pr",
-  async (req, res) => {
-    const userId = req.userId!;
-    const { projectId, threadId } = req.params as {
-      projectId: string;
-      threadId: string;
+router.post("/orax/projects/:projectId/threads/:threadId/prepare-pr", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params as {
+    projectId: string;
+    threadId: string;
+  };
+
+  try {
+    // Verify project ownership
+    const [project] = await db
+      .select()
+      .from(oraxProjectsTable)
+      .where(and(eq(oraxProjectsTable.id, projectId), eq(oraxProjectsTable.userId, userId)))
+      .limit(1);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    // Verify thread belongs to project
+    const [thread] = await db
+      .select()
+      .from(oraxThreadsTable)
+      .where(
+        and(
+          eq(oraxThreadsTable.id, threadId),
+          eq(oraxThreadsTable.projectId, projectId),
+          eq(oraxThreadsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (!thread) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
+    }
+
+    // Confirm a verified message exists in this thread
+    const [verifiedMsg] = await db
+      .select()
+      .from(oraxThreadMessagesTable)
+      .where(
+        and(
+          eq(oraxThreadMessagesTable.threadId, threadId),
+          eq(oraxThreadMessagesTable.eventType, "project_patch_verified"),
+        ),
+      )
+      .orderBy(desc(oraxThreadMessagesTable.createdAt))
+      .limit(1);
+
+    if (!verifiedMsg) {
+      res.status(422).json({
+        error:
+          "No verified patch found in this thread. Run verification before creating a pull request.",
+      });
+      return;
+    }
+
+    // Find sourceLocalPath + hostId from most recent desktop action for this thread
+    const [recentAction] = await db
+      .select()
+      .from(oraxDesktopActionsTable)
+      .where(
+        and(
+          eq(oraxDesktopActionsTable.threadId, threadId),
+          eq(oraxDesktopActionsTable.userId, userId),
+        ),
+      )
+      .orderBy(desc(oraxDesktopActionsTable.createdAt))
+      .limit(1);
+
+    if (!recentAction?.hostId) {
+      res.status(422).json({
+        error: "No desktop host found for this thread. Re-run the thread to bind a host.",
+      });
+      return;
+    }
+
+    const actionPayload = (recentAction.payload ?? {}) as {
+      sourceLocalPath?: string;
+      executionSourceId?: string;
+      projectId?: string;
+      changedFiles?: Array<{ relativePath: string; operation: string }>;
     };
+    const sourceLocalPath = actionPayload.sourceLocalPath ?? null;
 
-    try {
-      // Verify project ownership
-      const [project] = await db
-        .select()
-        .from(oraxProjectsTable)
-        .where(
-          and(
-            eq(oraxProjectsTable.id, projectId),
-            eq(oraxProjectsTable.userId, userId),
-          ),
-        )
-        .limit(1);
-      if (!project) {
-        res.status(404).json({ error: "Project not found" });
-        return;
-      }
+    if (!sourceLocalPath) {
+      res.status(422).json({
+        error:
+          "Could not resolve local project path from the most recent action. Re-run the thread.",
+      });
+      return;
+    }
 
-      // Verify thread belongs to project
-      const [thread] = await db
-        .select()
-        .from(oraxThreadsTable)
-        .where(
-          and(
-            eq(oraxThreadsTable.id, threadId),
-            eq(oraxThreadsTable.projectId, projectId),
-            eq(oraxThreadsTable.userId, userId),
-          ),
-        )
-        .limit(1);
-      if (!thread) {
-        res.status(404).json({ error: "Thread not found" });
-        return;
-      }
+    // Get changedFiles from the most recent applied or verified patch message
+    const [appliedMsg] = await db
+      .select()
+      .from(oraxThreadMessagesTable)
+      .where(
+        and(
+          eq(oraxThreadMessagesTable.threadId, threadId),
+          inArray(oraxThreadMessagesTable.eventType, [
+            "project_patch_applied",
+            "project_fix_drafted",
+            "project_patch_drafted",
+          ]),
+        ),
+      )
+      .orderBy(desc(oraxThreadMessagesTable.createdAt))
+      .limit(1);
 
-      // Confirm a verified message exists in this thread
-      const [verifiedMsg] = await db
-        .select()
-        .from(oraxThreadMessagesTable)
-        .where(
-          and(
-            eq(oraxThreadMessagesTable.threadId, threadId),
-            eq(oraxThreadMessagesTable.eventType, "project_patch_verified"),
-          ),
-        )
-        .orderBy(desc(oraxThreadMessagesTable.createdAt))
-        .limit(1);
+    const appliedPayload = (appliedMsg?.payload ?? {}) as {
+      changedFiles?: Array<{ relativePath: string }>;
+      draftPatch?: { changedFiles?: Array<{ relativePath: string }> };
+    };
+    const rawChangedFiles =
+      appliedPayload.changedFiles ?? appliedPayload.draftPatch?.changedFiles ?? [];
+    const changedFiles = rawChangedFiles.map((f) => f.relativePath).filter(Boolean);
 
-      if (!verifiedMsg) {
-        res.status(422).json({
-          error:
-            "No verified patch found in this thread. Run verification before creating a pull request.",
-        });
-        return;
-      }
-
-      // Find sourceLocalPath + hostId from most recent desktop action for this thread
-      const [recentAction] = await db
-        .select()
-        .from(oraxDesktopActionsTable)
-        .where(
-          and(
-            eq(oraxDesktopActionsTable.threadId, threadId),
-            eq(oraxDesktopActionsTable.userId, userId),
-          ),
-        )
-        .orderBy(desc(oraxDesktopActionsTable.createdAt))
-        .limit(1);
-
-      if (!recentAction?.hostId) {
-        res.status(422).json({
-          error:
-            "No desktop host found for this thread. Re-run the thread to bind a host.",
-        });
-        return;
-      }
-
-      const actionPayload = (recentAction.payload ?? {}) as {
-        sourceLocalPath?: string;
-        executionSourceId?: string;
-        projectId?: string;
-        changedFiles?: Array<{ relativePath: string; operation: string }>;
-      };
-      const sourceLocalPath = actionPayload.sourceLocalPath ?? null;
-
-      if (!sourceLocalPath) {
-        res.status(422).json({
-          error:
-            "Could not resolve local project path from the most recent action. Re-run the thread.",
-        });
-        return;
-      }
-
-      // Get changedFiles from the most recent applied or verified patch message
-      const [appliedMsg] = await db
-        .select()
-        .from(oraxThreadMessagesTable)
-        .where(
-          and(
-            eq(oraxThreadMessagesTable.threadId, threadId),
-            inArray(oraxThreadMessagesTable.eventType, [
-              "project_patch_applied",
-              "project_fix_drafted",
-              "project_patch_drafted",
-            ]),
-          ),
-        )
-        .orderBy(desc(oraxThreadMessagesTable.createdAt))
-        .limit(1);
-
-      const appliedPayload = (appliedMsg?.payload ?? {}) as {
-        changedFiles?: Array<{ relativePath: string }>;
-        draftPatch?: { changedFiles?: Array<{ relativePath: string }> };
-      };
-      const rawChangedFiles =
-        appliedPayload.changedFiles ??
-        appliedPayload.draftPatch?.changedFiles ??
-        [];
-      const changedFiles = rawChangedFiles.map((f) => f.relativePath).filter(Boolean);
-
-      // Build project slug from name
-      const projectSlug = project.name
+    // Build project slug from name
+    const projectSlug =
+      project.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 32) || "patch";
 
-      // Build commit message
-      const commitMessage =
-        `Orax: ${(thread.title ?? project.name).slice(0, 72)}\n\n` +
-        `Applied and verified via Orax Desktop.\n` +
-        `Project: ${project.name}\nThread: ${threadId}`;
+    // Build commit message
+    const commitMessage =
+      `Orax: ${(thread.title ?? project.name).slice(0, 72)}\n\n` +
+      `Applied and verified via Orax Desktop.\n` +
+      `Project: ${project.name}\nThread: ${threadId}`;
 
-      // Queue prepare_project_pr action
-      const iKey = `prepare-pr:${threadId}:${Date.now()}`;
-      const [action] = await db
-        .insert(oraxDesktopActionsTable)
-        .values({
-          userId,
-          hostId: recentAction.hostId,
-          threadId,
-          type: "prepare_project_pr",
-          status: "queued",
-          payload: {
-            projectId,
-            threadId,
-            executionSourceId: actionPayload.executionSourceId ?? null,
-            sourceLocalPath,
-            changedFiles,
-            commitMessage,
-            projectSlug,
-          },
-          idempotencyKey: iKey,
-        })
-        .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
-        .returning();
-
-      // Insert system message
-      const [host] = await db
-        .select()
-        .from(oraxHostsTable)
-        .where(
-          and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)),
-        )
-        .limit(1);
-
-      const [sysmsg] = await db
-        .insert(oraxThreadMessagesTable)
-        .values({
-          threadId,
-          role: "system",
-          content: `Preparing pull request branch on ${host?.deviceName ?? "desktop"}. Orax Desktop will pick this up shortly.`,
-          eventType: "project_pr_prepare_queued",
-          payload: { actionId: action?.id ?? null, hostId: recentAction.hostId },
-        })
-        .returning();
-
-      logger.info(
-        {
-          component: "orax-projects",
-          userId,
+    // Queue prepare_project_pr action
+    const iKey = `prepare-pr:${threadId}:${Date.now()}`;
+    const [action] = await db
+      .insert(oraxDesktopActionsTable)
+      .values({
+        userId,
+        hostId: recentAction.hostId,
+        threadId,
+        type: "prepare_project_pr",
+        status: "queued",
+        payload: {
           projectId,
           threadId,
-          actionId: action?.id,
+          executionSourceId: actionPayload.executionSourceId ?? null,
+          sourceLocalPath,
+          changedFiles,
+          commitMessage,
+          projectSlug,
         },
-        "prepare-pr queued prepare_project_pr",
-      );
+        idempotencyKey: iKey,
+      })
+      .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+      .returning();
 
-      res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
-    } catch (err) {
-      logger.error(
-        { component: "orax-projects", err, projectId, threadId },
-        "prepare-pr failed",
-      );
-      res.status(500).json({ error: "Failed to queue pull request preparation" });
-    }
-  },
-);
+    // Insert system message
+    const [host] = await db
+      .select()
+      .from(oraxHostsTable)
+      .where(and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)))
+      .limit(1);
+
+    const [sysmsg] = await db
+      .insert(oraxThreadMessagesTable)
+      .values({
+        threadId,
+        role: "system",
+        content: `Preparing pull request branch on ${host?.deviceName ?? "desktop"}. Orax Desktop will pick this up shortly.`,
+        eventType: "project_pr_prepare_queued",
+        payload: { actionId: action?.id ?? null, hostId: recentAction.hostId },
+      })
+      .returning();
+
+    logger.info(
+      {
+        component: "orax-projects",
+        userId,
+        projectId,
+        threadId,
+        actionId: action?.id,
+      },
+      "prepare-pr queued prepare_project_pr",
+    );
+
+    res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
+  } catch (err) {
+    logger.error({ component: "orax-projects", err, projectId, threadId }, "prepare-pr failed");
+    res.status(500).json({ error: "Failed to queue pull request preparation" });
+  }
+});
 
 export default router;

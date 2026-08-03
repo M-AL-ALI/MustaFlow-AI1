@@ -98,8 +98,13 @@ describe("Phase 9F — mobile file card View+Download parity audit", () => {
   });
 
   it("contentChanges to-text renders with accent color (highlighted new text)", () => {
-    const contentChangesStart = extras.indexOf("preview.contentChanges && preview.contentChanges.length > 0");
-    const contentChangesEnd = extras.indexOf("preview.status === \"needs_confirmation\"", contentChangesStart);
+    const contentChangesStart = extras.indexOf(
+      "preview.contentChanges && preview.contentChanges.length > 0",
+    );
+    const contentChangesEnd = extras.indexOf(
+      'preview.status === "needs_confirmation"',
+      contentChangesStart,
+    );
     const contentChangesBlock = extras.slice(contentChangesStart, contentChangesEnd);
     expect(contentChangesBlock).toContain("change.to");
     expect(contentChangesBlock).toContain("tone");

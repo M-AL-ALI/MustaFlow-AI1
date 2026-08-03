@@ -114,7 +114,9 @@ describe("Mobile Ora — clarifying-questions parity with the website hook", () 
   });
 
   it("the AsyncStorage store validates entries and caps tracked conversations", () => {
-    expect(store).toContain('const PENDING_CLARIFICATION_STORAGE_KEY = "ora_pending_clarification"');
+    expect(store).toContain(
+      'const PENDING_CLARIFICATION_STORAGE_KEY = "ora_pending_clarification"',
+    );
     expect(store).toContain("originalMessage");
     expect(store).toContain("PENDING_CLARIFICATION_MAX_KEYS");
   });

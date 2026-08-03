@@ -110,7 +110,10 @@ export function resolveFinalOraRoute(input: OraFinalRouteInput): OraFinalRouteRe
     }
 
     // 2b. An explicit current/live-info ask keeps the search tool.
-    if (decision.tool === "search" && inferOraSearchPlan({ query: message }).freshness === "current") {
+    if (
+      decision.tool === "search" &&
+      inferOraSearchPlan({ query: message }).freshness === "current"
+    ) {
       return {
         decision,
         conflictResolution: "search_over_edit_current_info",

@@ -149,13 +149,16 @@ interface XlsxHeaderStyle {
 
 function parseXlsxHeaderStyle(message: string): XlsxHeaderStyle | null {
   const headerTarget =
-    /\b(header|heading|headers|headings|row\s*1|first\s*row|title\s*row|column\s*header)\b/i.test(message);
+    /\b(header|heading|headers|headings|row\s*1|first\s*row|title\s*row|column\s*header)\b/i.test(
+      message,
+    );
   if (!headerTarget) return null;
 
   const hasBold = /\bbold\b/i.test(message);
-  const colorMatch = /\b(blue|red|green|yellow|orange|purple|black|white|gray|grey|navy|teal|maroon|olive|aqua|lime|silver)\b/i.exec(
-    message,
-  );
+  const colorMatch =
+    /\b(blue|red|green|yellow|orange|purple|black|white|gray|grey|navy|teal|maroon|olive|aqua|lime|silver)\b/i.exec(
+      message,
+    );
   const colorName = colorMatch?.[1]?.toLowerCase();
   const colorArgb = colorName ? (XLSX_HEADER_COLOR_ARGB[colorName] ?? undefined) : undefined;
 
@@ -1448,31 +1451,25 @@ function hasDocxHeadingColorIntent(message: string): boolean {
  * Apply a w:color element to runs inside Heading1–Heading6 paragraphs.
  * Returns updated XML and number of heading paragraphs modified.
  */
-function applyDocxHeadingColor(
-  docXml: string,
-  hexColor: string,
-): { xml: string; count: number } {
+function applyDocxHeadingColor(docXml: string, hexColor: string): { xml: string; count: number } {
   let count = 0;
   const upper = hexColor.toUpperCase();
   const xml = docXml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (para) => {
     if (!/w:pStyle w:val="Heading[1-6]"/i.test(para)) return para;
     count++;
     // Match <w:r> runs but not <w:rPr> elements.
-    return para.replace(
-      /(<w:r(?!Pr\b)\b[^>]*>)([\s\S]*?)(<\/w:r>)/g,
-      (_, open, inner, close) => {
-        const colorTag = `<w:color w:val="${upper}"/>`;
-        if (/<w:rPr/.test(inner)) {
-          const updated = inner.replace(
-            /(<w:rPr\b[^>]*>)([\s\S]*?)(<\/w:rPr>)/,
-            (_a: string, ropen: string, rcontent: string, rclose: string) =>
-              `${ropen}${rcontent.replace(/<w:color[^/]*\/>/g, "")}${colorTag}${rclose}`,
-          );
-          return `${open}${updated}${close}`;
-        }
-        return `${open}<w:rPr>${colorTag}</w:rPr>${inner}${close}`;
-      },
-    );
+    return para.replace(/(<w:r(?!Pr\b)\b[^>]*>)([\s\S]*?)(<\/w:r>)/g, (_, open, inner, close) => {
+      const colorTag = `<w:color w:val="${upper}"/>`;
+      if (/<w:rPr/.test(inner)) {
+        const updated = inner.replace(
+          /(<w:rPr\b[^>]*>)([\s\S]*?)(<\/w:rPr>)/,
+          (_a: string, ropen: string, rcontent: string, rclose: string) =>
+            `${ropen}${rcontent.replace(/<w:color[^/]*\/>/g, "")}${colorTag}${rclose}`,
+        );
+        return `${open}${updated}${close}`;
+      }
+      return `${open}<w:rPr>${colorTag}</w:rPr>${inner}${close}`;
+    });
   });
   return { xml, count };
 }
@@ -1486,7 +1483,8 @@ interface DocxSpacingParams {
 function parseDocxSpacingIntent(message: string): DocxSpacingParams | null {
   if (!/\b(spacing|space\s+between|paragraph\s+space|line\s+space)\b/i.test(message)) return null;
   if (/\b(more|increase|larger|bigger|double)\b/i.test(message)) return { before: 240, after: 120 };
-  if (/\b(less|decrease|smaller|compact|tight|single)\b/i.test(message)) return { before: 60, after: 60 };
+  if (/\b(less|decrease|smaller|compact|tight|single)\b/i.test(message))
+    return { before: 60, after: 60 };
   if (/\b(remove|none|zero|no)\b/i.test(message)) return { before: 0, after: 0 };
   return { before: 160, after: 80 };
 }
@@ -1534,22 +1532,19 @@ function applyPptxTitleColor(entries: ZipEntries, hexColor: string): number {
     const updated = xml.replace(/<p:sp\b[\s\S]*?<\/p:sp>/g, (sp) => {
       if (!/p:ph\b[^>]*type="(?:title|ctrTitle)"/i.test(sp)) return sp;
       let applied = false;
-      const result = sp.replace(
-        /(<a:r\b[^>]*>)([\s\S]*?)(<\/a:r>)/g,
-        (_, open, inner, close) => {
-          applied = true;
-          const fill = `<a:solidFill><a:srgbClr val="${upper}"/></a:solidFill>`;
-          if (/<a:rPr/.test(inner)) {
-            const u = inner.replace(
-              /(<a:rPr\b[^>]*>)([\s\S]*?)(<\/a:rPr>)/,
-              (_all: string, ropen: string, rc: string, rclose: string) =>
-                `${ropen}${rc.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/g, "")}${fill}${rclose}`,
-            );
-            return `${open}${u}${close}`;
-          }
-          return `${open}<a:rPr>${fill}</a:rPr>${inner}${close}`;
-        },
-      );
+      const result = sp.replace(/(<a:r\b[^>]*>)([\s\S]*?)(<\/a:r>)/g, (_, open, inner, close) => {
+        applied = true;
+        const fill = `<a:solidFill><a:srgbClr val="${upper}"/></a:solidFill>`;
+        if (/<a:rPr/.test(inner)) {
+          const u = inner.replace(
+            /(<a:rPr\b[^>]*>)([\s\S]*?)(<\/a:rPr>)/,
+            (_all: string, ropen: string, rc: string, rclose: string) =>
+              `${ropen}${rc.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/g, "")}${fill}${rclose}`,
+          );
+          return `${open}${u}${close}`;
+        }
+        return `${open}<a:rPr>${fill}</a:rPr>${inner}${close}`;
+      });
       if (applied) changed++;
       return result;
     });
@@ -1794,8 +1789,7 @@ function isXlsxStructuredWorkbookOp(message: string): boolean {
  * haven't gone through the full dataset-extraction pipeline.
  */
 function deriveMinimalSummaryFromWorkbook(workbook: ExcelJS.Workbook): DatasetSummary | null {
-  const sheet =
-    workbook.worksheets.find((s) => s.actualRowCount > 1) ?? workbook.worksheets[0];
+  const sheet = workbook.worksheets.find((s) => s.actualRowCount > 1) ?? workbook.worksheets[0];
   if (!sheet) return null;
 
   const headers: string[] = [];
@@ -2292,7 +2286,9 @@ async function editXlsx(entry: FileEntry, message: string): Promise<GeneratedFil
         headerStyle.bold ? "bold" : null,
         headerStyle.colorName ? `${headerStyle.colorName} fill` : null,
       ].filter((p): p is string => p !== null);
-      actions.push(`styled ${changed} header cell${changed === 1 ? "" : "s"} (${parts.join(" and ")})`);
+      actions.push(
+        `styled ${changed} header cell${changed === 1 ? "" : "s"} (${parts.join(" and ")})`,
+      );
     }
   }
 
@@ -2379,10 +2375,7 @@ export async function resolveRawOfficeEntry(
     if (supportsExtract) {
       try {
         const { extractText } = await import("./file-extract.js");
-        const text = await extractText(
-          input.activeAssetBuffer,
-          rawFileType as "docx" | "pptx",
-        );
+        const text = await extractText(input.activeAssetBuffer, rawFileType as "docx" | "pptx");
         if (text.trim()) extractedText = text.slice(0, MAX_TEXT_CHARS_PER_FILE);
       } catch {
         // Proceed with empty text — the regex/AI edit paths still work

@@ -105,7 +105,7 @@ The QA tape did not reach its interactive steps:
 - Checkpoint/version: `57`
 - Files written: `src/App.tsx`, `src/index.css`, `src/types.ts`
 - Terminal event: `Build completed with partial validation — live-server
-  infrastructure was unavailable, so container-dependent checks were deferred.`
+infrastructure was unavailable, so container-dependent checks were deferred.`
 - The same deferred-validation disclosure was visible in chat and in the
   Builder report.
 - No repair/self-heal events were emitted, so there was no spurious repair.

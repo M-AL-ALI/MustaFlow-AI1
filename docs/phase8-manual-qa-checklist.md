@@ -11,7 +11,7 @@
 
 ## Section 1 — Phase 8: File Citation Chip (website)
 
-*Exact chip copy: single file → `From your file: {filename}` · multiple files → `From your files: N files`*
+_Exact chip copy: single file → `From your file: {filename}` · multiple files → `From your files: N files`_
 
 **Scenario A — Single PPTX, specific slide**
 
@@ -42,7 +42,7 @@
 
 - [ ] Ask: `Latest AI news today with sources.`
 - [ ] Confirm source cards appear with the **"Sources"** label and Globe icon.
-- [ ] On at least one source card, confirm a short date appears beside the hostname: `Mar 12, 2026`, separated by ` · `.
+- [ ] On at least one source card, confirm a short date appears beside the hostname: `Mar 12, 2026`, separated by `·`.
 - [ ] Confirm the date is a plausible publication date — not blank, not garbled, not a year like `1970` or `2099`.
 - [ ] A source with no provider date must show **only the hostname** — no placeholder or garbled text.
 - [ ] A source whose provider-supplied date is longer than 40 characters or otherwise invalid must show **no date at all** — not garbage.
@@ -52,7 +52,7 @@
 
 ## Section 3 — Phase 8: Mobile File Citations and Dated Sources
 
-*(TestFlight build required — mobile code changed this phase)*
+_(TestFlight build required — mobile code changed this phase)_
 
 - [ ] Upload the same PPTX used in Section 1. Ask about a specific slide.
 - [ ] Below the reply, confirm **flat rows** (no collapsible chip — mobile renders a flat list): `From your file: <filename.pptx> — Slide 3`
@@ -64,7 +64,7 @@
 
 ## Section 4 — Phase 1 Regression: File Edit + Edit-Quality Card
 
-*Exact labels from `ora-edit-quality-card.tsx`:*
+_Exact labels from `ora-edit-quality-card.tsx`:_
 
 - `original_edited` → **"Edited your original file"** + sub-label **"Layout and design preserved"**
 - `unchanged` → **"Original file returned unchanged"**
@@ -79,7 +79,7 @@
 
 **Redesign / rebuild**
 
-- [ ] Request a structural redesign (e.g. `Completely redesign the slide layout`). Confirm the edit-quality card reads **"Rebuilt from your content"** + **"The original layout was not preserved"** — *not* "Edited your original file".
+- [ ] Request a structural redesign (e.g. `Completely redesign the slide layout`). Confirm the edit-quality card reads **"Rebuilt from your content"** + **"The original layout was not preserved"** — _not_ "Edited your original file".
 
 **Unchanged return**
 
@@ -97,7 +97,7 @@
 
 ## Section 5 — Phase 2 Regression: Ora File Version History
 
-*Flow: file card → "Version history" dialog. Dialog title: "Version history".*
+_Flow: file card → "Version history" dialog. Dialog title: "Version history"._
 
 - [ ] Sign in. In Ora chat, generate a file (e.g. `Create a short DOCX report on renewable energy.`). Confirm a real file card appears.
 - [ ] Ask for a revision (e.g. `Add a risk section at the end.`). A second file card appears.
@@ -139,7 +139,7 @@
 ## Section 8 — Phase 6/7 Regression: Search / Current-Info Routing
 
 - [ ] Ask: `What is the news today?`
-  - Expect: live source cards **or** the honest retryable error: *"I couldn't verify live results right now… Tap Retry live search below to try again."* Either is correct; a silent stale answer is not.
+  - Expect: live source cards **or** the honest retryable error: _"I couldn't verify live results right now… Tap Retry live search below to try again."_ Either is correct; a silent stale answer is not.
 - [ ] If the retryable error appeared, tap **Retry live search**. Confirm:
   - Re-runs a live search (not a second stale fallback).
   - Result includes live sources, not general knowledge.

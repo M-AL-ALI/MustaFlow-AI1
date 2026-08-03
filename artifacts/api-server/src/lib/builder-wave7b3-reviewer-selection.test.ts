@@ -6,10 +6,7 @@ vi.mock("./ai-providers", () => ({
 }));
 
 import { assembleArchitectReviewPrompt } from "./architect";
-import {
-  buildReviewerContextFromFiles,
-  buildReviewerWorkspaceContext,
-} from "./reviewer-context";
+import { buildReviewerContextFromFiles, buildReviewerWorkspaceContext } from "./reviewer-context";
 
 type TestFile = { path: string; content: string };
 
@@ -58,9 +55,9 @@ describe("Wave 7B-3 reviewer excerpt selection", () => {
     expect(selectedPaths).not.toContain("vite.config.ts");
     expect(selectedPaths).not.toContain("tsconfig.json");
     expect(context.fileExcerpts).toHaveLength(8);
-    expect(
-      context.fileExcerpts.reduce((total, excerpt) => total + excerpt.content.length, 0),
-    ).toBe(30_000);
+    expect(context.fileExcerpts.reduce((total, excerpt) => total + excerpt.content.length, 0)).toBe(
+      30_000,
+    );
   });
 
   it("reports requested files that are missing from the workspace", () => {

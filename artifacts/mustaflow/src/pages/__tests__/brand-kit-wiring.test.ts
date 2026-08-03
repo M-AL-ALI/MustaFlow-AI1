@@ -22,7 +22,7 @@ describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   });
 
   it("useEffect reads colors/fonts/logo from d.kit (not flat d)", () => {
-    const effectStart = src.indexOf("void authFetch(\"/api/ora/brand-kit\")");
+    const effectStart = src.indexOf('void authFetch("/api/ora/brand-kit")');
     expect(effectStart).toBeGreaterThan(-1);
     const effectEnd = src.indexOf(".finally(", effectStart);
     const effectBody = src.slice(effectStart, effectEnd);

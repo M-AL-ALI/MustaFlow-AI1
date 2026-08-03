@@ -289,10 +289,10 @@ async function applyPatch(projectId: string, threadId: string, messageId: string
 }
 
 async function prepareFix(projectId: string, threadId: string): Promise<void> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/prepare-fix`,
-    { method: "POST", headers: { "Content-Type": "application/json" } },
-  );
+  const res = await authFetch(`/api/orax/projects/${projectId}/threads/${threadId}/prepare-fix`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "Failed to queue fix preparation");
@@ -300,10 +300,10 @@ async function prepareFix(projectId: string, threadId: string): Promise<void> {
 }
 
 async function preparePr(projectId: string, threadId: string): Promise<void> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/prepare-pr`,
-    { method: "POST", headers: { "Content-Type": "application/json" } },
-  );
+  const res = await authFetch(`/api/orax/projects/${projectId}/threads/${threadId}/prepare-pr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "Failed to queue pull request preparation");
@@ -688,8 +688,11 @@ function ThreadDetail({
                       </div>
                       {(msg.payload?.checks ?? []).length > 0 && (
                         <div className="mt-1.5 flex flex-col gap-1">
-                          {(msg.payload!.checks!).map((c) => (
-                            <div key={c.name} className="flex items-center gap-1.5 text-muted-foreground">
+                          {msg.payload!.checks!.map((c) => (
+                            <div
+                              key={c.name}
+                              className="flex items-center gap-1.5 text-muted-foreground"
+                            >
                               <Check size={9} className="shrink-0 text-green-500" />
                               <span className="font-mono">{c.name}</span>
                               <span className="text-muted-foreground/50">({c.durationMs}ms)</span>
@@ -708,9 +711,7 @@ function ThreadDetail({
                           preparePr(projectId, thread.id)
                             .then(() => void reload())
                             .catch((err: unknown) =>
-                              setError(
-                                err instanceof Error ? err.message : "Create PR failed",
-                              ),
+                              setError(err instanceof Error ? err.message : "Create PR failed"),
                             )
                             .finally(() => setPreparingPr(false));
                         }}
@@ -733,8 +734,11 @@ function ThreadDetail({
                       </div>
                       {(msg.payload?.checks ?? []).length > 0 && (
                         <div className="mt-1.5 flex flex-col gap-1">
-                          {(msg.payload!.checks!).map((c) => (
-                            <div key={c.name} className="flex items-center gap-1.5 text-muted-foreground">
+                          {msg.payload!.checks!.map((c) => (
+                            <div
+                              key={c.name}
+                              className="flex items-center gap-1.5 text-muted-foreground"
+                            >
                               {c.status === "passed" ? (
                                 <Check size={9} className="shrink-0 text-green-500" />
                               ) : c.status === "skipped" ? (
@@ -783,7 +787,7 @@ function ThreadDetail({
                       {/* File chips */}
                       {(msg.payload.draftPatch.changedFiles ?? []).length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-1.5">
-                          {(msg.payload.draftPatch.changedFiles).map((f) => (
+                          {msg.payload.draftPatch.changedFiles.map((f) => (
                             <span
                               key={f.relativePath}
                               className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"

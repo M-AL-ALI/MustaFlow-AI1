@@ -63,7 +63,10 @@ requireContains("artifacts/orax-desktop/package.json", '"verify:phase3s"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3t"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3u"');
 requireContains("artifacts/orax-desktop/package.json", '"verify:phase3v"');
-requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "buildSupportDiagnostics");
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "buildSupportDiagnostics",
+);
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
   "findSupportDiagnosticsViolations",
@@ -75,14 +78,23 @@ requireContains(
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "Bearer");
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "PRIVATE KEY");
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "Windows local path");
-requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "includesSessionToken: false");
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "includesSessionToken: false",
+);
 requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "sanitizeHealthTimeline");
-requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "MAX_HEALTH_TIMELINE_ENTRIES");
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "MAX_HEALTH_TIMELINE_ENTRIES",
+);
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
   "healthTimeline: sanitizeHealthTimeline",
 );
-requireContains("artifacts/orax-desktop/src/main/support-diagnostics.ts", "includesPasswords: false");
+requireContains(
+  "artifacts/orax-desktop/src/main/support-diagnostics.ts",
+  "includesPasswords: false",
+);
 requireContains(
   "artifacts/orax-desktop/src/main/support-diagnostics.ts",
   "includesEnvironmentVariables: false",
@@ -105,9 +117,18 @@ requireOrder(
   "writeFile(result.filePath",
 );
 requireContains("artifacts/orax-desktop/src/preload/index.ts", "support:exportDiagnostics");
-requireContains("artifacts/orax-desktop/src/renderer/electron-api.d.ts", "SupportDiagnosticsExport");
-requireContains("artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx", "Export Support Diagnostics");
-requireContains("artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx", "does not include session tokens");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/electron-api.d.ts",
+  "SupportDiagnosticsExport",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx",
+  "Export Support Diagnostics",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx",
+  "does not include session tokens",
+);
 requireContains("docs/orax-desktop-update-recovery.md", "Update and Recovery");
 requireContains("docs/orax-desktop-update-recovery.md", "Rollback");
 requireContains("docs/orax-desktop-update-recovery.md", "Support Diagnostics");
@@ -122,7 +143,10 @@ requireContains(
 );
 requireContains("docs/orax-desktop-update-recovery.md", "Settings export may have an empty");
 requireContains("docs/orax-desktop-update-recovery.md", "Health Smoke Checklist");
-requireContains("docs/orax-desktop-update-recovery.md", "Confirm diagnostics success/cancel messages");
+requireContains(
+  "docs/orax-desktop-update-recovery.md",
+  "Confirm diagnostics success/cancel messages",
+);
 requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Action Shortcuts");
 requireContains("docs/orax-desktop-update-recovery.md", "No new IPC APIs");
 requireContains("docs/orax-desktop-update-recovery.md", "Health Checklist Completion Summary");

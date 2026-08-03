@@ -51,9 +51,15 @@ requireContains("artifacts/orax-desktop/package.json", "electron-builder");
 requireContains("artifacts/orax-desktop/electron-builder.yml", "productName: Orax Desktop");
 requireContains("artifacts/orax-desktop/electron-builder.yml", "appId: ai.mustaflow.orax.desktop");
 requireContains("artifacts/orax-desktop/electron-builder.yml", "target: nsis");
-requireContains("artifacts/orax-desktop/electron-builder.yml", "artifactName: Orax-Desktop-${version}-${arch}-Setup.${ext}");
+requireContains(
+  "artifacts/orax-desktop/electron-builder.yml",
+  "artifactName: Orax-Desktop-${version}-${arch}-Setup.${ext}",
+);
 requireContains(".gitignore", "artifacts/orax-desktop/release/");
-requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Installer build pending public release");
+requireContains(
+  "artifacts/mustaflow/src/pages/orax-product.tsx",
+  "Installer build pending public release",
+);
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Request early access");
 
 requireNotTracked("artifacts/orax-desktop/release");

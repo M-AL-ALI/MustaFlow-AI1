@@ -54,7 +54,10 @@ requireContains(
   "https://downloads.mustaflow.com/orax/desktop/windows",
 );
 requireContains("artifacts/orax-desktop/scripts/release-manifest.mjs", "sha256");
-requireContains("artifacts/orax-desktop/scripts/release-manifest.mjs", "ORAX_DESKTOP_RELEASE_BASE_URL");
+requireContains(
+  "artifacts/orax-desktop/scripts/release-manifest.mjs",
+  "ORAX_DESKTOP_RELEASE_BASE_URL",
+);
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "Signed release channel");
 requireContains("artifacts/mustaflow/src/pages/orax-product.tsx", "internal release review");
 requireContains("docs/orax-desktop-release-channel.md", "Code signing gate");

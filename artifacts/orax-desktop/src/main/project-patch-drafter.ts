@@ -228,7 +228,9 @@ function buildRisks(userMessage: string, changedFiles: DraftFilePatch[]): string
   const risks: string[] = [];
 
   if (changedFiles.some((f) => f.relativePath.toLowerCase().includes("auth"))) {
-    risks.push("Authentication changes may affect existing sessions — test sign-in flow after applying.");
+    risks.push(
+      "Authentication changes may affect existing sessions — test sign-in flow after applying.",
+    );
   }
   if (changedFiles.some((f) => f.relativePath.toLowerCase().includes("route"))) {
     risks.push("Route changes may break existing links or redirect logic.");
@@ -315,8 +317,17 @@ export async function draftProjectPatch(params: {
   // Build the changed-file proposals
   const changedFiles: DraftFilePatch[] = [];
   for (const { file, contentPreview } of safeCandidates) {
-    const { operation, intentDescription } = deriveIntent(userMessage, file.relativePath, file.category);
-    const hunkPreview = buildHunkPreview(file.relativePath, operation, intentDescription, contentPreview);
+    const { operation, intentDescription } = deriveIntent(
+      userMessage,
+      file.relativePath,
+      file.category,
+    );
+    const hunkPreview = buildHunkPreview(
+      file.relativePath,
+      operation,
+      intentDescription,
+      contentPreview,
+    );
 
     // Phase 2L: compute originalHash for drift detection + send oldContentPreview
     let originalHash: string | undefined;

@@ -234,7 +234,6 @@ export function BuyCreditsSheet({
             ))}
           </div>
         </div>
-
       </div>
     </>
   );

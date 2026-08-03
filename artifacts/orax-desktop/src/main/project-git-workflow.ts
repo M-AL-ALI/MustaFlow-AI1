@@ -171,45 +171,44 @@ function createGitHubPr(opts: {
         },
       },
       (res) => {
-      let data = "";
-      res.on("data", (chunk: Buffer) => {
-        data += chunk.toString();
-      });
-      res.on("end", () => {
-        const status = res.statusCode ?? 0;
-        if (status === 201) {
-          try {
-            const parsed = JSON.parse(data) as { html_url: string; number: number };
-            resolve({ url: parsed.html_url, number: parsed.number });
-          } catch {
-            reject(new Error("GitHub API returned invalid JSON for the created PR"));
-          }
-        } else if (status === 422) {
-          try {
-            const parsed = JSON.parse(data) as {
-              errors?: Array<{ message?: string }>;
-              message?: string;
-            };
-            const alreadyExists = parsed.errors?.some((e) =>
-              /already exists/i.test(e.message ?? ""),
-            );
-            if (alreadyExists) {
-              reject(new Error("A pull request already exists for this branch"));
-            } else {
-              reject(
-                new Error(
-                  `GitHub validation error: ${parsed.message ?? data.slice(0, 120)}`,
-                ),
-              );
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          if (status === 201) {
+            try {
+              const parsed = JSON.parse(data) as { html_url: string; number: number };
+              resolve({ url: parsed.html_url, number: parsed.number });
+            } catch {
+              reject(new Error("GitHub API returned invalid JSON for the created PR"));
             }
-          } catch {
-            reject(new Error("GitHub API 422 validation error"));
+          } else if (status === 422) {
+            try {
+              const parsed = JSON.parse(data) as {
+                errors?: Array<{ message?: string }>;
+                message?: string;
+              };
+              const alreadyExists = parsed.errors?.some((e) =>
+                /already exists/i.test(e.message ?? ""),
+              );
+              if (alreadyExists) {
+                reject(new Error("A pull request already exists for this branch"));
+              } else {
+                reject(
+                  new Error(`GitHub validation error: ${parsed.message ?? data.slice(0, 120)}`),
+                );
+              }
+            } catch {
+              reject(new Error("GitHub API 422 validation error"));
+            }
+          } else {
+            reject(new Error(`GitHub API error (status ${status})`));
           }
-        } else {
-          reject(new Error(`GitHub API error (status ${status})`));
-        }
-      });
-    });
+        });
+      },
+    );
     req.on("error", (err: Error) => {
       reject(new Error(`GitHub API request failed: ${err.message}`));
     });
@@ -282,10 +281,7 @@ export async function prepareProjectPr(
 
   // Resolve token from arg or environment — never log it
   const token: string | null =
-    githubToken ??
-    process.env["GITHUB_TOKEN"] ??
-    process.env["GH_TOKEN"] ??
-    null;
+    githubToken ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? null;
 
   // ── Validate repo ──────────────────────────────────────────────────────────
   const repoInfo = await validateGitRepo(projectDir);
@@ -347,9 +343,7 @@ export async function prepareProjectPr(
   } else {
     const createRes = await runGit(projectDir, ["switch", "-c", branchName]);
     if (createRes.code !== 0) {
-      throw new Error(
-        `Could not create branch ${branchName}: ${createRes.stderr.slice(0, 200)}`,
-      );
+      throw new Error(`Could not create branch ${branchName}: ${createRes.stderr.slice(0, 200)}`);
     }
   }
 
@@ -397,7 +391,10 @@ export async function prepareProjectPr(
   if (token) {
     // Inject token via credential URL — no shell evaluation required
     // remoteUrl is non-null here: ghRemote being non-null proves the ternary took the truthy branch
-    const credUrl = (remoteUrl as string).replace(/^https:\/\//, `https://x-access-token:${token}@`);
+    const credUrl = (remoteUrl as string).replace(
+      /^https:\/\//,
+      `https://x-access-token:${token}@`,
+    );
     const pushRes = await runGit(projectDir, ["push", credUrl, `${branchName}:${branchName}`]);
     if (pushRes.code !== 0) {
       const redacted = redactToken(pushRes.stderr.slice(0, 200), token);

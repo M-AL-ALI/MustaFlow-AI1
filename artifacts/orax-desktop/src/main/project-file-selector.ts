@@ -106,9 +106,36 @@ function extractKeywords(message: string): string[] {
   const lower = message.toLowerCase();
   const tokens = lower.split(/[\s,./\-_:;'"()[\]{}]+/).filter((t) => t.length >= 3);
   const stopwords = new Set([
-    "the", "and", "for", "with", "that", "this", "from", "are", "can", "you",
-    "how", "what", "when", "why", "not", "get", "let", "make", "use", "try",
-    "add", "new", "old", "run", "set", "put", "our", "was", "all", "has",
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "are",
+    "can",
+    "you",
+    "how",
+    "what",
+    "when",
+    "why",
+    "not",
+    "get",
+    "let",
+    "make",
+    "use",
+    "try",
+    "add",
+    "new",
+    "old",
+    "run",
+    "set",
+    "put",
+    "our",
+    "was",
+    "all",
+    "has",
   ]);
   const seen = new Set<string>();
   return tokens
@@ -123,11 +150,19 @@ interface CategoryRule {
 }
 
 const CATEGORY_RULES: CategoryRule[] = [
-  { pattern: /auth|login|session|clerk|oauth|middleware\/auth|sign.?in|credential/, cat: "auth", boost: 4 },
+  {
+    pattern: /auth|login|session|clerk|oauth|middleware\/auth|sign.?in|credential/,
+    cat: "auth",
+    boost: 4,
+  },
   { pattern: /route|router|routing|navigation|redirect/, cat: "routing", boost: 3 },
   { pattern: /page|screen|component|layout|ui|modal|view|panel/, cat: "ui", boost: 2 },
   { pattern: /api|server|handler|controller|endpoint|request|fetch/, cat: "api", boost: 3 },
-  { pattern: /config|settings|vite\.config|next\.config|tsconfig|app\.json|turbo\.json|workspace/, cat: "config", boost: 2 },
+  {
+    pattern: /config|settings|vite\.config|next\.config|tsconfig|app\.json|turbo\.json|workspace/,
+    cat: "config",
+    boost: 2,
+  },
   { pattern: /test|spec|__tests__|\.test\.|\.spec\./, cat: "tests", boost: 1 },
   { pattern: /readme|docs|changelog|\.md$/, cat: "docs", boost: 1 },
   { pattern: /package\.json|pnpm.workspace|yarn\.lock|package.lock/, cat: "package", boost: 3 },

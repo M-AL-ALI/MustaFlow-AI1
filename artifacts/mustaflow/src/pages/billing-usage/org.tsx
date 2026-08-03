@@ -76,10 +76,7 @@ function apiErrorMessage(err: unknown): string {
 
 /** "$0.008" style per-credit rate without trailing zeros. */
 function fmtRate(v: number): string {
-  const s = v
-    .toFixed(4)
-    .replace(/0+$/, "")
-    .replace(/\.$/, "");
+  const s = v.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
   return `$${s}`;
 }
 
@@ -112,9 +109,8 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
     if (!open) setForm({ ...EMPTY_FORM });
   }, [open]);
 
-  const set =
-    (key: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement>) =>
-      setForm((f) => ({ ...f, [key]: e.target.value }));
+  const set = (key: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const requiredOk =
     form.companyName.trim().length >= 2 &&
@@ -132,7 +128,9 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
       city: form.city.trim(),
       postalCode: form.postalCode.trim(),
       country: form.country.trim().toUpperCase(),
-      ...(form.billingContactName.trim() ? { billingContactName: form.billingContactName.trim() } : {}),
+      ...(form.billingContactName.trim()
+        ? { billingContactName: form.billingContactName.trim() }
+        : {}),
       ...(form.taxId.trim() ? { taxId: form.taxId.trim() } : {}),
       ...(form.addressLine2.trim() ? { addressLine2: form.addressLine2.trim() } : {}),
       ...(form.region.trim() ? { region: form.region.trim() } : {}),
@@ -144,7 +142,8 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
         onSuccess: () => {
           toast({
             title: "Organization created",
-            description: "Your company is set up — fund the credit pool and add seats to start building.",
+            description:
+              "Your company is set up — fund the credit pool and add seats to start building.",
           });
           void queryClient.invalidateQueries({ queryKey: getGetNabuflowBillingStateQueryKey() });
           void queryClient.invalidateQueries({ queryKey: getGetNabuflowOrgQueryKey() });
@@ -186,7 +185,10 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !register.isPending && onClose()}>
-      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto" data-testid="org-setup-dialog">
+      <DialogContent
+        className="max-h-[85vh] max-w-lg overflow-y-auto"
+        data-testid="org-setup-dialog"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="h-4 w-4" /> Set up Constellation for your company
@@ -199,14 +201,28 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
         </DialogHeader>
 
         <div className="space-y-3">
-          {field("companyName", "Legal company name", { required: true, placeholder: "Acme Systems GmbH", maxLength: 200 })}
+          {field("companyName", "Legal company name", {
+            required: true,
+            placeholder: "Acme Systems GmbH",
+            maxLength: 200,
+          })}
           <div className="grid grid-cols-2 gap-3">
-            {field("billingContactName", "Billing contact", { placeholder: "Jane Doe", maxLength: 200 })}
-            {field("billingContactEmail", "Billing email", { required: true, type: "email", placeholder: "billing@acme.com" })}
+            {field("billingContactName", "Billing contact", {
+              placeholder: "Jane Doe",
+              maxLength: 200,
+            })}
+            {field("billingContactEmail", "Billing email", {
+              required: true,
+              type: "email",
+              placeholder: "billing@acme.com",
+            })}
           </div>
           <div className="grid grid-cols-2 gap-3">
             {field("taxId", "Tax / VAT ID", { placeholder: "DE123456789", maxLength: 60 })}
-            {field("poReference", "PO reference (optional)", { placeholder: "PO-2026-001", maxLength: 140 })}
+            {field("poReference", "PO reference (optional)", {
+              placeholder: "PO-2026-001",
+              maxLength: 140,
+            })}
           </div>
           {field("addressLine1", "Address line 1", { required: true, maxLength: 300 })}
           {field("addressLine2", "Address line 2", { maxLength: 300 })}
@@ -216,7 +232,11 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
           </div>
           <div className="grid grid-cols-2 gap-3">
             {field("postalCode", "Postal code", { required: true, maxLength: 20 })}
-            {field("country", "Country (2-letter)", { required: true, placeholder: "US", maxLength: 2 })}
+            {field("country", "Country (2-letter)", {
+              required: true,
+              placeholder: "US",
+              maxLength: 2,
+            })}
           </div>
           <p className="text-[11px] leading-snug text-muted-foreground">
             The account you're signed in with becomes the organization's billing admin. Invoices can
@@ -287,12 +307,17 @@ function PurchaseDialog({
 
   const tier = useMemo(() => {
     const tiers = pricing.data?.tiers ?? [];
-    return [...tiers].sort((a, b) => b.minCredits - a.minCredits).find((t) => n >= t.minCredits) ?? null;
+    return (
+      [...tiers].sort((a, b) => b.minCredits - a.minCredits).find((t) => n >= t.minCredits) ?? null
+    );
   }, [pricing.data?.tiers, n]);
 
   const totalCents = tier ? Math.round(n * tier.usdPerCredit * 100) : null;
-  const selfServeCents = pricing.data ? Math.round(n * pricing.data.selfServeRateUsdPerCredit * 100) : null;
-  const savingsCents = totalCents != null && selfServeCents != null ? selfServeCents - totalCents : null;
+  const selfServeCents = pricing.data
+    ? Math.round(n * pricing.data.selfServeRateUsdPerCredit * 100)
+    : null;
+  const savingsCents =
+    totalCents != null && selfServeCents != null ? selfServeCents - totalCents : null;
   const belowMin = n < minCredits;
   const cardBlocked = method === "card" && !hasCard;
 
@@ -315,7 +340,11 @@ function PurchaseDialog({
           onClose();
         },
         onError: (err) =>
-          toast({ title: "Purchase didn't go through", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Purchase didn't go through",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
       },
     );
   };
@@ -365,7 +394,10 @@ function PurchaseDialog({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs" data-testid="org-purchase-preview">
+          <div
+            className="rounded-lg border border-border bg-muted/30 p-3 text-xs"
+            data-testid="org-purchase-preview"
+          >
             {belowMin ? (
               <p className="text-amber-600 dark:text-amber-400">
                 Bulk purchases start at {minCredits.toLocaleString()} credits.
@@ -376,7 +408,9 @@ function PurchaseDialog({
                   <span className="text-muted-foreground">
                     {n.toLocaleString()} credits × {fmtRate(tier.usdPerCredit)} ({tier.label})
                   </span>
-                  <span className="font-semibold tabular-nums text-foreground">{formatUsdCents(totalCents)}</span>
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {formatUsdCents(totalCents)}
+                  </span>
                 </div>
                 {savingsCents != null && savingsCents > 0 && (
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
@@ -401,7 +435,9 @@ function PurchaseDialog({
                 data-testid="org-method-card"
                 className={cn(
                   "rounded-lg border px-3 py-2 text-left transition-colors",
-                  method === "card" ? "border-primary/50 bg-primary/10" : "border-border hover:bg-muted/60",
+                  method === "card"
+                    ? "border-primary/50 bg-primary/10"
+                    : "border-border hover:bg-muted/60",
                 )}
               >
                 <span className="block text-xs font-semibold text-foreground">Company card</span>
@@ -417,7 +453,9 @@ function PurchaseDialog({
                 data-testid="org-method-invoice"
                 className={cn(
                   "rounded-lg border px-3 py-2 text-left transition-colors",
-                  method === "invoice" ? "border-primary/50 bg-primary/10" : "border-border hover:bg-muted/60",
+                  method === "invoice"
+                    ? "border-primary/50 bg-primary/10"
+                    : "border-border hover:bg-muted/60",
                   !org.invoiceTermsEnabled && "cursor-not-allowed opacity-50",
                 )}
               >
@@ -425,7 +463,9 @@ function PurchaseDialog({
                   Invoice · net-{org.termsNetDays}
                 </span>
                 <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                  {org.invoiceTermsEnabled ? "Pool funds when the invoice is paid" : "Net terms by request — contact us"}
+                  {org.invoiceTermsEnabled
+                    ? "Pool funds when the invoice is paid"
+                    : "Net terms by request — contact us"}
                 </span>
               </button>
             </div>
@@ -515,7 +555,9 @@ export function OrgSection() {
   const [editOpen, setEditOpen] = useState(false);
   const [capInput, setCapInput] = useState<string | null>(null);
   const [seatEmail, setSeatEmail] = useState("");
-  const [seatCapEdit, setSeatCapEdit] = useState<{ seat: NabuflowOrgSeat; value: string } | null>(null);
+  const [seatCapEdit, setSeatCapEdit] = useState<{ seat: NabuflowOrgSeat; value: string } | null>(
+    null,
+  );
   const [removeTarget, setRemoveTarget] = useState<NabuflowOrgSeat | null>(null);
 
   const updateOrg = useUpdateNabuflowOrg();
@@ -587,7 +629,14 @@ export function OrgSection() {
   const resetShort = formatResetDate(month.resetsAt);
   const prevLast4 = card?.last4 ?? null;
 
-  const addressLine = [org.addressLine1, org.addressLine2, org.city, org.region, org.postalCode, org.country]
+  const addressLine = [
+    org.addressLine1,
+    org.addressLine2,
+    org.city,
+    org.region,
+    org.postalCode,
+    org.country,
+  ]
     .filter(Boolean)
     .join(", ");
 
@@ -611,7 +660,11 @@ export function OrgSection() {
           invalidateOrg();
         },
         onError: (err) =>
-          toast({ title: "Couldn't update the cap", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Couldn't update the cap",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
       },
     );
   };
@@ -631,7 +684,11 @@ export function OrgSection() {
           invalidateOrg();
         },
         onError: (err) =>
-          toast({ title: "Couldn't add the seat", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Couldn't add the seat",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
       },
     );
   };
@@ -656,7 +713,11 @@ export function OrgSection() {
           invalidateOrg();
         },
         onError: (err) =>
-          toast({ title: "Couldn't update the seat cap", description: apiErrorMessage(err), variant: "destructive" }),
+          toast({
+            title: "Couldn't update the seat cap",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          }),
       },
     );
   };
@@ -672,7 +733,11 @@ export function OrgSection() {
           invalidateOrg();
         },
         onError: (err) => {
-          toast({ title: "Couldn't remove the seat", description: apiErrorMessage(err), variant: "destructive" });
+          toast({
+            title: "Couldn't remove the seat",
+            description: apiErrorMessage(err),
+            variant: "destructive",
+          });
           setRemoveTarget(null);
         },
       },
@@ -687,8 +752,13 @@ export function OrgSection() {
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-base font-bold text-foreground">
               <Building2 className="h-4 w-4 text-muted-foreground" />
-              <span className="truncate" data-testid="org-company-name">{org.companyName}</span>
-              <Badge variant={org.status === "active" ? "default" : "destructive"} className="capitalize">
+              <span className="truncate" data-testid="org-company-name">
+                {org.companyName}
+              </span>
+              <Badge
+                variant={org.status === "active" ? "default" : "destructive"}
+                className="capitalize"
+              >
                 {org.status}
               </Badge>
             </h2>
@@ -698,7 +768,12 @@ export function OrgSection() {
             </p>
           </div>
           {isAdmin && (
-            <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} data-testid="org-edit-details">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setEditOpen(true)}
+              data-testid="org-edit-details"
+            >
               <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit details
             </Button>
           )}
@@ -770,13 +845,19 @@ export function OrgSection() {
       >
         <div className="grid gap-4 md:grid-cols-3">
           <div>
-            <p className="text-2xl font-bold tabular-nums text-foreground" data-testid="org-pool-credits">
+            <p
+              className="text-2xl font-bold tabular-nums text-foreground"
+              data-testid="org-pool-credits"
+            >
               {org.poolCredits.toLocaleString()}
             </p>
             <p className="text-[11px] text-muted-foreground">credits in the pool</p>
           </div>
           <div>
-            <p className="text-2xl font-bold tabular-nums text-foreground" data-testid="org-month-drawn">
+            <p
+              className="text-2xl font-bold tabular-nums text-foreground"
+              data-testid="org-month-drawn"
+            >
               {formatUsdCents(month.drawnUsdCents)}
             </p>
             <p className="text-[11px] text-muted-foreground">drawn this month (all seats)</p>
@@ -793,7 +874,9 @@ export function OrgSection() {
             total={month.capUsdCents}
             label="Organization monthly spend"
             sublabel={`Org-wide cap ${formatUsdCents(month.capUsdCents)} · resets ${resetShort ?? "next month"}`}
-            formatValue={() => `${formatUsdCents(month.drawnUsdCents)} of ${formatUsdCents(month.capUsdCents)}`}
+            formatValue={() =>
+              `${formatUsdCents(month.drawnUsdCents)} of ${formatUsdCents(month.capUsdCents)}`
+            }
             testId="org-month-meter"
           />
           {month.seatCapUsdCents != null && (
@@ -859,7 +942,9 @@ export function OrgSection() {
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate text-xs font-medium text-foreground">{s.email ?? s.userId}</span>
+                  <span className="truncate text-xs font-medium text-foreground">
+                    {s.email ?? s.userId}
+                  </span>
                   {s.role === "billing_admin" && (
                     <Badge variant="secondary" className="text-[9px]">
                       Billing admin
@@ -872,13 +957,18 @@ export function OrgSection() {
                     onClick={() =>
                       setSeatCapEdit({
                         seat: s,
-                        value: s.seatSpendCapUsdCents != null ? String(Math.round(s.seatSpendCapUsdCents / 100)) : "",
+                        value:
+                          s.seatSpendCapUsdCents != null
+                            ? String(Math.round(s.seatSpendCapUsdCents / 100))
+                            : "",
                       })
                     }
                     className="text-[11px] text-muted-foreground hover:text-foreground"
                     data-testid={`org-seat-cap-${s.userId}`}
                   >
-                    {s.seatSpendCapUsdCents != null ? `Cap ${formatUsdCents(s.seatSpendCapUsdCents)}/mo` : "No sub-cap"}
+                    {s.seatSpendCapUsdCents != null
+                      ? `Cap ${formatUsdCents(s.seatSpendCapUsdCents)}/mo`
+                      : "No sub-cap"}
                   </button>
                   <button
                     type="button"
@@ -902,7 +992,13 @@ export function OrgSection() {
               className="h-8 w-64 text-sm"
               data-testid="org-add-seat-email"
             />
-            <Button size="sm" variant="outline" onClick={submitAddSeat} disabled={addSeat.isPending} data-testid="org-add-seat">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={submitAddSeat}
+              disabled={addSeat.isPending}
+              data-testid="org-add-seat"
+            >
               {addSeat.isPending ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
@@ -953,7 +1049,10 @@ export function OrgSection() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Badge variant={purchaseStatusVariant(p.status)} className="capitalize text-[9px]">
+                    <Badge
+                      variant={purchaseStatusVariant(p.status)}
+                      className="capitalize text-[9px]"
+                    >
                       {p.status}
                     </Badge>
                     {p.hostedInvoiceUrl && (
@@ -986,11 +1085,18 @@ export function OrgSection() {
                   {l.description ? ` — ${l.description}` : ""}
                 </span>
                 <span className="shrink-0 tabular-nums">
-                  <span className={cn("font-semibold", l.credits >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground")}>
+                  <span
+                    className={cn(
+                      "font-semibold",
+                      l.credits >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground",
+                    )}
+                  >
                     {l.credits >= 0 ? "+" : ""}
                     {l.credits.toLocaleString()}
                   </span>
-                  <span className="ml-2 text-muted-foreground">→ {l.balanceAfter.toLocaleString()}</span>
+                  <span className="ml-2 text-muted-foreground">
+                    → {l.balanceAfter.toLocaleString()}
+                  </span>
                 </span>
               </div>
             ))}
@@ -1001,7 +1107,9 @@ export function OrgSection() {
       {!isAdmin && (
         <p className="text-[11px] text-muted-foreground">
           Your organization's billing admin manages purchases, seats and caps.
-          {state?.org?.companyName ? ` You're building on ${state.org.companyName}'s shared pool.` : ""}
+          {state?.org?.companyName
+            ? ` You're building on ${state.org.companyName}'s shared pool.`
+            : ""}
         </p>
       )}
 
@@ -1051,7 +1159,11 @@ export function OrgSection() {
                 invalidateOrg();
               },
               onError: (err) =>
-                toast({ title: "Couldn't update", description: apiErrorMessage(err), variant: "destructive" }),
+                toast({
+                  title: "Couldn't update",
+                  description: apiErrorMessage(err),
+                  variant: "destructive",
+                }),
             },
           )
         }
@@ -1084,10 +1196,20 @@ export function OrgSection() {
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setSeatCapEdit(null)} disabled={updateSeatCap.isPending}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSeatCapEdit(null)}
+              disabled={updateSeatCap.isPending}
+            >
               Cancel
             </Button>
-            <Button size="sm" onClick={submitSeatCap} disabled={updateSeatCap.isPending} data-testid="org-seat-cap-save">
+            <Button
+              size="sm"
+              onClick={submitSeatCap}
+              disabled={updateSeatCap.isPending}
+              data-testid="org-seat-cap-save"
+            >
               {updateSeatCap.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               Save
             </Button>
@@ -1102,8 +1224,8 @@ export function OrgSection() {
             <AlertDialogTitle>Remove this seat?</AlertDialogTitle>
             <AlertDialogDescription>
               {removeTarget?.email ?? removeTarget?.userId} will stop drawing from the shared pool
-              and fall back to their own personal plan (or no plan). Their finished builds and
-              usage history stay intact.
+              and fall back to their own personal plan (or no plan). Their finished builds and usage
+              history stay intact.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1182,7 +1304,14 @@ function OrgEditDialog({
             <Label htmlFor="org-edit-po" className="text-xs">
               PO reference
             </Label>
-            <Input id="org-edit-po" data-testid="org-edit-po" value={po} onChange={(e) => setPo(e.target.value)} maxLength={140} className="h-8 text-sm" />
+            <Input
+              id="org-edit-po"
+              data-testid="org-edit-po"
+              value={po}
+              onChange={(e) => setPo(e.target.value)}
+              maxLength={140}
+              className="h-8 text-sm"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

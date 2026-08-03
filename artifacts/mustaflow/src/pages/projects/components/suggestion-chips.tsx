@@ -90,12 +90,8 @@ export function SuggestionChips({ projectId, taskId, onAccepted }: SuggestionChi
             : {}),
         });
       }}
-      onSave={(suggestion) =>
-        save.mutate({ id: projectId, suggestionId: suggestion.id })
-      }
-      onDismiss={(suggestion) =>
-        dismiss.mutate({ id: projectId, suggestionId: suggestion.id })
-      }
+      onSave={(suggestion) => save.mutate({ id: projectId, suggestionId: suggestion.id })}
+      onDismiss={(suggestion) => dismiss.mutate({ id: projectId, suggestionId: suggestion.id })}
       className="mt-2.5"
     />
   );

@@ -87,7 +87,13 @@ async function spawnCheck(
   executable: string,
   args: string[],
   cwd: string,
-): Promise<{ exitCode: number | null; stdout: string; stderr: string; durationMs: number; timedOut: boolean }> {
+): Promise<{
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+}> {
   const startMs = Date.now();
   return new Promise((resolve) => {
     let stdoutBuf = "";
@@ -237,9 +243,7 @@ function buildSpawnArgs(pm: PkgMgr, scriptKey: string): [string, string[]] {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function verifyProjectPatch(opts: {
-  localPath: string;
-}): Promise<VerifyResult> {
+export async function verifyProjectPatch(opts: { localPath: string }): Promise<VerifyResult> {
   const startMs = Date.now();
 
   // Require package.json

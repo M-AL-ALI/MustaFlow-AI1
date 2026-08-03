@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  toDocxColor,
-  toArgb,
-  lightenArgb,
-  toPdfColor,
-  toPdfFont,
-} from "../brand-kit-apply";
+import { toDocxColor, toArgb, lightenArgb, toPdfColor, toPdfFont } from "../brand-kit-apply";
 import type { BrandKit } from "../brand-kit-apply";
 import type { ColumnType } from "../file-builder";
 
@@ -93,9 +87,7 @@ describe("buildPptx smoke tests (with brand kit)", () => {
   const minimalPresentation = {
     title: "Test Deck",
     subtitle: "Smoke test",
-    slides: [
-      { heading: "Slide One", bullets: ["Point A", "Point B"] },
-    ],
+    slides: [{ heading: "Slide One", bullets: ["Point A", "Point B"] }],
     charts: [],
   };
 
@@ -106,8 +98,8 @@ describe("buildPptx smoke tests (with brand kit)", () => {
     headingFont: "Arial",
     bodyFont: "Calibri",
     logoBuf: Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+      0x52,
     ]),
     logoMimeType: "image/png",
   };
@@ -164,9 +156,7 @@ describe("buildDocx smoke tests (with brand kit)", () => {
     accentColor: "#e94560",
     headingFont: "Georgia",
     bodyFont: "Arial",
-    logoBuf: Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    ]),
+    logoBuf: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     logoMimeType: "image/png",
   };
 

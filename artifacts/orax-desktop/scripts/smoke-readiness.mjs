@@ -55,7 +55,10 @@ function requireJsonScript(scriptName) {
     if (pkg.scripts?.[scriptName]) pass(`package script exists: ${scriptName}`);
     else fail(`package script exists: ${scriptName}`, "missing");
   } catch (error) {
-    fail(`package script exists: ${scriptName}`, error instanceof Error ? error.message : "read failed");
+    fail(
+      `package script exists: ${scriptName}`,
+      error instanceof Error ? error.message : "read failed",
+    );
   }
 }
 
@@ -91,7 +94,10 @@ requireJsonScript("build");
 requireJsonScript("smoke:readiness");
 requireJsonScript("verify:phase3d");
 
-requireContains("artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx", "No password is entered here");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx",
+  "No password is entered here",
+);
 requireNotContains("artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx", 'type="password"');
 requireNotContains("artifacts/orax-desktop/src/renderer/pages/SignInScreen.tsx", "future update");
 requireContains("artifacts/orax-desktop/src/main/auth.ts", "/api/orax/desktop-auth/start");
@@ -99,7 +105,10 @@ requireContains("artifacts/orax-desktop/src/main/auth.ts", "/api/orax/desktop-au
 requireContains("artifacts/orax-desktop/src/main/auth.ts", "storeEncrypted(SESSION_STORE_KEY");
 requireContains("artifacts/orax-desktop/src/renderer/pages/SetupScreen.tsx", "Welcome to Orax");
 requireContains("artifacts/orax-desktop/src/renderer/pages/SetupScreen.tsx", "after your approval");
-requireContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx", "Generate Pairing Code");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx",
+  "Generate Pairing Code",
+);
 requireNotContains("artifacts/orax-desktop/src/renderer/pages/PairingScreen.tsx", "Phase 2D");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HomeScreen.tsx", "Relay");
 requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "Health Check");
@@ -112,8 +121,14 @@ requireContains("artifacts/orax-desktop/src/renderer/pages/HealthScreen.tsx", "r
 requireContains("artifacts/orax-desktop/src/main/ipc-handlers.ts", "relay:restart");
 requireContains("artifacts/orax-desktop/src/preload/index.ts", "relay:restart");
 requireContains("artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx", "Cloud Projects");
-requireContains("artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx", ".orax/project.json");
-requireContains("artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx", "PERMISSION_MODE_LABELS");
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/ProjectsScreen.tsx",
+  ".orax/project.json",
+);
+requireContains(
+  "artifacts/orax-desktop/src/renderer/pages/SettingsScreen.tsx",
+  "PERMISSION_MODE_LABELS",
+);
 
 for (const action of [
   "run_project_thread",
@@ -123,7 +138,11 @@ for (const action of [
   "draft_project_fix",
   "prepare_project_pr",
 ]) {
-  requireContains("artifacts/orax-desktop/src/main/relay-client.ts", action, `relay handles ${action}`);
+  requireContains(
+    "artifacts/orax-desktop/src/main/relay-client.ts",
+    action,
+    `relay handles ${action}`,
+  );
 }
 
 requireContains("artifacts/orax-desktop/src/main/project-patch-applier.ts", ".orax");

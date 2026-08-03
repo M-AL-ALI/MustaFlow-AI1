@@ -25,8 +25,7 @@ export function hasBuilderAccess(
   );
 }
 
-export const BUILDER_ACCESS_DENIED_MESSAGE =
-  "AI Builder access is not enabled for this account.";
+export const BUILDER_ACCESS_DENIED_MESSAGE = "AI Builder access is not enabled for this account.";
 
 export type BuilderEmailLookup = (userId: string) => Promise<string | null | undefined>;
 

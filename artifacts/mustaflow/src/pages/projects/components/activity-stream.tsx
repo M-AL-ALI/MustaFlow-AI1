@@ -624,11 +624,7 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
                 : "text-foreground",
           )}
         >
-          {isDone
-            ? completionText
-            : isFailed
-              ? "Build failed"
-              : (lastEvent?.message ?? "Working…")}
+          {isDone ? completionText : isFailed ? "Build failed" : (lastEvent?.message ?? "Working…")}
         </span>
 
         {/* Action count + current icon */}

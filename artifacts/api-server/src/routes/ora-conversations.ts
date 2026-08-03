@@ -30,7 +30,9 @@ const MAX_LIST_LIMIT = 100;
  * Called synchronously (messages already in memory after Zod parse) so we
  * never do an extra DB round-trip just to compute these flags.
  */
-function computeConversationMetadata(messages: { role: string; content: string; [k: string]: unknown }[]): {
+function computeConversationMetadata(
+  messages: { role: string; content: string; [k: string]: unknown }[],
+): {
   metaHasImages: boolean;
   metaHasGeneratedFiles: boolean;
   metaHasSources: boolean;
@@ -44,7 +46,11 @@ function computeConversationMetadata(messages: { role: string; content: string; 
   let lastActivityType: string | null = null;
 
   for (const msg of messages) {
-    if (msg.imageUrl || msg.imageId || (Array.isArray(msg.images) && (msg.images as unknown[]).length > 0)) {
+    if (
+      msg.imageUrl ||
+      msg.imageId ||
+      (Array.isArray(msg.images) && (msg.images as unknown[]).length > 0)
+    ) {
       hasImages = true;
     }
     if (msg.generatedFile) {
@@ -65,7 +71,10 @@ function computeConversationMetadata(messages: { role: string; content: string; 
       lastActivityType = "image";
     } else if (lastAssistant.generatedFile) {
       lastActivityType = "file";
-    } else if (Array.isArray(lastAssistant.sources) && (lastAssistant.sources as unknown[]).length > 0) {
+    } else if (
+      Array.isArray(lastAssistant.sources) &&
+      (lastAssistant.sources as unknown[]).length > 0
+    ) {
       lastActivityType = "search";
     } else {
       lastActivityType = "chat";
@@ -91,9 +100,7 @@ const listQuerySchema = z.object({
   // Tri-state project filter: absent = all conversations (legacy behavior),
   // "personal" = Personal space only (projectId IS NULL), a numeric string =
   // that project only. Never collapse absent → null.
-  projectId: z
-    .union([z.literal("personal"), z.coerce.number().int().positive()])
-    .optional(),
+  projectId: z.union([z.literal("personal"), z.coerce.number().int().positive()]).optional(),
 });
 
 // List the signed-in user's conversations (lightweight — no message bodies).
@@ -134,9 +141,7 @@ router.get("/ora/conversations", async (req, res) => {
         )
       : undefined;
 
-    const whereCondition = searchCondition
-      ? and(baseConditions, searchCondition)
-      : baseConditions;
+    const whereCondition = searchCondition ? and(baseConditions, searchCondition) : baseConditions;
 
     // Fetch limit+1 rows to determine hasMore
     const rows = await db
@@ -158,7 +163,9 @@ router.get("/ora/conversations", async (req, res) => {
         // messageCount from jsonb array length — no message body transfer
         messageCount: sql<number>`jsonb_array_length(${oraConversationsTable.messages})`,
         // Short preview = last message's text, truncated
-        preview: sql<string | null>`left((${oraConversationsTable.messages} -> (jsonb_array_length(${oraConversationsTable.messages}) - 1) ->> 'content'), 140)`,
+        preview: sql<
+          string | null
+        >`left((${oraConversationsTable.messages} -> (jsonb_array_length(${oraConversationsTable.messages}) - 1) ->> 'content'), 140)`,
       })
       .from(oraConversationsTable)
       .where(whereCondition)
@@ -364,7 +371,9 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
   }
 
   // Compute metadata badges before the DB write (messages are already in memory).
-  const meta = computeConversationMetadata(messages as { role: string; content: string; [k: string]: unknown }[]);
+  const meta = computeConversationMetadata(
+    messages as { role: string; content: string; [k: string]: unknown }[],
+  );
 
   try {
     const now = new Date();
@@ -845,13 +854,13 @@ async function maybeGenerateSmartTitle(
 
     // Only generate when we have a short auto-derived title (≤ 60 chars) or no title
     const [current] = await db
-      .select({ title: oraConversationsTable.title, titleSource: oraConversationsTable.titleSource })
+      .select({
+        title: oraConversationsTable.title,
+        titleSource: oraConversationsTable.titleSource,
+      })
       .from(oraConversationsTable)
       .where(
-        and(
-          eq(oraConversationsTable.id, conversationId),
-          eq(oraConversationsTable.userId, userId),
-        ),
+        and(eq(oraConversationsTable.id, conversationId), eq(oraConversationsTable.userId, userId)),
       );
     if (!current) return;
     // Re-check titleSource — might have changed since the PUT /messages returned

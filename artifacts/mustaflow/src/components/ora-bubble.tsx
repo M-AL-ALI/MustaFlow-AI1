@@ -1660,26 +1660,26 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                             onRedesign={
                               isLatestAssistant ? handleRedesignFileEditPreview : undefined
                             }
-                            onCancel={
-                              isLatestAssistant ? handleCancelFileEditPreview : undefined
-                            }
+                            onCancel={isLatestAssistant ? handleCancelFileEditPreview : undefined}
                             disabled={isLoading || atLimit}
                           />
                         )}
                       </>
                     )}
 
-                    {!msg.generatedFile && msg.fileAgentPreview && msg.fileAgentPreview.status !== "applied" && (
-                      <OraFileAgentPreviewCard
-                        preview={msg.fileAgentPreview}
-                        compact
-                        onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
-                        onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
-                        onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
-                        onCancel={isLatestAssistant ? handleCancelFileEditPreview : undefined}
-                        disabled={isLoading || atLimit}
-                      />
-                    )}
+                    {!msg.generatedFile &&
+                      msg.fileAgentPreview &&
+                      msg.fileAgentPreview.status !== "applied" && (
+                        <OraFileAgentPreviewCard
+                          preview={msg.fileAgentPreview}
+                          compact
+                          onApply={isLatestAssistant ? handleApplyFileEditPreview : undefined}
+                          onRevise={isLatestAssistant ? handleReviseFileEditPreview : undefined}
+                          onRedesign={isLatestAssistant ? handleRedesignFileEditPreview : undefined}
+                          onCancel={isLatestAssistant ? handleCancelFileEditPreview : undefined}
+                          disabled={isLoading || atLimit}
+                        />
+                      )}
 
                     {msg.editedFrom && (
                       <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
