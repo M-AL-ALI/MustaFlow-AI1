@@ -756,7 +756,7 @@ export default function PricingPage() {
           },
           {
             q: "What if a build fails?",
-            a: "Every NabuFlow build has one flat price for its selected mode. Build-scoped planning, coding, architecture review and checks are included in that price, with no hidden side charges. The current standard and Deep prices are shown above from the live billing configuration.",
+            a: "Every NabuFlow build has one flat price for its selected mode. Build-scoped planning, coding, architecture review and checks are included in that price, with no hidden side charges. You always see the exact flat price in the builder when you choose a mode.",
           },
           {
             q: "How does credit rollover work on NabuFlow Builder plans?",

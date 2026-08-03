@@ -64,7 +64,7 @@ export const HELP_ARTICLE_SEED: HelpArticleSeed[] = [
     slug: "billing-credits",
     category: "billing",
     title: "How credits work",
-    body: "NabuFlow charges one flat price for each Builder task based on the selected mode. Build-scoped planning, coding, review, and checks are included with no hidden side charges; current standard and Deep prices appear in Billing & Usage. Each plan grants an included credit bucket per cycle. When that bucket runs out, builds continue at the plan's overage rate until the spending limit pauses new work. Unused included credits roll into the next cycle on Comet and Nova only; Orbit credits do not roll over. Pro and Deep build counters reset each cycle and never roll over.",
+    body: "NabuFlow charges one flat price for each Builder task based on the selected mode. Build-scoped planning, coding, review, and checks are included with no hidden side charges; you always see the exact flat price in the builder when you choose a mode. Each plan grants an included credit bucket per cycle. When that bucket runs out, builds continue at the plan's overage rate until the spending limit pauses new work. Unused included credits roll into the next cycle on Comet and Nova only; Orbit credits do not roll over. Pro and Deep build counters reset each cycle and never roll over.",
     tags: ["credits", "billing", "cost", "balance", "pricing", "payment"],
     isFaq: false,
     sortOrder: 1,
