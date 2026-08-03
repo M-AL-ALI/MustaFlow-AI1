@@ -140,7 +140,6 @@ packages = ["chromium"]
 [userenv]
 
 [userenv.shared]
-ENCRYPTION_KEY = "2StYvxMmidFvFsm3RsyyLFcarkUI/8KmtLV0Ss+Ceo8="
 FLY_APP_NAME = "mustaflow-containers"
 FLY_REGION = "iad"
 FLY_ORG_SLUG = "personal"

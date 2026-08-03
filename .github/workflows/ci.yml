@@ -135,10 +135,11 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mustaflow_e2e
-      # Non-sensitive CI values — safe placeholders for keys that are never
-      # used for real crypto when the auth bypass is active.
+      # Non-sensitive CI value; SESSION_SECRET is not a cryptographic key.
       SESSION_SECRET: ci-only-session-secret-not-for-production
-      ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      # Real AES-256-GCM key from GitHub secrets so E2E project-secret tests
+      # exercise actual encryption rather than the plaintext passthrough path.
+      ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
       NODE_ENV: development
       # E2E flags — enable header-based auth bypass and slow builder stub.
       E2E_TEST_ENABLED: "true"
