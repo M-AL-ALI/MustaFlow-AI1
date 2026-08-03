@@ -235,15 +235,6 @@ export function BuyCreditsSheet({
           </div>
         </div>
 
-        <div className="px-5 py-4 border-t border-border shrink-0">
-          <a
-            href="/billing/legacy"
-            className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            View credit packs & workspace plans
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
       </div>
     </>
   );

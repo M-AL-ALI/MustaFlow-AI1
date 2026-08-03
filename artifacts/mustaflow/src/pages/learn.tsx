@@ -78,7 +78,7 @@ const DEEP_DIVES: Lesson[] = [
   },
   {
     title: "Credits and billing",
-    description: "Understand how each build, refine, and scan spends credits, and how to top up.",
+    description: "Understand build prices, included credits, overage, and spending limits.",
     icon: CreditCard,
     minutes: 3,
     href: "/billing",

@@ -80,48 +80,19 @@ interface PackagesResponse {
 
 const TABS = [
   { id: "account", label: "Account", icon: User },
-  { id: "credits", label: "Credits & Billing", icon: CreditCard },
   { id: "privacy", label: "Privacy & Data", icon: Bell },
   { id: "developer", label: "Developer", icon: Code2 },
 ];
 
 export default function SettingsPage() {
-  const { toast } = useToast();
-
   const searchParams = new URLSearchParams(
     typeof window !== "undefined" ? window.location.search : "",
   );
   const tabParam = searchParams.get("tab");
-  const paymentParam = searchParams.get("payment");
 
-  const validTabs = ["account", "credits", "privacy", "developer"];
+  const validTabs = ["account", "privacy", "developer"];
   const initialTab = tabParam && validTabs.includes(tabParam) ? tabParam : "account";
   const [activeTab, setActiveTab] = useState(initialTab);
-
-  useEffect(() => {
-    if (paymentParam === "success") {
-      setActiveTab("credits");
-      toast({
-        title: "Payment successful",
-        description: "Your credits have been added to your account.",
-      });
-      const url = new URL(window.location.href);
-      url.searchParams.delete("payment");
-      url.searchParams.delete("tab");
-      window.history.replaceState({}, "", url.toString());
-    } else if (paymentParam === "cancelled") {
-      setActiveTab("credits");
-      toast({
-        title: "Payment cancelled",
-        description: "Your checkout was cancelled. No charges were made.",
-        variant: "destructive",
-      });
-      const url = new URL(window.location.href);
-      url.searchParams.delete("payment");
-      url.searchParams.delete("tab");
-      window.history.replaceState({}, "", url.toString());
-    }
-  }, [paymentParam, toast]);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 w-full">
@@ -147,7 +118,6 @@ export default function SettingsPage() {
 
         <div className="flex-1 min-w-0">
           {activeTab === "account" && <AccountTab />}
-          {activeTab === "credits" && <CreditsTab />}
           {activeTab === "privacy" && <PrivacyTab />}
           {activeTab === "developer" && <DeveloperTab />}
         </div>
@@ -597,7 +567,9 @@ function getStripePromise(pk: string): Promise<StripeJs | null> {
   return p;
 }
 
-function CreditsTab() {
+// Dormant with the unrouted legacy billing page. Kept only for the separately
+// approved backend/checkout retirement wave; Settings no longer renders it.
+export function LegacyCreditsTab() {
   const { toast } = useToast();
   const [packages, setPackages] = useState<PackagesResponse | null>(null);
   const [packagesLoading, setPackagesLoading] = useState(true);

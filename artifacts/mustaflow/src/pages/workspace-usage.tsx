@@ -112,7 +112,6 @@ export default function WorkspaceUsagePage() {
       isOverLimit ||
       isDomainsOverLimit);
   const recommendedTier = quota ? getRecommendedTier(quota.plan) : "starter";
-  const upgradeHref = `/billing/legacy?tier=${recommendedTier}`;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
@@ -276,12 +275,9 @@ export default function WorkspaceUsagePage() {
                         : "Enterprise: unlimited domains and bandwidth."}
                   </div>
                 </div>
-                <Link
-                  href={upgradeHref}
-                  className="shrink-0 ml-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors"
-                >
-                  Upgrade to {getPlanLabel(recommendedTier)}
-                </Link>
+                <span className="shrink-0 ml-4 text-xs text-neutral-400">
+                  Review plans in Billing &amp; Usage
+                </span>
               </div>
             )}
 

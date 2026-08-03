@@ -5,15 +5,11 @@ export function InlineBuilderError({
   message,
   suggestions,
   onTryFix,
-  onBuyCredits,
-  showCredits = false,
 }: {
   title?: string;
   message: string;
   suggestions?: string[];
   onTryFix?: (text: string) => void;
-  onBuyCredits?: () => void;
-  showCredits?: boolean;
 }) {
   const isInsufficientCredits = message.startsWith("Insufficient credits");
 
@@ -31,20 +27,13 @@ export function InlineBuilderError({
         </div>
       </div>
 
-      {isInsufficientCredits && showCredits && (
+      {isInsufficientCredits && (
         <div className="flex flex-wrap items-center gap-2 pl-5 pt-1">
-          <button
-            type="button"
-            onClick={onBuyCredits}
+          <a
+            href="/billing"
             className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           >
             <CreditCard className="h-3 w-3" />
-            Buy credits
-          </button>
-          <a
-            href="/billing"
-            className="inline-flex items-center gap-1.5 rounded-sm text-[10px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-          >
             Open Billing & Usage
             <ExternalLink className="h-3 w-3" />
           </a>

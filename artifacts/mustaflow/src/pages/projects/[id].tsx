@@ -9,9 +9,7 @@ import {
   useListTasks,
   useRollbackVersion,
   useListSuggestions,
-  useGetUserCredits,
   useGetNabuflowBillingState,
-  getGetUserCreditsQueryKey,
   getGetNabuflowBillingStateQueryKey,
   useGetMyPreferences,
   useUpdateMyPreferences,
@@ -26,14 +24,12 @@ import {
   useUpdateProject,
 } from "@workspace/api-client-react";
 import { AgentIcon } from "@/components/agent-icon";
-import { CreditBalancePill } from "@/components/credit-balance-pill";
 import {
   BuilderDeepReasoningIcon,
   BuilderModeIcon,
   builderModeLabel,
   normalizeBuilderAgentMode,
 } from "@/components/builder-mode-icon";
-import { BILLING_ENABLED } from "@/lib/billing-flag";
 import { pushRecentFile } from "./components/recent-files";
 import { StreamingText, MarkdownMessage, TypingIndicator } from "./components/chat-history";
 import { Button } from "@/components/ui/button";
@@ -46,7 +42,6 @@ import {
   TerminalSquare,
   BrainCircuit,
   AlertTriangle,
-  CreditCard,
   KeyRound,
   Paintbrush2,
   Activity,
@@ -73,7 +68,6 @@ import {
   Github,
   Plug,
   HeartPulse,
-  Crown,
   Cpu,
   Loader2,
   Bug,
@@ -82,32 +76,6 @@ import {
   RefreshCw,
   ImagePlus,
 } from "lucide-react";
-
-function SubscriptionTierBadge({ tier }: { tier: "free" | "core" | "wave" }) {
-  const tierLabel = tier === "wave" ? "Deep Wave" : tier === "core" ? "Core Pack" : "Free";
-  const isPaid = tier === "core" || tier === "wave";
-  return (
-    <Link
-      href="/billing/legacy"
-      className={cn(
-        "flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition-colors no-underline",
-        tier === "wave"
-          ? "border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500/15"
-          : tier === "core"
-            ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
-            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-      title={
-        isPaid
-          ? `${tierLabel} plan — all builder modes unlocked`
-          : "Free plan — upgrade to unlock Power and Pro builder modes"
-      }
-    >
-      <Crown style={{ width: 10, height: 10 }} className="shrink-0" />
-      {tierLabel}
-    </Link>
-  );
-}
 import { SuggestionChips } from "./components/suggestion-chips";
 import { QueueComposer } from "./components/queue-composer";
 import { useProjectIssues } from "@/hooks/use-project-issues";
@@ -139,7 +107,6 @@ import {
   useCancelTask,
   getBillingSubscription,
   listVersions,
-  resumePausedQueue,
   getContainerStatus,
   startContainer,
   stopContainer,
@@ -149,7 +116,6 @@ import {
   getAuthToken,
 } from "@workspace/api-client-react";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
-import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -579,106 +545,6 @@ export function ReportCard({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-const LOW_CREDITS_THRESHOLD = 20;
-
-function LowCreditsBanner({
-  projectId,
-  onBuyCredits,
-}: {
-  projectId: number;
-  onBuyCredits: () => void;
-}) {
-  const { data, isLoading } = useGetUserCredits({
-    query: {
-      queryKey: getGetUserCreditsQueryKey(),
-      refetchInterval: 60_000,
-      refetchOnWindowFocus: true,
-    },
-  });
-  const [dismissed, setDismissed] = useState(false);
-  const balance = data?.balance ?? null;
-
-  useEffect(() => {
-    try {
-      const key = `mustaflow_low_credits_dismissed_${projectId}`;
-      setDismissed(sessionStorage.getItem(key) === "1");
-    } catch {
-      setDismissed(false);
-    }
-  }, [projectId]);
-
-  if (
-    !BILLING_ENABLED ||
-    isLoading ||
-    balance === null ||
-    balance >= LOW_CREDITS_THRESHOLD ||
-    dismissed
-  ) {
-    return null;
-  }
-
-  const isEmpty = balance <= 0;
-
-  const handleDismiss = () => {
-    setDismissed(true);
-    try {
-      sessionStorage.setItem(`mustaflow_low_credits_dismissed_${projectId}`, "1");
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return (
-    <div
-      className={cn(
-        "shrink-0 flex items-center justify-between gap-2 px-4 py-1.5 border-b text-[11px] z-30",
-        isEmpty
-          ? "bg-destructive/10 border-destructive/20 text-destructive"
-          : "bg-yellow-500/10 border-yellow-500/20 text-yellow-500",
-      )}
-    >
-      <div className="flex items-center gap-1.5 min-w-0">
-        <AlertTriangle className="h-3 w-3 shrink-0" />
-        <span className="truncate">
-          {isEmpty ? (
-            <>You're out of build credits. Top up to start your next build.</>
-          ) : (
-            <>
-              Only <strong className="font-semibold">{balance}</strong>{" "}
-              {balance === 1 ? "credit" : "credits"} left — top up before your next build to avoid
-              interruptions.
-            </>
-          )}
-        </span>
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={onBuyCredits}
-          className={cn(
-            "inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors",
-            isEmpty
-              ? "border-destructive/40 bg-destructive/10 hover:bg-destructive/20"
-              : "border-yellow-500/40 bg-yellow-500/10 hover:bg-yellow-500/20",
-          )}
-        >
-          <CreditCard className="h-2.5 w-2.5" />
-          Buy credits
-        </button>
-        {!isEmpty && (
-          <button
-            onClick={handleDismiss}
-            className="p-0.5 rounded hover:bg-foreground/10 transition-colors opacity-70 hover:opacity-100"
-            title="Dismiss until next session"
-            aria-label="Dismiss low credits warning"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
-      </div>
     </div>
   );
 }
@@ -1412,15 +1278,9 @@ export default function ProjectWorkspacePage() {
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
-  const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
-  const [creditsSuccess, setCreditsSuccess] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get("credits_success") === "1";
-  });
   // Optimistic local state — seeded from localStorage so there's no flicker while the API loads.
   const [onboardingDismissedLocal, setOnboardingDismissedLocal] = useState(() => {
     try {
@@ -1487,27 +1347,6 @@ export default function ProjectWorkspacePage() {
     taskStatuses: tasksForFeed.map((task) => task.status),
     onComplete: completeTourFromBuild,
   });
-
-  useEffect(() => {
-    if (!creditsSuccess) return;
-    const url = new URL(window.location.href);
-    url.searchParams.delete("credits_success");
-    window.history.replaceState({}, "", url.toString());
-    // Task #638 — after a successful top-up, automatically resume any
-    // background tasks that were paused for insufficient credits.
-    resumePausedQueue(projectId)
-      .then((data) => {
-        if (data && (data.resumed ?? 0) > 0) {
-          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
-        }
-      })
-      .catch((err) => {
-        // Surface a NabuFlow billing block instead of silently swallowing it;
-        // anything else stays best-effort.
-        const gate = parseNabuflowGateError(err);
-        if (gate) setBillingBlock(gate);
-      });
-  }, [creditsSuccess, projectId, queryClient]);
 
   // One-shot: pre-fill AI builder chat prompt from URL (used by cross-project
   // Security page "Fix" links to seed a targeted fix prompt).
@@ -3537,8 +3376,6 @@ export default function ProjectWorkspacePage() {
         </Suspense>
       )}
 
-      <LowCreditsBanner projectId={projectId} onBuyCredits={() => setBuyCreditsOpen(true)} />
-
       {cveNewCount > 0 && (
         <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-1.5 bg-red-500/10 border-b border-red-500/20 text-[11px] text-red-400 z-30">
           <div className="flex items-center gap-1.5">
@@ -3681,9 +3518,7 @@ export default function ProjectWorkspacePage() {
                 reconnectAttempt={streamReconnectAttempt}
                 hasError={streamError}
               />
-              <SubscriptionTierBadge tier={subscriptionTier} />
               <NotificationsBell />
-              <CreditBalancePill />
               <button
                 onClick={startTour}
                 className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:bg-muted hover:text-foreground transition-colors"
@@ -4092,11 +3927,6 @@ export default function ProjectWorkspacePage() {
                       }}
                       className="h-full overflow-y-auto px-4 py-3 space-y-2.5 hide-scrollbar"
                     >
-                      {creditsSuccess && (
-                        <div className="sticky top-0 z-10 pb-1">
-                          <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
-                        </div>
-                      )}
                       {(() => {
                         const RECENT_DEFAULT = 6;
                         const allRecent = messages?.slice(-visibleMessageWindow) ?? [];
@@ -4456,8 +4286,6 @@ export default function ProjectWorkspacePage() {
                                       onTryFix={(text) => {
                                         setPrompt(text);
                                       }}
-                                      onBuyCredits={() => setBuyCreditsOpen(true)}
-                                      showCredits={BILLING_ENABLED}
                                     />
                                   )}
                                   {isPlanCard && (
@@ -5765,7 +5593,6 @@ export default function ProjectWorkspacePage() {
               setActiveTab("tools-files");
               setBackgroundPanelOpen(false);
             }}
-            onTopUp={() => setBuyCreditsOpen(true)}
           >
             {activeBatchId && (
               <QueueProgressStrip
@@ -5805,11 +5632,6 @@ export default function ProjectWorkspacePage() {
         </Suspense>
       )}
 
-      <BuyCreditsSheet
-        open={buyCreditsOpen}
-        onClose={() => setBuyCreditsOpen(false)}
-        returnUrl={`${window.location.origin}/projects/${projectId}?credits_success=1`}
-      />
       <WorkspaceTour active={tourActive} onClose={closeTour} />
 
       {/* Agentic first-time onboarding tooltip — 3-step guide for full-stack projects */}

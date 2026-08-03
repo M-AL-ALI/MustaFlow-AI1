@@ -17,12 +17,10 @@ import {
   ChevronDown,
   Plus,
   PanelLeftClose,
-  Zap,
-  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   useListAdminSupportTickets,
   getListAdminSupportTicketsQueryKey,
@@ -87,71 +85,6 @@ function NavGroup({
           );
         })}
       </div>
-    </div>
-  );
-}
-
-const LOW_CREDITS_THRESHOLD = 10;
-
-function CreditsWidget() {
-  const { isSignedIn } = useClerkUser();
-  const [balance, setBalance] = useState<number | null>(null);
-
-  const fetchBalance = useCallback(async () => {
-    try {
-      const res = await authFetch("/api/credits");
-      if (res.ok) {
-        const data = (await res.json()) as { balance: number };
-        setBalance(data.balance);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isSignedIn) return;
-    void fetchBalance();
-    const id = setInterval(() => void fetchBalance(), 60_000);
-    // Refresh immediately on window focus (e.g. returning from Stripe checkout)
-    const onFocus = () => void fetchBalance();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [isSignedIn, fetchBalance]);
-
-  if (!isSignedIn || balance === null) return null;
-
-  const isLow = balance < LOW_CREDITS_THRESHOLD;
-
-  return (
-    <div className="px-3 py-2">
-      <Link href="/billing">
-        <div
-          className={cn(
-            "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer border",
-            isLow
-              ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-600 hover:bg-yellow-500/15"
-              : "bg-muted/50 border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-          )}
-        >
-          {isLow ? (
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          ) : (
-            <Zap className="h-3.5 w-3.5 shrink-0" />
-          )}
-          <div className="flex-1 min-w-0">
-            <span className="font-semibold">{balance.toLocaleString()}</span>
-            <span className="ml-1">credits</span>
-            {isLow && (
-              <p className="text-[10px] leading-tight mt-0.5 font-normal">Running low — buy more</p>
-            )}
-          </div>
-          <CreditCard className="h-3 w-3 shrink-0 opacity-60" />
-        </div>
-      </Link>
     </div>
   );
 }
@@ -368,9 +301,6 @@ function SidebarInner({ onClose }: { onClose: () => void }) {
         <AdminNavItem />
         <BackgroundJobsPanel />
       </div>
-
-      {/* Credits widget — visible when signed in */}
-      {isSignedIn && <CreditsWidget />}
 
       {/* Bottom nav + footer */}
       <div className="mt-auto">

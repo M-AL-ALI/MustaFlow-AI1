@@ -211,8 +211,6 @@ interface BackgroundTasksDrawerProps {
   tasks: BgTask[];
   onRollback: (versionId: number) => void;
   onViewCode: () => void;
-  /** Task #638 — invoked when the user clicks the "Top up to resume" CTA. */
-  onTopUp?: () => void;
   children?: ReactNode;
 }
 
@@ -223,7 +221,6 @@ export function BackgroundTasksDrawer({
   tasks,
   onRollback,
   onViewCode,
-  onTopUp,
   children,
 }: BackgroundTasksDrawerProps) {
   const activeCount = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status)).length;
@@ -260,18 +257,16 @@ export function BackgroundTasksDrawer({
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold text-foreground">Queue paused — out of credits</p>
               <p className="text-[10px] text-muted-foreground/80 mt-0.5 leading-relaxed">
-                {pausedCount} task{pausedCount !== 1 ? "s" : ""} waiting. Top up to resume the
-                queue.
+                {pausedCount} task{pausedCount !== 1 ? "s" : ""} waiting. Review your plan or
+                spending limit to resume the queue.
               </p>
-              {onTopUp && (
-                <button
-                  onClick={onTopUp}
-                  className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-[11px] font-medium text-amber-200 transition-colors"
-                >
-                  <CreditCard className="h-3 w-3" />
-                  Top up to resume
-                </button>
-              )}
+              <a
+                href="/billing"
+                className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-[11px] font-medium text-amber-200 transition-colors"
+              >
+                <CreditCard className="h-3 w-3" />
+                Open Billing &amp; Usage
+              </a>
             </div>
           </div>
         )}
