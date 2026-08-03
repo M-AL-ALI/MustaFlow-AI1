@@ -151,7 +151,7 @@ function SettingsDrawer({
     },
     {
       icon: Info,
-      label: "About MustaFlow",
+      label: "About NabuFlow",
       description: "Version & documentation",
     },
   ];
@@ -169,7 +169,7 @@ function SettingsDrawer({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
-            <img src={logoUrl} alt="MustaFlow AI" className="h-6 w-auto object-contain" />
+            <img src={logoUrl} alt="NabuFlow" className="h-6 w-auto object-contain" />
             <span className="text-xs font-semibold text-foreground">Settings</span>
           </div>
           <button
@@ -249,7 +249,7 @@ function SettingsDrawer({
 
         <div className="px-4 py-3 border-t border-border shrink-0">
           <p className="text-[9px] text-muted-foreground/40 text-center">
-            MustaFlow AI · Developer Mode
+            NabuFlow · Developer Mode
           </p>
         </div>
       </div>
@@ -333,7 +333,7 @@ export function TopBar({
               )}
               aria-label="Open settings"
             >
-              <img src={logoUrl} alt="MustaFlow AI" className="h-5 w-auto object-contain" />
+              <img src={logoUrl} alt="NabuFlow" className="h-5 w-auto object-contain" />
             </button>
           </TooltipTrigger>
           <TooltipContent>Settings & panels</TooltipContent>

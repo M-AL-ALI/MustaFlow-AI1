@@ -11,7 +11,9 @@ vi.mock("@workspace/db", async () => {
 });
 
 const { HELP_ARTICLE_SEED } = await import("../../../../../lib/db/src/help-center-seed");
-const { refreshBillingCreditsHelpArticle } = await import("../startup-migrations");
+const { refreshBillingCreditsHelpArticle, refreshNabuflowHelpArticles } = await import(
+  "../startup-migrations"
+);
 
 describe("BC-2 billing help copy migration", () => {
   it("updates only billing-credits from the shared seed and is idempotent", async () => {
@@ -42,5 +44,42 @@ describe("BC-2 billing help copy migration", () => {
     await refreshBillingCreditsHelpArticle(client);
     expect(query).toHaveBeenCalledTimes(2);
     expect(writes).toBe(1);
+  });
+});
+
+describe("NabuFlow help copy migration", () => {
+  it("refreshes only the two builder FAQ rows from the shared seed and is idempotent", async () => {
+    const expected = HELP_ARTICLE_SEED.filter((article) =>
+      ["faq-what-is-mustaflow", "faq-build-mobile-apps"].includes(article.slug),
+    );
+    expect(expected).toHaveLength(2);
+
+    const stored = new Map(expected.map((article) => [article.slug, ["Old title", "Old body"]]));
+    let writes = 0;
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      expect(sql).toContain("UPDATE help_articles");
+      expect(sql).toContain("WHERE slug = $3");
+      expect(sql).toContain("title IS DISTINCT FROM $1");
+
+      const [title, body, slug] = params as [string, string, string];
+      expect(expected.some((article) => article.slug === slug)).toBe(true);
+      const current = stored.get(slug);
+      if (!current || current[0] !== title || current[1] !== body) {
+        stored.set(slug, [title, body]);
+        writes += 1;
+        return { rowCount: 1 };
+      }
+      return { rowCount: 0 };
+    });
+    const client = { query } as unknown as Parameters<typeof refreshNabuflowHelpArticles>[0];
+
+    await refreshNabuflowHelpArticles(client);
+    for (const article of expected) {
+      expect(stored.get(article.slug)).toEqual([article.title, article.body]);
+    }
+
+    await refreshNabuflowHelpArticles(client);
+    expect(query).toHaveBeenCalledTimes(4);
+    expect(writes).toBe(2);
   });
 });

@@ -325,7 +325,7 @@ export const RECIPES: RecipeDefinition[] = [
       {
         key: "subtext",
         label: "Supporting text",
-        placeholder: "e.g. Join thousands of makers who build with MustaFlow",
+        placeholder: "e.g. Join thousands of makers who build with NabuFlow",
         type: "textarea",
       },
       {

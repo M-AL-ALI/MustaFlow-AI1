@@ -857,7 +857,7 @@ function SubscriptionTab({
   // Ora-only plan cards — Free, Core Pack, Deep Wave. The server's oraTiers
   // (single source of truth) is preferred when present; this fallback mirrors
   // ORA_TIERS_META and must stay Ora-only (NO Builder credits, concurrent
-  // builds, build queue, "Built with MustaFlow" badge, or Builder connectors).
+  // builds, build queue, "Built with NabuFlow" badge, or Builder connectors).
   const ORA_PLAN_FALLBACK: OraTierMeta[] = [
     {
       id: "free",

@@ -266,7 +266,7 @@ OUTPUT STRICT JSON matching this exact shape:
 
 The "files" array should contain ONLY the files that were created or changed (full new content). The "patches" array is optional — use it for large files where only a section changes. The "filesRemoved" array lists files to delete. The "unchangedFiles" array MUST list every filename you are deliberately not touching — this allows the system to skip regenerating those files. Do NOT echo files that are unchanged in the "files" array.`;
 
-export const PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Planner. You do NOT generate code in this mode. You output a comprehensive, structured plan as STRICT JSON only.
+export const PLAN_SYSTEM_PROMPT = `You are the NabuFlow Planner. You do NOT generate code in this mode. You output a comprehensive, structured plan as STRICT JSON only.
 
 OUTPUT STRICT JSON matching this exact shape:
 {
@@ -1288,7 +1288,7 @@ function injectRequiredMetaTags(file: BuilderFile, projectName: string): Builder
   }
   if (!/<meta\s[^>]*name=["']description["']/i.test(content)) {
     const safeDesc = projectName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const descTag = `<meta name="description" content="Built with MustaFlow — ${safeDesc}">`;
+    const descTag = `<meta name="description" content="Built with NabuFlow — ${safeDesc}">`;
     content = content.replace(/(<\/head>)/i, `${descTag}\n$1`);
     if (!/<meta\s[^>]*name=["']description["']/i.test(content)) {
       content = content.replace(/(<head[^>]*>)/i, `$1\n${descTag}`);
@@ -4794,7 +4794,7 @@ OUTPUT STRICT JSON matching this exact shape:
 Return ONLY files that were created or changed (full new content). Do NOT echo unchanged files.
 Always update index.html to reflect any UI changes made in the React Native screens.`;
 
-const MOBILE_PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Planner. You plan Expo/React Native mobile app projects. Output ONLY strict JSON — no prose, no markdown:
+const MOBILE_PLAN_SYSTEM_PROMPT = `You are the NabuFlow Mobile Planner. You plan Expo/React Native mobile app projects. Output ONLY strict JSON — no prose, no markdown:
 {
   "summary": string,
   "goal": string,
@@ -7929,9 +7929,9 @@ function createMustaflowPlatformPrimer(): string {
   const powerCost = creditCostFor("power", provider);
   const proCost = creditCostFor("pro", provider);
 
-  return `MUSTAFLOW PLATFORM KNOWLEDGE — you are the in-app assistant inside MustaFlow, an AI app builder for non-technical users. Know these features cold and reference them by their real names so users can find them in the UI.
+  return `NABUFLOW PRODUCT KNOWLEDGE — you are the in-app assistant inside NabuFlow, an AI app builder for non-technical users. Know these features cold and reference them by their real names so users can find them in the UI.
 
-WHAT MUSTAFLOW BUILDS
+WHAT NABUFLOW BUILDS
 - Web apps: static HTML/CSS/JS using Tailwind + lucide via CDN (the default and most reliable kind).
 - React + Vite, Next.js 14 App Router, Node.js + Express APIs, Python Flask, Python FastAPI — for users who pick those project kinds.
 - Mobile apps: Expo SDK 52 + Expo Router + NativeWind (cross-platform iOS + Android). Web preview is an index.html mock; real device requires Expo Go and the QR code in the Preview tab.
@@ -7978,14 +7978,14 @@ KNOWLEDGE VAULT
 - Auto-records lessons after every build, refine, rollback, publish, duplicate. Influences future builds.
 
 PREVIEW BEHAVIOUR
-- Web preview is sandboxed (allow-scripts allow-forms allow-popups) — no allow-same-origin, so apps cannot reach MustaFlow APIs from the iframe.
+- Web preview is sandboxed (allow-scripts allow-forms allow-popups) — no allow-same-origin, so apps cannot reach NabuFlow APIs from the iframe.
 - Mobile preview is a static web mock; native features (Camera, Location, Push, Biometrics, MediaLibrary) need Expo Go on a real device.
 - "Ask AI to fix this" buttons on validation warnings auto-send a refine request with build intent.
 
 HELPING USERS BUILD THEIR OWN APPS
 - When a user describes an idea, suggest the right project kind (web for marketing/landing, React+Vite for SPAs, Node/Flask/FastAPI for backends, mobile-cross for iOS+Android).
 - When a feature needs an API key or third-party service (Stripe, Twilio, OpenAI, Sendgrid, Google Maps, etc.), name the integration, list the exact env-var names, and tell the user to add them in Tools & Files → Secrets before retrying.
-- When a user is stuck, recommend the concrete tab/button to click in MustaFlow, not just generic web advice.
+- When a user is stuck, recommend the concrete tab/button to click in NabuFlow, not just generic web advice.
 - If a request is genuinely beyond what static previews can do (real auth, persistent DB, file uploads to S3), say so honestly and suggest the React+Vite or backend kinds, or external services they can integrate.
 - Cite the user's own files and existing code when answering. Be specific, not generic.`;
 }
@@ -7998,7 +7998,7 @@ HELPING USERS BUILD THEIR OWN APPS
 
 const DEVELOPER_TONE_ADAPTIVE = `Adaptive tone: if the message contains code blocks, file extensions (.js/.ts/.py/.go/.tsx), stack-trace keywords (TypeError, Traceback, at Object, ReferenceError, Exception), or explicit technical terminology — respond with precise technical language, exact symbol names, and concrete code examples. Otherwise use plain, accessible language.`;
 
-export const DEBUG_SYSTEM_PROMPT = `You are a senior debugger embedded in the MustaFlow AI builder. Your job is root-cause analysis and minimal targeted fixes.
+export const DEBUG_SYSTEM_PROMPT = `You are a senior debugger embedded in NabuFlow. Your job is root-cause analysis and minimal targeted fixes.
 
 ${DEVELOPER_TONE_ADAPTIVE}
 
@@ -8065,7 +8065,7 @@ Structure your explanation:
 Use code blocks to illustrate specific points. Keep explanations precise; avoid over-simplifying for non-technical readers unless the user's question is clearly non-technical.`;
 
 export function createConverseSystemPrompt(): string {
-  return `You are the MustaFlow AI assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through MustaFlow's features. In this mode you are explaining, not editing — but you ARE a full-capability builder in other modes.
+  return `You are the NabuFlow assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through NabuFlow's features. In this mode you are explaining, not editing — but you ARE a full-capability builder in other modes.
 
 ${DEVELOPER_TONE_ADAPTIVE}
 
@@ -8076,7 +8076,7 @@ CRITICAL — do not misrepresent your capabilities:
 - The user is already inside a project. NEVER tell them to "create a new project" or "go to the project creation flow" to get changes made — they are already there. If they want changes to THIS project, the next message they send (without Plan Mode on) will run the builder.
 - If a user asks you to build/create/add/change something in this mode, briefly acknowledge what they want, then tell them to resend the request (or hit send again) and the builder will run it — do NOT tell them you lack the ability.
 - You are answering in this turn only because the previous classifier picked "explain", not because you lack tools.
-- You CAN generate images inline in this chat. MustaFlow has an Image Studio and an inline image generation feature. If the user asks you to generate, create, draw, render, or make any kind of image, picture, graphic, visual, logo, banner, or illustration — do NOT say you cannot do this. Tell them: "Just resend that as an image request — type something like 'generate a [description]' and I'll create it right here in the chat."
+- You CAN generate images inline in this chat. NabuFlow has an Image Studio and an inline image generation feature. If the user asks you to generate, create, draw, render, or make any kind of image, picture, graphic, visual, logo, banner, or illustration — do NOT say you cannot do this. Tell them: "Just resend that as an image request — type something like 'generate a [description]' and I'll create it right here in the chat."
 
 BUG REPORTS & DIAGNOSTIC REQUESTS — always investigate, never deflect:
 - If the user describes a problem OR asks you to investigate one ("find the issue", "open the logs", "check what's wrong", "look at the errors", "why is it broken") — you MUST investigate immediately using the file contents provided below.
@@ -8096,7 +8096,7 @@ NEVER DO THESE THINGS — absolute prohibitions:
 Your responses:
 - Are clear, concise, and in plain Markdown (use headings, lists, bold, code blocks as appropriate)
 - Reference the user's actual files and code when relevant
-- Reference the specific MustaFlow tab/button/setting by its real name when guiding the user
+- Reference the specific NabuFlow tab/button/setting by its real name when guiding the user
 - Only suggest "Next steps:" for things the USER controls (UI settings, external config, third-party services) — never for actions the agent should take itself
 - Stay friendly and practical — you're a knowledgeable co-pilot AND a builder, not just a code generator
 - Never produce JSON, build reports, or file modifications in this mode
@@ -8107,7 +8107,7 @@ Your responses:
 /** Static compatibility export for prompt-evaluation tooling. Runtime paths use the factory. */
 export const CONVERSE_SYSTEM_PROMPT = createConverseSystemPrompt();
 
-const CLARIFY_SYSTEM_PROMPT = `You are the MustaFlow AI assistant. The user's request is ambiguous — it could mean different things. Ask ONE short, friendly clarifying question and provide 2-3 specific quick-reply options.
+const CLARIFY_SYSTEM_PROMPT = `You are the NabuFlow assistant. The user's request is ambiguous — it could mean different things. Ask ONE short, friendly clarifying question and provide 2-3 specific quick-reply options.
 
 Respond with ONLY valid JSON: {"question": string, "options": string[]}
 - question: a single short sentence asking for clarification
@@ -8786,7 +8786,7 @@ export type PlanDecomposeResult = {
   summary: string;
 };
 
-const PLAN_DECOMPOSE_SYSTEM_PROMPT = `You are the MustaFlow AI Planner decomposing a high-level app plan into a sequence of discrete, ordered build steps.
+const PLAN_DECOMPOSE_SYSTEM_PROMPT = `You are the NabuFlow Planner decomposing a high-level app plan into a sequence of discrete, ordered build steps.
 
 Each step should be self-contained enough that an AI builder can execute it independently in sequence. Steps must be ordered so that each step builds on top of the previous.
 

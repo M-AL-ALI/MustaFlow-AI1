@@ -550,7 +550,7 @@ router.get("/security/sbom", async (req, res): Promise<void> => {
         tools: [
           {
             vendor: "MustaFlow",
-            name: "MustaFlow SBOM Generator",
+            name: "NabuFlow SBOM Generator",
             version: "1.0.0",
           },
         ],

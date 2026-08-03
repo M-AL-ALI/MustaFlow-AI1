@@ -556,7 +556,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     const ownerTier = ownerSub?.tier ?? "free";
     if (ownerTier === "free") {
       res.status(403).json({
-        error: "Autoscale requires MustaFlow Core",
+        error: "Autoscale requires NabuFlow Core",
         upgradeUrl: "/billing",
         code: "autoscale_requires_core",
       });

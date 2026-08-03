@@ -50,7 +50,7 @@ router.get("/docs", (_req, res) => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MustaFlow API Reference</title>
+    <title>NabuFlow API Reference</title>
     <style>
       body { margin: 0; padding: 0; }
     </style>

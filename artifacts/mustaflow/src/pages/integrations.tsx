@@ -495,7 +495,7 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "Cloudflare for SaaS",
-        description: "Custom domain SSL automation for MustaFlow-hosted projects.",
+        description: "Custom domain SSL automation for NabuFlow-hosted projects.",
         status: "active",
         authType: "api-key",
         envVars: ["CF_ZONE_ID", "CF_API_TOKEN", "PLATFORM_DOMAIN", "PLATFORM_CNAME_TARGET"],
@@ -504,7 +504,7 @@ const CATEGORIES: IntegrationCategory[] = [
       },
       {
         name: "Namecheap",
-        description: "Purchase and manage custom domains directly inside MustaFlow.",
+        description: "Purchase and manage custom domains directly inside NabuFlow.",
         status: "setup-required",
         authType: "api-key",
         envVars: [
@@ -755,7 +755,7 @@ export default function IntegrationsPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {totalCount}+ first-class connectors for your generated apps and the MustaFlow platform.{" "}
+          {totalCount}+ first-class connectors for your generated apps and the NabuFlow platform.{" "}
           <span className="text-green-500 font-medium">{activeCount} active</span>.
         </p>
       </div>

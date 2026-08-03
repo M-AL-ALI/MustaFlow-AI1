@@ -133,7 +133,7 @@ export default function LearnPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">Learn</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Short, plain-language guides to get the most out of MustaFlow. No code required.
+              Short, plain-language guides to get the most out of NabuFlow. No code required.
             </p>
           </div>
         </header>

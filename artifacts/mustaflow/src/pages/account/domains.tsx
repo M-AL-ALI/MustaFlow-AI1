@@ -956,7 +956,7 @@ export default function MyDomainsPage() {
         <div>
           <h1 className="text-lg font-semibold text-neutral-100">My Domains</h1>
           <p className="text-sm text-neutral-500 mt-0.5">
-            Manage domains purchased through MustaFlow.
+            Manage domains purchased through NabuFlow.
           </p>
         </div>
         <button

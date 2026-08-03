@@ -39,7 +39,7 @@ export default function CommunityPage() {
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-10">
       <PageMeta
         title="Community"
-        description="Join the MustaFlow AI builder community. Share apps, explore public templates, and learn from top builders on the platform."
+        description="Join the NabuFlow builder community. Share apps, explore public templates, and learn from top builders on the platform."
         path="/community"
       />
       {/* Header */}
@@ -79,19 +79,19 @@ export default function CommunityPage() {
         ))}
       </div>
 
-      {/* Built with MustaFlow badge */}
+      {/* Built with NabuFlow badge */}
       <div className="rounded-xl border border-border bg-card p-5 space-y-3">
         <div className="flex items-center gap-2">
           <Share2 className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-semibold text-foreground">Built with MustaFlow Badge</h2>
+          <h2 className="text-sm font-semibold text-foreground">Built with NabuFlow Badge</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Add the "Built with MustaFlow" badge to your published sites. Visitors can click it to
+          Add the "Built with NabuFlow" badge to your published sites. Visitors can click it to
           discover your profile and other apps built on the platform.
         </p>
         <div className="flex items-center gap-3">
           <div className="rounded border border-primary/30 px-3 py-1 text-xs font-semibold text-primary bg-primary/10">
-            Built with MustaFlow
+            Built with NabuFlow
           </div>
           <span className="text-xs text-muted-foreground">← Example badge (SVG coming soon)</span>
         </div>

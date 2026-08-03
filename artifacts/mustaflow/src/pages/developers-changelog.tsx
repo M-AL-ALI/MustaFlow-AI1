@@ -269,7 +269,7 @@ export default function DevelopersChangelogPage() {
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-10">
       <PageMeta
         title="API Changelog"
-        description="Track changes to the MustaFlow public API. View new endpoints, deprecations, and breaking changes by release date."
+        description="Track changes to the NabuFlow public API. View new endpoints, deprecations, and breaking changes by release date."
         path="/developers/changelog"
       />
       {/* Page header */}
@@ -286,7 +286,7 @@ export default function DevelopersChangelogPage() {
           <h1 className="text-3xl font-bold">API Changelog</h1>
         </div>
         <p className="text-muted-foreground max-w-xl">
-          A full history of additions, changes, and deprecations to the MustaFlow AI REST API.
+          A full history of additions, changes, and deprecations to the NabuFlow REST API.
           Non-breaking additions are shipped within the same version; breaking changes bump the
           version number.
         </p>

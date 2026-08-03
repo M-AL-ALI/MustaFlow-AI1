@@ -249,7 +249,7 @@ async function run(): Promise<void> {
           : `@${profile.username} | ${SITE_NAME}`,
         description:
           profile.bio ??
-          `See the public apps and projects built by ${displayName} on MustaFlow AI.`,
+          `See the public apps and projects built by ${displayName} on NabuFlow.`,
         body: `
 <main>
   <article>

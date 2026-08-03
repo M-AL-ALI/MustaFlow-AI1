@@ -292,7 +292,7 @@ async function captureSQLiteSnapshot(machineId: string, projectId: number): Prom
   }
 
   const header = [
-    "-- MustaFlow SQLite Snapshot",
+    "-- NabuFlow SQLite Snapshot",
     `-- Generated: ${new Date().toISOString()}`,
     `-- Provider: sqlite`,
     "",

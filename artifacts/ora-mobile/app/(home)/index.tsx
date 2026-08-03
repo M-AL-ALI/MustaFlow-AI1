@@ -445,9 +445,9 @@ const DATASET_TYPES = ["csv", "xlsx", "xls"];
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
   "Find the root cause of a problem",
-  "Can MustaFlow build X?",
+  "Can NabuFlow build X?",
   "Help me think through a strategy",
-  "What can I build with MustaFlow?",
+  "What can I build with NabuFlow?",
   "Analyze a business idea",
 ];
 

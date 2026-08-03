@@ -242,7 +242,7 @@ function SidebarInner({ onClose }: { onClose: () => void }) {
       {/* Logo + theme toggle + collapse button */}
       <div className="px-4 py-5 flex flex-col items-center gap-2 shrink-0 relative">
         <div className="rounded-3xl border-2 border-sidebar-border bg-sidebar-accent/40 p-3 shadow-lg ring-1 ring-primary/10">
-          <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
+          <img src={logoUrl} alt="NabuFlow" className="h-28 w-auto object-contain" />
         </div>
         <div className="absolute top-3 right-3 flex items-center gap-1.5">
           <ThemeToggle className="h-8 w-8" />
@@ -392,7 +392,7 @@ export function Sidebar() {
         )}
         aria-label="Open sidebar"
       >
-        <img src={logoUrl} alt="MustaFlow AI" className="h-7 w-auto object-contain" />
+        <img src={logoUrl} alt="NabuFlow" className="h-7 w-auto object-contain" />
       </button>
 
       {/* Desktop: in-flow spacer that animates width to push content */}

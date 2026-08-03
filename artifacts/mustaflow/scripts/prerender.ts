@@ -42,8 +42,8 @@ interface RouteMetadata {
  */
 const STATIC_FAQS = [
   {
-    title: "What is MustaFlow?",
-    body: "MustaFlow is an AI-powered app builder for non-technical users. You describe an app idea in natural language and MustaFlow plans, builds, previews, and helps you publish it. It supports static web apps, React apps, full-stack Node.js apps, and native mobile apps.",
+    title: "What is NabuFlow?",
+    body: "NabuFlow is an AI-powered app builder for non-technical users. You describe an app idea in natural language and NabuFlow plans, builds, previews, and helps you publish it. It supports static web apps, React apps, full-stack Node.js apps, and native mobile apps.",
   },
   {
     title: "Do I need to know how to code?",
@@ -51,7 +51,7 @@ const STATIC_FAQS = [
   },
   {
     title: "Can I build mobile apps?",
-    body: "Yes. When your prompt describes a mobile app, MustaFlow automatically uses its mobile pipeline to generate a native Expo / React Native app. You do not need to change any setting; the stack is detected from your description.",
+    body: "Yes. When your prompt describes a mobile app, NabuFlow automatically uses its mobile pipeline to generate a native Expo / React Native app. You do not need to change any setting; the stack is detected from your description.",
   },
   {
     title: "How do I contact support?",
@@ -77,12 +77,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/",
     title: `${SITE_NAME} | AI App Builder for Web, Mobile, and Templates`,
     description:
-      "Build websites, apps, and workflows with AI. MustaFlow helps you brainstorm ideas, start from templates, generate code, and publish faster.",
+      "Build websites, apps, and workflows with AI. NabuFlow helps you brainstorm ideas, start from templates, generate code, and publish faster.",
     body: `
 <main>
   <section aria-label="Hero">
     <h1>Build. Debug. Deploy.</h1>
-    <p>Describe it or write it — MustaFlow plans, builds, tests, and ships your app, whether you code or not.</p>
+    <p>Describe it or write it — NabuFlow plans, builds, tests, and ships your app, whether you code or not.</p>
     <a href="/sign-up">Start Building</a>
   </section>
   <section aria-label="What you can build">
@@ -107,7 +107,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
       </li>
       <li>
         <h3>AI builds it for you</h3>
-        <p>MustaFlow AI plans, codes, and assembles your app in seconds. Preview it live as it takes shape.</p>
+        <p>NabuFlow plans, codes, and assembles your app in seconds. Preview it live as it takes shape.</p>
       </li>
       <li>
         <h3>Publish instantly</h3>
@@ -140,12 +140,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/gallery",
     title: `Template Gallery | ${SITE_NAME}`,
     description:
-      "Browse hundreds of community-built and official app templates across every category. Start your next project in seconds with MustaFlow AI.",
+      "Browse hundreds of community-built and official app templates across every category. Start your next project in seconds with NabuFlow.",
     body: `
 <main>
   <section aria-label="Gallery header">
     <h1>Template Gallery</h1>
-    <p>Browse community-built and official app templates across every category. Start your next project in seconds with MustaFlow AI.</p>
+    <p>Browse community-built and official app templates across every category. Start your next project in seconds with NabuFlow.</p>
   </section>
   <nav aria-label="Template categories">
     <h2>Browse by category</h2>
@@ -175,12 +175,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/extensions",
     title: `Extensions Marketplace | ${SITE_NAME}`,
     description:
-      "Discover and install extensions to supercharge your MustaFlow AI projects. Add integrations, tools, and capabilities to your apps.",
+      "Discover and install extensions to supercharge your NabuFlow projects. Add integrations, tools, and capabilities to your apps.",
     body: `
 <main>
   <section aria-label="Extensions header">
     <h1>Extensions</h1>
-    <p>Discover and install extensions to supercharge your MustaFlow AI projects. Add integrations, tools, and capabilities to your apps.</p>
+    <p>Discover and install extensions to supercharge your NabuFlow projects. Add integrations, tools, and capabilities to your apps.</p>
   </section>
   <nav aria-label="Extension categories">
     <h2>Browse by category</h2>
@@ -215,7 +215,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/community",
     title: `Community | ${SITE_NAME}`,
     description:
-      "Join the MustaFlow AI builder community. Share apps, explore public templates, and learn from top builders on the platform.",
+      "Join the NabuFlow builder community. Share apps, explore public templates, and learn from top builders on the platform.",
     body: `
 <main>
   <section aria-label="Community header">
@@ -223,7 +223,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     <p>Build with others. Share your work. Learn from the best builders on the platform.</p>
   </section>
   <section aria-label="Platform stats">
-    <h2>MustaFlow AI by the numbers</h2>
+    <h2>NabuFlow by the numbers</h2>
     <ul>
       <li>150+ templates published</li>
       <li>2,400+ community builders</li>
@@ -248,9 +248,9 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
       </li>
     </ul>
   </nav>
-  <section aria-label="Built with MustaFlow badge">
-    <h2>Built with MustaFlow badge</h2>
-    <p>Add a badge to your published sites to show they were built with MustaFlow. Visitors can click it to discover more apps and builders on the platform.</p>
+  <section aria-label="Built with NabuFlow badge">
+    <h2>Built with NabuFlow badge</h2>
+    <p>Add a badge to your published sites to show they were built with NabuFlow. Visitors can click it to discover more apps and builders on the platform.</p>
   </section>
 </main>`,
   },
@@ -258,12 +258,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/pricing",
     title: `Pricing | ${SITE_NAME}`,
     description:
-      "Simple, transparent pricing for every stage of building. Start free and scale up with MustaFlow AI — no credit card required.",
+      "Simple, transparent pricing for every stage of building. Start free and scale up with NabuFlow — no credit card required.",
     body: `
 <main>
   <section aria-label="Pricing header">
     <h1>Simple, transparent pricing</h1>
-    <p>Start free and scale up with MustaFlow AI. No credit card required to get started.</p>
+    <p>Start free and scale up with NabuFlow. No credit card required to get started.</p>
   </section>
   <section aria-label="Plans">
     <h2>Plans</h2>
@@ -379,12 +379,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/developers",
     title: `Developers | ${SITE_NAME}`,
     description:
-      "Build on MustaFlow AI with our public API. Manage projects, trigger builds, publish apps, and integrate with your own tools.",
+      "Build on NabuFlow with our public API. Manage projects, trigger builds, publish apps, and integrate with your own tools.",
     body: `
 <main>
   <section aria-label="Developer portal header">
     <h1>Developer Portal</h1>
-    <p>Build on MustaFlow AI with our public REST API and developer tools. Manage projects, trigger builds, publish apps, and integrate MustaFlow into your own workflows.</p>
+    <p>Build on NabuFlow with our public REST API and developer tools. Manage projects, trigger builds, publish apps, and integrate NabuFlow into your own workflows.</p>
   </section>
   <nav aria-label="API sections">
     <h2>API Documentation</h2>
@@ -400,7 +400,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
   </nav>
   <section aria-label="Authentication">
     <h2>Authentication</h2>
-    <p>The MustaFlow public API uses Personal Access Tokens (PATs) for authentication. Generate a token from Settings, then pass it as a Bearer token in the Authorization header of every request.</p>
+    <p>The NabuFlow public API uses Personal Access Tokens (PATs) for authentication. Generate a token from Settings, then pass it as a Bearer token in the Authorization header of every request.</p>
     <p>Base URL: <code>https://mustaflow.app/api/v1</code></p>
   </section>
   <section aria-label="Developer features">
@@ -430,12 +430,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/developers/changelog",
     title: `API Changelog | ${SITE_NAME}`,
     description:
-      "Track changes to the MustaFlow public API. View new endpoints, deprecations, and breaking changes by release date.",
+      "Track changes to the NabuFlow public API. View new endpoints, deprecations, and breaking changes by release date.",
     body: `
 <main>
   <section aria-label="Changelog header">
     <h1>API Changelog</h1>
-    <p>Track changes to the MustaFlow public API. View new endpoints, deprecations, and breaking changes by release date.</p>
+    <p>Track changes to the NabuFlow public API. View new endpoints, deprecations, and breaking changes by release date.</p>
   </section>
   <nav aria-label="Developer navigation">
     <a href="/developers">Developer Portal</a>
@@ -447,7 +447,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/help",
     title: `Help Center | ${SITE_NAME}`,
     description:
-      "Get answers to common questions about building with MustaFlow AI. Browse help articles or contact support.",
+      "Get answers to common questions about building with NabuFlow. Browse help articles or contact support.",
     jsonLd: HELP_FAQ_JSONLD,
     body: `
 <main>
@@ -458,7 +458,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
   <section aria-label="Help categories">
     <h2>Browse help topics</h2>
     <ul>
-      <li>Getting started with MustaFlow AI</li>
+      <li>Getting started with NabuFlow</li>
       <li>AI Builder — building and refining projects</li>
       <li>Publishing and custom domains</li>
       <li>Credits and billing</li>
@@ -471,12 +471,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
   <section aria-label="Frequently asked questions">
     <h2>Frequently asked questions</h2>
     <dl>
-      <dt>What is MustaFlow?</dt>
-      <dd>MustaFlow is an AI-powered app builder for non-technical users. You describe an app idea in natural language and MustaFlow plans, builds, previews, and helps you publish it. It supports static web apps, React apps, full-stack Node.js apps, and native mobile apps.</dd>
+      <dt>What is NabuFlow?</dt>
+      <dd>NabuFlow is an AI-powered app builder for non-technical users. You describe an app idea in natural language and NabuFlow plans, builds, previews, and helps you publish it. It supports static web apps, React apps, full-stack Node.js apps, and native mobile apps.</dd>
       <dt>Do I need to know how to code?</dt>
       <dd>No. You describe what you want in plain language and the AI Builder writes the code for you. You can review and refine the result through chat without editing code yourself, though the files are available if you want them.</dd>
       <dt>Can I build mobile apps?</dt>
-      <dd>Yes. When your prompt describes a mobile app, MustaFlow automatically uses its mobile pipeline to generate a native Expo / React Native app. You do not need to change any setting; the stack is detected from your description.</dd>
+      <dd>Yes. When your prompt describes a mobile app, NabuFlow automatically uses its mobile pipeline to generate a native Expo / React Native app. You do not need to change any setting; the stack is detected from your description.</dd>
       <dt>How do I contact support?</dt>
       <dd>Use Ask Ora in the Help Center for instant help. Ora can troubleshoot most issues using these help articles and your account details. If Ora cannot resolve your problem, use Escalate to support to open a ticket that is sent to our support team with your conversation and any screenshots you attach.</dd>
     </dl>
@@ -498,23 +498,23 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     path: "/help/domains-api",
     title: `Custom Domains & API Guide | ${SITE_NAME}`,
     description:
-      "Learn how to connect a custom domain, configure DNS, and use the MustaFlow public API to manage and publish your apps.",
+      "Learn how to connect a custom domain, configure DNS, and use the NabuFlow public API to manage and publish your apps.",
     body: `
 <main>
   <section aria-label="Guide header">
     <h1>Custom Domains &amp; API Guide</h1>
-    <p>Learn how to connect a custom domain to your MustaFlow app, configure DNS records, and use the public REST API to manage and publish your projects programmatically.</p>
+    <p>Learn how to connect a custom domain to your NabuFlow app, configure DNS records, and use the public REST API to manage and publish your projects programmatically.</p>
   </section>
   <section aria-label="Custom domains">
     <h2>Custom Domains</h2>
-    <p>Every published MustaFlow app gets a free subdomain on <code>mustaflow.app</code>. You can also connect your own domain by adding a CNAME record pointing to <code>hosted.mustaflow.app</code> and entering the domain in the Publishing tab of your project.</p>
+    <p>Every published NabuFlow app gets a free subdomain on <code>mustaflow.app</code>. You can also connect your own domain by adding a CNAME record pointing to <code>hosted.mustaflow.app</code> and entering the domain in the Publishing tab of your project.</p>
     <h3>How to connect a custom domain</h3>
     <ol>
       <li>Open your project and go to the Publishing tab.</li>
       <li>Enter your domain name in the Custom Domain field.</li>
       <li>Add a CNAME record at your DNS provider pointing your domain to <code>hosted.mustaflow.app</code>.</li>
       <li>Wait for DNS to propagate (usually a few minutes).</li>
-      <li>MustaFlow automatically provisions an SSL certificate for your domain.</li>
+      <li>NabuFlow automatically provisions an SSL certificate for your domain.</li>
     </ol>
   </section>
   <section aria-label="Authentication">
@@ -523,7 +523,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
   </section>
   <section aria-label="Domain API endpoints">
     <h2>Domain endpoints</h2>
-    <p>The MustaFlow REST API lets you add, verify, and remove custom domains programmatically. All domain endpoints require a valid Personal Access Token.</p>
+    <p>The NabuFlow REST API lets you add, verify, and remove custom domains programmatically. All domain endpoints require a valid Personal Access Token.</p>
   </section>
   <section aria-label="Webhooks">
     <h2>Webhooks</h2>

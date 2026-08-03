@@ -51,7 +51,7 @@ export function generateOgSvg(opts: {
   const bg2 = "#0d1528";
 
   const titleLines = wrapText(xmlEscape(name || "Untitled App"), 30, 2);
-  const descLines = wrapText(xmlEscape(description ?? "Built with MustaFlow AI"), 58, 3);
+  const descLines = wrapText(xmlEscape(description ?? "Built with NabuFlow"), 58, 3);
 
   const kindLabel = xmlEscape(
     (kind ?? "web").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
@@ -116,7 +116,7 @@ export function generateOgSvg(opts: {
 
   <!-- Footer -->
   <rect x="0" y="580" width="1200" height="50" fill="#ffffff" opacity="0.02"/>
-  <text x="80" y="612" font-family="system-ui,sans-serif" font-size="20" fill="#475569" font-weight="500">MustaFlow AI</text>
+  <text x="80" y="612" font-family="system-ui,sans-serif" font-size="20" fill="#475569" font-weight="500">NabuFlow</text>
   <text x="1120" y="612" font-family="system-ui,sans-serif" font-size="20" fill="${accent}" font-weight="600" text-anchor="end">www.mustaflow.com</text>
 </svg>`;
 }

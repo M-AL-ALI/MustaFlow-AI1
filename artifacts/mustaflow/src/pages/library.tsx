@@ -250,7 +250,7 @@ export default function LibraryPage() {
           </div>
 
           <p className="text-xs text-muted-foreground/70 mb-6 ml-13 pl-1">
-            These lessons were contributed by MustaFlow users and are anonymized. Helpful ratings
+            These lessons were contributed by NabuFlow users and are anonymized. Helpful ratings
             surface the best lessons.
           </p>
 

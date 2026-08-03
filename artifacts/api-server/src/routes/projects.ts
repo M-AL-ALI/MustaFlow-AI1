@@ -766,7 +766,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: '${project.name}',
-  description: 'Built with MustaFlow AI',
+  description: 'Built with NabuFlow',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

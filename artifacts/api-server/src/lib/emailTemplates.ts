@@ -43,19 +43,19 @@ export function welcomeTemplate(opts: {
   ctaUrl: string;
 }): EmailTemplate {
   const { displayName, ctaUrl } = opts;
-  const greeting = displayName ? `Hi ${displayName},` : "Welcome to MustaFlow,";
-  const subject = "Welcome to MustaFlow — build your first app";
+  const greeting = displayName ? `Hi ${displayName},` : "Welcome to NabuFlow,";
+  const subject = "Welcome to NabuFlow — build your first app";
 
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">You're all set.</h2>
   <p>${greeting}</p>
-  <p>Your account is ready to get started. Just describe what you want to build and MustaFlow will plan, write, and preview it for you — no code required.</p>
+  <p>Your account is ready to get started. Just describe what you want to build and NabuFlow will plan, write, and preview it for you — no code required.</p>
   ${ctaButton("Build your first app", ctaUrl)}
   <p style="font-size:13px;color:#4b5563">
     Not sure what to build? Try something like <em>"a personal expense tracker"</em> or <em>"a landing page for my bakery."</em>
   </p>`);
 
-  const text = `${greeting}\n\nYour MustaFlow account is ready to start building.\n\nDescribe your first app idea here: ${ctaUrl}`;
+  const text = `${greeting}\n\nYour NabuFlow account is ready to start building.\n\nDescribe your first app idea here: ${ctaUrl}`;
 
   return { subject, html, text };
 }
@@ -110,18 +110,18 @@ export function domainVerifiedTemplate(opts: { hostname: string; siteUrl: string
 
 export function lowCreditTemplate(opts: { balance: number; topUpUrl: string }): EmailTemplate {
   const { balance, topUpUrl } = opts;
-  const subject = `You have ${balance} credits left on MustaFlow`;
+  const subject = `You have ${balance} credits left on NabuFlow`;
 
   const html = wrap(`
   <h2 style="margin-top:0;color:#d97706">Running low on credits</h2>
-  <p>Your MustaFlow account has <strong>${balance} credit${balance === 1 ? "" : "s"}</strong> remaining.</p>
+  <p>Your NabuFlow account has <strong>${balance} credit${balance === 1 ? "" : "s"}</strong> remaining.</p>
   <p>Each build uses credits based on the mode you choose. Top up now to keep building without interruption.</p>
   ${ctaButton("Top up credits", topUpUrl, "#d97706")}
   <p style="font-size:13px;color:#4b5563">
     Check your plan's current credit costs in billing settings.
   </p>`);
 
-  const text = `You have ${balance} credit${balance === 1 ? "" : "s"} left on MustaFlow.\n\nTop up here: ${topUpUrl}`;
+  const text = `You have ${balance} credit${balance === 1 ? "" : "s"} left on NabuFlow.\n\nTop up here: ${topUpUrl}`;
 
   return { subject, html, text };
 }
@@ -162,7 +162,7 @@ export function orgInviteTemplate(opts: {
   expiresAt: Date;
 }): EmailTemplate {
   const { orgName, inviterName, role, acceptUrl, expiresAt } = opts;
-  const subject = `You're invited to join ${orgName} on MustaFlow`;
+  const subject = `You're invited to join ${orgName} on NabuFlow`;
   const inviter = inviterName ?? "A teammate";
   const expiresStr = expiresAt.toLocaleDateString(undefined, {
     year: "numeric",
@@ -172,12 +172,12 @@ export function orgInviteTemplate(opts: {
 
   const html = wrap(`
   <h2 style="margin-top:0">You've been invited to ${orgName}</h2>
-  <p>${inviter} invited you to join <strong>${orgName}</strong> on MustaFlow as a <strong>${role}</strong>.</p>
+  <p>${inviter} invited you to join <strong>${orgName}</strong> on NabuFlow as a <strong>${role}</strong>.</p>
   ${ctaButton("Accept invitation", acceptUrl, "#4a90e2")}
   <p style="font-size:13px;color:#444">Or paste this link into your browser:<br><span style="color:#666">${acceptUrl}</span></p>
   <p style="font-size:12px;color:#666">This invitation expires on ${expiresStr}. If you didn't expect this email, you can safely ignore it.</p>`);
 
-  const text = `${inviter} invited you to join ${orgName} on MustaFlow as a ${role}.\n\nAccept: ${acceptUrl}\n\nExpires: ${expiresStr}`;
+  const text = `${inviter} invited you to join ${orgName} on NabuFlow as a ${role}.\n\nAccept: ${acceptUrl}\n\nExpires: ${expiresStr}`;
 
   return { subject, html, text };
 }

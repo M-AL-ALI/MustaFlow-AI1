@@ -63,7 +63,7 @@ router.get("/activity", async (_req, res): Promise<void> => {
       summary:
         m.role === "user"
           ? `You: ${m.content.slice(0, 100)}`
-          : `MustaFlow: ${m.content.slice(0, 100)}`,
+          : `NabuFlow: ${m.content.slice(0, 100)}`,
       createdAt: m.createdAt,
     })),
     ...tasks.map((t) => ({

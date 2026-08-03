@@ -21,6 +21,7 @@ type MigrationStep = {
 };
 
 const BILLING_CREDITS_HELP_SLUG = "billing-credits";
+const NABUFLOW_HELP_SLUGS = ["faq-what-is-mustaflow", "faq-build-mobile-apps"] as const;
 
 /** One-time BC-2 content refresh; the seed remains the only owner of the article body. */
 export async function refreshBillingCreditsHelpArticle(
@@ -40,6 +41,32 @@ export async function refreshBillingCreditsHelpArticle(
         AND body IS DISTINCT FROM $1`,
     [article.body, article.slug],
   );
+}
+
+/** One-time product-name refresh for the two deployed builder FAQ articles. */
+export async function refreshNabuflowHelpArticles(
+  client: Pick<import("pg").PoolClient, "query">,
+): Promise<void> {
+  const { HELP_ARTICLE_SEED } = await import("@workspace/db");
+  const articles = NABUFLOW_HELP_SLUGS.map((slug) => {
+    const article = HELP_ARTICLE_SEED.find((entry) => entry.slug === slug);
+    if (!article) {
+      throw new Error(`Missing help-center seed article: ${slug}`);
+    }
+    return article;
+  });
+
+  for (const article of articles) {
+    await client.query(
+      `UPDATE help_articles
+          SET title = $1,
+              body = $2,
+              updated_at = now()
+        WHERE slug = $3
+          AND (title IS DISTINCT FROM $1 OR body IS DISTINCT FROM $2)`,
+      [article.title, article.body, article.slug],
+    );
+  }
 }
 
 const MIGRATION_STEPS: MigrationStep[] = [
@@ -5109,6 +5136,14 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-refresh-billing-credits-help-copy",
     async run(client) {
       await refreshBillingCreditsHelpArticle(client);
+    },
+  },
+  // Product-name disambiguation: the deployed FAQ rows predate NabuFlow and
+  // are preserved by ON CONFLICT DO NOTHING. Keep this intentionally narrow.
+  {
+    name: "migrate-refresh-nabuflow-help-copy",
+    async run(client) {
+      await refreshNabuflowHelpArticles(client);
     },
   },
 ];

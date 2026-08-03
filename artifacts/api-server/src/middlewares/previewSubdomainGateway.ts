@@ -303,7 +303,7 @@ export async function previewSubdomainGateway(
         `<!DOCTYPE html><html><head><title>Preview — Sign In Required</title></head>` +
           `<body style="font-family:sans-serif;padding:2rem">` +
           `<h2>Preview session required</h2>` +
-          `<p>Open the test preview from your MustaFlow project workspace to access this preview.</p>` +
+          `<p>Open the test preview from your NabuFlow project workspace to access this preview.</p>` +
           `</body></html>`,
       );
     return;

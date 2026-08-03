@@ -95,7 +95,7 @@ export default function DocsDevModePage() {
       <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto px-6 h-14 flex items-center gap-4">
           <Link href="/" className="flex items-center gap-2 shrink-0">
-            <img src={logoUrl} alt="MustaFlow AI" className="h-6 w-auto" />
+            <img src={logoUrl} alt="NabuFlow" className="h-6 w-auto" />
           </Link>
           <span className="w-px h-5 bg-border" />
           <nav className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -211,7 +211,7 @@ export default function DocsDevModePage() {
             <p>
               That reasoning then drives the next tool call — reading the auth file rather than
               blindly writing a new one. Suppressing chain-of-thought produces faster but lower
-              quality decisions, which is why MustaFlow preserves it for complex tasks.
+              quality decisions, which is why NabuFlow preserves it for complex tasks.
             </p>
           </Section>
 
@@ -373,7 +373,7 @@ export default function DocsDevModePage() {
                 dropped. The agent can lose track of earlier decisions.
               </p>
               <p className="mt-1">
-                The fix: MustaFlow enforces a step cap on loop iterations and a wall-clock time
+                The fix: NabuFlow enforces a step cap on loop iterations and a wall-clock time
                 limit. The agent is also designed to make small, focused changes rather than
                 attempting to do everything in one giant loop, which keeps context usage bounded.
               </p>
@@ -493,7 +493,7 @@ export default function DocsDevModePage() {
             </Callout>
             <Callout title="Level 3 — Knowledge Vault (persistent, per project)">
               <p>
-                This is where MustaFlow adds something beyond the base model. The Knowledge Vault
+                This is where NabuFlow adds something beyond the base model. The Knowledge Vault
                 stores lessons learned about your specific project after every build, refine,
                 rollback, or publish:
               </p>
@@ -719,7 +719,7 @@ export default function DocsDevModePage() {
 
         {/* Footer */}
         <div className="mt-10 flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-6">
-          <span>MustaFlow AI — Developer Mode documentation</span>
+          <span>NabuFlow — Developer Mode documentation</span>
           <Link
             href="/dev"
             className="flex items-center gap-1.5 text-primary hover:underline font-medium"

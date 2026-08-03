@@ -537,7 +537,7 @@ function ModeSection() {
         <h2 className="text-base font-semibold">Workspace</h2>
       </div>
       <p className="text-sm text-muted-foreground">
-        MustaFlow uses a single workspace for all projects.
+        NabuFlow uses a single workspace for all projects.
       </p>
       <div className="flex items-center gap-3 px-4 py-4 rounded-lg border border-primary/40 bg-primary/5">
         <Sparkles className="h-4 w-4 text-primary shrink-0" />
@@ -1642,7 +1642,7 @@ function DeveloperTab() {
         </div>
 
         <p className="text-sm text-muted-foreground">
-          Personal access tokens let you authenticate with the MustaFlow API from scripts and
+          Personal access tokens let you authenticate with the NabuFlow API from scripts and
           external tools. Treat them like passwords.
         </p>
 

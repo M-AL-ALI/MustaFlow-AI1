@@ -239,7 +239,7 @@ export default function UserProfilePage() {
         }
         description={
           profile.bio ??
-          `See the public apps and projects built by ${profile.displayName ?? profile.username} on MustaFlow AI.`
+          `See the public apps and projects built by ${profile.displayName ?? profile.username} on NabuFlow.`
         }
         path={`/u/${profile.username}`}
       />
@@ -258,7 +258,7 @@ export default function UserProfilePage() {
             <h1 className="text-xl font-bold text-foreground">{displayName}</h1>
             {profile.badgeEmbedEnabled && (
               <span className="text-xs text-primary border border-primary/30 px-2 py-0.5 rounded-full">
-                Built with MustaFlow
+                Built with NabuFlow
               </span>
             )}
           </div>
@@ -339,7 +339,7 @@ export default function UserProfilePage() {
           <button
             onClick={handleCopyBadge}
             className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-            title="Copy 'Built with MustaFlow' badge"
+            title="Copy 'Built with NabuFlow' badge"
           >
             <Share2 className="h-4 w-4" />
           </button>
@@ -370,22 +370,22 @@ export default function UserProfilePage() {
         )}
       </div>
 
-      {/* "Built with MustaFlow" badge info */}
+      {/* "Built with NabuFlow" badge info */}
       <div className="mt-10 rounded-xl border border-border bg-card p-4">
         <div className="flex items-center gap-2 mb-2">
           <Share2 className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold text-foreground">Built with MustaFlow</h3>
+          <h3 className="text-sm font-semibold text-foreground">Built with NabuFlow</h3>
         </div>
         <p className="text-xs text-muted-foreground mb-3">
-          Add a badge to your published sites to show they were built with MustaFlow. Visitors can
+          Add a badge to your published sites to show they were built with NabuFlow. Visitors can
           click it to discover more apps and builders.
         </p>
         <div className="flex items-center gap-2 p-3 bg-muted/30 rounded-lg font-mono text-xs text-muted-foreground overflow-x-auto">
-          <code>{`<a href="https://mustaflow.app/u/${profile.username}"><img src="https://mustaflow.app/badge/built-with-mustaflow.svg" alt="Built with MustaFlow" height="20" /></a>`}</code>
+          <code>{`<a href="https://mustaflow.app/u/${profile.username}"><img src="https://mustaflow.app/badge/built-with-mustaflow.svg" alt="Built with NabuFlow" height="20" /></a>`}</code>
         </div>
         <button
           onClick={async () => {
-            const code = `<a href="https://mustaflow.app/u/${profile.username}"><img src="https://mustaflow.app/badge/built-with-mustaflow.svg" alt="Built with MustaFlow" height="20" /></a>`;
+            const code = `<a href="https://mustaflow.app/u/${profile.username}"><img src="https://mustaflow.app/badge/built-with-mustaflow.svg" alt="Built with NabuFlow" height="20" /></a>`;
             await navigator.clipboard.writeText(code);
             toast({ title: "Badge code copied" });
           }}

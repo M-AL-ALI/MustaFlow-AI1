@@ -120,7 +120,7 @@ export async function captureSQLiteSnapshot(
     return null;
   }
   const header = [
-    "-- MustaFlow SQLite Snapshot",
+    "-- NabuFlow SQLite Snapshot",
     `-- Generated: ${new Date().toISOString()}`,
     `-- Provider: sqlite`,
     "",

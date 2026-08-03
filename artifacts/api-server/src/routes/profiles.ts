@@ -263,8 +263,8 @@ router.get("/me/profile/badge", async (req, res): Promise<void> => {
     const badgeUrl = `${origin}/badge/built-with-mustaflow.svg`;
     const profileUrl = `${origin}/u/${profile.username}`;
 
-    const htmlSnippet = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer"><img src="${badgeUrl}" alt="Built with MustaFlow" height="20" /></a>`;
-    const markdownSnippet = `[![Built with MustaFlow](${badgeUrl})](${profileUrl})`;
+    const htmlSnippet = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer"><img src="${badgeUrl}" alt="Built with NabuFlow" height="20" /></a>`;
+    const markdownSnippet = `[![Built with NabuFlow](${badgeUrl})](${profileUrl})`;
 
     res.json({ html: htmlSnippet, markdown: markdownSnippet, badgeUrl, profileUrl });
   } catch (err) {

@@ -273,7 +273,7 @@ function BrandProfileSection() {
 
       <div className="border border-border rounded-xl p-5 bg-card">
         <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-          Teach MustaFlow your brand. Every new build will start with these colours, fonts, and tone
+          Teach NabuFlow your brand. Every new build will start with these colours, fonts, and tone
           — no need to repeat yourself in every prompt.
         </p>
 
@@ -679,7 +679,7 @@ export default function MemoryPage() {
               </span>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              After every build, MustaFlow analyses your history and infers your style preferences —
+              After every build, NabuFlow analyses your history and infers your style preferences —
               things like colour palettes, component patterns, and code conventions. These
               preferences are automatically injected into your next AI build, making every project
               feel more "you" without manual configuration.

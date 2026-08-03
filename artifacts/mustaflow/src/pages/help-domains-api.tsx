@@ -85,7 +85,7 @@ export default function HelpDomainsApiPage() {
     <div className="min-h-screen bg-background">
       <PageMeta
         title="Custom Domains & API Guide"
-        description="Learn how to connect a custom domain, configure DNS, and use the MustaFlow public API to manage and publish your apps."
+        description="Learn how to connect a custom domain, configure DNS, and use the NabuFlow public API to manage and publish your apps."
         path="/help/domains-api"
       />
       <div className="max-w-4xl mx-auto px-6 py-12 space-y-16">
@@ -103,7 +103,7 @@ export default function HelpDomainsApiPage() {
               Domains API &amp; CLI
             </h1>
             <p className="text-lg text-muted-foreground">
-              Manage custom domains programmatically using the MustaFlow public REST API v1 or the
+              Manage custom domains programmatically using the NabuFlow public REST API v1 or the
               CLI.
             </p>
           </div>
