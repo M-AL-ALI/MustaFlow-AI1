@@ -1201,6 +1201,27 @@ function PrivacyTab() {
             Privacy Policy
           </a>
           <a
+            href="/terms"
+            className="text-sm text-primary hover:underline flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Terms of Service
+          </a>
+          <a
+            href="/billing-refunds"
+            className="text-sm text-primary hover:underline flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Billing &amp; Refund Policy
+          </a>
+          <a
+            href="/acceptable-use"
+            className="text-sm text-primary hover:underline flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Acceptable Use Policy
+          </a>
+          <a
             href="/trust"
             className="text-sm text-primary hover:underline flex items-center gap-1.5"
           >
@@ -1208,7 +1229,7 @@ function PrivacyTab() {
             Trust &amp; Security page (sub-processors, certifications, disclosure)
           </a>
           <a
-            href="mailto:privacy@mustaflow.app"
+            href="mailto:support@mustaflow.com"
             className="text-sm text-primary hover:underline flex items-center gap-1.5"
           >
             <ExternalLink className="h-3.5 w-3.5" />

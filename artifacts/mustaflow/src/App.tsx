@@ -46,6 +46,8 @@ const LibraryPage = builderLazy(() => import("./pages/library"));
 const SettingsPage = builderLazy(() => import("./pages/settings"));
 const TermsPage = lazy(() => import("./pages/terms"));
 const PrivacyPage = lazy(() => import("./pages/privacy"));
+const BillingRefundsPage = lazy(() => import("./pages/billing-refunds"));
+const AcceptableUsePage = lazy(() => import("./pages/acceptable-use"));
 const HelpPage = lazy(() => import("./pages/help"));
 const HelpDomainsApiPage = lazy(() => import("./pages/help-domains-api"));
 const SupportTicketsPage = lazy(() => import("./pages/support-tickets"));
@@ -822,6 +824,16 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                   <Route path="/privacy">
                     <AppLayout>
                       <PrivacyPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/billing-refunds">
+                    <AppLayout>
+                      <BillingRefundsPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/acceptable-use">
+                    <AppLayout>
+                      <AcceptableUsePage />
                     </AppLayout>
                   </Route>
                   <Route path="/help">

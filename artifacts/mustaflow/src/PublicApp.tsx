@@ -49,6 +49,8 @@ const HelpDomainsApiPage = lazy(() => import("./pages/help-domains-api"));
 const StatusPage = lazy(() => import("./pages/status"));
 const PrivacyPage = lazy(() => import("./pages/privacy"));
 const TermsPage = lazy(() => import("./pages/terms"));
+const BillingRefundsPage = lazy(() => import("./pages/billing-refunds"));
+const AcceptableUsePage = lazy(() => import("./pages/acceptable-use"));
 const NotFound = lazy(() => import("./pages/not-found"));
 
 export function PublicApp() {
@@ -77,6 +79,8 @@ export function PublicApp() {
                   <Route path="/status" component={StatusPage} />
                   <Route path="/privacy" component={PrivacyPage} />
                   <Route path="/terms" component={TermsPage} />
+                  <Route path="/billing-refunds" component={BillingRefundsPage} />
+                  <Route path="/acceptable-use" component={AcceptableUsePage} />
 
                   {/* Sign-in / sign-up links redirect to the public URL paths —
                       the full app (index.html) renders the Clerk-hosted flows */}

@@ -305,7 +305,10 @@ function SidebarInner({ onClose }: { onClose: () => void }) {
       {/* Bottom nav + footer */}
       <div className="mt-auto">
         <NavGroup items={BOTTOM_NAV_ITEMS} />
-        <div className="px-6 py-2 flex items-center flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground/60">
+        <div
+          aria-label="Legal links"
+          className="px-6 py-2 flex items-center flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground/60"
+        >
           <a
             href="/changelog"
             className="hover:text-muted-foreground transition-colors font-medium"
@@ -323,6 +326,21 @@ function SidebarInner({ onClose }: { onClose: () => void }) {
           <span>·</span>
           <a href="/privacy" className="hover:text-muted-foreground transition-colors">
             Privacy
+          </a>
+          <span>·</span>
+          <a href="/billing-refunds" className="hover:text-muted-foreground transition-colors">
+            Billing
+          </a>
+          <span>·</span>
+          <a href="/acceptable-use" className="hover:text-muted-foreground transition-colors">
+            Acceptable Use
+          </a>
+          <span>·</span>
+          <a
+            href="mailto:support@mustaflow.com"
+            className="hover:text-muted-foreground transition-colors"
+          >
+            Contact
           </a>
         </div>
         <UserSection />
