@@ -3714,15 +3714,20 @@ async function safeEvent(fn: AgentLoopEvent, type: string, msg: string): Promise
 //
 // Two layers of redaction:
 //   1) The project's secret registry (decrypted values from project_secrets)
-//      — authoritative literal match. Loaded once per project + cached for 5
-//      minutes so we don't pay decryption cost on every event.
+//      — authoritative literal match. Loaded once per project + cached for 60
+//      seconds so we don't pay decryption cost on every event.
 //   2) Conservative regex patterns for well-known secret shapes — catches
 //      keys that came from outside the registry (env files printed by the
 //      shell, AI-generated tokens, etc).
 type SecretRegistryEntry = { values: string[]; expiresAt: number };
 const SECRET_REGISTRY_CACHE = new Map<number, SecretRegistryEntry>();
 const SECRET_REGISTRY_PENDING = new Map<number, Promise<string[]>>();
-const SECRET_REGISTRY_TTL_MS = 5 * 60_000;
+const SECRET_REGISTRY_TTL_MS = 60_000;
+
+export function invalidateAgentSecretRegistry(projectId: number): void {
+  SECRET_REGISTRY_CACHE.delete(projectId);
+  SECRET_REGISTRY_PENDING.delete(projectId);
+}
 
 async function loadProjectSecretLiterals(projectId: number): Promise<string[]> {
   const now = Date.now();
@@ -3743,9 +3748,9 @@ async function loadProjectSecretLiterals(projectId: number): Promise<string[]> {
       for (const row of rows) {
         try {
           const v = encryptionService.decrypt(row.valueEncrypted);
-          // Only redact values that are non-trivially long — short values
-          // (e.g. "dev", "true") would cause far too many false positives.
-          if (v && v.length >= 6) values.push(v);
+          // Redact every non-empty saved value. A short value can cause false
+          // positives, but leaking a real secret is the worse failure mode.
+          if (v) values.push(v);
         } catch {
           // skip malformed
         }
@@ -4216,6 +4221,9 @@ async function writeToolAudit(
   },
 ): Promise<void> {
   try {
+    const literals = await loadProjectSecretLiterals(ctx.input.projectId);
+    const stdoutTail = redactSecrets(row.stdoutTail, literals);
+    const stderrTail = redactSecrets(row.stderrTail, literals);
     await db.insert(toolAuditTable).values({
       projectId: ctx.input.projectId,
       taskId: ctx.input.taskId ?? null,
@@ -4223,8 +4231,8 @@ async function writeToolAudit(
       stack: ctx.stack,
       argv: row.argv,
       exitCode: row.exitCode,
-      stdoutTail: row.stdoutTail.slice(0, 400),
-      stderrTail: row.stderrTail.slice(0, 400),
+      stdoutTail: stdoutTail.slice(0, 400),
+      stderrTail: stderrTail.slice(0, 400),
       durationMs: row.durationMs,
       blocked: row.blocked,
       blockReason: row.blockReason,
@@ -4699,11 +4707,13 @@ async function ensureContainerProvisioned(ctx: ToolCtx): Promise<ContainerProvis
   if (ctx.containerState.id) return { ok: true };
   try {
     const { isContainerLayerConfigured, provisionContainer } = await import("./container");
+    const { getBuildSecretMap } = await import("./container-secrets");
     if (!(await isContainerLayerConfigured())) {
       return { ok: true, deferred: true, reason: CONTAINER_TOOL_DEFERRED_REASON };
     }
     const files = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
-    const info = await provisionContainer(ctx.input.projectId, files);
+    const buildEnv = await getBuildSecretMap(ctx.input.projectId);
+    const info = await provisionContainer(ctx.input.projectId, files, buildEnv);
     if (!info?.containerId) {
       return { ok: false, reason: CONTAINER_PROVISIONING_FAILED_REASON };
     }
@@ -7839,8 +7849,10 @@ async function runCheckProfile(
   if (needsContainer && !effectiveContainerId && !input.signal.aborted) {
     try {
       const { provisionContainer } = await import("./container");
+      const { getBuildSecretMap } = await import("./container-secrets");
       const files = workspace.all().map((f) => ({ path: f.path, content: f.content }));
-      const info = await provisionContainer(input.projectId, files);
+      const buildEnv = await getBuildSecretMap(input.projectId);
+      const info = await provisionContainer(input.projectId, files, buildEnv);
       if (info?.containerId) {
         effectiveContainerId = info.containerId;
         if (containerState) containerState.id = info.containerId;

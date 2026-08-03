@@ -2452,6 +2452,26 @@ paths:
                 $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/secrets/{secretId}:
+    patch:
+      operationId: updateSecret
+      tags: [secrets]
+      summary: Update a write-only project secret
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: secretId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecretUpdateInput"
+      responses:
+        "200":
+          description: Updated masked secret metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretEntry"
     delete:
       operationId: deleteSecret
       tags: [secrets]
@@ -9433,11 +9453,35 @@ components:
       type: object
       required: [name, value, environment]
       properties:
-        name: { type: string, minLength: 1 }
+        name:
+          type: string
+          minLength: 1
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
+          description: Valid environment-variable name.
         value: { type: string, minLength: 1 }
         environment:
           type: string
           enum: [development, testing, staging, production]
+        isPreviewSafe:
+          type: boolean
+          default: false
+          description: Whether a development/testing value may be injected into build and preview containers.
+
+    SecretUpdateInput:
+      type: object
+      minProperties: 1
+      properties:
+        value: { type: string, minLength: 1 }
+        environment:
+          type: string
+          enum: [development, testing, staging, production]
+        category: { type: string }
+        minRole:
+          type: string
+          enum: [viewer, member, admin, owner]
+        isPreviewSafe:
+          type: boolean
+          description: Whether a development/testing value may be injected into build and preview containers.
 
     TaskFeedbackInput:
       type: object

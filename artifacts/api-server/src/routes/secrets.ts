@@ -17,35 +17,40 @@ import {
   ListSecretsResponse,
   CreateSecretParams,
   CreateSecretBody,
+  UpdateSecretParams,
+  UpdateSecretBody,
 } from "@workspace/api-zod";
-import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
-import { encryptionService, maskValue } from "../lib/encryption";
+import { requireProjectOwnership } from "../lib/auth";
+import { encryptionService } from "../lib/encryption";
 import { writeKnowledge } from "../lib/knowledge";
 import { restartContainerWithSecrets, execInContainer } from "../lib/container";
+import {
+  getContainerSecretMap,
+  getProjectSecretLiterals,
+  invalidateContainerSecretCache,
+} from "../lib/container-secrets";
 import { logger } from "../lib/logger";
 import { publishTaskEvent, publishSecretEvent, subscribeSecretEvents } from "../lib/event-bus";
+import { isValidProjectSecretName, MASKED_SECRET_VALUE } from "../lib/project-secret-policy";
+
+export {
+  isValidProjectSecretName,
+  MASKED_SECRET_VALUE,
+  PROJECT_SECRET_NAME_PATTERN,
+} from "../lib/project-secret-policy";
 
 /**
- * Load all secrets for a project as decrypted { name: value } pairs and
- * fire a best-effort container restart with the latest env.
+ * Load the preview-safe development/testing secrets for a project and fire a
+ * best-effort container restart with the latest environment.
  * Never throws — failures are swallowed so secret mutations always succeed.
  */
 async function triggerContainerSecretRefresh(projectId: number): Promise<void> {
   try {
-    const rows = await db
-      .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
-      .from(secretsTable)
-      .where(eq(secretsTable.projectId, projectId));
-
-    const envVars: Record<string, string> = {};
-    for (const row of rows) {
-      try {
-        envVars[row.name] = encryptionService.decrypt(row.valueEncrypted);
-      } catch {
-        // skip individual decrypt failures
-      }
-    }
-
+    invalidateContainerSecretCache(projectId);
+    void import("../lib/agent-loop").then(({ invalidateAgentSecretRegistry }) => {
+      invalidateAgentSecretRegistry(projectId);
+    });
+    const envVars = await getContainerSecretMap(projectId);
     await restartContainerWithSecrets(projectId, envVars);
   } catch {
     // best-effort — never fail the main secret operation
@@ -216,6 +221,11 @@ async function triggerMigrationsAfterDbSecretChange(
     );
 
     const migrationResult = await execInContainer(machineId, migrationCmd, projectId);
+    const secretLiterals = await getProjectSecretLiterals(projectId);
+    let safeMigrationOutput = migrationResult.output;
+    for (const value of secretLiterals) {
+      safeMigrationOutput = safeMigrationOutput.split(value).join("[REDACTED]");
+    }
 
     if (migrationResult.ok) {
       logger.info({ projectId, secretName }, "Auto-migration after DB secret change succeeded");
@@ -230,10 +240,10 @@ async function triggerMigrationsAfterDbSecretChange(
       void emitMigrationTaskEvent(projectId, "narration", successMsg);
     } else {
       logger.warn(
-        { projectId, secretName, output: migrationResult.output },
+        { projectId, secretName, output: safeMigrationOutput },
         "Auto-migration after DB secret change failed",
       );
-      const failMsg = `Database migration failed after "${secretName}" update: ${migrationResult.output.slice(0, 400)}`;
+      const failMsg = `Database migration failed after "${secretName}" update: ${safeMigrationOutput.slice(0, 400)}`;
       try {
         await db
           .insert(containerLogsTable)
@@ -320,7 +330,10 @@ function toEntry(row: Secret, contextEnv?: string) {
     id: row.id,
     projectId: row.projectId,
     name: row.name,
-    masked: maskValue(encryptionService.decrypt(row.valueEncrypted)),
+    // Fixed mask: the API never decrypts or reveals even a suffix for list or
+    // mutation responses. Plaintext exists only at server-side runtime
+    // injection/verification boundaries.
+    masked: MASKED_SECRET_VALUE,
     environment: row.environment,
     category: row.category,
     verificationStatus: row.verificationStatus,
@@ -360,35 +373,29 @@ async function writeAuditLog(opts: {
 
 const router: IRouter = Router();
 
-// Secrets list uses requireProjectAccess("viewer") so org members can reach
-// the route; per-secret minRole filtering is applied inside the handler via
-// getCallerProjectRole + callerCanSeeSecret.
-router.get(
-  "/projects/:id/secrets",
-  requireProjectAccess("viewer"),
-  async (req, res): Promise<void> => {
-    const params = ListSecretsParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: params.error.message });
-      return;
-    }
-    const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
+// Secret metadata is owner-scoped. Values are write-only and never returned.
+router.get("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
+  const params = ListSecretsParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
 
-    // Resolve caller's effective role so we can filter secrets by minRole.
-    const callerRole = await getCallerProjectRole(req.userId!, params.data.id);
+  // Resolve caller's effective role so we can filter secrets by minRole.
+  const callerRole = await getCallerProjectRole(req.userId!, params.data.id);
 
-    const rows = await db
-      .select()
-      .from(secretsTable)
-      .where(eq(secretsTable.projectId, params.data.id))
-      .orderBy(desc(secretsTable.createdAt));
+  const rows = await db
+    .select()
+    .from(secretsTable)
+    .where(eq(secretsTable.projectId, params.data.id))
+    .orderBy(desc(secretsTable.createdAt));
 
-    // Filter: only return secrets the caller has permission to see.
-    const visible = rows.filter((r) => callerCanSeeSecret(callerRole, r.minRole));
+  // Filter: only return secrets the caller has permission to see.
+  const visible = rows.filter((r) => callerCanSeeSecret(callerRole, r.minRole));
 
-    res.json(ListSecretsResponse.parse(visible.map((r) => toEntry(r, contextEnv))));
-  },
-);
+  res.json(ListSecretsResponse.parse(visible.map((r) => toEntry(r, contextEnv))));
+});
 
 router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = CreateSecretParams.safeParse(req.params);
@@ -402,6 +409,31 @@ router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): 
     return;
   }
 
+  if (!isValidProjectSecretName(parsed.data.name)) {
+    res.status(400).json({
+      error:
+        "Secret names must start with a letter or underscore and contain only letters, numbers, and underscores.",
+    });
+    return;
+  }
+
+  const [duplicate] = await db
+    .select({ id: secretsTable.id })
+    .from(secretsTable)
+    .where(
+      and(
+        eq(secretsTable.projectId, params.data.id),
+        eq(secretsTable.name, parsed.data.name),
+        eq(secretsTable.environment, parsed.data.environment ?? "development"),
+      ),
+    );
+  if (duplicate) {
+    res.status(409).json({
+      error: `A secret named ${parsed.data.name} already exists for this environment.`,
+    });
+    return;
+  }
+
   const encrypted = encryptionService.encrypt(parsed.data.value);
 
   const [row] = await db
@@ -412,6 +444,10 @@ router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): 
       valueEncrypted: encrypted,
       environment: parsed.data.environment ?? "development",
       category: (parsed.data as { category?: string }).category ?? "other",
+      isPreviewSafe:
+        parsed.data.environment === "development" || parsed.data.environment === "testing"
+          ? ((parsed.data as { isPreviewSafe?: boolean }).isPreviewSafe ?? false)
+          : false,
     })
     .returning();
   if (!row) {
@@ -472,6 +508,7 @@ router.delete(
     }
 
     await db.delete(secretsTable).where(eq(secretsTable.id, secretId));
+    invalidateContainerSecretCache(projectId);
 
     void writeAuditLog({
       projectId,
@@ -510,44 +547,64 @@ router.patch(
   "/projects/:id/secrets/:secretId",
   requireProjectOwnership,
   async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const secretId = Number(req.params.secretId);
-    if (!Number.isFinite(secretId)) {
-      res.status(400).json({ error: "Invalid secret id" });
+    const params = UpdateSecretParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
       return;
     }
+    const parsed = UpdateSecretBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const { id: projectId, secretId } = params.data;
+    const body = parsed.data;
+    if (Object.keys(body).length === 0) {
+      res.status(400).json({ error: "Provide at least one secret field to update." });
+      return;
+    }
+
     const [existing] = await db.select().from(secretsTable).where(eq(secretsTable.id, secretId));
     if (!existing || existing.projectId !== projectId) {
       res.status(404).json({ error: "Secret not found" });
       return;
     }
 
-    const body = req.body as {
-      value?: string;
-      environment?: string;
-      category?: string;
-      verificationStatus?: string;
-      minRole?: string;
-      isPreviewSafe?: boolean;
-    };
+    if (body.environment && body.environment !== existing.environment) {
+      const [duplicate] = await db
+        .select({ id: secretsTable.id })
+        .from(secretsTable)
+        .where(
+          and(
+            eq(secretsTable.projectId, projectId),
+            eq(secretsTable.name, existing.name),
+            eq(secretsTable.environment, body.environment),
+          ),
+        );
+      if (duplicate) {
+        res.status(409).json({
+          error: `A secret named ${existing.name} already exists for this environment.`,
+        });
+        return;
+      }
+    }
+
     const updates: Partial<{
       valueEncrypted: string;
       environment: string;
       category: string;
-      verificationStatus: string;
       minRole: string;
       isPreviewSafe: boolean;
       updatedAt: ReturnType<typeof sql>;
     }> = { updatedAt: sql`now()` };
 
-    if (body.value) updates.valueEncrypted = encryptionService.encrypt(body.value);
+    if (body.value !== undefined) updates.valueEncrypted = encryptionService.encrypt(body.value);
     if (body.environment) updates.environment = body.environment;
-    if (body.category) updates.category = body.category;
-    if (body.verificationStatus) updates.verificationStatus = body.verificationStatus;
-    if (body.minRole && ["viewer", "member", "admin", "owner"].includes(body.minRole)) {
-      updates.minRole = body.minRole;
-    }
-    if (typeof body.isPreviewSafe === "boolean") {
+    if (body.category !== undefined) updates.category = body.category;
+    if (body.minRole) updates.minRole = body.minRole;
+    if (body.environment === "staging" || body.environment === "production") {
+      updates.isPreviewSafe = false;
+    } else if (typeof body.isPreviewSafe === "boolean") {
       updates.isPreviewSafe = body.isPreviewSafe;
     }
 
@@ -560,6 +617,7 @@ router.patch(
       res.status(500).json({ error: "Failed to update secret" });
       return;
     }
+    invalidateContainerSecretCache(projectId);
 
     void writeAuditLog({
       projectId,

@@ -294,6 +294,7 @@ import type {
   SecretAuditEntry,
   SecretEntry,
   SecretInput,
+  SecretUpdateInput,
   SecretVerifyResult,
   SecurityBadgeCount,
   SecurityBadgeCountsByProject,
@@ -8395,6 +8396,80 @@ export const useSaveMobileAppSettings = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getSaveMobileAppSettingsMutationOptions(options));
+    }
+
+export const getUpdateSecretUrl = (id: number,
+    secretId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/secrets/${secretId}`
+}
+
+/**
+ * @summary Update a write-only project secret
+ */
+export const updateSecret = async (id: number,
+    secretId: number,
+    secretUpdateInput: SecretUpdateInput, options?: RequestInit): Promise<SecretEntry> => {
+
+  return customFetch<SecretEntry>(getUpdateSecretUrl(id,secretId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      secretUpdateInput,)
+  }
+);}
+
+
+
+
+export const getUpdateSecretMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSecret>>, TError,{id: number;secretId: number;data: BodyType<SecretUpdateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSecret>>, TError,{id: number;secretId: number;data: BodyType<SecretUpdateInput>}, TContext> => {
+
+const mutationKey = ['updateSecret'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSecret>>, {id: number;secretId: number;data: BodyType<SecretUpdateInput>}> = (props) => {
+          const {id,secretId,data} = props ?? {};
+
+          return  updateSecret(id,secretId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateSecretMutationResult = NonNullable<Awaited<ReturnType<typeof updateSecret>>>
+    export type UpdateSecretMutationBody = BodyType<SecretUpdateInput>
+    export type UpdateSecretMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a write-only project secret
+ */
+export const useUpdateSecret = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSecret>>, TError,{id: number;secretId: number;data: BodyType<SecretUpdateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSecret>>,
+        TError,
+        {id: number;secretId: number;data: BodyType<SecretUpdateInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateSecretMutationOptions(options));
     }
 
 export const getDeleteSecretUrl = (id: number,

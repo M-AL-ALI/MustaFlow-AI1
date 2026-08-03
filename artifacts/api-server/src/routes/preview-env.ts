@@ -18,7 +18,6 @@ import {
   projectVersionsTable,
   projectFilesTable,
   previewSessionsTable,
-  secretsTable,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { getUnresolvedCriticalFindings } from "./readiness";
@@ -34,6 +33,7 @@ import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
 import { createHash, randomBytes } from "crypto";
 import { healthCheckPathForStack, waitForContainerHealthy } from "../lib/health-inject";
+import { getContainerSecretMap } from "../lib/container-secrets";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
@@ -653,30 +653,12 @@ async function startTestContainer(
   candidateId: number,
   files: Array<{ path: string; content: string | null; mimeType: string | null }>,
 ): Promise<void> {
-  const secretRows = await db
-    .select({
-      name: secretsTable.name,
-      valueEncrypted: secretsTable.valueEncrypted,
-      isPreviewSafe: secretsTable.isPreviewSafe,
-    })
-    .from(secretsTable)
-    .where(eq(secretsTable.projectId, projectId));
-
   const envVars: Record<string, string> = {
     PROJECT_ID: String(projectId),
     NODE_ENV: "testing",
     PORT: "3000",
+    ...(await getContainerSecretMap(projectId)),
   };
-
-  // Only inject preview-safe secrets into the test container.
-  for (const s of secretRows) {
-    if (!s.isPreviewSafe) continue;
-    try {
-      envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
-    } catch {
-      // skip malformed secrets
-    }
-  }
 
   const previewDbUrl = project.previewDbUrl
     ? encryptionService.decrypt(project.previewDbUrl)

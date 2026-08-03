@@ -14,19 +14,40 @@
  *   - container-logs.ts    (log-line redaction)
  */
 
-import { inArray, and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, secretsTable } from "@workspace/db";
 import { encryptionService } from "./encryption";
 import { logger } from "./logger";
+import {
+  buildRuntimeSecretMap,
+  redactSecretMapValues,
+  secretCanInjectAtRuntime,
+  type ProjectSecretRuntime,
+} from "./project-secret-policy";
+
+export { redactSecretMapValues, secretCanInjectAtRuntime } from "./project-secret-policy";
+export type { ProjectSecretRuntime } from "./project-secret-policy";
 
 export interface ContainerSecret {
   name: string;
   valueEncrypted: string;
   environment: string;
+  isPreviewSafe: boolean;
+  minRole: string;
 }
 
-/** Environments that are safe to inject into the dev container. */
-const DEV_ENVIRONMENTS = ["development", "testing"] as const;
+async function loadProjectSecretRows(projectId: number): Promise<ContainerSecret[]> {
+  return db
+    .select({
+      name: secretsTable.name,
+      valueEncrypted: secretsTable.valueEncrypted,
+      environment: secretsTable.environment,
+      isPreviewSafe: secretsTable.isPreviewSafe,
+      minRole: secretsTable.minRole,
+    })
+    .from(secretsTable)
+    .where(eq(secretsTable.projectId, projectId));
+}
 
 /**
  * Load secrets for a project that are scoped to development or testing AND
@@ -41,21 +62,8 @@ const DEV_ENVIRONMENTS = ["development", "testing"] as const;
  * in the Secrets panel warning banner so users can remediate).
  */
 export async function getContainerSecrets(projectId: number): Promise<ContainerSecret[]> {
-  return db
-    .select({
-      name: secretsTable.name,
-      valueEncrypted: secretsTable.valueEncrypted,
-      environment: secretsTable.environment,
-    })
-    .from(secretsTable)
-    .where(
-      and(
-        eq(secretsTable.projectId, projectId),
-        inArray(secretsTable.environment, DEV_ENVIRONMENTS as unknown as string[]),
-        eq(secretsTable.isPreviewSafe, true),
-        eq(secretsTable.minRole, "viewer"),
-      ),
-    );
+  const rows = await loadProjectSecretRows(projectId);
+  return rows.filter((row) => secretCanInjectAtRuntime(row, "preview"));
 }
 
 /**
@@ -64,13 +72,35 @@ export async function getContainerSecrets(projectId: number): Promise<ContainerS
  * Decryption errors for individual secrets are caught and skipped.
  */
 export async function getContainerSecretMap(projectId: number): Promise<Record<string, string>> {
-  const rows = await getContainerSecrets(projectId);
+  return getProjectSecretMap(projectId, "preview");
+}
+
+/** Build-time environment for server-side build and validation containers. */
+export async function getBuildSecretMap(projectId: number): Promise<Record<string, string>> {
+  return getProjectSecretMap(projectId, "build");
+}
+
+/** Published server runtime environment. Never includes draft/test values. */
+export async function getProductionSecretMap(projectId: number): Promise<Record<string, string>> {
+  return getProjectSecretMap(projectId, "production");
+}
+
+export async function getProjectSecretMap(
+  projectId: number,
+  runtime: ProjectSecretRuntime,
+): Promise<Record<string, string>> {
+  const rows = await loadProjectSecretRows(projectId);
+  return buildRuntimeSecretMap(rows, runtime, (value) => encryptionService.decrypt(value));
+}
+
+async function getAllProjectSecretMap(projectId: number): Promise<Record<string, string>> {
+  const rows = await loadProjectSecretRows(projectId);
   const env: Record<string, string> = {};
   for (const row of rows) {
     try {
       env[row.name] = encryptionService.decrypt(row.valueEncrypted);
     } catch {
-      // skip secrets that can't be decrypted
+      // skip secrets that cannot be decrypted
     }
   }
   return env;
@@ -103,7 +133,10 @@ export async function getCachedContainerSecretMap(
   }
 
   try {
-    const secrets = await getContainerSecretMap(projectId);
+    // Redaction deliberately covers every project secret, not only values that
+    // are eligible for the current preview container. A production value that
+    // accidentally reaches an error string must still be removed.
+    const secrets = await getAllProjectSecretMap(projectId);
     secretCache.set(projectId, { secrets, expiresAt: now + CACHE_TTL_MS });
     return secrets;
   } catch (err) {
@@ -120,8 +153,15 @@ export function invalidateContainerSecretCache(projectId: number): void {
   secretCache.delete(projectId);
 }
 
+/** Decrypted literals used only for exact-match redaction at persistence boundaries. */
+export async function getProjectSecretLiterals(projectId: number): Promise<string[]> {
+  const secrets = await getCachedContainerSecretMap(projectId);
+  if (secrets === null) return [];
+  return Object.values(secrets).filter((value) => value.length > 0);
+}
+
 /**
- * Redact any secret value (≥ 8 chars) found in `line`, replacing it with
+ * Redact any non-empty secret value found in `line`, replacing it with
  * `[REDACTED:<NAME>]`. Returns the redacted string.
  *
  * If secrets cannot be loaded, prepends `[redaction-unavailable] ` as a
@@ -134,12 +174,5 @@ export async function redactSecretValuesInLog(projectId: number, line: string): 
     return `[redaction-unavailable] ${line}`;
   }
 
-  let redacted = line;
-  for (const [name, value] of Object.entries(secrets)) {
-    if (value.length < 8) continue; // too short to reliably redact
-    if (redacted.includes(value)) {
-      redacted = redacted.split(value).join(`[REDACTED:${name}]`);
-    }
-  }
-  return redacted;
+  return redactSecretMapValues(line, secrets);
 }

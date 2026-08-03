@@ -1,5 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Lock,
   LockOpen,
@@ -27,9 +27,12 @@ import {
   getListSecretsQueryKey,
 } from "@workspace/api-client-react";
 import type { SecretEntry } from "@workspace/api-client-react";
+import { parseDotEnvSecrets, parseJsonSecrets } from "../../projects/components/secrets-import";
 
 interface SecretsPanelProps {
   projectId: number;
+  prefillName?: string;
+  onPrefillConsumed?: () => void;
 }
 
 type TabId = "project" | "account";
@@ -95,13 +98,13 @@ function SecretRow({
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!editValue.trim()) return;
+    if (!editValue) return;
     setSaving(true);
     try {
       const res = await authFetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: editValue.trim() }),
+        body: JSON.stringify({ value: editValue }),
         credentials: "include",
       });
       if (res.ok) {
@@ -136,6 +139,7 @@ function SecretRow({
               secret.masked
             )}
           </div>
+          <div className="text-[9px] capitalize text-muted-foreground/70">{secret.environment}</div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {canTogglePreview && (
@@ -220,7 +224,7 @@ function SecretRow({
             />
             <button
               onClick={() => void handleSave()}
-              disabled={!editValue.trim() || saving}
+              disabled={!editValue || saving}
               className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded disabled:opacity-40 hover:bg-primary/90 transition-colors"
             >
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
@@ -240,31 +244,38 @@ function SecretRow({
 
 function AddSecretForm({
   projectId,
+  initialName,
   onAdded,
   onCancel,
 }: {
   projectId: number;
+  initialName?: string;
   onAdded: () => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName ?? "");
   const [value, setValue] = useState("");
+  const [environment, setEnvironment] = useState<"development" | "testing" | "production">(
+    "development",
+  );
+  const [isPreviewSafe, setIsPreviewSafe] = useState(true);
   const createSecret = useCreateSecret();
 
   const handleSave = useCallback(() => {
-    if (!name.trim() || !value.trim()) return;
+    if (!name.trim() || !value) return;
     createSecret.mutate(
       {
         id: projectId,
         data: {
           name: name.trim().toUpperCase().replace(/\s/g, "_"),
-          value: value.trim(),
-          environment: "development",
+          value,
+          environment,
+          isPreviewSafe: environment !== "production" && isPreviewSafe,
         },
       },
       { onSuccess: onAdded },
     );
-  }, [name, value, createSecret, projectId, onAdded]);
+  }, [name, value, environment, isPreviewSafe, createSecret, projectId, onAdded]);
 
   return (
     <div className="border border-primary/30 rounded-md bg-primary/5 p-3 space-y-2">
@@ -289,10 +300,36 @@ function AddSecretForm({
         placeholder="Secret value…"
         className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono outline-none focus:border-primary/50"
       />
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label className="space-y-1 text-[10px] text-muted-foreground">
+          <span>Available in</span>
+          <select
+            value={environment}
+            onChange={(event) =>
+              setEnvironment(event.target.value as "development" | "testing" | "production")
+            }
+            className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+          >
+            <option value="development">Build and preview</option>
+            <option value="testing">Testing and preview</option>
+            <option value="production">Published app</option>
+          </select>
+        </label>
+        {environment !== "production" && (
+          <label className="flex items-center gap-2 self-end rounded border border-border px-2 py-1.5 text-[10px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={isPreviewSafe}
+              onChange={(event) => setIsPreviewSafe(event.target.checked)}
+            />
+            Use this value while building and previewing
+          </label>
+        )}
+      </div>
       <div className="flex gap-1.5">
         <button
           onClick={handleSave}
-          disabled={!name.trim() || !value.trim() || createSecret.isPending}
+          disabled={!name.trim() || !value || createSecret.isPending}
           className="flex-1 py-1.5 text-xs bg-primary text-primary-foreground rounded disabled:opacity-40 hover:bg-primary/90 transition-colors font-medium"
         >
           {createSecret.isPending ? (
@@ -314,15 +351,21 @@ function AddSecretForm({
 
 function BulkEditModal({
   projectId,
+  existingSecrets,
   onClose,
   onSaved,
 }: {
   projectId: number;
+  existingSecrets: SecretEntry[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [mode, setMode] = useState<"json" | "env">("env");
   const [text, setText] = useState("");
+  const [environment, setEnvironment] = useState<"development" | "testing" | "production">(
+    "development",
+  );
+  const [isPreviewSafe, setIsPreviewSafe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -330,40 +373,38 @@ function BulkEditModal({
     setError(null);
     setSaving(true);
     try {
-      const pairs: Array<{ name: string; value: string }> = [];
-      if (mode === "env") {
-        for (const line of text.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith("#")) continue;
-          const idx = trimmed.indexOf("=");
-          if (idx < 1) continue;
-          const k = trimmed.slice(0, idx).trim();
-          const v = trimmed
-            .slice(idx + 1)
-            .trim()
-            .replace(/^["']|["']$/g, "");
-          if (k) pairs.push({ name: k, value: v });
-        }
-      } else {
-        const parsed = JSON.parse(text) as Record<string, string>;
-        for (const [k, v] of Object.entries(parsed)) {
-          if (typeof k === "string" && typeof v === "string") {
-            pairs.push({ name: k, value: v });
-          }
-        }
-      }
-      if (pairs.length === 0) {
-        setError("No valid secrets found in the input.");
-        setSaving(false);
-        return;
-      }
+      const pairs = mode === "env" ? parseDotEnvSecrets(text) : parseJsonSecrets(text);
       for (const pair of pairs) {
-        await authFetch(`/api/projects/${projectId}/secrets`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...pair, environment: "development" }),
-          credentials: "include",
-        });
+        const existing = existingSecrets.find(
+          (secret) => secret.name === pair.name && secret.environment === environment,
+        );
+        const response = await authFetch(
+          existing
+            ? `/api/projects/${projectId}/secrets/${existing.id}`
+            : `/api/projects/${projectId}/secrets`,
+          {
+            method: existing ? "PATCH" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+              existing
+                ? {
+                    value: pair.value,
+                    environment,
+                    isPreviewSafe: environment !== "production" && isPreviewSafe,
+                  }
+                : {
+                    ...pair,
+                    environment,
+                    isPreviewSafe: environment !== "production" && isPreviewSafe,
+                  },
+            ),
+            credentials: "include",
+          },
+        );
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? `Could not save ${pair.name}.`);
+        }
       }
       onSaved();
       onClose();
@@ -372,7 +413,7 @@ function BulkEditModal({
     } finally {
       setSaving(false);
     }
-  }, [text, mode, projectId, onSaved, onClose]);
+  }, [text, mode, projectId, existingSecrets, environment, isPreviewSafe, onSaved, onClose]);
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -422,6 +463,32 @@ function BulkEditModal({
             rows={8}
             className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono outline-none focus:border-primary/50 resize-none"
           />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="space-y-1 text-[10px] text-muted-foreground">
+              <span>Available in</span>
+              <select
+                value={environment}
+                onChange={(event) =>
+                  setEnvironment(event.target.value as "development" | "testing" | "production")
+                }
+                className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+              >
+                <option value="development">Build and preview</option>
+                <option value="testing">Testing and preview</option>
+                <option value="production">Published app</option>
+              </select>
+            </label>
+            {environment !== "production" && (
+              <label className="flex items-center gap-2 self-end rounded border border-border px-2 py-1.5 text-[10px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={isPreviewSafe}
+                  onChange={(event) => setIsPreviewSafe(event.target.checked)}
+                />
+                Use in build and preview
+              </label>
+            )}
+          </div>
           {error && (
             <div className="flex items-start gap-1.5 text-xs text-red-400">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -449,10 +516,11 @@ function BulkEditModal({
   );
 }
 
-export function SecretsPanel({ projectId }: SecretsPanelProps) {
+export function SecretsPanel({ projectId, prefillName, onPrefillConsumed }: SecretsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("project");
   const [showAdd, setShowAdd] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [initialName, setInitialName] = useState<string>();
   const queryClient = useQueryClient();
 
   const { data: secrets = [], isLoading } = useListSecrets(projectId, {
@@ -463,11 +531,19 @@ export function SecretsPanel({ projectId }: SecretsPanelProps) {
     void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
   }, [queryClient, projectId]);
 
+  useEffect(() => {
+    if (!prefillName) return;
+    setInitialName(prefillName);
+    setShowAdd(true);
+    onPrefillConsumed?.();
+  }, [prefillName, onPrefillConsumed]);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {showBulkEdit && (
         <BulkEditModal
           projectId={projectId}
+          existingSecrets={secrets as SecretEntry[]}
           onClose={() => setShowBulkEdit(false)}
           onSaved={invalidate}
         />
@@ -521,15 +597,20 @@ export function SecretsPanel({ projectId }: SecretsPanelProps) {
             {showAdd && (
               <AddSecretForm
                 projectId={projectId}
+                initialName={initialName}
                 onAdded={() => {
+                  setInitialName(undefined);
                   setShowAdd(false);
                   invalidate();
                 }}
-                onCancel={() => setShowAdd(false)}
+                onCancel={() => {
+                  setInitialName(undefined);
+                  setShowAdd(false);
+                }}
               />
             )}
 
-            {/* Banner: secrets that are not marked preview-safe are excluded from the container */}
+            {/* Secrets that are not marked preview-safe stay outside build and preview. */}
             {!isLoading &&
               !showAdd &&
               (() => {
@@ -544,8 +625,8 @@ export function SecretsPanel({ projectId }: SecretsPanelProps) {
                     <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                     <span>
                       <span className="font-medium">
-                        {notSafe.length} secret{notSafe.length !== 1 ? "s" : ""} not injected into
-                        container
+                        {notSafe.length} secret{notSafe.length !== 1 ? "s" : ""} not available in
+                        build and preview
                       </span>{" "}
                       — the agent cannot access them. Enable &ldquo;Preview safe&rdquo; on each
                       secret from the secret settings to allow injection.
@@ -565,8 +646,10 @@ export function SecretsPanel({ projectId }: SecretsPanelProps) {
                 </div>
                 <div>
                   <div className="text-xs font-medium text-foreground mb-0.5">No secrets yet</div>
-                  <div className="text-[11px] text-muted-foreground max-w-[160px] leading-relaxed">
-                    Add secrets to use as environment variables in your project.
+                  <div className="text-[11px] text-muted-foreground max-w-[250px] leading-relaxed">
+                    Secrets keep API keys and private settings out of your code. Your app can use
+                    them while building, previewing, or after publishing without showing the saved
+                    value again.
                   </div>
                 </div>
                 <button
