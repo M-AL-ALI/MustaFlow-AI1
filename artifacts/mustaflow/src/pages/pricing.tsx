@@ -726,7 +726,7 @@ export default function PricingPage() {
           <p className="text-center text-xs text-muted-foreground mt-4">
             Each build has one flat mode price that includes its planning, coding, review and checks
             — no hidden build-side charges. Manage credits and spending limits from your{" "}
-            <Link href="/billing/legacy" className="text-primary hover:underline">
+            <Link href="/billing" className="text-primary hover:underline">
               billing dashboard
             </Link>
             .

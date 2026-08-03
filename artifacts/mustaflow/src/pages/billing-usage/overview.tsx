@@ -9,7 +9,6 @@ import {
   CreditCard,
   FileText,
   Lock,
-  Package,
   RefreshCw,
   Sparkles,
 } from "lucide-react";
@@ -353,21 +352,7 @@ export function OverviewSection() {
                 <AlertTriangle className="mr-1.5 h-3.5 w-3.5" /> Spending limits
               </Link>
             </Button>
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="justify-start"
-              data-testid="legacy-packs-link"
-            >
-              <Link href="/billing/legacy">
-                <Package className="mr-1.5 h-3.5 w-3.5" /> Credit packs
-              </Link>
-            </Button>
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            One-time top-up credit packs and workspace plans live on the legacy billing page.
-          </p>
         </SectionCard>
 
         <SectionCard title="Recent billing activity" testId="overview-notifications">

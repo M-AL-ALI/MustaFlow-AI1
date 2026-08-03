@@ -171,7 +171,7 @@ const CATEGORIES: IntegrationCategory[] = [
         status: "active",
         authType: "api-key",
         envVars: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER"],
-        note: "Active. Credit top-up checkout uses Stripe. Add project-level Stripe keys for your generated apps.",
+        note: "Active. NabuFlow subscriptions use Stripe. Add project-level Stripe keys for your generated apps.",
         tags: ["payments", "subscriptions"],
         snippet: `import Stripe from 'stripe';\nconst stripe = new Stripe(process.env.STRIPE_SECRET_KEY);`,
       },

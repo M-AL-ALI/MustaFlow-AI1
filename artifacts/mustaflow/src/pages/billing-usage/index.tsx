@@ -79,11 +79,11 @@ export default function BillingUsagePage() {
   const rawSection = params?.section ?? "";
   const known = SECTIONS.some((s) => s.slug === rawSection);
 
-  // Old deep links like /billing?tier=starter belong to the legacy
-  // workspace-subscription page — preserve their meaning.
+  // Old tier deep links now land on the current plan picker. The retired
+  // legacy page sold credits that do not fund NabuFlow builds.
   const tier = new URLSearchParams(search).get("tier");
   if (!rawSection && tier) {
-    return <Redirect to={`/billing/legacy?tier=${encodeURIComponent(tier)}`} replace />;
+    return <Redirect to="/billing/plans" replace />;
   }
   if (rawSection && !known) {
     return <Redirect to="/billing" replace />;

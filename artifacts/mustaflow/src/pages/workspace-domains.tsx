@@ -12,7 +12,6 @@ import {
   Trash2,
   Users,
   Link2,
-  Zap,
   AlertCircle,
   ShieldCheck,
 } from "lucide-react";
@@ -362,30 +361,19 @@ export default function WorkspaceDomainsPage() {
               </div>
             )}
             {overQuota && (
-              <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="mt-3 flex items-center gap-2">
                 <div className="flex items-center gap-2 text-xs text-red-400">
                   <AlertCircle size={13} />
-                  You've hit your domain limit. Upgrade to claim more.
+                  You've hit your domain limit. Plan changes are managed through Billing &amp;
+                  Usage.
                 </div>
-                <Link
-                  href="/billing/legacy"
-                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors"
-                >
-                  <Zap size={12} /> Upgrade plan
-                </Link>
               </div>
             )}
             {!overQuota && quota.plan === "free" && (
-              <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="mt-3">
                 <div className="text-xs text-neutral-500">
-                  Need more domains or teammate roles? Upgrade for higher limits.
+                  Domain and teammate limits are shown here for your current workspace plan.
                 </div>
-                <Link
-                  href="/billing/legacy"
-                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded-lg text-xs font-medium text-neutral-200 transition-colors"
-                >
-                  <Zap size={12} /> See plans
-                </Link>
               </div>
             )}
           </div>
