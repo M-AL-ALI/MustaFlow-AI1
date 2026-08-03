@@ -748,7 +748,7 @@ export async function handleStripeWebhook(
   try {
     switch (event.type) {
       case "checkout.session.completed":
-        await handleCheckoutCompleted(stripe, event as any);
+        await handleCheckoutCompleted(stripe, event as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         break;
       case "invoice.paid": {
         // NabuFlow invoices (namespaced subscription on the SHARED customer)
@@ -760,13 +760,13 @@ export async function handleStripeWebhook(
           await import("../lib/nabuflow-org");
         const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaid } =
           await import("../lib/nabuflow-billing");
-        const invoice = event.data?.object as any;
+        const invoice = event.data?.object as any; // eslint-disable-line @typescript-eslint/no-explicit-any
         if (await isNabuflowOrgInvoiceEvent(invoice)) {
           await handleNabuflowOrgInvoicePaid(invoice);
         } else if (await isNabuflowInvoiceEvent(invoice)) {
           await handleNabuflowInvoicePaid(invoice);
         } else {
-          await handleInvoicePaid(event as any);
+          await handleInvoicePaid(event as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         }
         break;
       }
@@ -775,36 +775,36 @@ export async function handleStripeWebhook(
           await import("../lib/nabuflow-org");
         const { isNabuflowInvoiceEvent, handleNabuflowInvoicePaymentFailed } =
           await import("../lib/nabuflow-billing");
-        const invoice = event.data?.object as any;
+        const invoice = event.data?.object as any; // eslint-disable-line @typescript-eslint/no-explicit-any
         if (await isNabuflowOrgInvoiceEvent(invoice)) {
           await handleNabuflowOrgInvoicePaymentFailed(invoice);
         } else if (await isNabuflowInvoiceEvent(invoice)) {
           await handleNabuflowInvoicePaymentFailed(invoice);
         } else {
-          await handleInvoicePaymentFailed(event as any);
+          await handleInvoicePaymentFailed(event as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         }
         break;
       }
       case "customer.subscription.updated":
-        await handleSubscriptionUpdated(event as any);
+        await handleSubscriptionUpdated(event as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         break;
       case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event as any);
+        await handleSubscriptionDeleted(event as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         break;
       // NabuFlow card-on-file state is webhook-driven (never client calls).
       case "payment_method.attached": {
         const { handleNabuflowPaymentMethodAttached } = await import("../lib/nabuflow-billing");
-        await handleNabuflowPaymentMethodAttached(event.data?.object as any);
+        await handleNabuflowPaymentMethodAttached(event.data?.object as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         break;
       }
       case "payment_method.detached": {
         const { handleNabuflowPaymentMethodDetached } = await import("../lib/nabuflow-billing");
-        await handleNabuflowPaymentMethodDetached(event.data?.object as any);
+        await handleNabuflowPaymentMethodDetached(event.data?.object as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         break;
       }
       case "setup_intent.succeeded": {
         const { handleNabuflowSetupIntentSucceeded } = await import("../lib/nabuflow-billing");
-        await handleNabuflowSetupIntentSucceeded(event.data?.object as any);
+        await handleNabuflowSetupIntentSucceeded(event.data?.object as any); // eslint-disable-line @typescript-eslint/no-explicit-any
         break;
       }
       default:

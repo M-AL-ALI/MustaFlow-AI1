@@ -23,7 +23,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = join(__dirname, "..", "dist", "public");
 const BASE_URL = "https://mustaflow.app";
 const SITE_NAME = "MustaFlow AI";
-const DEFAULT_IMAGE = `${BASE_URL}/opengraph.jpg`;
 
 interface RouteMetadata {
   path: string;
@@ -574,31 +573,6 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
   },
 ];
 
-function buildHead(meta: RouteMetadata): string {
-  const canonicalUrl = `${BASE_URL}${meta.path}`;
-  const image = meta.image ?? DEFAULT_IMAGE;
-  const robots = meta.noIndex ? "noindex, nofollow" : "index, follow";
-
-  return `
-    <title>${meta.title}</title>
-    <meta name="description" content="${meta.description}" />
-    <link rel="canonical" href="${canonicalUrl}" />
-    <meta name="robots" content="${robots}" />
-    <meta property="og:title" content="${meta.title}" />
-    <meta property="og:description" content="${meta.description}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="${canonicalUrl}" />
-    <meta property="og:site_name" content="${SITE_NAME}" />
-    <meta property="og:locale" content="en_US" />
-    <meta property="og:image" content="${image}" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${meta.title}" />
-    <meta name="twitter:description" content="${meta.description}" />
-    <meta name="twitter:image" content="${image}" />`.trim();
-}
-
 // Replaces the entire <head> metadata block (title, description, OG, Twitter,
 // canonical, robots) with route-specific values. Keeps everything else
 // (charset, viewport, icons, fonts, scripts) intact.
@@ -606,8 +580,6 @@ function buildHead(meta: RouteMetadata): string {
 // appended just before </head> so crawlers receive structured data in the
 // initial HTML response — no JavaScript execution required.
 function injectMetadata(html: string, meta: RouteMetadata): string {
-  const newHead = buildHead(meta);
-
   // Replace the title tag
   html = html.replace(/<title>[^<]*<\/title>/, `<title>${meta.title}</title>`);
 
@@ -691,12 +663,14 @@ function prerender(): void {
   // /u/:username) that never need Clerk.
   // DO NOT use public.html here — it overwrites index.html with a bundle that
   // excludes Clerk, breaking all authenticated routes (Ora, billing, etc.).
-  let indexHtmlPath = join(distDir, "index.html");
+  const indexHtmlPath = join(distDir, "index.html");
   let indexHtml: string;
   try {
     indexHtml = readFileSync(indexHtmlPath, "utf-8");
+    // eslint-disable-next-line no-console
     console.log("[prerender] Using index.html as template (full authenticated app entry).");
   } catch {
+    // eslint-disable-next-line no-console
     console.error(`[prerender] dist/public/index.html not found — run vite build first`);
     process.exit(1);
   }
@@ -711,10 +685,12 @@ function prerender(): void {
 
     mkdirSync(outDir, { recursive: true });
     writeFileSync(outFile, routeHtml, "utf-8");
+    // eslint-disable-next-line no-console
     console.log(`[prerender] ${route.path} → ${outFile.replace(distDir, "dist/public")}`);
     rendered++;
   }
 
+  // eslint-disable-next-line no-console
   console.log(`[prerender] Done — ${rendered} routes rendered.`);
 }
 
