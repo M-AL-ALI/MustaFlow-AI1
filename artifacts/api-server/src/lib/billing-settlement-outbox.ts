@@ -114,7 +114,7 @@ export interface SettlementHandlers {
 
 const defaultHandlers: SettlementHandlers = {
   async creditDeduction(record) {
-    const { deductCreditsAtomic } = await import("../routes/credits");
+    const { deductCreditsAtomic } = await import("../lib/credits");
     if (!record.owner_id || !record.amount) throw new Error("credit settlement payload incomplete");
     const opts = record.context["opts"] as Parameters<typeof deductCreditsAtomic>[2] | undefined;
     if (!opts) throw new Error("credit settlement options missing");
@@ -294,16 +294,13 @@ export async function settleCreditsDurably(input: {
   amount: number;
   taskId: number;
   reservation?: boolean;
-  opts: Omit<
-    Parameters<typeof import("../routes/credits").deductCreditsAtomic>[2],
-    "settlementKey"
-  >;
+  opts: Omit<Parameters<typeof import("../lib/credits").deductCreditsAtomic>[2], "settlementKey">;
 }): Promise<
-  Awaited<ReturnType<typeof import("../routes/credits").deductCreditsAtomic>> | { deferred: true }
+  Awaited<ReturnType<typeof import("../lib/credits").deductCreditsAtomic>> | { deferred: true }
 > {
   const dedupeKey = taskCreditSettlementKey(input.taskId, input.opts.source ?? input.opts.type);
   try {
-    const { deductCreditsAtomic } = await import("../routes/credits");
+    const { deductCreditsAtomic } = await import("../lib/credits");
     const result = await deductCreditsAtomic(input.ownerId, input.amount, {
       ...input.opts,
       settlementKey: dedupeKey,

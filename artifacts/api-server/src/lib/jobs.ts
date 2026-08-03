@@ -63,7 +63,7 @@ import { logger } from "./logger";
 import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
-import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
+import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
