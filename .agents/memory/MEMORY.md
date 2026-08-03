@@ -1,3 +1,4 @@
+- [CI typeof-import type inclusion](ci-typeof-import-type-inclusion.md) — `typeof import("../routes/foo")` in a type position is static; drags the file into any tsconfig. Fix: move shared fns to lib, never use typeof-import in lib signatures.
 - [E2E_TEST_ENABLED stub in approval tests](e2e-test-enabled-stub-in-approval-tests.md) — stub E2E_TEST_ENABLED="" in beforeEach for any test asserting createPrompt fired; env is true globally in Replit, bypassing gates silently.
 - [admin.ts merge revert pattern](admin-ts-merge-revert-pattern.md) — task-agent merges repeatedly revert 8 known fixes; always typecheck+lint before firing gate after any auto-merge of admin.ts.
 - [EAS build #55 activity-trace](eas-build-55-trace.md) — build d88e492e queued 2026-07-25; autoIncrement:false pin pattern; final GitHub HEAD 21a22366.
