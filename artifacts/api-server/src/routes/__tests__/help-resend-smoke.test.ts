@@ -212,7 +212,7 @@ describe("POST /help/support/escalate — Resend email delivery", () => {
 
     const res = await request(app)
       .post("/help/support/escalate")
-      .send({ subject: "no email configured", transcript: TRANSCRIPT });
+      .send({ subject: "default recipient test", transcript: TRANSCRIPT });
 
     expect(res.status).toBe(201);
     expect(res.body.emailStatus).toBe("sent");
