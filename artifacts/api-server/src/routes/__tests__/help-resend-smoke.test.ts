@@ -204,20 +204,23 @@ describe("POST /help/support/escalate — Resend email delivery", () => {
     expect(res.body.emailStatus).toBe("failed");
   });
 
-  it("saves ticket with emailStatus 'skipped' when SUPPORT_EMAIL is not set, returns 201", async () => {
-    // SUPPORT_EMAIL is deleted in beforeEach
+  it("falls back to support@mustaflow.com when SUPPORT_EMAIL is not set, emails and returns 201", async () => {
+    // SUPPORT_EMAIL is deleted in beforeEach — the code defaults to support@mustaflow.com
     authedUser();
     dbResults.push([{ id: 3 }]); // insert
+    dbResults.push([]); // update emailStatus
     dbResults.push([]); // broadcastNewTicket
 
     const res = await request(app)
       .post("/help/support/escalate")
-      .send({ subject: "no email configured", transcript: TRANSCRIPT });
+      .send({ subject: "default recipient test", transcript: TRANSCRIPT });
 
     expect(res.status).toBe(201);
-    expect(res.body.emailStatus).toBe("skipped");
-    // sendEmailWithStatus must NOT be called when SUPPORT_EMAIL is absent
-    expect(vi.mocked(sendEmailWithStatus)).not.toHaveBeenCalled();
+    expect(res.body.emailStatus).toBe("sent");
+    // sendEmailWithStatus MUST be called with the default support address
+    const sendCall = vi.mocked(sendEmailWithStatus).mock.calls[0];
+    expect(sendCall).toBeDefined();
+    expect(sendCall?.[0].to).toBe("support@mustaflow.com");
   });
 });
 

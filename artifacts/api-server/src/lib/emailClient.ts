@@ -46,7 +46,7 @@ export async function sendEmail(opts: {
     return;
   }
   try {
-    const from = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+    const from = process.env.SMTP_FROM ?? "support@mustaflow.com";
     const client = createClient();
     const { error } = await client.emails.send({
       from,
@@ -91,7 +91,7 @@ export async function sendEmailWithStatus(opts: {
     return "skipped";
   }
   try {
-    const from = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+    const from = process.env.SMTP_FROM ?? "support@mustaflow.com";
     const client = createClient();
     const { error } = await client.emails.send({
       from,
