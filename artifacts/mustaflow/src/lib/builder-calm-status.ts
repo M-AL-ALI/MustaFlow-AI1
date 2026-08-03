@@ -20,10 +20,13 @@ export const CALM_STATUS_VOCABULARY = {
 export function getCalmBuilderStatus({
   phase,
   fileCount = 0,
+  previewSyncPending = false,
 }: {
   phase: CalmBuilderPhase;
   fileCount?: number;
+  previewSyncPending?: boolean;
 }): string {
+  if (previewSyncPending) return "Updating preview\u2026";
   if (phase === "building" && fileCount > 0) {
     return `Building — ${fileCount} file${fileCount === 1 ? "" : "s"} so far`;
   }

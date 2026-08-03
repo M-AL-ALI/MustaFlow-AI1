@@ -286,9 +286,29 @@ router.patch(
       void (async () => {
         try {
           const { publishProjectFilesChanged } = await import("../lib/preview-events");
+          const revisionFiles = await db
+            .select({
+              path: projectFilesTable.path,
+              content: projectFilesTable.content,
+              mimeType: projectFilesTable.mimeType,
+            })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, projectId));
+          const [revision] = await db
+            .insert(projectVersionsTable)
+            .values({
+              projectId,
+              label: `Manual save: ${updated.path}`.slice(0, 200),
+              note: "Authoritative preview revision after a manual file save.",
+              changelogEntry: `Updated ${updated.path}`.slice(0, 500),
+              filesSnapshot: revisionFiles,
+            })
+            .returning({ id: projectVersionsTable.id });
+          if (!revision?.id) throw new Error("Manual-save preview revision was not created");
           publishProjectFilesChanged(
             projectId,
-            [{ path: updated.path, content: updated.content }],
+            revision.id,
+            revisionFiles.map((file) => ({ path: file.path, content: file.content })),
             [],
             "manual-save",
           );

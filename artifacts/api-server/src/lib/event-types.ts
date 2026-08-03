@@ -51,6 +51,8 @@ export type EventType = (typeof EventTypes)[keyof typeof EventTypes];
  */
 export interface ProjectFilesChangedPayload {
   projectId: number;
+  /** Monotonic committed project version that this live payload represents. */
+  revision: number;
   /** Paths of files that were written (created or updated). */
   changedPaths: string[];
   /** Map of path → content for all changed files. */
@@ -71,4 +73,6 @@ export interface ProjectFilesChangedPayload {
   requiresInstall: boolean;
   /** True when vite.config.*, tsconfig.*, or .env* changed. */
   requiresRestart: boolean;
+  /** Backend emission timestamp used by preview reconciliation diagnostics. */
+  generatedAt: string;
 }

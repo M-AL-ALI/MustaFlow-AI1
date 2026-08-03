@@ -1,11 +1,6 @@
 import type { ProjectFilesChangedPayload } from "@/lib/event-types";
 
-const PACKAGE_FILES = new Set([
-  "package.json",
-  "package-lock.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-]);
+const PACKAGE_FILES = new Set(["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"]);
 
 const RESTART_PATTERNS = [
   /^vite\.config\.[jt]s$/,
@@ -41,6 +36,11 @@ export interface WebContainerSyncOptions {
   maxLifecycleActions?: number;
   lifecycleWindowMs?: number;
   now?: () => number;
+  onTiming?: (
+    phase: "sync_finish" | "webcontainer_ready",
+    payload: ProjectFilesChangedPayload,
+    timestamp: string,
+  ) => void;
 }
 
 export interface WebContainerSyncResult {
@@ -105,12 +105,15 @@ export function mergeProjectFilePayloads(
 
   return {
     projectId: incoming.projectId,
+    revision: Math.max(current.revision, incoming.revision),
     operationType: incoming.operationType,
     changedPaths: Array.from(new Set([...current.changedPaths, ...incoming.changedPaths])),
     removedPaths: Array.from(removedPaths),
     files,
     requiresInstall: current.requiresInstall || incoming.requiresInstall,
     requiresRestart: current.requiresRestart || incoming.requiresRestart,
+    generatedAt: incoming.generatedAt,
+    authoritative: current.authoritative === true || incoming.authoritative === true,
   };
 }
 
@@ -124,6 +127,7 @@ export class WebContainerSyncController {
   private readonly maxLifecycleActions: number;
   private readonly lifecycleWindowMs: number;
   private readonly now: () => number;
+  private readonly onTiming: WebContainerSyncOptions["onTiming"];
   private readonly knownHashes = new Map<string, string>();
   private readonly lifecycleActionTimes: number[] = [];
   private pendingPayload: ProjectFilesChangedPayload | null = null;
@@ -142,6 +146,7 @@ export class WebContainerSyncController {
     this.maxLifecycleActions = options.maxLifecycleActions ?? 3;
     this.lifecycleWindowMs = options.lifecycleWindowMs ?? 60_000;
     this.now = options.now ?? Date.now;
+    this.onTiming = options.onTiming;
   }
 
   seed(files: Array<{ path: string; content: string }>): void {
@@ -238,9 +243,7 @@ export class WebContainerSyncController {
     return true;
   }
 
-  private async applyPayload(
-    payload: ProjectFilesChangedPayload,
-  ): Promise<WebContainerSyncResult> {
+  private async applyPayload(payload: ProjectFilesChangedPayload): Promise<WebContainerSyncResult> {
     const writtenPaths: string[] = [];
     const removedPaths: string[] = [];
     const skippedPaths: string[] = [];
@@ -261,7 +264,12 @@ export class WebContainerSyncController {
       }
     }
 
-    for (const path of payload.removedPaths) {
+    const authoritativeRemovedPaths = payload.authoritative
+      ? [...this.knownHashes.keys()].filter((path) => !(path in payload.files))
+      : [];
+    const pathsToRemove = new Set([...payload.removedPaths, ...authoritativeRemovedPaths]);
+
+    for (const path of pathsToRemove) {
       if (!this.knownHashes.has(path)) {
         skippedPaths.push(path);
         continue;
@@ -275,6 +283,8 @@ export class WebContainerSyncController {
         // A later payload can retry the removal because the known hash remains.
       }
     }
+
+    this.onTiming?.("sync_finish", payload, new Date(this.now()).toISOString());
 
     const changedPaths = [...writtenPaths, ...removedPaths];
     const needsInstall = changedPaths.some(isPackageDependencyPath);
@@ -300,6 +310,8 @@ export class WebContainerSyncController {
         await this.adapter.restartDevServer();
       }
     }
+
+    this.onTiming?.("webcontainer_ready", payload, new Date(this.now()).toISOString());
 
     return {
       writtenPaths,

@@ -426,6 +426,8 @@ export * from './projectKind';
 export * from './projectPlatform';
 export * from './projectPolicyStrictness';
 export * from './projectPreviewDbStatus';
+export * from './projectPreviewState';
+export * from './projectPreviewStateBlockedByStatus';
 export * from './projectProdContainerStatus';
 export * from './projectProjectFormat';
 export * from './projectProjectMode';

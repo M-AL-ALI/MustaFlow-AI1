@@ -350,6 +350,7 @@ router.post(
       const targetPaths = new Set(targetSnapshot.map((file) => file.path));
       publishProjectFilesChanged(
         projectId,
+        restoredCheckpointId,
         targetSnapshot.map((file) => ({ path: file.path, content: file.content })),
         currentFiles.map((file) => file.path).filter((path) => !targetPaths.has(path)),
         "rollback",

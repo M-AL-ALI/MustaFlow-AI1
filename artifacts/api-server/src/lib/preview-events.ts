@@ -16,6 +16,7 @@
  */
 
 import { publishPreviewEvent } from "./event-bus";
+import { logger } from "./logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,8 @@ export type ProjectFilesOperationType =
 
 export interface ProjectFilesChangedPayload {
   projectId: number;
+  /** Monotonic live preview revision. Always a committed project_versions id. */
+  revision: number;
   operationType: ProjectFilesOperationType;
   /** Paths of all files that were written/updated (including those excluded from `files`). */
   changedPaths: string[];
@@ -109,6 +112,7 @@ export interface ProjectFilesChangedPayload {
  */
 export function buildProjectFilesChangedPayload(
   projectId: number,
+  revision: number,
   files: Array<{ path: string; content: string }>,
   removedPaths: string[],
   operationType: ProjectFilesOperationType,
@@ -137,6 +141,7 @@ export function buildProjectFilesChangedPayload(
 
   return {
     projectId,
+    revision,
     operationType,
     changedPaths,
     removedPaths,
@@ -155,11 +160,37 @@ export function buildProjectFilesChangedPayload(
  */
 export function publishProjectFilesChanged(
   projectId: number,
+  revision: number,
   files: Array<{ path: string; content: string }>,
   removedPaths: string[],
   operationType: ProjectFilesOperationType,
 ): ProjectFilesChangedPayload {
-  const payload = buildProjectFilesChangedPayload(projectId, files, removedPaths, operationType);
+  if (!Number.isInteger(revision) || revision <= 0) {
+    throw new Error(
+      `Preview revision must be a positive project version id (received ${revision})`,
+    );
+  }
+
+  const payload = buildProjectFilesChangedPayload(
+    projectId,
+    revision,
+    files,
+    removedPaths,
+    operationType,
+  );
+
+  logger.info(
+    {
+      event: "preview_reconciliation_timing",
+      phase: "backend_emission",
+      projectId,
+      revision,
+      operationType,
+      backendEmittedAt: payload.generatedAt,
+      changedPathCount: payload.changedPaths.length,
+    },
+    "Preview reconciliation timing",
+  );
 
   publishPreviewEvent({
     projectId,
@@ -175,10 +206,11 @@ export function publishProjectFilesChanged(
  * Emit a `preview_ready` event on the project preview channel.
  * Called after agentic container sync confirms HTTP 200 on /healthz.
  */
-export function publishPreviewReady(projectId: number): void {
+export function publishPreviewReady(projectId: number, revision: number): void {
   publishPreviewEvent({
     projectId,
     eventType: "preview_ready",
+    data: { revision },
     createdAt: new Date().toISOString(),
   });
 }
@@ -187,11 +219,15 @@ export function publishPreviewReady(projectId: number): void {
  * Emit a `preview_sync_failed` event on the project preview channel.
  * Called when agentic container sync or healthz poll fails.
  */
-export function publishPreviewSyncFailed(projectId: number, reason: string): void {
+export function publishPreviewSyncFailed(
+  projectId: number,
+  revision: number,
+  reason: string,
+): void {
   publishPreviewEvent({
     projectId,
     eventType: "preview_sync_failed",
-    data: { reason },
+    data: { revision, reason },
     createdAt: new Date().toISOString(),
   });
 }

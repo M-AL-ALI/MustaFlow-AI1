@@ -5585,6 +5585,28 @@ export const StreamProjectPreviewEventsParams = zod.object({
 
 
 /**
+ * Returns the latest committed project version id used as the monotonic preview
+revision. Reconciliation is disabled while a task has staged `needs_review`
+or `needs_fix` output that has not been promoted to live project files.
+
+ * @summary Get the authoritative live preview revision and reconciliation guard
+ */
+export const GetProjectPreviewStateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectPreviewStateResponse = zod.object({
+  "projectId": zod.number(),
+  "revision": zod.number().nullable().describe('Latest committed project version id used as the monotonic live preview revision.'),
+  "versionCreatedAt": zod.coerce.date().nullable(),
+  "reconciliationAllowed": zod.boolean().describe('False while unpromoted needs_review or needs_fix output exists.'),
+  "blockedByTaskId": zod.number().nullable(),
+  "blockedByStatus": zod.union([zod.literal('needs_review'),zod.literal('needs_fix'),zod.literal(null)]).nullable(),
+  "generatedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Get the current container lifecycle status for a project
  */
 export const GetContainerStatusParams = zod.object({

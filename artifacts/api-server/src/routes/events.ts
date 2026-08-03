@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq } from "drizzle-orm";
-import { db, agentTasksTable, taskEventsTable, toolAuditTable } from "@workspace/db";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import {
+  db,
+  agentTasksTable,
+  projectVersionsTable,
+  taskEventsTable,
+  toolAuditTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   subscribeTaskEvents,
@@ -11,6 +17,7 @@ import {
 const router: IRouter = Router();
 
 const TERMINAL_EVENT_TYPES = new Set(["completed", "failed", "cancelled"]);
+const STAGED_PREVIEW_STATUSES = ["needs_review", "needs_fix"] as const;
 
 router.get(
   "/projects/:id/tasks/:taskId/events",
@@ -163,6 +170,59 @@ router.get(
     req.on("close", () => {
       streamClosed = true;
       unsubscribe();
+    });
+  },
+);
+
+/**
+ * GET /projects/:id/preview-state
+ *
+ * Small authoritative reconciliation probe. `revision` is the latest committed
+ * project version id. A staged task blocks reconciliation because its draft
+ * snapshot has not been promoted to project_files yet.
+ */
+router.get(
+  "/projects/:id/preview-state",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    const [[latestVersion], [stagedTask]] = await Promise.all([
+      db
+        .select({
+          id: projectVersionsTable.id,
+          createdAt: projectVersionsTable.createdAt,
+        })
+        .from(projectVersionsTable)
+        .where(eq(projectVersionsTable.projectId, projectId))
+        .orderBy(desc(projectVersionsTable.id))
+        .limit(1),
+      db
+        .select({ id: agentTasksTable.id, status: agentTasksTable.status })
+        .from(agentTasksTable)
+        .where(
+          and(
+            eq(agentTasksTable.projectId, projectId),
+            inArray(agentTasksTable.status, [...STAGED_PREVIEW_STATUSES]),
+          ),
+        )
+        .orderBy(desc(agentTasksTable.id))
+        .limit(1),
+    ]);
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      projectId,
+      revision: latestVersion?.id ?? null,
+      versionCreatedAt: latestVersion?.createdAt ?? null,
+      reconciliationAllowed: !stagedTask,
+      blockedByTaskId: stagedTask?.id ?? null,
+      blockedByStatus: stagedTask?.status ?? null,
+      generatedAt: new Date().toISOString(),
     });
   },
 );

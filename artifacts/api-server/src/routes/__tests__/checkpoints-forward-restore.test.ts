@@ -293,6 +293,7 @@ describe("Version History restore", () => {
     expect(testState.messages).toHaveLength(3);
     expect(testState.previewEvents).toHaveBeenCalledWith(
       45,
+      101,
       [{ path: "src/App.tsx", content: "export const subtitle = 'Earlier';" }],
       ["src/New.ts"],
       "rollback",

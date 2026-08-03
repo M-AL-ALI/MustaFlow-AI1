@@ -119,6 +119,15 @@ import {
   projectFilesChangedPayloadFromFrame,
   type ProjectFilesChangedPayload,
 } from "@/lib/event-types";
+import {
+  acceptPreviewPayload,
+  createPreviewRevisionState,
+  logPreviewTiming,
+  markPreviewRevisionApplied,
+  markPreviewRevisionFailed,
+  reconcilePreviewRevision,
+  type PreviewPayloadSource,
+} from "@/lib/preview-reconciliation";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import { IntegrationSetupCard } from "./components/integration-setup-card";
@@ -1300,6 +1309,82 @@ export default function ProjectWorkspacePage() {
   const filesPayloadRef = useRef<ProjectFilesChangedPayload | null>(null);
   /** Incrementing seq so PreviewTab can react to new payloads even if the ref content changed. */
   const [filesPayloadSeq, setFilesPayloadSeq] = useState(0);
+  const previewRevisionStateRef = useRef(createPreviewRevisionState(projectId));
+  const [previewSyncPending, setPreviewSyncPending] = useState(false);
+  useEffect(() => {
+    previewRevisionStateRef.current = createPreviewRevisionState(projectId);
+    filesPayloadRef.current = null;
+    setPreviewSyncPending(false);
+  }, [projectId]);
+
+  const queuePreviewPayload = useCallback((payload: ProjectFilesChangedPayload) => {
+    setPreviewSyncPending(true);
+    filesPayloadRef.current = payload;
+    setFilesPayloadSeq((sequence) => sequence + 1);
+  }, []);
+
+  const receivePreviewPayload = useCallback(
+    (payload: ProjectFilesChangedPayload, source: PreviewPayloadSource) => {
+      if (activeTaskNeedsReviewRef.current) {
+        logPreviewTiming({
+          phase: "reconciliation_blocked",
+          projectId,
+          revision: payload.revision,
+          source,
+          reason: "active_task_staged",
+        });
+        return;
+      }
+      if (acceptPreviewPayload(previewRevisionStateRef.current, payload, source)) {
+        queuePreviewPayload(payload);
+      }
+    },
+    [projectId, queuePreviewPayload],
+  );
+
+  const reconcilePreview = useCallback(
+    (source: "stream-connect" | "stream-reconnect" | "task-terminal") => {
+      if (activeTaskNeedsReviewRef.current) {
+        logPreviewTiming({
+          phase: "reconciliation_blocked",
+          projectId,
+          revision: previewRevisionStateRef.current.queuedRevision || null,
+          source,
+          reason: "active_task_staged",
+        });
+        return Promise.resolve();
+      }
+      return reconcilePreviewRevision({
+        state: previewRevisionStateRef.current,
+        source,
+        enqueue: queuePreviewPayload,
+        onPendingChange: setPreviewSyncPending,
+      }).catch((error: unknown) => {
+        logPreviewTiming({
+          phase: "sync_failed",
+          projectId,
+          revision: previewRevisionStateRef.current.queuedRevision || null,
+          source,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+    [projectId, queuePreviewPayload],
+  );
+
+  const handlePreviewRevisionApplied = useCallback((payload: ProjectFilesChangedPayload) => {
+    if (payload.projectId !== previewRevisionStateRef.current.projectId) return;
+    if (markPreviewRevisionApplied(previewRevisionStateRef.current, payload.revision)) {
+      setPreviewSyncPending(false);
+    }
+  }, []);
+
+  const handlePreviewRevisionFailed = useCallback((payload: ProjectFilesChangedPayload) => {
+    if (payload.projectId !== previewRevisionStateRef.current.projectId) return;
+    if (markPreviewRevisionFailed(previewRevisionStateRef.current, payload.revision)) {
+      setPreviewSyncPending(false);
+    }
+  }, []);
   const [, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
@@ -1864,6 +1949,7 @@ export default function ProjectWorkspacePage() {
   const calmStatusText = getCalmBuilderStatus({
     phase: visibleCalmPhase,
     fileCount: calmFileCount,
+    previewSyncPending,
   });
 
   // ── Project issues detection ────────────────────────────────────────────────
@@ -2299,8 +2385,7 @@ export default function ProjectWorkspacePage() {
           // if the payload has no data.
           const parsed = event as unknown as { data?: ProjectFilesChangedPayload };
           if (parsed.data && typeof parsed.data === "object" && !activeTaskNeedsReviewRef.current) {
-            filesPayloadRef.current = parsed.data;
-            setFilesPayloadSeq((n) => n + 1);
+            receivePreviewPayload(parsed.data, "task-stream");
           }
         } else if (event.eventType === "file_diff" && event.message) {
           // Refresh the preview iframe a few seconds after a file is written.
@@ -2358,6 +2443,7 @@ export default function ProjectWorkspacePage() {
           }
           void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+          void reconcilePreview("task-terminal");
         }
       } catch {
         // ignore malformed frames
@@ -2369,7 +2455,14 @@ export default function ProjectWorkspacePage() {
       setLiveCodeBuffer("");
       if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
     };
-  }, [activeTaskId, projectId, queryClient, recordThreadImage]);
+  }, [
+    activeTaskId,
+    projectId,
+    queryClient,
+    reconcilePreview,
+    receivePreviewPayload,
+    recordThreadImage,
+  ]);
 
   // ── Project-level preview SSE ───────────────────────────────────────────────
   // Subscribe to /preview-events/stream for the lifetime of this project page.
@@ -2380,6 +2473,12 @@ export default function ProjectWorkspacePage() {
     if (!projectId) return;
     const es = new EventSource(`/api/projects/${projectId}/preview-events/stream`);
     previewEventSourceRef.current = es;
+    let hasConnected = false;
+    es.onopen = () => {
+      const source = hasConnected ? "stream-reconnect" : "stream-connect";
+      hasConnected = true;
+      void reconcilePreview(source);
+    };
     es.onmessage = (e: MessageEvent<string>) => {
       try {
         // Wire format: { eventType, projectId, data: { ...payload fields }, createdAt }
@@ -2396,12 +2495,12 @@ export default function ProjectWorkspacePage() {
             operationType?: string;
             generatedAt?: string;
             projectId?: number;
+            revision?: number;
           };
         };
         if (event.eventType === "project_files_changed") {
           const payload = projectFilesChangedPayloadFromFrame(event, projectId);
-          filesPayloadRef.current = payload;
-          setFilesPayloadSeq((n) => n + 1);
+          receivePreviewPayload(payload, "project-stream");
           // Invalidate file list so the editor panel reflects new content
           void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
         } else if (event.eventType === "preview_ready") {
@@ -2422,7 +2521,7 @@ export default function ProjectWorkspacePage() {
       es.close();
       previewEventSourceRef.current = null;
     };
-  }, [projectId, queryClient]);
+  }, [projectId, queryClient, reconcilePreview, receivePreviewPayload]);
   // ── End project-level preview SSE ──────────────────────────────────────────
 
   const dismissAgentPrompt = useCallback((promptId: string) => {
@@ -5304,6 +5403,8 @@ export default function ProjectWorkspacePage() {
                   navigationRequest={previewNavigationRequest}
                   filesPayloadRef={filesPayloadRef}
                   filesPayloadSeq={filesPayloadSeq}
+                  onPreviewRevisionApplied={handlePreviewRevisionApplied}
+                  onPreviewRevisionFailed={handlePreviewRevisionFailed}
                   isTaskStaged={
                     (tasksForFeed as Array<{ id: number; status: string }>).find(
                       (t) => t.id === activeTaskId,

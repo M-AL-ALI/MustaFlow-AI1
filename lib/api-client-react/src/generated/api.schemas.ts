@@ -1899,6 +1899,35 @@ export interface UpdateTaskBody {
   testScript?: string | null;
 }
 
+/**
+ * @nullable
+ */
+export type ProjectPreviewStateBlockedByStatus = typeof ProjectPreviewStateBlockedByStatus[keyof typeof ProjectPreviewStateBlockedByStatus] | null;
+
+
+export const ProjectPreviewStateBlockedByStatus = {
+  needs_review: 'needs_review',
+  needs_fix: 'needs_fix',
+} as const;
+
+export interface ProjectPreviewState {
+  projectId: number;
+  /**
+     * Latest committed project version id used as the monotonic live preview revision.
+     * @nullable
+     */
+  revision: number | null;
+  /** @nullable */
+  versionCreatedAt: string | null;
+  /** False while unpromoted needs_review or needs_fix output exists. */
+  reconciliationAllowed: boolean;
+  /** @nullable */
+  blockedByTaskId: number | null;
+  /** @nullable */
+  blockedByStatus: ProjectPreviewStateBlockedByStatus;
+  generatedAt: string;
+}
+
 export type ProjectVersionPlanSnapshot = { [key: string]: unknown } | null;
 
 export interface ProjectVersion {

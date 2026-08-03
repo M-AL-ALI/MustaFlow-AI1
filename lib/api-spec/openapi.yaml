@@ -4498,6 +4498,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/preview-state:
+    get:
+      operationId: getProjectPreviewState
+      tags: [projects]
+      summary: Get the authoritative live preview revision and reconciliation guard
+      description: |
+        Returns the latest committed project version id used as the monotonic preview
+        revision. Reconciliation is disabled while a task has staged `needs_review`
+        or `needs_fix` output that has not been promoted to live project files.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Current preview reconciliation metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPreviewState"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/container/status:
     get:
       operationId: getContainerStatus
@@ -9279,6 +9310,33 @@ components:
         testScript:
           type: ["string", "null"]
           description: User-authored JSON test plan. When set, re-running tests uses this instead of AI-generating a new one.
+
+    ProjectPreviewState:
+      type: object
+      required:
+        [
+          projectId,
+          revision,
+          versionCreatedAt,
+          reconciliationAllowed,
+          blockedByTaskId,
+          blockedByStatus,
+          generatedAt,
+        ]
+      properties:
+        projectId: { type: integer }
+        revision:
+          type: ["integer", "null"]
+          description: Latest committed project version id used as the monotonic live preview revision.
+        versionCreatedAt: { type: ["string", "null"], format: date-time }
+        reconciliationAllowed:
+          type: boolean
+          description: False while unpromoted needs_review or needs_fix output exists.
+        blockedByTaskId: { type: ["integer", "null"] }
+        blockedByStatus:
+          type: ["string", "null"]
+          enum: [needs_review, needs_fix, null]
+        generatedAt: { type: string, format: date-time }
 
     ProjectVersion:
       type: object

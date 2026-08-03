@@ -18,12 +18,14 @@ describe("project_files_changed frontend payload parsing", () => {
         projectId: 42,
         data: {
           projectId: 7,
+          revision: 81,
           operationType: "rollback",
           changedPaths: ["src/App.tsx"],
           removedPaths: ["src/Old.tsx"],
           files: { "src/App.tsx": "export default function App() { return null; }" },
           requiresInstall: true,
           requiresRestart: true,
+          generatedAt: "2026-08-02T23:16:16.206Z",
         },
       },
       99,
@@ -31,12 +33,15 @@ describe("project_files_changed frontend payload parsing", () => {
 
     expect(payload).toEqual({
       projectId: 7,
+      revision: 81,
       operationType: "rollback",
       changedPaths: ["src/App.tsx"],
       removedPaths: ["src/Old.tsx"],
       files: { "src/App.tsx": "export default function App() { return null; }" },
       requiresInstall: true,
       requiresRestart: true,
+      generatedAt: "2026-08-02T23:16:16.206Z",
+      authoritative: false,
     });
   });
 
@@ -61,6 +66,15 @@ describe("project_files_changed frontend payload parsing", () => {
       requiresInstall: false,
       requiresRestart: false,
     });
+  });
+
+  it("keeps preview completion behind WebContainer sync and lifecycle readiness", () => {
+    expect(previewTabSource).toContain("await syncFromBackend(payload)");
+    expect(previewTabSource).toContain("onPreviewRevisionApplied?.(payload)");
+    expect(previewTabSource).toContain("activePreviewSyncRef.current.then");
+    expect(previewTabSource.indexOf("await syncFromBackend(payload)")).toBeLessThan(
+      previewTabSource.indexOf("onPreviewRevisionApplied?.(payload)"),
+    );
   });
 
   it("keeps the proxy-unavailable state focused on test preview, not production", () => {
