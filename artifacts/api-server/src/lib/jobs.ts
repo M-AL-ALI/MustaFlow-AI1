@@ -1305,6 +1305,12 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
       return somePresent;
     }).map((i) => i.name);
     const parts: string[] = [];
+    const secretNames = Array.from(new Set(rows.map((row) => row.name))).sort();
+    if (secretNames.length > 0) {
+      parts.push(
+        `AVAILABLE PROJECT SECRET NAMES (values are never exposed to the agent): ${secretNames.join(", ")}. Reference these by name through process.env and never print, copy, or hardcode their values.`,
+      );
+    }
     if (active.length > 0) {
       parts.push(
         `ACTIVE INTEGRATIONS (connected and verified): ${active.join(", ")}. When generating or refining code, prefer these services over alternatives and reference their environment variables from project secrets.`,

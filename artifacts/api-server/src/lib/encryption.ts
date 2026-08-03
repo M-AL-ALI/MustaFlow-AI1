@@ -73,6 +73,11 @@ class AES256GcmEncryptionService implements EncryptionService {
   }
 }
 
+/** Construct the production cipher directly (used by focused crypto tests). */
+export function createEncryptionService(base64Key: string): EncryptionService {
+  return new AES256GcmEncryptionService(base64Key);
+}
+
 // ─── Dev-only passthrough (never shipped to production) ──────────────────────
 
 class DevOnlyPassthroughEncryption implements EncryptionService {
@@ -108,7 +113,7 @@ function buildEncryptionService(): EncryptionService {
     return new DevOnlyPassthroughEncryption();
   }
   try {
-    const svc = new AES256GcmEncryptionService(rawKey);
+    const svc = createEncryptionService(rawKey);
     logger.info("AES-256-GCM encryption active");
     return svc;
   } catch (err) {

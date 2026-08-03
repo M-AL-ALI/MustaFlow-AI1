@@ -8,9 +8,15 @@
 import type { SecretInputEnvironment } from './secretInputEnvironment';
 
 export interface SecretInput {
-  /** @minLength 1 */
+  /**
+     * Valid environment-variable name.
+     * @minLength 1
+     * @pattern ^[A-Za-z_][A-Za-z0-9_]*$
+     */
   name: string;
   /** @minLength 1 */
   value: string;
   environment: SecretInputEnvironment;
+  /** Whether a development/testing value may be injected into build and preview containers. */
+  isPreviewSafe?: boolean;
 }

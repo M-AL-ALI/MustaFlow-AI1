@@ -2059,11 +2059,47 @@ export const SecretInputEnvironment = {
 } as const;
 
 export interface SecretInput {
-  /** @minLength 1 */
+  /**
+     * Valid environment-variable name.
+     * @minLength 1
+     * @pattern ^[A-Za-z_][A-Za-z0-9_]*$
+     */
   name: string;
   /** @minLength 1 */
   value: string;
   environment: SecretInputEnvironment;
+  /** Whether a development/testing value may be injected into build and preview containers. */
+  isPreviewSafe?: boolean;
+}
+
+export type SecretUpdateInputEnvironment = typeof SecretUpdateInputEnvironment[keyof typeof SecretUpdateInputEnvironment];
+
+
+export const SecretUpdateInputEnvironment = {
+  development: 'development',
+  testing: 'testing',
+  staging: 'staging',
+  production: 'production',
+} as const;
+
+export type SecretUpdateInputMinRole = typeof SecretUpdateInputMinRole[keyof typeof SecretUpdateInputMinRole];
+
+
+export const SecretUpdateInputMinRole = {
+  viewer: 'viewer',
+  member: 'member',
+  admin: 'admin',
+  owner: 'owner',
+} as const;
+
+export interface SecretUpdateInput {
+  /** @minLength 1 */
+  value?: string;
+  environment?: SecretUpdateInputEnvironment;
+  category?: string;
+  minRole?: SecretUpdateInputMinRole;
+  /** Whether a development/testing value may be injected into build and preview containers. */
+  isPreviewSafe?: boolean;
 }
 
 export type TaskFeedbackInputFeedback = typeof TaskFeedbackInputFeedback[keyof typeof TaskFeedbackInputFeedback];

@@ -32,6 +32,7 @@ import { publishTaskEvent } from "../lib/event-bus";
 import { EventTypes } from "../lib/event-types";
 import { publishProjectFilesChanged } from "../lib/preview-events";
 import { writeKnowledge } from "../lib/knowledge";
+import { getProductionSecretMap } from "../lib/container-secrets";
 
 const router: IRouter = Router();
 
@@ -517,23 +518,12 @@ router.post(
       setImmediate(() => {
         void (async () => {
           try {
-            const secretRows = await db
-              .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
-              .from(secretsTable)
-              .where(eq(secretsTable.projectId, projectId));
-
             const envVars: Record<string, string> = {
               PROJECT_ID: String(projectId),
               NODE_ENV: "production",
               PORT: "3000",
+              ...(await getProductionSecretMap(projectId)),
             };
-            for (const s of secretRows) {
-              try {
-                envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
-              } catch {
-                // skip
-              }
-            }
 
             const filePayload = snapshot.map((f) => ({ path: f.path, content: f.content }));
             const result = await deployProductionContainer(

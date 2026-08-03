@@ -44,7 +44,6 @@ import {
   previewSnapshotsTable,
   deploymentLogsTable,
   projectDomainsTable,
-  secretsTable,
   userSubscriptionsTable,
   orgMembersTable,
   notificationsTable,
@@ -57,7 +56,7 @@ import { isAdminUser } from "../lib/adminAuth";
 import { generateOgSvg } from "../lib/ogImage";
 import { deployProductionContainer, destroyContainer } from "../lib/container";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
-import { encryptionService } from "../lib/encryption";
+import { getProductionSecretMap } from "../lib/container-secrets";
 import { getUnresolvedCriticalFindings } from "./readiness";
 import { evaluatePublishGate, evaluatePromotionGate } from "../lib/publish-gate";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
@@ -576,25 +575,12 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     try {
       // SECURITY: Only inject secrets with environment='production' into production containers.
       // Development and testing secrets must never reach the production environment.
-      const secretRows = await db
-        .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
-        .from(secretsTable)
-        .where(
-          and(eq(secretsTable.projectId, projectId), eq(secretsTable.environment, "production")),
-        );
-
       const envVars: Record<string, string> = {
         PROJECT_ID: String(projectId),
         NODE_ENV: "production",
         PORT: "3000",
+        ...(await getProductionSecretMap(projectId)),
       };
-      for (const s of secretRows) {
-        try {
-          envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
-        } catch {
-          // skip malformed secrets
-        }
-      }
 
       const prodResult = await deployProductionContainer(
         projectId,

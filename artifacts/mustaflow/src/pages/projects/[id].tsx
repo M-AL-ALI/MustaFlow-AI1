@@ -266,6 +266,11 @@ const ArtifactTabs = builderLazy(() =>
 const ToolsTab = builderLazy(() =>
   import("./components/tools-tab").then((module) => ({ default: module.ToolsTab })),
 );
+const SecretsPanel = builderLazy(() =>
+  import("../dev-workspace/components/secrets-panel").then((module) => ({
+    default: module.SecretsPanel,
+  })),
+);
 const PublishingTab = builderLazy(() =>
   import("./components/publishing-tab").then((module) => ({
     default: module.PublishingTab,
@@ -641,6 +646,7 @@ const ADVANCED_TABS = [
   { label: "Manage", value: "manage", icon: Settings },
   { label: "Terminal", value: "terminal", icon: TerminalSquare },
   { label: "Canvas", value: "canvas", icon: Paintbrush2 },
+  { label: "Secrets", value: "secrets", icon: KeyRound },
   { label: "Project setup", value: "tools-files", icon: Blocks },
   { label: "Integrations", value: "integrations", icon: Plug },
   { label: "Checks", value: "checks", icon: ScanSearch },
@@ -3050,8 +3056,9 @@ export default function ProjectWorkspacePage() {
 
   const handleAddKey = useCallback((keyName: string) => {
     setPrefillSecretName(keyName);
-    setActiveTab("tools-files");
+    setActiveTab("secrets");
   }, []);
+  const handleSecretPrefillConsumed = useCallback(() => setPrefillSecretName(null), []);
 
   const _handleSend = () => {
     const currentPrompt = prompt;
@@ -3608,7 +3615,7 @@ export default function ProjectWorkspacePage() {
                     <button
                       onClick={() => {
                         setPrefillSecretName("DATABASE_URL");
-                        setActiveTab("tools-files");
+                        setActiveTab("secrets");
                         setPreflightBanner(null);
                       }}
                       className="text-xs font-medium text-destructive underline underline-offset-2 hover:text-destructive/80 transition-colors whitespace-nowrap"
@@ -3793,7 +3800,7 @@ export default function ProjectWorkspacePage() {
                   onAddKey={(keyName) => {
                     setViewingHistoryPlan(null);
                     setPrefillSecretName(keyName);
-                    setActiveTab("tools-files");
+                    setActiveTab("secrets");
                   }}
                   disabled={isBusy}
                   readOnly
@@ -5289,7 +5296,7 @@ export default function ProjectWorkspacePage() {
                     const payload = latest.plan as { kind: "report"; report: TaskReport };
                     return payload.report ?? null;
                   })()}
-                  onJumpToSecrets={() => setActiveTab("tools-files")}
+                  onJumpToSecrets={() => setActiveTab("secrets")}
                 />
               )}
               {activeTab === "plan" && (
@@ -5450,6 +5457,13 @@ export default function ProjectWorkspacePage() {
                     }
                   }}
                   onRollbackSuccess={() => setBuildRefreshCount((n) => n + 1)}
+                />
+              )}
+              {activeTab === "secrets" && (
+                <SecretsPanel
+                  projectId={projectId}
+                  prefillName={prefillSecretName ?? undefined}
+                  onPrefillConsumed={handleSecretPrefillConsumed}
                 />
               )}
               {activeTab === "publishing" && (

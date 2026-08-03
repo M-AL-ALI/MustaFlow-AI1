@@ -7960,7 +7960,7 @@ PUBLISHING
 - Unpublish clears the public URL; deployment history is preserved.
 
 SECRETS & INTEGRATIONS
-- Tools & Files → Secrets. Values are AES-256-GCM encrypted server-side; only a masked preview (••••••••XXXX) is ever returned.
+- The workspace Secrets tab stores project environment variables. Values are AES-256-GCM encrypted server-side; saved values are returned only as a fixed mask (••••••••).
 - Each secret can be verified server-side per category (HTTP ping etc.). Verification status shows in the UI.
 - Site settings (title, meta description, theme color) live on the Publishing tab.
 

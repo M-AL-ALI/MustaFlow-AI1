@@ -3054,12 +3054,15 @@ export const CreateSecretParams = zod.object({
 
 
 
+export const createSecretBodyNameRegExp = new RegExp('^[A-Za-z_][A-Za-z0-9_]\*$');
 
+export const createSecretBodyIsPreviewSafeDefault = false;
 
 export const CreateSecretBody = zod.object({
-  "name": zod.string().min(1),
+  "name": zod.string().min(1).regex(createSecretBodyNameRegExp).describe('Valid environment-variable name.'),
   "value": zod.string().min(1),
-  "environment": zod.enum(['development', 'testing', 'staging', 'production'])
+  "environment": zod.enum(['development', 'testing', 'staging', 'production']),
+  "isPreviewSafe": zod.boolean().default(createSecretBodyIsPreviewSafeDefault).describe('Whether a development\/testing value may be injected into build and preview containers.')
 })
 
 
@@ -3630,6 +3633,40 @@ export const SaveMobileAppSettingsResponse = zod.object({
   "splashBackgroundColor": zod.string(),
   "iconUrl": zod.string().nullish().describe('Preview URL for the current icon, or null if not yet uploaded.'),
   "taskId": zod.number().nullish().describe('ID of the AgentTask created for this save (for event polling).')
+})
+
+
+/**
+ * @summary Update a write-only project secret
+ */
+export const UpdateSecretParams = zod.object({
+  "id": zod.coerce.number(),
+  "secretId": zod.coerce.number()
+})
+
+
+
+
+export const UpdateSecretBody = zod.object({
+  "value": zod.string().min(1).optional(),
+  "environment": zod.enum(['development', 'testing', 'staging', 'production']).optional(),
+  "category": zod.string().optional(),
+  "minRole": zod.enum(['viewer', 'member', 'admin', 'owner']).optional(),
+  "isPreviewSafe": zod.boolean().optional().describe('Whether a development\/testing value may be injected into build and preview containers.')
+})
+
+export const UpdateSecretResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "name": zod.string(),
+  "masked": zod.string(),
+  "environment": zod.enum(['development', 'testing', 'staging', 'production']),
+  "verificationStatus": zod.string().optional(),
+  "category": zod.string().nullish(),
+  "envWarning": zod.string().nullish(),
+  "minRole": zod.enum(['viewer', 'member', 'admin', 'owner']).optional().describe('Minimum org role required to view the decrypted secret value'),
+  "isPreviewSafe": zod.boolean().optional().describe('When true, this secret is injected into the dev\/test container. When false, it is excluded.'),
+  "createdAt": zod.coerce.date()
 })
 
 
