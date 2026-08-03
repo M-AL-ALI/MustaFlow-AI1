@@ -823,7 +823,7 @@ function AccountSection() {
                               "Could not delete account",
                               err instanceof Error
                                 ? err.message
-                                : "Please try again, or email support@mustaflow.app.",
+                                : "Please try again, or email support@mustaflow.com.",
                             );
                             return;
                           }

@@ -8,6 +8,7 @@ import { useState, useCallback } from "react";
 import { Search, ShoppingCart, Loader2, CheckCircle, XCircle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { SupportErrorMessage } from "@/components/support-report-link";
 
 interface SearchResult {
   domain: string;
@@ -141,7 +142,7 @@ export function DomainPurchaseWidget({ projectId }: { projectId: number }) {
       {error && (
         <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
           <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-          <span>{error}</span>
+          <SupportErrorMessage message={error} />
         </div>
       )}
 

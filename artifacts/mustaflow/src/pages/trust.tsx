@@ -86,8 +86,8 @@ export default function TrustPage() {
         <p className="text-sm text-muted-foreground">
           SOC 2 Type II audit is currently in progress. Evidence collection is automated. We expect
           to receive our report in Q4 2026. Contact{" "}
-          <a href="mailto:security@mustaflow.app" className="text-primary hover:underline">
-            security@mustaflow.app
+          <a href="mailto:support@mustaflow.com" className="text-primary hover:underline">
+            support@mustaflow.com
           </a>{" "}
           to request a copy of our current attestation.
         </p>
@@ -161,8 +161,8 @@ export default function TrustPage() {
               </li>
               <li>
                 A Data Processing Agreement (DPA) is available on request for EU customers — email{" "}
-                <a href="mailto:privacy@mustaflow.app" className="text-primary hover:underline">
-                  privacy@mustaflow.app
+                <a href="mailto:support@mustaflow.com" className="text-primary hover:underline">
+                  support@mustaflow.com
                 </a>
                 .
               </li>
@@ -236,8 +236,8 @@ export default function TrustPage() {
         <ul className="list-disc pl-5 space-y-1 mt-2">
           <li>
             Email{" "}
-            <a href="mailto:security@mustaflow.app" className="text-primary hover:underline">
-              security@mustaflow.app
+            <a href="mailto:support@mustaflow.com" className="text-primary hover:underline">
+              support@mustaflow.com
             </a>{" "}
             with subject line{" "}
             <code className="font-mono text-xs bg-muted px-1 rounded">SECURITY</code>.
@@ -257,20 +257,20 @@ export default function TrustPage() {
         <div className="space-y-2">
           <p>
             <strong className="text-foreground">Security issues:</strong>{" "}
-            <a href="mailto:security@mustaflow.app" className="text-primary hover:underline">
-              security@mustaflow.app
+            <a href="mailto:support@mustaflow.com" className="text-primary hover:underline">
+              support@mustaflow.com
             </a>
           </p>
           <p>
             <strong className="text-foreground">Privacy & GDPR requests:</strong>{" "}
-            <a href="mailto:privacy@mustaflow.app" className="text-primary hover:underline">
-              privacy@mustaflow.app
+            <a href="mailto:support@mustaflow.com" className="text-primary hover:underline">
+              support@mustaflow.com
             </a>
           </p>
           <p>
             <strong className="text-foreground">Enterprise sales (SSO, HIPAA BAA, DPA):</strong>{" "}
-            <a href="mailto:enterprise@mustaflow.app" className="text-primary hover:underline">
-              enterprise@mustaflow.app
+            <a href="mailto:support@mustaflow.com" className="text-primary hover:underline">
+              support@mustaflow.com
             </a>
           </p>
         </div>

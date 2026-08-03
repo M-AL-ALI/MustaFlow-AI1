@@ -4,11 +4,13 @@
  * Reads env vars at call time (not module load) so hot-reload keeps working:
  *   RESEND_API_KEY  — required; without it every send is a graceful no-op
  *   SUPPORT_EMAIL   — recipient for support ticket notifications
- *   SMTP_FROM       — "From" address, default noreply@mustaflow.app
+ *   SMTP_FROM       — "From" address, default support@mustaflow.com
  *                     (reused so callers are unchanged)
  *
  * All sends are best-effort: errors are logged but never re-thrown.
  */
+
+import { resolveDefaultSender, SUPPORT_EMAIL_ADDRESS } from "./support-contact";
 
 import { Resend } from "resend";
 import { logger } from "./logger";
@@ -46,7 +48,7 @@ export async function sendEmail(opts: {
     return;
   }
   try {
-    const from = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+    const from = resolveDefaultSender("SMTP_FROM");
     const client = createClient();
     const { error } = await client.emails.send({
       from,
@@ -73,7 +75,7 @@ export type EmailDeliveryStatus = "sent" | "skipped" | "failed";
 /**
  * Like sendEmail, but reports the delivery outcome so callers (e.g. support
  * ticket escalation) can persist an accurate emailStatus. Never throws.
- *   - "skipped" — RESEND_API_KEY or SUPPORT_EMAIL is not configured.
+ *   - "skipped" — RESEND_API_KEY is not configured.
  *   - "sent"    — the message was handed to Resend successfully.
  *   - "failed"  — Resend returned an error or threw.
  */
@@ -91,7 +93,7 @@ export async function sendEmailWithStatus(opts: {
     return "skipped";
   }
   try {
-    const from = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+    const from = resolveDefaultSender("SMTP_FROM");
     const client = createClient();
     const { error } = await client.emails.send({
       from,
@@ -215,7 +217,7 @@ export async function sendGdprDeletionConfirmation(opts: {
     <li>Deployment history</li>
   </ul>
   <p>If you did not make this request or wish to cancel it, please contact us within
-     30 days at <a href="mailto:privacy@mustaflow.app">privacy@mustaflow.app</a>.</p>
+     30 days at <a href="mailto:${SUPPORT_EMAIL_ADDRESS}">${SUPPORT_EMAIL_ADDRESS}</a>.</p>
   <p style="font-size:12px;color:#666">Reference ID: ${userId}</p>
 </body>
 </html>`;
@@ -225,7 +227,7 @@ export async function sendGdprDeletionConfirmation(opts: {
     "",
     `Your data will be permanently deleted on or before ${erasureDateStr}.`,
     "",
-    "To cancel this request, contact privacy@mustaflow.app within 30 days.",
+    `To cancel this request, contact ${SUPPORT_EMAIL_ADDRESS} within 30 days.`,
     "",
     `Reference ID: ${userId}`,
   ].join("\n");

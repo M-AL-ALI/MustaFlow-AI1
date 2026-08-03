@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Link, useSearch } from "wouter";
 import { BuilderCreditCostList } from "@/components/billing/builder-credit-cost-list";
+import { SupportErrorMessage } from "@/components/support-report-link";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -401,7 +402,9 @@ export default function BillingPage() {
       else
         toast({
           title: "Portal unavailable",
-          description: data.error ?? "Contact support.",
+          description: (
+            <SupportErrorMessage message={data.error ?? "The billing portal is unavailable."} />
+          ),
           variant: "destructive",
         });
     } catch {

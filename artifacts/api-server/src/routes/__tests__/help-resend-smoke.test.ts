@@ -166,7 +166,7 @@ beforeEach(async () => {
 
 describe("POST /help/support/escalate — Resend email delivery", () => {
   it("sends email to SUPPORT_EMAIL when configured", async () => {
-    process.env.SUPPORT_EMAIL = "help@mustaflow.app";
+    process.env.SUPPORT_EMAIL = "support-override@example.com";
     authedUser();
     seedInsertResult(1);
     // Second DB call: broadcastNewTicket select (noop in tests)
@@ -182,12 +182,12 @@ describe("POST /help/support/escalate — Resend email delivery", () => {
 
     const sendCall = vi.mocked(sendEmailWithStatus).mock.calls[0];
     expect(sendCall).toBeDefined();
-    expect(sendCall?.[0].to).toBe("help@mustaflow.app");
+    expect(sendCall?.[0].to).toBe("support-override@example.com");
     expect(sendCall?.[0].subject).toContain("ticket");
   });
 
   it("saves ticket with emailStatus 'failed' when Resend throws, still returns 201", async () => {
-    process.env.SUPPORT_EMAIL = "help@mustaflow.app";
+    process.env.SUPPORT_EMAIL = "support-override@example.com";
     sendEmailWithStatusMock.mockResolvedValue("failed");
     authedUser();
     // insert returns id; update emailStatus to failed; broadcastNewTicket
@@ -204,10 +204,10 @@ describe("POST /help/support/escalate — Resend email delivery", () => {
     expect(res.body.emailStatus).toBe("failed");
   });
 
-  it("saves ticket with emailStatus 'skipped' when SUPPORT_EMAIL is not set, returns 201", async () => {
-    // SUPPORT_EMAIL is deleted in beforeEach
+  it("emails the company support address when SUPPORT_EMAIL is not set", async () => {
     authedUser();
     dbResults.push([{ id: 3 }]); // insert
+    dbResults.push([]); // update emailStatus
     dbResults.push([]); // broadcastNewTicket
 
     const res = await request(app)
@@ -215,9 +215,11 @@ describe("POST /help/support/escalate — Resend email delivery", () => {
       .send({ subject: "no email configured", transcript: TRANSCRIPT });
 
     expect(res.status).toBe(201);
-    expect(res.body.emailStatus).toBe("skipped");
-    // sendEmailWithStatus must NOT be called when SUPPORT_EMAIL is absent
-    expect(vi.mocked(sendEmailWithStatus)).not.toHaveBeenCalled();
+    expect(res.body.emailStatus).toBe("sent");
+    expect(res.body.supportEmailUsed).toBe("support@mustaflow.com");
+    expect(vi.mocked(sendEmailWithStatus)).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "support@mustaflow.com" }),
+    );
   });
 });
 

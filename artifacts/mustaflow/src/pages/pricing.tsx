@@ -299,10 +299,10 @@ function NabuFlowPlansSection({
             </div>
           </div>
           <Button variant="outline" className="shrink-0 gap-2" asChild>
-            <a href="mailto:enterprise@mustaflow.ai">
+            <Link href="/help?mode=report">
               Contact us
               <ArrowRight className="h-4 w-4" />
-            </a>
+            </Link>
           </Button>
         </div>
       ))}

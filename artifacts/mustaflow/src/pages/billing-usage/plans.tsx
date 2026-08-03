@@ -49,6 +49,7 @@ import {
 import { CardSetupDialog } from "@/components/billing/card-setup-dialog";
 import { OrgSetupDialog } from "./org";
 import { useNabuflowState } from "./shared";
+import { SupportErrorMessage } from "@/components/support-report-link";
 
 const ACTIVE_SUB_STATUSES = new Set(["active", "trialing", "past_due"]);
 
@@ -137,7 +138,7 @@ export function PlansSection() {
         onError: (err) =>
           toast({
             title: "Couldn't start the plan",
-            description: apiErrorMessage(err),
+            description: <SupportErrorMessage message={apiErrorMessage(err)} />,
             variant: "destructive",
           }),
         onSettled: () => setPendingPlanId(null),
@@ -160,7 +161,7 @@ export function PlansSection() {
           setPreviewState(null);
           toast({
             title: "Couldn't preview the switch",
-            description: apiErrorMessage(err),
+            description: <SupportErrorMessage message={apiErrorMessage(err)} />,
             variant: "destructive",
           });
         },
@@ -193,7 +194,7 @@ export function PlansSection() {
         onError: (err) =>
           toast({
             title: "Couldn't switch plans",
-            description: apiErrorMessage(err),
+            description: <SupportErrorMessage message={apiErrorMessage(err)} />,
             variant: "destructive",
           }),
       },
@@ -332,7 +333,7 @@ export function PlansSection() {
                             onError: (err) =>
                               toast({
                                 title: "Couldn't resume",
-                                description: apiErrorMessage(err),
+                                description: <SupportErrorMessage message={apiErrorMessage(err)} />,
                                 variant: "destructive",
                               }),
                           })
@@ -553,7 +554,7 @@ export function PlansSection() {
           </AlertDialogHeader>
           {cancelError ? (
             <p role="alert" className="text-sm text-muted-foreground">
-              {cancelError}
+              <SupportErrorMessage message={cancelError} />
             </p>
           ) : null}
           <AlertDialogFooter>

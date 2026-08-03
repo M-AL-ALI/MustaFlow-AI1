@@ -291,7 +291,7 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
           : res.emailStatus === "failed"
             ? "Ticket created, but email notification failed; staff can still see it in the support inbox."
             : res.emailStatus === "skipped"
-              ? "Ticket created, but support email is not configured; staff must review the support inbox."
+              ? "Ticket created, but email delivery was unavailable; staff can still see it in the support inbox."
               : "Ticket created. Our team will review it shortly.",
       );
       onTicketCreated(res.ticketId);

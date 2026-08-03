@@ -622,7 +622,7 @@ export function HealthScreen() {
         );
         const result = await support.exportDiagnostics({ healthTimeline });
         if (!result) return "Diagnostics export cancelled.";
-        return "Diagnostics exported. Health timeline included.";
+        return "Diagnostics exported. Health timeline included. Send it to support@mustaflow.com.";
       }),
     [actionHistory, runAction],
   );

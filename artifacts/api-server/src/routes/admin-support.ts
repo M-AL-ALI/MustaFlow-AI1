@@ -31,6 +31,7 @@ import { requireAdmin } from "../lib/adminAuth";
 import { r2GetObject } from "../lib/cloudflare";
 import { sendEmailWithStatus } from "../lib/emailClient";
 import { supportReplyTemplate } from "../lib/emailTemplates";
+import { resolveDefaultSender, resolveSupportRecipient } from "../lib/support-contact";
 
 const router: IRouter = Router();
 
@@ -493,8 +494,8 @@ router.get("/admin/support-tickets/:id/attachments/:assetId", async (req, res): 
 // Resend delivery without creating a real support ticket.
 // Returns: { ok, emailStatus, recipient } — never throws.
 router.post("/admin/email/test", async (req, res): Promise<void> => {
-  const recipient = process.env.SUPPORT_EMAIL;
-  const smtpFrom = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+  const recipient = resolveSupportRecipient();
+  const smtpFrom = resolveDefaultSender("SMTP_FROM");
 
   if (!process.env.RESEND_API_KEY) {
     res.status(503).json({
@@ -505,16 +506,6 @@ router.post("/admin/email/test", async (req, res): Promise<void> => {
     });
     return;
   }
-  if (!recipient) {
-    res.status(503).json({
-      ok: false,
-      emailStatus: "skipped",
-      recipient: null,
-      error: "SUPPORT_EMAIL is not configured. Set it in environment secrets and redeploy.",
-    });
-    return;
-  }
-
   const now = new Date().toUTCString();
   const emailStatus = await sendEmailWithStatus({
     to: recipient,
