@@ -13,7 +13,10 @@ import { resolveAuthedOraUser } from "../lib/public-ai/authed-user";
 import { scanUserInput, ORA_SUPPORT_SYSTEM_PROMPT } from "../lib/public-ai/prompt";
 import { persistOraAsset } from "../lib/ora-assets";
 import { sendEmailWithStatus, type EmailDeliveryStatus } from "../lib/emailClient";
-import { supportTicketTemplate } from "../lib/emailTemplates";
+import {
+  supportTicketTemplate,
+  supportTicketConfirmationTemplate,
+} from "../lib/emailTemplates";
 import { getClerkUserById } from "../lib/clerk-users";
 import { broadcastNewTicket } from "../lib/support-alerts";
 import { supportChatLimiter, supportEscalateLimiter } from "../lib/rateLimit";
@@ -852,7 +855,25 @@ router.post("/help/support/escalate", supportEscalateLimiter, async (req, res) =
     logger.warn({ component: "help-support", err }, "Failed to update ticket email status");
   }
 
-  res.status(201).json({ ticketId, emailStatus, supportEmailUsed: recipient });
+  // 4) Send a confirmation auto-reply to the submitter — best-effort; any
+  //    failure is logged but must never affect the ticket-creation response.
+  let autoReplyStatus: EmailDeliveryStatus = "skipped";
+  if (userEmail) {
+    try {
+      const confirmTpl = supportTicketConfirmationTemplate({ ticketId, subject });
+      autoReplyStatus = await sendEmailWithStatus({
+        to: userEmail,
+        subject: confirmTpl.subject,
+        html: confirmTpl.html,
+        text: confirmTpl.text,
+      });
+    } catch (err) {
+      logger.warn({ component: "help-support", err }, "Support ticket auto-reply threw");
+      autoReplyStatus = "failed";
+    }
+  }
+
+  res.status(201).json({ ticketId, emailStatus, supportEmailUsed: recipient, autoReplyStatus });
 });
 
 export default router;

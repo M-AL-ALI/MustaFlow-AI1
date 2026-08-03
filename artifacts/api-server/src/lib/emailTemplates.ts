@@ -302,6 +302,40 @@ export function supportTicketTemplate(opts: {
 
 // ── Support reply (staff → requester) ─────────────────────────────────────────
 
+export function supportTicketConfirmationTemplate(opts: {
+  ticketId: number;
+  subject: string;
+}): EmailTemplate {
+  const { ticketId, subject } = opts;
+  const esc = (s: string): string =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const emailSubject = `Support ticket #${ticketId} received`;
+
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">We received your support request</h2>
+  <p>Thank you for reaching out to MustaFlow support. Your request has been logged and our team will review it shortly.</p>
+  <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">
+    <strong>Ticket #${ticketId}</strong> &mdash; ${esc(subject)}
+  </p>
+  <p>We'll reach out to you as soon as possible to help resolve your issue.</p>
+  <p style="font-size:13px;color:#4b5563">If you have additional details to share, simply reply to this email.</p>`);
+
+  const text = [
+    `We received your support request — Ticket #${ticketId}`,
+    "",
+    `Thank you for reaching out to MustaFlow support. Your request has been logged and our team will review it shortly.`,
+    "",
+    `Ticket #${ticketId} — ${subject}`,
+    "",
+    `We'll reach out to you as soon as possible to help resolve your issue.`,
+    "",
+    `If you have additional details to share, simply reply to this email.`,
+  ].join("\n");
+
+  return { subject: emailSubject, html, text };
+}
+
 export function supportReplyTemplate(opts: {
   ticketId: number;
   subject: string;
