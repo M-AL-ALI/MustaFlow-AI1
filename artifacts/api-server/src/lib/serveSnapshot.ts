@@ -18,12 +18,12 @@ import { isBinaryMime } from "./binary-mime";
 import { recordProdLog, hashIp } from "./prodLogs";
 import { logger } from "./logger";
 
-// ── "Built with MustaFlow" badge — free-tier injection ────────────────────────
+// ── "Built with NabuFlow" badge — free-tier injection ─────────────────────────
 // Injected into published HTML pages for free-tier project owners.
 // Core/pro/team subscribers are exempt. Cache TTL: 60 seconds.
 
 const BADGE_HTML =
-  '<div style="position:fixed;bottom:12px;right:12px;font-size:11px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:4px 8px;border-radius:4px"><a href="https://www.mustaflow.com" target="_blank" style="color:#fff;text-decoration:none">Built with MustaFlow</a></div>';
+  '<div style="position:fixed;bottom:12px;right:12px;font-size:11px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:4px 8px;border-radius:4px"><a href="https://www.mustaflow.com" target="_blank" style="color:#fff;text-decoration:none">Built with NabuFlow</a></div>';
 
 interface TierCacheEntry {
   tier: string;
@@ -588,7 +588,7 @@ export async function serveSnapshot(
         ogImageUrl: ogUrl,
         slug,
       });
-      // Inject "Built with MustaFlow" badge for free-tier owners.
+      // Inject "Built with NabuFlow" badge for free-tier owners.
       // Paid subscribers (core/pro/team) are exempt.
       if (project.ownerId) {
         const ownerTier = await getOwnerTier(project.ownerId);

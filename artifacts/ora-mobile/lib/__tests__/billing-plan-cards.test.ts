@@ -12,7 +12,7 @@ const BUILDER_WORDS: RegExp[] = [
   /\bcredits?\b/i,
   /concurrent build/i,
   /build queue/i,
-  /Built with MustaFlow/i,
+  /Built with NabuFlow/i,
   /\bConnectors\b/i,
 ];
 

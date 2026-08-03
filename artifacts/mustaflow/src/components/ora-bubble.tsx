@@ -1573,7 +1573,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 <p className="text-sm font-medium mb-1">Hi, I&apos;m Ora</p>
                 <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed">
                   Your free AI consultant. Ask me anything about app planning, strategy, or
-                  MustaFlow. Upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, or ZIP for analysis.
+                  NabuFlow. Upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, or ZIP for analysis.
                 </p>
               </div>
             )}

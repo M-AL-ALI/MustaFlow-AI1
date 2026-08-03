@@ -377,9 +377,9 @@ const ACCEPTED_EXTENSIONS = new Set([
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
   "Find the root cause of a problem",
-  "Can MustaFlow build X?",
+  "Can NabuFlow build X?",
   "Help me think through a strategy",
-  "What can I build with MustaFlow?",
+  "What can I build with NabuFlow?",
   "Analyze a business idea",
 ];
 
@@ -1696,7 +1696,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
         ) : (
           <div className="px-4 py-4">
             <p className="text-xs text-muted-foreground mb-3">
-              Ask Ora anything about planning your app, strategy, or MustaFlow:
+              Ask Ora anything about planning your app, strategy, or NabuFlow:
             </p>
             <div className="flex flex-wrap gap-2">
               {EXAMPLE_CHIPS.map((chip) => (

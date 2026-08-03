@@ -1153,7 +1153,7 @@ function buildMemoryStatusContext({
 function topicSuggestionGuidance(topic: OraTopic): string {
   const guidance: Record<OraTopic, string> = {
     "product-features":
-      "Focus on MustaFlow capabilities: integrations available, how specific features work, what's possible with the platform.",
+      "Focus on NabuFlow capabilities: integrations available, how specific features work, what's possible with the builder.",
     pricing:
       "Focus on value and cost: plan comparisons, credit usage, what's included at each tier, how to get started cheaply.",
     onboarding:

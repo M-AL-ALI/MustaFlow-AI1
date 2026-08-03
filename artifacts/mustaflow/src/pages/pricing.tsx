@@ -11,7 +11,7 @@ import { nabuflowLadderLines } from "@/lib/nabuflow-billing";
 
 // Ora-only plan tier (mirrors the server's ORA_TIERS_META / OpenAPI OraTierMeta).
 // Contains ONLY Ora features — never AI Builder credits, concurrent builds,
-// build queue, "Built with MustaFlow" badge, or Builder connectors.
+// build queue, "Built with NabuFlow" badge, or Builder connectors.
 interface OraTierMeta {
   id: string;
   name: string;
@@ -475,7 +475,7 @@ export default function PricingPage() {
       <MobileAppBanner />
       <PageMeta
         title="Pricing"
-        description="Simple, transparent pricing for every stage of building. Start free and scale up with MustaFlow AI — no credit card required."
+        description="Simple, transparent pricing for every stage of building. Start free and scale up with NabuFlow — no credit card required."
         path="/pricing"
       />
       {/* Hero */}
@@ -744,7 +744,7 @@ export default function PricingPage() {
           },
           {
             q: "What is the badge on published apps?",
-            a: 'Free-tier published apps display a small "Built with MustaFlow" badge. Upgrade to Core to remove it.',
+            a: 'Free-tier published apps display a small "Built with NabuFlow" badge. Upgrade to Core to remove it.',
           },
           {
             q: "Can I change agent mode mid-project?",

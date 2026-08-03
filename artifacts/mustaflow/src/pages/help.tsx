@@ -846,7 +846,7 @@ export default function HelpPage() {
     <div className="mx-auto max-w-3xl space-y-8 p-6">
       <PageMeta
         title="Help Center"
-        description="Get answers to common questions about building with MustaFlow AI. Browse help articles or contact support."
+        description="Get answers to common questions about building with NabuFlow. Browse help articles or contact support."
         path="/help"
       />
       <div className="space-y-2">

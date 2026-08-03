@@ -556,7 +556,7 @@ export default function DevelopersPage() {
     <div className="max-w-4xl mx-auto px-6 py-12 space-y-12">
       <PageMeta
         title="Developers"
-        description="Build on MustaFlow AI with our public API. Manage projects, trigger builds, publish apps, and integrate with your own tools."
+        description="Build on NabuFlow with our public API. Manage projects, trigger builds, publish apps, and integrate with your own tools."
         path="/developers"
       />
       {/* Header */}
@@ -567,7 +567,7 @@ export default function DevelopersPage() {
         </div>
         <p className="text-muted-foreground max-w-xl">
           Automate project creation, trigger builds, and read output files programmatically using
-          the MustaFlow AI REST API. Everything the web app does, you can do from your own scripts
+          the NabuFlow REST API. Everything the web app does, you can do from your own scripts
           and pipelines.
         </p>
         <p className="text-xs text-muted-foreground">API version: v1 — last updated May 2026</p>
@@ -666,7 +666,7 @@ export default function DevelopersPage() {
       {/* Overview */}
       <Section icon={BookOpen} title="API Overview">
         <p>
-          The MustaFlow AI API is a REST API over HTTPS. All requests and responses use JSON. The
+          The NabuFlow API is a REST API over HTTPS. All requests and responses use JSON. The
           base URL for all endpoints is:
         </p>
         <div className="rounded-lg border border-border bg-zinc-950 px-4 py-3 font-mono text-xs text-zinc-200">

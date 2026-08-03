@@ -307,7 +307,7 @@ export default function GalleryPage() {
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
       <PageMeta
         title="Template Gallery"
-        description="Browse hundreds of community-built and official app templates across every category. Start your next project in seconds with MustaFlow AI."
+        description="Browse hundreds of community-built and official app templates across every category. Start your next project in seconds with NabuFlow."
         path="/gallery"
       />
       {/* Header */}

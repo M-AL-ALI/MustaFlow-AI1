@@ -478,7 +478,7 @@ export default function HomePage() {
               Build. Debug. Deploy.
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              Describe it or write it — MustaFlow plans, builds, tests, and ships your app, whether
+              Describe it or write it — NabuFlow plans, builds, tests, and ships your app, whether
               you code or not.
             </p>
           </div>
@@ -845,7 +845,7 @@ export default function HomePage() {
                 Professional tools, <span className="gradient-text">built in</span>
               </h2>
               <p className="text-muted-foreground max-w-2xl mx-auto">
-                Not a no-code toy. MustaFlow ships with the tools developers actually use — shell
+                Not a no-code toy. NabuFlow ships with the tools developers actually use — shell
                 access, debugging, CI, and a REST API to automate everything.
               </p>
             </div>
@@ -1085,7 +1085,7 @@ export default function HomePage() {
                 Everything you need, nothing you don't
               </h2>
               <p className="text-muted-foreground max-w-xl mx-auto text-sm">
-                From the first prompt to a published, secured, scaled app — MustaFlow handles the
+                From the first prompt to a published, secured, scaled app — NabuFlow handles the
                 whole stack.
               </p>
             </div>
@@ -1370,7 +1370,7 @@ export default function HomePage() {
                   The AI that gets better with every build
                 </h2>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-5">
-                  Every project teaches MustaFlow something new. Lessons are captured automatically
+                  Every project teaches NabuFlow something new. Lessons are captured automatically
                   — what worked, what didn't, your preferences — and injected into every future
                   build so the AI always improves.
                 </p>
@@ -1439,7 +1439,7 @@ export default function HomePage() {
         <div className="max-w-4xl mx-auto px-6 py-16 text-center">
           <h2 className="text-2xl font-bold mb-3">Ready to build something?</h2>
           <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-            Join developers, makers, founders, and creators who ship faster with MustaFlow AI.
+            Join developers, makers, founders, and creators who ship faster with NabuFlow.
           </p>
           <div className="flex items-center justify-center gap-4 flex-wrap">
             <Button size="lg" className="gap-2" asChild>

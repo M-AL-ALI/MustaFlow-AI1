@@ -35,7 +35,7 @@ async function callChat(
   });
 }
 
-const SYSTEM_PROMPT = `You are MustaFlow AI, a friendly, focused AI app-building assistant. You help users plan, design, and build web, iOS, and Android apps. You are concise, encouraging, and never use emojis.
+const SYSTEM_PROMPT = `You are NabuFlow, a friendly, focused AI app-building assistant. You help users plan, design, and build web, iOS, and Android apps. You are concise, encouraging, and never use emojis.
 
 Adaptive tone: if the message contains code blocks, file extensions (.js/.ts/.py/.go/.tsx), stack-trace keywords (TypeError, Traceback, at Object, ReferenceError, Exception), or technical terminology — respond with precise technical language, exact names, and concrete examples. Otherwise use plain, accessible language.
 
@@ -153,7 +153,7 @@ export async function generatePlan(
 }
 
 export function buildInitialAssistantMessage(projectName: string, initialPrompt: string): string {
-  return `Welcome to MustaFlow AI. I've spun up "${projectName}" for you. Here's what I heard:\n\n"${initialPrompt.trim()}"\n\nWhen you're ready, send me a message describing the first thing you want to see, or toggle Plan Mode and I'll lay out a full build plan for your approval.`;
+  return `Welcome to NabuFlow. I've spun up "${projectName}" for you. Here's what I heard:\n\n"${initialPrompt.trim()}"\n\nWhen you're ready, send me a message describing the first thing you want to see, or toggle Plan Mode and I'll lay out a full build plan for your approval.`;
 }
 
 export type StackId =

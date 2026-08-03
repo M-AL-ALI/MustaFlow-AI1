@@ -1,7 +1,7 @@
 /**
  * CycloneDX 1.5 SBOM Generator
  *
- * Produces a Software Bill of Materials for a MustaFlow project.
+ * Produces a Software Bill of Materials for a NabuFlow project.
  * Two component groups are included:
  *   1. CDN libraries detected in the generated HTML files.
  *   2. API server npm production dependencies.
@@ -343,7 +343,7 @@ export function generateSbom(projectName: string, files: ProjectFile[]): Cyclone
     version: 1,
     metadata: {
       timestamp: new Date().toISOString(),
-      tools: [{ vendor: "MustaFlow", name: "SBOM Generator", version: "1.0.0" }],
+      tools: [{ vendor: "MustaFlow", name: "NabuFlow SBOM Generator", version: "1.0.0" }],
       component: {
         type: "application",
         name: projectName,

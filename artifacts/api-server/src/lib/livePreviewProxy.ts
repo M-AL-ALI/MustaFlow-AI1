@@ -222,7 +222,7 @@ const PROXY_UNAVAILABLE_HTML = (projectId: number): string => `<!doctype html>
 <body><div class="wrap">
   <h1>Container preview unavailable</h1>
   <p>Container preview is not available in this environment. The Fly.io proxy (<code>${FLY_PROXY_HOSTNAME}</code>) could not be reached from here.</p>
-  <p>Your app files are still saved in MustaFlow. Start a test preview, retry, or inspect container logs.</p>
+  <p>Your app files are still saved in NabuFlow. Start a test preview, retry, or inspect container logs.</p>
   <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
 </div></body></html>`;
 

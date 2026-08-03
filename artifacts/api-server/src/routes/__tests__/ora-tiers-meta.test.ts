@@ -8,7 +8,7 @@
  *   1. Prices/limits are derived from the canonical @workspace/db constants —
  *      most importantly Deep Wave at $40 (TIER_PRICE_USD.wave), never $65.
  *   2. The cards stay Ora-only: no AI Builder concepts (credits, concurrent
- *      builds, build queue, "Built with MustaFlow" badge, Builder connectors).
+ *      builds, build queue, "Built with NabuFlow" badge, Builder connectors).
  */
 
 import { describe, expect, it } from "vitest";
@@ -25,7 +25,7 @@ const BUILDER_WORDS: RegExp[] = [
   /credit/i,
   /concurrent build/i,
   /build queue/i,
-  /Built with MustaFlow/i,
+  /Built with NabuFlow/i,
   /\bConnectors\b/i,
 ];
 

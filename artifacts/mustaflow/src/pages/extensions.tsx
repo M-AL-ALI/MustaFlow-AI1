@@ -415,7 +415,7 @@ export default function ExtensionsPage() {
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
       <PageMeta
         title="Extensions Marketplace"
-        description="Discover and install extensions to supercharge your MustaFlow AI projects. Add integrations, tools, and capabilities to your apps."
+        description="Discover and install extensions to supercharge your NabuFlow projects. Add integrations, tools, and capabilities to your apps."
         path="/extensions"
       />
       {/* Header */}
@@ -554,7 +554,7 @@ export default function ExtensionsPage() {
             </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            Build extensions that integrate with MustaFlow projects.
+            Build extensions that integrate with NabuFlow projects.
           </p>
         </div>
         <div className="divide-y divide-border">
@@ -590,7 +590,7 @@ export default function ExtensionsPage() {
           <div>
             <h3 className="text-sm font-semibold text-foreground">Build an extension</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Publish your extension to reach thousands of MustaFlow users. All extensions are
+              Publish your extension to reach thousands of NabuFlow users. All extensions are
               reviewed by the team before listing.
             </p>
           </div>

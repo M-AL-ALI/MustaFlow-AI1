@@ -25,7 +25,7 @@ Return ONLY this JSON format, no prose, no markdown:
 {"intent":"<intent>","confidence":"<confidence>","topic":"<topic>"}
 
 Intent values:
-"simple_faq" / high — short factual question about MustaFlow (pricing, features, what it does, how to sign up) where the answer is straightforward
+"simple_faq" / high — short factual question about NabuFlow (pricing, features, what it does, how to sign up) where the answer is straightforward
 "simple_faq" / low — possible FAQ but you are not fully sure it is simple
 "premium" / high — clearly requires analysis, strategy, explanation, problem-solving, brainstorming, planning, or substantive reasoning
 "premium" / low — possibly needs deeper reasoning but unsure
@@ -33,7 +33,7 @@ Intent values:
 "builder_request" / low — possibly a build/deploy request but ambiguous
 
 Topic values (pick the single most relevant):
-"product-features" — questions about MustaFlow capabilities, integrations, or how it works
+"product-features" — questions about NabuFlow capabilities, integrations, or how it works
 "pricing" — pricing, plans, credits, billing, or cost questions
 "onboarding" — getting started, signing up, first steps, tutorials
 "app-planning" — planning or designing an app idea (requirements, scope, architecture)
@@ -45,7 +45,7 @@ Topic values (pick the single most relevant):
 
 Rules:
 - When in doubt between simple_faq and premium, choose premium with high confidence.
-- Only use simple_faq with high confidence for genuinely short factual questions (e.g. "What is MustaFlow?", "How much does it cost?").
+- Only use simple_faq with high confidence for genuinely short factual questions (e.g. "What is NabuFlow?", "How much does it cost?").
 - Never return anything other than the JSON format above.`;
 
 /** Safe fallback when the classifier times out or fails. Defaults to the

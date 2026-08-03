@@ -525,7 +525,7 @@ router.post(
     }
 
     const branch = body.branch ?? conn[0].defaultBranch;
-    const commitMessage = body.commitMessage?.trim() || "Push from MustaFlow AI";
+    const commitMessage = body.commitMessage?.trim() || "Push from NabuFlow";
 
     try {
       await db
@@ -766,7 +766,7 @@ router.post(
         method: "POST",
         body: JSON.stringify({
           title: body.title,
-          body: body.body ?? "Created via MustaFlow AI",
+          body: body.body ?? "Created via NabuFlow",
           head: body.head,
           base,
         }),

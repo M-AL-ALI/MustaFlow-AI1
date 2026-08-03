@@ -109,7 +109,7 @@ export const SUBSCRIPTION_TIERS_META = [
       "150 credits / month",
       "Instant replies",
       "1 concurrent build",
-      '"Built with MustaFlow" badge on published apps',
+      '"Built with NabuFlow" badge on published apps',
       "Community support",
     ],
   },
@@ -158,7 +158,7 @@ export const SUBSCRIPTION_TIERS_META = [
 // ── Ora-only plan metadata (Ora plan/billing parity) ─────────────────────────
 // Ora surfaces (website Ora settings/pricing/billing plan cards + mobile
 // Settings) must render ONLY Ora features — never AI Builder credits, concurrent
-// builds, build queue, the "Built with MustaFlow" badge, or Builder connectors.
+// builds, build queue, the "Built with NabuFlow" badge, or Builder connectors.
 // This array is the SINGLE SOURCE OF TRUTH consumed by BOTH website and mobile
 // via the API (GET /billing/subscription -> oraTiers, GET /billing/ora-plans).
 // Everything is derived from the canonical per-tier constants in

@@ -267,7 +267,7 @@ router.post("/help/support/chat", supportChatLimiter, async (req, res) => {
   if (!scanUserInput(message)) {
     res.status(200).json({
       reply:
-        "I can only help with using MustaFlow. Let me know what you're trying to do and I'll walk you through it, or you can escalate to the support team.",
+        "I can only help with using MustaFlow AI Technology products. Let me know what you're trying to do and I'll walk you through it, or you can escalate to the support team.",
       canEscalate: true,
     });
     return;

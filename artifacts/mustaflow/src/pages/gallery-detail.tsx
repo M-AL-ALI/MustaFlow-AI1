@@ -173,7 +173,7 @@ export default function GalleryDetailPage() {
       <>
         <PageMeta
           title={`${slugTitle} — Template Gallery`}
-          description={`View the ${slugTitle} app template in the MustaFlow AI template gallery.`}
+          description={`View the ${slugTitle} app template in the NabuFlow template gallery.`}
           path={`/gallery/${slug}`}
         />
         <div className="flex items-center justify-center py-32">

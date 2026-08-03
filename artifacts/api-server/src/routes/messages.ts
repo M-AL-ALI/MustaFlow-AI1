@@ -1591,7 +1591,7 @@ router.post(
 
       // Build system prompt: use developer pair-programmer prompt when the
       // client explicitly set agentIntent=converse (i.e. "Assistant" mode).
-      const DEVELOPER_PAIR_PROGRAMMER_PROMPT = `You are MustaFlow Assistant — an expert developer pair programmer with deep knowledge of TypeScript, JavaScript, Python, Go, React, Node.js, Express, SQL, and system design. You help developers debug errors, review code quality, explain architecture decisions, and suggest refactors. Match the technical depth of the user: use precise developer language when they do; plain language otherwise. When recommending a specific file change, wrap the new content in a fenced code block with the filename as the language tag (e.g. \`\`\`src/api/auth.ts).`;
+      const DEVELOPER_PAIR_PROGRAMMER_PROMPT = `You are NabuFlow Assistant — an expert developer pair programmer with deep knowledge of TypeScript, JavaScript, Python, Go, React, Node.js, Express, SQL, and system design. You help developers debug errors, review code quality, explain architecture decisions, and suggest refactors. Match the technical depth of the user: use precise developer language when they do; plain language otherwise. When recommending a specific file change, wrap the new content in a fenced code block with the filename as the language tag (e.g. \`\`\`src/api/auth.ts).`;
 
       const hasDeveloperSignals =
         /```|\.ts\b|\.tsx\b|\.js\b|\.py\b|\.go\b|error:|Error:|TypeError|at \w+\s*\(|stack trace|undefined is not|cannot read/i.test(

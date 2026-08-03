@@ -331,8 +331,8 @@ async function maybeSendUptimeAlert(opts: {
     .limit(3);
   if (recent.length < 3 || recent.some((r) => r.status !== "failed")) return;
 
-  const subject = `[MustaFlow] ${opts.projectName} is down`;
-  const body = `Synthetic uptime probe failed 3 times in a row for ${opts.projectName}.\n\nTarget: ${opts.target}\nLast status: ${opts.rootStatus || "network error"}\n\nThe alert cools down for 1 hour. Open the Publishing tab in MustaFlow to investigate.`;
+  const subject = `[NabuFlow] ${opts.projectName} is down`;
+  const body = `Synthetic uptime probe failed 3 times in a row for ${opts.projectName}.\n\nTarget: ${opts.target}\nLast status: ${opts.rootStatus || "network error"}\n\nThe alert cools down for 1 hour. Open the Publishing tab in NabuFlow to investigate.`;
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {

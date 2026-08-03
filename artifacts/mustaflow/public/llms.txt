@@ -1,8 +1,8 @@
-# MustaFlow AI
+# NabuFlow
 
-> An AI-powered app builder for non-technical users. Describe an app idea in plain language and MustaFlow plans, builds, and deploys it — no coding required.
+> An AI-powered app builder for non-technical users. Describe an app idea in plain language and NabuFlow plans, builds, and deploys it — no coding required.
 
-MustaFlow supports multiple output stacks: static HTML/CSS/JS sites, React SPAs, full-stack Node.js apps, and native mobile apps (Expo/React Native). The stack is auto-detected from the user's description.
+NabuFlow supports multiple output stacks: static HTML/CSS/JS sites, React SPAs, full-stack Node.js apps, and native mobile apps (Expo/React Native). The stack is auto-detected from the user's description.
 
 ## Product
 
