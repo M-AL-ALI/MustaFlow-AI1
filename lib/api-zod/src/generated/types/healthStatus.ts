@@ -6,10 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { HealthStatusContainerSubsystem } from './healthStatusContainerSubsystem';
+import type { HealthStatusEncryptionKey } from './healthStatusEncryptionKey';
 
 export interface HealthStatus {
   status: string;
   /** Status of the Fly.io container subsystem. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "error" = token is set but API call failed at startup.
    */
   containerSubsystem?: HealthStatusContainerSubsystem;
+  /** Encryption key health. "ok" = key is present and AES-256-GCM round-trip passes. "missing" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). "invalid" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).
+   */
+  encryptionKey?: HealthStatusEncryptionKey;
 }

@@ -19,6 +19,18 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { logger } from "./logger";
 
+// ─── Encryption key health status ────────────────────────────────────────────
+
+/** Observable health of the ENCRYPTION_KEY at startup. */
+export type EncryptionKeyStatus = "ok" | "missing" | "invalid";
+
+let _encryptionKeyStatus: EncryptionKeyStatus = "missing";
+
+/** Returns the result of the startup encryption key health check. */
+export function getEncryptionKeyStatus(): EncryptionKeyStatus {
+  return _encryptionKeyStatus;
+}
+
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12;
 const _TAG_BYTES = 16;
@@ -100,6 +112,7 @@ class DevOnlyPassthroughEncryption implements EncryptionService {
 function buildEncryptionService(): EncryptionService {
   const rawKey = process.env.ENCRYPTION_KEY;
   if (!rawKey) {
+    _encryptionKeyStatus = "missing";
     if (process.env.NODE_ENV === "production") {
       throw new Error(
         "ENCRYPTION_KEY environment variable is required in production. " +
@@ -114,11 +127,23 @@ function buildEncryptionService(): EncryptionService {
   }
   try {
     const svc = createEncryptionService(rawKey);
+    // Round-trip health probe — confirm the key actually encrypts and decrypts
+    // correctly before accepting traffic. The probe string contains no secret
+    // material and is never logged.
+    const _probe = "enc-startup-probe";
+    if (svc.decrypt(svc.encrypt(_probe)) !== _probe) {
+      throw new Error("AES-256-GCM round-trip check failed — key may be corrupt");
+    }
+    _encryptionKeyStatus = "ok";
     logger.info("AES-256-GCM encryption active");
     return svc;
   } catch (err) {
+    _encryptionKeyStatus = "invalid";
     if (process.env.NODE_ENV === "production") throw err;
-    logger.error({ err }, "Invalid ENCRYPTION_KEY — falling back to plaintext");
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      "ENCRYPTION_KEY invalid — falling back to plaintext. Fix before deploying.",
+    );
     return new DevOnlyPassthroughEncryption();
   }
 }

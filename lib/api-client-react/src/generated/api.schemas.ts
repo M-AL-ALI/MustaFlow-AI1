@@ -18,11 +18,27 @@ export const HealthStatusContainerSubsystem = {
   error: 'error',
 } as const;
 
+/**
+ * Encryption key health. "ok" = key is present and AES-256-GCM round-trip passes. "missing" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). "invalid" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).
+
+ */
+export type HealthStatusEncryptionKey = typeof HealthStatusEncryptionKey[keyof typeof HealthStatusEncryptionKey];
+
+
+export const HealthStatusEncryptionKey = {
+  ok: 'ok',
+  missing: 'missing',
+  invalid: 'invalid',
+} as const;
+
 export interface HealthStatus {
   status: string;
   /** Status of the Fly.io container subsystem. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "error" = token is set but API call failed at startup.
    */
   containerSubsystem?: HealthStatusContainerSubsystem;
+  /** Encryption key health. "ok" = key is present and AES-256-GCM round-trip passes. "missing" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). "invalid" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).
+   */
+  encryptionKey?: HealthStatusEncryptionKey;
 }
 
 export interface ApiError {

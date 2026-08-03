@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import { getContainerSubsystemStatus } from "../lib/container";
+import { getEncryptionKeyStatus } from "../lib/encryption";
 
 const router: IRouter = Router();
 
@@ -9,6 +10,7 @@ router.get("/healthz", (_req, res) => {
   const data = HealthCheckResponse.parse({
     status: "ok",
     ...(subsystem !== null ? { containerSubsystem: subsystem } : {}),
+    encryptionKey: getEncryptionKeyStatus(),
   });
   res.json(data);
 });
