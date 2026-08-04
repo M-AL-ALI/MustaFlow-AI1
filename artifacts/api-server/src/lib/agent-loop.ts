@@ -4624,7 +4624,7 @@ async function execWithTimeout(
   /** Propagated from execInContainer — true when the Fly machine had stopped and was woken. */
   machineWoken?: boolean;
 }> {
-  const { execInContainer } = await import("./container");
+  const { execInContainer } = await import("./tenant-runtime");
   let timer: NodeJS.Timeout | null = null;
   const timeoutPromise = new Promise<{
     ok: false;
@@ -4706,7 +4706,7 @@ type ContainerProvisioningResult =
 async function ensureContainerProvisioned(ctx: ToolCtx): Promise<ContainerProvisioningResult> {
   if (ctx.containerState.id) return { ok: true };
   try {
-    const { isContainerLayerConfigured, provisionContainer } = await import("./container");
+    const { isContainerLayerConfigured, provisionContainer } = await import("./tenant-runtime");
     const { getBuildSecretMap } = await import("./container-secrets");
     if (!(await isContainerLayerConfigured())) {
       return { ok: true, deferred: true, reason: CONTAINER_TOOL_DEFERRED_REASON };
@@ -4761,7 +4761,7 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   // This ensures package.json (and other config files) are present in the
   // container when npm runs. Without this, npm v10 throws "Tracker 'idealTree'
   // already exists" when it can't find package.json in the working directory.
-  const { syncFilesToContainer } = await import("./container");
+  const { syncFilesToContainer } = await import("./tenant-runtime");
   const files = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
   if (files.length > 0) {
     await syncFilesToContainer(ctx.containerState.id, ctx.input.projectId, files).catch(() => {});
@@ -4819,7 +4819,7 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   // onMachineRestarted re-syncs workspace files when the machine's writable
   // layer resets between retries — without it, npm runs against an empty /app.
   const { npmInstallInBackground: bgInstall, startContainerHealthServer } =
-    await import("./container");
+    await import("./tenant-runtime");
 
   // Keep the stuck-run-scheduler from killing this task while npm install runs.
   // ensureInstalled is called outside the AI tool loop so the normal per-step
@@ -4990,7 +4990,7 @@ async function autoInstallMissingDeps(
 
   // Sync the updated package.json to the container's /app directory
   try {
-    const { writeFileToContainer } = await import("./container");
+    const { writeFileToContainer } = await import("./tenant-runtime");
     await writeFileToContainer(containerId, "package.json", updated, input.projectId);
   } catch (err) {
     // If the container write fails, revert the workspace to keep them consistent
@@ -5061,7 +5061,7 @@ async function executeSingleFileWrite(
     after: content,
   });
   if (containerState.id) {
-    const { writeFileToContainer } = await import("./container");
+    const { writeFileToContainer } = await import("./tenant-runtime");
     let syncFailed = false;
     let syncErrDetail = "";
     try {
@@ -5362,7 +5362,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         after: newText,
       });
       if (containerState.id) {
-        const { writeFileToContainer } = await import("./container");
+        const { writeFileToContainer } = await import("./tenant-runtime");
         // Same container-sync verification as write_file: return ok:false if
         // the exec fails so the agent doesn't loop on stale container state.
         let patchSyncFailed = false;
@@ -5935,7 +5935,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       // `final` event, and best-effort cleanup the tmp files.
       const runId = commandRunKey(argv, t);
       await emitCommandStartEvent(input.onEvent, { runId, argv, startedAt: t });
-      const { execInContainer } = await import("./container");
+      const { execInContainer } = await import("./tenant-runtime");
       const slug = `${t}_${Math.random().toString(36).slice(2, 8)}`;
       const logPath = `/tmp/agent-cmd-${slug}.log`;
       const exitPath = `/tmp/agent-cmd-${slug}.exit`;
@@ -7848,7 +7848,7 @@ async function runCheckProfile(
     input.liveServerAvailable === false ? null : (containerState?.id ?? input.containerId ?? null);
   if (needsContainer && !effectiveContainerId && !input.signal.aborted) {
     try {
-      const { provisionContainer } = await import("./container");
+      const { provisionContainer } = await import("./tenant-runtime");
       const { getBuildSecretMap } = await import("./container-secrets");
       const files = workspace.all().map((f) => ({ path: f.path, content: f.content }));
       const buildEnv = await getBuildSecretMap(input.projectId);
@@ -7879,7 +7879,7 @@ async function runCheckProfile(
         npmInstallInBackground: bgInstall,
         syncFilesToContainer: syncFn,
         startContainerHealthServer: startHealthSrv,
-      } = await import("./container");
+      } = await import("./tenant-runtime");
       const containerId = effectiveContainerId;
       const installStartedAt = Date.now();
       const INSTALL_WALL_CLOCK_CAP_MS = 6 * 60 * 1000;

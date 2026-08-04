@@ -531,7 +531,7 @@ export async function runUserSpecs(opts: UserSpecRunOptions): Promise<E2eScenari
   const specsToRun = opts.specs.slice(0, maxSpecs);
   const specsSkipped = opts.specs.slice(maxSpecs);
 
-  const { writeFileToContainer, execInContainer } = await import("../container");
+  const { writeFileToContainer, execInContainer } = await import("../tenant-runtime");
   const results: E2eScenarioResult[] = [];
   const remoteWorkDir = `/tmp/mf-e2e-${Date.now()}-${Math.floor(Math.random() * 1e9).toString(36)}`;
 

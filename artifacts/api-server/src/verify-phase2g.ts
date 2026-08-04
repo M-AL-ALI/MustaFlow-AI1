@@ -203,7 +203,7 @@ export const api = axios.create({ baseURL: '/api' });`,
 
     // Read current package.json from container
     try {
-      const { execInContainer } = await import("./lib/container");
+      const { execInContainer } = await import("./lib/tenant-runtime");
       const catResult = await execInContainer(
         containerId,
         ["cat", "/app/package.json"],
@@ -221,7 +221,7 @@ export const api = axios.create({ baseURL: '/api' });`,
         pass("Confirmed: react-router-dom absent from container before patch");
 
         // Write the patched package.json
-        const { writeFileToContainer } = await import("./lib/container");
+        const { writeFileToContainer } = await import("./lib/tenant-runtime");
         const patchedContent = addMissingToDeps(JSON.stringify(containerPkg, null, 2), [
           "react-router-dom",
         ]);

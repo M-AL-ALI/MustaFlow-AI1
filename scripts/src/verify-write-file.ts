@@ -14,13 +14,15 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { pool } from "@workspace/db";
+import {
+  execInContainer,
+  hasContainerLayerCredentials,
+  writeFileToContainer,
+} from "../../artifacts/api-server/src/lib/tenant-runtime.js";
 
 // Workspace root is one level above scripts/
 const ROOT = join(import.meta.dirname, "../..");
 
-const FLY_API_BASE = "https://api.machines.dev/v1";
-const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
-const FLY_TOKEN = process.env.FLY_API_TOKEN ?? "";
 const TEST_CONTENT = "Preview Sync Test 123";
 const TEST_FILE = "_verify_write_test.txt";
 
@@ -43,40 +45,16 @@ function section(title: string) {
 async function execInMachine(
   machineId: string,
   command: string[],
+  projectId: number,
   cwd = "/app",
 ): Promise<{ ok: boolean; stdout: string; stderr: string; exitCode: number }> {
-  const res = await fetch(`${FLY_API_BASE}/apps/${FLY_APP}/machines/${machineId}/exec`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${FLY_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ command, cwd, timeout: 15 }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    return { ok: false, stdout: "", stderr: text, exitCode: -1 };
-  }
-  const data = (await res.json()) as { stdout?: string; stderr?: string; exit_code?: number };
-  const exitCode = data.exit_code ?? 0;
-  return { ok: exitCode === 0, stdout: data.stdout ?? "", stderr: data.stderr ?? "", exitCode };
-}
-
-// writeFileToContainer logic inline (same as container.ts)
-async function writeFileTo(machineId: string, filePath: string, content: string): Promise<boolean> {
-  if (!FLY_TOKEN) return false;
-  try {
-    const b64 = Buffer.from(content, "utf8").toString("base64");
-    const dir = filePath.includes("/")
-      ? `/app/${filePath.split("/").slice(0, -1).join("/")}`
-      : "/app";
-    const fullPath = `/app/${filePath}`;
-    const cmd = ["/bin/sh", "-c", `mkdir -p "${dir}" && echo "${b64}" | base64 -d > "${fullPath}"`];
-    const res = await execInMachine(machineId, cmd);
-    return res.ok;
-  } catch {
-    return false;
-  }
+  const result = await execInContainer(machineId, command, projectId, cwd);
+  return {
+    ok: result.ok,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+  };
 }
 
 // ── Fetch a live project with a running container ─────────────────────────────
@@ -97,9 +75,11 @@ if (projectRes.rows.length === 0) {
 }
 const { id: projectId, name: projectName, container_id: containerId } = projectRes.rows[0]!;
 console.log(`\nUsing project #${projectId} — ${projectName} (container: ${containerId})`);
-console.log(`FLY_API_TOKEN: ${FLY_TOKEN ? "present" : "MISSING — live container tests skipped"}`);
+console.log(
+  `FLY_API_TOKEN: ${hasContainerLayerCredentials() ? "present" : "MISSING — live container tests skipped"}`,
+);
 
-const canExec = !!FLY_TOKEN;
+const canExec = hasContainerLayerCredentials();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST 1: File-write + container read-back
@@ -110,12 +90,16 @@ if (!canExec) {
   fail("1a-1c skipped", "FLY_API_TOKEN missing");
 } else {
   // 1a. Write to container
-  const writeOk = await writeFileTo(containerId, TEST_FILE, TEST_CONTENT);
+  const writeOk = await writeFileToContainer(containerId, TEST_FILE, TEST_CONTENT, projectId);
   if (writeOk) pass("1a writeFileToContainer returns true");
   else fail("1a writeFileToContainer returned false — sync failed");
 
   // 1b. Read back from container
-  const readBack = await execInMachine(containerId, ["/bin/sh", "-c", `cat /app/${TEST_FILE}`]);
+  const readBack = await execInMachine(
+    containerId,
+    ["/bin/sh", "-c", `cat /app/${TEST_FILE}`],
+    projectId,
+  );
   const got = readBack.stdout.trim();
   if (readBack.ok && got === TEST_CONTENT) {
     pass("1b container read-back matches written content", `"${got}"`);
@@ -129,21 +113,26 @@ if (!canExec) {
   }
 
   // 1c. File exists at correct /app/ path
-  const pathCheck = await execInMachine(containerId, [
-    "/bin/sh",
-    "-c",
-    `test -f /app/${TEST_FILE} && echo EXISTS || echo MISSING`,
-  ]);
+  const pathCheck = await execInMachine(
+    containerId,
+    ["/bin/sh", "-c", `test -f /app/${TEST_FILE} && echo EXISTS || echo MISSING`],
+    projectId,
+  );
   if (pathCheck.stdout.trim() === "EXISTS") pass("1c file exists at /app/ path in container");
   else fail("1c file not found at /app/ path", pathCheck.stdout.trim());
 
   // 1d. Failure case: bad container returns false (not success)
-  const badWrite = await writeFileTo("nonexistent-machine-00000", TEST_FILE, TEST_CONTENT);
+  const badWrite = await writeFileToContainer(
+    "nonexistent-machine-00000",
+    TEST_FILE,
+    TEST_CONTENT,
+    projectId,
+  );
   if (!badWrite) pass("1d bad-container write returns false (would have looped before fix)");
   else fail("1d bad-container write incorrectly returned true");
 
   // Cleanup
-  await execInMachine(containerId, ["/bin/sh", "-c", `rm -f /app/${TEST_FILE}`]);
+  await execInMachine(containerId, ["/bin/sh", "-c", `rm -f /app/${TEST_FILE}`], projectId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

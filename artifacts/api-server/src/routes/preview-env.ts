@@ -28,7 +28,7 @@ import {
   execInContainer,
   getContainerStatus,
   npmInstallInBackground,
-} from "../lib/container";
+} from "../lib/tenant-runtime";
 import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
 import { createHash, randomBytes } from "crypto";

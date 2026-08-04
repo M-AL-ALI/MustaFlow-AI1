@@ -23,7 +23,7 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
 import { writeKnowledge } from "../lib/knowledge";
-import { restartContainerWithSecrets, execInContainer } from "../lib/container";
+import { restartContainerWithSecrets, execInContainer } from "../lib/tenant-runtime";
 import {
   getContainerSecretMap,
   getProjectSecretLiterals,
@@ -186,7 +186,7 @@ async function triggerMigrationsAfterDbSecretChange(
     // machine restart. We sync files and run migrations independently — the new
     // DATABASE_URL env var is already baked into the machine config at this point
     // because restartContainerWithSecrets calls updateContainerEnv before restarting.
-    const { syncFilesToContainer } = await import("../lib/container");
+    const { syncFilesToContainer } = await import("../lib/tenant-runtime");
     await syncFilesToContainer(machineId, projectId, allProjectFiles);
 
     // Install dependencies if package.json is present (so drizzle-kit is available)

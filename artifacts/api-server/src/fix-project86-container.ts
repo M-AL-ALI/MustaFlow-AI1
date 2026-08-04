@@ -16,7 +16,8 @@ import {
   syncFilesToContainer,
   patchMachineAutostop,
   startContainerHealthServer,
-} from "./lib/container";
+  tenantRuntimeProvider,
+} from "./lib/tenant-runtime";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
@@ -356,7 +357,7 @@ async function main() {
 
   // ── 14. External Fly URL check ────────────────────────────────────────────
   if (healthy) {
-    const flyUrl = `https://mustaflow-containers.fly.dev/container/${MACHINE_ID}/healthz`;
+    const flyUrl = `${tenantRuntimeProvider.resolveEndpoint(MACHINE_ID)}/healthz`;
     console.log(`\n[external] GET ${flyUrl}`);
     try {
       const { default: https } = await import("https");

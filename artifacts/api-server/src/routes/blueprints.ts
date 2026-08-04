@@ -38,7 +38,7 @@ import { discoverMcpTools, assertSafeMcpEndpoint } from "../lib/mcp";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { encryptionService } from "../lib/encryption";
-import { execInContainer } from "../lib/container";
+import { execInContainer } from "../lib/tenant-runtime";
 import { publishTaskEvent } from "../lib/event-bus";
 import { z } from "zod";
 

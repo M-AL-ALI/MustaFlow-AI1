@@ -23,7 +23,7 @@
  * checks ran (none were skipped) and all passed — used for the UI banner.
  */
 
-import { execInContainer, npmInstallInBackground, syncFilesToContainer } from "./container";
+import { execInContainer, npmInstallInBackground, syncFilesToContainer } from "./tenant-runtime";
 import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,7 +171,7 @@ export async function runQualityGate(
               ),
             );
             // Restart the health server so keepalive pings keep the machine alive.
-            const { startContainerHealthServer } = await import("./container");
+            const { startContainerHealthServer } = await import("./tenant-runtime");
             await startContainerHealthServer(containerId, projectId);
           },
         });

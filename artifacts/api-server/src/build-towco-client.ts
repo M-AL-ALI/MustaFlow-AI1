@@ -8,8 +8,8 @@
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { execInContainer, patchMachineAutostop } from "./lib/container.js";
-import { writeFileToContainer } from "./lib/container.js";
+import { execInContainer, patchMachineAutostop } from "./lib/tenant-runtime.js";
+import { writeFileToContainer } from "./lib/tenant-runtime.js";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;

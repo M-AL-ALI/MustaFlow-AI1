@@ -8,12 +8,15 @@ import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
 import { createSupportAlertsServer } from "./lib/support-alerts";
 import { createDebugServer } from "./routes/debug";
-import { ensureFlyApp, runContainerSelfCheck } from "./lib/container";
+import {
+  ensureFlyApp,
+  resumeContainerLogTailersOnBoot,
+  runContainerSelfCheck,
+} from "./lib/tenant-runtime";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
 import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
 import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
-import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
 import { startContainerLogRetentionScheduler } from "./lib/container-log-retention";
 import { startOraTranscriptRetentionScheduler } from "./lib/ora-transcript-retention";
 import { startOraAssetsRetentionScheduler } from "./lib/ora-assets-retention";

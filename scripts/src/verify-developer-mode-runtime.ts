@@ -13,6 +13,10 @@
  */
 
 import { pool } from "@workspace/db";
+import {
+  execInContainer,
+  hasContainerLayerCredentials,
+} from "../../artifacts/api-server/src/lib/tenant-runtime.js";
 
 const PROJECT_ID = parseInt(process.env.VERIFY_PROJECT_ID ?? "", 10);
 if (isNaN(PROJECT_ID) || PROJECT_ID <= 0) {
@@ -20,7 +24,7 @@ if (isNaN(PROJECT_ID) || PROJECT_ID <= 0) {
   process.exit(1);
 }
 
-const FLY_API_TOKEN_PRESENT = !!process.env.FLY_API_TOKEN;
+const FLY_API_TOKEN_PRESENT = hasContainerLayerCredentials();
 const NEON_API_KEY_PRESENT = !!process.env.NEON_API_KEY;
 
 let totalPass = 0;
@@ -112,31 +116,15 @@ if (!project.container_id) {
   console.log("  (skipped — FLY_API_TOKEN missing)");
 } else {
   try {
-    const FLY_API_BASE = "https://api.machines.dev/v1";
-    const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
-    const FLY_TOKEN = process.env.FLY_API_TOKEN!;
     const containerId = project.container_id;
 
     async function execInMachine(command: string[], cwd = "/app") {
-      const res = await fetch(`${FLY_API_BASE}/apps/${FLY_APP}/machines/${containerId}/exec`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${FLY_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ command, cwd, timeout: 15 }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        return { ok: false as const, stdout: "", stderr: text, exitCode: -1 };
-      }
-      const data = (await res.json()) as { stdout?: string; stderr?: string; exit_code?: number };
-      const exitCode = data.exit_code ?? 0;
+      const result = await execInContainer(containerId, command, PROJECT_ID, cwd);
       return {
-        ok: exitCode === 0,
-        stdout: data.stdout ?? "",
-        stderr: data.stderr ?? "",
-        exitCode,
+        ok: result.ok,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
       };
     }
 

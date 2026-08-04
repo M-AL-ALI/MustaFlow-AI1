@@ -55,7 +55,7 @@ router.post(
     }
 
     try {
-      const { execInContainer } = await import("../lib/container");
+      const { execInContainer } = await import("../lib/tenant-runtime");
       const cwd = wf.cwd ?? ".";
       const envPrefix = wf.env
         ? Object.entries(wf.env)

@@ -24,7 +24,7 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
 import { logger } from "../lib/logger";
-import { execInContainer } from "../lib/container";
+import { execInContainer } from "../lib/tenant-runtime";
 import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
 import {
   uploadSnapshotBlob,

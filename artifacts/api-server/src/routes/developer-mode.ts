@@ -11,6 +11,7 @@ import { Router, type IRouter } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { hasContainerLayerCredentials } from "../lib/tenant-runtime";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -43,7 +44,7 @@ router.get(
       return;
     }
 
-    const flyApiTokenPresent = !!process.env.FLY_API_TOKEN;
+    const flyApiTokenPresent = hasContainerLayerCredentials();
     const neonApiKeyPresent = !!process.env.NEON_API_KEY;
 
     let preflightOk = false;
@@ -52,7 +53,7 @@ router.get(
 
     if (project.containerId) {
       try {
-        const { ensureContainerAwake } = await import("../lib/container");
+        const { ensureContainerAwake } = await import("../lib/tenant-runtime");
         const result = await ensureContainerAwake(
           project.containerId,
           projectId,

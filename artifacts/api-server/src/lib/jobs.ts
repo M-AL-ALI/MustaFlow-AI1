@@ -109,7 +109,7 @@ import {
   isDeferredCheckResult,
   resolveStackId,
 } from "./check-profiles";
-import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./container";
+import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./tenant-runtime";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
 import {
   buildAgentTaskTerminalUpdate,
@@ -248,7 +248,7 @@ async function runAgenticPreflightGate(
     // poll /healthz (which would always fail before the first app is built).
     const effectiveContainerUrl = isFirstBuild ? null : containerUrl;
 
-    const { ensureContainerAwake, execInContainer } = await import("./container");
+    const { ensureContainerAwake, execInContainer } = await import("./tenant-runtime");
     const { ContainerUnavailableError } = await import("./errors");
     let wakeResult: { ok: boolean; message?: string };
     try {
@@ -2866,7 +2866,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
         if (project.containerId && project.containerUrl) {
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
-            await import("./container");
+            await import("./tenant-runtime");
           keepaliveMachineId = project.containerId;
           logger.info(
             { taskId, projectId, machineId: project.containerId },
@@ -3382,7 +3382,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
         if (project.containerId && project.containerUrl) {
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
-            await import("./container");
+            await import("./tenant-runtime");
           keepaliveMachineId = project.containerId;
           logger.info(
             { taskId, projectId, machineId: project.containerId },
@@ -6680,7 +6680,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         "Task complete: restoring autostop + setting min_machines_running=0",
       );
       try {
-        const { patchMachineAutostop } = await import("./container");
+        const { patchMachineAutostop } = await import("./tenant-runtime");
         await patchMachineAutostop(keepaliveMachineId, projectId, "stop");
       } catch (restoreErr) {
         logger.warn(
@@ -6768,7 +6768,7 @@ async function runPostWriteMigrationSync(
     getContainerStatus,
     mapFlyErrorToMessage,
     npmInstallInBackground,
-  } = await import("./container");
+  } = await import("./tenant-runtime");
 
   if (containerRow.containerStatus !== "running") {
     await emitEvent(taskId, "narration", "Waking container for database migrations…");
@@ -6948,7 +6948,7 @@ async function syncAgenticPreviewRuntime(opts: {
     syncFilesToContainer,
     execInContainer,
     npmInstallInBackground,
-  } = await import("./container");
+  } = await import("./tenant-runtime");
 
   try {
     if (opts.containerStatus !== "running") {
@@ -7238,7 +7238,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       void emitEvent(taskId, "narration", "Running npm audit on staged dependencies…");
       try {
         const { execInContainer, startContainer, getContainerStatus, syncFilesToContainer } =
-          await import("./container");
+          await import("./tenant-runtime");
 
         if (containerRow.containerStatus !== "running") {
           await startContainer(containerRow.containerId, projectId);

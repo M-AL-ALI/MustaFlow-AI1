@@ -16,7 +16,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { db, projectsTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
-import { execInContainer } from "./container";
+import { execInContainer } from "./tenant-runtime";
 import { logger } from "./logger";
 
 export interface TerminalServer {
