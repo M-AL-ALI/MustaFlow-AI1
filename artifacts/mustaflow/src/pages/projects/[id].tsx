@@ -220,7 +220,6 @@ import {
   type ProjectImageItem,
 } from "./components/project-image-model";
 import { useProjectImages } from "./components/use-project-images";
-import { useCveCriticalHighCount } from "./components/use-cve-critical-high-count";
 import { builderLazy } from "@/lib/builder-lazy";
 
 const CommandPalette = builderLazy(() =>
@@ -940,8 +939,6 @@ export default function ProjectWorkspacePage() {
     },
   );
   const pendingSuggestionsCount = allSuggestions.filter((s) => s.status === "pending").length;
-  const cveCriticalHighCount = useCveCriticalHighCount(advancedDataEnabled);
-
   const { data: cveScanStatus } = useGetCveScanStatus({
     query: {
       enabled: advancedDataEnabled,
@@ -3569,38 +3566,6 @@ export default function ProjectWorkspacePage() {
           )}
         </div>
       </div>
-
-      {moreTabsExpanded && (
-        <div className="shrink-0 flex items-center gap-1 overflow-x-auto border-b border-border bg-card/60 px-3 h-9">
-          {ADVANCED_TABS.filter(
-            (tab) =>
-              tab.value !== "git" && (tab.value !== "analytics" || project.status === "published"),
-          ).map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.value}
-                onClick={() => setActiveTab(tab.value)}
-                data-tab={tab.value}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition-colors",
-                  activeTab === tab.value
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-              >
-                <Icon className="h-3 w-3 shrink-0" />
-                {tab.label}
-                {tab.value === "checks" && cveCriticalHighCount > 0 && (
-                  <span className="min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[8px] font-bold leading-none inline-flex items-center justify-center">
-                    {cveCriticalHighCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {/* ── Pre-flight failure banner ── */}
       {preflightBanner &&

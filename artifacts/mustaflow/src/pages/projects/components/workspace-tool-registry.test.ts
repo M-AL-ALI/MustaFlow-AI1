@@ -28,9 +28,10 @@ describe("workspace tool registry", () => {
     }
   });
 
-  it("routes GitHub through Tools instead of the standalone advanced strip", () => {
+  it("uses Tools as the canonical launcher without the legacy horizontal tool strip", () => {
     const pageSource = readFileSync(resolve(process.cwd(), "src/pages/projects/[id].tsx"), "utf8");
     expect(pageSource).toContain('aria-label="Open project tools"');
-    expect(pageSource).toContain('tab.value !== "git"');
+    expect(pageSource).not.toContain("data-tab={tab.value}");
+    expect(pageSource).not.toContain("ADVANCED_TABS.filter(");
   });
 });

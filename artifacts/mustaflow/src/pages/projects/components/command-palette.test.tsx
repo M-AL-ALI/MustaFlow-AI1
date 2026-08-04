@@ -20,10 +20,15 @@ describe("Command Center", () => {
     for (const category of ["Build", "Connect", "Configure", "Protect"]) {
       expect(screen.getByText(category)).toBeInTheDocument();
     }
+    expect(document.querySelector("[cmdk-list]")).toHaveClass(
+      "sm:[&_[cmdk-list-sizer]]:grid",
+      "sm:[&_[cmdk-list-sizer]]:grid-cols-2",
+    );
     expect(screen.getByText("GitHub")).toBeInTheDocument();
     expect(screen.queryByText("Analytics")).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Search project tools"), "secret");
+    expect(document.querySelector("[cmdk-list]")).not.toHaveClass("sm:[&_[cmdk-list-sizer]]:grid");
     expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
     expect(screen.queryByText("Page map")).not.toBeInTheDocument();
     await user.click(screen.getByText("Secrets"));

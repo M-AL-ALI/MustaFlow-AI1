@@ -255,6 +255,7 @@ function AddSecretForm({
 }) {
   const [name, setName] = useState(initialName ?? "");
   const [value, setValue] = useState("");
+  const [valueInputReadOnly, setValueInputReadOnly] = useState(true);
   const [environment, setEnvironment] = useState<"development" | "testing" | "production">(
     "development",
   );
@@ -287,6 +288,11 @@ function AddSecretForm({
       </label>
       <input
         id="new-secret-name"
+        name="nabuflow-secret-identifier"
+        autoComplete="off"
+        data-1p-ignore="true"
+        data-bwignore="true"
+        data-lpignore="true"
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
@@ -298,7 +304,14 @@ function AddSecretForm({
       </label>
       <input
         id="new-secret-value"
+        name="nabuflow-secret-material"
         type="password"
+        autoComplete="new-password"
+        data-1p-ignore="true"
+        data-bwignore="true"
+        data-lpignore="true"
+        readOnly={valueInputReadOnly}
+        onFocus={() => setValueInputReadOnly(false)}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -577,10 +590,12 @@ export function SecretsPanel({ projectId, prefillName, onPrefillConsumed }: Secr
           </button>
           <button
             onClick={() => setShowAdd(true)}
-            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex h-5 items-center justify-center gap-1 rounded px-1.5 text-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title="Add secret"
+            aria-label="Add secret"
           >
             <Plus className="h-3 w-3" />
+            Add secret
           </button>
         </div>
       </div>

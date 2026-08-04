@@ -44,6 +44,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 type CommandCenterProps = {
   open: boolean;
@@ -82,8 +83,16 @@ const TOOL_ICONS = {
   analytics: Map,
 } satisfies Record<WorkspaceToolId, typeof Monitor>;
 
+const CATEGORY_GRID_CLASSES = {
+  Build: "sm:col-start-1 sm:row-start-1",
+  Connect: "sm:col-start-2 sm:row-start-1",
+  Configure: "sm:col-start-1 sm:row-start-2",
+  Protect: "sm:col-start-2 sm:row-start-2",
+} satisfies Record<(typeof WORKSPACE_TOOL_CATEGORIES)[number], string>;
+
 export function CommandPalette({ open, onClose, onNavigate, isPublished }: CommandCenterProps) {
   const [query, setQuery] = useState("");
+  const isFiltering = query.trim().length > 0;
   const visibleTools = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return WORKSPACE_TOOLS.filter((tool) => {
@@ -107,7 +116,11 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
   }, [onClose, open]);
 
   return (
-    <CommandDialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+    <CommandDialog
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      contentClassName="w-[calc(100vw-2rem)] sm:max-w-4xl"
+    >
       <div className="border-b border-border px-4 pb-3 pt-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -129,13 +142,29 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
         value={query}
         onValueChange={setQuery}
       />
-      <CommandList className="max-h-[min(65vh,520px)] p-2">
+      <CommandList
+        className={cn(
+          "max-h-[min(68vh,560px)] p-3",
+          !isFiltering &&
+            "sm:[&_[cmdk-list-sizer]]:grid sm:[&_[cmdk-list-sizer]]:grid-cols-2 sm:[&_[cmdk-list-sizer]]:items-start sm:[&_[cmdk-list-sizer]]:gap-3",
+        )}
+      >
         <CommandEmpty>No matching tool found.</CommandEmpty>
         {WORKSPACE_TOOL_CATEGORIES.map((category) => {
           const categoryTools = visibleTools.filter((tool) => tool.category === category);
           if (categoryTools.length === 0) return null;
           return (
-            <CommandGroup key={category} heading={category}>
+            <CommandGroup
+              key={category}
+              heading={category}
+              className={cn(
+                "rounded-lg border border-border/70 bg-muted/10 !p-1",
+                !isFiltering && [
+                  CATEGORY_GRID_CLASSES[category],
+                  "sm:[&_[cmdk-group-items]]:grid sm:[&_[cmdk-group-items]]:grid-cols-2 sm:[&_[cmdk-group-items]]:gap-0.5",
+                ],
+              )}
+            >
               {categoryTools.map((tool) => {
                 const Icon = TOOL_ICONS[tool.id];
                 return (
@@ -146,19 +175,21 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
                       onNavigate(tool.open);
                       onClose();
                     }}
-                    className="items-start gap-3 px-3 py-2.5"
+                    className="items-center gap-2 px-2 !py-1.5"
                   >
-                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40 text-muted-foreground">
-                      <Icon className="h-3.5 w-3.5" />
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground">
+                      <Icon className="!h-3.5 !w-3.5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-medium text-foreground">{tool.name}</span>
-                      <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                      <span className="block truncate text-[11px] font-medium text-foreground">
+                        {tool.name}
+                      </span>
+                      <span className="block truncate text-[10px] leading-4 text-muted-foreground">
                         {tool.description}
                       </span>
                     </span>
                     {tool.placement === "primary" && (
-                      <CommandShortcut className="normal-case tracking-normal">
+                      <CommandShortcut className="hidden normal-case tracking-normal 2xl:inline">
                         Always visible
                       </CommandShortcut>
                     )}

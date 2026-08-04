@@ -10,6 +10,12 @@ describe("Secrets copy", () => {
     );
     expect(source).toContain('htmlFor="new-secret-name"');
     expect(source).toContain('htmlFor="new-secret-value"');
+    expect(source).toContain('name="nabuflow-secret-identifier"');
+    expect(source).toContain('autoComplete="off"');
+    expect(source).toContain('name="nabuflow-secret-material"');
+    expect(source).toContain('autoComplete="new-password"');
+    expect(source).toContain("readOnly={valueInputReadOnly}");
+    expect(source).toContain('aria-label="Add secret"');
     expect(source).toContain("Name:");
     expect(source).toContain("Value:");
     expect(source).toContain("Project secrets work only in this project");
