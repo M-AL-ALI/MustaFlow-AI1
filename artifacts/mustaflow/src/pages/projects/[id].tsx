@@ -30,7 +30,11 @@ import {
   builderModeLabel,
   normalizeBuilderAgentMode,
 } from "@/components/builder-mode-icon";
-import { pushRecentFile } from "./components/recent-files";
+import {
+  WORKSPACE_TOOLS,
+  type WorkspaceToolId,
+  type WorkspaceToolOpen,
+} from "@workspace/nabuflow-workspace-tools";
 import { StreamingText, MarkdownMessage, TypingIndicator } from "./components/chat-history";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +54,7 @@ import {
   ChevronDown,
   Monitor,
   Wrench,
+  Workflow,
   MessageSquare,
   ExternalLink,
   BookOpen,
@@ -632,37 +637,45 @@ function ApplyEditButton({
   );
 }
 
-const CORE_WORKSPACE_TABS = [
-  { label: "Preview", value: "preview", icon: Monitor },
-  { label: "Page map", value: "page-map", icon: Globe },
-  { label: "Plan", value: "plan", icon: ListOrdered },
-];
+const WORKSPACE_TOOL_ICONS = {
+  preview: Monitor,
+  "page-map": Globe,
+  plan: ListOrdered,
+  images: ImagePlus,
+  code: FileCode2,
+  recipes: Puzzle,
+  workflows: Workflow,
+  publishing: Rocket,
+  manage: Settings,
+  terminal: TerminalSquare,
+  canvas: Paintbrush2,
+  secrets: KeyRound,
+  "tools-files": Blocks,
+  integrations: Plug,
+  checks: ScanSearch,
+  security: ShieldCheck,
+  knowledge: BrainCircuit,
+  database: DatabaseZap,
+  runtime: Cpu,
+  git: Github,
+  logs: Wrench,
+  resources: BookOpen,
+  analytics: Activity,
+  health: HeartPulse,
+  comments: MessageSquare,
+  "activity-log": Activity,
+  checkpoints: RotateCcw,
+} satisfies Record<WorkspaceToolId, typeof Monitor>;
 
-const ADVANCED_TABS = [
-  { label: "Images", value: "images", icon: ImagePlus },
-  { label: "Code", value: "code", icon: FileCode2 },
-  { label: "Recipes", value: "recipes", icon: Puzzle },
-  { label: "Publishing", value: "publishing", icon: Rocket },
-  { label: "Manage", value: "manage", icon: Settings },
-  { label: "Terminal", value: "terminal", icon: TerminalSquare },
-  { label: "Canvas", value: "canvas", icon: Paintbrush2 },
-  { label: "Secrets", value: "secrets", icon: KeyRound },
-  { label: "Project setup", value: "tools-files", icon: Blocks },
-  { label: "Integrations", value: "integrations", icon: Plug },
-  { label: "Checks", value: "checks", icon: ScanSearch },
-  { label: "Security", value: "security", icon: ShieldCheck },
-  { label: "Saved context", value: "knowledge", icon: BrainCircuit },
-  { label: "Database", value: "database", icon: DatabaseZap },
-  { label: "Server", value: "runtime", icon: Cpu },
-  { label: "GitHub", value: "git", icon: Github },
-  { label: "Logs", value: "logs", icon: Wrench },
-  { label: "Resources", value: "resources", icon: BookOpen },
-  { label: "Analytics", value: "analytics", icon: Activity },
-  { label: "Health", value: "health", icon: HeartPulse },
-  { label: "Comments", value: "comments", icon: MessageSquare },
-  { label: "Activity", value: "activity-log", icon: Activity },
-  { label: "Version history", value: "checkpoints", icon: RotateCcw },
-];
+const workspaceTabsForPlacement = (placement: "primary" | "tools") =>
+  WORKSPACE_TOOLS.filter((tool) => tool.placement === placement).map((tool) => ({
+    label: tool.name,
+    value: tool.open.tabId,
+    icon: WORKSPACE_TOOL_ICONS[tool.id],
+  }));
+
+const CORE_WORKSPACE_TABS = workspaceTabsForPlacement("primary");
+const ADVANCED_TABS = workspaceTabsForPlacement("tools");
 
 const WORKSPACE_TABS = [...CORE_WORKSPACE_TABS, ...ADVANCED_TABS];
 
@@ -1133,13 +1146,13 @@ export default function ProjectWorkspacePage() {
     requestId: number;
   } | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
-    const valid = WORKSPACE_TABS.map((tab) => tab.value);
+    const valid: readonly string[] = WORKSPACE_TABS.map((tab) => tab.value);
     if (typeof window !== "undefined") {
       const urlTab = new URLSearchParams(window.location.search).get("tab");
       if (urlTab && valid.includes(urlTab)) return urlTab;
     }
     const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
-    const visibleByDefault = CORE_WORKSPACE_TABS.map((tab) => tab.value);
+    const visibleByDefault: readonly string[] = CORE_WORKSPACE_TABS.map((tab) => tab.value);
     return stored && visibleByDefault.includes(stored) ? stored : "preview";
   });
   const [moreTabsExpanded, setMoreTabsExpanded] = useState<boolean>(() => {
@@ -1285,6 +1298,7 @@ export default function ProjectWorkspacePage() {
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [projectSetupSubview, setProjectSetupSubview] = useState<string>();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   // Optimistic local state — seeded from localStorage so there's no flicker while the API loads.
@@ -3349,30 +3363,10 @@ export default function ProjectWorkspacePage() {
           <CommandPalette
             open
             onClose={() => setCommandPaletteOpen(false)}
-            files={files}
-            projectId={projectId}
-            onOpenFile={(fileId) => {
-              pushRecentFile(fileId);
-              setSelectedCodeFileId(fileId);
-              setActiveTab("code");
-            }}
-            onSendMessage={(text) => {
-              setPrompt(text);
-            }}
-            onNavigate={(target) => {
-              if (target === "shortcuts") {
-                setKeyboardShortcutsOpen(true);
-              } else if (
-                target === "git" ||
-                target === "packages" ||
-                target === "debugger" ||
-                target === "snippets"
-              ) {
-                // These are sidebar modes within the code editor — navigate to code tab
-                setActiveTab("code");
-              } else {
-                setActiveTab(target);
-              }
+            isPublished={project.status === "published"}
+            onNavigate={(target: WorkspaceToolOpen) => {
+              setProjectSetupSubview(target.subview);
+              setActiveTab(target.tabId);
             }}
           />
         </Suspense>
@@ -3499,6 +3493,20 @@ export default function ProjectWorkspacePage() {
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 shrink-0">
           <button
+            type="button"
+            onClick={() => setCommandPaletteOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            aria-label="Open project tools"
+          >
+            <Blocks className="h-3.5 w-3.5 text-muted-foreground" />
+            Tools
+            <kbd className="hidden rounded border border-border bg-muted/60 px-1 py-0.5 text-[9px] font-normal text-muted-foreground lg:inline">
+              {typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+                ? "⌘K"
+                : "Ctrl K"}
+            </kbd>
+          </button>
+          <button
             onClick={() =>
               setMoreTabsExpanded((value) => {
                 const next = !value;
@@ -3565,7 +3573,8 @@ export default function ProjectWorkspacePage() {
       {moreTabsExpanded && (
         <div className="shrink-0 flex items-center gap-1 overflow-x-auto border-b border-border bg-card/60 px-3 h-9">
           {ADVANCED_TABS.filter(
-            (tab) => tab.value !== "analytics" || project.status === "published",
+            (tab) =>
+              tab.value !== "git" && (tab.value !== "analytics" || project.status === "published"),
           ).map((tab) => {
             const Icon = tab.icon;
             return (
@@ -5441,7 +5450,7 @@ export default function ProjectWorkspacePage() {
                   projectKind={project?.kind}
                   wiredModuleIds={wiredModuleIds}
                   prefillSecretName={prefillSecretName}
-                  defaultTab={prefillSecretName ? "secrets" : undefined}
+                  defaultTab={prefillSecretName ? "secrets" : projectSetupSubview}
                   onSendMessage={(text) => {
                     setActiveTab("preview");
                     send(text);

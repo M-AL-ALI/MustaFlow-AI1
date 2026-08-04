@@ -7,6 +7,7 @@
     { "path": "./lib/api-client-react" },
     { "path": "./lib/api-zod" },
     { "path": "./lib/ora-contracts" },
+    { "path": "./lib/nabuflow-workspace-tools" },
     { "path": "./lib/integrations-openai-ai-server" },
     { "path": "./lib/integrations-openai-ai-react" },
     { "path": "./lib/integrations-anthropic-ai" },

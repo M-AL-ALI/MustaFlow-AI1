@@ -282,14 +282,22 @@ function AddSecretForm({
       <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
         New Secret
       </div>
+      <label htmlFor="new-secret-name" className="block text-[10px] font-medium text-foreground">
+        Name
+      </label>
       <input
+        id="new-secret-name"
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
         placeholder="SECRET_NAME"
         className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono outline-none focus:border-primary/50"
       />
+      <label htmlFor="new-secret-value" className="block text-[10px] font-medium text-foreground">
+        Value
+      </label>
       <input
+        id="new-secret-value"
         type="password"
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -300,6 +308,10 @@ function AddSecretForm({
         placeholder="Secret value…"
         className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs font-mono outline-none focus:border-primary/50"
       />
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        Example: Name: <code className="rounded bg-muted px-1">STRIPE_KEY</code> — Value: the long
+        code from Stripe.
+      </p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="space-y-1 text-[10px] text-muted-foreground">
           <span>Available in</span>
@@ -594,6 +606,10 @@ export function SecretsPanel({ projectId, prefillName, onPrefillConsumed }: Secr
       <div className="flex-1 overflow-y-auto min-h-0 p-2 space-y-2">
         {activeTab === "project" ? (
           <>
+            <p className="px-1 pb-1 text-[10px] leading-relaxed text-muted-foreground">
+              Project secrets work only in this project. Account secrets can be reused across all of
+              your projects.
+            </p>
             {showAdd && (
               <AddSecretForm
                 projectId={projectId}
@@ -679,8 +695,8 @@ export function SecretsPanel({ projectId, prefillName, onPrefillConsumed }: Secr
                 <div>
                   <div className="text-xs font-medium text-foreground mb-1">Account Secrets</div>
                   <div className="text-[11px] text-muted-foreground leading-relaxed">
-                    Account secrets are available across all your projects. Manage them from the
-                    platform Settings page.
+                    Account secrets can be reused across all your projects. Project secrets stay
+                    with this project only. Manage account secrets from Settings.
                   </div>
                 </div>
               </div>

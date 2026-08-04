@@ -56,6 +56,7 @@ import {
   type ConversationTurn,
 } from "./builder";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { formatWorkspaceToolsForAgent } from "@workspace/nabuflow-workspace-tools";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";
 import { generatePostBuildSuggestions } from "./post-build-suggestions";
@@ -1289,6 +1290,7 @@ const INTEGRATION_KEY_MAP: Array<{ name: string; keys: string[] }> = [
 ];
 
 async function loadActiveIntegrations(projectId: number): Promise<string> {
+  const workspaceTools = formatWorkspaceToolsForAgent();
   try {
     const rows = await db
       .select({ name: secretsTable.name, verificationStatus: secretsTable.verificationStatus })
@@ -1304,7 +1306,7 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
       const somePresent = integration.keys.some((k) => secretMap.has(k));
       return somePresent;
     }).map((i) => i.name);
-    const parts: string[] = [];
+    const parts: string[] = [workspaceTools];
     const secretNames = Array.from(new Set(rows.map((row) => row.name))).sort();
     if (secretNames.length > 0) {
       parts.push(
@@ -1323,7 +1325,7 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
     }
     return parts.join("\n");
   } catch {
-    return "";
+    return workspaceTools;
   }
 }
 

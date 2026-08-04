@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { WORKSPACE_TOOLS } from "@workspace/nabuflow-workspace-tools";
 
 const workspaceSource = readFileSync(
   path.resolve(process.cwd(), "src/pages/projects/[id].tsx"),
@@ -9,7 +10,9 @@ const workspaceSource = readFileSync(
 
 describe("project Secrets workspace surface", () => {
   it("registers a dedicated lazy-mounted workspace tab", () => {
-    expect(workspaceSource).toContain('{ label: "Secrets", value: "secrets", icon: KeyRound }');
+    expect(WORKSPACE_TOOLS).toContainEqual(
+      expect.objectContaining({ id: "secrets", name: "Secrets", category: "Configure" }),
+    );
     expect(workspaceSource).toContain('activeTab === "secrets"');
     expect(workspaceSource).toContain("<SecretsPanel");
     expect(workspaceSource).toContain("projectId={projectId}");

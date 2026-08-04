@@ -89,6 +89,7 @@
   },
   "dependencies": {
     "@workspace/ora-contracts": "workspace:*",
+    "@workspace/nabuflow-workspace-tools": "workspace:*",
     "@clerk/react": "^6.6.4",
     "@clerk/themes": "^2.4.57",
     "@dagrejs/dagre": "^3.0.0",

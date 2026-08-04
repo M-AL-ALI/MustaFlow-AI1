@@ -261,6 +261,9 @@ importers:
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
+      '@workspace/nabuflow-workspace-tools':
+        specifier: workspace:*
+        version: link:../../lib/nabuflow-workspace-tools
       '@workspace/ora-contracts':
         specifier: workspace:*
         version: link:../../lib/ora-contracts
@@ -646,6 +649,9 @@ importers:
       '@webcontainer/api':
         specifier: ^1.6.4
         version: 1.6.4
+      '@workspace/nabuflow-workspace-tools':
+        specifier: workspace:*
+        version: link:../../lib/nabuflow-workspace-tools
       '@workspace/ora-contracts':
         specifier: workspace:*
         version: link:../../lib/ora-contracts
@@ -1272,6 +1278,8 @@ importers:
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
+
+  lib/nabuflow-workspace-tools: {}
 
   lib/ora-contracts:
     dependencies:

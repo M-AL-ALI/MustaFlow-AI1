@@ -1310,6 +1310,10 @@ export function ToolsTab({
     }
   }, [prefillSecretName]);
 
+  useEffect(() => {
+    if (defaultTab) setInnerTab(defaultTab);
+  }, [defaultTab]);
+
   const handleCreateSecret = () => {
     if (!newSecretName || !newSecretValue) return;
     createSecret.mutate(
