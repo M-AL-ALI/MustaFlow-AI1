@@ -31,6 +31,7 @@ import {
 } from "../lib/provisioning";
 import { isContainerLayerConfigured } from "../lib/tenant-runtime";
 import { resolveInitialStackSelection } from "../lib/stack-selection";
+import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -269,6 +270,12 @@ router.post("/projects", async (req, res): Promise<void> => {
     return;
   }
 
+  const scaffoldServicePort = resolveProjectRuntimeManifest({
+    runtimePort: project.runtimePort,
+    stack: resolvedStack,
+    legacyProfile: "stack",
+  }).servicePort;
+
   // Task #544: every new project gets a primary artifact mirroring its
   // kind/platform/format/stack. This preserves the "project owns ≥1 artifact"
   // invariant so resolveArtifactId() always finds a target and the artifact
@@ -345,7 +352,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || ${scaffoldServicePort};
 
 app.use(cors());
 app.use(express.json());
@@ -431,7 +438,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-PORT = int(os.environ.get("PORT", 3000))
+PORT = int(os.environ.get("PORT", ${scaffoldServicePort}))
 
 
 @app.route("/")
@@ -676,7 +683,11 @@ createRoot(document.getElementById('root')!).render(
             name: safeName,
             version: "0.1.0",
             private: true,
-            scripts: { dev: "next dev -p 3000", build: "next build", start: "next start -p 3000" },
+            scripts: {
+              dev: `next dev -p ${scaffoldServicePort}`,
+              build: "next build",
+              start: `next start -p ${scaffoldServicePort}`,
+            },
             dependencies: {
               next: "14.2.5",
               react: "^18.3.1",
@@ -865,7 +876,7 @@ import 'dotenv/config'
 import { router } from './routes/index'
 
 const app = express()
-const PORT = process.env.PORT ?? 3000
+const PORT = process.env.PORT ?? ${scaffoldServicePort}
 
 app.use(cors())
 app.use(express.json())
@@ -895,7 +906,7 @@ router.get('/', (_req, res) => {
       {
         path: ".env.example",
         mimeType: "text/plain",
-        content: `PORT=3000
+        content: `PORT=${scaffoldServicePort}
 # Add your environment variables here
 `,
       },
@@ -945,7 +956,7 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", ${scaffoldServicePort}))
     app = create_app()
     app.run(host="0.0.0.0", port=port, debug=True)
 `,
@@ -953,7 +964,7 @@ if __name__ == "__main__":
       {
         path: ".env.example",
         mimeType: "text/plain",
-        content: `PORT=5000\n# Add your environment variables here\n`,
+        content: `PORT=${scaffoldServicePort}\n# Add your environment variables here\n`,
       },
     ];
     await db.insert(projectFilesTable).values(
@@ -1008,14 +1019,14 @@ async def root() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", ${scaffoldServicePort}))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
 `,
       },
       {
         path: ".env.example",
         mimeType: "text/plain",
-        content: `PORT=8000\n# Add your environment variables here\n`,
+        content: `PORT=${scaffoldServicePort}\n# Add your environment variables here\n`,
       },
     ];
     await db.insert(projectFilesTable).values(

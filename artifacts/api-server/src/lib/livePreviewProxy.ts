@@ -78,6 +78,7 @@ type PreviewProject = {
   containerStatus: string;
   containerUrl: string | null;
   stack: string | null;
+  runtimePort: number | null;
 };
 
 export async function loadPreviewProject(projectId: number): Promise<PreviewProject | null> {
@@ -92,6 +93,7 @@ export async function loadPreviewProject(projectId: number): Promise<PreviewProj
       containerStatus: projectsTable.containerStatus,
       containerUrl: projectsTable.containerUrl,
       stack: projectsTable.stack,
+      runtimePort: projectsTable.runtimePort,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
@@ -191,7 +193,7 @@ const PROXY_UNAVAILABLE_HTML = (projectId: number): string => `<!doctype html>
 const wakingProjects = new Set<number>();
 
 /** Kick off an async wake of the container. Best-effort, never throws. */
-function wakeContainer(projectId: number): void {
+function wakeContainer(projectId: number, runtimePort: number | null): void {
   // If a wake is already in progress for this project, skip — the in-flight
   // call will update the DB when it finishes (or times out).
   if (wakingProjects.has(projectId)) return;
@@ -213,7 +215,7 @@ function wakeContainer(projectId: number): void {
           getContainerSecretMap(projectId),
         ]);
 
-        await provisionContainer(projectId, fileRows, envVars);
+        await provisionContainer(projectId, fileRows, envVars, { servicePort: runtimePort });
       } catch (err) {
         logger.warn({ err, projectId }, "wakeContainer (preview proxy) failed");
       } finally {
@@ -366,7 +368,7 @@ export async function handleLivePreviewHttp(
 
   // No container provisioned yet — wake (best-effort) and show cold-start page.
   if (!project.containerId || !project.containerUrl) {
-    wakeContainer(project.id);
+    wakeContainer(project.id, project.runtimePort);
     sendHtml(res, 503, COLD_START_HTML(project.id), "container-starting");
     return;
   }
@@ -387,7 +389,7 @@ export async function handleLivePreviewHttp(
   // Hibernated / stopped / starting → wake (idempotent) and show cold-start.
   if (project.containerStatus !== "running") {
     if (project.containerStatus === "hibernated" || project.containerStatus === "stopped") {
-      wakeContainer(project.id);
+      wakeContainer(project.id, project.runtimePort);
     }
     sendHtml(res, 503, COLD_START_HTML(project.id), "container-starting");
     return;

@@ -3,6 +3,7 @@ import { parse as acornParse } from "acorn";
 import { checkSyntax } from "./checks/syntax-checker";
 import { runTsCheck, formatTsErrors } from "./checks/ts-checker";
 import { logger } from "./logger";
+import { isValidTenantServicePort } from "./runtime-manifest";
 import type { AgentMode } from "./ai";
 import { creditCostFor, resolveStageProvider } from "./ai-providers";
 import type { TaskReport } from "@workspace/db";
@@ -5304,6 +5305,8 @@ type StackBuildArgs = {
   /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
   taskId?: number;
   taskMode?: string;
+  /** Explicit project runtime service port; omitted preserves legacy prompt defaults. */
+  runtimePort?: number | null;
 };
 
 type StackRefineArgs = {
@@ -5325,7 +5328,14 @@ type StackRefineArgs = {
   /** NabuFlow R2 Phase D: task ID for per-build token telemetry accumulation. */
   taskId?: number;
   taskMode?: string;
+  /** Explicit project runtime service port; omitted preserves legacy prompt defaults. */
+  runtimePort?: number | null;
 };
+
+function stackPromptForRuntimePort(systemPrompt: string, runtimePort?: number | null): string {
+  if (!isValidTenantServicePort(runtimePort)) return systemPrompt;
+  return systemPrompt.replace(/\b(?:3000|5000|8000|8080)\b/g, String(runtimePort));
+}
 
 async function runStackBuildPipeline(
   args: StackBuildArgs,
@@ -5350,7 +5360,7 @@ async function runStackBuildPipeline(
   } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-    { role: "system", content: systemPrompt },
+    { role: "system", content: stackPromptForRuntimePort(systemPrompt, args.runtimePort) },
     { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
   ];
 
@@ -5523,7 +5533,7 @@ async function runStackRefinePipeline(
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-    { role: "system", content: systemPrompt },
+    { role: "system", content: stackPromptForRuntimePort(systemPrompt, args.runtimePort) },
     {
       role: "system",
       content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,

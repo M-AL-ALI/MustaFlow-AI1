@@ -12,6 +12,7 @@ import type {
   RuntimeInstallOptions,
   RuntimeLogLevel,
   RuntimeProductionOptions,
+  RuntimeServiceOptions,
   RuntimeStatus,
   RuntimeSubsystemStatus,
   TenantRuntimeProvider,
@@ -27,12 +28,14 @@ function toRuntimeInfo(info: flyRuntime.ContainerInfo | flyRuntime.ProdContainer
       runtimeId: info.prodContainerId,
       status: info.status,
       endpoint: info.containerUrl,
+      servicePort: info.servicePort,
     };
   }
   return {
     runtimeId: info.containerId,
     status: info.status,
     endpoint: info.containerUrl,
+    servicePort: info.servicePort,
   };
 }
 
@@ -66,8 +69,9 @@ export class FlyRuntimeProvider implements TenantRuntimeProvider {
     projectId: number,
     stack?: string | null,
     environment?: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<RuntimeCreateResult> {
-    const result = await flyRuntime.createContainer(projectId, stack, environment);
+    const result = await flyRuntime.createContainer(projectId, stack, environment, options);
     if (!result || "error" in result) return result;
     return toRuntimeInfo(result);
   }
@@ -147,15 +151,17 @@ export class FlyRuntimeProvider implements TenantRuntimeProvider {
     runtimeId: string,
     projectId: number,
     environment: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<boolean> {
-    return flyRuntime.updateContainerEnv(runtimeId, projectId, environment);
+    return flyRuntime.updateContainerEnv(runtimeId, projectId, environment, options);
   }
 
   restartWithProjectEnvironment(
     projectId: number,
     environment: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<void> {
-    return flyRuntime.restartContainerWithSecrets(projectId, environment);
+    return flyRuntime.restartContainerWithSecrets(projectId, environment, options);
   }
 
   ensureAwake(
@@ -171,8 +177,9 @@ export class FlyRuntimeProvider implements TenantRuntimeProvider {
     projectId: number,
     files: RuntimeFile[],
     environment?: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<RuntimeInfo | null> {
-    const result = await flyRuntime.provisionContainer(projectId, files, environment);
+    const result = await flyRuntime.provisionContainer(projectId, files, environment, options);
     return result ? toRuntimeInfo(result) : null;
   }
 
@@ -200,12 +207,14 @@ export class FlyRuntimeProvider implements TenantRuntimeProvider {
     previousRuntimeId: string | null,
     files: RuntimeFile[],
     environment: Record<string, string>,
+    options?: RuntimeProductionOptions,
   ): Promise<RuntimeInfo | null> {
     const result = await flyRuntime.deployProductionContainer(
       projectId,
       previousRuntimeId,
       files,
       environment,
+      options,
     );
     return result ? toRuntimeInfo(result) : null;
   }

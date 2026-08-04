@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { lookup } from "node:dns/promises";
 import { logger } from "./logger";
 import { ContainerUnavailableError } from "./errors";
+import { LEGACY_NODE_SERVICE_PORT, resolveProjectRuntimeManifest } from "./runtime-manifest";
 
 export type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -30,6 +31,7 @@ export interface ContainerInfo {
   containerId: string;
   status: ContainerStatus;
   containerUrl: string | null;
+  servicePort: number;
 }
 
 const FLY_API_BASE = "https://api.machines.dev/v1";
@@ -46,21 +48,29 @@ const DEFAULT_NODE_IMAGE = "node:22-alpine";
 const PYTHON_IMAGE = "python:3.12-slim";
 
 /** Default dev server port. Stack-specific ports override this at provision time. */
-const DEFAULT_INTERNAL_PORT = 3000;
+const DEFAULT_INTERNAL_PORT = LEGACY_NODE_SERVICE_PORT;
 
 /** Derive the container image and dev server port from the project stack. */
-function stackConfig(stack?: string | null): { image: string; internalPort: number } {
+function stackConfig(
+  stack?: string | null,
+  runtimePort?: number | null,
+): { image: string; internalPort: number } {
+  const internalPort = resolveProjectRuntimeManifest({
+    runtimePort,
+    stack,
+    legacyProfile: "stack",
+  }).servicePort;
   switch (stack) {
     case "nextjs":
-      return { image: DEFAULT_NODE_IMAGE, internalPort: 3000 };
+      return { image: DEFAULT_NODE_IMAGE, internalPort };
     case "node-api":
-      return { image: DEFAULT_NODE_IMAGE, internalPort: 3000 };
+      return { image: DEFAULT_NODE_IMAGE, internalPort };
     case "python-flask":
-      return { image: PYTHON_IMAGE, internalPort: 5000 };
+      return { image: PYTHON_IMAGE, internalPort };
     case "python-fastapi":
-      return { image: PYTHON_IMAGE, internalPort: 8000 };
+      return { image: PYTHON_IMAGE, internalPort };
     default:
-      return { image: DEFAULT_NODE_IMAGE, internalPort: DEFAULT_INTERNAL_PORT };
+      return { image: DEFAULT_NODE_IMAGE, internalPort };
   }
 }
 
@@ -399,6 +409,7 @@ export async function createContainer(
   projectId: number,
   stack?: string | null,
   extraEnv?: Record<string, string>,
+  options?: { servicePort?: number | null },
 ): Promise<ContainerInfo | { error: string } | null> {
   if (!isConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — container creation skipped");
@@ -406,7 +417,7 @@ export async function createContainer(
   }
 
   const machineName = `project-${projectId}`;
-  const { image, internalPort } = stackConfig(stack);
+  const { image, internalPort } = stackConfig(stack, options?.servicePort);
 
   const body = {
     name: machineName,
@@ -484,6 +495,7 @@ export async function createContainer(
       containerId: machineId,
       status: "starting",
       containerUrl,
+      servicePort: internalPort,
     };
   } catch (err) {
     logger.error({ err, projectId }, "Error creating Fly machine");
@@ -975,6 +987,7 @@ export async function updateContainerEnv(
   machineId: string,
   projectId: number,
   extraEnv: Record<string, string>,
+  options?: { servicePort?: number | null },
 ): Promise<boolean> {
   if (!isConfigured()) return false;
   try {
@@ -984,7 +997,12 @@ export async function updateContainerEnv(
         config: {
           env: {
             PROJECT_ID: String(projectId),
-            PORT: String(DEFAULT_INTERNAL_PORT),
+            PORT: String(
+              resolveProjectRuntimeManifest({
+                runtimePort: options?.servicePort,
+                legacyProfile: "fixed-node",
+              }).servicePort,
+            ),
             ...extraEnv,
           },
         },
@@ -1011,6 +1029,7 @@ export async function updateContainerEnv(
 export async function restartContainerWithSecrets(
   projectId: number,
   envVars: Record<string, string>,
+  options?: { servicePort?: number | null },
 ): Promise<void> {
   if (!isConfigured()) return;
 
@@ -1018,6 +1037,7 @@ export async function restartContainerWithSecrets(
     .select({
       containerId: projectsTable.containerId,
       containerStatus: projectsTable.containerStatus,
+      runtimePort: projectsTable.runtimePort,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
@@ -1027,7 +1047,9 @@ export async function restartContainerWithSecrets(
   const machineId = project.containerId;
 
   // 1. Update the stored machine config with the new env vars
-  await updateContainerEnv(machineId, projectId, envVars);
+  await updateContainerEnv(machineId, projectId, envVars, {
+    servicePort: options?.servicePort ?? project.runtimePort,
+  });
 
   // 2. Restart the machine so processes see the new env
   try {
@@ -1169,6 +1191,7 @@ export async function provisionContainer(
   projectId: number,
   files: Array<{ path: string; content: string }>,
   extraEnv?: Record<string, string>,
+  options?: { servicePort?: number | null },
 ): Promise<ContainerInfo | null> {
   if (!isConfigured()) return null;
 
@@ -1179,18 +1202,27 @@ export async function provisionContainer(
       containerStatus: projectsTable.containerStatus,
       containerUrl: projectsTable.containerUrl,
       stack: projectsTable.stack,
+      runtimePort: projectsTable.runtimePort,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
 
   if (!project) return null;
 
+  const configuredServicePort = options?.servicePort ?? project.runtimePort;
+
   // Already running — return current info
   if (project.containerStatus === "running" && project.containerId) {
+    const servicePort = resolveProjectRuntimeManifest({
+      runtimePort: configuredServicePort,
+      stack: project.stack,
+      legacyProfile: "stack",
+    }).servicePort;
     return {
       containerId: project.containerId,
       status: "running",
       containerUrl: project.containerUrl,
+      servicePort,
     };
   }
 
@@ -1205,7 +1237,9 @@ export async function provisionContainer(
 
   if (!machineId) {
     // Create new machine — stack selects the right image; extraEnv injects project secrets
-    const info = await createContainer(projectId, project.stack, extraEnv);
+    const info = await createContainer(projectId, project.stack, extraEnv, {
+      servicePort: configuredServicePort,
+    });
     if (!info || "error" in info) {
       await db
         .update(projectsTable)
@@ -1243,7 +1277,9 @@ export async function provisionContainer(
     // Passing an empty map clears any previously injected secrets that were
     // deleted while the container was hibernated — this is intentional so that
     // removed secrets do not reappear after restart.
-    await updateContainerEnv(machineId, projectId, extraEnv ?? {});
+    await updateContainerEnv(machineId, projectId, extraEnv ?? {}, {
+      servicePort: configuredServicePort,
+    });
     // Wake existing machine
     await startContainer(machineId, projectId);
     const wakeReady = await waitForMachineReady(machineId, 30);
@@ -1281,7 +1317,16 @@ export async function provisionContainer(
     })
     .where(eq(projectsTable.id, projectId));
 
-  return { containerId: machineId, status: "running", containerUrl };
+  return {
+    containerId: machineId,
+    status: "running",
+    containerUrl,
+    servicePort: resolveProjectRuntimeManifest({
+      runtimePort: configuredServicePort,
+      stack: project.stack,
+      legacyProfile: "stack",
+    }).servicePort,
+  };
 }
 
 /**
@@ -1336,6 +1381,7 @@ export interface ProdContainerInfo {
   prodContainerId: string;
   containerUrl: string | null;
   status: ContainerStatus;
+  servicePort: number;
 }
 
 /**
@@ -1346,7 +1392,11 @@ export async function createProductionContainer(
   projectId: number,
   envVars: Record<string, string>,
   runtime?: string | null,
-  opts?: { region?: string | null; deploymentType?: string | null },
+  opts?: {
+    region?: string | null;
+    deploymentType?: string | null;
+    servicePort?: number | null;
+  },
 ): Promise<ProdContainerInfo | null> {
   if (!isConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — prod container creation skipped");
@@ -1359,6 +1409,11 @@ export async function createProductionContainer(
   // autoscale   → scale-to-zero on demand (min_machines_running:0)
   const region = opts?.region && opts.region.trim() ? opts.region.trim() : FLY_REGION;
   const minMachines = opts?.deploymentType === "autoscale" ? 0 : 1;
+  const servicePort = resolveProjectRuntimeManifest({
+    runtimePort: opts?.servicePort,
+    stack: runtime,
+    legacyProfile: "fixed-node",
+  }).servicePort;
 
   const body = {
     name: machineName,
@@ -1368,7 +1423,7 @@ export async function createProductionContainer(
       env: {
         ...envVars,
         PROJECT_ID: String(projectId),
-        PORT: "3000",
+        PORT: String(servicePort),
         NODE_ENV: "production",
       },
       init: {
@@ -1390,7 +1445,7 @@ export async function createProductionContainer(
             { port: 80, handlers: ["http"] },
           ],
           protocol: "tcp",
-          internal_port: 3000,
+          internal_port: servicePort,
           autostop: "stop",
           autostart: true,
           min_machines_running: minMachines,
@@ -1429,6 +1484,7 @@ export async function createProductionContainer(
       prodContainerId: machineId,
       containerUrl,
       status: "starting",
+      servicePort,
     };
   } catch (err) {
     logger.error({ err, projectId }, "Error creating prod Fly machine");
@@ -1476,6 +1532,7 @@ export async function deployProductionContainer(
   oldProdMachineId: string | null,
   files: Array<{ path: string; content: string }>,
   envVars: Record<string, string>,
+  options?: { servicePort?: number | null },
 ): Promise<ProdContainerInfo | null> {
   if (!isConfigured()) return null;
 
@@ -1488,6 +1545,7 @@ export async function deployProductionContainer(
       stack: projectsTable.stack,
       region: projectsTable.region,
       deploymentType: projectsTable.deploymentType,
+      runtimePort: projectsTable.runtimePort,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
@@ -1496,6 +1554,7 @@ export async function deployProductionContainer(
   const greenInfo = await createProductionContainer(projectId, envVars, proj?.stack, {
     region: proj?.region ?? null,
     deploymentType: proj?.deploymentType ?? null,
+    servicePort: options?.servicePort ?? proj?.runtimePort ?? null,
   });
   if (!greenInfo) {
     await writeLog(projectId, "system", "Failed to create new prod container — aborting deploy");
@@ -1567,6 +1626,7 @@ export async function deployProductionContainer(
     prodContainerId: greenInfo.prodContainerId,
     containerUrl: greenInfo.containerUrl,
     status: "running",
+    servicePort: greenInfo.servicePort,
   };
 }
 
@@ -1687,8 +1747,7 @@ export async function startContainerHealthServer(
   projectId: number,
 ): Promise<void> {
   if (!isConfigured()) return;
-  const nodeOneLiner =
-    "require('http').createServer(function(q,r){r.writeHead(200);r.end('ok')}).listen(parseInt(process.env.PORT)||3000)";
+  const nodeOneLiner = `require('http').createServer(function(q,r){r.writeHead(200);r.end('ok')}).listen(parseInt(process.env.PORT)||${DEFAULT_INTERNAL_PORT})`;
   const cmd = [
     "sh",
     "-c",

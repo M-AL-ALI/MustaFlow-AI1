@@ -13,6 +13,7 @@ import type {
   RuntimeInstallOptions,
   RuntimeLogLevel,
   RuntimeProductionOptions,
+  RuntimeServiceOptions,
 } from "./tenant-runtime-provider";
 
 export const tenantRuntimeProvider = new FlyRuntimeProvider();
@@ -28,13 +29,15 @@ export async function createContainer(
   projectId: number,
   stack?: string | null,
   environment?: Record<string, string>,
+  options?: RuntimeServiceOptions,
 ) {
-  const result = await tenantRuntimeProvider.create(projectId, stack, environment);
+  const result = await tenantRuntimeProvider.create(projectId, stack, environment, options);
   if (!result || "error" in result) return result;
   return {
     containerId: result.runtimeId,
     status: result.status,
     containerUrl: result.endpoint,
+    servicePort: result.servicePort,
   };
 }
 
@@ -97,12 +100,14 @@ export const updateContainerEnv = (
   runtimeId: string,
   projectId: number,
   environment: Record<string, string>,
-) => tenantRuntimeProvider.updateEnvironment(runtimeId, projectId, environment);
+  options?: RuntimeServiceOptions,
+) => tenantRuntimeProvider.updateEnvironment(runtimeId, projectId, environment, options);
 
 export const restartContainerWithSecrets = (
   projectId: number,
   environment: Record<string, string>,
-) => tenantRuntimeProvider.restartWithProjectEnvironment(projectId, environment);
+  options?: RuntimeServiceOptions,
+) => tenantRuntimeProvider.restartWithProjectEnvironment(projectId, environment, options);
 
 export const ensureContainerAwake = (
   runtimeId: string,
@@ -118,13 +123,15 @@ export async function provisionContainer(
   projectId: number,
   files: RuntimeFile[],
   environment?: Record<string, string>,
+  options?: RuntimeServiceOptions,
 ) {
-  const result = await tenantRuntimeProvider.provision(projectId, files, environment);
+  const result = await tenantRuntimeProvider.provision(projectId, files, environment, options);
   if (!result) return null;
   return {
     containerId: result.runtimeId,
     status: result.status,
     containerUrl: result.endpoint,
+    servicePort: result.servicePort,
   };
 }
 
@@ -147,6 +154,7 @@ export async function createProductionContainer(
     prodContainerId: result.runtimeId,
     containerUrl: result.endpoint,
     status: result.status,
+    servicePort: result.servicePort,
   };
 }
 
@@ -155,18 +163,21 @@ export async function deployProductionContainer(
   previousRuntimeId: string | null,
   files: RuntimeFile[],
   environment: Record<string, string>,
+  options?: RuntimeProductionOptions,
 ) {
   const result = await tenantRuntimeProvider.deployProduction(
     projectId,
     previousRuntimeId,
     files,
     environment,
+    options,
   );
   if (!result) return null;
   return {
     prodContainerId: result.runtimeId,
     containerUrl: result.endpoint,
     status: result.status,
+    servicePort: result.servicePort,
   };
 }
 
