@@ -37,7 +37,7 @@ import {
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
 import { evictTierCache } from "./public-ai/authed-user";
-import { destroyContainer } from "./container";
+import { destroyContainer } from "./tenant-runtime";
 import { objectStorageClient } from "./objectStorage";
 
 /**

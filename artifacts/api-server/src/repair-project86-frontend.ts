@@ -12,7 +12,12 @@ import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { db, pool, projectFilesTable } from "@workspace/db";
-import { execInContainer, patchMachineAutostop, syncFilesToContainer } from "./lib/container.js";
+import {
+  execInContainer,
+  patchMachineAutostop,
+  syncFilesToContainer,
+  tenantRuntimeProvider,
+} from "./lib/tenant-runtime.js";
 
 const PROJECT_ID = 86;
 const MACHINE_ID = "d895134c606e98";
@@ -140,7 +145,7 @@ async function main() {
   console.log(
     "  In production deployment: API server runs outside Replit sandbox → proxy resolves",
   );
-  console.log("  Container URL: https://mustaflow-containers.fly.dev/container/" + MACHINE_ID);
+  console.log("  Container URL: " + tenantRuntimeProvider.resolveEndpoint(MACHINE_ID));
 
   console.log("\n=== Repair complete ===");
   await pool.end();

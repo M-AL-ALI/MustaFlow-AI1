@@ -29,7 +29,7 @@ import {
   provisionPreviewDb,
   getRollingAverageMs,
 } from "../lib/provisioning";
-import { isContainerLayerConfigured } from "../lib/container";
+import { isContainerLayerConfigured } from "../lib/tenant-runtime";
 import { resolveInitialStackSelection } from "../lib/stack-selection";
 
 // ── Health score — content-based analysis ─────────────────────────────────────

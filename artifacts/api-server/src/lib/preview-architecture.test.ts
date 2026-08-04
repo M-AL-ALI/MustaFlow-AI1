@@ -15,6 +15,7 @@ const filesSource = readSource("artifacts/api-server/src/routes/files.ts");
 const eventsSource = readSource("artifacts/api-server/src/routes/events.ts");
 const previewEnvSource = readSource("artifacts/api-server/src/routes/preview-env.ts");
 const livePreviewProxySource = readSource("artifacts/api-server/src/lib/livePreviewProxy.ts");
+const flyRuntimeProviderSource = readSource("artifacts/api-server/src/lib/fly-runtime-provider.ts");
 const projectFilesPreviewSource = readSource(
   "artifacts/api-server/src/lib/project-files-preview.ts",
 );
@@ -179,7 +180,8 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(livePreviewProxySource).toContain("X-MustaFlow-Preview-State");
     expect(livePreviewProxySource).toContain('"proxy-unavailable"');
     expect(livePreviewProxySource).toContain('"server-unreachable"');
-    expect(livePreviewProxySource).toContain("isFlyProxyReachable");
+    expect(livePreviewProxySource).toContain("tenantRuntimeProvider.isGatewayReachable");
+    expect(flyRuntimeProviderSource).toContain("isGatewayReachable(): Promise<boolean>");
     expect(livePreviewProxySource).not.toContain(
       "Deploy to production to test agentic app previews",
     );

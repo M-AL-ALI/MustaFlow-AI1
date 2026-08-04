@@ -42,7 +42,7 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
-import { execInContainer } from "../lib/container";
+import { execInContainer } from "../lib/tenant-runtime";
 
 const router: IRouter = Router();
 

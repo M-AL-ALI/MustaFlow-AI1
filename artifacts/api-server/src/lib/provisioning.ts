@@ -31,10 +31,10 @@ import { db, projectsTable, secretsTable } from "@workspace/db";
 import { logger } from "./logger";
 import {
   createContainer,
+  ensureContainerLogTailer,
   hasContainerLayerCredentials,
   isContainerLayerConfigured,
-} from "./container";
-import { ensureContainerLogTailer } from "./container-logs";
+} from "./tenant-runtime";
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
 

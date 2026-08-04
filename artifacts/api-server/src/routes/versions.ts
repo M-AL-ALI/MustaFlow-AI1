@@ -24,7 +24,7 @@ import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge } from "../lib/consoleBridge";
 import { logger } from "../lib/logger";
-import { deployProductionContainer } from "../lib/container";
+import { deployProductionContainer, hasContainerLayerCredentials } from "../lib/tenant-runtime";
 import { encryptionService } from "../lib/encryption";
 import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
 import { downloadSnapshotBlob } from "../lib/snapshot-storage";
@@ -513,7 +513,7 @@ router.post(
       currentProject?.prodContainerId &&
       currentProject.projectFormat === "react-vite" &&
       currentProject.status === "published" &&
-      process.env.FLY_API_TOKEN
+      hasContainerLayerCredentials()
     ) {
       setImmediate(() => {
         void (async () => {

@@ -7,16 +7,18 @@
  */
 import { readFileSync, readdirSync, statSync } from "fs";
 import { resolve, join, relative } from "path";
-import { execInContainer, writeFileToContainer, patchMachineAutostop } from "./lib/container.js";
+import {
+  execInContainer,
+  hasContainerLayerCredentials,
+  writeFileToContainer,
+  patchMachineAutostop,
+  tenantRuntimeProvider,
+} from "./lib/tenant-runtime.js";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
 const BUILD_DIR = "/tmp/towco-build";
 const MINIMAL_SERVER = "/tmp/towco-minimal-server.mjs";
-
-const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
-const FLY_TOKEN = process.env.FLY_API_TOKEN ?? "";
-const FLY_API_BASE = "https://api.machines.dev/v1";
 
 function sh(cmd: string): string[] {
   return ["sh", "-c", cmd];
@@ -82,15 +84,8 @@ async function writeFileChunked(containerPath: string, content: string | Buffer)
 /** Run a shell command on the container, return true on exit 0. */
 async function flyExec(cmd: string): Promise<boolean> {
   try {
-    const res = await fetch(`${FLY_API_BASE}/apps/${FLY_APP}/machines/${MACHINE_ID}/exec`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${FLY_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ command: ["/bin/sh", "-c", cmd], cwd: "/app", timeout: 30 }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) return false;
-    const json = (await res.json()) as { exit_code: number };
-    return json.exit_code === 0;
+    const result = await execInContainer(MACHINE_ID, ["/bin/sh", "-c", cmd], PROJECT_ID, "/app");
+    return result.ok;
   } catch {
     return false;
   }
@@ -99,15 +94,8 @@ async function flyExec(cmd: string): Promise<boolean> {
 /** Run a shell command on the container, return combined stdout+stderr text. */
 async function flyExecOut(cmd: string): Promise<string> {
   try {
-    const res = await fetch(`${FLY_API_BASE}/apps/${FLY_APP}/machines/${MACHINE_ID}/exec`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${FLY_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ command: ["/bin/sh", "-c", cmd], cwd: "/app", timeout: 30 }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) return "";
-    const json = (await res.json()) as { exit_code: number; stdout: string; stderr: string };
-    return ((json.stdout ?? "") + (json.stderr ?? "")).trim();
+    const result = await execInContainer(MACHINE_ID, ["/bin/sh", "-c", cmd], PROJECT_ID, "/app");
+    return result.output.trim();
   } catch {
     return "";
   }
@@ -130,7 +118,7 @@ function walkDir(dir: string, base: string): Array<{ abs: string; rel: string }>
 async function main() {
   console.log("=== Upload minimal Towco server + pre-built client (stdin method) ===\n");
 
-  if (!FLY_TOKEN) {
+  if (!hasContainerLayerCredentials()) {
     console.error("FLY_API_TOKEN not set");
     process.exit(1);
   }
@@ -212,7 +200,8 @@ async function main() {
   }
 
   // 11. External Fly URL check via Node.js (no curl/wget needed here)
-  const flyUrl = `https://mustaflow-containers.fly.dev/container/${MACHINE_ID}/healthz`;
+  const runtimeEndpoint = tenantRuntimeProvider.resolveEndpoint(MACHINE_ID);
+  const flyUrl = `${runtimeEndpoint}/healthz`;
   console.log(`\n[external] GET ${flyUrl}`);
   try {
     const { default: https } = await import("https");
@@ -239,7 +228,7 @@ async function main() {
 
   console.log(`\n=== /healthz: ${healthy ? "200 OK ✓" : "FAILED ✗"} ===`);
   if (healthy) {
-    console.log(`   Container: https://mustaflow-containers.fly.dev/container/${MACHINE_ID}`);
+    console.log(`   Container: ${runtimeEndpoint}`);
     console.log("   Serving: /healthz + dist/client/ static files (no npm install needed)");
     console.log("   Preview proxy: works in production — DNS blocked in Replit sandbox only");
   }

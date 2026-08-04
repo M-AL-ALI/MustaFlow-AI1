@@ -7,7 +7,12 @@
  */
 import { readFileSync, readdirSync, statSync } from "fs";
 import { resolve, join, relative } from "path";
-import { execInContainer, writeFileToContainer, patchMachineAutostop } from "./lib/container.js";
+import {
+  execInContainer,
+  writeFileToContainer,
+  patchMachineAutostop,
+  tenantRuntimeProvider,
+} from "./lib/tenant-runtime.js";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
@@ -153,7 +158,7 @@ async function main() {
 
   // 10. External URL test
   if (healthy) {
-    const flyUrl = `https://mustaflow-containers.fly.dev/container/${MACHINE_ID}/healthz`;
+    const flyUrl = `${tenantRuntimeProvider.resolveEndpoint(MACHINE_ID)}/healthz`;
     console.log(`\n[external] GET ${flyUrl}`);
     try {
       const { default: https } = await import("https");
@@ -179,7 +184,7 @@ async function main() {
 
   console.log(`\n=== Result: ${healthy ? "/healthz 200 OK ✓" : "FAILED ✗"} ===`);
   if (healthy) {
-    console.log(`   Container: https://mustaflow-containers.fly.dev/container/${MACHINE_ID}`);
+    console.log(`   Container: ${tenantRuntimeProvider.resolveEndpoint(MACHINE_ID)}`);
     console.log(
       "   Preview proxy: works in production deployment (DNS blocked from Replit sandbox)",
     );

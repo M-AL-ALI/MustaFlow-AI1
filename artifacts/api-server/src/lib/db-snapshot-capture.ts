@@ -8,7 +8,7 @@
  */
 import { db, dbSnapshotsTable, projectsTable, secretsTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
-import { execInContainer } from "./container";
+import { execInContainer } from "./tenant-runtime";
 import { encryptionService } from "./encryption";
 import { uploadSnapshotBlob } from "./snapshot-storage";
 import { logger } from "./logger";

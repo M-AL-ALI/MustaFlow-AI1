@@ -11,7 +11,7 @@ import { z } from "zod/v4";
 import { db, userPreferencesTable } from "@workspace/db";
 import { getClerkUserById } from "../lib/clerk-users";
 import { hasBuilderAccess, isBuilderOpenToAll } from "../lib/builder-access";
-import { isContainerLayerConfigured } from "../lib/container";
+import { isContainerLayerConfigured } from "../lib/tenant-runtime";
 
 const router: IRouter = Router();
 

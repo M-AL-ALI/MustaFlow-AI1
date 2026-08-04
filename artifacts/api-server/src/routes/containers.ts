@@ -19,8 +19,9 @@ import {
   getContainerStatus,
   execInContainer,
   destroyContainer,
-} from "../lib/container";
-import { ensureContainerLogTailer, recordContainerLog } from "../lib/container-logs";
+  ensureContainerLogTailer,
+  recordContainerLog,
+} from "../lib/tenant-runtime";
 import { subscribeContainerLogs, type ContainerLogPayload } from "../lib/event-bus";
 import { getContainerSecretMap } from "../lib/container-secrets";
 import { logger } from "../lib/logger";

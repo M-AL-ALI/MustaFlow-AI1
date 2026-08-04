@@ -6,7 +6,7 @@ import { guessMime } from "../lib/builder";
 
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
-import { writeFileToContainer } from "../lib/container";
+import { writeFileToContainer } from "../lib/tenant-runtime";
 import { runEslintFix } from "../lib/checks/eslint-runner";
 import { applyProjectEslintFixes } from "../lib/eslint-fix-all";
 import { readDiagnostics } from "../lib/agent-senses";

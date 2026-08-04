@@ -9,7 +9,7 @@ import { Router, type IRouter } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import { execInContainer } from "../lib/container";
+import { execInContainer } from "../lib/tenant-runtime";
 
 const router: IRouter = Router();
 

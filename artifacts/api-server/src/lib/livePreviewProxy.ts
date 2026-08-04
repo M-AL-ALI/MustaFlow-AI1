@@ -20,7 +20,6 @@
 import type { Request, Response, NextFunction } from "express";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { lookup as dnsLookup } from "node:dns/promises";
 import { and, eq } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
@@ -29,18 +28,14 @@ import {
   hasContainerLayerCredentials,
   isContainerLayerConfigured,
   provisionContainer,
-} from "./container";
+  tenantRuntimeProvider,
+} from "./tenant-runtime";
 import { getContainerSecretMap } from "./container-secrets";
 import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 
-/**
- * The Fly proxy app hostname derived from the same env var used in container.ts.
- * Kept in sync: container.ts line 36 uses `process.env.FLY_APP_NAME ?? "mustaflow-containers"`.
- */
-const FLY_PROXY_APP_NAME = process.env.FLY_APP_NAME ?? "mustaflow-containers";
-const FLY_PROXY_HOSTNAME = `${FLY_PROXY_APP_NAME}.fly.dev`;
-const FLY_PROXY_REACHABILITY_TTL_MS = 30_000;
+const runtimeGatewayHostname = tenantRuntimeProvider.getGatewayHostname();
+const runtimeGatewayLabel = tenantRuntimeProvider.getGatewayLabel();
 
 type PreviewProxyState =
   | "container-starting"
@@ -48,46 +43,8 @@ type PreviewProxyState =
   | "proxy-unavailable"
   | "server-unreachable";
 
-let flyProxyReachabilityCache: { reachable: boolean; checkedAt: number } | null = null;
-let flyProxyReachabilityProbe: Promise<boolean> | null = null;
-
-async function isFlyProxyReachable(): Promise<boolean> {
-  const now = Date.now();
-  if (
-    flyProxyReachabilityCache &&
-    now - flyProxyReachabilityCache.checkedAt < FLY_PROXY_REACHABILITY_TTL_MS
-  ) {
-    return flyProxyReachabilityCache.reachable;
-  }
-
-  if (flyProxyReachabilityProbe) return flyProxyReachabilityProbe;
-
-  flyProxyReachabilityProbe = dnsLookup(FLY_PROXY_HOSTNAME)
-    .then(() => {
-      flyProxyReachabilityCache = { reachable: true, checkedAt: Date.now() };
-      logger.info(
-        { hostname: FLY_PROXY_HOSTNAME },
-        "Fly proxy hostname resolved - agentic preview proxy enabled",
-      );
-      return true;
-    })
-    .catch((err: unknown) => {
-      flyProxyReachabilityCache = { reachable: false, checkedAt: Date.now() };
-      logger.info(
-        { hostname: FLY_PROXY_HOSTNAME, code: (err as NodeJS.ErrnoException).code },
-        "Fly proxy hostname not reachable - agentic preview proxy disabled in this environment",
-      );
-      return false;
-    })
-    .finally(() => {
-      flyProxyReachabilityProbe = null;
-    });
-
-  return flyProxyReachabilityProbe;
-}
-
 // Probe once for startup logging, but keep request-time checks retryable.
-void isFlyProxyReachable();
+void tenantRuntimeProvider.isGatewayReachable();
 
 // Accepts both the full path (`/api/projects/:id/preview/...`, as seen by the
 // top-level WebSocket upgrade handler) and the router-relative path
@@ -221,7 +178,7 @@ const PROXY_UNAVAILABLE_HTML = (projectId: number): string => `<!doctype html>
 </style></head>
 <body><div class="wrap">
   <h1>Container preview unavailable</h1>
-  <p>Container preview is not available in this environment. The Fly.io proxy (<code>${FLY_PROXY_HOSTNAME}</code>) could not be reached from here.</p>
+  <p>Container preview is not available in this environment. The ${runtimeGatewayLabel} (<code>${runtimeGatewayHostname}</code>) could not be reached from here.</p>
   <p>Your app files are still saved in NabuFlow. Start a test preview, retry, or inspect container logs.</p>
   <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
 </div></body></html>`;
@@ -441,7 +398,7 @@ export async function handleLivePreviewHttp(
   // resolve), return a clear 502 with an environment-specific explanation
   // instead of crashing with ENOTFOUND. Status 502 (not 503) is intentional —
   // 503 would trigger the COLD_START_HTML auto-refresh meta tag.
-  const reachable = await isFlyProxyReachable();
+  const reachable = await tenantRuntimeProvider.isGatewayReachable();
   if (!reachable) {
     await serveProjectFilesPreview(
       res,

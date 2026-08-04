@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db, projectFilesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { extractPageMap } from "../lib/page-map";
-import { writeFileToContainer } from "../lib/container";
+import { writeFileToContainer } from "../lib/tenant-runtime";
 import { logger } from "../lib/logger";
 import { parseBlocks, reorderBlocks, removeBlock, insertBlock } from "../lib/blocks";
 

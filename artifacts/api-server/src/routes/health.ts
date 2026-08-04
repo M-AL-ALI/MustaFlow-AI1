@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
-import { getContainerSubsystemStatus } from "../lib/container";
+import { getContainerSubsystemStatus } from "../lib/tenant-runtime";
 import { getEncryptionKeyStatus } from "../lib/encryption";
 
 const router: IRouter = Router();

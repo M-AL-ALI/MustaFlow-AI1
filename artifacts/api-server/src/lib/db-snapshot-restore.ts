@@ -21,7 +21,7 @@
  *   /data/db.sqlite atomically via sqlite3.
  */
 
-import { execInContainer } from "./container";
+import { execInContainer } from "./tenant-runtime";
 import { logger } from "./logger";
 
 // ── Postgres JSON snapshot types ──────────────────────────────────────────────

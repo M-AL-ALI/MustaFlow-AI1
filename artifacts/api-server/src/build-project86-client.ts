@@ -22,7 +22,7 @@ import {
   syncFilesToContainer,
   patchMachineAutostop,
   startContainerHealthServer,
-} from "./lib/container";
+} from "./lib/tenant-runtime";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;

@@ -11,19 +11,16 @@
 import { db, pool, projectsTable, secretsTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { Client } from "pg";
+import { destroyContainer, hasContainerLayerCredentials } from "./lib/tenant-runtime";
 
-const FLY_TOKEN = process.env.FLY_API_TOKEN ?? "";
 const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
 const NEON_KEY = process.env.NEON_API_KEY ?? "";
 
-async function flyDelete(machineId: string): Promise<void> {
-  if (!FLY_TOKEN || !machineId) return;
+async function flyDelete(machineId: string, projectId: number): Promise<void> {
+  if (!hasContainerLayerCredentials() || !machineId) return;
   try {
-    const r = await fetch(
-      `https://api.machines.dev/v1/apps/${FLY_APP}/machines/${machineId}?force=true`,
-      { method: "DELETE", headers: { Authorization: `Bearer ${FLY_TOKEN}` } },
-    );
-    console.log(`[cleanup] fly destroy ${machineId} → ${r.status}`);
+    const destroyed = await destroyContainer(machineId, projectId);
+    console.log(`[cleanup] fly destroy ${machineId} → ${destroyed ? "ok" : "failed"}`);
   } catch (err) {
     console.log(`[cleanup] fly destroy failed:`, err);
   }
@@ -46,7 +43,7 @@ async function main(): Promise<void> {
   console.log("─".repeat(70));
   console.log("Task #762 — Agentic provisioning end-to-end verification");
   console.log("─".repeat(70));
-  console.log(`FLY_API_TOKEN:  ${FLY_TOKEN ? "set" : "MISSING"}`);
+  console.log(`FLY_API_TOKEN:  ${hasContainerLayerCredentials() ? "set" : "MISSING"}`);
   console.log(`NEON_API_KEY:   ${NEON_KEY ? "set" : "MISSING"}`);
   console.log(`FLY_APP_NAME:   ${FLY_APP}`);
   console.log("");
@@ -136,7 +133,7 @@ async function main(): Promise<void> {
   } finally {
     // 7. Tear down everything we created so no orphaned cloud resources remain.
     console.log("\n[cleanup] Tearing down test resources…");
-    if (containerId) await flyDelete(containerId);
+    if (containerId) await flyDelete(containerId, project.id);
     if (neonProjectId) await neonDelete(neonProjectId);
     await db
       .delete(secretsTable)

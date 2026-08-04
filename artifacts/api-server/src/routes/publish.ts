@@ -54,7 +54,11 @@ import { writeKnowledge } from "../lib/knowledge";
 import { scanContent } from "../lib/content-safety";
 import { isAdminUser } from "../lib/adminAuth";
 import { generateOgSvg } from "../lib/ogImage";
-import { deployProductionContainer, destroyContainer } from "../lib/container";
+import {
+  deployProductionContainer,
+  destroyContainer,
+  hasContainerLayerCredentials,
+} from "../lib/tenant-runtime";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { getProductionSecretMap } from "../lib/container-secrets";
 import { getUnresolvedCriticalFindings } from "./readiness";
@@ -568,7 +572,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // both go through the blue/green path; container.ts reads the type to
   // set min_machines_running appropriately.
   const shouldDeployContainer =
-    deploymentType !== "static" && !!project.containerId && !!process.env.FLY_API_TOKEN;
+    deploymentType !== "static" && !!project.containerId && hasContainerLayerCredentials();
 
   if (shouldDeployContainer) {
     req.log.info({ projectId }, "Project has dev container — deploying production container");

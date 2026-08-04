@@ -892,7 +892,7 @@ export async function readDiagnostics(input: {
 
   let execOut: { ok: boolean; output: string };
   try {
-    const { execInContainer } = await import("./container");
+    const { execInContainer } = await import("./tenant-runtime");
     if (signal.aborted) {
       return { ok: false, tool: auto, path: args.path, diagnostics: [], raw: "", error: "aborted" };
     }

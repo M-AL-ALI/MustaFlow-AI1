@@ -116,7 +116,7 @@ export async function revokePreviewForSecurityChange(
     project.testContainerStatus !== "error"
   ) {
     try {
-      const { destroyContainer } = await import("./container");
+      const { destroyContainer } = await import("./tenant-runtime");
       await destroyContainer(project.testContainerId, projectId);
     } catch (err) {
       logger.warn(
