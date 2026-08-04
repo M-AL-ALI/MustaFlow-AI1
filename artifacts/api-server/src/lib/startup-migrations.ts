@@ -5146,6 +5146,23 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await refreshNabuflowHelpArticles(client);
     },
   },
+  // Provider-neutral tenant runtime manifest: existing projects remain null
+  // and therefore retain their exact historical port behavior.
+  {
+    name: "migrate-project-runtime-port",
+    async run(client) {
+      await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS runtime_port INTEGER`);
+      await client.query(`
+        DO $$
+        BEGIN
+          ALTER TABLE projects
+            ADD CONSTRAINT projects_runtime_port_range
+            CHECK (runtime_port IS NULL OR runtime_port BETWEEN 1024 AND 65535);
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$
+      `);
+    },
+  },
 ];
 
 /**

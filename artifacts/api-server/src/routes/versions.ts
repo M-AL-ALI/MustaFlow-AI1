@@ -33,6 +33,7 @@ import { EventTypes } from "../lib/event-types";
 import { publishProjectFilesChanged } from "../lib/preview-events";
 import { writeKnowledge } from "../lib/knowledge";
 import { getProductionSecretMap } from "../lib/container-secrets";
+import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 
 const router: IRouter = Router();
 
@@ -505,6 +506,8 @@ router.post(
         prodContainerId: projectsTable.prodContainerId,
         projectFormat: projectsTable.projectFormat,
         status: projectsTable.status,
+        stack: projectsTable.stack,
+        runtimePort: projectsTable.runtimePort,
       })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId));
@@ -518,10 +521,15 @@ router.post(
       setImmediate(() => {
         void (async () => {
           try {
+            const servicePort = resolveProjectRuntimeManifest({
+              runtimePort: currentProject.runtimePort,
+              stack: currentProject.stack,
+              legacyProfile: "fixed-node",
+            }).servicePort;
             const envVars: Record<string, string> = {
               PROJECT_ID: String(projectId),
               NODE_ENV: "production",
-              PORT: "3000",
+              PORT: String(servicePort),
               ...(await getProductionSecretMap(projectId)),
             };
 
@@ -531,6 +539,7 @@ router.post(
               currentProject.prodContainerId,
               filePayload,
               envVars,
+              { servicePort: currentProject.runtimePort },
             );
 
             if (result) {

@@ -224,10 +224,10 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(jobsSource).not.toContain('["npm", "install", "--prefer-offline", "--no-audit"]');
   });
 
-  it("container preview startup uses platform port and stack-specific health probes", () => {
+  it("container preview startup uses the project service port and stack-specific health probes", () => {
     expect(jobsSource).toContain("healthPath: healthCheckPathForStack(opts.stack)");
-    expect(jobsSource).toContain("npm run dev -- --host 0.0.0.0 --port 3000");
-    expect(jobsSource).toContain("npm run dev -- -H 0.0.0.0 -p 3000");
-    expect(jobsSource).toContain("uvicorn main:app --host 0.0.0.0 --port 3000");
+    expect(jobsSource).toContain("npm run dev -- --host 0.0.0.0 --port ${servicePort}");
+    expect(jobsSource).toContain("npm run dev -- -H 0.0.0.0 -p ${servicePort}");
+    expect(jobsSource).toContain("uvicorn main:app --host 0.0.0.0 --port ${servicePort}");
   });
 });

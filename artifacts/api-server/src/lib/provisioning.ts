@@ -452,7 +452,9 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       await setStep(projectId, "create_container");
       let containerError: string | undefined;
       try {
-        const info = await createContainer(projectId, project.stack);
+        const info = await createContainer(projectId, project.stack, undefined, {
+          servicePort: project.runtimePort,
+        });
         if (!info) {
           containerError = "Failed to create Fly.io machine for this project.";
         } else if ("error" in info) {

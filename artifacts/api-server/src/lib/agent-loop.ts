@@ -48,6 +48,7 @@ import {
 import { logger } from "./logger";
 import {
   CHECK_PROFILES,
+  checkProfileForServicePort,
   DEFERRED_CONTAINER_CHECK_MESSAGE,
   PARTIAL_VALIDATION_WARNING,
   checksForLiveServerCapability,
@@ -57,6 +58,7 @@ import {
   type CheckSpec,
   type StackId,
 } from "./check-profiles";
+import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { scanMissingDeps, addMissingToDeps } from "./dep-scanner";
 import {
   DEFAULT_POLICY_STRICTNESS,
@@ -106,6 +108,8 @@ export interface AgentLoopInput {
   projectKind: string;
   projectFormat: string | null;
   stack: string | null;
+  /** Optional explicit tenant app service port from the project runtime manifest. */
+  runtimePort?: number | null;
   userPrompt: string;
   agentMode: AgentMode;
   /** Enables the deepest unified planning pass before building. Never available in Lite. */
@@ -346,7 +350,7 @@ const CHECK_STRATEGY_HINTS: Record<string, { label: string; isFoundation: boolea
       hint: [
         "STOP adding routes or feature code. The server cannot start.",
         "Fix the server entry point first:",
-        "  1. src/index.ts (or server.ts) must exist and call app.listen(Number(process.env.PORT) || 3000)",
+        "  1. src/index.ts (or server.ts) must listen on the numeric process.env.PORT value injected by the runtime",
         "  2. Check package.json has a 'start' or 'dev' script that points to your entry file",
         "  3. Use read_file on the entry file — look for missing imports, undefined variables, or syntax errors",
         "  4. The server must respond HTTP 200 to GET /healthz before calling finalize",
@@ -1629,6 +1633,11 @@ function buildSystemPrompt(
   const isMobile = stack === "mobile-cross";
   const isDeveloperMode = input.projectMode === "developer";
   const strictness = input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
+  const servicePort = resolveProjectRuntimeManifest({
+    runtimePort: input.runtimePort,
+    stack,
+    legacyProfile: "fixed-node",
+  }).servicePort;
   const liveServerCapabilityNote =
     input.liveServerAvailable === false
       ? "Live cloud-server infrastructure is unavailable for this run. Generate the requested architecture, but do not attempt container commands and do not treat server startup or /healthz as a finalization requirement. Continue every available file, syntax, structure, and other non-runtime validation."
@@ -1660,11 +1669,11 @@ The preview pane is an <iframe> connected to the dev server through the NabuFlow
 DO NOT manually restart the server after writing files. The filesystem watcher handles it. Restarting kills the HMR connection and causes a blank preview until the process comes back up.
 
 ## Critical: always bind to process.env.PORT
-The container runtime injects PORT (default 3000). Your server MUST read it:
-- Node.js/Express: const port = parseInt(process.env.PORT ?? "3000", 10); app.listen(port, ...)
-- Python Flask:    port = int(os.environ.get("PORT", 3000)); app.run(host="0.0.0.0", port=port)
-- Python FastAPI:  uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
-- Go/Gin:          port := os.Getenv("PORT"); if port == "" { port = "3000" }; router.Run(":" + port)
+The container runtime injects PORT (this project's service port is ${servicePort}). Your server MUST read it:
+- Node.js/Express: const port = parseInt(process.env.PORT ?? "${servicePort}", 10); app.listen(port, ...)
+- Python Flask:    port = int(os.environ.get("PORT", ${servicePort})); app.run(host="0.0.0.0", port=port)
+- Python FastAPI:  uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", ${servicePort})))
+- Go/Gin:          port := os.Getenv("PORT"); if port == "" { port = "${servicePort}" }; router.Run(":" + port)
 Never hardcode a port other than as a fallback when PORT is unset.
 
 ## Critical: server must start even without DATABASE_URL
@@ -1733,7 +1742,7 @@ app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
 \`\`\`
 
 ## Critical: bind to process.env.PORT
-  const port = parseInt(process.env.PORT ?? "3000", 10);
+  const port = parseInt(process.env.PORT ?? "${servicePort}", 10);
   app.listen(port, "0.0.0.0", () => console.log(\`Listening on \${port}\`));
 
 ## Required: TypeScript configuration for Node.js projects
@@ -1771,7 +1780,7 @@ Order of operations:
 ## npm install in containers — OOM / timeout handling
 Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL) or times out:
 - Do NOT retry npm install in a loop — it will keep failing.
-- Instead, check whether the server is already running: curl -sf http://localhost:3000/healthz
+- Instead, check whether the server is already running: curl -sf http://localhost:${servicePort}/healthz
 - If the server responds → proceed to finalize immediately.
 - Use npx to run binaries that aren't in node_modules (e.g. \`npx tsx src/server/index.ts\`).
 - Never fail a task solely because npm install cannot complete — the server may already be running.`
@@ -2018,7 +2027,12 @@ function guessMime(path: string): string {
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const stack = resolveStackId(input.projectKind, input.projectFormat, input.stack);
-  const baseProfile = CHECK_PROFILES[stack];
+  const servicePort = resolveProjectRuntimeManifest({
+    runtimePort: input.runtimePort,
+    stack,
+    legacyProfile: "fixed-node",
+  }).servicePort;
+  const baseProfile = checkProfileForServicePort(CHECK_PROFILES[stack], servicePort);
   const liveServerAvailable = input.liveServerAvailable !== false;
   const profile = {
     ...baseProfile,

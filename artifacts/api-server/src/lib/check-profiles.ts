@@ -41,6 +41,23 @@ export type CheckProfile = {
   checks: CheckSpec[];
 };
 
+const TENANT_SERVICE_PORT_PLACEHOLDER = "__NABUFLOW_SERVICE_PORT__";
+
+/** Materialize a check profile for the project's configured tenant service port. */
+export function checkProfileForServicePort(
+  profile: CheckProfile,
+  servicePort: number,
+): CheckProfile {
+  const replacement = String(servicePort);
+  return {
+    ...profile,
+    checks: profile.checks.map((check) => ({
+      ...check,
+      argv: check.argv.map((arg) => arg.replaceAll(TENANT_SERVICE_PORT_PLACEHOLDER, replacement)),
+    })),
+  };
+}
+
 export const DEFERRED_CONTAINER_CHECK_MESSAGE =
   "deferred: live-server infrastructure unavailable; container execution was not attempted";
 
@@ -162,7 +179,7 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
       {
         id: "server-start",
         label: "Server startup (healthz)",
-        // Poll the live dev-server on port 3000 first.  If it doesn't answer,
+        // Poll the live dev-server on the resolved project service port first.
         // try to (re-)start it via `npm run dev:server` and wait up to ~14 s.
         // This surfaces DATABASE_URL / crash errors to the agent so it can fix
         // them before calling finalize.
@@ -172,18 +189,18 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
           [
             "cd /app",
             // Quick poll — server may already be running and healthy
-            "CODE=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:3000/healthz 2>/dev/null || echo 000)",
+            `CODE=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:${TENANT_SERVICE_PORT_PLACEHOLDER}/healthz 2>/dev/null || echo 000)`,
             'if [ "$CODE" = "200" ]; then echo "healthz OK"; exit 0; fi',
             // Not yet healthy — (re-)start the dev server
             "pkill -f 'tsx ' 2>/dev/null || true",
             "pkill -f 'node ' 2>/dev/null || true",
             "sleep 1",
-            "export PORT=3000",
+            `export PORT=${TENANT_SERVICE_PORT_PLACEHOLDER}`,
             "nohup npm run dev:server >/tmp/__hc_server.log 2>&1 &",
             // Poll up to 7 × 2 s = 14 s
             "for i in 1 2 3 4 5 6 7; do",
             "  sleep 2",
-            "  CODE=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:3000/healthz 2>/dev/null || echo 000)",
+            `  CODE=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:${TENANT_SERVICE_PORT_PLACEHOLDER}/healthz 2>/dev/null || echo 000)`,
             '  if [ "$CODE" = "200" ]; then echo "healthz OK after restart"; exit 0; fi',
             "done",
             'echo "Server did not respond to GET /healthz within 15 s (last HTTP $CODE)"',

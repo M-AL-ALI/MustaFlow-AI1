@@ -14,6 +14,8 @@ export interface RuntimeInfo {
   runtimeId: string;
   status: RuntimeStatus;
   endpoint: string | null;
+  /** Internal port on which the tenant application listens. */
+  servicePort: number;
 }
 
 export interface RuntimeCreateFailure {
@@ -48,6 +50,11 @@ export interface RuntimeInstallOptions {
 export interface RuntimeProductionOptions {
   region?: string | null;
   deploymentType?: string | null;
+  servicePort?: number | null;
+}
+
+export interface RuntimeServiceOptions {
+  servicePort?: number | null;
 }
 
 export type RuntimeLogLevel = "stdout" | "stderr" | "system";
@@ -66,6 +73,7 @@ export interface TenantRuntimeProvider {
     projectId: number,
     stack?: string | null,
     environment?: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<RuntimeCreateResult>;
   start(runtimeId: string, projectId: number): Promise<boolean>;
   stop(runtimeId: string, projectId: number): Promise<boolean>;
@@ -100,10 +108,12 @@ export interface TenantRuntimeProvider {
     runtimeId: string,
     projectId: number,
     environment: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<boolean>;
   restartWithProjectEnvironment(
     projectId: number,
     environment: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<void>;
 
   ensureAwake(
@@ -116,6 +126,7 @@ export interface TenantRuntimeProvider {
     projectId: number,
     files: RuntimeFile[],
     environment?: Record<string, string>,
+    options?: RuntimeServiceOptions,
   ): Promise<RuntimeInfo | null>;
   hibernate(projectId: number): Promise<void>;
   createProduction(
@@ -129,6 +140,7 @@ export interface TenantRuntimeProvider {
     previousRuntimeId: string | null,
     files: RuntimeFile[],
     environment: Record<string, string>,
+    options?: RuntimeProductionOptions,
   ): Promise<RuntimeInfo | null>;
 
   configureIdleBehavior(

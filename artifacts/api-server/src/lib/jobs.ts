@@ -110,6 +110,7 @@ import {
   resolveStackId,
 } from "./check-profiles";
 import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./tenant-runtime";
+import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
 import {
   buildAgentTaskTerminalUpdate,
@@ -554,6 +555,7 @@ function buildRepairPrompt(
   recentlyChangedPaths: string[],
   attemptNumber = 1,
   previousErrors: Array<{ label: string; output: string }> = [],
+  servicePort = resolveProjectRuntimeManifest({}).servicePort,
 ): string {
   const errorDetail = failedChecks
     .map((c) => `### ${c.label}\n${c.output.slice(0, 1500)}`)
@@ -606,7 +608,7 @@ function buildRepairPrompt(
       "Fix ONLY the server startup problem. Do NOT add new features.",
       "Rules:",
       "  1. read_file the server entry point (src/index.ts, server.ts, app.ts, or equivalent)",
-      "  2. Check that the server calls app.listen(Number(process.env.PORT) || 3000)",
+      `  2. Check that the server listens on process.env.PORT (configured service port ${servicePort})`,
       "  3. Verify the package.json 'start' or 'dev' script points to the correct entry file",
       "  4. Add a GET /healthz route that always returns HTTP 200 and never touches the database",
       "  5. Ensure no module-level throws on missing env vars — use lazy initialization",
@@ -2830,6 +2832,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
           taskId: taskId as number,
           taskMode: agentMode,
+          runtimePort: project.runtimePort,
         };
 
         // ── Agentic pre-flight gate ────────────────────────────────────────────
@@ -2896,6 +2899,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   projectKind: project.kind,
                   projectFormat: project.projectFormat ?? null,
                   stack: project.stack ?? null,
+                  runtimePort: project.runtimePort ?? null,
                   projectMode: project.projectMode ?? null,
                   userPrompt,
                   agentMode,
@@ -3349,6 +3353,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
           taskId: taskId as number,
           taskMode: agentMode,
+          runtimePort: project.runtimePort,
         };
 
         // ── Agentic pre-flight gate (refine path) ────────────────────────────
@@ -3410,6 +3415,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   projectKind: project.kind,
                   projectFormat: project.projectFormat ?? null,
                   stack: project.stack ?? null,
+                  runtimePort: project.runtimePort ?? null,
                   projectMode: project.projectMode ?? null,
                   userPrompt,
                   agentMode,
@@ -3695,6 +3701,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 projectKind: project.kind,
                 projectFormat: project.projectFormat ?? null,
                 stack: project.stack ?? null,
+                runtimePort: project.runtimePort ?? null,
                 projectMode: project.projectMode ?? null,
                 userPrompt: stricterPrompt,
                 agentMode,
@@ -4021,6 +4028,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             currentChangedPaths,
             repairAttempt,
             repairAttempt > 1 ? currentFailedChecks : [],
+            resolveProjectRuntimeManifest({
+              runtimePort: project.runtimePort,
+              stack: project.stack,
+              legacyProfile: "fixed-node",
+            }).servicePort,
           );
           const filesForRepair = await loadFiles(projectId);
 
@@ -4033,6 +4045,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               projectKind: project.kind,
               projectFormat: project.projectFormat ?? null,
               stack: project.stack ?? null,
+              runtimePort: project.runtimePort ?? null,
               projectMode: project.projectMode ?? null,
               userPrompt: repairPrompt,
               agentMode,
@@ -4290,7 +4303,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             // Smoke test — only after TypeScript/ESLint pass, server-side stacks only.
             if (gateResult.passed && isServerStack) {
               await emitEvent(taskId, "narration", "Running server startup smoke test…");
-              const smokeCheck = await runSmokeTest(project.containerId, projectId);
+              const smokeCheck = await runSmokeTest(
+                project.containerId,
+                projectId,
+                resolveProjectRuntimeManifest({
+                  runtimePort: project.runtimePort,
+                  stack: project.stack,
+                  legacyProfile: "fixed-node",
+                }).servicePort,
+              );
               gateResult.checks.push(smokeCheck);
               // Re-derive passed/allPassed after adding the smoke check.
               const executedAfterSmoke = gateResult.checks.filter((c) => !c.skipped);
@@ -4705,7 +4726,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
             if (gateResult.passed && _isServerStack) {
               await emitEvent(taskId, "narration", "Running server startup smoke test…");
-              const smokeCheck = await runSmokeTest(project.containerId, projectId);
+              const smokeCheck = await runSmokeTest(
+                project.containerId,
+                projectId,
+                resolveProjectRuntimeManifest({
+                  runtimePort: project.runtimePort,
+                  stack: project.stack,
+                  legacyProfile: "fixed-node",
+                }).servicePort,
+              );
               gateResult.checks.push(smokeCheck);
               const executedAfterSmoke = gateResult.checks.filter((c) => !c.skipped);
               gateResult.passed =
@@ -4892,6 +4921,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           containerStatus: project.containerStatus,
           containerUrl: project.containerUrl,
           stack: project.stack,
+          runtimePort: project.runtimePort,
           signal,
           files: allRuntimeFileRows.map((file) => ({
             path: file.path,
@@ -5028,6 +5058,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 projectKind: project.kind,
                 projectFormat: resolvedProjectFormat,
                 stack: resolvedProjectStack,
+                runtimePort: project.runtimePort ?? null,
                 projectMode: project.projectMode ?? null,
                 userPrompt: buildPreviewRepairObservation(initialObservation),
                 agentMode,
@@ -5147,6 +5178,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     containerStatus: report.previewUpdated ? "running" : project.containerStatus,
                     containerUrl: project.containerUrl,
                     stack: resolvedProjectStack,
+                    runtimePort: project.runtimePort,
                     signal,
                     files: snapshot.map((file) => ({
                       path: file.path,
@@ -6856,6 +6888,7 @@ function shellQuote(value: string): string {
 function startCommandForFiles(
   files: Array<{ path: string; content: string }>,
   stack: string | null | undefined,
+  servicePort: number,
 ): string | null {
   const pkgFile = files.find((f) => f.path === "package.json");
   if (pkgFile) {
@@ -6863,15 +6896,15 @@ function startCommandForFiles(
       const pkg = JSON.parse(pkgFile.content) as { scripts?: Record<string, string> };
       const scripts = pkg.scripts ?? {};
       if (stack === "react-vite") {
-        if (scripts.dev) return "npm run dev -- --host 0.0.0.0 --port 3000";
-        if (scripts.preview) return "npm run preview -- --host 0.0.0.0 --port 3000";
-        if (scripts.start) return "npm start -- --host 0.0.0.0 --port 3000";
-        return "npx vite --host 0.0.0.0 --port 3000";
+        if (scripts.dev) return `npm run dev -- --host 0.0.0.0 --port ${servicePort}`;
+        if (scripts.preview) return `npm run preview -- --host 0.0.0.0 --port ${servicePort}`;
+        if (scripts.start) return `npm start -- --host 0.0.0.0 --port ${servicePort}`;
+        return `npx vite --host 0.0.0.0 --port ${servicePort}`;
       }
       if (stack === "nextjs") {
-        if (scripts.dev) return "npm run dev -- -H 0.0.0.0 -p 3000";
+        if (scripts.dev) return `npm run dev -- -H 0.0.0.0 -p ${servicePort}`;
         if (scripts.start) return "npm start";
-        return "npx next dev -H 0.0.0.0 -p 3000";
+        return `npx next dev -H 0.0.0.0 -p ${servicePort}`;
       }
       if (scripts["dev:server"]) return "npm run dev:server";
       if (scripts.dev) return "npm run dev";
@@ -6884,7 +6917,7 @@ function startCommandForFiles(
 
   if (stack === "python-flask" || files.some((f) => f.path === "app.py")) return "python app.py";
   if (stack === "python-fastapi" || files.some((f) => f.path === "main.py"))
-    return "uvicorn main:app --host 0.0.0.0 --port 3000";
+    return `uvicorn main:app --host 0.0.0.0 --port ${servicePort}`;
   return null;
 }
 
@@ -6907,6 +6940,7 @@ async function syncAgenticPreviewRuntime(opts: {
   containerStatus: string | null;
   containerUrl: string | null;
   stack: string | null | undefined;
+  runtimePort: number | null | undefined;
   signal?: AbortSignal;
   files: Array<{ path: string; content: string }>;
   removedPaths: string[];
@@ -7011,7 +7045,12 @@ async function syncAgenticPreviewRuntime(opts: {
       }
     }
 
-    const startCommand = startCommandForFiles(opts.files, opts.stack);
+    const servicePort = resolveProjectRuntimeManifest({
+      runtimePort: opts.runtimePort,
+      stack: opts.stack,
+      legacyProfile: "fixed-node",
+    }).servicePort;
+    const startCommand = startCommandForFiles(opts.files, opts.stack, servicePort);
     if (startCommand) {
       await emitEvent(opts.taskId, "narration", "Restarting container app server…");
       await execInContainer(
@@ -7025,7 +7064,7 @@ async function syncAgenticPreviewRuntime(opts: {
             "pkill -f 'tsx ' 2>/dev/null || true",
             "pkill -f 'vite' 2>/dev/null || true",
             "pkill -f 'next' 2>/dev/null || true",
-            "export PORT=3000",
+            `export PORT=${servicePort}`,
             `nohup ${startCommand} >/tmp/app.log 2>&1 &`,
           ].join(" && "),
         ],
@@ -7454,6 +7493,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     containerStatus: project.containerStatus,
     containerUrl: project.containerUrl,
     stack: project.stack,
+    runtimePort: project.runtimePort,
     files: builderFiles.map((file) => ({ path: file.path, content: file.content })),
     removedPaths,
     packageManifestChanged,

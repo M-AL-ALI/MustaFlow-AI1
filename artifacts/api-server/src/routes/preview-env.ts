@@ -30,6 +30,7 @@ import {
   npmInstallInBackground,
 } from "../lib/tenant-runtime";
 import { encryptionService } from "../lib/encryption";
+import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import { logger } from "../lib/logger";
 import { createHash, randomBytes } from "crypto";
 import { healthCheckPathForStack, waitForContainerHealthy } from "../lib/health-inject";
@@ -653,10 +654,15 @@ async function startTestContainer(
   candidateId: number,
   files: Array<{ path: string; content: string | null; mimeType: string | null }>,
 ): Promise<void> {
+  const servicePort = resolveProjectRuntimeManifest({
+    runtimePort: project.runtimePort,
+    stack: project.stack,
+    legacyProfile: "fixed-node",
+  }).servicePort;
   const envVars: Record<string, string> = {
     PROJECT_ID: String(projectId),
     NODE_ENV: "testing",
-    PORT: "3000",
+    PORT: String(servicePort),
     ...(await getContainerSecretMap(projectId)),
   };
 
@@ -673,7 +679,9 @@ async function startTestContainer(
   }
 
   // Create a new Fly machine for the test environment.
-  const containerInfo = await createContainer(projectId, project.stack ?? null, envVars);
+  const containerInfo = await createContainer(projectId, project.stack ?? null, envVars, {
+    servicePort: project.runtimePort,
+  });
   if (!containerInfo) {
     throw new Error(
       "Container creation failed — FLY_API_TOKEN may be missing or Fly returned an error",
@@ -738,7 +746,11 @@ async function startTestContainer(
   // Start the app process in the background.
   await execInContainer(
     containerInfo.containerId,
-    ["/bin/sh", "-c", `cd /app && export PORT=3000 && nohup ${startCommand} &>/tmp/app.log &`],
+    [
+      "/bin/sh",
+      "-c",
+      `cd /app && export PORT=${servicePort} && nohup ${startCommand} &>/tmp/app.log &`,
+    ],
     projectId,
   );
 

@@ -25,6 +25,7 @@
 
 import { execInContainer, npmInstallInBackground, syncFilesToContainer } from "./tenant-runtime";
 import { logger } from "./logger";
+import { LEGACY_NODE_SERVICE_PORT } from "./runtime-manifest";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -346,7 +347,7 @@ export async function runQualityGate(
 export async function runSmokeTest(
   containerId: string,
   projectId: number,
-  port: number = 3000,
+  port: number = LEGACY_NODE_SERVICE_PORT,
 ): Promise<QualityGateCheck> {
   const start = Date.now();
 

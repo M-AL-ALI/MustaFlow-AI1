@@ -74,6 +74,9 @@ export const projectsTable = pgTable(
     // python-fastapi = Python + FastAPI
     // Immutable after creation — duplicate the project to change stack.
     stack: text("stack").notNull().default("react-vite"),
+    // Explicit tenant app service port. Null preserves each legacy runtime
+    // path's historical default until the project receives a manifest value.
+    runtimePort: integer("runtime_port"),
     // True when the user explicitly selected the stack at project creation.
     // False preserves automatic architecture selection for callers that omit it.
     stackLocked: boolean("stack_locked").notNull().default(false),

@@ -61,6 +61,7 @@ import {
 } from "../lib/tenant-runtime";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { getProductionSecretMap } from "../lib/container-secrets";
+import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import { getUnresolvedCriticalFindings } from "./readiness";
 import { evaluatePublishGate, evaluatePromotionGate } from "../lib/publish-gate";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
@@ -577,12 +578,17 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   if (shouldDeployContainer) {
     req.log.info({ projectId }, "Project has dev container — deploying production container");
     try {
+      const servicePort = resolveProjectRuntimeManifest({
+        runtimePort: project.runtimePort,
+        stack: project.stack,
+        legacyProfile: "fixed-node",
+      }).servicePort;
       // SECURITY: Only inject secrets with environment='production' into production containers.
       // Development and testing secrets must never reach the production environment.
       const envVars: Record<string, string> = {
         PROJECT_ID: String(projectId),
         NODE_ENV: "production",
-        PORT: "3000",
+        PORT: String(servicePort),
         ...(await getProductionSecretMap(projectId)),
       };
 
@@ -591,6 +597,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         project.prodContainerId ?? null,
         files.map((f) => ({ path: f.path, content: f.content })),
         envVars,
+        { servicePort: project.runtimePort },
       );
       if (prodResult) {
         containerDeployed = true;

@@ -72,6 +72,7 @@ describe("TenantRuntimeProvider Fly adapter", () => {
       containerId: "runtime-1",
       containerUrl: "https://mustaflow-containers.fly.dev/container/runtime-1",
       status: "starting",
+      servicePort: 3000,
     });
     mocks.execInContainer.mockResolvedValue({
       ok: true,
@@ -86,6 +87,7 @@ describe("TenantRuntimeProvider Fly adapter", () => {
       runtimeId: "runtime-1",
       endpoint: "https://mustaflow-containers.fly.dev/container/runtime-1",
       status: "starting",
+      servicePort: 3000,
     });
     await expect(provider.exec("runtime-1", ["node", "--version"], 42)).resolves.toEqual({
       ok: true,
@@ -95,7 +97,12 @@ describe("TenantRuntimeProvider Fly adapter", () => {
       exitCode: 0,
       runtimeRestarted: true,
     });
-    expect(mocks.createContainer).toHaveBeenCalledWith(42, "node-api", { TOKEN: "value" });
+    expect(mocks.createContainer).toHaveBeenCalledWith(
+      42,
+      "node-api",
+      { TOKEN: "value" },
+      undefined,
+    );
   });
 
   it("delegates lifecycle, file, environment, and log operations unchanged", async () => {
@@ -112,7 +119,9 @@ describe("TenantRuntimeProvider Fly adapter", () => {
     await expect(provider.destroy("runtime-2", 7)).resolves.toBe(true);
     await expect(provider.status("runtime-2")).resolves.toBe("running");
     await provider.restoreFiles("runtime-2", 7, [{ path: "index.js", content: "ok" }], true);
-    await expect(provider.updateEnvironment("runtime-2", 7, { PORT: "3000" })).resolves.toBe(true);
+    await expect(
+      provider.updateEnvironment("runtime-2", 7, { TOKEN: "value" }, { servicePort: 4321 }),
+    ).resolves.toBe(true);
     await provider.recordLog(7, "system", "ready");
     provider.startLogStream(7, "runtime-2");
 
@@ -123,6 +132,12 @@ describe("TenantRuntimeProvider Fly adapter", () => {
       true,
     );
     expect(mocks.ensureContainerLogTailer).toHaveBeenCalledWith(7, "runtime-2");
+    expect(mocks.updateContainerEnv).toHaveBeenCalledWith(
+      "runtime-2",
+      7,
+      { TOKEN: "value" },
+      { servicePort: 4321 },
+    );
   });
 
   it("preserves the existing Fly endpoint shape inside the adapter", () => {
