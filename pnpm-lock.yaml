@@ -1287,6 +1287,16 @@ importers:
         specifier: 'catalog:'
         version: 3.25.76
 
+  lib/tenant-runtime-contracts:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 3.25.76
+    devDependencies:
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.3)(yaml@2.8.4)
+
   scripts:
     dependencies:
       '@workspace/db':
