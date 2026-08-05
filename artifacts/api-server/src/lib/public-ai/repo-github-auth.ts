@@ -231,6 +231,199 @@ export async function fetchGithubUser(token: string): Promise<{ login: string }>
   return githubGet<{ login: string }>(token, "/user");
 }
 
+export type OraGithubTokenHealth =
+  | "ok"
+  | "not_connected"
+  | "oauth_not_configured"
+  | "token_unreadable"
+  | "token_invalid"
+  | "rate_limited"
+  | "access_denied"
+  | "github_unreachable"
+  | "github_error";
+
+export interface OraGithubProblem {
+  tokenHealth: OraGithubTokenHealth;
+  message: string;
+  detail: string;
+  retryable: boolean;
+  reconnectRequired: boolean;
+  status?: number;
+}
+
+export interface OraGithubConnectionHealth {
+  available: boolean;
+  connected: boolean;
+  healthy: boolean;
+  login: string | null;
+  scopes: string;
+  tokenHealth: OraGithubTokenHealth;
+  detail: string | null;
+  retryable: boolean;
+  reconnectRequired: boolean;
+  checkedAt: string;
+}
+
+export function describeOraGithubProblem(err: unknown): OraGithubProblem {
+  if (err instanceof OraGithubApiError) {
+    if (err.rateLimited) {
+      return {
+        tokenHealth: "rate_limited",
+        message: "GitHub rate limit reached",
+        detail: "GitHub is rate limiting this token right now. Wait a moment, then retry.",
+        retryable: true,
+        reconnectRequired: false,
+        status: err.status,
+      };
+    }
+    if (err.status === 401) {
+      return {
+        tokenHealth: "token_invalid",
+        message: "GitHub authorization expired",
+        detail:
+          "GitHub rejected Ora's saved authorization. Reconnect GitHub in Settings, then retry.",
+        retryable: false,
+        reconnectRequired: true,
+        status: err.status,
+      };
+    }
+    if (err.status === 403) {
+      return {
+        tokenHealth: "access_denied",
+        message: "GitHub denied access",
+        detail:
+          "GitHub denied this request. Reconnect if repository permissions changed, or retry if this was temporary.",
+        retryable: true,
+        reconnectRequired: true,
+        status: err.status,
+      };
+    }
+    if (err.status >= 500) {
+      return {
+        tokenHealth: "github_error",
+        message: "GitHub is temporarily unavailable",
+        detail: "GitHub returned a server error. Retry in a moment.",
+        retryable: true,
+        reconnectRequired: false,
+        status: err.status,
+      };
+    }
+    return {
+      tokenHealth: "github_error",
+      message: "GitHub request failed",
+      detail: `GitHub returned HTTP ${err.status}. Retry, or reconnect GitHub if the problem persists.`,
+      retryable: err.status >= 408,
+      reconnectRequired: false,
+      status: err.status,
+    };
+  }
+
+  const detail = err instanceof Error && err.message ? err.message : "Unknown network error";
+  return {
+    tokenHealth: "github_unreachable",
+    message: "Could not reach GitHub",
+    detail: `Ora could not reach GitHub. Retry when the connection is stable. (${detail})`,
+    retryable: true,
+    reconnectRequired: false,
+  };
+}
+
+export async function checkOraGithubConnectionHealth(
+  userId: string,
+): Promise<OraGithubConnectionHealth> {
+  const checkedAt = new Date().toISOString();
+  if (!isOraGithubConfigured()) {
+    return {
+      available: false,
+      connected: false,
+      healthy: false,
+      login: null,
+      scopes: "",
+      tokenHealth: "oauth_not_configured",
+      detail: "GitHub OAuth is not configured on this server.",
+      retryable: false,
+      reconnectRequired: false,
+      checkedAt,
+    };
+  }
+
+  const connection = await getOraGithubConnection(userId);
+  if (!connection) {
+    return {
+      available: true,
+      connected: false,
+      healthy: false,
+      login: null,
+      scopes: "",
+      tokenHealth: "not_connected",
+      detail: null,
+      retryable: false,
+      reconnectRequired: false,
+      checkedAt,
+    };
+  }
+
+  const token = await getOraGithubToken(userId);
+  if (!token) {
+    return {
+      available: true,
+      connected: true,
+      healthy: false,
+      login: connection.login,
+      scopes: connection.scopes,
+      tokenHealth: "token_unreadable",
+      detail:
+        "Ora found a saved GitHub connection but could not decrypt its token. Reconnect GitHub in Settings.",
+      retryable: false,
+      reconnectRequired: true,
+      checkedAt,
+    };
+  }
+
+  try {
+    const user = await fetchGithubUser(token);
+    return {
+      available: true,
+      connected: true,
+      healthy: true,
+      login: user.login || connection.login,
+      scopes: connection.scopes,
+      tokenHealth: "ok",
+      detail: null,
+      retryable: false,
+      reconnectRequired: false,
+      checkedAt,
+    };
+  } catch (err) {
+    const problem = describeOraGithubProblem(err);
+    return {
+      available: true,
+      connected: true,
+      healthy: false,
+      login: connection.login,
+      scopes: connection.scopes,
+      tokenHealth: problem.tokenHealth,
+      detail: problem.detail,
+      retryable: problem.retryable,
+      reconnectRequired: problem.reconnectRequired,
+      checkedAt,
+    };
+  }
+}
+
+export function problemFromOraGithubHealth(
+  health: OraGithubConnectionHealth,
+  fallbackDetail: string,
+): OraGithubProblem {
+  return {
+    tokenHealth: health.tokenHealth,
+    message: health.connected ? "GitHub authorization needs attention" : "GitHub is not connected",
+    detail: health.detail ?? fallbackDetail,
+    retryable: health.retryable,
+    reconnectRequired: health.reconnectRequired,
+  };
+}
+
 export interface OraGithubRepoSummary {
   fullName: string;
   owner: string;
@@ -277,12 +470,73 @@ export async function fetchRepoMeta(
   token: string,
   owner: string,
   repo: string,
-): Promise<{ defaultBranch: string; private: boolean; sizeKb: number }> {
+): Promise<{
+  defaultBranch: string;
+  private: boolean;
+  sizeKb: number;
+  branchSha: string;
+  treeSha: string;
+}> {
   const meta = await githubGet<{ default_branch: string; private: boolean; size: number }>(
     token,
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
   );
-  return { defaultBranch: meta.default_branch, private: meta.private, sizeKb: meta.size };
+  const branch = await fetchRepoBranchMeta(token, owner, repo, meta.default_branch);
+  return {
+    defaultBranch: meta.default_branch,
+    private: meta.private,
+    sizeKb: meta.size,
+    branchSha: branch.branchSha,
+    treeSha: branch.treeSha,
+  };
+}
+
+export async function fetchRepoBranchMeta(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<{ branch: string; branchSha: string; treeSha: string }> {
+  type BranchResponse = {
+    name?: string;
+    commit?: {
+      sha?: string;
+      commit?: {
+        tree?: { sha?: string };
+      };
+    };
+  };
+  type CommitResponse = {
+    sha?: string;
+    commit?: {
+      tree?: { sha?: string };
+    };
+  };
+
+  const branchData = await githubGet<BranchResponse>(
+    token,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(
+      branch,
+    )}`,
+  );
+  const branchSha = branchData.commit?.sha;
+  let treeSha = branchData.commit?.commit?.tree?.sha ?? null;
+  if (!branchSha) {
+    throw new Error("GitHub branch metadata did not include a commit SHA");
+  }
+  if (!treeSha) {
+    const commit = await githubGet<CommitResponse>(
+      token,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(
+        branchSha,
+      )}`,
+    );
+    treeSha = commit.commit?.tree?.sha ?? null;
+  }
+  if (!treeSha) {
+    throw new Error("GitHub branch metadata did not include a tree SHA");
+  }
+  return { branch: branchData.name || branch, branchSha, treeSha };
 }
 
 export interface OraRepoTreeEntry {

@@ -151,6 +151,7 @@ function safeFailure(
 type RepoAccessResult =
   | { status: "no_user" }
   | { status: "not_connected" }
+  | { status: "github_unhealthy"; detail: string }
   | { status: "no_repo" }
   | { status: "ok"; token: string; session: OraRepoSessionRow };
 
@@ -175,6 +176,9 @@ async function repoAccess(
     requestedRepo,
   });
   if (!resolved.connected) return { status: "not_connected" };
+  if (resolved.failure && !resolved.session) {
+    return { status: "github_unhealthy", detail: resolved.failure.detail };
+  }
   if (!resolved.token || !resolved.session) return { status: "no_repo" };
   return { status: "ok", token: resolved.token, session: resolved.session };
 }
@@ -192,6 +196,12 @@ async function executeRepoRead(
     return toolFailure(
       "github_not_connected",
       "GitHub is not connected for this account. The user can connect it in Settings to enable repository tools.",
+    );
+  }
+  if (access.status === "github_unhealthy") {
+    return toolFailure(
+      "github_not_connected",
+      `${access.detail} Do not claim GitHub repository results were analyzed.`,
     );
   }
   if (access.status === "no_repo") {
@@ -221,6 +231,8 @@ async function executeRepoRead(
         repo: session.repo,
         ref: session.ref,
         defaultBranch: session.defaultBranch,
+        branchSha: session.branchSha,
+        treeSha: session.treeSha,
         token,
       });
     } catch (error) {

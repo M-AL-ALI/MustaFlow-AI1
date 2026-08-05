@@ -17,9 +17,14 @@ import { createChatCompletion } from "../ai-providers";
 import { logger } from "../logger";
 import { runCandidateChain, type ModelCandidate } from "./model-router";
 import {
+  checkOraGithubConnectionHealth,
+  describeOraGithubProblem,
+  fetchRepoBranchMeta,
   fetchRepoMeta,
   getOraGithubToken,
   listGithubRepos,
+  problemFromOraGithubHealth,
+  type OraGithubProblem,
   type OraGithubRepoSummary,
 } from "./repo-github-auth";
 import { diffCommit, listFiles, readCommits, readFile, searchRepo } from "./repo-read-tools";
@@ -107,6 +112,14 @@ export async function getActiveRepoSession(userId: string): Promise<OraRepoSessi
   return rows[0] ?? null;
 }
 
+function shortSha(sha: string | null | undefined): string {
+  return sha ? sha.slice(0, 10) : "unknown";
+}
+
+function githubFailureContext(problem: OraGithubProblem, repoFullName: string): string {
+  return `[GitHub repository analysis unavailable for ${repoFullName}: ${problem.detail} Tell the user this plainly. Do not claim repository files, commits, branches, or GitHub account state were analyzed.]`;
+}
+
 const GITHUB_REPO_SIGNAL_PATTERN =
   /\b(?:github|repos?|repository|commits?|branches?|pull\s+requests?|merge|diff|codebase|source\s+code)\b|\b(?:find\s+bugs?\s+(?:in\s+)?|(?:analy[sz]e|inspect|review)\s+)(?:my|the|this)\s+(?:app|code|project)\b/i;
 
@@ -170,18 +183,56 @@ export function parseGithubRepoUrl(text: string): { owner: string; repo: string 
  * it in the dropdown. Access is validated against GitHub first; on any
  * failure the existing session (or none) is kept and chat proceeds normally.
  */
+interface RepoActivationResult {
+  session: OraRepoSessionRow | null;
+  failure: OraGithubProblem | null;
+}
+
+async function refreshRepoSessionBranchSnapshot(
+  token: string,
+  session: OraRepoSessionRow,
+): Promise<RepoActivationResult> {
+  try {
+    const branch = await fetchRepoBranchMeta(
+      token,
+      session.owner,
+      session.repo,
+      session.defaultBranch,
+    );
+    const updated = await db
+      .update(oraRepoSessionsTable)
+      .set({
+        branchSha: branch.branchSha,
+        treeSha: branch.treeSha,
+        lastUsedAt: new Date(),
+      })
+      .where(eq(oraRepoSessionsTable.id, session.id))
+      .returning();
+    return {
+      session: updated[0] ?? { ...session, branchSha: branch.branchSha, treeSha: branch.treeSha },
+      failure: null,
+    };
+  } catch (err) {
+    logger.warn(
+      { err, owner: session.owner, repo: session.repo },
+      "ora-repo: branch metadata refresh failed",
+    );
+    return { session: null, failure: describeOraGithubProblem(err) };
+  }
+}
+
 async function activateRepoSession(
   userId: string,
   token: string,
   target: { owner: string; repo: string },
   current: OraRepoSessionRow | null,
-): Promise<OraRepoSessionRow | null> {
+): Promise<RepoActivationResult> {
   if (
     current &&
     current.owner.toLowerCase() === target.owner.toLowerCase() &&
     current.repo.toLowerCase() === target.repo.toLowerCase()
   ) {
-    return current;
+    return refreshRepoSessionBranchSnapshot(token, current);
   }
   try {
     const meta = await fetchRepoMeta(token, target.owner, target.repo);
@@ -209,6 +260,8 @@ async function activateRepoSession(
         repo: target.repo,
         ref: "",
         defaultBranch: meta.defaultBranch,
+        branchSha: meta.branchSha,
+        treeSha: meta.treeSha,
         status: "active",
       })
       .returning();
@@ -216,13 +269,13 @@ async function activateRepoSession(
       { owner: target.owner, repo: target.repo },
       "ora-repo: connected repository resolved for analysis",
     );
-    return inserted[0] ?? current;
+    return { session: inserted[0] ?? null, failure: null };
   } catch (err) {
     logger.warn(
       { err, owner: target.owner, repo: target.repo },
       "ora-repo: connected repository resolution failed",
     );
-    return current;
+    return { session: null, failure: describeOraGithubProblem(err) };
   }
 }
 
@@ -231,9 +284,11 @@ async function attachRepoFromMessage(
   token: string,
   message: string,
   current: OraRepoSessionRow | null,
-): Promise<OraRepoSessionRow | null> {
+): Promise<RepoActivationResult> {
   const parsed = parseGithubRepoUrl(message);
-  return parsed ? activateRepoSession(userId, token, parsed, current) : current;
+  if (parsed) return activateRepoSession(userId, token, parsed, current);
+  if (current) return refreshRepoSessionBranchSnapshot(token, current);
+  return { session: null, failure: null };
 }
 
 const REPOSITORY_REQUEST_PATTERN =
@@ -349,6 +404,7 @@ export interface ResolvedOraRepoSession {
   connected: boolean;
   token: string | null;
   session: OraRepoSessionRow | null;
+  failure?: OraGithubProblem | null;
 }
 
 /**
@@ -362,13 +418,31 @@ export async function resolveOraRepoSessionForRequest(input: {
   requestedRepo?: string;
 }): Promise<ResolvedOraRepoSession> {
   const token = await getOraGithubToken(input.userId);
-  if (!token) return { connected: false, token: null, session: null };
+  if (!token) {
+    const health = await checkOraGithubConnectionHealth(input.userId);
+    if (!health.connected) return { connected: false, token: null, session: null };
+    return {
+      connected: true,
+      token: null,
+      session: null,
+      failure: problemFromOraGithubHealth(
+        health,
+        "Ora could not read the saved GitHub authorization. Reconnect GitHub in Settings.",
+      ),
+    };
+  }
 
   const message = input.message?.trim() ?? "";
   const existing = await getActiveRepoSession(input.userId);
-  const fromUrl = message
+  const fromUrlResult = message
     ? await attachRepoFromMessage(input.userId, token, message, existing)
-    : existing;
+    : existing
+      ? await refreshRepoSessionBranchSnapshot(token, existing)
+      : { session: null, failure: null };
+  const fromUrl = fromUrlResult.session;
+  if (fromUrlResult.failure && parseGithubRepoUrl(message)) {
+    return { connected: true, token, session: null, failure: fromUrlResult.failure };
+  }
   const pastedRepoUrl = parseGithubRepoUrl(message);
   if (
     fromUrl &&
@@ -385,16 +459,22 @@ export async function resolveOraRepoSessionForRequest(input: {
     const repos = await listGithubRepos(token);
     const match = findConnectedRepoForRequest(repos, message, input.requestedRepo);
     if (!match) return { connected: true, token, session: fromUrl };
-    const session = await activateRepoSession(
+    const activated = await activateRepoSession(
       input.userId,
       token,
       { owner: match.owner, repo: match.name },
       fromUrl,
     );
-    return { connected: true, token, session };
+    return {
+      connected: true,
+      token,
+      session: activated.session,
+      failure: activated.failure,
+    };
   } catch (err) {
+    const failure = describeOraGithubProblem(err);
     logger.warn({ err }, "ora-repo: connected repository lookup failed");
-    return { connected: true, token, session: fromUrl };
+    return { connected: true, token, session: fromUrl, failure };
   }
 }
 
@@ -431,7 +511,22 @@ export async function runRepoInvestigation(
     userId: args.userId,
     message: args.message,
   });
-  if (!resolved.connected || !resolved.token) return null;
+  if (!resolved.connected) return null;
+  if (resolved.failure && !resolved.session) {
+    if (!isRepositoryRequest(args.message)) return null;
+    const repoName = parseGithubRepoUrl(args.message);
+    const repoFullName = repoName
+      ? `${repoName.owner}/${repoName.repo}`
+      : "connected GitHub account";
+    args.onStatus(`Could not verify ${repoFullName} on GitHub.`, "fail");
+    return {
+      contextBlock: githubFailureContext(resolved.failure, repoFullName),
+      repoFullName,
+      stepsRun: 0,
+      guidanceAddendum: "",
+    };
+  }
+  if (!resolved.token) return null;
   const token = resolved.token;
   const session = resolved.session;
   if (!session) {
@@ -460,6 +555,8 @@ export async function runRepoInvestigation(
       repo: session.repo,
       ref: session.ref,
       defaultBranch: session.defaultBranch,
+      branchSha: session.branchSha,
+      treeSha: session.treeSha,
       token,
     });
   } catch (err) {
@@ -498,7 +595,7 @@ export async function runRepoInvestigation(
   };
 
   pushTranscript(
-    `Repository: ${repoFullName} (default branch ${session.defaultBranch}, ${ws.files.length} indexed files${ws.truncated ? ", index truncated by size caps" : ""})`,
+    `Repository: ${repoFullName} (default branch ${session.defaultBranch} @ ${shortSha(session.branchSha)}, ${ws.files.length} indexed files${ws.truncated ? ", index truncated by size caps" : ""})`,
   );
 
   for (let i = 0; i < REPO_ANALYST_LIMITS.maxSteps; i++) {

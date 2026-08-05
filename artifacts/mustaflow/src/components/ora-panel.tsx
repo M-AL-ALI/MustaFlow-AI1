@@ -707,6 +707,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   // Ora GitHub repo analysis (read-only) — active session + picker dialog.
   const {
     connected: githubConnected,
+    githubStatus,
     repoSession,
     selectRepo,
     detachRepo,
@@ -2719,6 +2720,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           await selectRepo(owner, repo);
         }}
         connected={githubConnected}
+        githubStatus={githubStatus}
       />
     </div>
   );

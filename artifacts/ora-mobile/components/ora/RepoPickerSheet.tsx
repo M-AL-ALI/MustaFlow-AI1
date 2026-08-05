@@ -6,8 +6,10 @@ import { GitBranch, Lock, X } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
 import {
+  ApiRequestError,
   listGithubRepos,
   selectRepoSession,
+  type OraGithubStatus,
   type OraGithubRepoSummary,
   type OraRepoSessionSummary,
 } from "@/lib/api";
@@ -15,6 +17,7 @@ import {
 export interface RepoPickerSheetProps {
   visible: boolean;
   connected: boolean;
+  githubStatus?: OraGithubStatus | null;
   onClose: () => void;
   onSelected: (session: OraRepoSessionSummary) => void;
   onNeedConnect: () => void;
@@ -31,6 +34,7 @@ export interface RepoPickerSheetProps {
 export function RepoPickerSheet({
   visible,
   connected,
+  githubStatus,
   onClose,
   onSelected,
   onNeedConnect,
@@ -42,15 +46,25 @@ export function RepoPickerSheet({
   const [selecting, setSelecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadRepos = React.useCallback(() => {
     if (!visible || !connected) return;
     setLoading(true);
     setError(null);
     listGithubRepos()
       .then(setRepos)
-      .catch(() => setError("Could not load your repositories."))
+      .catch((err) =>
+        setError(
+          err instanceof ApiRequestError || err instanceof Error
+            ? err.message
+            : "Could not load your repositories.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, [visible, connected]);
+
+  useEffect(() => {
+    loadRepos();
+  }, [loadRepos]);
 
   const filtered = (repos ?? []).filter((r) =>
     r.fullName.toLowerCase().includes(filter.toLowerCase()),
@@ -85,6 +99,25 @@ export function RepoPickerSheet({
 
           {!connected ? (
             <View style={{ gap: 10, paddingVertical: 8 }}>
+              {githubStatus?.connected && githubStatus.healthy === false ? (
+                <View
+                  style={{
+                    borderWidth: 1,
+                    borderColor: "#7f1d1d",
+                    backgroundColor: "rgba(127,29,29,0.18)",
+                    borderRadius: 10,
+                    padding: 10,
+                    gap: 4,
+                  }}
+                >
+                  <Text style={{ color: "#fecaca", fontSize: 13, fontWeight: "700" }}>
+                    GitHub needs to be reconnected.
+                  </Text>
+                  <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
+                    {githubStatus.detail ?? "Ora could not verify the saved GitHub authorization."}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
                 Connect your GitHub account first — Settings → GitHub. Ora only reads your code; it
                 can never commit or push.
@@ -126,7 +159,40 @@ export function RepoPickerSheet({
                 </View>
               )}
               {error && (
-                <Text style={{ color: "#f87171", fontSize: 13, paddingVertical: 8 }}>{error}</Text>
+                <View style={{ gap: 10, paddingVertical: 8 }}>
+                  <Text style={{ color: "#f87171", fontSize: 13 }}>{error}</Text>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <Pressable
+                      onPress={loadRepos}
+                      disabled={loading}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: c.border,
+                        borderRadius: 10,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        opacity: loading ? 0.6 : 1,
+                      }}
+                    >
+                      <Text style={{ color: c.foreground, fontSize: 12, fontWeight: "700" }}>
+                        Retry
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={onNeedConnect}
+                      style={{
+                        backgroundColor: c.accent,
+                        borderRadius: 10,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                      }}
+                    >
+                      <Text style={{ color: "#000", fontSize: 12, fontWeight: "700" }}>
+                        GitHub Settings
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
               )}
               {!loading && !error && (
                 <FlatList
@@ -156,7 +222,13 @@ export function RepoPickerSheet({
                             onSelected(session);
                             onClose();
                           })
-                          .catch(() => setError("Could not open that repository."))
+                          .catch((err) =>
+                            setError(
+                              err instanceof ApiRequestError || err instanceof Error
+                                ? err.message
+                                : "Could not open that repository.",
+                            ),
+                          )
                           .finally(() => setSelecting(null));
                       }}
                       style={{

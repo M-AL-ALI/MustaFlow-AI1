@@ -52,6 +52,85 @@ afterEach(async () => {
 });
 
 describe("lazy GitHub API repository workspace", () => {
+  it("classifies GitHub token failures for honest UI/model diagnostics", () => {
+    expect(
+      githubAuth.describeOraGithubProblem(new githubAuth.OraGithubApiError("bad", 401, false)),
+    ).toMatchObject({
+      tokenHealth: "token_invalid",
+      reconnectRequired: true,
+      retryable: false,
+    });
+    expect(
+      githubAuth.describeOraGithubProblem(new githubAuth.OraGithubApiError("limited", 403, true)),
+    ).toMatchObject({
+      tokenHealth: "rate_limited",
+      reconnectRequired: false,
+      retryable: true,
+    });
+  });
+
+  it("fetches branch commit and tree SHAs before repo analysis sessions are created", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith("/repos/M-AL-ALI/MustaFlow-AI1")) {
+          return Response.json({ default_branch: "main", private: true, size: 42 });
+        }
+        if (url.endsWith("/repos/M-AL-ALI/MustaFlow-AI1/branches/main")) {
+          return Response.json({
+            name: "main",
+            commit: {
+              sha: "commit1234567890",
+              commit: { tree: { sha: "tree1234567890" } },
+            },
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const meta = await githubAuth.fetchRepoMeta("test-token", "M-AL-ALI", "MustaFlow-AI1");
+
+    expect(meta).toMatchObject({
+      defaultBranch: "main",
+      branchSha: "commit1234567890",
+      treeSha: "tree1234567890",
+    });
+    expect(calls.some((url) => url.includes("/branches/main"))).toBe(true);
+  });
+
+  it("uses the verified tree SHA for the lazy index when one is available", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes("/git/trees/tree-lock")) {
+          return treeResponse([{ path: "src/index.ts", sha: "a1b2c3d4", size: 35 }]);
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const ws = await workspace.materializeRepoWorkspace({
+      sessionId: sessionId(),
+      owner: "M-AL-ALI",
+      repo: "MustaFlow-AI1",
+      ref: "",
+      defaultBranch: "main",
+      branchSha: "commit-lock",
+      treeSha: "tree-lock",
+      token: "test-token",
+    });
+
+    expect(ws.source).toBe("github_api");
+    expect(calls[0]).toContain("/git/trees/tree-lock?recursive=1");
+  });
+
   it("reads a repo whose excluded media exceeds the old tarball cap without downloading an archive", async () => {
     const calls: string[] = [];
     vi.stubGlobal(

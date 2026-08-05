@@ -48,6 +48,8 @@ async function migrateOraGithub() {
       last_used_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE ora_repo_sessions ADD COLUMN IF NOT EXISTS branch_sha TEXT`);
+  await pool.query(`ALTER TABLE ora_repo_sessions ADD COLUMN IF NOT EXISTS tree_sha TEXT`);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS ora_repo_sessions_user_id_idx
       ON ora_repo_sessions(user_id)

@@ -2120,7 +2120,13 @@ export function getProjectThreadContext(
 export interface OraGithubStatus {
   available: boolean;
   connected: boolean;
+  healthy: boolean;
   login: string | null;
+  tokenHealth: string;
+  detail: string | null;
+  retryable: boolean;
+  reconnectRequired: boolean;
+  checkedAt?: string;
 }
 
 export interface OraGithubRepoSummary {
@@ -2139,6 +2145,7 @@ export interface OraRepoSessionSummary {
   repo: string;
   fullName: string;
   defaultBranch: string;
+  branchSha: string | null;
 }
 
 export async function getGithubStatus(): Promise<OraGithubStatus> {

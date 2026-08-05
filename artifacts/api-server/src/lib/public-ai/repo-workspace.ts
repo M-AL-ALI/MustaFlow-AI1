@@ -788,6 +788,8 @@ export interface MaterializeArgs {
   repo: string;
   ref: string;
   defaultBranch?: string;
+  branchSha?: string | null;
+  treeSha?: string | null;
   token: string;
 }
 
@@ -821,16 +823,12 @@ export async function materializeRepoWorkspace(args: MaterializeArgs): Promise<R
       "ora-repo: loading lazy repository index",
     );
     let apiFailure: unknown;
+    const treeRef = args.treeSha || args.ref || args.defaultBranch || "HEAD";
+    const archiveRef = args.branchSha || args.ref || args.defaultBranch || "";
     try {
-      const tree = await fetchRepoTree(
-        args.token,
-        args.owner,
-        args.repo,
-        args.ref || args.defaultBranch || "HEAD",
-        {
-          shouldDescend: (treePath) => !isSkippedPath(treePath),
-        },
-      );
+      const tree = await fetchRepoTree(args.token, args.owner, args.repo, treeRef, {
+        shouldDescend: (treePath) => !isSkippedPath(treePath),
+      });
       const apiWorkspace = createApiWorkspace(args, key, tree);
       workspaces.set(key, apiWorkspace);
       return apiWorkspace;
@@ -848,7 +846,7 @@ export async function materializeRepoWorkspace(args: MaterializeArgs): Promise<R
     }
 
     await fs.rm(root, { recursive: true, force: true });
-    const url = tarballUrl(args.owner, args.repo, args.ref);
+    const url = tarballUrl(args.owner, args.repo, archiveRef);
     try {
       const extraction = await downloadAndExtract(url, args.token, root);
       const { files, totalBytes, truncated } = await indexAndPrune(root);
