@@ -12,6 +12,7 @@ const whisperRecorderSource = read("../../../hooks/use-whisper-recorder.ts");
 const panelSource = read("../../ora-panel.tsx");
 const bubbleSource = read("../../ora-bubble.tsx");
 const voicePanelSource = read("../ora-voice-mode-button.tsx");
+const voiceTipSource = read("../ora-voice-tip.tsx");
 
 describe("Phase 9D — cancel file-edit preview wiring (website)", () => {
   it("panel has handleCancelFileEditPreview callback and sends the cancel message", () => {
@@ -217,5 +218,15 @@ describe("Ora Item 5 quick wins (website)", () => {
       "isNoMic ? false : isListening || isSpeaking || whisperRecording",
     );
     expect(voicePanelSource).toContain("No mic");
+  });
+});
+
+describe("Ora Item 6 mobile-width layout polish (website)", () => {
+  it("keeps the first-run voice tip collapsed until the user expands it", () => {
+    expect(voiceTipSource).toContain("const [expanded, setExpanded] = useState(false)");
+    expect(voiceTipSource).toContain("Voice tools available");
+    expect(voiceTipSource).toContain("aria-expanded={expanded}");
+    expect(voiceTipSource).toContain("setExpanded((current) => !current)");
+    expect(voiceTipSource).toMatch(/expanded \? \([\s\S]*buildTipText/);
   });
 });
