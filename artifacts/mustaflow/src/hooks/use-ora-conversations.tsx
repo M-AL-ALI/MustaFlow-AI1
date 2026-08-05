@@ -92,6 +92,7 @@ export function OraConversationsProvider({
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(() =>
     getStoredPendingProjectId() != null ? null : idleGatedOraConversationId(getStoredCurrentId()),
   );
+  const [newConversationTick, setNewConversationTick] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const currentIdRef = useRef<number | null>(currentConversationId);
@@ -104,6 +105,7 @@ export function OraConversationsProvider({
   const activeProjectIdRef = useRef<number | null>(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const creatingPromiseRef = useRef<Promise<number | null> | null>(null);
+  const selectionGenRef = useRef(0);
   // Track whether we've synced last-active from server settings on mount.
   const lastActiveSyncedRef = useRef(false);
   const hiddenAtRef = useRef<number | null>(null);
@@ -290,8 +292,10 @@ export function OraConversationsProvider({
     const current = conversations.find((c) => c.id === currentIdRef.current);
     const currentProjectId = current?.projectId ?? null;
     if (currentProjectId !== activeProjectId) {
+      selectionGenRef.current += 1;
       pendingProjectIdRef.current = undefined;
       setCurrentConversationId(null);
+      setNewConversationTick((tick) => tick + 1);
       storeCurrentId(null);
     }
   }, [activeProjectId, conversations]);
@@ -300,6 +304,7 @@ export function OraConversationsProvider({
     (id: number | null) => {
       markOraActive();
       // Selecting an existing conversation clears any pending new-chat scope.
+      selectionGenRef.current += 1;
       pendingProjectIdRef.current = undefined;
       setCurrentConversationId(id);
       storeCurrentId(id);
@@ -323,8 +328,10 @@ export function OraConversationsProvider({
     // undefined (defer to the active project route). Preserve the distinction —
     // do NOT coalesce undefined→null, or a project-scoped "New conversation"
     // would silently fall back to standalone.
+    selectionGenRef.current += 1;
     pendingProjectIdRef.current = projectId;
     setCurrentConversationId(null);
+    setNewConversationTick((tick) => tick + 1);
     storeCurrentId(null);
   }, []);
 
@@ -334,6 +341,7 @@ export function OraConversationsProvider({
       if (creatingPromiseRef.current) return creatingPromiseRef.current;
 
       const promise = (async (): Promise<number | null> => {
+        const createGen = selectionGenRef.current;
         try {
           const res = await authFetch(`${BASE}/api/ora/conversations`, {
             method: "POST",
@@ -351,6 +359,9 @@ export function OraConversationsProvider({
           if (!res.ok) return null;
           const data = (await res.json()) as { conversation: OraConversationSummary };
           const id = data.conversation.id;
+          if (createGen !== selectionGenRef.current || currentIdRef.current != null) {
+            return null;
+          }
           currentIdRef.current = id;
           pendingProjectIdRef.current = undefined;
           setCurrentConversationId(id);
@@ -548,6 +559,7 @@ export function OraConversationsProvider({
     projects,
     conversations,
     currentConversationId,
+    newConversationTick,
     activeProjectId,
     activeProject,
     loading,

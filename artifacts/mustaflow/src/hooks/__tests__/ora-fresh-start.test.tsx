@@ -51,6 +51,7 @@ function conversationsContext(
     projects: [],
     conversations,
     currentConversationId: null,
+    newConversationTick: 0,
     activeProjectId: null,
     activeProject: null,
     loading: false,
@@ -146,6 +147,20 @@ describe("Ora fresh-start website wiring", () => {
 
   it("loads the endpoint's maximum page so Show more exposes the available history", () => {
     expect(provider).toContain("/api/ora/conversations?limit=100");
+  });
+
+  it("treats every New conversation click as a real reset, even when the id is already null", () => {
+    expect(provider).toContain("const [newConversationTick, setNewConversationTick] = useState(0)");
+    expect(provider).toContain("setNewConversationTick((tick) => tick + 1)");
+    expect(chat).toContain("conv?.newConversationTick");
+    expect(chat).toContain("resetVisibleThread(true)");
+  });
+
+  it("retires stale async replies when starting or switching conversations", () => {
+    expect(chat).toContain("const conversationResetGenRef = useRef(0)");
+    expect(chat).toContain("conversationResetGenRef.current += 1");
+    expect(chat).toContain("setMessagesForGeneration(turnGeneration");
+    expect(chat).toContain("if (!isTurnCurrent()) return;");
   });
 
   it("puts recents before starter prompts in the compact home hierarchy", () => {

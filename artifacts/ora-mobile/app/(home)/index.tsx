@@ -804,6 +804,7 @@ export default function OraChatScreen() {
   // connect, and calling stop() would kill the newer session. Incremented in
   // stopRealtimeSession (the single teardown chokepoint) and before each start.
   const realtimeStartGenRef = useRef(0);
+  const realtimeThreadGenRef = useRef(0);
   // Assigned just after the realtime hook is created below; declared up here so
   // earlier effects (e.g. the AppState background handler) can tear the session
   // down without a use-before-declaration reference.
@@ -852,6 +853,25 @@ export default function OraChatScreen() {
   // Abort controller for any in-flight SSE stream. Aborted on unmount and on
   // each new send so only one stream is ever active at a time.
   const streamAbortRef = useRef<AbortController | null>(null);
+  // Retires async work whenever the user starts a new chat or switches threads.
+  // Late responses from the old thread then no-op instead of painting into the
+  // fresh transcript or persisting under the wrong conversation id.
+  const threadResetGenRef = useRef(0);
+  const setMessagesForGeneration = useCallback(
+    (generation: number, next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) => {
+      if (threadResetGenRef.current !== generation) return;
+      if (typeof next === "function") {
+        setMessages((prev) =>
+          threadResetGenRef.current === generation
+            ? (next as (prev: OraMessage[]) => OraMessage[])(prev)
+            : prev,
+        );
+        return;
+      }
+      setMessages(threadResetGenRef.current === generation ? next : messagesRef.current);
+    },
+    [],
+  );
   const startRecordingRef = useRef<() => Promise<void>>(async () => {});
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
@@ -1132,6 +1152,7 @@ export default function OraChatScreen() {
 
   const persist = useCallback(
     async (msgs: OraMessage[], temporaryOverride?: boolean) => {
+      const persistGeneration = threadResetGenRef.current;
       // Anonymous sessions are never persisted — no account to attach to.
       if (!isSignedIn) return;
       // Temporary chats are never written to the conversation store. A turn
@@ -1144,6 +1165,7 @@ export default function OraChatScreen() {
           const title = msgs.find((m) => m.role === "user")?.content.slice(0, 60) || "New chat";
           // Scope new chats to the active project (null = standalone/"Recent").
           const created = await createConversation(title, activeProjectIdRef.current);
+          if (threadResetGenRef.current !== persistGeneration) return;
           convId = created.conversation.id;
           setConversationId(convId);
           // Uploads that happened before this conversation existed were cached
@@ -1159,6 +1181,7 @@ export default function OraChatScreen() {
             storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
           }
         }
+        if (threadResetGenRef.current !== persistGeneration) return;
         await saveConversationMessages(convId, msgs);
       } catch {
         /* persistence is best-effort */
@@ -1174,6 +1197,7 @@ export default function OraChatScreen() {
   // transcript event fires, so they carry no streaming/pending state.
   const appendRealtimeTurn = useCallback(
     (role: "user" | "assistant", content: string) => {
+      if (realtimeThreadGenRef.current !== threadResetGenRef.current) return;
       const msg: OraMessage = { id: uid(), role, content };
       const nextMsgs = [...messagesRef.current, msg];
       messagesRef.current = nextMsgs;
@@ -1186,6 +1210,7 @@ export default function OraChatScreen() {
 
   const appendRealtimeToolResult = useCallback(
     (result: OraRealtimeToolWrittenResult) => {
+      if (realtimeThreadGenRef.current !== threadResetGenRef.current) return;
       const msg: OraMessage = {
         id: uid(),
         role: "assistant",
@@ -1290,6 +1315,10 @@ export default function OraChatScreen() {
       streamAbortRef.current?.abort();
       const abortController = new AbortController();
       streamAbortRef.current = abortController;
+      const turnGeneration = threadResetGenRef.current;
+      const isTurnCurrent = () => threadResetGenRef.current === turnGeneration;
+      const setTurnMessages = (next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) =>
+        setMessagesForGeneration(turnGeneration, next);
 
       const userMsg: OraMessage = {
         id: uid(),
@@ -1327,7 +1356,7 @@ export default function OraChatScreen() {
         .map((m) => ({ role: m.role, content: m.content }));
 
       const next = [...base, userMsg, pendingMsg];
-      setMessages(next);
+      setTurnMessages(next);
       setSending(true);
       // Fresh turn — drop any stale activity trace from the previous send.
       setStreamActivity(null);
@@ -1344,6 +1373,7 @@ export default function OraChatScreen() {
           if (attch.kind === "image") {
             pushActivity(oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT));
             const res = await analyzeImage(attch.ref, prompt, history);
+            if (!isTurnCurrent()) return;
             pushActivity(oraActivityStep("file-reading", "ok"));
             assistant = {
               id: pendingId,
@@ -1356,6 +1386,7 @@ export default function OraChatScreen() {
               oraActivityStep("dataset-analysis", "start", oraAnalyzingDatasetText(attch.filename)),
             );
             const { result } = await analyzeDataset(attch.ref, prompt, history);
+            if (!isTurnCurrent()) return;
             pushActivity(oraActivityStep("dataset-analysis", "ok"));
             const profile = result.datasetProfile;
             const summary =
@@ -1380,6 +1411,7 @@ export default function OraChatScreen() {
               oraActivityStep("file-reading", "start", oraReadingFileText(attch.filename)),
             );
             const res = await analyzeDocument(attch.ref, prompt, history);
+            if (!isTurnCurrent()) return;
             pushActivity(oraActivityStep("file-reading", "ok"));
             assistant = {
               id: pendingId,
@@ -1463,6 +1495,7 @@ export default function OraChatScreen() {
             // user just rejected.
             pushActivity(oraActivityStep("web-search", "start"));
             const res = await sendChat(chatReq);
+            if (!isTurnCurrent()) return;
             applyServerActivity(res);
             applyPendingClarification(res);
             assistant = {
@@ -1483,6 +1516,7 @@ export default function OraChatScreen() {
             const streamResult = await streamChatNative(
               chatReq,
               (delta) => {
+                if (!isTurnCurrent()) return;
                 // First real answer token clears the activity trace and the
                 // legacy status line — and the trace stays cleared (late
                 // activity frames are ignored below).
@@ -1495,18 +1529,21 @@ export default function OraChatScreen() {
                 }
                 streamedContent += delta;
                 const content = streamedContent;
-                setMessages((prev) =>
+                setTurnMessages((prev) =>
                   prev.map((m) =>
                     m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
                   ),
                 );
               },
               abortController.signal,
-              (statusText) => setStreamStatus(statusText),
+              (statusText) => {
+                if (isTurnCurrent()) setStreamStatus(statusText);
+              },
               (step) => {
-                if (streamedContent.length === 0) pushActivity(step);
+                if (isTurnCurrent() && streamedContent.length === 0) pushActivity(step);
               },
             );
+            if (!isTurnCurrent()) return;
 
             if (streamResult === null) {
               // Streaming could not start — fall back to regular /chat.
@@ -1514,6 +1551,7 @@ export default function OraChatScreen() {
               // "start" step when the bounce signal named one.)
               notifyStreamFallbackCalled();
               const res = await sendChat(chatReq);
+              if (!isTurnCurrent()) return;
               applyServerActivity(res);
               applyPendingClarification(res);
               assistant = {
@@ -1575,6 +1613,7 @@ export default function OraChatScreen() {
                   ? { streamFallbackToken: streamResult.fallbackToken }
                   : {}),
               });
+              if (!isTurnCurrent()) return;
               applyServerActivity(res);
               applyPendingClarification(res);
               assistant = {
@@ -1606,7 +1645,8 @@ export default function OraChatScreen() {
         }
 
         const finalMsgs = next.map((m) => (m.id === pendingId ? assistant : m));
-        setMessages(finalMsgs);
+        if (!isTurnCurrent()) return;
+        setTurnMessages(finalMsgs);
         scrollToEnd();
         void persist(finalMsgs, turnIsTemporary);
         // Auto-speak in Talk mode or when the user has enabled auto-read
@@ -1618,6 +1658,7 @@ export default function OraChatScreen() {
           scheduleTalkRestart(700);
         }
       } catch (err) {
+        if (!isTurnCurrent()) return;
         if (abortController.signal.aborted) return;
         // Honest failure line for whatever tool was mid-flight (kept truthful
         // even though the error bubble replaces the thinking row).
@@ -1638,7 +1679,7 @@ export default function OraChatScreen() {
           typeof err.body === "object" &&
           err.body !== null &&
           (err.body as { searchRetryable?: unknown }).searchRetryable === true;
-        setMessages((prev) =>
+        setTurnMessages((prev) =>
           prev.map((m) =>
             m.id === pendingId
               ? {
@@ -1653,11 +1694,13 @@ export default function OraChatScreen() {
           ),
         );
       } finally {
-        setSending(false);
-        setStreamStatus(null);
-        setStreamActivity(null);
-        if (streamAbortRef.current === abortController) {
-          streamAbortRef.current = null;
+        if (isTurnCurrent()) {
+          setSending(false);
+          setStreamStatus(null);
+          setStreamActivity(null);
+          if (streamAbortRef.current === abortController) {
+            streamAbortRef.current = null;
+          }
         }
       }
     },
@@ -1672,6 +1715,7 @@ export default function OraChatScreen() {
       scheduleTalkRestart,
       isSignedIn,
       pushActivity,
+      setMessagesForGeneration,
     ],
   );
 
@@ -1737,6 +1781,10 @@ export default function OraChatScreen() {
       setGenerateFileDraft(null);
 
       const turnIsTemporary = temporary;
+      const turnGeneration = threadResetGenRef.current;
+      const isTurnCurrent = () => threadResetGenRef.current === turnGeneration;
+      const setTurnMessages = (next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) =>
+        setMessagesForGeneration(turnGeneration, next);
       const userMsg: OraMessage = { id: uid(), role: "user", content: text };
       const pendingId = uid();
       const pendingMsg: OraMessage = {
@@ -1750,7 +1798,7 @@ export default function OraChatScreen() {
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
       const next = [...messages, userMsg, pendingMsg];
-      setMessages(next);
+      setTurnMessages(next);
       setSending(true);
       // Live activity trace: file generation is non-streaming, so synthesize
       // the shared "Generating your file…" start step for the thinking row.
@@ -1770,6 +1818,7 @@ export default function OraChatScreen() {
           // in-place rather than regenerating the file from scratch.
           activeAssetId: activeAssetId ?? null,
         });
+        if (!isTurnCurrent()) return;
         for (const raw of res.activity ?? []) {
           const step = parseOraActivityStep(raw);
           if (step) pushActivity(step);
@@ -1784,7 +1833,7 @@ export default function OraChatScreen() {
           setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
         }
         const finalMsgs = next.map((m) => (m.id === pendingId ? assistant : m));
-        setMessages(finalMsgs);
+        setTurnMessages(finalMsgs);
         scrollToEnd();
         void persist(finalMsgs, turnIsTemporary);
         // Auto-track the result as the new active working artifact if it has a
@@ -1796,7 +1845,7 @@ export default function OraChatScreen() {
         // Honest terminal step for the in-flight "Generating your file…" line.
         pushActivity(oraActivityStep("file-generation", "fail"));
         const msg = friendlyOraSendErrorMessage(err, "Couldn't create that file. Try again.");
-        setMessages((prev) =>
+        setTurnMessages((prev) =>
           prev.map((m) =>
             m.id === pendingId
               ? { ...m, pending: false, isStreaming: false, error: true, content: msg }
@@ -1804,12 +1853,23 @@ export default function OraChatScreen() {
           ),
         );
       } finally {
-        setSending(false);
-        setStreamStatus(null);
-        setStreamActivity(null);
+        if (isTurnCurrent()) {
+          setSending(false);
+          setStreamStatus(null);
+          setStreamActivity(null);
+        }
       }
     },
-    [sending, messages, temporary, language, scrollToEnd, persist, pushActivity],
+    [
+      sending,
+      messages,
+      temporary,
+      language,
+      scrollToEnd,
+      persist,
+      pushActivity,
+      setMessagesForGeneration,
+    ],
   );
 
   const handleReviseGeneratedFile = useCallback((file: GeneratedFile) => {
@@ -1846,7 +1906,9 @@ export default function OraChatScreen() {
     if (!isSignedInRef.current || temporaryRef.current) return;
     const fact = message.memorySaveCandidate?.trim();
     if (!fact) return;
+    const saveGeneration = threadResetGenRef.current;
     const supersededTitles = await saveOraMemory(fact, activeProjectIdRef.current);
+    if (threadResetGenRef.current !== saveGeneration) return;
     const next = messagesRef.current.map((m) =>
       m.id === message.id
         ? {
@@ -2055,6 +2117,10 @@ export default function OraChatScreen() {
     setEditingImage(true);
     setEditInstruction("");
     setEditingImageId(null);
+    const turnGeneration = threadResetGenRef.current;
+    const isTurnCurrent = () => threadResetGenRef.current === turnGeneration;
+    const setEditMessages = (next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) =>
+      setMessagesForGeneration(turnGeneration, next);
 
     const userMsg: OraMessage = {
       id: `${Date.now()}-edit-user`,
@@ -2067,11 +2133,12 @@ export default function OraChatScreen() {
       content: "",
       pending: true,
     };
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setEditMessages((prev) => [...prev, userMsg, loadingMsg]);
 
     try {
       const { displayUrl, newImageId } = await editImage(id, instr, activeProjectIdRef.current);
-      setMessages((prev) => [
+      if (!isTurnCurrent()) return;
+      setEditMessages((prev) => [
         ...prev.slice(0, -1),
         {
           id: `${Date.now()}-edit-result`,
@@ -2084,8 +2151,9 @@ export default function OraChatScreen() {
         } satisfies OraMessage,
       ]);
     } catch (err) {
+      if (!isTurnCurrent()) return;
       const msg = err instanceof Error ? err.message : "Image edit failed.";
-      setMessages((prev) => [
+      setEditMessages((prev) => [
         ...prev.slice(0, -1),
         {
           id: `${Date.now()}-edit-err`,
@@ -2095,9 +2163,9 @@ export default function OraChatScreen() {
         },
       ]);
     } finally {
-      setEditingImage(false);
+      if (isTurnCurrent()) setEditingImage(false);
     }
-  }, [editingImageId, editInstruction, editingImage, sending]);
+  }, [editingImageId, editInstruction, editingImage, sending, setMessagesForGeneration]);
 
   const startRecording = useCallback(async () => {
     if (recording || transcribing) return;
@@ -2457,20 +2525,31 @@ export default function OraChatScreen() {
   }, []);
 
   const newChat = useCallback(() => {
+    threadResetGenRef.current += 1;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
     // A live realtime session is bound to the current conversation; switching
     // threads underneath it would mis-persist its transcripts to the new thread,
     // so stop it (and drop Talk mode if it was driving the session).
     stopRealtimeForContextSwitch();
+    setSending(false);
+    setStreamStatus(null);
+    setStreamActivity(null);
     setMessages([]);
     setConversationId(null);
     setAttachment(null);
     setInput("");
+    setGenerateFileDraft(null);
+    setActiveArtifactRef(null);
     documentRefsRef.current = [];
     pendingClarificationRef.current = null;
     // A new blank chat must not inherit pre-conversation upload refs or a
     // pre-conversation pending clarification.
     storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
     storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    });
   }, [stopRealtimeForContextSwitch]);
 
   const resetToFreshHomeAfterIdle = useCallback(() => {
@@ -2487,14 +2566,22 @@ export default function OraChatScreen() {
   const toggleTemporary = useCallback(() => {
     // Block toggling during an in-flight send to avoid clearing a live thread.
     if (sending) return;
+    threadResetGenRef.current += 1;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
     // Stop realtime first: the new temporary/saved thread must not inherit the
     // old session's transcripts, and temporary state changes its persistence.
     stopRealtimeForContextSwitch();
+    setSending(false);
+    setStreamStatus(null);
+    setStreamActivity(null);
     setTemporary((prev) => !prev);
     setMessages([]);
     setConversationId(null);
     setAttachment(null);
     setInput("");
+    setGenerateFileDraft(null);
+    setActiveArtifactRef(null);
     documentRefsRef.current = [];
     pendingClarificationRef.current = null;
   }, [sending, stopRealtimeForContextSwitch]);
@@ -2543,6 +2630,7 @@ export default function OraChatScreen() {
       // realtimeStartingRef, so it must be set first. It also lets background /
       // exit / context-switch handlers abort an in-flight start().
       realtimeStartingRef.current = true;
+      realtimeThreadGenRef.current = threadResetGenRef.current;
       if (recordingRef.current) void stopRecordingRef.current();
       // Seed the live session with the recent visible conversation so the spoken
       // turn continues in context (seeded client-side as lower-authority items,
@@ -2730,6 +2818,12 @@ export default function OraChatScreen() {
   const loadConversation = useCallback(
     async (id: number) => {
       if (isSignedInRef.current) void markOraActive();
+      const loadGeneration = ++threadResetGenRef.current;
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+      setSending(false);
+      setStreamStatus(null);
+      setStreamActivity(null);
       setShowConversations(false);
       // Switching to a different saved conversation must stop a live realtime
       // session bound to the old thread, or its transcripts persist to the wrong
@@ -2741,6 +2835,7 @@ export default function OraChatScreen() {
       // failed load never leaves another thread's refs active.
       documentRefsRef.current = [];
       pendingClarificationRef.current = null;
+      setMessages([]);
       try {
         // Hydrate the persistent ref cache alongside the fetch so the restore
         // below works even when this is the first read after an app restart.
@@ -2749,6 +2844,7 @@ export default function OraChatScreen() {
           loadDocumentRefsStore(),
           loadPendingClarificationStore(),
         ]);
+        if (threadResetGenRef.current !== loadGeneration) return;
         setConversationId(id);
         // Restore THIS conversation's cached upload refs so a follow-up
         // "Revise ..." still targets the file uploaded here — even after the

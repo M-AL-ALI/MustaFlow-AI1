@@ -1339,6 +1339,26 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!oraConv?.newConversationTick) return;
+    handleExitVoiceConvMode();
+    setInput("");
+    setVoiceReady(false);
+    setActiveArtifactRef(null);
+    setShowHeaderMenu(false);
+    setShowPlusMenu(false);
+    setShowModeMenu(false);
+    setEditingFromIdx(null);
+    requestAnimationFrame(() => {
+      const el = feedRef.current;
+      if (!el) return;
+      el.scrollTop = 0;
+      prevMsgCountRef.current = 0;
+      atBottomRef.current = true;
+      setShowJumpToLatest(false);
+    });
+  }, [handleExitVoiceConvMode, oraConv?.newConversationTick]);
+
   const handleToggleVoiceConvTtsMute = useCallback(() => {
     // Realtime: mute only Ora's audio output (the data channel keeps running).
     if (voiceTransportRef.current === "realtime") {
