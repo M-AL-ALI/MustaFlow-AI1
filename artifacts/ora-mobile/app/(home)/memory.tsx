@@ -1233,7 +1233,7 @@ function PreferencesTab() {
       />
       <ToggleRow
         label="Ask before saving sensitive info"
-        description="Stores your preference. Active sensitive-content detection will be added in a future update."
+        description="Always confirm before Ora saves anything that looks sensitive, like passwords or financial details."
         value={askSensitive}
         onValueChange={handleAskSensitive}
       />

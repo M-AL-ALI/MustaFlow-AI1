@@ -1913,6 +1913,7 @@ export default function OraChatScreen() {
   // from a settled bubble that has not re-rendered.
   const persistRef = useRef(persist);
   persistRef.current = persist;
+  const autoSaveMemoryInFlight = useRef<Set<string>>(new Set());
   const handleSaveMemory = useCallback(async (message: OraMessage) => {
     // Never write memory from an anonymous or temporary chat.
     if (!isSignedInRef.current || temporaryRef.current) return;
@@ -1934,6 +1935,32 @@ export default function OraChatScreen() {
     setMessages(next);
     void persistRef.current(next);
   }, []);
+
+  // Match the website: high-confidence, non-sensitive candidates can save
+  // automatically when memory reference + auto-save are on. Low-confidence
+  // suggestions and sensitive facts stay manual.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    if (temporary) return;
+    if (!getAutoSaveMemories() || !getReferenceSavedMemories()) return;
+    messages.forEach((message) => {
+      const candidate = message.memorySaveCandidate?.trim();
+      if (message.role !== "assistant") return;
+      if (!candidate || message.memorySaved) return;
+      if (message.memorySaveCandidateConfidence !== "high") return;
+      if (message.memorySaveCandidateSensitive === true) return;
+      const key = `${message.id}\u0000${candidate}`;
+      if (autoSaveMemoryInFlight.current.has(key)) return;
+      autoSaveMemoryInFlight.current.add(key);
+      handleSaveMemory(message)
+        .catch(() => {
+          // Leave the candidate visible so the user can retry manually.
+        })
+        .finally(() => {
+          autoSaveMemoryInFlight.current.delete(key);
+        });
+    });
+  }, [messages, isSignedIn, temporary, handleSaveMemory]);
 
   // Regenerate the assistant reply for the user turn that produced `message`.
   const handleRegenerate = useCallback(
@@ -3630,7 +3657,7 @@ export default function OraChatScreen() {
               speaking={speakingId === item.id}
               onSpeak={() => speakRef.current(item)}
               onSuggestion={handleSuggestion}
-              onSaveMemory={!temporary && getAutoSaveMemories() ? handleSaveMemory : undefined}
+              onSaveMemory={!temporary && isSignedIn ? handleSaveMemory : undefined}
               onLongPress={() => setActionsMessage(item)}
               onEditImage={(id) => {
                 setEditingImageId(id);
@@ -5333,9 +5360,8 @@ const MessageBubble = React.memo(
     // isLatest gates the "Retry live search" affordance; when a newer message
     // arrives the previously-latest bubble must re-render to hide the button.
     prev.isLatest === next.isLatest &&
-    // onSaveMemory is stable (deps []); its presence only flips when temporary
-    // mode toggles, so this keeps the memory chip from going stale without
-    // re-rendering on every streaming token.
+    // onSaveMemory is stable (deps []); its presence flips only when signed-in
+    // or temporary state changes, so the memory chip does not go stale.
     Boolean(prev.onSaveMemory) === Boolean(next.onSaveMemory),
 );
 

@@ -134,6 +134,18 @@ describe("Ora chat UX response wiring", () => {
     expect(panelSource).toMatch(/showSuggestions &&[\s\S]*msg\.suggestions!\.map/);
   });
 
+  it("auto-saves only high-confidence non-sensitive memory candidates", () => {
+    const autoSaveStart = panelSource.indexOf("Save-by-default auto-save");
+    expect(autoSaveStart).toBeGreaterThan(-1);
+    const autoSaveBody = panelSource.slice(autoSaveStart, autoSaveStart + 1400);
+
+    expect(autoSaveBody).toContain('msg.memorySaveCandidateConfidence === "high"');
+    expect(autoSaveBody).toContain("msg.memorySaveCandidateSensitive === true");
+    expect(autoSaveBody).toContain("highConfidence");
+    expect(autoSaveBody).toContain("!sensitive");
+    expect(panelSource).not.toContain("getAskBeforeSensitive");
+  });
+
   it("keeps the public home bubble usable for generated images, files, and suggestions", () => {
     expect(bubbleSource).toMatch(/msg\.imageUrl\s*&&[\s\S]*<img[\s\S]*src=\{msg\.imageUrl\}/);
     expect(bubbleSource).toContain("formatOraImageMeta(msg.imageMeta)");

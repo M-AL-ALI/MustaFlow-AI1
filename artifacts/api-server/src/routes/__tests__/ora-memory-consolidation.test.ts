@@ -145,4 +145,37 @@ describe("Ora memory consolidation (API + DB)", () => {
         and(eq(knowledgeEntriesTable.userId, ctxUser), eq(knowledgeEntriesTable.scope, "user")),
       );
   });
+
+  it("multi-session lifecycle: fresh recall, update wins, delete removes", async () => {
+    const ctxUser = `${USER}-lifecycle`;
+    const app = appAs(ctxUser);
+
+    const first = await createMemory(app, "my name is Mira", "The user's name is Mira");
+    const firstRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
+    expect(firstRecall.used.map((u) => u.id)).toContain(first.id);
+    expect(firstRecall.text).toContain("Mira");
+
+    const second = await createMemory(app, "my name is Nora", "The user's name is Nora");
+    expect(second.supersededIds).toContain(first.id);
+
+    const updatedRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
+    expect(updatedRecall.used.map((u) => u.id)).toContain(second.id);
+    expect(updatedRecall.used.map((u) => u.id)).not.toContain(first.id);
+    expect(updatedRecall.text).toContain("Nora");
+    expect(updatedRecall.text).not.toContain("Mira");
+
+    const deleted = await request(app).delete(`/ora/memories/${second.id}`).send();
+    expect(deleted.status).toBe(200);
+
+    const afterDeleteRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
+    expect(afterDeleteRecall.used.map((u) => u.id)).not.toContain(second.id);
+    expect(afterDeleteRecall.text).not.toContain("Nora");
+    expect(afterDeleteRecall.text).not.toContain("Mira");
+
+    await db
+      .delete(knowledgeEntriesTable)
+      .where(
+        and(eq(knowledgeEntriesTable.userId, ctxUser), eq(knowledgeEntriesTable.scope, "user")),
+      );
+  });
 });

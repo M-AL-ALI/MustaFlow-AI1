@@ -14,8 +14,11 @@ import {
   tokeniseMemory,
   selectMemoriesWithinBudget,
   rankMemoriesByRelevance,
+  rankMemoriesForRecallInventory,
   resolveOraMemoryRecallProfile,
   inferMemoryQueryCategories,
+  isBroadOraMemoryRecallRequest,
+  buildMemoryStatusContext,
   memoryConflictsWithCurrentMessage,
   type OraMemoryRow,
 } from "../public-ai/chat";
@@ -80,6 +83,41 @@ describe("inferMemoryQueryCategories", () => {
     expect(inferMemoryQueryCategories("what company do I work for?")).toContain("personal");
     expect(inferMemoryQueryCategories("what tech stack is my app using?")).toContain("project");
     expect(inferMemoryQueryCategories("what did my uploaded document say?")).toContain("document");
+  });
+});
+
+describe("broad memory recall requests", () => {
+  it("recognizes inventory-style recall without treating save commands as recall", () => {
+    expect(isBroadOraMemoryRecallRequest("What do you know about me?")).toBe(true);
+    expect(isBroadOraMemoryRecallRequest("show me my saved memories")).toBe(true);
+    expect(isBroadOraMemoryRecallRequest("remember that I prefer dark mode")).toBe(false);
+  });
+
+  it("prioritizes personal and preference facts for broad 'about me' recall", () => {
+    const rows: OraMemoryRow[] = [
+      mem(1, "Recent random note", "unrelated temporary detail", 0, "other"),
+      mem(2, "Launch project", "building a launch tracker", 1, "project"),
+      mem(999, "Name", "The user's name is Mira", 90, "personal"),
+      mem(1000, "Answer style", "Prefers concise answers", 45, "preference"),
+    ];
+
+    const selected = rankMemoriesForRecallInventory(rows, "What do you know about me?");
+    expect(selected.map((m) => m.id).slice(0, 2)).toEqual([999, 1000]);
+  });
+
+  it("adds no-invention instructions when memory context exists for a recall question", () => {
+    const status = buildMemoryStatusContext({
+      authed: true,
+      temporary: false,
+      referenceSavedMemories: true,
+      message: "What do you know about me?",
+      memoryUsedCount: 2,
+      hasCrossConversationContext: false,
+    });
+
+    expect(status).toContain("Answer only from the Saved memories");
+    expect(status).toContain("Do not infer, invent");
+    expect(status).toContain("Memory Center");
   });
 });
 

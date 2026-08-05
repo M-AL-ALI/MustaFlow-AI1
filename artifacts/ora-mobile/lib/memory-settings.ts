@@ -8,7 +8,7 @@ const KEY_ASK_SENSITIVE = "ora_ask_before_sensitive";
 let _refMemories = true;
 let _refHistory = true;
 let _autoSave = true;
-let _askSensitive = false;
+let _askSensitive = true;
 
 export async function loadMemorySettings(): Promise<void> {
   try {
