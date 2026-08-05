@@ -62,12 +62,26 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(menuBody).not.toContain("onSelectMode");
   });
 
-  it("GenerateFileSheet offers all five server formats", () => {
+  it("GenerateFileSheet offers every server format", () => {
     expect(index).toContain("function GenerateFileSheet(");
     expect(index).toContain("GENERATE_FILE_FORMATS");
-    for (const fmt of ["docx", "pdf", "xlsx", "csv", "pptx"]) {
+    for (const fmt of ["docx", "pdf", "xlsx", "csv", "pptx", "md"]) {
       expect(index).toContain(`value: "${fmt}"`);
     }
+  });
+
+  it("auto-routes explicit file requests and validates a real artifact before showing a card", () => {
+    expect(index).toContain("detectExplicitOraFileRequest(text)");
+    expect(index).toContain("detectOraUploadedFileModification(text, attachment.filename)");
+    expect(index).toContain("if (!isSuccessfulOraGeneratedFilePayload(res))");
+    expect(index).toContain("generation returned no artifact");
+  });
+
+  it("round-trips uploaded image edits through the image-edit endpoint", () => {
+    expect(api).toContain('"/api/public-ai/image-edit"');
+    expect(index).toContain("isOraUploadedImageEditRequest(prompt)");
+    expect(index).toContain("await editUploadedImage(attch.ref, prompt)");
+    expect(index).toContain("if (!res.imageUrl)");
   });
 
   it("handleGenerateFile calls generateFile and renders a downloadable card via buildChatExtras", () => {

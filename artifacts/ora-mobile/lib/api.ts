@@ -232,6 +232,7 @@ function pathRequiresAuth(path: string): boolean {
     path === "/api/public-ai/file-analysis" ||
     path === "/api/public-ai/dataset-analysis" ||
     path === "/api/public-ai/image-analysis" ||
+    path === "/api/public-ai/image-edit" ||
     path === "/api/public-ai/export-file" ||
     path === "/api/public-ai/generate-file"
   );
@@ -1078,6 +1079,15 @@ export function analyzeImage(
     jsonRequest<AnalysisResponse>("/api/public-ai/image-analysis", {
       method: "POST",
       body: JSON.stringify({ imageRef, message, messages, language }),
+    }),
+  );
+}
+
+export function editUploadedImage(imageRef: string, instruction: string): Promise<ChatResponse> {
+  return withOraSessionRecovery(() =>
+    jsonRequest<ChatResponse>("/api/public-ai/image-edit", {
+      method: "POST",
+      body: JSON.stringify({ imageRef, message: instruction }),
     }),
   );
 }

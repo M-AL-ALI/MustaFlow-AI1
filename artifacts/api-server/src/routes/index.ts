@@ -162,6 +162,7 @@ router.use(brainstormRouter);
 // ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────
 router.post("/public-ai/chat", oraLimiter);
 router.post("/public-ai/chat/stream", oraLimiter);
+router.post("/public-ai/image-edit", oraLimiter);
 // Expensive analysis/generation routes get both an IP fixed-window limiter and
 // the shared oraLimiter concurrency semaphore (same gate as /chat).
 router.post("/public-ai/file-analysis", oraFileAnalysisLimiter, oraLimiter);

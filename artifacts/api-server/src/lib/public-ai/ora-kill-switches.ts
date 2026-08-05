@@ -19,6 +19,7 @@
  *   ORA_FILE_ANALYSIS_DISABLED=true
  *   ORA_DATASET_ANALYSIS_DISABLED=true
  *   ORA_IMAGE_ANALYSIS_DISABLED=true
+ *   ORA_IMAGE_GENERATION_DISABLED=true
  *   ORA_FILE_GENERATION_DISABLED=true
  *   ORA_TTS_DISABLED=true
  *   ORA_TRANSCRIBE_DISABLED=true
@@ -33,6 +34,7 @@ export type OraFeature =
   | "file_analysis"
   | "dataset_analysis"
   | "image_analysis"
+  | "image_generation"
   | "file_generation"
   | "tts"
   | "transcribe"
@@ -46,6 +48,7 @@ const FEATURE_ENV_VAR: Record<OraFeature, string> = {
   file_analysis: "ORA_FILE_ANALYSIS_DISABLED",
   dataset_analysis: "ORA_DATASET_ANALYSIS_DISABLED",
   image_analysis: "ORA_IMAGE_ANALYSIS_DISABLED",
+  image_generation: "ORA_IMAGE_GENERATION_DISABLED",
   file_generation: "ORA_FILE_GENERATION_DISABLED",
   tts: "ORA_TTS_DISABLED",
   transcribe: "ORA_TRANSCRIBE_DISABLED",
@@ -60,6 +63,7 @@ const FEATURE_LABEL: Record<OraFeature, string> = {
   file_analysis: "File analysis",
   dataset_analysis: "Dataset analysis",
   image_analysis: "Image analysis",
+  image_generation: "Image generation",
   file_generation: "File generation",
   tts: "Voice responses",
   transcribe: "Voice input",

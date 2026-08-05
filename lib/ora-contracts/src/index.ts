@@ -274,7 +274,109 @@ export type OraRole = "user" | "assistant";
 export type OraMode = "instant" | "deep";
 export type OraTier = "anonymous" | "free" | "core" | "wave";
 export type OraMessageKind = "image-analysis" | "document-analysis";
-export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
+export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx" | "md";
+
+export interface OraExplicitFileRequest {
+  format: FileFormat;
+  requestedFileName: string | null;
+}
+
+const ORA_FILE_EXTENSION_FORMATS: Record<string, FileFormat> = {
+  csv: "csv",
+  xlsx: "xlsx",
+  xls: "xlsx",
+  docx: "docx",
+  doc: "docx",
+  pdf: "pdf",
+  pptx: "pptx",
+  ppt: "pptx",
+  md: "md",
+  markdown: "md",
+};
+
+/** Deterministic client/server routing for an explicit downloadable-file request. */
+export function detectExplicitOraFileRequest(text: string): OraExplicitFileRequest | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const creationVerb =
+    /\b(create|generate|make|produce|export|build|draft|prepare|write|give\s+me)\b/i.test(trimmed);
+  const fileObject =
+    /\b(file|document|report|spreadsheet|workbook|worksheet|table|charts?|graphs?|histogram|dashboard|visuali[sz]ation|plot|presentation|slides?|deck|markdown)\b/i.test(
+      trimmed,
+    );
+  if (!creationVerb || !fileObject) return null;
+
+  const named = trimmed.match(
+    /\b(?:file\s*name|filename|save(?:\s+it)?\s+as|named|called)\b(?:\s+(?:is|as|to)|\s*[:=])?\s*["']?([A-Za-z0-9][A-Za-z0-9 ._-]{0,100}\.([A-Za-z0-9]{1,8}))["']?/i,
+  );
+  const extension = named?.[2]?.toLowerCase();
+  const requestedFormat = extension ? ORA_FILE_EXTENSION_FORMATS[extension] : undefined;
+  if (requestedFormat) {
+    return { format: requestedFormat, requestedFileName: named?.[1]?.trim() ?? null };
+  }
+
+  const formatSignals: Array<[RegExp, FileFormat]> = [
+    [/\b(markdown|\.md\b)\b/i, "md"],
+    [/\b(csv|comma[ -]separated)\b/i, "csv"],
+    [
+      /\b(excel|xlsx|xls|spreadsheet|workbook|worksheet|charts?|graphs?|histogram|dashboard|visuali[sz]ation|plot)\b/i,
+      "xlsx",
+    ],
+    [/\b(word|docx|word\s+document)\b/i, "docx"],
+    [/\bpdf\b/i, "pdf"],
+    [/\b(power[ -]?point|pptx?|presentation|slides?|deck)\b/i, "pptx"],
+  ];
+  for (const [pattern, format] of formatSignals) {
+    if (pattern.test(trimmed)) return { format, requestedFileName: null };
+  }
+  if (/\b(charts?|graphs?|histogram|dashboard|visuali[sz]ation|plot)\b/i.test(trimmed)) {
+    return { format: "xlsx", requestedFileName: null };
+  }
+  if (/\b(table|data|sheet)\b/i.test(trimmed)) return { format: "csv", requestedFileName: null };
+  return { format: "pdf", requestedFileName: null };
+}
+
+/** Infer a file round-trip only when the user asks to modify and return an upload. */
+export function detectOraUploadedFileModification(
+  text: string,
+  fileName: string,
+): FileFormat | null {
+  const wantsEdit =
+    /\b(edit|revise|modify|update|change|replace|delete|remove|add|insert|rewrite|rename|reformat|convert)\b/i.test(
+      text,
+    );
+  const wantsOutput =
+    /\b(return|send|give|download|export|file|copy|back|updated|revised|modified)\b/i.test(text);
+  if (!wantsEdit || !wantsOutput) return null;
+  const extension = fileName.toLowerCase().match(/\.([a-z0-9]{1,8})$/)?.[1];
+  return extension ? (ORA_FILE_EXTENSION_FORMATS[extension] ?? null) : null;
+}
+
+export function isOraUploadedImageEditRequest(text: string): boolean {
+  return (
+    /\b(edit|modify|change|replace|remove|add|erase|retouch|recolor|crop|resize|enhance|fix|make)\b/i.test(
+      text,
+    ) &&
+    !/\b(describe|analy[sz]e|explain|read|identify|what\s+is|what(?:'s| is)\s+in)\b/i.test(text)
+  );
+}
+
+export function isSuccessfulOraGeneratedFilePayload(value: unknown): value is {
+  fileName: string;
+  fileData: string;
+  mimeType: string;
+} {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Record<string, unknown>;
+  return (
+    typeof payload.fileName === "string" &&
+    payload.fileName.trim().length > 0 &&
+    typeof payload.fileData === "string" &&
+    payload.fileData.length > 0 &&
+    typeof payload.mimeType === "string" &&
+    payload.mimeType.trim().length > 0
+  );
+}
 
 /* ── Persisted sub-schemas (exact server wire contract) ─────────────────── */
 
@@ -572,7 +674,7 @@ export const oraPendingClarificationSchema = z.object({
   originalMessage: z.string().min(1).max(4000),
   kind: z.enum(ORA_CLARIFICATION_KINDS),
   /** Output format inferred at ask time, so continuation doesn't re-infer. */
-  inferredFileFormat: z.enum(["csv", "xlsx", "docx", "pdf", "pptx"]).nullable().optional(),
+  inferredFileFormat: z.enum(["csv", "xlsx", "docx", "pdf", "pptx", "md"]).nullable().optional(),
 });
 
 export type OraPendingClarification = z.infer<typeof oraPendingClarificationSchema>;

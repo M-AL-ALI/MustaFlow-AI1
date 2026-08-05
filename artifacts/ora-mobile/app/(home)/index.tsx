@@ -126,6 +126,7 @@ import {
   analyzeDataset,
   analyzeDocument,
   analyzeImage,
+  editUploadedImage,
   ApiRequestError,
   createConversation,
   createProject,
@@ -217,6 +218,10 @@ import {
   oraReadingFileText,
   parseOraActivityStep,
   ORA_ANALYZING_IMAGE_TEXT,
+  detectExplicitOraFileRequest,
+  detectOraUploadedFileModification,
+  isOraUploadedImageEditRequest,
+  isSuccessfulOraGeneratedFilePayload,
   shouldResumeOraConversation,
 } from "@workspace/ora-contracts";
 import type { OraActivityRowStep } from "@/components/ora/OraThinkingRow";
@@ -526,6 +531,7 @@ function detectFileFormat(fileName: string, mimeType: string): FileFormat {
   if (ext === "csv" || ext === "xlsx" || ext === "docx" || ext === "pdf" || ext === "pptx") {
     return ext;
   }
+  if (ext === "md" || mimeType.toLowerCase().includes("markdown")) return "md";
   const mt = mimeType.toLowerCase();
   if (mt.includes("csv")) return "csv";
   if (mt.includes("spreadsheet") || mt.includes("excel")) return "xlsx";
@@ -1199,7 +1205,8 @@ export default function OraChatScreen() {
           threadResetGenRef.current !== persistGeneration ||
           conversationTransitionRef.current ||
           conversationIdRef.current !== convId
-        ) return;
+        )
+          return;
         await saveConversationMessages(convId, msgs);
       } catch {
         /* persistence is best-effort */
@@ -1389,16 +1396,37 @@ export default function OraChatScreen() {
           // so the thinking row shows the same wording as the website.
           const prompt = text || "Please analyze this attachment.";
           if (attch.kind === "image") {
-            pushActivity(oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT));
-            const res = await analyzeImage(attch.ref, prompt, history);
-            if (!isTurnCurrent()) return;
-            pushActivity(oraActivityStep("file-reading", "ok"));
-            assistant = {
-              id: pendingId,
-              role: "assistant",
-              content: res.reply,
-              messageKind: "image-analysis",
-            };
+            const isImageEdit = isOraUploadedImageEditRequest(prompt);
+            pushActivity(
+              isImageEdit
+                ? oraActivityStep("image-generation", "start")
+                : oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT),
+            );
+            if (isImageEdit) {
+              const res = await editUploadedImage(attch.ref, prompt);
+              if (!isTurnCurrent()) return;
+              if (!res.imageUrl) {
+                throw new Error("The image edit failed and no edited image was created.");
+              }
+              pushActivity(oraActivityStep("image-generation", "ok"));
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                imageUrl: res.imageUrl,
+                editInstruction: prompt,
+              };
+            } else {
+              const res = await analyzeImage(attch.ref, prompt, history);
+              if (!isTurnCurrent()) return;
+              pushActivity(oraActivityStep("file-reading", "ok"));
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                messageKind: "image-analysis",
+              };
+            }
           } else if (attch.kind === "dataset") {
             pushActivity(
               oraActivityStep("dataset-analysis", "start", oraAnalyzingDatasetText(attch.filename)),
@@ -1761,6 +1789,17 @@ export default function OraChatScreen() {
       );
       return;
     }
+    const uploadedEditFormat =
+      attachment && attachment.kind !== "image"
+        ? detectOraUploadedFileModification(text, attachment.filename)
+        : null;
+    const explicitFileRequest = detectExplicitOraFileRequest(text);
+    if (uploadedEditFormat || (explicitFileRequest && attachment?.kind !== "image")) {
+      setInput("");
+      setAttachment(null);
+      void handleGenerateFileRef.current?.(text, uploadedEditFormat ?? explicitFileRequest!.format);
+      return;
+    }
     const attch = attachment;
     setInput("");
     setAttachment(null);
@@ -1838,6 +1877,9 @@ export default function OraChatScreen() {
           activeAssetId: activeAssetId ?? null,
         });
         if (!isTurnCurrent()) return;
+        if (!isSuccessfulOraGeneratedFilePayload(res)) {
+          throw new Error("I couldn't create that file because generation returned no artifact.");
+        }
         for (const raw of res.activity ?? []) {
           const step = parseOraActivityStep(raw);
           if (step) pushActivity(step);
@@ -5983,6 +6025,7 @@ const GENERATE_FILE_FORMATS: {
   { value: "xlsx", label: "Excel spreadsheet (.xlsx)", icon: FileSpreadsheet },
   { value: "csv", label: "CSV (.csv)", icon: FileSpreadsheet },
   { value: "pptx", label: "PowerPoint (.pptx)", icon: Presentation },
+  { value: "md", label: "Markdown (.md)", icon: FileText },
 ];
 
 // Bottom sheet to author a brand-new file from a prompt. Collects a description

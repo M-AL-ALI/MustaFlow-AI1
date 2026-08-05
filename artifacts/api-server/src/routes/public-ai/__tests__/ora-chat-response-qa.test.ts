@@ -302,11 +302,19 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 async function buildApp() {
   process.env.ORA_SESSION_SECRET = TEST_SECRET;
   process.env.PUBLIC_AI_ENABLED = "true";
+  process.env.DATABASE_URL ||= "postgresql://ora-test:ora-test@127.0.0.1:5432/ora-test";
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
   const router = (await import("../chat")).default;
   app.use(router);
+  app.use(
+    (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      const detail =
+        error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error);
+      res.status(500).json({ error: detail });
+    },
+  );
   return app;
 }
 
@@ -435,6 +443,53 @@ What should I tell Replit?`;
     ).toBe(true);
   });
 
+  it("routes a named Markdown request and preserves the requested filename", async () => {
+    fileBuilderMock.generateFileFromPrompt.mockResolvedValueOnce({
+      reply: "Created the Markdown file.",
+      fileName: "ora-test.md",
+      fileData: Buffer.from("- one\n- two\n- three\n").toString("base64"),
+      mimeType: "text/markdown; charset=utf-8",
+    });
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({
+        message:
+          "Create a file named ora-test.md containing three bullet points and give me the download",
+        messages: [],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.fileName).toBe("ora-test.md");
+    expect(res.body.fileData).toBeTruthy();
+    const [prompt, format] = fileBuilderMock.generateFileFromPrompt.mock.calls.at(
+      -1,
+    ) as unknown as [string, string];
+    expect(prompt).toContain("ora-test.md");
+    expect(format).toBe("md");
+  });
+
+  it("fails honestly when generation produces no artifact", async () => {
+    fileBuilderMock.generateFileFromPrompt.mockResolvedValueOnce({
+      reply: "Your download card is ready.",
+      fileName: "fake.csv",
+      fileData: "",
+      mimeType: "text/csv",
+    });
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Create a CSV file of three items.", messages: [] });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain("No download was created");
+    expect(res.body.reply).toBeUndefined();
+    expect(res.body.fileName).toBeUndefined();
+    expect(res.body.fileData).toBeUndefined();
+  });
+
   it("routes natural AppSheet workbook requests through the file branch as XLSX", async () => {
     fileBuilderMock.generateFileFromPrompt.mockResolvedValueOnce({
       reply: "Created the AppSheet-ready workbook.",
@@ -497,6 +552,40 @@ What should I tell Replit?`;
     expect(res.body.reply).toContain("confirmation");
   });
 
+  it("round-trips a non-destructive uploaded-file modification through generation", async () => {
+    const sessionId = "ora-chat-uploaded-doc-round-trip";
+    const fileRef = storeFile({
+      sessionId,
+      filename: "operating-plan.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      extractedText: "Operating Plan\nSection 1: Current priorities",
+      charCount: 46,
+    });
+    fileBuilderMock.generateFileFromPrompt.mockResolvedValueOnce({
+      reply: "Created the revised document.",
+      fileName: "operating-plan.docx",
+      fileData: Buffer.from("revised docx").toString("base64"),
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession({ sessionId })}`)
+      .send({
+        message: "Add an executive summary section and return the updated file",
+        messages: [],
+        documentRefs: [fileRef],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.fileName).toBe("operating-plan.docx");
+    const [prompt, format] = fileBuilderMock.generateFileFromPrompt.mock.calls.at(
+      -1,
+    ) as unknown as [string, string];
+    expect(prompt).toContain("Current priorities");
+    expect(format).toBe("docx");
+  });
+
   it("returns inline image fields for signed-in image generation without sign-in hedging", async () => {
     authState.user = { userId: "ora-user-1", tier: "core", isPaid: true };
 
@@ -505,7 +594,7 @@ What should I tell Replit?`;
       .set("Cookie", `ora-session=${makeSession()}`)
       .send({ message: "Create a clean logo for my mobile mechanic app.", messages: [] });
 
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.reply).toContain("Here's the image you asked for");
     expect(res.body.reply).not.toMatch(/sign in|sign up|create an account/i);
     expect(res.body.imageUrl).toBe("data:image/png;base64,aW1hZ2U=");
@@ -559,7 +648,7 @@ What should I tell Replit?`;
         referenceChatHistory: false,
       });
 
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.reply).toBe("You prefer direct answers with minimal steps.");
     expect(res.body.memoriesUsed).toEqual([{ id: 42, title: "Answer style" }]);
     expect(

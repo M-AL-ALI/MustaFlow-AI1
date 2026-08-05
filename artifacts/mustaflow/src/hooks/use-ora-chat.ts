@@ -18,6 +18,8 @@ import {
   oraReadingFileText,
   parseOraActivityStep,
   ORA_ANALYZING_IMAGE_TEXT,
+  isSuccessfulOraGeneratedFilePayload,
+  isOraUploadedImageEditRequest,
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
@@ -30,7 +32,7 @@ import {
   type OraActivityTraceStep,
 } from "@/lib/ora-activity";
 
-export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
+export type FileFormat = import("@workspace/ora-contracts").FileFormat;
 
 export interface GeneratedFile {
   fileName: string;
@@ -1361,59 +1363,60 @@ export function useOraChat(): UseOraChatReturn {
   // belongs to a brand-new chat: create it — but only if the user is still on a
   // new chat (currentConversationId === null). If they navigated to an existing
   // conversation meanwhile, drop the save rather than clobber that conversation.
-  const saveToConversation = useCallback(async (
-    msgs: OraMessage[],
-    targetId: number | null,
-    targetGeneration: number,
-  ) => {
-    const c = convRef.current;
-    if (
-      !c ||
-      c.isConversationTransitioning() ||
-      c.conversationTransitionGeneration !== targetGeneration
-    ) return;
-    let id = targetId;
-    let createdForSnapshot = false;
-    if (id == null) {
-      if (c.currentConversationId != null) return;
-      const firstUser = msgs.find((m) => m.role === "user");
-      id = await c.ensureConversation(firstUser?.content ?? "New chat");
-      createdForSnapshot = id != null;
-      // Uploads that happened before this conversation existed were cached
-      // under the "standalone" key — move them to the new conversation's key
-      // so a later reload restores them for this conversation.
-      if (id != null && !temporaryRef.current && documentRefsRef.current.length > 0) {
-        storeDocumentRefs(docRefsKey(id), documentRefsRef.current);
-        storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+  const saveToConversation = useCallback(
+    async (msgs: OraMessage[], targetId: number | null, targetGeneration: number) => {
+      const c = convRef.current;
+      if (
+        !c ||
+        c.isConversationTransitioning() ||
+        c.conversationTransitionGeneration !== targetGeneration
+      )
+        return;
+      let id = targetId;
+      let createdForSnapshot = false;
+      if (id == null) {
+        if (c.currentConversationId != null) return;
+        const firstUser = msgs.find((m) => m.role === "user");
+        id = await c.ensureConversation(firstUser?.content ?? "New chat");
+        createdForSnapshot = id != null;
+        // Uploads that happened before this conversation existed were cached
+        // under the "standalone" key — move them to the new conversation's key
+        // so a later reload restores them for this conversation.
+        if (id != null && !temporaryRef.current && documentRefsRef.current.length > 0) {
+          storeDocumentRefs(docRefsKey(id), documentRefsRef.current);
+          storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+        }
+        // Same move for a clarification asked before the conversation existed.
+        if (id != null && !temporaryRef.current && pendingClarificationRef.current) {
+          storePendingClarification(docRefsKey(id), pendingClarificationRef.current);
+          storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
+        }
       }
-      // Same move for a clarification asked before the conversation existed.
-      if (id != null && !temporaryRef.current && pendingClarificationRef.current) {
-        storePendingClarification(docRefsKey(id), pendingClarificationRef.current);
-        storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
+      if (id == null) return;
+      const latest = convRef.current;
+      if (
+        !latest ||
+        latest.isConversationTransitioning() ||
+        latest.conversationTransitionGeneration !== targetGeneration ||
+        (!createdForSnapshot && latest.currentConversationId !== id)
+      )
+        return;
+      try {
+        const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId: id, messages: serializeForStorage(msgs) }),
+        });
+        if (res.ok) {
+          loadedConvRef.current = id;
+          latest.notifyPersisted();
+        }
+      } catch {
+        /* best-effort; silent on failure */
       }
-    }
-    if (id == null) return;
-    const latest = convRef.current;
-    if (
-      !latest ||
-      latest.isConversationTransitioning() ||
-      latest.conversationTransitionGeneration !== targetGeneration ||
-      (!createdForSnapshot && latest.currentConversationId !== id)
-    ) return;
-    try {
-      const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: id, messages: serializeForStorage(msgs) }),
-      });
-      if (res.ok) {
-        loadedConvRef.current = id;
-        latest.notifyPersisted();
-      }
-    } catch {
-      /* best-effort; silent on failure */
-    }
-  }, []);
+    },
+    [],
+  );
 
   const saveToServer = useCallback(
     (msgs: OraMessage[]) => {
@@ -1450,7 +1453,7 @@ export function useOraChat(): UseOraChatReturn {
     return conv.registerConversationTransitionHandler((nextConversationId) => {
       resetVisibleThread(nextConversationId == null);
     });
-  }, [conv?.registerConversationTransitionHandler, resetVisibleThread]);
+  }, [conv, resetVisibleThread]);
 
   // Phase 1: Session init — runs once on mount regardless of auth state
   useEffect(() => {
@@ -1970,17 +1973,31 @@ export function useOraChat(): UseOraChatReturn {
           }
 
           if (currentAttachment.isImage) {
-            setPendingImageAnalysis(true);
+            const isImageEdit = isOraUploadedImageEditRequest(content);
+            setPendingImageAnalysis(!isImageEdit);
             body.imageRef = currentAttachment.fileRef;
 
-            pushActivity(oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT));
+            pushActivity(
+              isImageEdit
+                ? oraActivityStep("image-generation", "start")
+                : oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT),
+            );
             const data = await apiPost<{
               reply: string;
-              imageAnalysisCount: number;
-              imageAnalysisLimit: number;
-            }>("/api/public-ai/image-analysis", body);
+              imageUrl?: string;
+              editInstruction?: string;
+              imageAnalysisCount?: number;
+              imageAnalysisLimit?: number;
+              msgCount?: number;
+              msgLimit?: number;
+              imageCount?: number;
+              imageLimit?: number;
+            }>(isImageEdit ? "/api/public-ai/image-edit" : "/api/public-ai/image-analysis", body);
             if (!isTurnCurrent()) return;
-            pushActivity(oraActivityStep("file-reading", "ok"));
+            if (isImageEdit && !data.imageUrl) {
+              throw new Error("The image edit failed and no edited image was created.");
+            }
+            pushActivity(oraActivityStep(isImageEdit ? "image-generation" : "file-reading", "ok"));
 
             setTurnMessages((prev) => {
               const next = [
@@ -1988,7 +2005,9 @@ export function useOraChat(): UseOraChatReturn {
                 {
                   role: "assistant" as const,
                   content: data.reply,
-                  messageKind: "image-analysis" as const,
+                  ...(!isImageEdit ? { messageKind: "image-analysis" as const } : {}),
+                  ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+                  ...(data.editInstruction ? { editInstruction: data.editInstruction } : {}),
                 },
               ];
               storeTranscript(next);
@@ -1999,8 +2018,16 @@ export function useOraChat(): UseOraChatReturn {
               prev
                 ? {
                     ...prev,
-                    imageAnalysisCount: data.imageAnalysisCount,
-                    imageAnalysisLimit: data.imageAnalysisLimit,
+                    ...(data.imageAnalysisCount != null
+                      ? { imageAnalysisCount: data.imageAnalysisCount }
+                      : {}),
+                    ...(data.imageAnalysisLimit != null
+                      ? { imageAnalysisLimit: data.imageAnalysisLimit }
+                      : {}),
+                    ...(data.msgCount != null ? { msgCount: data.msgCount } : {}),
+                    ...(data.msgLimit != null ? { msgLimit: data.msgLimit } : {}),
+                    ...(data.imageCount != null ? { imageCount: data.imageCount } : {}),
+                    ...(data.imageLimit != null ? { imageLimit: data.imageLimit } : {}),
                   }
                 : null,
             );
@@ -2675,6 +2702,9 @@ export function useOraChat(): UseOraChatReturn {
           activity?: OraActivityStep[];
         }>("/api/public-ai/generate-file", body);
         if (!isTurnCurrent()) return;
+        if (!isSuccessfulOraGeneratedFilePayload(data)) {
+          throw new Error("I couldn't create that file because generation returned no artifact.");
+        }
 
         for (const raw of data.activity ?? []) {
           const step = parseOraActivityStep(raw);
@@ -2771,6 +2801,12 @@ export function useOraChat(): UseOraChatReturn {
               windowHours?: number;
             }>("/api/public-ai/generate-file", retryBody);
             if (!isTurnCurrent()) return;
+            if (!isSuccessfulOraGeneratedFilePayload(retryData)) {
+              throw new Error(
+                "I couldn't create that file because generation returned no artifact.",
+                { cause: err },
+              );
+            }
             setToolMessages((prev) => {
               const next = [
                 ...prev,
@@ -2809,8 +2845,15 @@ export function useOraChat(): UseOraChatReturn {
           setError(msg ?? "File generation failed. Please try again.");
         }
         setToolMessages((prev) => {
-          const next = prev.slice(0, -1);
+          const next = [
+            ...prev,
+            {
+              role: "assistant" as const,
+              content: `I couldn't generate the requested file. ${msg ?? "Please try again."}`,
+            },
+          ];
           storeTranscript(next);
+          if (isSignedIn) saveToServer(next);
           return next;
         });
       } finally {

@@ -114,6 +114,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /public-ai\/(chat|orchestrator|prompt|expertise|model-router)/i,
+      /routes\/public-ai\/index\.ts$/i,
       /ora-smoke\.test\.ts$/i,
       /use-ora-chat/i,
       // The mobile home screen hosts the entire Ora chat surface (composer,
@@ -195,7 +196,12 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
     id: "image-generation-editing",
     title: "Image generation, image editing, inline image cards, and image/search routing",
     ownerSurfaces: ["api", "website", "mobile"],
-    fileHints: [/image/i, /generated-image/i, /imageMeta/i],
+    fileHints: [
+      /image/i,
+      /generated-image/i,
+      /imageMeta/i,
+      /public-ai\/ora-(kill-switches|spend-cap)\.ts$/i,
+    ],
     manualWebsite:
       "Generate, edit, and search for images; verify the right route and inline card controls.",
     manualMobile:
