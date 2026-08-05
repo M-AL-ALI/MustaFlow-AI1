@@ -121,7 +121,7 @@ function downloadOraFile(file: GeneratedFile) {
 }
 
 function viewOraFile(file: GeneratedFile): string {
-  if (!file.fileData) return;
+  if (!file.fileData) throw new Error("This file is no longer available to preview.");
   const byteChars = atob(file.fileData);
   const byteNums = new Uint8Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);

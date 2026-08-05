@@ -201,7 +201,9 @@ describe("Ora fresh-start website wiring", () => {
     const ensurePosition = chat.indexOf("await conversationContext.ensureConversation(content)");
     const appendPosition = chat.indexOf("setTurnMessages(() =>", ensurePosition);
 
-    expect(provider).toContain("getCurrentConversationId: () => currentIdRef.current");
+    expect(provider).toContain(
+      "const getCurrentConversationId = useCallback(() => currentIdRef.current, [])",
+    );
     expect(ensurePosition).toBeGreaterThan(-1);
     expect(appendPosition).toBeGreaterThan(ensurePosition);
     expect(chat).toContain("const targetId = c.getCurrentConversationId()");

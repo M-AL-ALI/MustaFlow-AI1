@@ -761,7 +761,10 @@ export const oraPendingClarificationSchema = z.object({
   originalMessage: z.string().min(1).max(4000),
   kind: z.enum(ORA_CLARIFICATION_KINDS),
   /** Output format inferred at ask time, so continuation doesn't re-infer. */
-  inferredFileFormat: z.enum(["csv", "xlsx", "docx", "pdf", "pptx", "md"]).nullable().optional(),
+  inferredFileFormat: z
+    .enum(["csv", "xlsx", "docx", "pdf", "pptx", "md", "txt"])
+    .nullable()
+    .optional(),
 });
 
 export type OraPendingClarification = z.infer<typeof oraPendingClarificationSchema>;
