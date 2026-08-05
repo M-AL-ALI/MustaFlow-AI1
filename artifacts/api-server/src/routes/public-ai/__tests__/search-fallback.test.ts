@@ -1,32 +1,11 @@
 /**
- * Integration test — graceful web-search FAILURE fallback through the Ora chat route.
+ * Integration test - verified-or-fail live-search contract through the Ora chat route.
  *
- * This locks in the Deep-mode QA blocker fix: when a live web search fails or
- * times out, the route must NOT leave the user with a dead "Web search failed"
- * banner. Instead it answers from the model's own knowledge with an honest
- * caveat, keeps the turn's quota consumed (an answer WAS delivered), and only
- * refunds + returns a retryable 503 if the fallback answer ALSO fails.
- *
- * Covered end-to-end through POST /public-ai/chat:
- *   1. search fails → fallback answer succeeds → 200 with SEARCH_FALLBACK_NOTE,
- *      searchFallback:true, searchRetryable per freshness, quota NOT refunded.
- *   2. search fails → fallback answer also fails → 503 searchRetryable:true,
- *      quota refunded exactly once.
- *   3. search fails → fallback answer empty → treated as a failure (503 + refund).
- *   4. an evergreen search that fails → searchFallback:true but searchRetryable
- *      is false (a general-knowledge answer is not stale for evergreen topics).
- *   5. a FORCED "Retry live search" that still fails → retryable 503 WITHOUT the
- *      general-knowledge fallback (createChatCompletion is never called), quota
- *      refunded exactly once. The user already rejected the fallback answer, so
- *      repeating it verbatim is worse than an honest "couldn't verify" + Retry.
- *   6. a forced search whose provider TIMES OUT runs the harder secondary attempt
- *      (retryOnTimeout) instead of bailing on the first timeout like a normal
- *      degrade-fast search would.
- *
- * The provider boundary is mocked: the OpenAI Responses API (web search) always
- * rejects, and ai-providers.createChatCompletion (the fallback chain) is
- * controlled per test. The real orchestrator → runOraWebSearch → route fallback
- * pipeline runs, so this is deterministic and always runs in CI.
+ * When live web search fails, times out, or returns prose without citations, Ora
+ * must not degrade into uncited speculative bullets. The route returns a
+ * retryable 503, refunds the consumed turn exactly once, and the client can show
+ * a Retry live search affordance. The general model fallback is intentionally
+ * mocked and asserted unused.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -39,44 +18,26 @@ import jwt from "jsonwebtoken";
 // web-search.ts checks against when deciding whether to retry on timeout.
 import { APIConnectionTimeoutError } from "openai";
 
-const TEST_SECRET = "search-fallback-test-secret";
+const TEST_SECRET = "search-failure-test-secret";
+const RETRYABLE_ERROR_FRAGMENT = "verified live web results";
 
-// The honest degradation note the route prepends (mirrors SEARCH_FALLBACK_NOTE
-// in chat.ts, which is module-local and not exported). Used for evergreen
-// queries, where a general-knowledge answer is acceptable.
-const FALLBACK_NOTE_FRAGMENT = "answering from general knowledge";
-
-// The freshness-critical note (mirrors SEARCH_FALLBACK_NOTE_FRESH) used when the
-// query needed CURRENT info: it must NOT present general knowledge as verified
-// headlines and must point the user at the Retry affordance.
-const FRESH_FALLBACK_NOTE_FRAGMENT = "Tap Retry live search";
-
-// ─── Mocks ───────────────────────────────────────────────────────────────────
-
-// Mock the OpenAI SDK so the web_search Responses call ALWAYS rejects — every
-// attempt (initial + capped retry) fails, so runOraWebSearch throws and the
-// route's graceful-degradation catch takes over.
+// Mock the OpenAI SDK so the web_search Responses call can be controlled per test.
 const createMock = vi.hoisted(() => vi.fn());
 vi.mock("openai", () => ({
   default: class {
     responses = { create: createMock };
   },
-  // web-search.ts imports this named export and uses `err instanceof
-  // APIConnectionTimeoutError` to skip the retry on a genuine timeout; the mock
-  // must provide it or that check throws a TypeError under test.
   APIConnectionTimeoutError: class extends Error {},
 }));
 
-// Control the general-knowledge fallback chain. runCandidateChain invokes this
-// per candidate; the real selectOraModelRoute/runCandidateChain still run.
+// The old live-search failure path called this provider fallback. Item 3 forbids
+// that: a search attempt must return cited live results or fail cleanly.
 const createChatCompletionMock = vi.hoisted(() => vi.fn());
 vi.mock("../../../lib/ai-providers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../lib/ai-providers")>();
   return { ...actual, createChatCompletion: createChatCompletionMock };
 });
 
-// Search requires a signed-in user; Deep fallback requires a PAID user, so
-// resolve a Core-tier account.
 vi.mock("../../../lib/public-ai/authed-user", () => ({
   PAID_TIERS: new Set(["core", "wave"]),
   resolveAuthedOraUser: vi.fn(async () => ({
@@ -86,8 +47,6 @@ vi.mock("../../../lib/public-ai/authed-user", () => ({
   })),
 }));
 
-// Ora quota metering — allow the turn; spy on refundOraQuota so we can assert
-// the refund semantics (kept on fallback success, refunded on double failure).
 const refundOraQuotaMock = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("../../../lib/public-ai/ora-usage", () => ({
   consumeOraQuota: vi.fn(async () => ({
@@ -109,9 +68,25 @@ vi.mock("../../../lib/public-ai/ora-usage", () => ({
   })),
 }));
 
-// Mock @workspace/db so no Postgres connection is opened; profile/memory reads
-// resolve to [] (no personal context).
 vi.mock("@workspace/db", () => {
+  const chain: Record<string, unknown> = {};
+  for (const m of ["select", "from", "where", "orderBy", "limit"]) {
+    chain[m] = () => chain;
+  }
+  chain.then = (resolve: (v: unknown[]) => unknown) => resolve([]);
+  const tableStub = new Proxy({}, { get: (_t, prop) => ({ name: String(prop) }) }) as Record<
+    string,
+    unknown
+  >;
+  return {
+    db: chain,
+    knowledgeEntriesTable: tableStub,
+    oraProfilesTable: tableStub,
+    generatedImagesTable: tableStub,
+    TIER_ORA_MESSAGE_LIMIT: { free: 100, core: 1000, wave: 5000 },
+  };
+});
+vi.mock("../../../../../../lib/db/src/index.ts", () => {
   const chain: Record<string, unknown> = {};
   for (const m of ["select", "from", "where", "orderBy", "limit"]) {
     chain[m] = () => chain;
@@ -132,7 +107,7 @@ vi.mock("@workspace/db", () => {
 
 function makeSession(overrides: Record<string, unknown> = {}) {
   const payload = {
-    sessionId: "fallback-session-" + Math.random().toString(36).slice(2),
+    sessionId: "search-failure-session-" + Math.random().toString(36).slice(2),
     msgCount: 0,
     fileCount: 0,
     imageCount: 0,
@@ -147,6 +122,8 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 async function buildApp() {
   process.env.ORA_SESSION_SECRET = TEST_SECRET;
   process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-key";
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL ?? "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
@@ -169,126 +146,76 @@ function postChat(app: express.Express, message: string, extraBody: Record<strin
     });
 }
 
-describe("POST /public-ai/chat — graceful fallback when live web search fails", () => {
+function expectRetryableSearchFailure(res: request.Response) {
+  expect(res.status).toBe(503);
+  expect(res.body.searchRetryable).toBe(true);
+  expect(res.body.searchFallback).toBeUndefined();
+  expect(res.body.reply).toBeUndefined();
+  expect(res.body.error).toContain(RETRYABLE_ERROR_FRAGMENT);
+  expect(res.body.activity).toEqual([
+    expect.objectContaining({ tool: "web-search", phase: "fail" }),
+  ]);
+  expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
+  expect(createChatCompletionMock).not.toHaveBeenCalled();
+}
+
+describe("POST /public-ai/chat - verified-or-fail when live web search fails", () => {
   let app: express.Express;
 
   beforeEach(async () => {
-    // resetAllMocks (not clearAllMocks) so any unconsumed mock*Once queue never
-    // leaks into the next test.
     vi.resetAllMocks();
-    // Re-apply the always-reject default for the web-search provider.
-    createMock.mockRejectedValue(new Error("web_search upstream timeout"));
+    createMock.mockRejectedValue(new Error("web_search upstream failed"));
     app = await buildApp();
   });
 
-  it("answers from general knowledge (no refund) when search fails on a current-info query", async () => {
-    createChatCompletionMock.mockResolvedValue({
-      choices: [{ message: { content: "Bitcoin is a decentralized digital currency." } }],
-    });
+  it("returns retryable 503 and refunds when search fails on a current-info query", async () => {
+    const res = await postChat(app, "what is the current bitcoin price");
+
+    expect(createMock).toHaveBeenCalled();
+    expectRetryableSearchFailure(res);
+  });
+
+  it("returns retryable 503 and refunds when a normal search attempt times out", async () => {
+    createMock.mockRejectedValue(new APIConnectionTimeoutError({ message: "timed out" }));
 
     const res = await postChat(app, "what is the current bitcoin price");
 
-    expect(res.status).toBe(200);
-    expect(res.body.searchFallback).toBe(true);
-    // Freshness-critical query: the note must NOT claim the answer is current
-    // and must point the user at the Retry affordance instead.
-    expect(res.body.reply).toContain(FRESH_FALLBACK_NOTE_FRAGMENT);
-    expect(res.body.reply).not.toContain(FALLBACK_NOTE_FRAGMENT);
-    expect(res.body.reply).toContain("Bitcoin is a decentralized digital currency.");
-    // A volatile/current query is worth a live-verification retry.
-    expect(res.body.searchRetryable).toBe(true);
-    // An answer WAS delivered, so the quota stays consumed.
-    expect(refundOraQuotaMock).not.toHaveBeenCalled();
-    // The web-search provider was actually attempted (and failed) first.
-    expect(createMock).toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expectRetryableSearchFailure(res);
   });
 
-  it("forceSearch pins a non-search message to the live web-search tool", async () => {
-    // Make the fallback chain resolve so that IF the forced path incorrectly fell
-    // through to the general-knowledge fallback, this test would observe a 200 —
-    // proving the forced path bypasses it (see the 503 assertion below).
-    createChatCompletionMock.mockResolvedValue({
-      choices: [{ message: { content: "Here is some general background." } }],
-    });
-
-    // A plain greeting would normally route to a conversational answer (no
-    // search). With forceSearch:true (the "Retry live search" affordance) the
-    // route must attempt the LIVE web-search tool anyway.
+  it("forceSearch pins a non-search message to live web search without model fallback", async () => {
     const res = await postChat(app, "hello there, how are you", { forceSearch: true });
 
-    // Proof the search branch was entered: the web-search provider was attempted.
     expect(createMock).toHaveBeenCalled();
-    // A forced search that exhausts its strategy must NOT regenerate the long
-    // general-knowledge fallback the user just rejected. It returns a retryable
-    // 503 so the client keeps the user's message and the Retry affordance.
-    expect(res.status).toBe(503);
-    expect(res.body.searchRetryable).toBe(true);
-    expect(typeof res.body.error).toBe("string");
-    expect(res.body.error.length).toBeGreaterThan(0);
-    // The general-knowledge fallback must NOT run for a forced retry.
-    expect(createChatCompletionMock).not.toHaveBeenCalled();
-    // No answer was delivered, so the turn's quota is refunded exactly once.
-    expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
+    expectRetryableSearchFailure(res);
   });
 
   it("forced search runs the harder secondary attempt when the provider times out", async () => {
-    // Both forced attempts time out. Because forceSearch enables retryOnTimeout,
-    // the module must run the SECOND (low-effort, shorter-timeout) attempt rather
-    // than bailing on the first timeout the way a normal degrade-fast search does.
     createMock.mockRejectedValue(new APIConnectionTimeoutError({ message: "timed out" }));
-    createChatCompletionMock.mockResolvedValue({
-      choices: [{ message: { content: "Here is some general background." } }],
-    });
 
     const res = await postChat(app, "what is the current bitcoin price", { forceSearch: true });
 
-    // The provider was attempted TWICE (initial + forced secondary), proving the
-    // timeout retry ran — a non-forced search stops after a single timeout.
     expect(createMock).toHaveBeenCalledTimes(2);
-    // Forced search that still fails returns the retryable 503, never the fallback.
-    expect(res.status).toBe(503);
-    expect(res.body.searchRetryable).toBe(true);
-    expect(createChatCompletionMock).not.toHaveBeenCalled();
-    expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
+    expectRetryableSearchFailure(res);
   });
 
-  it("returns searchRetryable:false for an evergreen search that degrades", async () => {
-    createChatCompletionMock.mockResolvedValue({
-      choices: [{ message: { content: "The Eiffel Tower was completed in 1889." } }],
-    });
-
+  it("does not answer from general knowledge for evergreen search failures", async () => {
     const res = await postChat(app, "search the web for the history of the eiffel tower");
 
-    expect(res.status).toBe(200);
-    expect(res.body.searchFallback).toBe(true);
-    expect(res.body.reply).toContain(FALLBACK_NOTE_FRAGMENT);
-    // Evergreen background does not need a live-verification retry affordance.
-    expect(res.body.searchRetryable).toBe(false);
-    expect(refundOraQuotaMock).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalled();
+    expectRetryableSearchFailure(res);
   });
 
-  it("refunds the quota and returns a retryable 503 when the fallback answer also fails", async () => {
-    createChatCompletionMock.mockRejectedValue(new Error("all providers down"));
-
-    const res = await postChat(app, "what is the current bitcoin price");
-
-    expect(res.status).toBe(503);
-    expect(res.body.searchRetryable).toBe(true);
-    expect(typeof res.body.error).toBe("string");
-    expect(res.body.error.length).toBeGreaterThan(0);
-    // No answer was delivered, so the turn's quota is refunded exactly once.
-    expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("treats an EMPTY fallback answer as a failure (refund + retryable 503)", async () => {
-    createChatCompletionMock.mockResolvedValue({
-      choices: [{ message: { content: "   " } }],
+  it("rejects a provider answer that has prose but no citations", async () => {
+    createMock.mockResolvedValueOnce({
+      output_text: "Here is an uncited search-looking answer.",
+      output: [],
     });
 
-    const res = await postChat(app, "what is the current bitcoin price");
+    const res = await postChat(app, "search the web for the latest Ora product news");
 
-    expect(res.status).toBe(503);
-    expect(res.body.searchRetryable).toBe(true);
-    expect(refundOraQuotaMock).toHaveBeenCalledTimes(1);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expectRetryableSearchFailure(res);
   });
 });

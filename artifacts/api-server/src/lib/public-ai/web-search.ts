@@ -75,8 +75,7 @@ export interface OraWebSearchInput {
    * timeout, runs a lighter secondary attempt even after a genuine timeout, and
    * drops the model to low reasoning effort (the default medium effort on gpt-5
    * is the dominant cause of these search timeouts). The route turns a forced
-   * failure into a retryable 503 instead of repeating the general-knowledge
-   * answer the user just rejected.
+   * failure into a retryable 503 instead of an uncited fallback answer.
    */
   forceLive?: boolean;
 }
@@ -130,15 +129,15 @@ function getClient(): OpenAI {
  * web_search call hang this (non-streaming) search request indefinitely. The
  * `web_search` tool does real web fetching plus reasoning, so it legitimately
  * needs several seconds — the previous 5000 ms cap was so aggressive that live
- * search timed out and degraded to a general-knowledge answer far too often.
+ * search timed out and failed instead of returning verified results far too often.
  *
  * The first attempt now gets a generous cap. A single retry is allowed ONLY for
  * fast-failing transient errors (connection resets, 5xx, etc.); a genuine
  * timeout is NOT retried, because a call that could not finish within
  * ORA_SEARCH_TIMEOUT_MS almost never finishes in the shorter retry window and
- * would only add latency before the route degrades. Worst case for the timeout
- * path ≈ 12000 ms; worst case for a transient-error path ≈ 12000 + 250 + 8000 =
- * 20250 ms before the route degrades to a general-knowledge answer.
+ * would only add latency before the route returns a retryable failure. Worst
+ * case for the timeout path ≈ 12000 ms; worst case for a transient-error path ≈
+ * 12000 + 250 + 8000 = 20250 ms before the route fails cleanly.
  */
 export const ORA_SEARCH_TIMEOUT_MS = 12_000;
 export const ORA_SEARCH_RETRY_TIMEOUT_MS = 8_000;
@@ -159,11 +158,9 @@ export const ORA_SEARCH_FORCE_RETRY_TIMEOUT_MS = 12_000;
 export type OraWebSearchFailureReason = "timeout" | "connection" | "http_status" | "error";
 
 /**
- * Thrown when the live web-search provider call fails or times out on every
- * attempt, so the route can distinguish a provider failure (degrade to a
- * general-knowledge answer) from an empty answer. Carries structured metadata so
- * the route can emit one triage log (attempt count, latency, why it failed)
- * without re-deriving it.
+ * Thrown when the live web-search provider fails, times out, or returns an
+ * ungrounded response. Carries structured metadata so the route can emit one
+ * triage log (attempt count, latency, why it failed) without re-deriving it.
  */
 export class OraWebSearchError extends Error {
   readonly attemptCount: number;
@@ -243,7 +240,7 @@ async function createSearchResponse(
       lastErr = err;
       // Normal (degrade-fast) path: a real timeout is not worth retrying — the
       // shorter retry window would almost certainly time out again and only add
-      // latency before the route degrades. A forced "Retry live search" flips
+      // latency before the route fails cleanly. A forced "Retry live search" flips
       // retryOnTimeout ON: the next attempt is a lighter, low-effort call that
       // can realistically finish where the heavy first attempt stalled.
       if (err instanceof APIConnectionTimeoutError && !retryOnTimeout) break;
@@ -1008,8 +1005,8 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   // Shared request shape. The default search model is gpt-4o-mini: in live
   // benchmarks it returns grounded results in ~4-9s, comfortably under the
   // timeout caps, whereas gpt-5-mini at low effort spiked past the 12s normal
-  // cap on a meaningful fraction of calls — degrading live search to a
-  // general-knowledge answer (the "search doesn't work" symptom). Only reasoning
+  // cap on a meaningful fraction of calls — making live search fail instead of
+  // returning verified results (the "search doesn't work" symptom). Only reasoning
   // models (gpt-5 / o-series) accept `reasoning.effort`; non-reasoning models
   // like gpt-4o-mini reject it with a hard 400, so the param is gated on model
   // support and applied on BOTH the normal and forced paths when supported.
@@ -1083,6 +1080,22 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   // unverified, often-dead links.
   const prose = extractProseVideos(parsed.text);
   const reply = prose.text;
+  if (!reply) {
+    throw new OraWebSearchError("Web search returned an empty answer", {
+      attemptCount,
+      failureReason: "error",
+      latencyMs: searchLatencyMs,
+      searchProvider: "openai-web-search",
+    });
+  }
+  if (sources.length === 0) {
+    throw new OraWebSearchError("Web search returned an answer without citations", {
+      attemptCount,
+      failureReason: "error",
+      latencyMs: searchLatencyMs,
+      searchProvider: "openai-web-search",
+    });
+  }
   // The combined videos array is the model's own recollection, not grounded by
   // the search tool, so confirm each one is a real, embeddable video before
   // surfacing it. Anything unverifiable (hallucinated/dead YouTube IDs) is
@@ -1116,8 +1129,5 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     "Ora web search completed",
   );
 
-  if (!reply) {
-    throw new Error("Web search returned an empty answer");
-  }
   return { reply, sources, images, videos };
 }

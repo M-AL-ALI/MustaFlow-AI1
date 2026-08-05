@@ -151,26 +151,6 @@ async function refundOraQuotaFor(
 
 const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Be careful and substantive, but do not be verbose by default. Answer first with the clearest recommendation or conclusion, then add the reasoning, trade-offs, edge cases, sequencing, and verification steps only as much as the task warrants. Prefer concrete specifics (data models, flows, calculations, risks, next actions) over generalities. Keep length proportional to complexity: simple comparisons should be compact, medium planning answers should be structured but not padded, and only genuinely complex analysis should be long. Treat the token budget as a ceiling, not a target. Stop when the useful answer is complete.`;
 
-/**
- * Prepended to a reply when live web search failed and we answered from the
- * model's own knowledge instead of a dead error banner. Honest about the
- * degradation — never claims the answer is verified or 100% accurate.
- */
-const SEARCH_FALLBACK_NOTE =
-  "I couldn't verify live web results right now, so I'm answering from general knowledge.\n\n";
-
-/**
- * Freshness-critical variant of the fallback note, used when the query needed
- * CURRENT information (news, "today", "latest", live prices). In that case a
- * general-knowledge answer must NOT be presented as today's verified headlines,
- * so this note is explicit that the latest could not be confirmed and points the
- * user at the Retry affordance to run a live search again. Any background that
- * follows is framed as possibly out of date. Kept clutter-free per the product
- * copy rule: no markdown, no bold.
- */
-const SEARCH_FALLBACK_NOTE_FRESH =
-  "I couldn't verify live results right now, so I can't confirm the latest. Tap Retry live search below to try again. Here's some general background in the meantime, which may be out of date:\n\n";
-
 // ── Saved-memory retrieval (relevance-ranked) ────────────────────────────────
 
 /**
@@ -1028,7 +1008,7 @@ const bodySchema = z.object({
   streamFallbackToken: z.string().optional(),
   /**
    * Set to true when the user explicitly taps "Retry live search" after a
-   * search degraded to a general-knowledge fallback. Pins this turn to the live
+   * verified live-search attempt failed. Pins this turn to the live
    * web-search tool instead of re-classifying the message (which might route it
    * to a plain conversational answer), so a retry always attempts a fresh LIVE
    * search. Auth/plan gating still applies, so anonymous callers are still
@@ -2119,16 +2099,10 @@ router.post("/public-ai/chat", async (req, res) => {
         serverDiag: routeDiag,
       });
     } catch (err) {
-      // Graceful degradation (Deep-mode QA blocker): a live web-search failure or
-      // timeout must NOT leave the user with a dead "Web search failed" banner.
-      // Answer from the model's own knowledge with an honest caveat, and tell the
-      // client whether a live-verification retry is worthwhile (freshness-critical
-      // queries) so it can surface a working Retry affordance. The quota already
-      // consumed for this turn stays consumed because an answer is delivered; it
-      // is refunded ONLY if the fallback answer itself also fails.
-      // Structured triage metadata: the search module attaches attempt count,
-      // latency, and a coarse failure reason to OraWebSearchError. Log it once so
-      // forced vs. normal search failures are distinguishable in production.
+      // Verified-or-fail contract: live search must return a grounded answer with
+      // citations, or no answer at all. Never degrade into uncited speculative
+      // bullets, because users chose/search-triggered this path for freshness and
+      // verification. The consumed turn is refunded since no answer is delivered.
       const searchErrMeta =
         err instanceof webSearchModule.OraWebSearchError
           ? {
@@ -2138,125 +2112,17 @@ router.post("/public-ai/chat", async (req, res) => {
               searchProvider: err.searchProvider,
             }
           : {};
-      // FORCED-RETRY CONTRACT: when the user explicitly tapped "Retry live
-      // search", we already ran the harder forced strategy and it still failed.
-      // Regenerating the long general-knowledge fallback here would just repeat
-      // the exact answer they rejected. Instead, refund the quota (no answer
-      // delivered) and return a retryable 503 so the client keeps the user's
-      // message and the Retry affordance. This is the FIRST branch of the catch
-      // so it runs BEFORE (and instead of) the general-knowledge fallback, which
-      // guarantees exactly one refund and never calls createChatCompletion.
-      if (forceSearch) {
-        await refundOraQuotaFor(authed, quotaKind);
-        logger.warn(
-          { component: "ora-chat-search", forceSearch: true, ...searchErrMeta, err },
-          "Ora forced live search failed — returning retryable 503 (no general-knowledge fallback)",
-        );
-        res.status(503).json({
-          error:
-            "Live search is temporarily unavailable. I could not verify current results. Please try again in a moment — your message is still here.",
-          searchRetryable: true,
-          activity: [oraActivityStep("web-search", "fail")],
-        });
-        return;
-      }
-      // Graceful degradation for a NON-forced search failure: answer from the
-      // model's own knowledge with an honest caveat instead of a dead banner.
+      await refundOraQuotaFor(authed, quotaKind);
       logger.warn(
-        { component: "ora-chat-search", ...searchErrMeta, err },
-        "Ora web search failed — degrading to a general-knowledge answer",
+        { component: "ora-chat-search", forceSearch, ...searchErrMeta, err },
+        "Ora live search failed - returning retryable 503 without uncited fallback",
       );
-      try {
-        const fallbackDeep = mode === "deep" && !!authed?.isPaid;
-        const fallbackRouteTier: OraRouteTier = fallbackDeep ? "deep" : "premium";
-        const fallbackModel = openAiModelForOraRoute(fallbackRouteTier, planTier);
-        const fallbackSystemPrompt =
-          buildSystemPrompt(language, languageHint, !!authed, parsed.data.timeZone) +
-          (fallbackDeep ? DEEP_SYSTEM_ADDENDUM : "") +
-          searchPersonalContext +
-          buildFileContextAddendum(carriedDocs, documentRefs);
-        const fallbackMessages = [
-          { role: "system" as const, content: fallbackSystemPrompt },
-          ...history,
-          ...(carriedDocs ? [{ role: "user" as const, content: carriedDocs }] : []),
-          { role: "user" as const, content: message },
-        ];
-        const { createChatCompletion } = await import("../../lib/ai-providers");
-        const { available, openCircuits } = getOraProviderRoutingSnapshot();
-        const fallbackCandidates: ModelCandidate[] = selectOraModelRoute({
-          tier: fallbackRouteTier,
-          subscriptionTier: planTier,
-          topic: classifierResult.topic,
-          intent: classifierResult.intent,
-          confidence: classifierResult.confidence,
-          multilingual:
-            isNonEnglishLanguage(language) ||
-            ((!language || language === "auto") && isNonEnglishLanguage(languageHint)),
-          hasDocumentContext: carriedDocs.trim().length > 0,
-          available,
-          openCircuits,
-          openaiModel: fallbackModel,
-        });
-        const chain = await runCandidateChain(fallbackCandidates, async (candidate) => {
-          const completion = await createChatCompletion({
-            provider: candidate.provider,
-            model: candidate.model,
-            messages: fallbackMessages,
-            response_format: { type: "text" },
-            max_completion_tokens: fallbackDeep ? 1400 : 900,
-            disableThinking: true,
-          });
-          // Fall through to the next provider on a blank completion instead of
-          // failing the whole search-fallback with an empty answer.
-          assertNonEmptyCompletion(completion);
-          return completion;
-        });
-        const fallbackReply = chain.result.choices[0]?.message?.content?.trim() ?? "";
-        if (!fallbackReply) {
-          // Preserve the original search failure as the cause so both the search
-          // error and the empty-fallback condition are visible when debugging.
-          throw new Error("Ora search-fallback answer was empty", { cause: err });
-        }
-        // Freshness-critical prompts (e.g. "latest price", "today's news") are the
-        // ones where a general-knowledge answer may be stale, so those get a
-        // "retry live search" affordance; evergreen questions do not need one.
-        const searchRetryable =
-          webSearchModule.inferOraSearchPlan({ query: message }).freshness === "current";
-        // Freshness-critical prompts must never present general knowledge as
-        // today's verified headlines, so those get the explicit "couldn't
-        // confirm the latest, tap Retry" note; evergreen questions keep the
-        // generic note.
-        const fallbackNote = searchRetryable ? SEARCH_FALLBACK_NOTE_FRESH : SEARCH_FALLBACK_NOTE;
-        const { token, payload } = chargeSession(session, streamFallbackToken);
-        setSessionCookie(res, token);
-        const usage = await oraUsageResponse(authed, payload.msgCount);
-        res.json({
-          reply: fallbackNote + fallbackReply,
-          searchFallback: true,
-          searchRetryable,
-          ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
-          // Honest "tried and failed" trace step: live search failed and this
-          // answer came from the model's own knowledge instead.
-          activity: [oraActivityStep("web-search", "fail")],
-          ...usage,
-          serverDiag: routeDiag,
-        });
-      } catch (fallbackErr) {
-        // Both the live search AND the general-knowledge fallback failed. Refund
-        // the quota (no answer delivered) and return a friendly, retryable error
-        // instead of a dead banner — the client keeps the message and offers Retry.
-        await refundOraQuotaFor(authed, quotaKind);
-        logger.error(
-          { component: "ora-chat-search", err: fallbackErr },
-          "Ora web search fallback answer also failed",
-        );
-        res.status(503).json({
-          error:
-            "I couldn't reach live web results just now. Please try again in a moment — your message is still here.",
-          searchRetryable: true,
-          activity: [oraActivityStep("web-search", "fail")],
-        });
-      }
+      res.status(503).json({
+        error:
+          "I couldn't reach verified live web results just now. Please try again in a moment - your message is still here.",
+        searchRetryable: true,
+        activity: [oraActivityStep("web-search", "fail")],
+      });
     }
     return;
   }

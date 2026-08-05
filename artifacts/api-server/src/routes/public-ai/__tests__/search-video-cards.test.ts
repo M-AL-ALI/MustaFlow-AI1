@@ -130,12 +130,35 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 async function buildApp() {
   process.env.ORA_SESSION_SECRET = TEST_SECRET;
   process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-key";
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL ?? "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
   const router = (await import("../chat")).default;
   app.use(router);
   return app;
+}
+
+function outputWithCitation(): unknown[] {
+  return [
+    {
+      type: "message",
+      content: [
+        {
+          type: "output_text",
+          text: "answer body",
+          annotations: [
+            {
+              type: "url_citation",
+              url: "https://example.com/search-source",
+              title: "Search Source",
+            },
+          ],
+        },
+      ],
+    },
+  ];
 }
 
 describe("POST /public-ai/chat — video cards via live web search (mocked provider)", () => {
@@ -162,7 +185,7 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
           ],
         }) +
         "\n```",
-      output: [],
+      output: outputWithCitation(),
     });
 
     const { token } = makeSession();
@@ -211,7 +234,7 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
           ],
         }) +
         "\n```",
-      output: [],
+      output: outputWithCitation(),
     });
 
     const { token } = makeSession();
@@ -236,7 +259,7 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
         "\n\n```ora-media\n" +
         JSON.stringify({ images: [], videos: [] }) +
         "\n```",
-      output: [],
+      output: outputWithCitation(),
     });
 
     const { token } = makeSession();
@@ -274,7 +297,7 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
           ],
         }) +
         "\n```",
-      output: [],
+      output: outputWithCitation(),
     });
 
     const { token } = makeSession();

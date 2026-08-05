@@ -1821,10 +1821,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       className={cn(
                         "leading-relaxed whitespace-pre-wrap break-words",
                         isFull ? "text-[15px] text-foreground/90" : "text-sm text-foreground/85",
+                        msg.error && "text-destructive",
                       )}
                     >
-                      <OraRichText text={msg.content} isStreaming={msg.isStreaming} />
-                      {import.meta.env.DEV && msg.viaFallback && !msg.isStreaming && (
+                      {msg.error ? (
+                        <span>{msg.content}</span>
+                      ) : (
+                        <OraRichText text={msg.content} isStreaming={msg.isStreaming} />
+                      )}
+                      {import.meta.env.DEV && msg.viaFallback && !msg.isStreaming && !msg.error && (
                         <span
                           title="This response used the non-streaming fallback path (realProviderStreaming=false or /chat fallback)"
                           className="mt-1 inline-block select-none rounded px-1 py-px text-[10px] font-mono leading-none text-muted-foreground/50 border border-muted-foreground/20"

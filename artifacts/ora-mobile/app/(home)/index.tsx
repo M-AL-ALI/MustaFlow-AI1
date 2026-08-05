@@ -1490,9 +1490,8 @@ export default function OraChatScreen() {
             // tool. Search is a non-streaming specialist branch that the stream
             // route only bounces back with a streamingFallback signal, so skip
             // streaming and POST straight to /chat with forceSearch:true. If the
-            // forced search still fails the server returns a retryable 503 (handled
-            // in catch) instead of repeating the general-knowledge fallback the
-            // user just rejected.
+            // forced search still fails the server returns a retryable 503 handled
+            // by the inline error bubble below.
             pushActivity(oraActivityStep("web-search", "start"));
             const res = await sendChat(chatReq);
             if (!isTurnCurrent()) return;
@@ -1671,9 +1670,9 @@ export default function OraChatScreen() {
         // recovery; this guard ensures the raw server wording can never render
         // even from an unwrapped path.
         const msg = friendlyOraSendErrorMessage(err, "Something went wrong. Try again.");
-        // A forced "Retry live search" that still failed returns a retryable 503
-        // with searchRetryable in the body. Keep the user's message and re-surface
-        // the Retry affordance on the error bubble instead of a dead banner.
+        // A failed live search returns a retryable 503 with searchRetryable in
+        // the body. Keep the user's message and re-surface the Retry affordance
+        // on the error bubble instead of a dead banner.
         const searchRetryable =
           err instanceof ApiRequestError &&
           typeof err.body === "object" &&

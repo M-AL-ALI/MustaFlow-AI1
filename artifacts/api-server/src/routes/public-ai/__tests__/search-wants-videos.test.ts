@@ -26,7 +26,27 @@ import {
 } from "../../../lib/public-ai/web-search";
 
 function mockResponse(text: string) {
-  createMock.mockResolvedValueOnce({ output_text: text, output: [] });
+  createMock.mockResolvedValueOnce({
+    output_text: text,
+    output: [
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text,
+            annotations: [
+              {
+                type: "url_citation",
+                url: "https://example.com/search-source",
+                title: "Search Source",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
 }
 
 const SEARCH_ENV_NAMES = [

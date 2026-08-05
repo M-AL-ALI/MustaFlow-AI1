@@ -139,6 +139,8 @@ export interface OraMessage {
   images?: OraImage[];
   /** Relevant videos found on the web, rendered as clickable link cards. */
   videos?: OraVideo[];
+  /** True when this assistant row represents a recoverable request failure. */
+  error?: boolean;
   /** Saved Ora memories that shaped this reply (Ora-scoped only). */
   memoriesUsed?: OraMemoryUsed[];
   /**
@@ -166,15 +168,14 @@ export interface OraMessage {
    */
   viaFallback?: boolean;
   /**
-   * True when this assistant reply is a general-knowledge fallback delivered
-   * because live web search failed or timed out. The honest caveat is already
-   * prepended to `content` by the backend.
+   * Legacy flag from older transcripts where live web search failed but Ora
+   * returned a general-knowledge answer. New search failures render an inline
+   * retryable error bubble instead of an uncited fallback answer.
    */
   searchFallback?: boolean;
   /**
-   * True when the failed search was freshness-critical (e.g. "latest price"),
-   * so a "Retry live search" affordance is worth offering. Evergreen questions
-   * answerable from general knowledge leave this false.
+   * True when a live-search reply/error can be retried with the search tool
+   * pinned instead of re-classifying the message.
    */
   searchRetryable?: boolean;
   /**
@@ -834,7 +835,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.fileAgentPreview ? { fileAgentPreview: m.fileAgentPreview } : {}),
     // Persist the rolling summary so it can be re-sent after a reload
     ...(m.conversationSummary ? { conversationSummary: m.conversationSummary } : {}),
-    // Persist the search-fallback flags so the caveat/Retry state survives reload
+    // Persist legacy search-fallback/retry flags so older transcripts survive reload
     ...(m.searchFallback ? { searchFallback: true } : {}),
     ...(m.searchRetryable ? { searchRetryable: true } : {}),
     // Persist the clarifying-question flags so the state survives reload
@@ -2493,15 +2494,30 @@ export function useOraChat(): UseOraChatReturn {
               : "The attached file has expired. Please upload it again.",
           );
         } else if (status === 503 && (err as { searchRetryable?: boolean }).searchRetryable) {
-          // Rare double failure: live web search AND the general-knowledge
-          // fallback both failed. Keep the user's message in the thread so Retry
-          // can replay this exact turn, and show an honest, recoverable message
-          // instead of a dead banner. Return before the slice below so the user
-          // message is preserved (mirrors the mobile inline-error behavior).
-          setError(
+          // Live search must either return verified, cited results or fail
+          // visibly. Keep the user's turn in the thread and append an inline
+          // assistant error bubble so Retry live search can replay the same ask.
+          const retryableMessage =
             msg ??
-              "I couldn't reach live web results just now. Please try again in a moment — your message is still here.",
-          );
+            "I couldn't reach verified live web results just now. Please try again in a moment - your message is still here.";
+          setError(null);
+          setTurnMessages((prev) => {
+            const trimmed =
+              prev.at(-1)?.role === "assistant" && prev.at(-1)?.isStreaming
+                ? prev.slice(0, -1)
+                : prev;
+            const next: OraMessage[] = [
+              ...trimmed,
+              {
+                role: "assistant",
+                content: retryableMessage,
+                error: true,
+                searchRetryable: true,
+              },
+            ];
+            storeTranscript(next);
+            return next;
+          });
           return;
         } else {
           setError(msg ?? "Something went wrong. Please try again.");
@@ -3055,20 +3071,19 @@ export function useOraChat(): UseOraChatReturn {
     if (lastUserIdx === -1) return;
     const lastUserMsg = messages[lastUserIdx];
     if (!lastUserMsg?.content.trim()) return;
-    // When the previous answer degraded to a general-knowledge search fallback,
-    // this retry must re-run a LIVE search — not re-route the message (which
-    // could land on a plain conversational answer). Force the search tool so
-    // "Retry live search" always means exactly that.
+    // When the previous search result/error is retryable, re-run a LIVE search
+    // instead of re-routing the message (which could land on a plain
+    // conversational answer). Force the search tool so "Retry live search"
+    // always means exactly that.
     //
-    // Two shapes qualify: (a) the trailing message is the degraded assistant
-    // answer flagged searchFallback; (b) after a forced-search 503 double
-    // failure the outer catch preserves the user's turn (returns before the
-    // slice), so the trailing message IS the user turn. That is the only path
-    // that leaves a trailing user message with a recoverable error, so treat it
-    // as forced too — otherwise the post-503 retry re-degrades to the fallback.
+    // Two shapes qualify: (a) the trailing assistant message carries the
+    // retryable search flag; (b) older retryable failures preserved the user's
+    // turn as the trailing message.
     const lastMsg = messages[messages.length - 1];
     const forceSearch =
-      (lastMsg?.role === "assistant" && !!lastMsg.searchFallback) || lastMsg?.role === "user";
+      (lastMsg?.role === "assistant" &&
+        (lastMsg.searchRetryable === true || lastMsg.searchFallback === true)) ||
+      lastMsg?.role === "user";
     setError(null);
     await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx, forceSearch });
   }, [messages, isLoading, sendMessage]);

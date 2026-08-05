@@ -424,8 +424,8 @@ describe("Ora mobile parity — Retry live search (forceSearch)", () => {
   });
 
   it("the error branch renders a Retry live search affordance for retryable failures", () => {
-    // Both the success-fallback (searchFallback) and the forced-503 error bubble
-    // must expose Retry. The error branch specifically guards on message.error.
+    // Retryable search failures render an inline error bubble that keeps the
+    // search-pinned Retry affordance visible.
     expect(index).toContain("message.searchRetryable && isLatest && (");
     expect(index).toContain('accessibilityLabel="Retry live search"');
   });
