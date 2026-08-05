@@ -364,6 +364,14 @@ describe("Ora mobile parity — project conversation sync", () => {
     expect(index).toContain("createConversation(title, activeProjectIdRef.current)");
   });
 
+  it("new chat resets retire stale async work before old replies can append", () => {
+    expect(index).toContain("const threadResetGenRef = useRef(0)");
+    expect(index).toContain("threadResetGenRef.current += 1");
+    expect(index).toContain("setMessagesForGeneration(turnGeneration");
+    expect(index).toContain("if (!isTurnCurrent()) return;");
+    expect(index).toContain("listRef.current?.scrollToOffset({ offset: 0, animated: false })");
+  });
+
   it("project list and conversation list APIs are called on mount", () => {
     expect(api).toContain("export async function listProjects(");
     expect(api).toContain("export async function listConversations(");

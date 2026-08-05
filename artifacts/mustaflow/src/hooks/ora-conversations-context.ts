@@ -41,6 +41,12 @@ export interface OraConversationsContextValue {
   conversations: OraConversationSummary[];
   currentConversationId: number | null;
   /**
+   * Monotonic client-only reset signal. `currentConversationId` is not enough
+   * because repeated "New conversation" actions can be null -> null while a
+   * draft transcript is still visible.
+   */
+  newConversationTick: number;
+  /**
    * The project the user is currently inside, derived from the
    * `/ora/projects/:projectId` route (the single source of truth). `null` on
    * the standalone `/ora` view.

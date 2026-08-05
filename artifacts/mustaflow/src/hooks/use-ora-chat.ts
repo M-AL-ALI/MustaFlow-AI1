@@ -1281,6 +1281,59 @@ export function useOraChat(): UseOraChatReturn {
   // in-memory only — recomputed once after a reload from the persisted turns.
   const conversationSummaryRef = useRef<string>("");
   const summarizedUpToRef = useRef<number>(0);
+  // Every explicit new-chat / conversation switch retires the async work that
+  // belonged to the previous thread. Late responses then become no-ops instead
+  // of repainting the new blank chat or saving into the wrong conversation.
+  const conversationResetGenRef = useRef(0);
+
+  const setMessagesForGeneration = useCallback(
+    (generation: number, updater: (prev: OraMessage[]) => OraMessage[]) => {
+      if (conversationResetGenRef.current !== generation) return;
+      setMessages((prev) =>
+        conversationResetGenRef.current === generation ? updater(prev) : prev,
+      );
+    },
+    [],
+  );
+
+  const retireThreadWork = useCallback(() => {
+    conversationResetGenRef.current += 1;
+    editGenRef.current += 1;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setIsLoading(false);
+    setPendingImageAnalysis(false);
+    setStreamStatus(null);
+    clearActivity();
+  }, [clearActivity]);
+
+  const resetVisibleThread = useCallback(
+    (clearStandaloneStores: boolean) => {
+      retireThreadWork();
+      loadedConvRef.current = null;
+      documentRefsRef.current = [];
+      pendingClarificationRef.current = null;
+      conversationSummaryRef.current = "";
+      summarizedUpToRef.current = 0;
+      for (const u of objectUrlsRef.current) URL.revokeObjectURL(u);
+      objectUrlsRef.current = [];
+      if (clearStandaloneStores) {
+        storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
+        storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
+      }
+      setMessages([]);
+      setError(null);
+      setSessionExpired(false);
+      setAttachedFile(null);
+      setUploadState("idle");
+      setUploadError(null);
+    },
+    [retireThreadWork],
+  );
 
   const setLanguage = useCallback((lang: string) => {
     setLanguageState(lang);
@@ -1548,25 +1601,16 @@ export function useOraChat(): UseOraChatReturn {
     // long-term content can't leak into an incognito turn (it would otherwise be
     // re-sent as `body.messages`).
     if (temporaryRef.current) {
-      loadedConvRef.current = null;
-      documentRefsRef.current = [];
-      pendingClarificationRef.current = null;
-      conversationSummaryRef.current = "";
-      summarizedUpToRef.current = 0;
-      setMessages([]);
+      resetVisibleThread(false);
       return;
     }
     const id = conv.currentConversationId;
     if (id == null) {
-      loadedConvRef.current = null;
-      documentRefsRef.current = [];
-      pendingClarificationRef.current = null;
-      conversationSummaryRef.current = "";
-      summarizedUpToRef.current = 0;
-      setMessages([]);
+      resetVisibleThread(true);
       return;
     }
     if (id === loadedConvRef.current) return;
+    retireThreadWork();
     loadedConvRef.current = id;
     // Switching conversations: the prior conversation's upload refs and rolling
     // summary no longer apply (they belong to a different transcript). Restore
@@ -1576,6 +1620,7 @@ export function useOraChat(): UseOraChatReturn {
     pendingClarificationRef.current = getStoredPendingClarification(docRefsKey(id));
     conversationSummaryRef.current = "";
     summarizedUpToRef.current = 0;
+    setMessages([]);
     // Snapshot the edit generation before fetching. If the user types/sends a
     // message while this GET is in flight, editGenRef advances and we discard the
     // (now stale) server payload rather than overwriting the unsaved local edit.
@@ -1597,7 +1642,13 @@ export function useOraChat(): UseOraChatReturn {
     return () => {
       cancelled = true;
     };
-  }, [conv, conv?.currentConversationId]);
+  }, [
+    conv,
+    conv?.currentConversationId,
+    conv?.newConversationTick,
+    resetVisibleThread,
+    retireThreadWork,
+  ]);
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -1799,6 +1850,10 @@ export function useOraChat(): UseOraChatReturn {
       const currentAttachment = attachedFile;
       const baseMessages =
         opts?.truncateTo !== undefined ? messages.slice(0, opts.truncateTo) : messages;
+      const turnGeneration = conversationResetGenRef.current;
+      const isTurnCurrent = () => conversationResetGenRef.current === turnGeneration;
+      const setTurnMessages = (updater: (prev: OraMessage[]) => OraMessage[]) =>
+        setMessagesForGeneration(turnGeneration, updater);
 
       const userMsg: OraMessage = {
         role: "user",
@@ -1816,7 +1871,7 @@ export function useOraChat(): UseOraChatReturn {
           : {}),
         ...(opts?.editedFrom ? { editedFrom: true } : {}),
       };
-      setMessages(() => {
+      setTurnMessages(() => {
         const next = [...baseMessages, userMsg];
         storeTranscript(next);
         if (isSignedIn) saveToServer(next);
@@ -1879,9 +1934,10 @@ export function useOraChat(): UseOraChatReturn {
               imageAnalysisCount: number;
               imageAnalysisLimit: number;
             }>("/api/public-ai/image-analysis", body);
+            if (!isTurnCurrent()) return;
             pushActivity(oraActivityStep("file-reading", "ok"));
 
-            setMessages((prev) => {
+            setTurnMessages((prev) => {
               const next = [
                 ...prev,
                 {
@@ -1921,9 +1977,10 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/dataset-analysis", body);
+            if (!isTurnCurrent()) return;
             pushActivity(oraActivityStep("dataset-analysis", "ok"));
 
-            setMessages((prev) => {
+            setTurnMessages((prev) => {
               const next = [
                 ...prev,
                 {
@@ -1958,9 +2015,10 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/file-analysis", body);
+            if (!isTurnCurrent()) return;
             pushActivity(oraActivityStep("file-reading", "ok"));
 
-            setMessages((prev) => {
+            setTurnMessages((prev) => {
               const next = [
                 ...prev,
                 {
@@ -2162,6 +2220,7 @@ export function useOraChat(): UseOraChatReturn {
             // forceSearch:true.
             pushActivity(oraActivityStep("web-search", "start"));
             data = await apiPost<ChatResponseData>("/api/public-ai/chat", body);
+            if (!isTurnCurrent()) return;
             applyServerActivity(data);
             setLastOraStreamDiagnostics(
               mapOraStreamDiagnostics({
@@ -2176,7 +2235,7 @@ export function useOraChat(): UseOraChatReturn {
           } else {
             try {
               // Optimistically add a streaming placeholder that updates in real time.
-              setMessages((prev) => [
+              setTurnMessages((prev) => [
                 ...prev,
                 { role: "assistant" as const, content: "", isStreaming: true },
               ]);
@@ -2189,6 +2248,7 @@ export function useOraChat(): UseOraChatReturn {
                 BASE,
                 body,
                 (delta) => {
+                  if (!isTurnCurrent()) return;
                   if (!sawFirstToken) {
                     sawFirstToken = true;
                     clearActivity();
@@ -2201,7 +2261,7 @@ export function useOraChat(): UseOraChatReturn {
                   // them all into a single render — the entire response appears at
                   // once instead of word-by-word.
                   flushSync(() => {
-                    setMessages((prev) => {
+                    setTurnMessages((prev) => {
                       const last = prev[prev.length - 1];
                       if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
                       return [
@@ -2215,12 +2275,15 @@ export function useOraChat(): UseOraChatReturn {
                   });
                 },
                 streamAbort.signal,
-                (statusText) => setStreamStatus(statusText),
+                (statusText) => {
+                  if (isTurnCurrent()) setStreamStatus(statusText);
+                },
                 (step) => {
-                  if (!sawFirstToken) pushActivity(step);
+                  if (isTurnCurrent() && !sawFirstToken) pushActivity(step);
                 },
               );
 
+              if (!isTurnCurrent()) return;
               isRealStreamingPayload = donePayload.isRealStreaming ?? true;
               data = donePayload as ChatResponseData;
               usedStreaming = true;
@@ -2236,13 +2299,13 @@ export function useOraChat(): UseOraChatReturn {
               if (se.name === "AbortError") {
                 // Mid-stream navigation — abort cleanly, no error shown, and
                 // remove any empty streaming placeholder.
-                setMessages((prev) => {
+                setTurnMessages((prev) => {
                   const last = prev[prev.length - 1];
                   if (last?.role === "assistant" && last.isStreaming && !last.content)
                     return prev.slice(0, -1);
                   return prev;
                 });
-                streamAbortRef.current = null;
+                if (isTurnCurrent()) streamAbortRef.current = null;
                 return;
               }
 
@@ -2251,20 +2314,24 @@ export function useOraChat(): UseOraChatReturn {
                 // emitted. Preserve the partial reply (mark it done) rather than
                 // silently discarding it. Do NOT re-throw — the outer catch would
                 // remove the user message too, leaving the thread with no trace.
-                setMessages((prev) => {
+                setTurnMessages((prev) => {
                   const last = prev[prev.length - 1];
                   if (last?.role === "assistant" && last.isStreaming) {
                     return [...prev.slice(0, -1), { ...last, isStreaming: false }];
                   }
                   return prev;
                 });
-                setError("Ora's response was cut off. The partial reply above may be incomplete.");
-                streamAbortRef.current = null;
+                if (isTurnCurrent()) {
+                  setError(
+                    "Ora's response was cut off. The partial reply above may be incomplete.",
+                  );
+                  streamAbortRef.current = null;
+                }
                 return; // Do not fall through to the outer catch
               }
 
               // Remove the empty streaming placeholder before any fallback/rethrow.
-              setMessages((prev) => {
+              setTurnMessages((prev) => {
                 const last = prev[prev.length - 1];
                 if (last?.role === "assistant" && last.isStreaming) return prev.slice(0, -1);
                 return prev;
@@ -2273,7 +2340,7 @@ export function useOraChat(): UseOraChatReturn {
               if (!se.streamingFallback) {
                 // Real error (429, 401, network, etc.) — rethrow for the outer
                 // catch block to surface the right message.
-                streamAbortRef.current = null;
+                if (isTurnCurrent()) streamAbortRef.current = null;
                 throw streamErr;
               }
 
@@ -2286,6 +2353,7 @@ export function useOraChat(): UseOraChatReturn {
                 ...body,
                 ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),
               });
+              if (!isTurnCurrent()) return;
               applyServerActivity(data);
               setLastOraStreamDiagnostics(
                 mapOraStreamDiagnostics({
@@ -2300,7 +2368,8 @@ export function useOraChat(): UseOraChatReturn {
             }
           }
 
-          streamAbortRef.current = null;
+          if (isTurnCurrent()) streamAbortRef.current = null;
+          if (!isTurnCurrent()) return;
 
           // One-shot pending-clarification bookkeeping: a clarifying reply arms
           // the NEXT turn with its round-tripped task context; any other reply
@@ -2336,7 +2405,7 @@ export function useOraChat(): UseOraChatReturn {
 
           if (usedStreaming) {
             // Patch the streaming placeholder with final metadata from the done event.
-            setMessages((prev) => {
+            setTurnMessages((prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
               const finalMsg: OraMessage = {
@@ -2350,7 +2419,7 @@ export function useOraChat(): UseOraChatReturn {
               return next;
             });
           } else {
-            setMessages((prev) => {
+            setTurnMessages((prev) => {
               const next = [
                 ...prev,
                 { ...buildAssistantMsg(data), ...(viaFallback ? { viaFallback: true } : {}) },
@@ -2360,13 +2429,14 @@ export function useOraChat(): UseOraChatReturn {
               return next;
             });
           }
-          setSession((prev) => mergeUsage(prev, data));
+          if (isTurnCurrent()) setSession((prev) => mergeUsage(prev, data));
         }
       };
 
       try {
         await executeApiCall();
       } catch (err: unknown) {
+        if (!isTurnCurrent()) return;
         // Whatever tool was mid-flight gets its honest "tried and failed" line
         // (invisible once the error banner replaces the loading row, but keeps
         // the trace state truthful for diagnostics and retries).
@@ -2391,6 +2461,7 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/session", {});
+            if (!isTurnCurrent()) return;
             storeSessionId(data.sessionId);
             setSession({
               sessionId: data.sessionId,
@@ -2441,15 +2512,17 @@ export function useOraChat(): UseOraChatReturn {
             setUploadState("attached");
           }
         }
-        setMessages((prev) => {
+        setTurnMessages((prev) => {
           const next = prev.slice(0, -1);
           storeTranscript(next);
           return next;
         });
       } finally {
-        setPendingImageAnalysis(false);
-        setIsLoading(false);
-        setStreamStatus(null);
+        if (isTurnCurrent()) {
+          setPendingImageAnalysis(false);
+          setIsLoading(false);
+          setStreamStatus(null);
+        }
       }
     },
     [
@@ -2463,6 +2536,7 @@ export function useOraChat(): UseOraChatReturn {
       pushActivity,
       clearActivity,
       failInFlightActivity,
+      setMessagesForGeneration,
     ],
   );
 
@@ -2476,7 +2550,11 @@ export function useOraChat(): UseOraChatReturn {
         role: "user",
         content: isRevision ? content : `Create a ${formatLabel} file: ${content}`,
       };
-      setMessages((prev) => {
+      const turnGeneration = conversationResetGenRef.current;
+      const isTurnCurrent = () => conversationResetGenRef.current === turnGeneration;
+      const setToolMessages = (updater: (prev: OraMessage[]) => OraMessage[]) =>
+        setMessagesForGeneration(turnGeneration, updater);
+      setToolMessages((prev) => {
         const next = [...prev, userMsg];
         storeTranscript(next);
         if (isSignedIn) saveToServer(next);
@@ -2535,12 +2613,13 @@ export function useOraChat(): UseOraChatReturn {
           windowHours?: number;
           activity?: OraActivityStep[];
         }>("/api/public-ai/generate-file", body);
+        if (!isTurnCurrent()) return;
 
         for (const raw of data.activity ?? []) {
           const step = parseOraActivityStep(raw);
           if (step) pushActivity(step);
         }
-        setMessages((prev) => {
+        setToolMessages((prev) => {
           const next = [
             ...prev,
             {
@@ -2561,8 +2640,9 @@ export function useOraChat(): UseOraChatReturn {
           if (isSignedIn) saveToServer(next);
           return next;
         });
-        setSession((prev) => mergeUsage(prev, data));
+        if (isTurnCurrent()) setSession((prev) => mergeUsage(prev, data));
       } catch (err: unknown) {
+        if (!isTurnCurrent()) return;
         // Honest terminal step for the in-flight "Generating your file…" line.
         failInFlightActivity();
         const status = (err as { status?: number }).status;
@@ -2580,6 +2660,7 @@ export function useOraChat(): UseOraChatReturn {
               fileCount?: number;
               fileLimit?: number;
             }>("/api/public-ai/session", {});
+            if (!isTurnCurrent()) return;
             storeSessionId(refreshed.sessionId);
             setSession({
               sessionId: refreshed.sessionId,
@@ -2628,7 +2709,8 @@ export function useOraChat(): UseOraChatReturn {
               resetsAt?: string | null;
               windowHours?: number;
             }>("/api/public-ai/generate-file", retryBody);
-            setMessages((prev) => {
+            if (!isTurnCurrent()) return;
+            setToolMessages((prev) => {
               const next = [
                 ...prev,
                 {
@@ -2650,9 +2732,11 @@ export function useOraChat(): UseOraChatReturn {
               if (isSignedIn) saveToServer(next);
               return next;
             });
-            setSession((prev) => mergeUsage(prev, retryData));
-            setIsLoading(false);
-            setStreamStatus(null);
+            if (isTurnCurrent()) {
+              setSession((prev) => mergeUsage(prev, retryData));
+              setIsLoading(false);
+              setStreamStatus(null);
+            }
             return;
           } catch {
             // Retry failed; fall through to error state
@@ -2663,14 +2747,16 @@ export function useOraChat(): UseOraChatReturn {
         } else {
           setError(msg ?? "File generation failed. Please try again.");
         }
-        setMessages((prev) => {
+        setToolMessages((prev) => {
           const next = prev.slice(0, -1);
           storeTranscript(next);
           return next;
         });
       } finally {
-        setIsLoading(false);
-        setStreamStatus(null);
+        if (isTurnCurrent()) {
+          setIsLoading(false);
+          setStreamStatus(null);
+        }
       }
     },
     [
@@ -2683,6 +2769,7 @@ export function useOraChat(): UseOraChatReturn {
       pushActivity,
       clearActivity,
       failInFlightActivity,
+      setMessagesForGeneration,
     ],
   );
 
@@ -2703,7 +2790,11 @@ export function useOraChat(): UseOraChatReturn {
         (m) => m.imageId === sourceImageId,
       )?.imageMeta;
       const userMsg: OraMessage = { role: "user", content: `Edit image: ${trimmed}` };
-      setMessages((prev) => {
+      const turnGeneration = conversationResetGenRef.current;
+      const isTurnCurrent = () => conversationResetGenRef.current === turnGeneration;
+      const setEditMessages = (updater: (prev: OraMessage[]) => OraMessage[]) =>
+        setMessagesForGeneration(turnGeneration, updater);
+      setEditMessages((prev) => {
         const next = [...prev, userMsg];
         storeTranscript(next);
         if (isSignedIn) saveToServer(next);
@@ -2736,12 +2827,15 @@ export function useOraChat(): UseOraChatReturn {
           jobId: string;
           imageId: number;
         };
+        if (!isTurnCurrent()) return;
 
         // Poll the in-process job until it completes (~90s ceiling).
         let fileUrl: string | null = null;
         for (let attempt = 0; attempt < 60; attempt++) {
           await new Promise((r) => setTimeout(r, 1500));
+          if (!isTurnCurrent()) return;
           const statusRes = await safeAuthFetch(`${BASE}/api/images/status/${jobId}`);
+          if (!isTurnCurrent()) return;
           if (!statusRes.ok) continue;
           const s = (await statusRes.json()) as {
             status: string;
@@ -2765,8 +2859,10 @@ export function useOraChat(): UseOraChatReturn {
         // that rendered as a broken image. The /file route resolves the bytes
         // from whichever backend holds them (dev tmpdir or authenticated R2).
         const imgRes = await safeAuthFetch(`${BASE}/api/images/${newImageId}/file`);
+        if (!isTurnCurrent()) return;
         if (!imgRes.ok) throw new Error("Could not load the edited image.");
         const blob = await imgRes.blob();
+        if (!isTurnCurrent()) return;
         if (blob.size === 0) throw new Error("The edited image was empty. Please try again.");
         // Persist as a self-contained data URL (not a session-local object URL)
         // so the edited image renders immediately AND survives a transcript
@@ -2778,8 +2874,9 @@ export function useOraChat(): UseOraChatReturn {
           reader.onerror = () => reject(new Error("Could not read the edited image."));
           reader.readAsDataURL(blob);
         });
+        if (!isTurnCurrent()) return;
 
-        setMessages((prev) => {
+        setEditMessages((prev) => {
           const next = [
             ...prev,
             {
@@ -2796,6 +2893,7 @@ export function useOraChat(): UseOraChatReturn {
           return next;
         });
       } catch (err: unknown) {
+        if (!isTurnCurrent()) return;
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;
         if (status === 402) {
@@ -2808,46 +2906,27 @@ export function useOraChat(): UseOraChatReturn {
           setError(msg ?? "Failed to edit the image. Please try again.");
         }
         // Roll back the optimistic user message so the failed edit doesn't linger.
-        setMessages((prev) => {
+        setEditMessages((prev) => {
           const next = prev.slice(0, -1);
           storeTranscript(next);
           return next;
         });
       } finally {
-        setIsLoading(false);
-        setStreamStatus(null);
+        if (isTurnCurrent()) {
+          setIsLoading(false);
+          setStreamStatus(null);
+        }
       }
     },
-    [isLoading, isSignedIn, saveToServer, currentOraProjectId],
+    [isLoading, isSignedIn, saveToServer, currentOraProjectId, setMessagesForGeneration],
   );
 
   const clearConversation = useCallback(async () => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-
-    // Free any session-local edited-image blob URLs before the transcript that
-    // referenced them is dropped, so they don't leak for the rest of the session.
-    for (const u of objectUrlsRef.current) URL.revokeObjectURL(u);
-    objectUrlsRef.current = [];
-
     // Conversation mode: starting a new chat just resets to a blank conversation
     // (current id → null). The prior conversation stays in the sidebar; nothing
     // is deleted server-side and the rate-limit session is preserved.
     if (convRef.current) {
-      loadedConvRef.current = null;
-      documentRefsRef.current = [];
-      // A new blank chat must not inherit pre-conversation upload refs.
-      storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
-      conversationSummaryRef.current = "";
-      summarizedUpToRef.current = 0;
-      setMessages([]);
-      setError(null);
-      setSessionExpired(false);
-      setAttachedFile(null);
-      setUploadState("idle");
-      setUploadError(null);
+      resetVisibleThread(true);
       convRef.current.newConversation();
       return;
     }
@@ -2855,15 +2934,7 @@ export function useOraChat(): UseOraChatReturn {
     clearStoredTranscript();
     clearStoredSessionId();
     clearAllStoredDocumentRefs();
-    documentRefsRef.current = [];
-    conversationSummaryRef.current = "";
-    summarizedUpToRef.current = 0;
-    setMessages([]);
-    setError(null);
-    setSessionExpired(false);
-    setAttachedFile(null);
-    setUploadState("idle");
-    setUploadError(null);
+    resetVisibleThread(false);
     if (isSignedIn) {
       try {
         await apiDelete("/api/ora/transcript");
@@ -2899,7 +2970,7 @@ export function useOraChat(): UseOraChatReturn {
     } catch {
       /* best-effort */
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, resetVisibleThread]);
 
   const atLimit = (session?.msgCount ?? 0) >= (session?.msgLimit ?? 20);
 
@@ -2966,30 +3037,17 @@ export function useOraChat(): UseOraChatReturn {
   // Toggling temporary mode always resets to a clean slate so an incognito
   // session never mixes with a persisted conversation (and vice-versa). Any
   // pending debounced save is cancelled first.
-  const setTemporary = useCallback((value: boolean) => {
-    setTemporaryState(value);
-    temporaryRef.current = value;
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    editGenRef.current += 1;
-    loadedConvRef.current = null;
-    documentRefsRef.current = [];
-    conversationSummaryRef.current = "";
-    summarizedUpToRef.current = 0;
-    for (const u of objectUrlsRef.current) URL.revokeObjectURL(u);
-    objectUrlsRef.current = [];
-    setMessages([]);
-    setError(null);
-    setSessionExpired(false);
-    setAttachedFile(null);
-    setUploadState("idle");
-    setUploadError(null);
-    if (convRef.current) {
-      convRef.current.newConversation();
-    }
-  }, []);
+  const setTemporary = useCallback(
+    (value: boolean) => {
+      setTemporaryState(value);
+      temporaryRef.current = value;
+      resetVisibleThread(false);
+      if (convRef.current) {
+        convRef.current.newConversation();
+      }
+    },
+    [resetVisibleThread],
+  );
 
   const retryLastMessage = useCallback(async () => {
     if (isLoading) return;
