@@ -85,14 +85,14 @@ export interface OraMessage extends OraMessageData {
    */
   viaFallback?: boolean;
   /**
-   * True when this reply is a general-knowledge fallback because live web
-   * search failed/timed out. The honest caveat is already prepended to the
-   * content by the backend.
+   * Legacy flag from older transcripts where live web search failed but Ora
+   * returned a general-knowledge answer. New search failures render an inline
+   * retryable error bubble instead of an uncited fallback answer.
    */
   searchFallback?: boolean;
   /**
-   * True when the failed search was freshness-critical, so a "Retry live
-   * search" affordance is worth offering below the message.
+   * True when a live-search reply/error can be retried with the search tool
+   * pinned instead of re-classifying the message.
    */
   searchRetryable?: boolean;
   /**
@@ -334,8 +334,8 @@ export interface ChatRequest {
    * True for a user-initiated "Retry live search". The server pins this turn to
    * the live web-search tool and runs a harder forced strategy (longer timeout +
    * low-effort secondary attempt). If that still fails, the server returns a
-   * retryable 503 instead of repeating the general-knowledge fallback, so the
-   * client keeps the user's message and the Retry affordance.
+   * retryable 503 without an uncited fallback answer, so the client keeps the
+   * user's message and the Retry affordance.
    */
   forceSearch?: boolean;
   /**
@@ -401,13 +401,14 @@ export interface ChatResponse {
   resetsAt?: string | null;
   windowHours?: number;
   /**
-   * True when this reply is a general-knowledge fallback because live web
-   * search failed/timed out. The honest caveat is already prepended to `reply`.
+   * Legacy flag from older transcripts where live web search failed but Ora
+   * returned a general-knowledge answer. New search failures render an inline
+   * retryable error bubble instead of an uncited fallback answer.
    */
   searchFallback?: boolean;
   /**
-   * True when the failed search was freshness-critical, so a "Retry live
-   * search" affordance is worth offering.
+   * True when a live-search reply/error can be retried with the search tool
+   * pinned instead of re-classifying the message.
    */
   searchRetryable?: boolean;
   /**

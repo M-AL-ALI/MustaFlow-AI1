@@ -114,6 +114,8 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 async function buildApp() {
   process.env.ORA_SESSION_SECRET = TEST_SECRET;
   process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-key";
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL ?? "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
@@ -231,7 +233,7 @@ describe("POST /public-ai/chat — cited source links via live web search (mocke
     expect(res.body.reply.length).toBeGreaterThan(0);
   });
 
-  it("returns an empty sources array when the provider cites only unsafe URLs", async () => {
+  it("fails cleanly when the provider cites only unsafe URLs", async () => {
     createMock.mockResolvedValueOnce({
       output_text: "Here is what I found.",
       output: outputWithAnnotations([
@@ -251,8 +253,13 @@ describe("POST /public-ai/chat — cited source links via live web search (mocke
         referenceSavedMemories: false,
       });
 
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.sources)).toBe(true);
-    expect(res.body.sources.length).toBe(0);
+    expect(res.status).toBe(503);
+    expect(res.body.searchRetryable).toBe(true);
+    expect(res.body.searchFallback).toBeUndefined();
+    expect(res.body.reply).toBeUndefined();
+    expect(typeof res.body.error).toBe("string");
+    expect(res.body.activity).toEqual([
+      expect.objectContaining({ tool: "web-search", phase: "fail" }),
+    ]);
   });
 });
