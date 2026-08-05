@@ -584,7 +584,7 @@ describe("POST /public-ai/chat/stream", () => {
     const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
     vi.mocked(routeOraMessage).mockResolvedValueOnce({
       tool: "deep_thinking",
-      intent: "complex_analysis",
+      intent: "premium",
       confidence: "high",
       topic: "general",
       reason: "requested_deep_mode",
