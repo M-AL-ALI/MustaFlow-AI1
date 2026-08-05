@@ -104,6 +104,42 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     expect(c?.category).toBe("other");
   });
 
+  it("scores plainly stated durable teaching facts as high confidence", async () => {
+    const cases = [
+      ["my audit codename is Cobalt Finch 805", "Audit codename is Cobalt Finch 805"],
+      [
+        "my preferred audit beverage is lapsang souchong",
+        "Preferred audit beverage is lapsang souchong",
+      ],
+      ["my audit city is Boise", "Audit city is Boise"],
+    ] as const;
+
+    for (const [message, fact] of cases) {
+      mockAi.state.content = JSON.stringify({
+        save: true,
+        fact,
+        explicit: false,
+        category: "personal",
+      });
+      const candidate = await extractMemorySaveCandidate(message);
+      expect(candidate).toMatchObject({ fact, confidence: "high", sensitive: false });
+    }
+  });
+
+  it("keeps plainly stated teaching facts saveable when model extraction fails", async () => {
+    mockAi.state.throws = true;
+    for (const message of [
+      "my audit codename is Cobalt Finch 805",
+      "my preferred audit beverage is lapsang souchong",
+      "my audit city is Boise",
+    ]) {
+      expect(await extractMemorySaveCandidate(message)).toMatchObject({
+        confidence: "high",
+        sensitive: false,
+      });
+    }
+  });
+
   it("returns high confidence when the model flags an explicit save request", async () => {
     mockAi.state.content = JSON.stringify({
       save: true,
