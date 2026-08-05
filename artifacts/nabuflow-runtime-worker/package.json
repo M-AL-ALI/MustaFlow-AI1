@@ -1,0 +1,24 @@
+{
+  "name": "@workspace/nabuflow-runtime-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:staging": "wrangler deploy",
+    "lint": "eslint src/ test/ scripts/ --max-warnings 0",
+    "smoke:staging": "tsx scripts/staging-smoke.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "@cloudflare/sandbox": "0.12.4",
+    "@workspace/tenant-runtime-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260730.1",
+    "tsx": "catalog:",
+    "vitest": "^4.1.6",
+    "wrangler": "4.118.0"
+  }
+}

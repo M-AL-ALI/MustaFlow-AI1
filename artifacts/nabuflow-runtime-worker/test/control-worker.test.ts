@@ -1,0 +1,307 @@
+import { describe, expect, it } from "vitest";
+import { sha256Hex, signControlRequest } from "@workspace/tenant-runtime-contracts";
+import { handleControlRequest } from "../src/worker";
+import {
+  MemoryCoordinator,
+  MockBackend,
+  TEST_NOW_MS,
+  TEST_SECRET,
+  ensureBody,
+  fakeEnv,
+  signedRequest,
+} from "./helpers";
+
+const FIXED_VECTOR = {
+  body: '{"projectId":42}',
+  fields: {
+    method: "POST",
+    pathAndQuery: "/_nabuflow/control/v1/runtimes/42/preview/primary/start?wait=true",
+    timestamp: "1785859200000",
+    nonce: "01JXYZABCDEF0123456789ABCD",
+    bodySha256: "63e3cf682f2319d705ec920c8d78d555ec5b465d8ef83be0e6e0e476cba562a2",
+    idempotencyKey: "runtime-start-42-0001",
+  },
+  signature: "83afa15033d2649dc94448bacc80ea19dd336304d76a52d7621e01be3118d3e9",
+} as const;
+
+describe("authenticated staging control plane", () => {
+  it("is byte-compatible with the slice 2b-i fixed HMAC vector", async () => {
+    expect(await sha256Hex(FIXED_VECTOR.body)).toBe(FIXED_VECTOR.fields.bodySha256);
+    expect(await signControlRequest(TEST_SECRET, FIXED_VECTOR.fields)).toBe(FIXED_VECTOR.signature);
+  });
+
+  it("accepts signed requests and rejects unsigned, tampered, replayed, and expired requests", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const dependencies = { coordinator, backend, nowMs: TEST_NOW_MS, requestId: "request-test" };
+
+    const unsigned = await handleControlRequest(
+      new Request("https://runtime.example/_nabuflow/control/v1/version"),
+      fakeEnv(),
+      dependencies,
+    );
+    expect(unsigned.status).toBe(401);
+
+    const valid = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: "nonce-valid-version-0001",
+    });
+    const validClone = valid.clone() as Request;
+    const accepted = await handleControlRequest(valid, fakeEnv(), dependencies);
+    expect(accepted.status).toBe(200);
+    await expect(accepted.json()).resolves.toMatchObject({
+      protocolVersion: "1",
+      deploymentVersion: "worker-version-test-1",
+      provider: "cloudflare",
+    });
+
+    const replayed = await handleControlRequest(validClone, fakeEnv(), dependencies);
+    expect(replayed.status).toBe(409);
+    await expect(replayed.json()).resolves.toMatchObject({ code: "replay_detected" });
+
+    const tampered = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: "nonce-tampered-signature-1",
+    });
+    tampered.headers.set("x-nabuflow-signature", "0".repeat(64));
+    const tamperedResponse = await handleControlRequest(tampered, fakeEnv(), dependencies);
+    expect(tamperedResponse.status).toBe(401);
+    await expect(tamperedResponse.json()).resolves.toMatchObject({ code: "invalid_signature" });
+
+    const expired = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: "nonce-expired-version-001",
+      timestamp: TEST_NOW_MS - 60_001,
+    });
+    const expiredResponse = await handleControlRequest(expired, fakeEnv(), dependencies);
+    expect(expiredResponse.status).toBe(401);
+    await expect(expiredResponse.json()).resolves.toMatchObject({ code: "expired_signature" });
+  });
+
+  it("strictly rejects unknown fields without caching a server error", async () => {
+    const coordinator = new MemoryCoordinator();
+    const response = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/42/preview/primary",
+        method: "PUT",
+        nonce: "nonce-unknown-field-0001",
+        idempotencyKey: "ensure-unknown-field-1",
+        body: { ...ensureBody(), unexpected: true },
+      }),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("enforces the request cap before authentication and strictly validates query values", async () => {
+    const oversized = await handleControlRequest(
+      new Request("https://runtime.example/_nabuflow/control/v1/version", {
+        method: "POST",
+        body: "x".repeat(256 * 1024 + 1),
+      }),
+      fakeEnv(),
+      { coordinator: new MemoryCoordinator(), backend: new MockBackend() },
+    );
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({ code: "request_too_large" });
+
+    const invalidFollow = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/42/preview/primary/logs?follow=maybe",
+        nonce: "nonce-invalid-follow-0001",
+      }),
+      fakeEnv(),
+      { coordinator: new MemoryCoordinator(), backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(invalidFollow.status).toBe(400);
+    await expect(invalidFollow.json()).resolves.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("replays a completed mutation response for a new nonce with the same idempotency key", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const path = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+    const first = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        nonce: "nonce-idempotency-first-1",
+        idempotencyKey: "ensure-runtime-42-1",
+        body: ensureBody(),
+      }),
+      fakeEnv(),
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+
+    const second = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        nonce: "nonce-idempotency-second",
+        idempotencyKey: "ensure-runtime-42-1",
+        body: ensureBody(),
+      }),
+      fakeEnv(),
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toEqual(firstBody);
+    expect(coordinator.runtimes).toHaveLength(1);
+  });
+
+  it("rejects idempotency-key reuse for a different request and never audits request bodies", async () => {
+    const coordinator = new MemoryCoordinator();
+    const path = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+    const original = ensureBody();
+    original.manifest.startCommand = ["node", "server.mjs", "secret-body-marker"];
+    const first = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        nonce: "nonce-idempotency-audit-first",
+        idempotencyKey: "ensure-audit-conflict",
+        body: original,
+      }),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(first.status).toBe(200);
+
+    const changed = ensureBody();
+    changed.manifest.revision = "manifest-2";
+    const conflict = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        nonce: "nonce-idempotency-audit-second",
+        idempotencyKey: "ensure-audit-conflict",
+        body: changed,
+      }),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({ code: "idempotency_conflict" });
+    expect(JSON.stringify(coordinator.audits)).not.toContain("secret-body-marker");
+    expect(coordinator.audits.every((record) => !("body" in record))).toBe(true);
+  });
+
+  it("returns worker_version_not_ready before creating a runtime", async () => {
+    const coordinator = new MemoryCoordinator();
+    const body = ensureBody();
+    body.expectedDeploymentVersion = "version-not-propagated";
+    const response = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/42/preview/primary",
+        method: "PUT",
+        nonce: "nonce-version-gate-0001",
+        idempotencyKey: "ensure-version-gate-1",
+        body,
+      }),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "worker_version_not_ready" });
+    expect(coordinator.runtimes).toHaveLength(0);
+  });
+
+  it("runs the complete control lifecycle through the shared schemas", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+    let nonce = 0;
+    const send = async (input: {
+      path: string;
+      method: string;
+      body?: unknown;
+      idempotencyKey?: string;
+    }) =>
+      handleControlRequest(
+        await signedRequest({
+          ...input,
+          nonce: `nonce-lifecycle-${String(++nonce).padStart(4, "0")}`,
+        }),
+        env,
+        { coordinator, backend, nowMs: TEST_NOW_MS },
+      );
+
+    expect(
+      (
+        await send({
+          path: base,
+          method: "PUT",
+          body: ensureBody(),
+          idempotencyKey: "lifecycle-ensure",
+        })
+      ).status,
+    ).toBe(200);
+
+    const start = await send({
+      path: `${base}/start`,
+      method: "POST",
+      idempotencyKey: "lifecycle-start",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        artifactRevision: "artifact-1",
+        artifactSha256: "a".repeat(64),
+      },
+    });
+    expect(start.status).toBe(200);
+    await expect(start.json()).resolves.toMatchObject({ runtime: { status: "running" } });
+
+    const status = await send({ path: base, method: "GET" });
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({ runtime: { servicePort: 8080 } });
+
+    const exec = await send({
+      path: `${base}/exec`,
+      method: "POST",
+      idempotencyKey: "lifecycle-exec",
+      body: {
+        locator: ensureBody().locator,
+        argv: ["node", "-e", "console.log('ok')"],
+        cwd: "/workspace",
+        timeoutMs: 5_000,
+      },
+    });
+    expect(exec.status).toBe(200);
+    await expect(exec.json()).resolves.toMatchObject({ ok: true, exitCode: 0 });
+
+    const logs = await send({ path: `${base}/logs?limit=20`, method: "GET" });
+    expect(logs.status).toBe(200);
+    const logBody = (await logs.json()) as { entries: Array<{ message: string }> };
+    expect(logBody.entries.some((entry) => entry.message.includes("server ready"))).toBe(true);
+
+    expect(
+      (
+        await send({
+          path: `${base}/stop`,
+          method: "POST",
+          idempotencyKey: "lifecycle-stop",
+          body: { locator: ensureBody().locator, reason: "test complete" },
+        })
+      ).status,
+    ).toBe(200);
+    expect(backend.stops).toBe(1);
+
+    expect(
+      (
+        await send({
+          path: base,
+          method: "DELETE",
+          idempotencyKey: "lifecycle-destroy",
+          body: { locator: ensureBody().locator, reason: "test cleanup" },
+        })
+      ).status,
+    ).toBe(200);
+    expect(backend.destroys).toBe(1);
+    expect(coordinator.runtimes).toHaveLength(0);
+  });
+});
