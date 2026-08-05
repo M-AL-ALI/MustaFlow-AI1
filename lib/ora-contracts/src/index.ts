@@ -274,11 +274,35 @@ export type OraRole = "user" | "assistant";
 export type OraMode = "instant" | "deep";
 export type OraTier = "anonymous" | "free" | "core" | "wave";
 export type OraMessageKind = "image-analysis" | "document-analysis";
-export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx" | "md";
+export const ORA_SUPPORTED_FILE_FORMATS = [
+  "csv",
+  "xlsx",
+  "docx",
+  "pdf",
+  "pptx",
+  "md",
+  "txt",
+] as const;
+export type FileFormat = (typeof ORA_SUPPORTED_FILE_FORMATS)[number];
+
+export const ORA_FILE_MIME_TYPES: Record<FileFormat, string> = {
+  csv: "text/csv",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  md: "text/markdown",
+  txt: "text/plain",
+};
+
+export function isOraFileFormat(value: unknown): value is FileFormat {
+  return (ORA_SUPPORTED_FILE_FORMATS as readonly unknown[]).includes(value);
+}
 
 export interface OraExplicitFileRequest {
-  format: FileFormat;
+  format: FileFormat | null;
   requestedFileName: string | null;
+  requestedExtension: string | null;
 }
 
 const ORA_FILE_EXTENSION_FORMATS: Record<string, FileFormat> = {
@@ -286,12 +310,10 @@ const ORA_FILE_EXTENSION_FORMATS: Record<string, FileFormat> = {
   xlsx: "xlsx",
   xls: "xlsx",
   docx: "docx",
-  doc: "docx",
   pdf: "pdf",
   pptx: "pptx",
-  ppt: "pptx",
   md: "md",
-  markdown: "md",
+  txt: "txt",
 };
 
 /** Deterministic client/server routing for an explicit downloadable-file request. */
@@ -311,11 +333,16 @@ export function detectExplicitOraFileRequest(text: string): OraExplicitFileReque
   );
   const extension = named?.[2]?.toLowerCase();
   const requestedFormat = extension ? ORA_FILE_EXTENSION_FORMATS[extension] : undefined;
-  if (requestedFormat) {
-    return { format: requestedFormat, requestedFileName: named?.[1]?.trim() ?? null };
+  if (extension) {
+    return {
+      format: requestedFormat ?? null,
+      requestedFileName: named?.[1]?.trim() ?? null,
+      requestedExtension: extension,
+    };
   }
 
   const formatSignals: Array<[RegExp, FileFormat]> = [
+    [/\b(plain[ -]?text|text file|\.txt\b)\b/i, "txt"],
     [/\b(markdown|\.md\b)\b/i, "md"],
     [/\b(csv|comma[ -]separated)\b/i, "csv"],
     [
@@ -327,13 +354,61 @@ export function detectExplicitOraFileRequest(text: string): OraExplicitFileReque
     [/\b(power[ -]?point|pptx?|presentation|slides?|deck)\b/i, "pptx"],
   ];
   for (const [pattern, format] of formatSignals) {
-    if (pattern.test(trimmed)) return { format, requestedFileName: null };
+    if (pattern.test(trimmed)) {
+      return { format, requestedFileName: null, requestedExtension: null };
+    }
   }
   if (/\b(charts?|graphs?|histogram|dashboard|visuali[sz]ation|plot)\b/i.test(trimmed)) {
-    return { format: "xlsx", requestedFileName: null };
+    return { format: "xlsx", requestedFileName: null, requestedExtension: null };
   }
-  if (/\b(table|data|sheet)\b/i.test(trimmed)) return { format: "csv", requestedFileName: null };
-  return { format: "pdf", requestedFileName: null };
+  if (/\b(table|data|sheet)\b/i.test(trimmed)) {
+    return { format: "csv", requestedFileName: null, requestedExtension: null };
+  }
+  return { format: "pdf", requestedFileName: null, requestedExtension: null };
+}
+
+export type OraFileFormatResolution =
+  | { ok: true; format: FileFormat; requestedFileName: string | null }
+  | {
+      ok: false;
+      code: "UNSUPPORTED_FILE_FORMAT";
+      error: string;
+      requestedExtension: string | null;
+      supportedFormats: readonly FileFormat[];
+    };
+
+/** Resolve the actual output format, giving an explicit filename extension priority. */
+export function resolveOraFileFormatRequest(
+  text: string,
+  submittedFormat: unknown,
+): OraFileFormatResolution {
+  const explicit = detectExplicitOraFileRequest(text);
+  if (explicit?.requestedExtension) {
+    if (explicit.format) {
+      return {
+        ok: true,
+        format: explicit.format,
+        requestedFileName: explicit.requestedFileName,
+      };
+    }
+    return {
+      ok: false,
+      code: "UNSUPPORTED_FILE_FORMAT",
+      error: `Ora cannot generate .${explicit.requestedExtension} files. No substitute file was created.`,
+      requestedExtension: explicit.requestedExtension,
+      supportedFormats: ORA_SUPPORTED_FILE_FORMATS,
+    };
+  }
+  if (isOraFileFormat(submittedFormat)) {
+    return { ok: true, format: submittedFormat, requestedFileName: null };
+  }
+  return {
+    ok: false,
+    code: "UNSUPPORTED_FILE_FORMAT",
+    error: "Ora cannot generate that file format. No substitute file was created.",
+    requestedExtension: null,
+    supportedFormats: ORA_SUPPORTED_FILE_FORMATS,
+  };
 }
 
 /** Infer a file round-trip only when the user asks to modify and return an upload. */
@@ -361,20 +436,32 @@ export function isOraUploadedImageEditRequest(text: string): boolean {
   );
 }
 
-export function isSuccessfulOraGeneratedFilePayload(value: unknown): value is {
+export function isSuccessfulOraGeneratedFilePayload(
+  value: unknown,
+  expected?: { format: FileFormat; requestedFileName?: string | null },
+): value is {
   fileName: string;
   fileData: string;
   mimeType: string;
 } {
   if (!value || typeof value !== "object") return false;
   const payload = value as Record<string, unknown>;
-  return (
+  const hasArtifact =
     typeof payload.fileName === "string" &&
     payload.fileName.trim().length > 0 &&
     typeof payload.fileData === "string" &&
     payload.fileData.length > 0 &&
     typeof payload.mimeType === "string" &&
-    payload.mimeType.trim().length > 0
+    payload.mimeType.trim().length > 0;
+  if (!hasArtifact || !expected) return hasArtifact;
+
+  const fileName = payload.fileName as string;
+  const extension = fileName.toLowerCase().match(/\.([a-z0-9]{1,8})$/)?.[1] ?? null;
+  const mimeType = (payload.mimeType as string).toLowerCase().split(";", 1)[0]?.trim();
+  return (
+    extension === expected.format &&
+    mimeType === ORA_FILE_MIME_TYPES[expected.format] &&
+    (!expected.requestedFileName || fileName === expected.requestedFileName)
   );
 }
 
@@ -674,7 +761,10 @@ export const oraPendingClarificationSchema = z.object({
   originalMessage: z.string().min(1).max(4000),
   kind: z.enum(ORA_CLARIFICATION_KINDS),
   /** Output format inferred at ask time, so continuation doesn't re-infer. */
-  inferredFileFormat: z.enum(["csv", "xlsx", "docx", "pdf", "pptx", "md"]).nullable().optional(),
+  inferredFileFormat: z
+    .enum(["csv", "xlsx", "docx", "pdf", "pptx", "md", "txt"])
+    .nullable()
+    .optional(),
 });
 
 export type OraPendingClarification = z.infer<typeof oraPendingClarificationSchema>;

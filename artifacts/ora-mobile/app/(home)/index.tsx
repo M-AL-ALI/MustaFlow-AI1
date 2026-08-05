@@ -222,6 +222,7 @@ import {
   detectOraUploadedFileModification,
   isOraUploadedImageEditRequest,
   isSuccessfulOraGeneratedFilePayload,
+  resolveOraFileFormatRequest,
   shouldResumeOraConversation,
 } from "@workspace/ora-contracts";
 import type { OraActivityRowStep } from "@/components/ora/OraThinkingRow";
@@ -528,7 +529,14 @@ function isImageFile(mimeType?: string): boolean {
  */
 function detectFileFormat(fileName: string, mimeType: string): FileFormat {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
-  if (ext === "csv" || ext === "xlsx" || ext === "docx" || ext === "pdf" || ext === "pptx") {
+  if (
+    ext === "csv" ||
+    ext === "xlsx" ||
+    ext === "docx" ||
+    ext === "pdf" ||
+    ext === "pptx" ||
+    ext === "txt"
+  ) {
     return ext;
   }
   if (ext === "md" || mimeType.toLowerCase().includes("markdown")) return "md";
@@ -537,6 +545,7 @@ function detectFileFormat(fileName: string, mimeType: string): FileFormat {
   if (mt.includes("spreadsheet") || mt.includes("excel")) return "xlsx";
   if (mt.includes("wordprocessing") || mt.includes("msword")) return "docx";
   if (mt.includes("presentation") || mt.includes("powerpoint")) return "pptx";
+  if (mt.includes("text/plain")) return "txt";
   return "pdf";
 }
 
@@ -1168,6 +1177,13 @@ export default function OraChatScreen() {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, []);
 
+  const reportConversationSaveFailure = useCallback(() => {
+    Alert.alert(
+      "Conversation not saved",
+      "Ora could not save this conversation. Retry before leaving this chat so your messages are not lost.",
+    );
+  }, []);
+
   const persist = useCallback(
     async (msgs: OraMessage[], temporaryOverride?: boolean) => {
       const persistGeneration = threadResetGenRef.current;
@@ -1209,10 +1225,12 @@ export default function OraChatScreen() {
           return;
         await saveConversationMessages(convId, msgs);
       } catch {
-        /* persistence is best-effort */
+        if (threadResetGenRef.current === persistGeneration) {
+          reportConversationSaveFailure();
+        }
       }
     },
-    [conversationId, isSignedIn],
+    [conversationId, isSignedIn, reportConversationSaveFailure],
   );
 
   // ── TRUE realtime (WebRTC) voice — primary Talk-to-Ora transport ──────────
@@ -1336,11 +1354,34 @@ export default function OraChatScreen() {
       // whether the resulting transcript is persisted.
       const turnIsTemporary = temporary;
 
+      const turnGeneration = threadResetGenRef.current;
+      setSending(true);
+      if (isSignedInRef.current && !turnIsTemporary && conversationIdRef.current == null) {
+        conversationTransitionRef.current = true;
+        try {
+          const title = text.trim().slice(0, 60) || "New chat";
+          const created = await createConversation(title, activeProjectIdRef.current);
+          if (threadResetGenRef.current !== turnGeneration) return;
+          const createdId = created.conversation.id;
+          conversationIdRef.current = createdId;
+          setConversationId(createdId);
+        } catch {
+          if (threadResetGenRef.current === turnGeneration) {
+            setSending(false);
+            reportConversationSaveFailure();
+          }
+          return;
+        } finally {
+          if (threadResetGenRef.current === turnGeneration) {
+            conversationTransitionRef.current = false;
+          }
+        }
+      }
+
       // Abort any previous in-flight stream before starting a new one.
       streamAbortRef.current?.abort();
       const abortController = new AbortController();
       streamAbortRef.current = abortController;
-      const turnGeneration = threadResetGenRef.current;
       const isTurnCurrent = () => threadResetGenRef.current === turnGeneration;
       const setTurnMessages = (next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) =>
         setMessagesForGeneration(turnGeneration, next);
@@ -1382,7 +1423,6 @@ export default function OraChatScreen() {
 
       const next = [...base, userMsg, pendingMsg];
       setTurnMessages(next);
-      setSending(true);
       // Fresh turn — drop any stale activity trace from the previous send.
       setStreamActivity(null);
       scrollToEnd();
@@ -1763,6 +1803,7 @@ export default function OraChatScreen() {
       isSignedIn,
       pushActivity,
       setMessagesForGeneration,
+      reportConversationSaveFailure,
     ],
   );
 
@@ -1797,7 +1838,13 @@ export default function OraChatScreen() {
     if (uploadedEditFormat || (explicitFileRequest && attachment?.kind !== "image")) {
       setInput("");
       setAttachment(null);
-      void handleGenerateFileRef.current?.(text, uploadedEditFormat ?? explicitFileRequest!.format);
+      void handleGenerateFileRef.current?.(
+        text,
+        uploadedEditFormat ??
+          explicitFileRequest!.format ??
+          explicitFileRequest!.requestedExtension ??
+          "unsupported",
+      );
       return;
     }
     const attch = attachment;
@@ -1832,7 +1879,7 @@ export default function OraChatScreen() {
   // a downloadable generated-file card. Generation is non-streaming.
 
   const handleGenerateFile = useCallback(
-    async (prompt: string, format: FileFormat, activeAssetId?: number | null) => {
+    async (prompt: string, format: string, activeAssetId?: number | null) => {
       const text = prompt.trim();
       if (!text || sending) return;
       setShowGenerateFile(false);
@@ -1877,8 +1924,17 @@ export default function OraChatScreen() {
           activeAssetId: activeAssetId ?? null,
         });
         if (!isTurnCurrent()) return;
-        if (!isSuccessfulOraGeneratedFilePayload(res)) {
-          throw new Error("I couldn't create that file because generation returned no artifact.");
+        const fileRequest = resolveOraFileFormatRequest(text, format);
+        if (
+          !fileRequest.ok ||
+          !isSuccessfulOraGeneratedFilePayload(res, {
+            format: fileRequest.format,
+            requestedFileName: fileRequest.requestedFileName,
+          })
+        ) {
+          throw new Error(
+            "I couldn't create that file because the returned filename or file type did not match your request. No download card was shown.",
+          );
         }
         for (const raw of res.activity ?? []) {
           const step = parseOraActivityStep(raw);
@@ -1900,7 +1956,11 @@ export default function OraChatScreen() {
         // Auto-track the result as the new active working artifact if it has a
         // durable assetId (signed-in users only).
         if (res.assetId != null && res.fileName) {
-          setActiveArtifactRef({ assetId: res.assetId, fileName: res.fileName, format });
+          setActiveArtifactRef({
+            assetId: res.assetId,
+            fileName: res.fileName,
+            format: fileRequest.format,
+          });
         }
       } catch (err) {
         // Honest terminal step for the in-flight "Generating your file…" line.
@@ -4776,11 +4836,11 @@ function MessageBubbleBase({
     if (!file || viewingFile) return;
     setViewingFile(true);
     try {
+      const { uri, mimeType } = await materializeGeneratedFileToCache(file);
       if (Platform.OS === "web") {
-        await saveGeneratedFile(file);
+        await WebBrowser.openBrowserAsync(uri);
         return;
       }
-      const { uri, mimeType } = await materializeGeneratedFileToCache(file);
       if (canViewFileInApp()) {
         setFileViewerUri(uri);
       } else {
@@ -6026,6 +6086,7 @@ const GENERATE_FILE_FORMATS: {
   { value: "csv", label: "CSV (.csv)", icon: FileSpreadsheet },
   { value: "pptx", label: "PowerPoint (.pptx)", icon: Presentation },
   { value: "md", label: "Markdown (.md)", icon: FileText },
+  { value: "txt", label: "Plain text (.txt)", icon: FileText },
 ];
 
 // Bottom sheet to author a brand-new file from a prompt. Collects a description

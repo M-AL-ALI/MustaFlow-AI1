@@ -104,6 +104,78 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     expect(c?.category).toBe("other");
   });
 
+  it("scores plainly stated durable teaching facts as high confidence", async () => {
+    const cases = [
+      ["my audit codename is Cobalt Finch 805", "Audit codename is Cobalt Finch 805"],
+      [
+        "my preferred audit beverage is lapsang souchong",
+        "Preferred audit beverage is lapsang souchong",
+      ],
+      ["my audit city is Boise", "Audit city is Boise"],
+    ] as const;
+
+    for (const [message, fact] of cases) {
+      mockAi.state.content = JSON.stringify({
+        save: true,
+        fact,
+        explicit: false,
+        category: "personal",
+      });
+      const candidate = await extractMemorySaveCandidate(message);
+      expect(candidate).toMatchObject({ fact, confidence: "high", sensitive: false });
+    }
+  });
+
+  it("does not promote transient, momentary, hypothetical, or third-party facts", async () => {
+    const cases = [
+      ["I'm tired today", "Is tired today"],
+      ["I'm in a rush", "Is in a rush"],
+      ["this coffee is bad", "Thinks the current coffee is bad"],
+      ["if I moved to Denver, I would bike more", "Might move to Denver"],
+      ["my friend lives in Boise", "Friend lives in Boise"],
+    ] as const;
+
+    for (const [message, fact] of cases) {
+      mockAi.state.content = JSON.stringify({
+        save: true,
+        fact,
+        explicit: false,
+        category: "personal",
+      });
+      const candidate = await extractMemorySaveCandidate(message);
+      expect(candidate).toMatchObject({ fact, confidence: "low", sensitive: false });
+    }
+  });
+
+  it("still promotes a durable first-person preference without explicit remember wording", async () => {
+    mockAi.state.content = JSON.stringify({
+      save: true,
+      fact: "Prefers concise answers",
+      explicit: false,
+      category: "preference",
+    });
+    const candidate = await extractMemorySaveCandidate("I prefer concise answers");
+    expect(candidate).toMatchObject({
+      fact: "Prefers concise answers",
+      confidence: "high",
+      sensitive: false,
+    });
+  });
+
+  it("keeps plainly stated teaching facts saveable when model extraction fails", async () => {
+    mockAi.state.throws = true;
+    for (const message of [
+      "my audit codename is Cobalt Finch 805",
+      "my preferred audit beverage is lapsang souchong",
+      "my audit city is Boise",
+    ]) {
+      expect(await extractMemorySaveCandidate(message)).toMatchObject({
+        confidence: "high",
+        sensitive: false,
+      });
+    }
+  });
+
   it("returns high confidence when the model flags an explicit save request", async () => {
     mockAi.state.content = JSON.stringify({
       save: true,

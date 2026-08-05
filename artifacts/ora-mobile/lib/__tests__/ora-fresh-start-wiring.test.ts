@@ -103,4 +103,16 @@ describe("Ora mobile fresh-start lifecycle wiring", () => {
     expect(screen).toContain("conversationIdRef.current !== convId");
     expect(screen).toContain("threadResetGenRef.current === loadGeneration");
   });
+
+  it("awaits conversation creation before sending and surfaces persistence failure", () => {
+    const createPosition = screen.indexOf(
+      "await createConversation(title, activeProjectIdRef.current)",
+    );
+    const appendPosition = screen.indexOf("const userMsg: OraMessage", createPosition);
+
+    expect(createPosition).toBeGreaterThan(-1);
+    expect(appendPosition).toBeGreaterThan(createPosition);
+    expect(screen).toContain("conversationIdRef.current = createdId");
+    expect(screen).toContain('Alert.alert(\n      "Conversation not saved"');
+  });
 });

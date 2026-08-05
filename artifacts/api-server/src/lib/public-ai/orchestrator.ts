@@ -1106,6 +1106,25 @@ const MEMORY_SAVE_IMPLICIT_PATTERNS: RegExp[] = [
   /\bi(?:'m| am)\s+(?:building|working\s+on|launching)\b/i,
 ];
 
+// Direct teaching statements are stronger than incidental mentions even when
+// the user does not prepend "remember this". The model must still classify the
+// message as durable on the normal path; this also keeps straightforward
+// teaching reliable when model extraction times out and the fallback runs.
+const PLAINLY_STATED_MEMORY_FACT_PATTERNS: RegExp[] = [
+  /^(?:actually|correction|update)?[,:\s-]*my\s+[a-z][a-z0-9 _-]{0,60}\s+(?:is|is\s+now|are|has\s+changed\s+to)\s+\S/i,
+  /^(?:actually|correction|update)?[,:\s-]*i\s+(?:am|prefer|use|work\s+(?:at|for|with|in)|live\s+in|am\s+based\s+in|speak|build|run|own|manage|lead)\b/i,
+  /^(?:actually|correction|update)[,:\s-]+\S.{2,180}\s+(?:is\s+now|has\s+changed\s+to)\s+\S/i,
+];
+
+const TRANSIENT_MEMORY_SUBJECT_PATTERN =
+  /^\s*(?:actually[,:\s-]*)?my\s+(?:question|request|task|prompt|message|upload|file|document)\b/i;
+
+export function isPlainlyStatedOraMemoryFact(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || TRANSIENT_MEMORY_SUBJECT_PATTERN.test(trimmed)) return false;
+  return PLAINLY_STATED_MEMORY_FACT_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
 // Sensitive-data signals. A candidate matching ANY of these is treated as
 // containing PII / credentials and is NEVER auto-saved — it always requires an
 // explicit user click, even when the user used imperative "remember…" phrasing
@@ -1222,7 +1241,8 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
   const trimmed = message.trim();
   if (trimmed.length < 6 || trimmed.length > 400) return null;
   const isExplicit = hasExplicitMemorySaveIntent(trimmed);
-  const isImplicit = MEMORY_SAVE_IMPLICIT_PATTERNS.some((p) => p.test(trimmed));
+  const isPlainlyStated = isPlainlyStatedOraMemoryFact(trimmed);
+  const isImplicit = isPlainlyStated || MEMORY_SAVE_IMPLICIT_PATTERNS.some((p) => p.test(trimmed));
   if (!isExplicit && !isImplicit) return null;
 
   // Strip a leading "remember that" / "don't forget" preamble so the stored
@@ -1240,7 +1260,7 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
   const sensitive = detectSensitiveFact(trimmed) || detectSensitiveFact(cleanFact);
   return {
     fact: cleanFact,
-    confidence: sensitive ? "low" : isExplicit ? "high" : "low",
+    confidence: sensitive ? "low" : isExplicit || isPlainlyStated ? "high" : "low",
     sensitive,
     category: inferMemoryCandidateCategory(cleanFact),
   };
@@ -1382,6 +1402,7 @@ export async function extractMemorySaveCandidate(
     }
 
     const isExplicit = parsed.explicit === true || hasExplicitMemorySaveIntent(trimmed);
+    const isPlainlyStated = isPlainlyStatedOraMemoryFact(trimmed);
     // The sensitive guard is non-negotiable: scan the model's extracted fact AND
     // the raw user message (the PII may live in phrasing the model paraphrased
     // away). A sensitive candidate is always forced to low confidence so it can
@@ -1397,6 +1418,7 @@ export async function extractMemorySaveCandidate(
         latencyMs: Date.now() - start,
         save: true,
         explicit: isExplicit,
+        plainlyStated: isPlainlyStated,
         sensitive,
       },
       "Memory extraction: durable fact found",
@@ -1404,7 +1426,7 @@ export async function extractMemorySaveCandidate(
 
     return {
       fact: fact.slice(0, 300),
-      confidence: sensitive ? "low" : isExplicit ? "high" : "low",
+      confidence: sensitive ? "low" : isExplicit || isPlainlyStated ? "high" : "low",
       sensitive,
       category: parseMemoryCandidateCategory(parsed.category, fact),
     };

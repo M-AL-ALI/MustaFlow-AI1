@@ -423,6 +423,8 @@ export function OraConversationsProvider({
     [refresh],
   );
 
+  const getCurrentConversationId = useCallback(() => currentIdRef.current, []);
+
   const notifyPersisted = useCallback(() => {
     void refresh();
   }, [refresh]);
@@ -614,6 +616,7 @@ export function OraConversationsProvider({
     completeConversationTransition,
     registerConversationTransitionHandler,
     ensureConversation,
+    getCurrentConversationId,
     notifyPersisted,
     renameConversation,
     deleteConversation,

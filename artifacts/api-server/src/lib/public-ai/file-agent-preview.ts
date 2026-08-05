@@ -98,6 +98,8 @@ function formatLabel(format: FileFormat): string {
       return "PDF report";
     case "md":
       return "Markdown document";
+    case "txt":
+      return "plain-text file";
   }
 }
 

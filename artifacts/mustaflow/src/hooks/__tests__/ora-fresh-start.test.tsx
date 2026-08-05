@@ -64,6 +64,7 @@ function conversationsContext(
     completeConversationTransition: vi.fn(),
     registerConversationTransitionHandler: vi.fn(() => vi.fn()),
     ensureConversation: vi.fn(async () => null),
+    getCurrentConversationId: vi.fn(() => null),
     notifyPersisted: vi.fn(),
     renameConversation: vi.fn(async () => {}),
     deleteConversation: vi.fn(async () => {}),
@@ -192,8 +193,22 @@ describe("Ora fresh-start website wiring", () => {
     expect(chat).toContain("conversationTransitionGeneration !== targetGeneration");
     expect(chat).toContain("c.isConversationTransitioning()");
     expect(chat).toContain("conversationId: id, messages: serializeForStorage(msgs)");
-    expect(chat).toContain("latest?.currentConversationId === id");
+    expect(chat).toContain("latest.getCurrentConversationId() !== id");
     expect(chat).not.toContain("loadedConvRef.current = id;\n    // Switching conversations");
+  });
+
+  it("creates a new conversation before the first turn and surfaces save failures", () => {
+    const ensurePosition = chat.indexOf("await conversationContext.ensureConversation(content)");
+    const appendPosition = chat.indexOf("setTurnMessages(() =>", ensurePosition);
+
+    expect(provider).toContain(
+      "const getCurrentConversationId = useCallback(() => currentIdRef.current, [])",
+    );
+    expect(ensurePosition).toBeGreaterThan(-1);
+    expect(appendPosition).toBeGreaterThan(ensurePosition);
+    expect(chat).toContain("const targetId = c.getCurrentConversationId()");
+    expect(chat).toContain("This conversation could not be saved");
+    expect(chat).toContain("Your message was not sent");
   });
 
   it("puts starter prompts before collapsed recents in the compact home hierarchy", () => {

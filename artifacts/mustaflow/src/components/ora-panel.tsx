@@ -120,24 +120,15 @@ function downloadOraFile(file: GeneratedFile) {
   }, 2000);
 }
 
-function viewOraFile(file: GeneratedFile) {
-  if (!file.fileData) return;
+function viewOraFile(file: GeneratedFile): string {
+  if (!file.fileData) throw new Error("This file is no longer available to preview.");
   const byteChars = atob(file.fileData);
   const byteNums = new Uint8Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
   const blob = new Blob([byteNums], { type: file.mimeType });
   const url = URL.createObjectURL(blob);
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (!opened) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
   setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  return url;
 }
 
 // Download a durable library asset by id (reloaded messages drop the inline
@@ -160,22 +151,13 @@ async function downloadOraAssetById(assetId: number, fileName: string) {
   }, 2000);
 }
 
-async function viewOraAssetById(assetId: number) {
+async function viewOraAssetById(assetId: number): Promise<string> {
   const res = await authFetch(`/api/ora/assets/${assetId}/download`);
   if (!res.ok) throw new Error(`Could not open file (${res.status}).`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (!opened) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
   setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  return url;
 }
 
 function GeneratedFileCard({
@@ -236,11 +218,18 @@ function GeneratedFileCard({
     </button>
   ) : null;
   const handleView = async () => {
+    const preview = window.open("about:blank", "_blank");
+    if (!preview) {
+      showFileNotice("Could not open the file. Allow pop-ups for Ora and try again.");
+      return;
+    }
+    preview.opener = null;
     try {
-      if (file.fileData) viewOraFile(file);
-      else await viewOraAssetById(file.assetId!);
+      const url = file.fileData ? viewOraFile(file) : await viewOraAssetById(file.assetId!);
+      preview.location.href = url;
       showFileNotice(`Opened ${file.fileName}.`);
     } catch (err) {
+      preview.close();
       showFileNotice(err instanceof Error ? err.message : "Could not open this file.");
     }
   };
@@ -392,6 +381,7 @@ const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] =
   { value: "pdf", label: "PDF Document", ext: ".pdf" },
   { value: "pptx", label: "PowerPoint (.pptx)", ext: ".pptx" },
   { value: "md", label: "Markdown (.md)", ext: ".md" },
+  { value: "txt", label: "Plain text (.txt)", ext: ".txt" },
 ];
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
@@ -1236,7 +1226,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
       const explicitFileRequest = detectExplicitOraFileRequest(text);
       if (uploadedEditFormat || explicitFileRequest) {
         clearAttachment();
-        void generateFile(text, uploadedEditFormat ?? explicitFileRequest!.format);
+        void generateFile(
+          text,
+          uploadedEditFormat ??
+            explicitFileRequest!.format ??
+            explicitFileRequest!.requestedExtension ??
+            "unsupported",
+        );
         return;
       }
       const editedFrom = editingFromIdx !== null ? true : undefined;

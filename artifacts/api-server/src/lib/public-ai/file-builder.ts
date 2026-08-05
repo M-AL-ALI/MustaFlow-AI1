@@ -432,7 +432,7 @@ export function buildPresentationSystemPrompt(
 }
 
 export function buildDocumentSystemPrompt(
-  format: "docx" | "pdf" | "md",
+  format: "docx" | "pdf" | "md" | "txt",
   language?: string,
   hasSourceData = false,
   quality: OraFileQualityProfile = resolveOraFileQualityProfile({
@@ -1771,6 +1771,41 @@ export function buildMarkdown(data: DocumentData): Buffer {
   return Buffer.from(`${lines.join("\n").trim()}\n`, "utf8");
 }
 
+/** Serialize document content as UTF-8 plain text without Markdown substitution. */
+export function buildPlainText(data: DocumentData): Buffer {
+  const lines: string[] = [data.title];
+  if (data.subtitle) lines.push("", data.subtitle);
+  for (const section of data.sections) {
+    if (section.heading) lines.push("", section.heading);
+    if (section.content) lines.push("", section.content);
+    if (section.bullets?.length) lines.push("", ...section.bullets.map((item) => `- ${item}`));
+    if (section.table) {
+      lines.push(
+        "",
+        section.table.headers.join("\t"),
+        ...section.table.rows.map((row) => row.join("\t")),
+      );
+    }
+    if (section.chart) {
+      lines.push(
+        "",
+        section.chart.title,
+        ...section.chart.labels.map(
+          (label, index) => `${label}\t${section.chart!.values[index] ?? 0}`,
+        ),
+      );
+    }
+  }
+  for (const chart of data.charts ?? []) {
+    lines.push(
+      "",
+      chart.title,
+      ...chart.labels.map((label, index) => `${label}\t${chart.values[index] ?? 0}`),
+    );
+  }
+  return Buffer.from(`${lines.join("\n").trim()}\n`, "utf8");
+}
+
 const WINDOWS_RESERVED_BASENAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const UNSAFE_FILENAME_CHARS = '<>:"/\\|?*';
 
@@ -1838,6 +1873,8 @@ function mimeForFormat(format: FileFormat): string {
       return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
     case "md":
       return "text/markdown; charset=utf-8";
+    case "txt":
+      return "text/plain; charset=utf-8";
   }
 }
 
@@ -2522,7 +2559,7 @@ export async function generateFileFromPrompt(
   } else {
     const docType = detectProfessionalDocType(message);
     systemPrompt = buildDocumentSystemPrompt(
-      format as "docx" | "pdf" | "md",
+      format as "docx" | "pdf" | "md" | "txt",
       language,
       hasSourceData,
       quality,
@@ -2638,7 +2675,9 @@ export async function generateFileFromPrompt(
         ? await buildDocx(data, brandKit)
         : format === "md"
           ? buildMarkdown(data)
-          : await buildPdf(data, brandKit);
+          : format === "txt"
+            ? buildPlainText(data)
+            : await buildPdf(data, brandKit);
   }
 
   const formatLabel = format.toUpperCase();

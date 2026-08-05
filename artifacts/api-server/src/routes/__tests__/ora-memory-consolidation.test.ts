@@ -146,31 +146,52 @@ describe("Ora memory consolidation (API + DB)", () => {
       );
   });
 
-  it("multi-session lifecycle: fresh recall, update wins, delete removes", async () => {
+  it("multi-session lifecycle: teach three facts, recall, update, and delete through API + DB", async () => {
     const ctxUser = `${USER}-lifecycle`;
     const app = appAs(ctxUser);
 
-    const first = await createMemory(app, "my name is Mira", "The user's name is Mira");
-    const firstRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
-    expect(firstRecall.used.map((u) => u.id)).toContain(first.id);
-    expect(firstRecall.text).toContain("Mira");
+    const codename = await createMemory(
+      app,
+      "my audit codename is Cobalt Finch 805",
+      "Audit codename is Cobalt Finch 805",
+    );
+    const beverage = await createMemory(
+      app,
+      "my preferred audit beverage is lapsang souchong",
+      "Preferred audit beverage is lapsang souchong",
+    );
+    const city = await createMemory(app, "my audit city is Boise", "Audit city is Boise");
 
-    const second = await createMemory(app, "my name is Nora", "The user's name is Nora");
-    expect(second.supersededIds).toContain(first.id);
+    const firstRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
+    expect(firstRecall.used.map((u) => u.id)).toEqual(
+      expect.arrayContaining([codename.id, beverage.id, city.id]),
+    );
+    expect(firstRecall.text).toContain("Cobalt Finch 805");
+    expect(firstRecall.text).toContain("lapsang souchong");
+    expect(firstRecall.text).toContain("Boise");
+
+    const updatedCity = await createMemory(
+      app,
+      "my audit city is Portland",
+      "Audit city is Portland",
+    );
+    expect(updatedCity.supersededIds).toContain(city.id);
 
     const updatedRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
-    expect(updatedRecall.used.map((u) => u.id)).toContain(second.id);
-    expect(updatedRecall.used.map((u) => u.id)).not.toContain(first.id);
-    expect(updatedRecall.text).toContain("Nora");
-    expect(updatedRecall.text).not.toContain("Mira");
+    expect(updatedRecall.used.map((u) => u.id)).toContain(updatedCity.id);
+    expect(updatedRecall.used.map((u) => u.id)).not.toContain(city.id);
+    expect(updatedRecall.text).toContain("Portland");
+    expect(updatedRecall.text).not.toContain("Boise");
+    expect(updatedRecall.text).toContain("Cobalt Finch 805");
 
-    const deleted = await request(app).delete(`/ora/memories/${second.id}`).send();
+    const deleted = await request(app).delete(`/ora/memories/${beverage.id}`).send();
     expect(deleted.status).toBe(200);
 
     const afterDeleteRecall = await buildMemoryContext(ctxUser, null, "What do you know about me?");
-    expect(afterDeleteRecall.used.map((u) => u.id)).not.toContain(second.id);
-    expect(afterDeleteRecall.text).not.toContain("Nora");
-    expect(afterDeleteRecall.text).not.toContain("Mira");
+    expect(afterDeleteRecall.used.map((u) => u.id)).not.toContain(beverage.id);
+    expect(afterDeleteRecall.text).not.toContain("lapsang souchong");
+    expect(afterDeleteRecall.text).toContain("Cobalt Finch 805");
+    expect(afterDeleteRecall.text).toContain("Portland");
 
     await db
       .delete(knowledgeEntriesTable)

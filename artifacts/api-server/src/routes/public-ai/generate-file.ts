@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
-import { isSuccessfulOraGeneratedFilePayload, oraActivityStep } from "@workspace/ora-contracts";
+import {
+  isSuccessfulOraGeneratedFilePayload,
+  oraActivityStep,
+  resolveOraFileFormatRequest,
+} from "@workspace/ora-contracts";
 import { logger } from "../../lib/logger";
 import {
   validateSession,
@@ -28,7 +32,7 @@ const messageItemSchema = z.object({
 const bodySchema = z.object({
   message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
-  format: z.enum(["csv", "xlsx", "docx", "pdf", "pptx", "md"]),
+  format: z.string().min(1).max(12),
   language: z.string().max(20).optional(),
   // IDs of files the user uploaded earlier this conversation. When present we
   // re-hydrate their real content so creation extracts/transforms actual data
@@ -53,8 +57,15 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  const { message, messages, format, language, documentRefs, oraProjectId, activeAssetId } =
-    parsed.data;
+  const {
+    message,
+    messages,
+    format: submittedFormat,
+    language,
+    documentRefs,
+    oraProjectId,
+    activeAssetId,
+  } = parsed.data;
 
   if (isKillSwitchActive("file_generation")) {
     res.status(503).json(killSwitchBody("file_generation"));
@@ -117,6 +128,13 @@ router.post("/public-ai/generate-file", async (req, res) => {
     res.status(400).json({ error: "Message contains patterns that cannot be processed." });
     return;
   }
+
+  const formatResolution = resolveOraFileFormatRequest(message, submittedFormat);
+  if (!formatResolution.ok) {
+    res.status(415).json(formatResolution);
+    return;
+  }
+  const { format } = formatResolution;
 
   // Validate the requested Ora project space BEFORE consuming quota so a stale
   // or foreign project selection is rejected without charging the user. Only
@@ -281,7 +299,12 @@ router.post("/public-ai/generate-file", async (req, res) => {
         authed?.tier ?? null,
         oraBrandKit,
       ));
-    if (!isSuccessfulOraGeneratedFilePayload(result)) {
+    if (
+      !isSuccessfulOraGeneratedFilePayload(result, {
+        format,
+        requestedFileName: formatResolution.requestedFileName,
+      })
+    ) {
       throw new fileBuilder.FileGenerationError(
         "I couldn't generate the requested file. No download was created.",
       );
