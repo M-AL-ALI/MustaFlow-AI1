@@ -4,6 +4,8 @@ import * as http from "http";
 import express from "express";
 import cookieParser from "cookie-parser";
 
+process.env.DATABASE_URL ??= "postgres://ora-streaming-test:ora-streaming-test@localhost:5432/ora";
+
 // ---------------------------------------------------------------------------
 // Module mocks — must be hoisted before any imports that pull the real modules.
 // ---------------------------------------------------------------------------
@@ -556,7 +558,7 @@ describe("POST /public-ai/chat/stream", () => {
 
   // ── Latency: fast first token ─────────────────────────────────────────────
 
-  it("Ora live stream opts into a fast first token (disableThinking) on every provider call", async () => {
+  it("Instant live stream disables provider thinking for a fast first token", async () => {
     process.env.ORA_STREAMING_ENABLED = "true";
     const app = await buildTestApp();
     await request(app)
@@ -564,9 +566,8 @@ describe("POST /public-ai/chat/stream", () => {
       .set("Cookie", "ora-session=fake")
       .send(VALID_BODY)
       .buffer(true);
-    // The conversational stream-adapter must request a fast first token so
-    // Gemini 3's silent "thinking" phase cannot leave the bubble empty for
-    // several seconds. Every provider call on this path must carry the flag.
+    // Instant chat must request a fast first token so provider thinking phases
+    // cannot leave the bubble empty for several seconds.
     expect(streamChatCompletionMock).toHaveBeenCalled();
     // The mock is declared with no params, so widen the recorded calls to the
     // real param shape before asserting on the first argument.
@@ -576,6 +577,54 @@ describe("POST /public-ai/chat/stream", () => {
     for (const [params] of calls) {
       expect(params).toMatchObject({ disableThinking: true });
     }
+  });
+
+  it("Deep Thinking stream enables provider reasoning and emits stage status", async () => {
+    process.env.ORA_STREAMING_ENABLED = "true";
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    vi.mocked(routeOraMessage).mockResolvedValueOnce({
+      tool: "deep_thinking",
+      intent: "complex_analysis",
+      confidence: "high",
+      topic: "general",
+      reason: "requested_deep_mode",
+    });
+
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send({
+        ...VALID_BODY,
+        mode: "deep",
+        message: "Think deeply about the tradeoffs between queues and event streams.",
+      })
+      .buffer(true);
+
+    expect(res.status).toBe(200);
+    const calls = streamChatCompletionMock.mock.calls as unknown as Array<
+      [{ disableThinking?: boolean }]
+    >;
+    expect(calls[calls.length - 1]?.[0]).toMatchObject({ disableThinking: false });
+
+    const events = parseSseEvents(res.text);
+    const statusTexts = ((events["status"] ?? []) as Array<{ text?: string }>)
+      .map((ev) => ev.text)
+      .filter((text): text is string => typeof text === "string");
+    expect(statusTexts).toEqual(
+      expect.arrayContaining([
+        "Deep Thinking: preparing the reasoning plan...",
+        "Deep Thinking: reasoning through the answer...",
+        "Deep Thinking: finalizing the answer...",
+      ]),
+    );
+  });
+
+  it("non-streaming chat fallback keeps provider reasoning enabled for Deep Thinking", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
+    expect(src).toContain("disableThinking: !deepAllowed");
   });
 
   // ── Isolation tests ───────────────────────────────────────────────────────
@@ -645,11 +694,10 @@ describe("POST /public-ai/chat/stream", () => {
   it("SSE error after first token: error event has code 'stream_interrupted'", async () => {
     process.env.ORA_STREAMING_ENABLED = "true";
     // Yield one token, then throw — simulates a mid-stream provider cut.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    streamChatCompletionMock.mockImplementationOnce(async function* () {
+    streamChatCompletionMock.mockImplementationOnce(async function* (): AsyncGenerator<string> {
       yield " partial";
       throw new Error("provider cut stream");
-    } as any);
+    });
     const app = await buildTestApp();
     const res = await request(app)
       .post("/public-ai/chat/stream")

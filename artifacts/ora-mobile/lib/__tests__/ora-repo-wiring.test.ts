@@ -45,7 +45,7 @@ describe("mobile chat wiring", () => {
   });
   it("renders live narration via streamStatus in the thinking row", () => {
     expect(chat).toContain('streamStatus ?? "Thinking…"');
-    expect(chat).toContain("(statusText) => setStreamStatus(statusText)");
+    expect(chat).toContain("if (isTurnCurrent()) setStreamStatus(statusText)");
   });
 });
 

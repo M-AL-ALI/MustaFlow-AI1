@@ -2342,7 +2342,7 @@ router.post("/public-ai/chat", async (req, res) => {
             messages: callMessages,
             response_format: { type: "text" },
             max_completion_tokens: maxTokens,
-            disableThinking: true,
+            disableThinking: !deepAllowed,
           });
           // A blank HTTP-200 completion (observed with gemini-3-flash-preview at
           // low token ceilings) does not throw, so without this the chain would
@@ -3185,6 +3185,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Live activity trace: typed start/ok/fail steps riding the same SSE stream.
   // Fire-and-forget — a write failure can never take down the answer stream.
   const activity: OraActivityEmitter = createOraActivityEmitter((ev) => writeSSE(res, ev));
+  const emitDeepReasoningStatus = (text: string): void => {
+    if (deepAllowed) writeSSE(res, { type: "status", text });
+  };
+  emitDeepReasoningStatus("Deep Thinking: preparing the reasoning plan...");
 
   // ── Ora repo analysis (read-only) ──────────────────────────────────────────
   // When the signed-in user has an active GitHub repo session, run the
@@ -3267,12 +3271,18 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       maxTokens,
       signal: combinedSignal,
       logger,
+      enableProviderThinking: deepAllowed,
     })) {
       if (event.type === "candidate") {
         usedFallback = event.usedFallback;
         fallbackReason = event.reason ?? null;
         streamProvider = event.provider as Provider;
         streamModel = event.model;
+        emitDeepReasoningStatus(
+          event.usedFallback
+            ? "Deep Thinking: switching reasoning model..."
+            : "Deep Thinking: reasoning through the answer...",
+        );
       } else if (event.type === "token") {
         if (!firstTokenSent) {
           // Cancel the first-token timeout — we have a live stream.
@@ -3338,6 +3348,8 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     res.end();
     return;
   }
+
+  emitDeepReasoningStatus("Deep Thinking: finalizing the answer...");
 
   logger.info(
     {

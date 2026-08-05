@@ -1973,13 +1973,6 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       />
                     )}
 
-                  {msg.role === "assistant" && msg.viaFallback && !msg.isStreaming && (
-                    <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/50 select-none">
-                      <Zap className="h-2.5 w-2.5" />
-                      <span>Non-streamed</span>
-                    </div>
-                  )}
-
                   {msg.role === "assistant" &&
                     msg.searchRetryable &&
                     isLatestAssistant &&

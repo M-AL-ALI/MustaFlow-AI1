@@ -120,7 +120,7 @@ describe("Ora activity trace — hook wiring (use-ora-chat.ts)", () => {
     const body = hook.slice(idx, idx + 2200);
     expect(body).toContain("sawFirstToken = true;");
     expect(body).toContain("clearActivity();");
-    expect(body).toContain("if (!sawFirstToken) pushActivity(step);");
+    expect(body).toContain("if (isTurnCurrent() && !sawFirstToken) pushActivity(step);");
   });
 
   it("synthesizes the start step from the specialist-tool bounce signal", () => {
