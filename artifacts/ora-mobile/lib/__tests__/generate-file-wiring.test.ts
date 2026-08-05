@@ -65,7 +65,7 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   it("GenerateFileSheet offers every server format", () => {
     expect(index).toContain("function GenerateFileSheet(");
     expect(index).toContain("GENERATE_FILE_FORMATS");
-    for (const fmt of ["docx", "pdf", "xlsx", "csv", "pptx", "md"]) {
+    for (const fmt of ["docx", "pdf", "xlsx", "csv", "pptx", "md", "txt"]) {
       expect(index).toContain(`value: "${fmt}"`);
     }
   });
@@ -73,8 +73,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   it("auto-routes explicit file requests and validates a real artifact before showing a card", () => {
     expect(index).toContain("detectExplicitOraFileRequest(text)");
     expect(index).toContain("detectOraUploadedFileModification(text, attachment.filename)");
-    expect(index).toContain("if (!isSuccessfulOraGeneratedFilePayload(res))");
-    expect(index).toContain("generation returned no artifact");
+    expect(index).toContain("resolveOraFileFormatRequest(text, format)");
+    expect(index).toContain("No download card was shown.");
   });
 
   it("round-trips uploaded image edits through the image-edit endpoint", () => {
@@ -142,9 +142,10 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(viewFnStart).toBeGreaterThan(-1);
     const viewFnEnd = index.indexOf("\n  );", viewFnStart);
     const viewFnBody = index.slice(viewFnStart, viewFnEnd);
-    // Web opens the file directly; native materializes to cache first.
+    // Every platform materializes the file; web then opens rather than downloads it.
     expect(viewFnBody).toContain('Platform.OS === "web"');
     expect(viewFnBody).toContain("await materializeGeneratedFileToCache(file)");
+    expect(viewFnBody).toContain("await WebBrowser.openBrowserAsync(uri)");
     // iOS in-app WebView preview when available, share sheet otherwise.
     expect(viewFnBody).toContain("canViewFileInApp()");
     expect(viewFnBody).toContain("setFileViewerUri(uri)");

@@ -542,7 +542,7 @@ export interface GenerateFileRequest {
   message: string;
   /** Recent conversation history for context (server caps at 20). */
   messages: Array<{ role: "user" | "assistant"; content: string }>;
-  format: FileFormat;
+  format: string;
   language?: string;
   /**
    * UUID refs of documents/datasets uploaded earlier this conversation. When

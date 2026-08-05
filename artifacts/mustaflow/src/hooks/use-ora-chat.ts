@@ -20,6 +20,7 @@ import {
   ORA_ANALYZING_IMAGE_TEXT,
   isSuccessfulOraGeneratedFilePayload,
   isOraUploadedImageEditRequest,
+  resolveOraFileFormatRequest,
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
@@ -307,11 +308,7 @@ export interface UseOraChatReturn {
     content: string,
     opts?: { truncateTo?: number; editedFrom?: boolean; forceSearch?: boolean },
   ) => Promise<void>;
-  generateFile: (
-    content: string,
-    format: FileFormat,
-    activeAssetId?: number | null,
-  ) => Promise<void>;
+  generateFile: (content: string, format: string, activeAssetId?: number | null) => Promise<void>;
   editInlineImage: (sourceImageId: number, instruction: string) => Promise<void>;
   clearError: () => void;
   uploadFile: (file: File) => Promise<void>;
@@ -2677,7 +2674,7 @@ export function useOraChat(): UseOraChatReturn {
   );
 
   const generateFile = useCallback(
-    async (content: string, format: FileFormat, activeAssetId?: number | null) => {
+    async (content: string, format: string, activeAssetId?: number | null) => {
       if (!content.trim() || isLoading) return;
 
       const formatLabel = format.toUpperCase();
@@ -2750,8 +2747,17 @@ export function useOraChat(): UseOraChatReturn {
           activity?: OraActivityStep[];
         }>("/api/public-ai/generate-file", body);
         if (!isTurnCurrent()) return;
-        if (!isSuccessfulOraGeneratedFilePayload(data)) {
-          throw new Error("I couldn't create that file because generation returned no artifact.");
+        const fileRequest = resolveOraFileFormatRequest(content, format);
+        if (
+          !fileRequest.ok ||
+          !isSuccessfulOraGeneratedFilePayload(data, {
+            format: fileRequest.format,
+            requestedFileName: fileRequest.requestedFileName,
+          })
+        ) {
+          throw new Error(
+            "I couldn't create that file because the returned filename or file type did not match your request. No download card was shown.",
+          );
         }
 
         for (const raw of data.activity ?? []) {
@@ -2768,7 +2774,7 @@ export function useOraChat(): UseOraChatReturn {
                 fileName: data.fileName,
                 fileData: data.fileData,
                 mimeType: data.mimeType,
-                format,
+                format: fileRequest.format,
                 ...(data.assetId != null ? { assetId: data.assetId } : {}),
                 ...(data.editQuality ? { editQuality: data.editQuality } : {}),
               } satisfies GeneratedFile,
@@ -2849,9 +2855,16 @@ export function useOraChat(): UseOraChatReturn {
               windowHours?: number;
             }>("/api/public-ai/generate-file", retryBody);
             if (!isTurnCurrent()) return;
-            if (!isSuccessfulOraGeneratedFilePayload(retryData)) {
+            const retryFileRequest = resolveOraFileFormatRequest(content, format);
+            if (
+              !retryFileRequest.ok ||
+              !isSuccessfulOraGeneratedFilePayload(retryData, {
+                format: retryFileRequest.format,
+                requestedFileName: retryFileRequest.requestedFileName,
+              })
+            ) {
               throw new Error(
-                "I couldn't create that file because generation returned no artifact.",
+                "I couldn't create that file because the returned filename or file type did not match your request. No download card was shown.",
                 { cause: err },
               );
             }
@@ -2865,7 +2878,7 @@ export function useOraChat(): UseOraChatReturn {
                     fileName: retryData.fileName,
                     fileData: retryData.fileData,
                     mimeType: retryData.mimeType,
-                    format,
+                    format: retryFileRequest.format,
                     ...(retryData.editQuality ? { editQuality: retryData.editQuality } : {}),
                   } satisfies GeneratedFile,
                   ...(retryData.fileAgentPreview
