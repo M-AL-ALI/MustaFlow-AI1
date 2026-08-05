@@ -232,6 +232,7 @@ function pathRequiresAuth(path: string): boolean {
     path === "/api/public-ai/file-analysis" ||
     path === "/api/public-ai/dataset-analysis" ||
     path === "/api/public-ai/image-analysis" ||
+    path === "/api/public-ai/image-edit" ||
     path === "/api/public-ai/export-file" ||
     path === "/api/public-ai/generate-file"
   );
@@ -1082,6 +1083,15 @@ export function analyzeImage(
   );
 }
 
+export function editUploadedImage(imageRef: string, instruction: string): Promise<ChatResponse> {
+  return withOraSessionRecovery(() =>
+    jsonRequest<ChatResponse>("/api/public-ai/image-edit", {
+      method: "POST",
+      body: JSON.stringify({ imageRef, message: instruction }),
+    }),
+  );
+}
+
 export function analyzeDataset(
   fileRef: string,
   message: string,
@@ -1305,7 +1315,7 @@ export async function getConversation(id: number): Promise<OraConversationDetail
 export function saveConversationMessages(id: number, messages: OraMessage[]): Promise<unknown> {
   return jsonRequest(`/api/ora/conversations/${id}/messages`, {
     method: "PUT",
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ conversationId: id, messages }),
   });
 }
 

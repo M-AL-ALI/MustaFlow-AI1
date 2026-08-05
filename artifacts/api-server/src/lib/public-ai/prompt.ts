@@ -1,4 +1,8 @@
 import { planUploadedFileRequest } from "./file-edit-planner.js";
+import {
+  detectExplicitOraFileRequest,
+  type FileFormat as SharedFileFormat,
+} from "@workspace/ora-contracts";
 
 /**
  * Canonical Ora identity block — the shared source of truth for Ora's brand
@@ -236,13 +240,14 @@ const BUILDER_PATTERNS: RegExp[] = [
 ];
 
 // File format keywords used to auto-detect the desired output type in chat
-export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
+export type FileFormat = SharedFileFormat;
 const FILE_FORMAT_DETECT: Array<{ pattern: RegExp; format: FileFormat }> = [
   { pattern: /\b(?:appsheet|app\s+sheet)\b/i, format: "xlsx" },
   { pattern: /\b(csv|comma.separated)\b/i, format: "csv" },
   { pattern: /\b(excel|xlsx|xls|spreadsheet)\b/i, format: "xlsx" },
   { pattern: /\b(word|docx|doc\b|word\s+doc)/i, format: "docx" },
   { pattern: /\b(pdf)\b/i, format: "pdf" },
+  { pattern: /\b(markdown|md\s+file|\.md\b)\b/i, format: "md" },
   {
     pattern:
       /\b(powerpoint|power[\s-]?point|pptx?|presentation|slide[\s-]?deck|pitch[\s-]?deck|slide[\s-]?show|slideshow|slides)\b/i,
@@ -423,6 +428,8 @@ export function isPastedReferenceAnalysisRequest(text: string): boolean {
 /** Returns the file format if the message is a file generation request, else null. */
 export function detectFileRequest(text: string): FileFormat | null {
   if (isPastedReferenceAnalysisRequest(text)) return null;
+  const explicitRequest = detectExplicitOraFileRequest(text);
+  if (explicitRequest) return explicitRequest.format;
   // Must look like a generation/creation request
   const isGenRequest = FILE_GENERATION_PATTERNS.some((p) => p.test(text));
   if (!isGenRequest) return null;

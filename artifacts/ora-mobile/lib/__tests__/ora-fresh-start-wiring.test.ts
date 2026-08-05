@@ -94,4 +94,13 @@ describe("Ora mobile fresh-start lifecycle wiring", () => {
     expect(screen).toContain("setActiveProjectId(detail.projectId ?? null);");
     expect(screen).toContain("activeProjectId={activeProjectId}");
   });
+
+  it("atomically resets and guards rapid switches, in-flight replies, and saves", () => {
+    expect(screen).toContain("conversationTransitionRef.current = true");
+    expect(screen).toContain("conversationIdRef.current = null");
+    expect(screen).toContain("sending || conversationTransitionRef.current");
+    expect(screen).toContain("threadResetGenRef.current !== persistGeneration");
+    expect(screen).toContain("conversationIdRef.current !== convId");
+    expect(screen).toContain("threadResetGenRef.current === loadGeneration");
+  });
 });

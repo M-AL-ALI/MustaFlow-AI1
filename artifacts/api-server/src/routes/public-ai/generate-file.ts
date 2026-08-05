@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { oraActivityStep } from "@workspace/ora-contracts";
+import { isSuccessfulOraGeneratedFilePayload, oraActivityStep } from "@workspace/ora-contracts";
 import { logger } from "../../lib/logger";
 import {
   validateSession,
@@ -28,7 +28,7 @@ const messageItemSchema = z.object({
 const bodySchema = z.object({
   message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
-  format: z.enum(["csv", "xlsx", "docx", "pdf", "pptx"]),
+  format: z.enum(["csv", "xlsx", "docx", "pdf", "pptx", "md"]),
   language: z.string().max(20).optional(),
   // IDs of files the user uploaded earlier this conversation. When present we
   // re-hydrate their real content so creation extracts/transforms actual data
@@ -281,6 +281,11 @@ router.post("/public-ai/generate-file", async (req, res) => {
         authed?.tier ?? null,
         oraBrandKit,
       ));
+    if (!isSuccessfulOraGeneratedFilePayload(result)) {
+      throw new fileBuilder.FileGenerationError(
+        "I couldn't generate the requested file. No download was created.",
+      );
+    }
     // The full generator rebuilt the file from an uploaded source's extracted
     // text — an honest "redesigned" stamp so the quality card can say the
     // original layout was NOT carried over. Pure from-scratch generation

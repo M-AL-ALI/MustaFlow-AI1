@@ -432,7 +432,7 @@ export function buildPresentationSystemPrompt(
 }
 
 export function buildDocumentSystemPrompt(
-  format: "docx" | "pdf",
+  format: "docx" | "pdf" | "md",
   language?: string,
   hasSourceData = false,
   quality: OraFileQualityProfile = resolveOraFileQualityProfile({
@@ -1729,6 +1729,48 @@ function safeFileName(title: string, ext: string): string {
   return `${slug || "file"}.${ext}`;
 }
 
+function markdownTable(headers: string[], rows: string[][]): string[] {
+  const escapeCell = (value: string) => value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  return [
+    `| ${headers.map(escapeCell).join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map(
+      (row) => `| ${headers.map((_, index) => escapeCell(row[index] ?? "")).join(" | ")} |`,
+    ),
+  ];
+}
+
+function markdownChart(chart: FileChartSpec): string[] {
+  return [
+    `### ${chart.title}`,
+    "",
+    ...markdownTable(
+      [chart.xLabel || "Label", chart.yLabel || "Value"],
+      chart.labels.map((label, index) => [
+        label,
+        `${chart.values[index] ?? 0}${chart.valueSuffix ?? ""}`,
+      ]),
+    ),
+  ];
+}
+
+/** Serialize the same structured document model used by DOCX/PDF into real Markdown. */
+export function buildMarkdown(data: DocumentData): Buffer {
+  const lines: string[] = [`# ${data.title}`];
+  if (data.subtitle) lines.push("", `_${data.subtitle}_`);
+  for (const section of data.sections) {
+    if (section.heading) lines.push("", `## ${section.heading}`);
+    if (section.content) lines.push("", section.content);
+    if (section.bullets?.length) lines.push("", ...section.bullets.map((item) => `- ${item}`));
+    if (section.table) {
+      lines.push("", ...markdownTable(section.table.headers, section.table.rows));
+    }
+    if (section.chart) lines.push("", ...markdownChart(section.chart));
+  }
+  for (const chart of data.charts ?? []) lines.push("", ...markdownChart(chart));
+  return Buffer.from(`${lines.join("\n").trim()}\n`, "utf8");
+}
+
 const WINDOWS_RESERVED_BASENAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const UNSAFE_FILENAME_CHARS = '<>:"/\\|?*';
 
@@ -1794,6 +1836,8 @@ function mimeForFormat(format: FileFormat): string {
       return "application/pdf";
     case "pptx":
       return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    case "md":
+      return "text/markdown; charset=utf-8";
   }
 }
 
@@ -2478,7 +2522,7 @@ export async function generateFileFromPrompt(
   } else {
     const docType = detectProfessionalDocType(message);
     systemPrompt = buildDocumentSystemPrompt(
-      format as "docx" | "pdf",
+      format as "docx" | "pdf" | "md",
       language,
       hasSourceData,
       quality,
@@ -2590,7 +2634,11 @@ export async function generateFileFromPrompt(
       );
     }
     fileBuffer =
-      format === "docx" ? await buildDocx(data, brandKit) : await buildPdf(data, brandKit);
+      format === "docx"
+        ? await buildDocx(data, brandKit)
+        : format === "md"
+          ? buildMarkdown(data)
+          : await buildPdf(data, brandKit);
   }
 
   const formatLabel = format.toUpperCase();

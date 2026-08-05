@@ -92,7 +92,7 @@ describe("Ora conversation message persistence round-trip", () => {
 
     const saved = await request(app)
       .put(`/ora/conversations/${convId}/messages`)
-      .send({ messages });
+      .send({ conversationId: convId, messages });
     expect(saved.status).toBe(200);
 
     const fetched = await request(app).get(`/ora/conversations/${convId}`);
@@ -135,5 +135,32 @@ describe("Ora conversation message persistence round-trip", () => {
     // round-trip the mobile saveOraMemory + persist path depends on).
     expect(stored[5].memorySaved).toBe(true);
     expect(stored[5].memorySupersededTitles).toEqual(["Prefers dark mode", "Lives in Portland"]);
+  });
+
+  it("rejects a stale client append and leaves the old conversation unchanged", async () => {
+    const app = appAs(USER);
+    const oldCreated = await request(app).post("/ora/conversations").send({ title: "Old thread" });
+    const newCreated = await request(app).post("/ora/conversations").send({ title: "New thread" });
+    const oldId = oldCreated.body.conversation.id as number;
+    const newId = newCreated.body.conversation.id as number;
+    const original = [{ role: "user", content: "old-thread-only" }];
+
+    expect(
+      await request(app)
+        .put(`/ora/conversations/${oldId}/messages`)
+        .send({ conversationId: oldId, messages: original }),
+    ).toMatchObject({ status: 200 });
+
+    const staleSave = await request(app)
+      .put(`/ora/conversations/${oldId}/messages`)
+      .send({
+        conversationId: newId,
+        messages: [{ role: "user", content: "must-not-bleed" }],
+      });
+    expect(staleSave.status).toBe(409);
+    expect(staleSave.body.code).toBe("ORA_CONVERSATION_MISMATCH");
+
+    const fetchedOld = await request(app).get(`/ora/conversations/${oldId}`);
+    expect(fetchedOld.body.conversation.messages).toEqual(original);
   });
 });

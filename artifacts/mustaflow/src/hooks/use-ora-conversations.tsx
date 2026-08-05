@@ -93,10 +93,43 @@ export function OraConversationsProvider({
     getStoredPendingProjectId() != null ? null : idleGatedOraConversationId(getStoredCurrentId()),
   );
   const [newConversationTick, setNewConversationTick] = useState(0);
+  const [conversationTransitionGeneration, setConversationTransitionGeneration] = useState(0);
+  const [conversationTransitioning, setConversationTransitioning] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const currentIdRef = useRef<number | null>(currentConversationId);
   currentIdRef.current = currentConversationId;
+  const transitionGenerationRef = useRef(0);
+  const transitionInProgressRef = useRef(false);
+  const transitionHandlerRef = useRef<((nextConversationId: number | null) => void) | null>(null);
+
+  const beginConversationTransition = useCallback((nextConversationId: number | null) => {
+    const generation = transitionGenerationRef.current + 1;
+    transitionGenerationRef.current = generation;
+    transitionInProgressRef.current = true;
+    setConversationTransitionGeneration(generation);
+    setConversationTransitioning(true);
+    transitionHandlerRef.current?.(nextConversationId);
+    return generation;
+  }, []);
+
+  const isConversationTransitioning = useCallback(() => transitionInProgressRef.current, []);
+
+  const completeConversationTransition = useCallback((generation: number) => {
+    if (transitionGenerationRef.current !== generation) return;
+    transitionInProgressRef.current = false;
+    setConversationTransitioning(false);
+  }, []);
+
+  const registerConversationTransitionHandler = useCallback(
+    (handler: (nextConversationId: number | null) => void) => {
+      transitionHandlerRef.current = handler;
+      return () => {
+        if (transitionHandlerRef.current === handler) transitionHandlerRef.current = null;
+      };
+    },
+    [],
+  );
   // Scope override for the NEXT new conversation:
   //   undefined → defer to the active project (route)
   //   null      → explicit standalone chat
@@ -292,20 +325,24 @@ export function OraConversationsProvider({
     const current = conversations.find((c) => c.id === currentIdRef.current);
     const currentProjectId = current?.projectId ?? null;
     if (currentProjectId !== activeProjectId) {
+      beginConversationTransition(null);
       selectionGenRef.current += 1;
       pendingProjectIdRef.current = undefined;
+      currentIdRef.current = null;
       setCurrentConversationId(null);
       setNewConversationTick((tick) => tick + 1);
       storeCurrentId(null);
     }
-  }, [activeProjectId, conversations]);
+  }, [activeProjectId, beginConversationTransition, conversations]);
 
   const selectConversation = useCallback(
     (id: number | null) => {
       markOraActive();
+      beginConversationTransition(id);
       // Selecting an existing conversation clears any pending new-chat scope.
       selectionGenRef.current += 1;
       pendingProjectIdRef.current = undefined;
+      currentIdRef.current = id;
       setCurrentConversationId(id);
       storeCurrentId(id);
       // Fire-and-forget: sync the last-active id to server settings.
@@ -319,21 +356,26 @@ export function OraConversationsProvider({
         });
       }
     },
-    [isSignedIn],
+    [beginConversationTransition, isSignedIn],
   );
 
-  const newConversation = useCallback((projectId?: number | null) => {
-    markOraActive();
-    // `projectId` may be a number (scope to it), null (explicit standalone) or
-    // undefined (defer to the active project route). Preserve the distinction —
-    // do NOT coalesce undefined→null, or a project-scoped "New conversation"
-    // would silently fall back to standalone.
-    selectionGenRef.current += 1;
-    pendingProjectIdRef.current = projectId;
-    setCurrentConversationId(null);
-    setNewConversationTick((tick) => tick + 1);
-    storeCurrentId(null);
-  }, []);
+  const newConversation = useCallback(
+    (projectId?: number | null) => {
+      markOraActive();
+      beginConversationTransition(null);
+      // `projectId` may be a number (scope to it), null (explicit standalone) or
+      // undefined (defer to the active project route). Preserve the distinction —
+      // do NOT coalesce undefined→null, or a project-scoped "New conversation"
+      // would silently fall back to standalone.
+      selectionGenRef.current += 1;
+      pendingProjectIdRef.current = projectId;
+      currentIdRef.current = null;
+      setCurrentConversationId(null);
+      setNewConversationTick((tick) => tick + 1);
+      storeCurrentId(null);
+    },
+    [beginConversationTransition],
+  );
 
   const ensureConversation = useCallback(
     async (title: string): Promise<number | null> => {
@@ -560,12 +602,17 @@ export function OraConversationsProvider({
     conversations,
     currentConversationId,
     newConversationTick,
+    conversationTransitionGeneration,
+    conversationTransitioning,
     activeProjectId,
     activeProject,
     loading,
     refresh,
     selectConversation,
     newConversation,
+    isConversationTransitioning,
+    completeConversationTransition,
+    registerConversationTransitionHandler,
     ensureConversation,
     notifyPersisted,
     renameConversation,

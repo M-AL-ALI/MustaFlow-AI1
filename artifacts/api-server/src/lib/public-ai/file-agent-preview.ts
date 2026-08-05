@@ -96,6 +96,8 @@ function formatLabel(format: FileFormat): string {
       return "PowerPoint deck";
     case "pdf":
       return "PDF report";
+    case "md":
+      return "Markdown document";
   }
 }
 
@@ -122,6 +124,9 @@ function actionsForFormat(format: FileFormat, hasSourceData: boolean): string[] 
   }
   if (format === "docx") {
     return [...base, "Organize the document into professional sections"];
+  }
+  if (format === "md") {
+    return [...base, "Organize the document with Markdown headings and sections"];
   }
   return [...base, "Keep the output easy to import into spreadsheets"];
 }

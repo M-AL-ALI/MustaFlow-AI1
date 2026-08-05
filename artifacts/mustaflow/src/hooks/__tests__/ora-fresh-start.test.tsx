@@ -52,12 +52,17 @@ function conversationsContext(
     conversations,
     currentConversationId: null,
     newConversationTick: 0,
+    conversationTransitionGeneration: 0,
+    conversationTransitioning: false,
     activeProjectId: null,
     activeProject: null,
     loading: false,
     refresh: vi.fn(async () => {}),
     selectConversation,
     newConversation: vi.fn(),
+    isConversationTransitioning: vi.fn(() => false),
+    completeConversationTransition: vi.fn(),
+    registerConversationTransitionHandler: vi.fn(() => vi.fn()),
     ensureConversation: vi.fn(async () => null),
     notifyPersisted: vi.fn(),
     renameConversation: vi.fn(async () => {}),
@@ -179,6 +184,16 @@ describe("Ora fresh-start website wiring", () => {
     expect(chat).toContain("conversationResetGenRef.current += 1");
     expect(chat).toContain("setMessagesForGeneration(turnGeneration");
     expect(chat).toContain("if (!isTurnCurrent()) return;");
+  });
+
+  it("atomically resets, blocks sends and stale saves, and reloads persisted history", () => {
+    expect(provider).toContain("transitionHandlerRef.current?.(nextConversationId)");
+    expect(provider).toContain("currentIdRef.current = null");
+    expect(chat).toContain("conversationTransitionGeneration !== targetGeneration");
+    expect(chat).toContain("c.isConversationTransitioning()");
+    expect(chat).toContain("conversationId: id, messages: serializeForStorage(msgs)");
+    expect(chat).toContain("latest?.currentConversationId === id");
+    expect(chat).not.toContain("loadedConvRef.current = id;\n    // Switching conversations");
   });
 
   it("puts starter prompts before collapsed recents in the compact home hierarchy", () => {

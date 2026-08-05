@@ -34,6 +34,7 @@ import {
 } from "../../lib/public-ai/clarification-planner";
 import {
   oraActivityStep,
+  isSuccessfulOraGeneratedFilePayload,
   oraPendingClarificationSchema,
   oraWebSearchOkText,
 } from "@workspace/ora-contracts";
@@ -1767,6 +1768,11 @@ router.post("/public-ai/chat", async (req, res) => {
           carriedDocs.length > 0,
           authed?.tier ?? null,
         ));
+      if (!isSuccessfulOraGeneratedFilePayload(result)) {
+        throw new FileGenerationError(
+          "I couldn't generate the requested file. No download was created.",
+        );
+      }
       // The full generator rebuilt the file from an uploaded source's extracted
       // text — an honest "redesigned" stamp so the quality card can say the
       // original layout was NOT carried over. Pure from-scratch generation

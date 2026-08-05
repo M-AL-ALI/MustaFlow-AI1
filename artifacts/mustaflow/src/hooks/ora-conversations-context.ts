@@ -46,6 +46,10 @@ export interface OraConversationsContextValue {
    * draft transcript is still visible.
    */
   newConversationTick: number;
+  /** Monotonic token for an atomic conversation/message-list transition. */
+  conversationTransitionGeneration: number;
+  /** True while the chat surface is clearing or loading the selected thread. */
+  conversationTransitioning: boolean;
   /**
    * The project the user is currently inside, derived from the
    * `/ora/projects/:projectId` route (the single source of truth). `null` on
@@ -64,6 +68,14 @@ export interface OraConversationsContextValue {
    *   - a number    → that specific project.
    */
   newConversation: (projectId?: number | null) => void;
+  /** Synchronous guard used by send/save paths during a thread transition. */
+  isConversationTransitioning: () => boolean;
+  /** Completes only the transition matching this generation. */
+  completeConversationTransition: (generation: number) => void;
+  /** Lets the chat clear its transcript in the same React batch as the id change. */
+  registerConversationTransitionHandler: (
+    handler: (nextConversationId: number | null) => void,
+  ) => () => void;
   /** Create the current conversation if one doesn't exist yet (first message). */
   ensureConversation: (title: string) => Promise<number | null>;
   /** Called by the chat hook after messages persist, to re-sort the list. */

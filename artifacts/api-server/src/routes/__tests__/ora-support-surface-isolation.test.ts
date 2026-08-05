@@ -122,7 +122,10 @@ describe("Support conversations are invisible to the normal /ora/conversations s
     const app = appAs(USER);
     const res = await request(app)
       .put(`/ora/conversations/${supportId}/messages`)
-      .send({ messages: [{ role: "user", content: "leaked" }] });
+      .send({
+        conversationId: supportId,
+        messages: [{ role: "user", content: "leaked" }],
+      });
     expect(res.status).toBe(404);
 
     // The support transcript must remain untouched.

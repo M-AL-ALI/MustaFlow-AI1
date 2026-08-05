@@ -67,7 +67,11 @@ import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { looksLikeFileRevision } from "@/lib/revision-intent";
 import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
 import { cn } from "@/lib/utils";
-import type { OraRealtimeToolWrittenResult } from "@workspace/ora-contracts";
+import {
+  detectExplicitOraFileRequest,
+  detectOraUploadedFileModification,
+  type OraRealtimeToolWrittenResult,
+} from "@workspace/ora-contracts";
 import type {
   UseOraChatReturn,
   UploadState,
@@ -387,6 +391,7 @@ const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] =
   { value: "docx", label: "Word Document", ext: ".docx" },
   { value: "pdf", label: "PDF Document", ext: ".pdf" },
   { value: "pptx", label: "PowerPoint (.pptx)", ext: ".pptx" },
+  { value: "md", label: "Markdown (.md)", ext: ".md" },
 ];
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
@@ -1224,6 +1229,16 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
       // click "Revise" manually.
       void generateFile(text, activeArtifactRef.format, activeArtifactRef.assetId);
     } else {
+      const uploadedEditFormat =
+        attachedFile && !attachedFile.isImage
+          ? detectOraUploadedFileModification(text, attachedFile.filename)
+          : null;
+      const explicitFileRequest = detectExplicitOraFileRequest(text);
+      if (uploadedEditFormat || explicitFileRequest) {
+        clearAttachment();
+        void generateFile(text, uploadedEditFormat ?? explicitFileRequest!.format);
+        return;
+      }
       const editedFrom = editingFromIdx !== null ? true : undefined;
       setEditingFromIdx(null);
       void sendMessage(text, editedFrom ? { editedFrom: true } : undefined);

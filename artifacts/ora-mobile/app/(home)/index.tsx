@@ -126,6 +126,7 @@ import {
   analyzeDataset,
   analyzeDocument,
   analyzeImage,
+  editUploadedImage,
   ApiRequestError,
   createConversation,
   createProject,
@@ -217,6 +218,10 @@ import {
   oraReadingFileText,
   parseOraActivityStep,
   ORA_ANALYZING_IMAGE_TEXT,
+  detectExplicitOraFileRequest,
+  detectOraUploadedFileModification,
+  isOraUploadedImageEditRequest,
+  isSuccessfulOraGeneratedFilePayload,
   shouldResumeOraConversation,
 } from "@workspace/ora-contracts";
 import type { OraActivityRowStep } from "@/components/ora/OraThinkingRow";
@@ -526,6 +531,7 @@ function detectFileFormat(fileName: string, mimeType: string): FileFormat {
   if (ext === "csv" || ext === "xlsx" || ext === "docx" || ext === "pdf" || ext === "pptx") {
     return ext;
   }
+  if (ext === "md" || mimeType.toLowerCase().includes("markdown")) return "md";
   const mt = mimeType.toLowerCase();
   if (mt.includes("csv")) return "csv";
   if (mt.includes("spreadsheet") || mt.includes("excel")) return "xlsx";
@@ -868,6 +874,7 @@ export default function OraChatScreen() {
   // Late responses from the old thread then no-op instead of painting into the
   // fresh transcript or persisting under the wrong conversation id.
   const threadResetGenRef = useRef(0);
+  const conversationTransitionRef = useRef(false);
   const setMessagesForGeneration = useCallback(
     (generation: number, next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) => {
       if (threadResetGenRef.current !== generation) return;
@@ -1164,6 +1171,7 @@ export default function OraChatScreen() {
   const persist = useCallback(
     async (msgs: OraMessage[], temporaryOverride?: boolean) => {
       const persistGeneration = threadResetGenRef.current;
+      if (conversationTransitionRef.current) return;
       // Anonymous sessions are never persisted — no account to attach to.
       if (!isSignedIn) return;
       // Temporary chats are never written to the conversation store. A turn
@@ -1171,13 +1179,14 @@ export default function OraChatScreen() {
       // whether an already-started send gets persisted.
       if ((temporaryOverride ?? temporaryRef.current) === true) return;
       try {
-        let convId = conversationId;
+        let convId = conversationIdRef.current;
         if (!convId) {
           const title = msgs.find((m) => m.role === "user")?.content.slice(0, 60) || "New chat";
           // Scope new chats to the active project (null = standalone/"Recent").
           const created = await createConversation(title, activeProjectIdRef.current);
           if (threadResetGenRef.current !== persistGeneration) return;
           convId = created.conversation.id;
+          conversationIdRef.current = convId;
           setConversationId(convId);
           // Uploads that happened before this conversation existed were cached
           // under the "standalone" key — move them to the new conversation's
@@ -1192,7 +1201,12 @@ export default function OraChatScreen() {
             storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
           }
         }
-        if (threadResetGenRef.current !== persistGeneration) return;
+        if (
+          threadResetGenRef.current !== persistGeneration ||
+          conversationTransitionRef.current ||
+          conversationIdRef.current !== convId
+        )
+          return;
         await saveConversationMessages(convId, msgs);
       } catch {
         /* persistence is best-effort */
@@ -1315,7 +1329,7 @@ export default function OraChatScreen() {
       attch: Attachment | null,
       opts?: { truncateTo?: number; forceSearch?: boolean },
     ) => {
-      if ((!text && !attch) || sending) return;
+      if ((!text && !attch) || sending || conversationTransitionRef.current) return;
       if (isSignedInRef.current) void markOraActive();
 
       // Capture this turn's temporary state so a toggle mid-send can't change
@@ -1382,16 +1396,37 @@ export default function OraChatScreen() {
           // so the thinking row shows the same wording as the website.
           const prompt = text || "Please analyze this attachment.";
           if (attch.kind === "image") {
-            pushActivity(oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT));
-            const res = await analyzeImage(attch.ref, prompt, history);
-            if (!isTurnCurrent()) return;
-            pushActivity(oraActivityStep("file-reading", "ok"));
-            assistant = {
-              id: pendingId,
-              role: "assistant",
-              content: res.reply,
-              messageKind: "image-analysis",
-            };
+            const isImageEdit = isOraUploadedImageEditRequest(prompt);
+            pushActivity(
+              isImageEdit
+                ? oraActivityStep("image-generation", "start")
+                : oraActivityStep("file-reading", "start", ORA_ANALYZING_IMAGE_TEXT),
+            );
+            if (isImageEdit) {
+              const res = await editUploadedImage(attch.ref, prompt);
+              if (!isTurnCurrent()) return;
+              if (!res.imageUrl) {
+                throw new Error("The image edit failed and no edited image was created.");
+              }
+              pushActivity(oraActivityStep("image-generation", "ok"));
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                imageUrl: res.imageUrl,
+                editInstruction: prompt,
+              };
+            } else {
+              const res = await analyzeImage(attch.ref, prompt, history);
+              if (!isTurnCurrent()) return;
+              pushActivity(oraActivityStep("file-reading", "ok"));
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                messageKind: "image-analysis",
+              };
+            }
           } else if (attch.kind === "dataset") {
             pushActivity(
               oraActivityStep("dataset-analysis", "start", oraAnalyzingDatasetText(attch.filename)),
@@ -1754,6 +1789,17 @@ export default function OraChatScreen() {
       );
       return;
     }
+    const uploadedEditFormat =
+      attachment && attachment.kind !== "image"
+        ? detectOraUploadedFileModification(text, attachment.filename)
+        : null;
+    const explicitFileRequest = detectExplicitOraFileRequest(text);
+    if (uploadedEditFormat || (explicitFileRequest && attachment?.kind !== "image")) {
+      setInput("");
+      setAttachment(null);
+      void handleGenerateFileRef.current?.(text, uploadedEditFormat ?? explicitFileRequest!.format);
+      return;
+    }
     const attch = attachment;
     setInput("");
     setAttachment(null);
@@ -1831,6 +1877,9 @@ export default function OraChatScreen() {
           activeAssetId: activeAssetId ?? null,
         });
         if (!isTurnCurrent()) return;
+        if (!isSuccessfulOraGeneratedFilePayload(res)) {
+          throw new Error("I couldn't create that file because generation returned no artifact.");
+        }
         for (const raw of res.activity ?? []) {
           const step = parseOraActivityStep(raw);
           if (step) pushActivity(step);
@@ -2575,7 +2624,9 @@ export default function OraChatScreen() {
   }, []);
 
   const newChat = useCallback(() => {
-    threadResetGenRef.current += 1;
+    conversationTransitionRef.current = true;
+    const resetGeneration = ++threadResetGenRef.current;
+    conversationIdRef.current = null;
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
     // A live realtime session is bound to the current conversation; switching
@@ -2598,6 +2649,9 @@ export default function OraChatScreen() {
     storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
     storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
     requestAnimationFrame(() => {
+      if (threadResetGenRef.current === resetGeneration) {
+        conversationTransitionRef.current = false;
+      }
       listRef.current?.scrollToOffset({ offset: 0, animated: false });
     });
   }, [stopRealtimeForContextSwitch]);
@@ -2869,7 +2923,9 @@ export default function OraChatScreen() {
   const loadConversation = useCallback(
     async (id: number) => {
       if (isSignedInRef.current) void markOraActive();
+      conversationTransitionRef.current = true;
       const loadGeneration = ++threadResetGenRef.current;
+      conversationIdRef.current = null;
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
       setSending(false);
@@ -2896,6 +2952,7 @@ export default function OraChatScreen() {
           loadPendingClarificationStore(),
         ]);
         if (threadResetGenRef.current !== loadGeneration) return;
+        conversationIdRef.current = id;
         setConversationId(id);
         // Restore THIS conversation's cached upload refs so a follow-up
         // "Revise ..." still targets the file uploaded here — even after the
@@ -2918,6 +2975,12 @@ export default function OraChatScreen() {
         scrollToEnd();
       } catch {
         /* ignore */
+      } finally {
+        requestAnimationFrame(() => {
+          if (threadResetGenRef.current === loadGeneration) {
+            conversationTransitionRef.current = false;
+          }
+        });
       }
     },
     [scrollToEnd, stopRealtimeForContextSwitch],
@@ -5962,6 +6025,7 @@ const GENERATE_FILE_FORMATS: {
   { value: "xlsx", label: "Excel spreadsheet (.xlsx)", icon: FileSpreadsheet },
   { value: "csv", label: "CSV (.csv)", icon: FileSpreadsheet },
   { value: "pptx", label: "PowerPoint (.pptx)", icon: Presentation },
+  { value: "md", label: "Markdown (.md)", icon: FileText },
 ];
 
 // Bottom sheet to author a brand-new file from a prompt. Collects a description

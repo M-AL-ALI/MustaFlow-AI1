@@ -77,7 +77,7 @@ export const ORA_TOOL_REGISTRY: Record<OraTool, OraToolMeta> = {
   },
   file_generation: {
     tool: "file_generation",
-    description: "Generate a downloadable CSV / XLSX / DOCX / PDF / PPTX file.",
+    description: "Generate a downloadable CSV / XLSX / DOCX / PDF / PPTX / Markdown file.",
     minAccess: "anon",
     creditCost: 2,
     status: "live",
@@ -235,7 +235,7 @@ export type OraVisualIntent = "generate_image" | "find_image" | "generate_file" 
 // request ("a logo with the word bakery") or are already handled by
 // detectFileRequest when there is no competing visual intent.
 const EXPLICIT_DOWNLOADABLE_FORMAT =
-  /\b(pdf|docx|xlsx|xls|csv|pptx|powerpoint|power\s?point|excel|spreadsheet|word\s+doc(?:ument)?|slide\s?deck|pitch\s?deck|slide\s?show|slideshow|comma[\s-]separated)\b/i;
+  /\b(pdf|docx|xlsx|xls|csv|pptx|markdown|md\s+file|powerpoint|power\s?point|excel|spreadsheet|word\s+doc(?:ument)?|slide\s?deck|pitch\s?deck|slide\s?show|slideshow|comma[\s-]separated)\b/i;
 
 function hasExplicitDownloadableFormat(message: string): boolean {
   return EXPLICIT_DOWNLOADABLE_FORMAT.test(message);
