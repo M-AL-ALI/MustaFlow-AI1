@@ -57,6 +57,7 @@ vi.mock("./logger", () => ({
 }));
 
 import { FlyRuntimeProvider } from "./fly-runtime-provider";
+import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import type { TenantRuntimeProvider } from "./tenant-runtime-provider";
 
 describe("TenantRuntimeProvider Fly adapter", () => {
@@ -144,6 +145,26 @@ describe("TenantRuntimeProvider Fly adapter", () => {
     expect(provider.resolveEndpoint("abc123")).toBe(
       "https://mustaflow-containers.fly.dev/container/abc123",
     );
+  });
+
+  it("keeps the unset provider path constructed as the existing Fly adapter", async () => {
+    const { createTenantRuntimeProvider } = await import("./tenant-runtime");
+    expect(createTenantRuntimeProvider({})).toBeInstanceOf(FlyRuntimeProvider);
+    expect(createTenantRuntimeProvider({ TENANT_RUNTIME_PROVIDER: "" })).toBeInstanceOf(
+      FlyRuntimeProvider,
+    );
+  });
+
+  it("selects the Cloudflare adapter only when the provider and complete config are explicit", async () => {
+    const { createTenantRuntimeProvider } = await import("./tenant-runtime");
+    expect(
+      createTenantRuntimeProvider({
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_CONTROL_URL: "https://runtime.example.test",
+        CLOUDFLARE_RUNTIME_CONTROL_TOKEN: "control-token-with-at-least-thirty-two-characters",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toBeInstanceOf(CloudflareRuntimeProvider);
   });
 
   it("keeps production consumers behind the tenant runtime seam", () => {

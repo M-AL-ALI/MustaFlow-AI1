@@ -59,6 +59,19 @@ export interface RuntimeServiceOptions {
 
 export type RuntimeLogLevel = "stdout" | "stderr" | "system";
 
+export class RuntimeProviderUnavailableError extends Error {
+  readonly code = "runtime_provider_capability_unavailable";
+
+  constructor(
+    readonly providerId: string,
+    readonly capability: string,
+    message = `Runtime capability ${capability} is unavailable from provider ${providerId}`,
+  ) {
+    super(message);
+    this.name = "RuntimeProviderUnavailableError";
+  }
+}
+
 export interface TenantRuntimeProvider {
   /** Stable provider identifier for diagnostics only. */
   readonly providerId: string;

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { sha256Hex, signControlRequest } from "@workspace/tenant-runtime-contracts";
-import { handleControlRequest } from "../src/worker";
+import { handleControlRequest, handleWorkerRequest } from "../src/worker";
 import {
   MemoryCoordinator,
   MockBackend,
@@ -76,6 +76,87 @@ describe("authenticated staging control plane", () => {
     const expiredResponse = await handleControlRequest(expired, fakeEnv(), dependencies);
     expect(expiredResponse.status).toBe(401);
     await expect(expiredResponse.json()).resolves.toMatchObject({ code: "expired_signature" });
+  });
+
+  it.each([
+    ["tampered", "0".repeat(64)],
+    ["truncated", "0".repeat(62)],
+    ["wrong-length", "0".repeat(66)],
+    ["non-hex/non-base64", "~".repeat(64)],
+    ["oversized", "a".repeat(16 * 1024)],
+  ])("rejects a %s signature with a clean 401", async (_name, signature) => {
+    const coordinator = new MemoryCoordinator();
+    const request = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: `nonce-malformed-${_name}-0001`,
+    });
+    request.headers.set("x-nabuflow-signature", signature);
+
+    const response = await handleControlRequest(request, fakeEnv(), {
+      coordinator,
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({ code: "invalid_signature" });
+    expect(coordinator.nonces).toHaveLength(0);
+  });
+
+  it("rejects a missing signature header with a clean 401", async () => {
+    const coordinator = new MemoryCoordinator();
+    const request = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: "nonce-missing-signature-0001",
+    });
+    request.headers.delete("x-nabuflow-signature");
+
+    const response = await handleControlRequest(request, fakeEnv(), {
+      coordinator,
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({ code: "unauthorized" });
+    expect(coordinator.nonces).toHaveLength(0);
+  });
+
+  it("contains unexpected errors at the Worker boundary and audits the failing stage", async () => {
+    const coordinator = new MemoryCoordinator();
+    coordinator.consumeOnce = async () => {
+      throw new Error("simulated coordinator failure");
+    };
+    const request = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: "nonce-worker-boundary-0001",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await handleWorkerRequest(request, fakeEnv(), {
+      coordinator,
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+      requestId: "request-boundary-test",
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "unexpected_worker_error",
+      retryable: true,
+      requestId: "request-boundary-test",
+    });
+    expect(coordinator.audits).toContainEqual(
+      expect.objectContaining({
+        requestId: "request-boundary-test",
+        stage: "authentication",
+        outcome: "unexpected_worker_error",
+        status: 503,
+      }),
+    );
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('"stage":"authentication"'));
+    consoleError.mockRestore();
   });
 
   it("strictly rejects unknown fields without caching a server error", async () => {

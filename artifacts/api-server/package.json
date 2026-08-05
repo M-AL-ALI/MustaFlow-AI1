@@ -34,6 +34,7 @@
     "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/ora-contracts": "workspace:*",
     "@workspace/nabuflow-workspace-tools": "workspace:*",
+    "@workspace/tenant-runtime-contracts": "workspace:*",
     "acorn": "^8.16.0",
     "archiver": "^8.0.0",
     "cookie-parser": "^1.4.7",
