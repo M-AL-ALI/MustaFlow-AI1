@@ -2188,8 +2188,38 @@ export default function SettingsScreen() {
             {githubStatus?.connected ? (
               <View style={{ gap: 8 }}>
                 <Text style={{ color: c.foreground, fontSize: 13, fontWeight: "600" }}>
-                  Connected as {githubStatus.login}
+                  {githubStatus.healthy ? "Connected" : "Needs reconnect"} as {githubStatus.login}
                 </Text>
+                <Text
+                  style={{
+                    color: githubStatus.healthy ? c.mutedForeground : "#f87171",
+                    fontSize: 12,
+                    lineHeight: 18,
+                  }}
+                >
+                  {githubStatus.healthy
+                    ? "Token verified. Choose a repository from any Ora chat."
+                    : (githubStatus.detail ??
+                      "Ora could not verify the saved GitHub authorization.")}
+                </Text>
+                {!githubStatus.healthy ? (
+                  <Button
+                    label="Reconnect GitHub"
+                    onPress={() => {
+                      void (async () => {
+                        try {
+                          const url = await getGithubConnectUrl();
+                          await WebBrowser.openBrowserAsync(url);
+                          const status = await getGithubStatus();
+                          setGithubStatus(status);
+                        } catch {
+                          Alert.alert("Connection failed", "Could not start GitHub sign-in.");
+                        }
+                      })();
+                    }}
+                    full
+                  />
+                ) : null}
                 <Button
                   label="Disconnect GitHub"
                   variant="secondary"
@@ -2202,7 +2232,17 @@ export default function SettingsScreen() {
                         onPress: () => {
                           void disconnectGithub().then(() =>
                             setGithubStatus((prev) =>
-                              prev ? { ...prev, connected: false, login: null } : prev,
+                              prev
+                                ? {
+                                    ...prev,
+                                    connected: false,
+                                    healthy: false,
+                                    login: null,
+                                    tokenHealth: "not_connected",
+                                    detail: null,
+                                    reconnectRequired: false,
+                                  }
+                                : prev,
                             ),
                           );
                         },

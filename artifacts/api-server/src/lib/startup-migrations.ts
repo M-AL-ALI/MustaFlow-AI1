@@ -4726,6 +4726,8 @@ const MIGRATION_STEPS: MigrationStep[] = [
           last_used_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `);
+      await client.query(`ALTER TABLE ora_repo_sessions ADD COLUMN IF NOT EXISTS branch_sha TEXT`);
+      await client.query(`ALTER TABLE ora_repo_sessions ADD COLUMN IF NOT EXISTS tree_sha TEXT`);
       await client.query(`
         CREATE INDEX IF NOT EXISTS ora_repo_sessions_user_id_idx
           ON ora_repo_sessions(user_id)

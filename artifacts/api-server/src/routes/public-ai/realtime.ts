@@ -479,9 +479,17 @@ async function buildRealtimeInstructions(opts: {
         instructions +=
           "\n\n## Connected GitHub repository (read-only)\n" +
           `The selected repository is ${repo.session.owner}/${repo.session.repo}. ` +
+          `Default branch: ${repo.session.defaultBranch}${
+            repo.session.branchSha ? ` at ${repo.session.branchSha.slice(0, 10)}` : ""
+          }. ` +
           "Use the repository tools directly. Never ask the user to paste its URL. " +
           "You may read, search, inspect commits, and analyze it, but you can never " +
           "write, edit, commit, push, or open a pull request.";
+      } else if (repo.connected && repo.failure) {
+        instructions +=
+          "\n\n## GitHub repository access needs attention\n" +
+          `${repo.failure.detail} Tell the user this plainly if they ask for GitHub analysis. ` +
+          "Do not claim repository files, branches, commits, or GitHub account state were analyzed.";
       } else if (repo.connected) {
         instructions +=
           "\n\n## Connected GitHub account (read-only)\n" +

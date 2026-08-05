@@ -16,6 +16,19 @@ export interface OraRepoSession {
   repo: string;
   fullName: string;
   defaultBranch: string;
+  branchSha: string | null;
+}
+
+export interface OraGithubStatus {
+  available: boolean;
+  connected: boolean;
+  healthy: boolean;
+  login: string | null;
+  tokenHealth: string;
+  detail: string | null;
+  retryable: boolean;
+  reconnectRequired: boolean;
+  checkedAt?: string;
 }
 
 export interface OraGithubRepo {
@@ -28,8 +41,27 @@ export interface OraGithubRepo {
   pushedAt: string | null;
 }
 
+interface OraGithubErrorPayload {
+  error?: string;
+  detail?: string;
+}
+
+async function githubErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = (await res.json()) as OraGithubErrorPayload;
+    return data.detail || data.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function shortSha(sha: string | null | undefined): string | null {
+  return sha ? sha.slice(0, 10) : null;
+}
+
 export function useOraRepoSession(isSignedIn: boolean) {
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [githubStatus, setGithubStatus] = useState<OraGithubStatus | null>(null);
   const [repoSession, setRepoSession] = useState<OraRepoSession | null>(null);
 
   const refresh = useCallback(async () => {
@@ -40,8 +72,9 @@ export function useOraRepoSession(isSignedIn: boolean) {
         authFetch("/api/ora/github/repo-session"),
       ]);
       if (statusRes.ok) {
-        const status = (await statusRes.json()) as { connected: boolean };
-        setConnected(status.connected);
+        const status = (await statusRes.json()) as OraGithubStatus;
+        setGithubStatus(status);
+        setConnected(status.available && status.connected && status.healthy);
       }
       if (sessionRes.ok) {
         const data = (await sessionRes.json()) as { session: OraRepoSession | null };
@@ -63,7 +96,7 @@ export function useOraRepoSession(isSignedIn: boolean) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ owner, repo, conversationId: conversationId ?? null }),
       });
-      if (!res.ok) throw new Error("Could not select repository");
+      if (!res.ok) throw new Error(await githubErrorMessage(res, "Could not select repository"));
       const data = (await res.json()) as { session: OraRepoSession };
       setRepoSession(data.session);
       return data.session;
@@ -81,7 +114,7 @@ export function useOraRepoSession(isSignedIn: boolean) {
     }
   }, [repoSession]);
 
-  return { connected, repoSession, refresh, selectRepo, detachRepo };
+  return { connected, githubStatus, repoSession, refresh, selectRepo, detachRepo };
 }
 
 export function OraRepoChip({
@@ -99,6 +132,11 @@ export function OraRepoChip({
       <Github className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--ora-accent-hsl))]" />
       <span className="font-medium">Analyzing: {session.fullName}</span>
       <span className="text-muted-foreground/60">read-only</span>
+      {shortSha(session.branchSha) && (
+        <span className="text-muted-foreground/60">
+          {session.defaultBranch} @ {shortSha(session.branchSha)}
+        </span>
+      )}
       <button
         type="button"
         aria-label="Stop analyzing this repository"
@@ -116,11 +154,13 @@ export function OraRepoPickerDialog({
   onClose,
   onSelect,
   connected,
+  githubStatus,
 }: {
   open: boolean;
   onClose: () => void;
   onSelect: (owner: string, repo: string) => Promise<void>;
   connected: boolean | null;
+  githubStatus?: OraGithubStatus | null;
 }) {
   const [repos, setRepos] = useState<OraGithubRepo[] | null>(null);
   const [filter, setFilter] = useState("");
@@ -128,19 +168,31 @@ export function OraRepoPickerDialog({
   const [selecting, setSelecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open || !connected) return;
+  const loadRepos = useCallback(() => {
+    if (!open || connected !== true) return;
     setLoading(true);
     setError(null);
     authFetch("/api/ora/github/repos")
       .then(async (res) => {
-        if (!res.ok) throw new Error("Could not load repositories");
+        if (!res.ok) {
+          throw new Error(
+            await githubErrorMessage(res, "Could not load your repositories from GitHub."),
+          );
+        }
         const data = (await res.json()) as { repos: OraGithubRepo[] };
         setRepos(data.repos);
       })
-      .catch(() => setError("Could not load your repositories from GitHub."))
+      .catch((err) =>
+        setError(
+          err instanceof Error ? err.message : "Could not load your repositories from GitHub.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, [open, connected]);
+
+  useEffect(() => {
+    loadRepos();
+  }, [loadRepos]);
 
   if (!open) return null;
 
@@ -173,8 +225,20 @@ export function OraRepoPickerDialog({
           </button>
         </div>
         <div className="p-4">
-          {connected === false ? (
+          {connected === null ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Checking GitHub connection...
+            </div>
+          ) : connected === false ? (
             <div className="space-y-3 text-sm">
+              {githubStatus?.connected && githubStatus.healthy === false && (
+                <div className="space-y-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs">
+                  <p className="font-medium text-red-300">GitHub needs to be reconnected.</p>
+                  <p className="text-muted-foreground">
+                    {githubStatus.detail ?? "Ora could not verify the saved GitHub authorization."}
+                  </p>
+                </div>
+              )}
               <p>Connect your GitHub account first — it takes two clicks.</p>
               <a
                 href="/ora/settings"
@@ -200,7 +264,27 @@ export function OraRepoPickerDialog({
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading your repositories…
                 </div>
               )}
-              {error && <p className="py-4 text-sm text-red-400">{error}</p>}
+              {error && (
+                <div className="space-y-3 py-4">
+                  <p className="text-sm text-red-400">{error}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={loadRepos}
+                      disabled={loading}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted/60 disabled:opacity-50"
+                    >
+                      <Loader2 className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Retry
+                    </button>
+                    <a
+                      href="/ora/settings"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-muted/80"
+                    >
+                      <Github className="h-3.5 w-3.5" /> GitHub Settings
+                    </a>
+                  </div>
+                </div>
+              )}
               {!loading && !error && (
                 <ul className="max-h-72 space-y-0.5 overflow-y-auto" data-testid="ora-repo-list">
                   {filtered.map((r) => (
@@ -213,7 +297,13 @@ export function OraRepoPickerDialog({
                           setError(null);
                           onSelect(r.owner, r.name)
                             .then(onClose)
-                            .catch(() => setError("Could not open that repository."))
+                            .catch((err) =>
+                              setError(
+                                err instanceof Error
+                                  ? err.message
+                                  : "Could not open that repository.",
+                              ),
+                            )
                             .finally(() => setSelecting(null));
                         }}
                         className={cn(

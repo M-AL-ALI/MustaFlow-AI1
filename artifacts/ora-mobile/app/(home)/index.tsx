@@ -163,6 +163,7 @@ import {
   getGithubStatus,
   getRepoSession,
   detachRepoSession,
+  type OraGithubStatus,
   type OraRepoSessionSummary,
 } from "@/lib/api";
 import { RepoPickerSheet } from "@/components/ora/RepoPickerSheet";
@@ -647,6 +648,7 @@ export default function OraChatScreen() {
   const [repoSession, setRepoSession] = useState<OraRepoSessionSummary | null>(null);
   const [showRepoPicker, setShowRepoPicker] = useState(false);
   const [githubConnected, setGithubConnected] = useState(false);
+  const [githubStatus, setGithubStatus] = useState<OraGithubStatus | null>(null);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
   // Live activity trace: the current typed tool step (web search, file gen,
   // image gen, repo analysis, file reading) shown by OraThinkingRow with a
@@ -888,10 +890,14 @@ export default function OraChatScreen() {
     if (!isSignedIn) {
       setRepoSession(null);
       setGithubConnected(false);
+      setGithubStatus(null);
       return;
     }
     getGithubStatus()
-      .then((status) => setGithubConnected(status.connected))
+      .then((status) => {
+        setGithubStatus(status);
+        setGithubConnected(status.available && status.connected && status.healthy);
+      })
       .catch(() => {});
     getRepoSession()
       .then(setRepoSession)
@@ -3595,6 +3601,11 @@ export default function OraChatScreen() {
                 Analyzing: {repoSession.fullName}
               </Text>
               <Text style={{ color: c.mutedForeground, fontSize: 11 }}>read-only</Text>
+              {repoSession.branchSha ? (
+                <Text style={{ color: c.mutedForeground, fontSize: 11 }}>
+                  {repoSession.defaultBranch} @ {repoSession.branchSha.slice(0, 10)}
+                </Text>
+              ) : null}
               <Pressable
                 accessibilityLabel="Stop analyzing this repository"
                 hitSlop={8}
@@ -4175,6 +4186,7 @@ export default function OraChatScreen() {
       <RepoPickerSheet
         visible={showRepoPicker}
         connected={githubConnected}
+        githubStatus={githubStatus}
         onClose={() => setShowRepoPicker(false)}
         onSelected={(sessionRow) => setRepoSession(sessionRow)}
         onNeedConnect={() => {

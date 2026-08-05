@@ -37,6 +37,8 @@ export const oraRepoSessionsTable = pgTable(
     repo: text("repo").notNull(),
     ref: text("ref").notNull().default(""),
     defaultBranch: text("default_branch").notNull().default("main"),
+    branchSha: text("branch_sha"),
+    treeSha: text("tree_sha"),
     status: text("status").notNull().default("active"),
     fileCount: integer("file_count"),
     totalBytes: integer("total_bytes"),

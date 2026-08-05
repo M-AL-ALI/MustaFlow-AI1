@@ -17,11 +17,12 @@ import { db, oraRepoSessionsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import {
   buildOraAuthorizeUrl,
+  checkOraGithubConnectionHealth,
   deleteOraGithubConnection,
+  describeOraGithubProblem,
   exchangeOraOAuthCode,
   fetchGithubUser,
   fetchRepoMeta,
-  getOraGithubConnection,
   getOraGithubToken,
   isOraGithubConfigured,
   listGithubRepos,
@@ -29,11 +30,35 @@ import {
   saveOraGithubConnection,
   signOraOAuthState,
   verifyOraOAuthState,
+  type OraGithubProblem,
 } from "../lib/public-ai/repo-github-auth";
 import { destroyRepoWorkspace } from "../lib/public-ai/repo-workspace";
 
 export const oraGithubCallbackRouter = Router();
 export const oraGithubRouter = Router();
+
+function githubProblemStatus(problem: OraGithubProblem): number {
+  if (problem.tokenHealth === "oauth_not_configured") return 503;
+  if (problem.tokenHealth === "not_connected") return 401;
+  if (problem.tokenHealth === "rate_limited") return 429;
+  if (problem.tokenHealth === "token_invalid" || problem.tokenHealth === "token_unreadable") {
+    return 401;
+  }
+  if (problem.tokenHealth === "access_denied") return 403;
+  if (problem.status === 404) return 404;
+  return 502;
+}
+
+function githubProblemBody(problem: OraGithubProblem) {
+  return {
+    error: problem.message,
+    detail: problem.detail,
+    tokenHealth: problem.tokenHealth,
+    retryable: problem.retryable,
+    reconnectRequired: problem.reconnectRequired,
+    status: problem.status ?? null,
+  };
+}
 
 const MOBILE_DONE_HTML = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>GitHub connected</title></head>
 <body style="background:#0a0a0a;color:#e5e5e5;font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
@@ -86,16 +111,7 @@ oraGithubCallbackRouter.get("/ora/github/oauth/callback", async (req, res) => {
 // GET /ora/github/status
 oraGithubRouter.get("/ora/github/status", async (req, res) => {
   const userId = req.userId!;
-  if (!isOraGithubConfigured()) {
-    res.json({ available: false, connected: false });
-    return;
-  }
-  const connection = await getOraGithubConnection(userId);
-  res.json({
-    available: true,
-    connected: Boolean(connection),
-    login: connection?.login ?? null,
-  });
+  res.json(await checkOraGithubConnectionHealth(userId));
 });
 
 // POST /ora/github/connect { platform?: "web" | "mobile" } → { url }
@@ -134,15 +150,34 @@ oraGithubRouter.get("/ora/github/repos", async (req, res) => {
   const userId = req.userId!;
   const token = await getOraGithubToken(userId);
   if (!token) {
-    res.status(401).json({ error: "GitHub is not connected" });
+    const health = await checkOraGithubConnectionHealth(userId);
+    const problem: OraGithubProblem = {
+      tokenHealth: health.tokenHealth,
+      message: health.connected
+        ? "GitHub authorization needs attention"
+        : "GitHub is not connected",
+      detail:
+        health.detail ??
+        "Connect GitHub in Settings before Ora can list repositories for analysis.",
+      retryable: health.retryable,
+      reconnectRequired: health.reconnectRequired,
+    };
+    res.status(health.available === false ? 503 : githubProblemStatus(problem)).json({
+      ...githubProblemBody(problem),
+      available: health.available,
+      connected: health.connected,
+      healthy: health.healthy,
+      login: health.login,
+    });
     return;
   }
   try {
     const repos = await listGithubRepos(token);
     res.json({ repos });
   } catch (err) {
+    const problem = describeOraGithubProblem(err);
     logger.warn({ err }, "ora-github: repo list failed");
-    res.status(502).json({ error: "Could not list repositories from GitHub" });
+    res.status(githubProblemStatus(problem)).json(githubProblemBody(problem));
   }
 });
 
@@ -170,15 +205,37 @@ oraGithubRouter.post("/ora/github/repo-session", async (req, res) => {
   }
   const token = await getOraGithubToken(userId);
   if (!token) {
-    res.status(401).json({ error: "GitHub is not connected" });
+    const health = await checkOraGithubConnectionHealth(userId);
+    const problem: OraGithubProblem = {
+      tokenHealth: health.tokenHealth,
+      message: health.connected
+        ? "GitHub authorization needs attention"
+        : "GitHub is not connected",
+      detail:
+        health.detail ?? "Connect GitHub in Settings before selecting a repository for analysis.",
+      retryable: health.retryable,
+      reconnectRequired: health.reconnectRequired,
+    };
+    res.status(health.available === false ? 503 : githubProblemStatus(problem)).json({
+      ...githubProblemBody(problem),
+      available: health.available,
+      connected: health.connected,
+      healthy: health.healthy,
+      login: health.login,
+    });
     return;
   }
   const { owner, repo, conversationId } = parsed.data;
-  let meta: { defaultBranch: string };
+  let meta: { defaultBranch: string; branchSha: string; treeSha: string };
   try {
     meta = await fetchRepoMeta(token, owner, repo);
-  } catch {
-    res.status(404).json({ error: "Repository not found or not accessible" });
+  } catch (err) {
+    const problem = describeOraGithubProblem(err);
+    logger.warn({ err, owner, repo }, "ora-github: repo metadata lookup failed");
+    res.status(githubProblemStatus(problem)).json({
+      ...githubProblemBody(problem),
+      error: problem.status === 404 ? "Repository not found or not accessible" : problem.message,
+    });
     return;
   }
   // One active session per user+conversation scope: detach previous ones.
@@ -206,6 +263,8 @@ oraGithubRouter.post("/ora/github/repo-session", async (req, res) => {
       repo,
       ref: "",
       defaultBranch: meta.defaultBranch,
+      branchSha: meta.branchSha,
+      treeSha: meta.treeSha,
       status: "active",
     })
     .returning({ id: oraRepoSessionsTable.id });
@@ -218,6 +277,7 @@ oraGithubRouter.post("/ora/github/repo-session", async (req, res) => {
       repo,
       fullName: `${owner}/${repo}`,
       defaultBranch: meta.defaultBranch,
+      branchSha: meta.branchSha,
     },
   });
 });
@@ -239,6 +299,7 @@ oraGithubRouter.get("/ora/github/repo-session", async (req, res) => {
           repo: row.repo,
           fullName: `${row.owner}/${row.repo}`,
           defaultBranch: row.defaultBranch,
+          branchSha: row.branchSha,
         }
       : null,
   });

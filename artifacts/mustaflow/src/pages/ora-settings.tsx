@@ -1765,19 +1765,42 @@ const SAFE_FONTS_WEB = [
 ] as const;
 type SafeFont = (typeof SAFE_FONTS_WEB)[number];
 
+interface OraGithubStatus {
+  available: boolean;
+  connected: boolean;
+  healthy: boolean;
+  login: string | null;
+  tokenHealth: string;
+  detail: string | null;
+  retryable: boolean;
+  reconnectRequired: boolean;
+  checkedAt?: string;
+}
+
 function GithubConnectionSection() {
   const { toast } = useToast();
-  const [status, setStatus] = useState<{
-    available: boolean;
-    connected: boolean;
-    login: string | null;
-  } | null>(null);
+  const [status, setStatus] = useState<OraGithubStatus | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const statusWithDefaults = useCallback(
+    (patch: Partial<OraGithubStatus>): OraGithubStatus => ({
+      available: true,
+      connected: false,
+      healthy: false,
+      login: null,
+      tokenHealth: "not_connected",
+      detail: null,
+      retryable: false,
+      reconnectRequired: false,
+      ...patch,
+    }),
+    [],
+  );
 
   const loadStatus = useCallback(() => {
     authFetch("/api/ora/github/status")
       .then(async (res) => {
-        if (res.ok) setStatus((await res.json()) as typeof status);
+        if (res.ok) setStatus((await res.json()) as OraGithubStatus);
       })
       .catch(() => {});
   }, []);
@@ -1810,7 +1833,15 @@ function GithubConnectionSection() {
       if (res.status === 503) {
         // Server reports GitHub OAuth is not configured — flip the section to
         // the explanatory panel instead of leaving a button that does nothing.
-        setStatus((prev) => ({ ...(prev ?? { connected: false, login: null }), available: false }));
+        setStatus((prev) =>
+          statusWithDefaults({
+            ...(prev ?? {}),
+            available: false,
+            connected: false,
+            healthy: false,
+            tokenHealth: "oauth_not_configured",
+          }),
+        );
         setBusy(false);
         return;
       }
@@ -1831,7 +1862,19 @@ function GithubConnectionSection() {
     setBusy(true);
     try {
       await authFetch("/api/ora/github", { method: "DELETE" });
-      setStatus((prev) => (prev ? { ...prev, connected: false, login: null } : prev));
+      setStatus((prev) =>
+        prev
+          ? statusWithDefaults({
+              ...prev,
+              connected: false,
+              healthy: false,
+              login: null,
+              tokenHealth: "not_connected",
+              detail: null,
+              reconnectRequired: false,
+            })
+          : prev,
+      );
       toast({ title: "GitHub disconnected" });
     } finally {
       setBusy(false);
@@ -1847,19 +1890,39 @@ function GithubConnectionSection() {
       {status?.connected ? (
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5">
-            <p className="text-sm font-medium">Connected as {status.login}</p>
-            <p className="text-xs text-muted-foreground">
-              Pick a repo from the + menu in any Ora chat to start an analysis.
+            <p className="text-sm font-medium">
+              {status.healthy ? "Connected" : "Needs reconnect"} as {status.login}
             </p>
+            {status.healthy ? (
+              <p className="text-xs text-muted-foreground">
+                Token verified. Pick a repo from the + menu in any Ora chat to start an analysis.
+              </p>
+            ) : (
+              <p className="text-xs text-red-400">
+                {status.detail ?? "Ora could not verify the saved GitHub authorization."}
+              </p>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={() => void disconnect()}
-            disabled={busy}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/60 transition-colors disabled:opacity-50"
-          >
-            Disconnect
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {!status.healthy && (
+              <button
+                type="button"
+                onClick={() => void connect()}
+                disabled={busy}
+                className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                Reconnect
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void disconnect()}
+              disabled={busy}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/60 transition-colors disabled:opacity-50"
+            >
+              Disconnect
+            </button>
+          </div>
         </div>
       ) : status?.available === false ? (
         // Server has no GitHub OAuth credentials configured. Say so plainly —

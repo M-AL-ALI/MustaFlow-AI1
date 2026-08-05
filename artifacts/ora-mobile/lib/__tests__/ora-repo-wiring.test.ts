@@ -26,6 +26,8 @@ describe("mobile api layer", () => {
       expect(api).toContain(`export async function ${fn}`);
     }
     expect(api).not.toMatch(/pushToGithub|commitToGithub|createGithubPr/);
+    expect(api).toContain("tokenHealth");
+    expect(api).toContain("branchSha");
   });
   it("threads SSE status events through streamChatNative", () => {
     expect(api).toContain('if (type === "status")');
@@ -38,6 +40,7 @@ describe("mobile chat wiring", () => {
     expect(chat).toContain("getRepoSession()");
     expect(chat).toContain("RepoPickerSheet");
     expect(chat).toContain("Analyzing: {repoSession.fullName}");
+    expect(chat).toContain("repoSession.branchSha");
     expect(chat).toContain("Analyze GitHub repo");
   });
   it("renders live narration via streamStatus in the thinking row", () => {
@@ -50,6 +53,8 @@ describe("mobile settings GitHub section", () => {
   it("connects via the server OAuth URL in the in-app browser", () => {
     expect(settings).toContain("getGithubConnectUrl");
     expect(settings).toContain("disconnectGithub");
+    expect(settings).toContain("Needs reconnect");
+    expect(settings).toContain("Token verified");
     expect(settings).toMatch(/read-only/i);
   });
 
@@ -65,6 +70,8 @@ describe("repo picker sheet", () => {
   it("uses the shared api helpers and states the read-only promise", () => {
     expect(sheet).toContain("listGithubRepos");
     expect(sheet).toContain("selectRepoSession");
+    expect(sheet).toContain("Retry");
+    expect(sheet).toContain("githubStatus");
     expect(sheet).toMatch(/never writes/i);
   });
 });

@@ -19,6 +19,9 @@ describe("ora-github-repo component", () => {
     expect(component).toContain("/api/ora/github/status");
     expect(component).toContain("/api/ora/github/repos");
     expect(component).toContain("/api/ora/github/repo-session");
+    expect(component).toContain("tokenHealth");
+    expect(component).toContain("branchSha");
+    expect(component).toContain("Retry");
     expect(component).not.toMatch(/git push|create_pr|commit_change/i);
   });
   it("states the read-only promise to the user", () => {
@@ -51,6 +54,8 @@ describe("ora-settings GitHub section", () => {
     expect(settings).toContain("/api/ora/github/connect");
     expect(settings).toContain('authFetch("/api/ora/github", { method: "DELETE" })');
     expect(settings).toContain("GithubConnectionSection");
+    expect(settings).toContain("Needs reconnect");
+    expect(settings).toContain("Token verified");
   });
 
   // Regression: the Connect button was disabled on `available === false` with
