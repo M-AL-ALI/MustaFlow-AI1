@@ -287,6 +287,36 @@ describe("Ora mobile parity — temporary chat does not save or reference memori
     expect(handleBody).toContain("temporaryRef.current");
     expect(handleBody).toContain("isSignedInRef.current");
   });
+
+  it("manual save stays available even when auto-save is off", () => {
+    expect(index).toContain(
+      "onSaveMemory={!temporary && isSignedIn ? handleSaveMemory : undefined}",
+    );
+    expect(index).not.toContain(
+      "onSaveMemory={!temporary && getAutoSaveMemories() ? handleSaveMemory : undefined}",
+    );
+  });
+
+  it("auto-save only persists high-confidence non-sensitive candidates", () => {
+    const effectStart = index.indexOf("high-confidence, non-sensitive candidates can save");
+    expect(effectStart).toBeGreaterThan(-1);
+    const effectBody = index.slice(effectStart, effectStart + 1200);
+
+    expect(effectBody).toContain("getAutoSaveMemories()");
+    expect(effectBody).toContain("getReferenceSavedMemories()");
+    expect(effectBody).toContain('message.memorySaveCandidateConfidence !== "high"');
+    expect(effectBody).toContain("message.memorySaveCandidateSensitive === true");
+    expect(effectBody).toContain("handleSaveMemory(message)");
+  });
+
+  it("sensitive memory confirmation defaults on and describes active protection", () => {
+    const settings = read("../memory-settings.ts");
+    const memoryScreen = read("../../app/(home)/memory.tsx");
+
+    expect(settings).toContain("let _askSensitive = true;");
+    expect(memoryScreen).toContain("Always confirm before Ora saves anything that looks sensitive");
+    expect(memoryScreen).not.toContain("will be added in a future update");
+  });
 });
 
 // ── Streaming gate parity ───────────────────────────────────────────────────

@@ -499,6 +499,38 @@ export async function rankMemoriesByRelevance(
   );
 }
 
+const BROAD_MEMORY_RECALL_PATTERNS: RegExp[] = [
+  /\bwhat\s+(?:do|can)\s+you\s+(?:know|remember|have\s+saved)\s+(?:about\s+me|for\s+me)\b/i,
+  /\bwhat\s+(?:saved\s+)?memories\s+do\s+you\s+have\b/i,
+  /\btell\s+me\s+what\s+you\s+(?:know|remember|have\s+saved)\s+(?:about\s+me|for\s+me)\b/i,
+  /\bshow\s+me\s+(?:my\s+)?(?:saved\s+)?memories\b/i,
+];
+
+export function isBroadOraMemoryRecallRequest(message: string): boolean {
+  return BROAD_MEMORY_RECALL_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function recallInventoryCategoryPriority(message: string): Record<string, number> {
+  const text = message.toLowerCase();
+  if (/\b(project|app|product|repo|document|file)\b/.test(text)) {
+    return { project: 0, document: 1, preference: 2, personal: 3, other: 4 };
+  }
+  return { personal: 0, preference: 1, project: 2, document: 3, other: 4 };
+}
+
+export function rankMemoriesForRecallInventory(
+  rows: OraMemoryRow[],
+  message: string,
+): OraMemoryRow[] {
+  const priority = recallInventoryCategoryPriority(message);
+  return [...rows].sort((a, b) => {
+    const categoryA = priority[a.category ?? "other"] ?? priority.other;
+    const categoryB = priority[b.category ?? "other"] ?? priority.other;
+    if (categoryA !== categoryB) return categoryA - categoryB;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+}
+
 /**
  * Lazily backfill embeddings for Ora memories that lack them so future
  * retrievals can use semantic similarity. Fire-and-forget and strictly bounded
@@ -662,16 +694,23 @@ export async function buildMemoryContext(
 
     const trimmedMessage = currentMessage?.trim() ?? "";
     const hasMessage = trimmedMessage.length > 0;
+    const broadRecallRequest = hasMessage && isBroadOraMemoryRecallRequest(trimmedMessage);
     // Embed the prompt ONCE and share it across both ranking passes so the
     // blend never doubles embedding latency/cost on the pre-reply path.
-    const promptEmbedding = hasMessage ? await embedPromptBestEffort(trimmedMessage) : null;
+    const promptEmbedding =
+      hasMessage && !broadRecallRequest ? await embedPromptBestEffort(trimmedMessage) : null;
     const rankPool = async (
       pool: OraMemoryRow[],
       poolProfile: OraMemoryRecallProfile,
     ): Promise<OraMemoryRow[]> =>
-      hasMessage
-        ? rankMemoriesByRelevance(pool, currentMessage ?? "", poolProfile, promptEmbedding)
-        : selectMemoriesWithinBudget(pool, poolProfile);
+      broadRecallRequest
+        ? selectMemoriesWithinBudget(
+            rankMemoriesForRecallInventory(pool, trimmedMessage),
+            poolProfile,
+          )
+        : hasMessage
+          ? rankMemoriesByRelevance(pool, currentMessage ?? "", poolProfile, promptEmbedding)
+          : selectMemoriesWithinBudget(pool, poolProfile);
 
     let selected: OraMemoryRow[];
     if (!isProjectChat || projectPool.length === 0) {
@@ -1090,7 +1129,7 @@ export function isOraMemoryRecallRequest(message: string): boolean {
   );
 }
 
-function buildMemoryStatusContext({
+export function buildMemoryStatusContext({
   authed,
   temporary,
   referenceSavedMemories,
@@ -1123,7 +1162,7 @@ function buildMemoryStatusContext({
     return "\n\n## Memory status for this turn\nNo relevant saved memories or past-conversation summaries were available. If the user asks what you remember, say you do not have that saved instead of guessing.";
   }
 
-  return "";
+  return "\n\n## Memory status for this turn\nThe user is asking what Ora remembers or knows about them. Answer only from the Saved memories and Earlier relevant conversations sections supplied in this prompt. Do not infer, invent, or reveal any personal facts beyond that context. Be direct, distinguish saved memories from past conversation recall when both are present, and mention that the user can view, edit, disable, or delete saved memories in the Memory Center.";
 }
 
 /**

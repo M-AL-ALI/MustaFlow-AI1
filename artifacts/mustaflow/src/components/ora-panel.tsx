@@ -65,11 +65,7 @@ import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { looksLikeFileRevision } from "@/lib/revision-intent";
-import {
-  getAutoSaveMemories,
-  getReferenceSavedMemories,
-  getAskBeforeSensitive,
-} from "@/lib/ora-memory-settings";
+import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
 import { cn } from "@/lib/utils";
 import type { OraRealtimeToolWrittenResult } from "@workspace/ora-contracts";
 import type {
@@ -692,20 +688,24 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     [markMemorySaved, queryClient, saveOraProjectId, toast],
   );
 
-  // Save-by-default auto-save: when the auto-save and reference-memories
-  // preferences are on, save ANY durable memory candidate Ora detects (any
-  // confidence) without an extra click. Sensitive candidates are still gated by
-  // the ask-before-sensitive safeguard — those keep the inline chip so the user
-  // saves them deliberately. Temporary ("incognito") chats never auto-save.
+  // Save-by-default auto-save: only high-confidence, non-sensitive candidates
+  // save without an extra click. Low-confidence suggestions and sensitive facts
+  // remain manual. Temporary ("incognito") chats never auto-save.
   useEffect(() => {
     if (!isSignedIn) return;
     if (temporary) return;
     if (!getAutoSaveMemories() || !getReferenceSavedMemories()) return;
-    const askBeforeSensitive = getAskBeforeSensitive();
     messages.forEach((msg) => {
       const candidate = msg.memorySaveCandidate;
-      const sensitiveGated = msg.memorySaveCandidateSensitive === true && askBeforeSensitive;
-      if (msg.role === "assistant" && candidate && !sensitiveGated && !msg.memorySaved) {
+      const highConfidence = msg.memorySaveCandidateConfidence === "high";
+      const sensitive = msg.memorySaveCandidateSensitive === true;
+      if (
+        msg.role === "assistant" &&
+        candidate &&
+        highConfidence &&
+        !sensitive &&
+        !msg.memorySaved
+      ) {
         // Key the in-flight guard by content identity, not array index, so a
         // transcript edit/truncation mid-save can't collide with a stale index.
         const key = `${msg.content}\u0000${candidate}`;
