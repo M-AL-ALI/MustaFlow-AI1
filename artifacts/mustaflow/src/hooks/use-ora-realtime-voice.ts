@@ -2836,7 +2836,7 @@ export function useOraRealtimeVoice(
         } else {
           if (!isReconnect) reconnectAllowedRef.current = false;
           setState("idle");
-          setFallbackReason("No microphone available. Using basic voice mode.");
+          setFallbackReason("No microphone found. Connect or enable a microphone, then try again.");
         }
         return false;
       }

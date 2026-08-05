@@ -15,7 +15,13 @@
  * the logger are mocked so no network/IO happens.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const billingSource = readFileSync(resolve(here, "../billing.ts"), "utf8").replace(/\r\n/g, "\n");
 
 // ── Shared mock state (hoisted so the vi.mock factories can reach it) ──────────
 const h = vi.hoisted(() => {
@@ -183,6 +189,32 @@ describe("extractSubscriptionPeriod", () => {
 });
 
 // ─── handleStripeWebhook envelope ────────────────────────────────────────────
+describe("Ora subscription display freshness", () => {
+  it("refreshes Stripe subscription state before returning user-visible billing summaries", () => {
+    expect(billingSource).toContain("async function refreshOraSubscriptionFromStripe(");
+    expect(billingSource).toContain("stripe.subscriptions.retrieve(sub.stripeSubscriptionId)");
+    expect(billingSource).toContain("currentPeriodEnd: period.end");
+    expect(billingSource).toContain("cancelAtPeriodEnd");
+
+    const subscriptionRoute = billingSource.slice(
+      billingSource.indexOf('router.get("/billing/subscription"'),
+      billingSource.indexOf('router.get("/billing/payment-method"'),
+    );
+    expect(subscriptionRoute).toContain(
+      "refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId))",
+    );
+
+    const paymentRoute = billingSource.slice(
+      billingSource.indexOf('router.get("/billing/payment-method"'),
+      billingSource.indexOf('router.post("/billing/payment-method/setup"'),
+    );
+    expect(paymentRoute).toContain(
+      "refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId))",
+    );
+    expect(paymentRoute).toContain("renewalDate: sub.currentPeriodEnd");
+  });
+});
+
 describe("handleStripeWebhook", () => {
   it("returns 503 (retryable) when the Stripe client is unavailable", async () => {
     h.getStripeClientMock.mockResolvedValue(null);

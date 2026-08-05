@@ -102,7 +102,7 @@ function viewOraFile(file: GeneratedFile) {
 // owner-scoped /download route authorizes the request.
 async function downloadOraAssetById(assetId: number, fileName: string) {
   const res = await authFetch(`/api/ora/assets/${assetId}/download?download=1`);
-  if (!res.ok) return;
+  if (!res.ok) throw new Error(`Download failed (${res.status}).`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -119,7 +119,7 @@ async function downloadOraAssetById(assetId: number, fileName: string) {
 
 async function viewOraAssetById(assetId: number) {
   const res = await authFetch(`/api/ora/assets/${assetId}/download`);
-  if (!res.ok) return;
+  if (!res.ok) throw new Error(`Could not open file (${res.status}).`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, "_blank", "noopener,noreferrer");
@@ -146,6 +146,20 @@ function GeneratedFileCard({
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [restoredAssetId, setRestoredAssetId] = useState<number | null>(null);
+  const [fileNotice, setFileNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
+
+  const showFileNotice = (message: string) => {
+    setFileNotice(message);
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => setFileNotice(null), 4000);
+  };
 
   // After a restore the server mints a NEW head asset (history is never
   // rewritten). Point this card's Download/View at the new head and drop the
@@ -184,11 +198,29 @@ function GeneratedFileCard({
       History
     </button>
   ) : null;
+  const handleView = async () => {
+    try {
+      if (file.fileData) viewOraFile(file);
+      else await viewOraAssetById(file.assetId!);
+      showFileNotice(`Opened ${file.fileName}.`);
+    } catch (err) {
+      showFileNotice(err instanceof Error ? err.message : "Could not open this file.");
+    }
+  };
+  const handleDownload = async () => {
+    try {
+      if (file.fileData) downloadOraFile(file);
+      else await downloadOraAssetById(file.assetId!, file.fileName);
+      showFileNotice(`Download started: ${file.fileName}`);
+    } catch (err) {
+      showFileNotice(err instanceof Error ? err.message : "Could not download this file.");
+    }
+  };
 
   if (isPdf && (file.fileData || file.assetId != null)) {
     return (
       <div
-        className={`mt-2 w-full flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] ${cardPad}`}
+        className={`mt-2 w-full flex flex-wrap items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] ${cardPad}`}
       >
         <div
           className={`shrink-0 flex ${iconBox} items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]`}
@@ -202,7 +234,7 @@ function GeneratedFileCard({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={() => (file.fileData ? viewOraFile(file) : viewOraAssetById(file.assetId!))}
+            onClick={handleView}
             className="inline-flex items-center gap-1 rounded-lg border border-[hsl(265_85%_65%/0.25)] bg-background/70 px-2 py-1.5 text-[10px] font-medium text-foreground hover:bg-[hsl(265_85%_65%/0.1)]"
           >
             <ExternalLink className="h-3 w-3" />
@@ -210,11 +242,7 @@ function GeneratedFileCard({
           </button>
           <button
             type="button"
-            onClick={() =>
-              file.fileData
-                ? downloadOraFile(file)
-                : downloadOraAssetById(file.assetId!, file.fileName)
-            }
+            onClick={handleDownload}
             className="inline-flex items-center gap-1 rounded-lg bg-[hsl(265_85%_65%)] px-2 py-1.5 text-[10px] font-semibold text-white hover:opacity-90"
           >
             <Download className="h-3 w-3" />
@@ -232,6 +260,9 @@ function GeneratedFileCard({
             </button>
           )}
         </div>
+        {fileNotice && (
+          <p className="w-full text-[10px] font-medium text-[hsl(265_85%_65%)]">{fileNotice}</p>
+        )}
         {historyDialog}
       </div>
     );
@@ -240,7 +271,7 @@ function GeneratedFileCard({
   if (file.fileData || file.assetId != null) {
     return (
       <div
-        className={`mt-2 w-full text-left group flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] ${cardPad} transition-all cursor-pointer`}
+        className={`mt-2 w-full text-left group flex flex-wrap items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] ${cardPad} transition-all cursor-pointer`}
       >
         <div
           className={`shrink-0 flex ${iconBox} items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]`}
@@ -256,11 +287,7 @@ function GeneratedFileCard({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={() =>
-              file.fileData
-                ? downloadOraFile(file)
-                : downloadOraAssetById(file.assetId!, file.fileName)
-            }
+            onClick={handleDownload}
             className="inline-flex items-center gap-1 rounded-lg bg-[hsl(265_85%_65%)] px-2 py-1.5 text-[10px] font-semibold text-white hover:opacity-90"
           >
             <Download className="h-3 w-3" />
@@ -278,6 +305,9 @@ function GeneratedFileCard({
             </button>
           )}
         </div>
+        {fileNotice && (
+          <p className="w-full text-[10px] font-medium text-[hsl(265_85%_65%)]">{fileNotice}</p>
+        )}
         {historyDialog}
       </div>
     );
@@ -789,6 +819,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     if (!whisperSupported) return;
     if (isLoading || voice.voiceState === "speaking") return;
     if (whisperState !== "idle") return;
+    if (whisperConv.isPermissionDenied || whisperConv.isMicrophoneUnavailable) return;
 
     const t = window.setTimeout(() => {
       void startWhisperRecording({ autoStop: true });
@@ -801,6 +832,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     voice.voiceState,
     voiceConvActive,
     voiceTransport,
+    whisperConv.isMicrophoneUnavailable,
+    whisperConv.isPermissionDenied,
     whisperState,
     whisperSupported,
   ]);
@@ -1566,7 +1599,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           onScroll={handleFeedScroll}
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain scroll-smooth"
         >
-          <div className="px-4 py-4 space-y-5">
+          <div className="px-4 pt-4 pb-28 space-y-5">
             {messages.length === 0 && !isLoading && (
               <div className="text-center py-8">
                 <DynamicAtom state="idle" size={48} className="mx-auto mb-3" />
@@ -1625,6 +1658,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                           alt="Generated by Ora"
                           className="w-full rounded-xl border border-border/60"
                           loading="lazy"
+                          onLoad={() => {
+                            if (isLastMessage) requestAnimationFrame(jumpToLatest);
+                          }}
                         />
                         {msg.imageMeta && (
                           <div className="mt-1.5 flex flex-wrap gap-1">
@@ -1901,6 +1937,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   whisperState={whisperConv.state}
                   whisperSupported={whisperConv.isSupported}
                   whisperError={whisperConv.error}
+                  whisperPermissionDenied={whisperConv.isPermissionDenied}
+                  whisperMicrophoneUnavailable={whisperConv.isMicrophoneUnavailable}
                   onWhisperStart={whisperConv.startRecording}
                   onWhisperStop={whisperConv.stopRecording}
                   onWhisperCancel={whisperConv.cancelRecording}

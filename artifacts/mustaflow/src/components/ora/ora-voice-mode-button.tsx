@@ -409,6 +409,8 @@ export interface OraVoiceConvPanelProps {
   whisperError?: string | null;
   /** True when the whisper error is a mic permission denial (no auto-retry). */
   whisperPermissionDenied?: boolean;
+  /** True when there is no usable microphone on this device/browser. */
+  whisperMicrophoneUnavailable?: boolean;
   onWhisperStart?: () => Promise<void>;
   onWhisperStop?: () => void;
   onWhisperCancel?: () => void;
@@ -462,6 +464,7 @@ export function OraVoiceConvPanel({
   whisperSupported,
   whisperError,
   whisperPermissionDenied = false,
+  whisperMicrophoneUnavailable = false,
   onWhisperStart,
   ttsUnavailable,
   onDismissTtsNotice,
@@ -503,6 +506,8 @@ export function OraVoiceConvPanel({
   const whisperTranscribing = whisperState === "transcribing";
   const whisperIdle = !whisperState || whisperState === "idle" || whisperState === "error";
   const isMicDenied = whisperPermissionDenied && !!whisperError;
+  const isNoMic =
+    (whisperMicrophoneUnavailable && !!whisperError) || /no microphone/i.test(fallbackNotice ?? "");
 
   const labelCls = size === "sm" ? "text-[10px]" : "text-[11px]";
   const headingCls = size === "sm" ? "text-xs" : "text-sm";
@@ -511,37 +516,41 @@ export function OraVoiceConvPanel({
     ? "Ora is thinking…"
     : isSpeaking
       ? "Ora is speaking…"
-      : isMicDenied
-        ? "Microphone blocked"
-        : useWhisper
-          ? whisperRecording
-            ? "Listening…"
-            : whisperTranscribing
-              ? "Transcribing…"
-              : "Listening…"
-          : isListening
-            ? "Listening…"
-            : "Voice Mode Active";
+      : isNoMic
+        ? "No microphone found"
+        : isMicDenied
+          ? "Microphone blocked"
+          : useWhisper
+            ? whisperRecording
+              ? "Listening…"
+              : whisperTranscribing
+                ? "Transcribing…"
+                : "Listening…"
+            : isListening
+              ? "Listening…"
+              : "Voice Mode Active";
 
   const subLabel = isLoading
     ? "Preparing reply…"
     : isSpeaking
       ? "Tap interrupt to speak"
-      : isMicDenied
-        ? "Allow mic in your browser's address bar, then tap Retry"
-        : useWhisper
-          ? whisperRecording
-            ? "Speak naturally — Ora will answer when you pause"
-            : whisperTranscribing
-              ? "Processing your speech…"
-              : whisperError
-                ? whisperError
-                : "Speak naturally — Ora is ready"
-          : isListening
-            ? interimTranscript
-              ? `"${interimTranscript}"`
-              : "Speak naturally — your words will auto-send"
-            : "Starting…";
+      : isNoMic
+        ? "Connect or enable a microphone, then tap Retry"
+        : isMicDenied
+          ? "Allow mic in your browser's address bar, then tap Retry"
+          : useWhisper
+            ? whisperRecording
+              ? "Speak naturally — Ora will answer when you pause"
+              : whisperTranscribing
+                ? "Processing your speech…"
+                : whisperError
+                  ? whisperError
+                  : "Speak naturally — Ora is ready"
+            : isListening
+              ? interimTranscript
+                ? `"${interimTranscript}"`
+                : "Speak naturally — your words will auto-send"
+              : "Starting…";
 
   return (
     <div className="rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.06)] px-4 py-3 flex flex-col gap-3">
@@ -576,8 +585,14 @@ export function OraVoiceConvPanel({
       {/* State row */}
       <div className="flex items-center gap-3">
         <WaveformBars
-          animated={isListening || isSpeaking || whisperRecording}
-          colorClass={whisperRecording || isListening ? "bg-red-400" : "bg-[hsl(265_85%_65%)]"}
+          animated={isNoMic ? false : isListening || isSpeaking || whisperRecording}
+          colorClass={
+            isNoMic
+              ? "bg-amber-500"
+              : whisperRecording || isListening
+                ? "bg-red-400"
+                : "bg-[hsl(265_85%_65%)]"
+          }
           scale={size === "sm" ? 0.85 : 1.1}
         />
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -595,7 +610,7 @@ export function OraVoiceConvPanel({
           </span>
         </div>
         {/* Live indicator */}
-        {(isListening || whisperRecording) && (
+        {(isListening || whisperRecording) && !isNoMic && (
           <span
             className="h-2 w-2 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse"
             aria-label="Recording"
@@ -645,7 +660,28 @@ export function OraVoiceConvPanel({
         {useWhisper &&
           !isSpeaking &&
           !isLoading &&
-          (isMicDenied ? (
+          (isNoMic ? (
+            <>
+              <span
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/8 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400 select-none",
+                )}
+              >
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                No mic
+              </span>
+              {onWhisperStart && (
+                <button
+                  type="button"
+                  onClick={() => void onWhisperStart()}
+                  className="flex items-center gap-1.5 rounded-lg border border-[hsl(265_85%_65%/0.45)] bg-[hsl(265_85%_65%/0.08)] px-2.5 py-1 text-xs text-[hsl(265_85%_65%)] hover:border-[hsl(265_85%_65%/0.65)] hover:bg-[hsl(265_85%_65%/0.14)] transition-colors"
+                >
+                  <Mic className="h-3 w-3" />
+                  Retry
+                </button>
+              )}
+            </>
+          ) : isMicDenied ? (
             /* Mic permission denied — show alert + Retry instead of the active pill */
             <>
               <span

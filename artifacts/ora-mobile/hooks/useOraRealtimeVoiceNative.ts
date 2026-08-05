@@ -2816,7 +2816,7 @@ export function useOraRealtimeVoiceNative(
           return { started: false, reason };
         }
         if (!isReconnect) reconnectAllowedRef.current = false;
-        const reason = "No microphone available. Using basic voice mode.";
+        const reason = "No microphone found. Connect or enable a microphone, then try again.";
         setState("idle");
         setFallbackReason(reason);
         return { started: false, reason };

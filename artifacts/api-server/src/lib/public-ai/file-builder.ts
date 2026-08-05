@@ -1729,6 +1729,59 @@ function safeFileName(title: string, ext: string): string {
   return `${slug || "file"}.${ext}`;
 }
 
+const WINDOWS_RESERVED_BASENAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const UNSAFE_FILENAME_CHARS = '<>:"/\\|?*';
+
+function replaceUnsafeFileNameChars(value: string): string {
+  let sanitized = "";
+  for (const char of value) {
+    sanitized += char.charCodeAt(0) < 32 || UNSAFE_FILENAME_CHARS.includes(char) ? "_" : char;
+  }
+  return sanitized;
+}
+
+export function sanitizeRequestedFileName(
+  rawName: string | undefined,
+  ext: FileFormat,
+): string | null {
+  const withoutExt = replaceUnsafeFileNameChars(rawName ?? "")
+    .replace(/["'`]/g, "")
+    .replace(/[.][a-z0-9]{1,8}$/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/_+/g, "_")
+    .trim()
+    .replace(/^[ ._-]+|[ ._-]+$/g, "");
+
+  if (!withoutExt || WINDOWS_RESERVED_BASENAMES.test(withoutExt)) return null;
+  return `${withoutExt.slice(0, 80)}.${ext}`;
+}
+
+export function requestedFileNameFromPrompt(message: string, format: FileFormat): string | null {
+  const prompt = message.split(/\n\n\[(?:ATTACHED|DATASET|ACTIVE WORKING FILE)/i)[0] ?? message;
+  const quoted = prompt.match(
+    /\b(?:file\s*name|filename|save(?:\s+it)?\s+as|named|called)\s*(?:is|as|to|:|=)?\s*["']([^"'\r\n]{1,120})["']/i,
+  );
+  if (quoted?.[1]) return sanitizeRequestedFileName(quoted[1], format);
+
+  const withExtension = prompt.match(
+    /\b(?:file\s*name|filename|save(?:\s+it)?\s+as|named|called)\s*(?:is|as|to|:|=)?\s+([A-Za-z0-9][A-Za-z0-9 ._-]{0,100}\.[A-Za-z0-9]{1,8})(?=$|[\s,;.!?])/i,
+  );
+  if (withExtension?.[1]) return sanitizeRequestedFileName(withExtension[1], format);
+
+  const fieldStyle = prompt.match(/\b(?:file\s*name|filename)\s*[:=]\s*([^\r\n]{1,120})/i);
+  if (fieldStyle?.[1]) return sanitizeRequestedFileName(fieldStyle[1], format);
+
+  return null;
+}
+
+export function generatedFileNameForPrompt(
+  message: string,
+  title: string,
+  format: FileFormat,
+): string {
+  return requestedFileNameFromPrompt(message, format) ?? safeFileName(title, format);
+}
+
 function mimeForFormat(format: FileFormat): string {
   switch (format) {
     case "csv":
@@ -2548,7 +2601,7 @@ export async function generateFileFromPrompt(
       : `${sectionCount} section${sectionCount !== 1 ? "s" : ""}`;
 
   return {
-    fileName: safeFileName(title, format),
+    fileName: generatedFileNameForPrompt(message, title, format),
     fileData: fileBuffer.toString("base64"),
     mimeType: mimeForFormat(format),
     reply: `Here's your ${formatLabel} file -- "${title}" (${summary}). Click the card below to download it.`,

@@ -11,6 +11,8 @@ describe("Live Voice settings — provider privacy + product voice selector (mob
   const types = read("../types.ts");
   const voicePreset = read("../voice-preset.ts");
   const api = read("../api.ts");
+  const index = read("../../app/(home)/index.tsx");
+  const nativeVoice = read("../../hooks/useOraRealtimeVoiceNative.ts");
 
   it("never renders the underlying model or a raw provider voice id in the settings screen", () => {
     expect(settings).not.toContain("realtimeDiag.model");
@@ -41,5 +43,22 @@ describe("Live Voice settings — provider privacy + product voice selector (mob
     expect(types).toContain("voicePreset?: VoicePreset");
     expect(types).toContain("defaultVoicePreset");
     expect(types).toContain("defaultVoiceLabel");
+  });
+
+  it("shows no-microphone as an honest non-listening state on native mobile", () => {
+    expect(nativeVoice).toContain(
+      "No microphone found. Connect or enable a microphone, then try again.",
+    );
+    expect(index).toContain("function isNoMicrophoneVoiceError(");
+    expect(index).toContain(
+      "const noMicVoiceState = talkMode && isNoMicrophoneVoiceError(voiceError)",
+    );
+    expect(index).toContain("if (isNoMicrophoneVoiceError(result.reason)) return");
+    expect(index).toContain('"No microphone found"');
+    expect(index).toContain('"Connect or enable a microphone, then try again."');
+    expect(index).toContain("listening={noMicVoiceState ? false");
+    expect(index).toContain(
+      "onPress={noMicVoiceState ? beginRealtimeSession : retryRealtimeVoice}",
+    );
   });
 });

@@ -229,6 +229,52 @@ async function getOrCreateSubscription(userId: string) {
   return created!;
 }
 
+function mapStripeSubscriptionStatus(status: string | null | undefined): string {
+  switch (status) {
+    case "active":
+    case "trialing":
+    case "past_due":
+    case "canceled":
+      return status;
+    default:
+      return "grace_period";
+  }
+}
+
+async function refreshOraSubscriptionFromStripe(
+  sub: Awaited<ReturnType<typeof getOrCreateSubscription>>,
+): Promise<Awaited<ReturnType<typeof getOrCreateSubscription>>> {
+  if (!sub.stripeSubscriptionId) return sub;
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) return sub;
+
+  try {
+    const stripeSub = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    const period = extractSubscriptionPeriod(stripeSub);
+    const cancelAtPeriodEnd = stripeSub.cancel_at_period_end ?? false;
+    const status = mapStripeSubscriptionStatus(stripeSub.status);
+    const [updated] = await db
+      .update(userSubscriptionsTable)
+      .set({
+        status,
+        cancelAtPeriodEnd,
+        ...(period.end ? { currentPeriodEnd: period.end } : {}),
+        updatedAt: sql`now()`,
+      })
+      .where(eq(userSubscriptionsTable.userId, sub.userId))
+      .returning();
+    return updated ?? sub;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
+    logger.warn(
+      { err: msg, userId: sub.userId, subscriptionId: sub.stripeSubscriptionId },
+      "Failed to refresh Ora subscription period from Stripe; returning cached billing state",
+    );
+    return sub;
+  }
+}
+
 // Exported for NabuFlow billing (Task #1516): both plan families share the
 // account's single Stripe Customer, stored on user_subscriptions.
 export async function ensureStripeCustomer(
@@ -1292,7 +1338,7 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
-  const sub = await getOrCreateSubscription(userId);
+  const sub = await refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId));
   const superuser = await isSuperuser(userId);
   const effectiveTier =
     sub.tier === "core" || sub.tier === "wave"
@@ -1484,7 +1530,7 @@ router.get("/billing/payment-method", async (req, res): Promise<void> => {
     return;
   }
 
-  const sub = await getOrCreateSubscription(userId);
+  const sub = await refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId));
   const base = {
     hasPaymentMethod: false as boolean,
     customerId: sub.stripeCustomerId ?? undefined,

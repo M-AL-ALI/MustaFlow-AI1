@@ -118,6 +118,7 @@ import {
   saveImageFromUrl,
   saveTextAsFile,
   shareCachedFile,
+  type SaveOutcome,
 } from "@/lib/files";
 import { logError } from "@/lib/log";
 import { isSafeHttpUrl } from "@/lib/safe-url";
@@ -549,6 +550,16 @@ function buildGeneratedFile(
     // Edit-quality transparency metadata (Phase A quality card).
     ...(res.editQuality ? { editQuality: res.editQuality } : {}),
   };
+}
+
+function generatedFileSaveConfirmation(file: GeneratedFile, outcome: SaveOutcome): string {
+  if (outcome === "image-saved") return "Image saved to your photo library.";
+  if (outcome === "shared") return `${file.fileName} is ready in the share sheet.`;
+  return `Opened download for ${file.fileName}.`;
+}
+
+function isNoMicrophoneVoiceError(message: string | null | undefined): boolean {
+  return /no microphone|check your microphone/i.test(message ?? "");
 }
 
 /**
@@ -2116,6 +2127,7 @@ export default function OraChatScreen() {
     if (!id || !instr || editingImage || sending) return;
     const sourceImageMeta = messagesRef.current.find((m) => m.imageId === id)?.imageMeta;
     setEditingImage(true);
+    setStreamStatus("Rendering the edited image...");
     setEditInstruction("");
     setEditingImageId(null);
     const turnGeneration = threadResetGenRef.current;
@@ -2137,7 +2149,14 @@ export default function OraChatScreen() {
     setEditMessages((prev) => [...prev, userMsg, loadingMsg]);
 
     try {
-      const { displayUrl, newImageId } = await editImage(id, instr, activeProjectIdRef.current);
+      const { displayUrl, newImageId } = await editImage(
+        id,
+        instr,
+        activeProjectIdRef.current,
+        (status) => {
+          if (isTurnCurrent()) setStreamStatus(status);
+        },
+      );
       if (!isTurnCurrent()) return;
       setEditMessages((prev) => [
         ...prev.slice(0, -1),
@@ -2164,7 +2183,10 @@ export default function OraChatScreen() {
         },
       ]);
     } finally {
-      if (isTurnCurrent()) setEditingImage(false);
+      if (isTurnCurrent()) {
+        setEditingImage(false);
+        setStreamStatus(null);
+      }
     }
   }, [editingImageId, editInstruction, editingImage, sending, setMessagesForGeneration]);
 
@@ -2695,6 +2717,7 @@ export default function OraChatScreen() {
             setRealtimeActive(false);
             realtimeActiveRef.current = false;
             if (result.reason) setVoiceError(result.reason);
+            if (isNoMicrophoneVoiceError(result.reason)) return;
             scheduleTalkRestart(300);
           }
         });
@@ -3152,57 +3175,66 @@ export default function OraChatScreen() {
   const onMutePress = realtimeOn ? realtimeVoice.toggleMute : toggleTalkModeMute;
   const realtimeInterim =
     realtimeVoice.interimAssistantTranscript || realtimeVoice.interimUserTranscript;
+  const noMicVoiceState = talkMode && isNoMicrophoneVoiceError(voiceError);
 
   // Talk-card live state booleans (mirror website OraRealtimeConvView).
-  const talkListening = realtimeOn ? rtState === "listening" : recording;
-  const talkConnecting = realtimeOn && rtState === "connecting";
-  const talkThinking = realtimeOn ? rtState === "thinking" : sending || transcribing;
-  const talkSpeaking = realtimeOn ? rtState === "speaking" : !!speakingId;
+  const talkListening = noMicVoiceState ? false : realtimeOn ? rtState === "listening" : recording;
+  const talkConnecting = !noMicVoiceState && realtimeOn && rtState === "connecting";
+  const talkThinking = noMicVoiceState
+    ? false
+    : realtimeOn
+      ? rtState === "thinking"
+      : sending || transcribing;
+  const talkSpeaking = noMicVoiceState ? false : realtimeOn ? rtState === "speaking" : !!speakingId;
   const talkAnimated = talkListening || talkConnecting || talkThinking || talkSpeaking;
 
-  const talkStatusTitle = realtimeOn
-    ? rtState === "connecting"
-      ? "Connecting…"
-      : rtState === "thinking"
-        ? "Ora is thinking…"
-        : rtState === "speaking"
-          ? "Ora is speaking…"
-          : rtState === "listening"
-            ? "Listening…"
-            : "Live voice active"
-    : sending
-      ? "Ora is thinking"
-      : speakingId
-        ? "Ora is speaking"
-        : transcribing
-          ? "Transcribing"
-          : recording
-            ? "Listening"
-            : "Voice mode active";
-
-  const talkStatusSubtitle = realtimeOn
-    ? rtState === "connecting"
-      ? "Setting up a live voice connection…"
-      : talkMuted
-        ? "Muted — Ora can still hear you"
-        : rtState === "speaking"
-          ? realtimeInterim || "Tap interrupt to jump in"
-          : rtState === "thinking"
-            ? "Preparing a spoken reply…"
-            : realtimeVoice.interimUserTranscript
-              ? `"${realtimeVoice.interimUserTranscript}"`
-              : "Speak naturally — Ora listens as you talk"
-    : talkModeMuted
-      ? "Muted - replies stay on screen"
+  const talkStatusTitle = noMicVoiceState
+    ? "No microphone found"
+    : realtimeOn
+      ? rtState === "connecting"
+        ? "Connecting…"
+        : rtState === "thinking"
+          ? "Ora is thinking…"
+          : rtState === "speaking"
+            ? "Ora is speaking…"
+            : rtState === "listening"
+              ? "Listening…"
+              : "Live voice active"
       : sending
-        ? "Preparing reply..."
+        ? "Ora is thinking"
         : speakingId
-          ? "Tap interrupt to speak"
+          ? "Ora is speaking"
           : transcribing
-            ? "Turning speech into text..."
+            ? "Transcribing"
             : recording
-              ? "Speak naturally - Ora answers when you pause"
-              : "Tap the mic or wait for Ora to listen";
+              ? "Listening"
+              : "Voice mode active";
+
+  const talkStatusSubtitle = noMicVoiceState
+    ? "Connect or enable a microphone, then try again."
+    : realtimeOn
+      ? rtState === "connecting"
+        ? "Setting up a live voice connection…"
+        : talkMuted
+          ? "Muted — Ora can still hear you"
+          : rtState === "speaking"
+            ? realtimeInterim || "Tap interrupt to jump in"
+            : rtState === "thinking"
+              ? "Preparing a spoken reply…"
+              : realtimeVoice.interimUserTranscript
+                ? `"${realtimeVoice.interimUserTranscript}"`
+                : "Speak naturally — Ora listens as you talk"
+      : talkModeMuted
+        ? "Muted - replies stay on screen"
+        : sending
+          ? "Preparing reply..."
+          : speakingId
+            ? "Tap interrupt to speak"
+            : transcribing
+              ? "Turning speech into text..."
+              : recording
+                ? "Speak naturally - Ora answers when you pause"
+                : "Tap the mic or wait for Ora to listen";
 
   // Header subtitle mirrors the website's transient status line: it only shows
   // while Ora is busy, and is blank otherwise (no usage counter in the header).
@@ -3232,7 +3264,7 @@ export default function OraChatScreen() {
       ),
   );
   const showThinkingRow = shouldShowOraActivityRow({
-    sending,
+    sending: sending || editingImage,
     streamingWithContent,
     hasActivity: streamActivity !== null,
   });
@@ -3341,9 +3373,13 @@ export default function OraChatScreen() {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <OraVoiceOrb
               active={talkMode}
-              listening={realtimeOn ? rtState === "listening" : recording}
+              listening={noMicVoiceState ? false : realtimeOn ? rtState === "listening" : recording}
               speaking={
-                realtimeOn ? rtState === "speaking" || rtState === "thinking" : !!speakingId
+                noMicVoiceState
+                  ? false
+                  : realtimeOn
+                    ? rtState === "speaking" || rtState === "thinking"
+                    : !!speakingId
               }
               onPress={toggleTalkMode}
             />
@@ -3471,7 +3507,7 @@ export default function OraChatScreen() {
           contentContainerStyle={{
             paddingHorizontal: 16,
             paddingTop: 24,
-            paddingBottom: 32,
+            paddingBottom: Math.max(96, insets.bottom + 96),
             gap: 24,
             flexGrow: 1,
           }}
@@ -3601,6 +3637,7 @@ export default function OraChatScreen() {
               }}
               onImagePreview={openImagePreview}
               onRetrySearch={handleRetrySearch}
+              onMediaLoaded={scrollToEnd}
               onReviseFile={handleReviseGeneratedFile}
               onApplyFileEditPreview={handleApplyFileEditPreview}
               onReviseFileEditPreview={handleReviseFileEditPreview}
@@ -3772,9 +3809,10 @@ export default function OraChatScreen() {
               >
                 {voiceError}
               </Text>
-              {realtimeVoice.networkQuality === "legacy" && realtimeVoice.isSupported && (
+              {((realtimeVoice.networkQuality === "legacy" && realtimeVoice.isSupported) ||
+                noMicVoiceState) && (
                 <Pressable
-                  onPress={retryRealtimeVoice}
+                  onPress={noMicVoiceState ? beginRealtimeSession : retryRealtimeVoice}
                   hitSlop={6}
                   style={{
                     borderWidth: 1,
@@ -4567,6 +4605,7 @@ function MessageBubbleBase({
   onEditImage,
   onImagePreview,
   onRetrySearch,
+  onMediaLoaded,
   onReviseFile,
   onApplyFileEditPreview,
   onReviseFileEditPreview,
@@ -4584,6 +4623,7 @@ function MessageBubbleBase({
   onEditImage?: (imageId: number) => void;
   onImagePreview?: (source: string) => void;
   onRetrySearch?: (message: OraMessage) => void;
+  onMediaLoaded?: () => void;
   onReviseFile?: (file: GeneratedFile) => void;
   onApplyFileEditPreview?: () => void;
   onReviseFileEditPreview?: () => void;
@@ -4625,9 +4665,7 @@ function MessageBubbleBase({
     setSavingFile(true);
     try {
       const outcome = await saveGeneratedFile(generatedFile);
-      if (outcome === "image-saved") {
-        Alert.alert("Saved", "Image saved to your photo library.");
-      }
+      Alert.alert("Saved", generatedFileSaveConfirmation(generatedFile, outcome));
     } catch (err) {
       Alert.alert(
         "Couldn't save file",
@@ -4816,6 +4854,7 @@ function MessageBubbleBase({
                       }}
                       contentFit="cover"
                       transition={200}
+                      onLoadEnd={onMediaLoaded}
                     />
                   </Pressable>
                   {!!message.imageMeta && (

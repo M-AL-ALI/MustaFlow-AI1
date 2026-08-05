@@ -277,3 +277,24 @@ describe("Mobile Ora — OraThinkingRow fade lifecycle", () => {
     expect(row).toContain("c.mutedForeground");
   });
 });
+
+describe("Mobile Ora Item 5 image progress and composer clearance", () => {
+  const api = read("../api.ts");
+  const index = read("../../app/(home)/index.tsx");
+
+  it("surfaces edited-image rendering and loading status through the home screen", () => {
+    expect(api).toContain("onProgress?: (status: string) => void");
+    expect(api).toContain('onProgress?.("Rendering the edited image...")');
+    expect(api).toContain('onProgress?.("Loading the edited image...")');
+    expect(index).toContain('setStreamStatus("Rendering the edited image...")');
+    expect(index).toContain("if (isTurnCurrent()) setStreamStatus(status);");
+    expect(index).toMatch(/finally[\s\S]*setEditingImage\(false\)[\s\S]*setStreamStatus\(null\)/);
+    expect(index).toContain("sending: sending || editingImage");
+  });
+
+  it("keeps generated images clear of the composer and scrolls after media load", () => {
+    expect(index).toContain("paddingBottom: Math.max(96, insets.bottom + 96)");
+    expect(index).toContain("onMediaLoaded={scrollToEnd}");
+    expect(index).toContain("onLoadEnd={onMediaLoaded}");
+  });
+});
