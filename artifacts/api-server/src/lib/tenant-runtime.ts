@@ -8,6 +8,8 @@
  */
 
 import { FlyRuntimeProvider } from "./fly-runtime-provider";
+import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
+import { parseTenantRuntimeConfig } from "@workspace/tenant-runtime-contracts";
 import type {
   RuntimeFile,
   RuntimeInstallOptions,
@@ -16,7 +18,16 @@ import type {
   RuntimeServiceOptions,
 } from "./tenant-runtime-provider";
 
-export const tenantRuntimeProvider = new FlyRuntimeProvider();
+export function createTenantRuntimeProvider(
+  environment: Record<string, string | undefined> = process.env,
+) {
+  const config = parseTenantRuntimeConfig(environment);
+  return config.provider === "cloudflare"
+    ? new CloudflareRuntimeProvider(config.cloudflare!)
+    : new FlyRuntimeProvider();
+}
+
+export const tenantRuntimeProvider = createTenantRuntimeProvider();
 
 export const hasContainerLayerCredentials = (): boolean => tenantRuntimeProvider.hasCredentials();
 export const isContainerLayerConfigured = (): Promise<boolean> =>

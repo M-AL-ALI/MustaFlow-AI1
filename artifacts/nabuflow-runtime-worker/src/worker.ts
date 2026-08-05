@@ -61,6 +61,20 @@ interface WorkerDependencies {
   backend?: RuntimeBackend;
   nowMs?: number;
   requestId?: string;
+  context?: RequestExecutionContext;
+}
+
+type ControlRequestStage =
+  | "initialization"
+  | "body_read"
+  | "authentication"
+  | "routing"
+  | "idempotency"
+  | "execution"
+  | "audit";
+
+interface RequestExecutionContext {
+  stage: ControlRequestStage;
 }
 
 class ControlHttpError extends Error {
@@ -76,12 +90,75 @@ class ControlHttpError extends Error {
 
 class RequestTooLargeError extends Error {}
 
+export async function handleWorkerRequest(
+  request: Request,
+  env: WorkerBindings,
+  dependencies: WorkerDependencies = {},
+): Promise<Response> {
+  const requestId = dependencies.requestId ?? crypto.randomUUID();
+  const context = dependencies.context ?? { stage: "initialization" };
+  let coordinator = dependencies.coordinator;
+  try {
+    coordinator ??= getCoordinator(env);
+    return await handleControlRequest(request, env, {
+      ...dependencies,
+      requestId,
+      coordinator,
+      context,
+    });
+  } catch (error) {
+    const failureStage = context.stage;
+    try {
+      coordinator ??= getCoordinator(env);
+      await coordinator.recordAudit({
+        requestId,
+        timestamp: new Date().toISOString(),
+        method: request.method,
+        endpoint: "unhandled",
+        stage: failureStage,
+        outcome: "unexpected_worker_error",
+        projectId: null,
+        role: null,
+        slot: null,
+        status: 503,
+      });
+    } catch {
+      // eslint-disable-next-line no-console -- this is the last-resort Worker boundary
+      console.error(
+        JSON.stringify({
+          event: "control_worker_audit_failed",
+          requestId,
+          stage: failureStage,
+        }),
+      );
+    }
+    // eslint-disable-next-line no-console -- preserve an observable trace when request handling fails
+    console.error(
+      JSON.stringify({
+        event: "control_worker_unexpected_error",
+        requestId,
+        stage: failureStage,
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return errorResponse(
+      503,
+      "unexpected_worker_error",
+      "The staging control plane encountered a transient internal error",
+      true,
+      requestId,
+      { "retry-after": "1" },
+    );
+  }
+}
+
 export async function handleControlRequest(
   request: Request,
   env: WorkerBindings,
   dependencies: WorkerDependencies = {},
 ): Promise<Response> {
   const requestId = dependencies.requestId ?? crypto.randomUUID();
+  const context = dependencies.context ?? { stage: "initialization" };
   const nowMs = dependencies.nowMs ?? Date.now();
   const coordinator = dependencies.coordinator ?? getCoordinator(env);
   const backend = dependencies.backend ?? new CloudflareSandboxBackend(env);
@@ -89,6 +166,7 @@ export async function handleControlRequest(
   const pathAndQuery = `${url.pathname}${url.search}`;
   let rawBody: Uint8Array;
 
+  context.stage = "body_read";
   try {
     rawBody = await readCappedBody(request, MAX_REQUEST_BYTES);
   } catch (error) {
@@ -110,6 +188,7 @@ export async function handleControlRequest(
     );
   }
 
+  context.stage = "authentication";
   const signed = readSignedRequest(request, pathAndQuery, rawBody);
   if (signed === null) {
     return errorResponse(
@@ -157,6 +236,7 @@ export async function handleControlRequest(
 
   let route: MatchedRoute;
   let input: ControlInput;
+  context.stage = "routing";
   try {
     route = matchRoute(request.method, url.pathname);
     input = parseInput(route, url, rawBody);
@@ -176,6 +256,7 @@ export async function handleControlRequest(
   const needsIdempotency = MUTATION_ENDPOINTS.has(route.endpoint);
   let idempotencyFingerprint: string | null = null;
   if (needsIdempotency) {
+    context.stage = "idempotency";
     if (!idempotencyKey) {
       const error = new ControlHttpError(
         400,
@@ -226,6 +307,7 @@ export async function handleControlRequest(
     }
   }
 
+  context.stage = "execution";
   try {
     const result = await executeEndpoint(route.endpoint, input, env, coordinator, backend);
     validateResponse(route.endpoint, result.body);
@@ -720,20 +802,24 @@ function errorResponse(
   message: string,
   retryable: boolean,
   requestId: string,
+  headers: HeadersInit = {},
 ): Response {
   return jsonResponse(
     status,
     errorBody(new ControlHttpError(status, code, message, retryable), requestId),
+    headers,
   );
 }
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: unknown, headers: HeadersInit = {}): Response {
+  const responseHeaders = new Headers({
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+  });
+  new Headers(headers).forEach((value, key) => responseHeaders.set(key, value));
   return Response.json(body, {
     status,
-    headers: {
-      "cache-control": "no-store",
-      "content-type": "application/json; charset=utf-8",
-    },
+    headers: responseHeaders,
   });
 }
 
@@ -750,6 +836,7 @@ async function recordAudit(
     timestamp: new Date().toISOString(),
     method,
     endpoint,
+    stage: null,
     outcome: outcome.code,
     projectId: locator?.projectId ?? null,
     role: locator?.role ?? null,

@@ -267,6 +267,9 @@ importers:
       '@workspace/ora-contracts':
         specifier: workspace:*
         version: link:../../lib/ora-contracts
+      '@workspace/tenant-runtime-contracts':
+        specifier: workspace:*
+        version: link:../../lib/tenant-runtime-contracts
       acorn:
         specifier: ^8.16.0
         version: 8.16.0

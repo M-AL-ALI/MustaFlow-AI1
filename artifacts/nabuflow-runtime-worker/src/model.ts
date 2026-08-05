@@ -34,6 +34,7 @@ export interface ControlAuditRecord {
   timestamp: string;
   method: string;
   endpoint: string;
+  stage: string | null;
   outcome: string;
   projectId: number | null;
   role: string | null;
