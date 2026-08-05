@@ -197,7 +197,8 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(mobileHome).toContain("const onInterruptPress = realtimeOn");
     expect(mobileHome).toContain("const onMutePress = realtimeOn");
     expect(mobileHome).toContain("onPress={onMutePress}");
-    expect(mobileHome).toContain("const talkStatusTitle = realtimeOn");
+    expect(mobileHome).toContain("const talkStatusTitle = noMicVoiceState");
+    expect(mobileHome).toContain('"No microphone found"');
     expect(mobileHome).toContain('"Ora is thinking"');
     expect(mobileHome).toContain('"Ora is speaking"');
     expect(mobileHome).toContain('"Live voice active"');
