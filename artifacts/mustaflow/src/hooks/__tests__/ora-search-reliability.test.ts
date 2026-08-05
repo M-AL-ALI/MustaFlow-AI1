@@ -11,7 +11,7 @@ describe("Ora website search reliability wiring", () => {
 
   it("renders retryable live-search failures as inline assistant error rows", () => {
     const branchStart = hookSrc.indexOf(
-      'status === 503 && (err as { searchRetryable?: boolean }).searchRetryable',
+      "status === 503 && (err as { searchRetryable?: boolean }).searchRetryable",
     );
     expect(branchStart).toBeGreaterThan(-1);
     const branchBody = hookSrc.slice(branchStart, branchStart + 1200);
@@ -24,12 +24,16 @@ describe("Ora website search reliability wiring", () => {
   });
 
   it("pins the search tool when retrying an inline retryable search row", () => {
-    expect(hookSrc).toContain("lastMsg.searchRetryable === true || lastMsg.searchFallback === true");
-    expect(hookSrc).toContain("await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx, forceSearch })");
+    expect(hookSrc).toContain(
+      "lastMsg.searchRetryable === true || lastMsg.searchFallback === true",
+    );
+    expect(hookSrc).toContain(
+      "await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx, forceSearch })",
+    );
   });
 
   it("shows failed live-search rows as errors with a Retry live search affordance", () => {
-    expect(panelSrc).toContain("msg.error && \"text-destructive\"");
+    expect(panelSrc).toContain('msg.error && "text-destructive"');
     expect(panelSrc).toContain("msg.error ? (");
     expect(panelSrc).toContain("msg.searchRetryable &&");
     expect(panelSrc).toContain("Retry live search");
