@@ -78,6 +78,8 @@ export interface OraConversationsContextValue {
   ) => () => void;
   /** Create the current conversation if one doesn't exist yet (first message). */
   ensureConversation: (title: string) => Promise<number | null>;
+  /** Read the authoritative ref synchronously, including immediately after creation. */
+  getCurrentConversationId: () => number | null;
   /** Called by the chat hook after messages persist, to re-sort the list. */
   notifyPersisted: () => void;
   renameConversation: (id: number, title: string) => Promise<void>;

@@ -1237,6 +1237,7 @@ export function useOraChat(): UseOraChatReturn {
   const sessionInitRef = useRef(false);
   const transcriptRestoredRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendStartRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
   // Session-local object URLs created for edited images in dev (auth-walled file
   // route). Tracked so we can revoke them on unmount / conversation clear and
@@ -1373,12 +1374,10 @@ export function useOraChat(): UseOraChatReturn {
       )
         return;
       let id = targetId;
-      let createdForSnapshot = false;
       if (id == null) {
-        if (c.currentConversationId != null) return;
+        if (c.getCurrentConversationId() != null) return;
         const firstUser = msgs.find((m) => m.role === "user");
         id = await c.ensureConversation(firstUser?.content ?? "New chat");
-        createdForSnapshot = id != null;
         // Uploads that happened before this conversation existed were cached
         // under the "standalone" key — move them to the new conversation's key
         // so a later reload restores them for this conversation.
@@ -1398,9 +1397,20 @@ export function useOraChat(): UseOraChatReturn {
         !latest ||
         latest.isConversationTransitioning() ||
         latest.conversationTransitionGeneration !== targetGeneration ||
-        (!createdForSnapshot && latest.currentConversationId !== id)
+        latest.getCurrentConversationId() !== id
       )
         return;
+      const surfaceSaveFailure = () => {
+        const current = convRef.current;
+        if (
+          current?.conversationTransitionGeneration === targetGeneration &&
+          current.getCurrentConversationId() === id
+        ) {
+          setError(
+            "This conversation could not be saved. Retry before leaving this chat so your messages are not lost.",
+          );
+        }
+      };
       try {
         const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
           method: "PUT",
@@ -1410,9 +1420,11 @@ export function useOraChat(): UseOraChatReturn {
         if (res.ok) {
           loadedConvRef.current = id;
           latest.notifyPersisted();
+        } else {
+          surfaceSaveFailure();
         }
       } catch {
-        /* best-effort; silent on failure */
+        surfaceSaveFailure();
       }
     },
     [],
@@ -1432,7 +1444,7 @@ export function useOraChat(): UseOraChatReturn {
       if (c) {
         if (c.isConversationTransitioning()) return;
         // Snapshot the target conversation id NOW, before the debounce window.
-        const targetId = c.currentConversationId;
+        const targetId = c.getCurrentConversationId();
         const targetGeneration = c.conversationTransitionGeneration;
         saveTimerRef.current = setTimeout(() => {
           void saveToConversation(msgs, targetId, targetGeneration);
@@ -1891,14 +1903,52 @@ export function useOraChat(): UseOraChatReturn {
       content: string,
       opts?: { truncateTo?: number; editedFrom?: boolean; forceSearch?: boolean },
     ) => {
-      if (!content.trim() || isLoading) return;
+      if (!content.trim() || isLoading || sendStartRef.current) return;
       if (isSignedIn) markOraActive();
+
+      const conversationContext = convRef.current;
+      if (conversationContext?.isConversationTransitioning()) {
+        setError("Please wait for the new chat to finish opening, then send again.");
+        return;
+      }
+
+      const turnGeneration = conversationResetGenRef.current;
+      const isTurnCurrent = () => conversationResetGenRef.current === turnGeneration;
+      sendStartRef.current = true;
+      setIsLoading(true);
+      setError(null);
+
+      if (
+        isSignedIn &&
+        conversationContext &&
+        !temporaryRef.current &&
+        conversationContext.getCurrentConversationId() == null
+      ) {
+        const transitionGeneration = conversationContext.conversationTransitionGeneration;
+        const createdId = await conversationContext.ensureConversation(content);
+        const latest = convRef.current;
+        if (
+          createdId == null ||
+          !latest ||
+          !isTurnCurrent() ||
+          latest.isConversationTransitioning() ||
+          latest.conversationTransitionGeneration !== transitionGeneration ||
+          latest.getCurrentConversationId() !== createdId
+        ) {
+          sendStartRef.current = false;
+          if (isTurnCurrent()) {
+            setIsLoading(false);
+            setError("Ora could not create a saved conversation. Your message was not sent.");
+          }
+          return;
+        }
+        loadedConvRef.current = createdId;
+      }
+      sendStartRef.current = false;
 
       const currentAttachment = attachedFile;
       const baseMessages =
         opts?.truncateTo !== undefined ? messages.slice(0, opts.truncateTo) : messages;
-      const turnGeneration = conversationResetGenRef.current;
-      const isTurnCurrent = () => conversationResetGenRef.current === turnGeneration;
       const setTurnMessages = (updater: (prev: OraMessage[]) => OraMessage[]) =>
         setMessagesForGeneration(turnGeneration, updater);
 
@@ -1924,9 +1974,7 @@ export function useOraChat(): UseOraChatReturn {
         if (isSignedIn) saveToServer(next);
         return next;
       });
-      setIsLoading(true);
       setStreamStatus("Rendering the edited image...");
-      setError(null);
       // Fresh turn — drop any stale activity trace from the previous send.
       clearActivity();
 

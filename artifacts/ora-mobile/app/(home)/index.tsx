@@ -1168,6 +1168,13 @@ export default function OraChatScreen() {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, []);
 
+  const reportConversationSaveFailure = useCallback(() => {
+    Alert.alert(
+      "Conversation not saved",
+      "Ora could not save this conversation. Retry before leaving this chat so your messages are not lost.",
+    );
+  }, []);
+
   const persist = useCallback(
     async (msgs: OraMessage[], temporaryOverride?: boolean) => {
       const persistGeneration = threadResetGenRef.current;
@@ -1209,10 +1216,12 @@ export default function OraChatScreen() {
           return;
         await saveConversationMessages(convId, msgs);
       } catch {
-        /* persistence is best-effort */
+        if (threadResetGenRef.current === persistGeneration) {
+          reportConversationSaveFailure();
+        }
       }
     },
-    [conversationId, isSignedIn],
+    [conversationId, isSignedIn, reportConversationSaveFailure],
   );
 
   // ── TRUE realtime (WebRTC) voice — primary Talk-to-Ora transport ──────────
@@ -1336,11 +1345,34 @@ export default function OraChatScreen() {
       // whether the resulting transcript is persisted.
       const turnIsTemporary = temporary;
 
+      const turnGeneration = threadResetGenRef.current;
+      setSending(true);
+      if (isSignedInRef.current && !turnIsTemporary && conversationIdRef.current == null) {
+        conversationTransitionRef.current = true;
+        try {
+          const title = text.trim().slice(0, 60) || "New chat";
+          const created = await createConversation(title, activeProjectIdRef.current);
+          if (threadResetGenRef.current !== turnGeneration) return;
+          const createdId = created.conversation.id;
+          conversationIdRef.current = createdId;
+          setConversationId(createdId);
+        } catch {
+          if (threadResetGenRef.current === turnGeneration) {
+            setSending(false);
+            reportConversationSaveFailure();
+          }
+          return;
+        } finally {
+          if (threadResetGenRef.current === turnGeneration) {
+            conversationTransitionRef.current = false;
+          }
+        }
+      }
+
       // Abort any previous in-flight stream before starting a new one.
       streamAbortRef.current?.abort();
       const abortController = new AbortController();
       streamAbortRef.current = abortController;
-      const turnGeneration = threadResetGenRef.current;
       const isTurnCurrent = () => threadResetGenRef.current === turnGeneration;
       const setTurnMessages = (next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) =>
         setMessagesForGeneration(turnGeneration, next);
@@ -1382,7 +1414,6 @@ export default function OraChatScreen() {
 
       const next = [...base, userMsg, pendingMsg];
       setTurnMessages(next);
-      setSending(true);
       // Fresh turn — drop any stale activity trace from the previous send.
       setStreamActivity(null);
       scrollToEnd();
@@ -1763,6 +1794,7 @@ export default function OraChatScreen() {
       isSignedIn,
       pushActivity,
       setMessagesForGeneration,
+      reportConversationSaveFailure,
     ],
   );
 
