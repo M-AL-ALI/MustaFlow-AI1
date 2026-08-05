@@ -1549,6 +1549,7 @@ export default function OraChatScreen() {
               // (streamChatNative already surfaced the specialist tool's
               // "start" step when the bounce signal named one.)
               notifyStreamFallbackCalled();
+              setStreamStatus("Finishing the answer...");
               const res = await sendChat(chatReq);
               if (!isTurnCurrent()) return;
               applyServerActivity(res);
@@ -1606,6 +1607,7 @@ export default function OraChatScreen() {
               // Retry via /chat with the signed fallback token so the server
               // acknowledges the increment without double-charging.
               notifyStreamFallbackCalled();
+              setStreamStatus("Finishing the answer...");
               const res = await sendChat({
                 ...chatReq,
                 ...(streamResult.fallbackToken

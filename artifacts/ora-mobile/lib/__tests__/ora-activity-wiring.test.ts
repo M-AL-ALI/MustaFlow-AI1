@@ -78,6 +78,11 @@ describe("Mobile Ora — api.ts forwards activity events", () => {
     expect(body).toContain("if (step) onActivity?.(step);");
   });
 
+  it("forwards SSE status text for reasoning-stage progress", () => {
+    expect(api).toContain('if (type === "status")');
+    expect(api).toContain('onStatus?.((parsed as { text?: string }).text ?? "");');
+  });
+
   it("synthesizes the tool's start step from the specialist bounce signal", () => {
     expect(api).toContain("oraActivityToolForRoutedTool(bounce.tool)");
     expect(api).toContain('onActivity?.(oraActivityStep(bouncedTool, "start"));');
@@ -94,7 +99,9 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
 
   it("passes onActivity into streamChatNative and ignores late frames", () => {
     expect(index).toContain("(step) => {");
-    expect(index).toContain("if (streamedContent.length === 0) pushActivity(step);");
+    expect(index).toContain(
+      "if (isTurnCurrent() && streamedContent.length === 0) pushActivity(step);",
+    );
   });
 
   it("clears the trace on the first real answer token via deferred scheduleClear", () => {
@@ -125,6 +132,12 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
     expect(index).toContain("const applyServerActivity = (res: ChatResponse | null) => {");
     const applied = index.split("applyServerActivity(res);").length - 1;
     expect(applied).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shows a named progress line while retrying through /chat fallback", () => {
+    const fallbackStatusCount =
+      index.split('setStreamStatus("Finishing the answer...")').length - 1;
+    expect(fallbackStatusCount).toBeGreaterThanOrEqual(2);
   });
 
   it("renders the activity step through OraThinkingRow", () => {

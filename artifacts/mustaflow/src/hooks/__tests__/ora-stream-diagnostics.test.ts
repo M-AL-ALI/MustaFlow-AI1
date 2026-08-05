@@ -90,4 +90,18 @@ describe("use-ora-chat diagnostics capture wiring", () => {
   it("reconciles viaFallback once real-streaming status is known", () => {
     expect(src).toContain("setLastOraStreamDiagnostics({ ...lastDiag, viaFallback })");
   });
+
+  it("forwards SSE status text for reasoning-stage progress", () => {
+    expect(src).toContain('} else if (eventType === "status") {');
+    expect(src).toContain("onStatus?.((parsed as { text: string }).text)");
+  });
+
+  it("shows a named progress line while retrying through /chat fallback", () => {
+    expect(src).toContain('setStreamStatus("Finishing the answer...")');
+  });
+
+  it("does not render the opaque Non-streamed badge in the chat panel", () => {
+    const panel = readFileSync(path.join(__dirname, "../../components/ora-panel.tsx"), "utf8");
+    expect(panel).not.toContain("Non-streamed");
+  });
 });

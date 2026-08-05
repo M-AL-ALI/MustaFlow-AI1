@@ -2350,6 +2350,7 @@ export function useOraChat(): UseOraChatReturn {
               // streamFallbackToken (when present) proves to /chat that the
               // streaming route already pre-incremented the session counter so
               // it should not double-charge the anonymous-session slot.
+              if (isTurnCurrent()) setStreamStatus("Finishing the answer...");
               data = await apiPost<ChatResponseData>("/api/public-ai/chat", {
                 ...body,
                 ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),

@@ -195,6 +195,8 @@ export interface StreamOraParams {
   /** Combined signal: merges client-disconnect + first-token timeout. */
   signal: AbortSignal;
   logger: { warn: (obj: object, msg: string) => void };
+  /** Deep Thinking keeps provider-native reasoning enabled; Instant keeps fastest TTFT. */
+  enableProviderThinking?: boolean;
 }
 
 /**
@@ -291,7 +293,14 @@ async function* simulateChunkStream(text: string, signal: AbortSignal): AsyncGen
 export async function* streamOraMessage(
   params: StreamOraParams,
 ): AsyncGenerator<OraStreamProviderEvent> {
-  const { candidates, messages, maxTokens, signal, logger } = params;
+  const {
+    candidates,
+    messages,
+    maxTokens,
+    signal,
+    logger,
+    enableProviderThinking = false,
+  } = params;
   // Dynamic import mirrors the pattern used in the non-streaming route and
   // ensures the vi.mock("../ai-providers") in tests intercepts correctly.
   const { streamChatCompletion } = await import("../ai-providers");
@@ -320,11 +329,10 @@ export async function* streamOraMessage(
         messages,
         max_completion_tokens: maxTokens,
         signal,
-        // Live conversational chat: prioritize a fast first token over Gemini's
-        // multi-second silent "thinking" phase so streaming starts visibly
-        // instead of sitting on an empty bubble. (Builder code-gen leaves this
-        // off to keep full reasoning.)
-        disableThinking: true,
+        // Instant chat prioritizes fast first token. Deep Thinking intentionally
+        // keeps provider-native reasoning enabled; the route emits stage status
+        // lines so the user sees progress during any pre-token thinking phase.
+        disableThinking: !enableProviderThinking,
       });
 
       // Smooth word-group streaming with immediate start.
