@@ -344,6 +344,7 @@ router.patch("/ora/conversations/:id", async (req, res) => {
 });
 
 const saveMessagesSchema = z.object({
+  conversationId: z.number().int().positive(),
   messages: z.array(messageSchema).max(MAX_STORED),
 });
 
@@ -358,6 +359,14 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
   const parsed = saveMessagesSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  if (parsed.data.conversationId !== id) {
+    res.status(409).json({
+      error: "Conversation changed before the messages were saved",
+      code: "ORA_CONVERSATION_MISMATCH",
+    });
     return;
   }
 

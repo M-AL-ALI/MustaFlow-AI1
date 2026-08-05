@@ -1305,7 +1305,7 @@ export async function getConversation(id: number): Promise<OraConversationDetail
 export function saveConversationMessages(id: number, messages: OraMessage[]): Promise<unknown> {
   return jsonRequest(`/api/ora/conversations/${id}/messages`, {
     method: "PUT",
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ conversationId: id, messages }),
   });
 }
 

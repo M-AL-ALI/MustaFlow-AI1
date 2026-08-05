@@ -868,6 +868,7 @@ export default function OraChatScreen() {
   // Late responses from the old thread then no-op instead of painting into the
   // fresh transcript or persisting under the wrong conversation id.
   const threadResetGenRef = useRef(0);
+  const conversationTransitionRef = useRef(false);
   const setMessagesForGeneration = useCallback(
     (generation: number, next: OraMessage[] | ((prev: OraMessage[]) => OraMessage[])) => {
       if (threadResetGenRef.current !== generation) return;
@@ -1164,6 +1165,7 @@ export default function OraChatScreen() {
   const persist = useCallback(
     async (msgs: OraMessage[], temporaryOverride?: boolean) => {
       const persistGeneration = threadResetGenRef.current;
+      if (conversationTransitionRef.current) return;
       // Anonymous sessions are never persisted — no account to attach to.
       if (!isSignedIn) return;
       // Temporary chats are never written to the conversation store. A turn
@@ -1171,13 +1173,14 @@ export default function OraChatScreen() {
       // whether an already-started send gets persisted.
       if ((temporaryOverride ?? temporaryRef.current) === true) return;
       try {
-        let convId = conversationId;
+        let convId = conversationIdRef.current;
         if (!convId) {
           const title = msgs.find((m) => m.role === "user")?.content.slice(0, 60) || "New chat";
           // Scope new chats to the active project (null = standalone/"Recent").
           const created = await createConversation(title, activeProjectIdRef.current);
           if (threadResetGenRef.current !== persistGeneration) return;
           convId = created.conversation.id;
+          conversationIdRef.current = convId;
           setConversationId(convId);
           // Uploads that happened before this conversation existed were cached
           // under the "standalone" key — move them to the new conversation's
@@ -1192,7 +1195,11 @@ export default function OraChatScreen() {
             storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
           }
         }
-        if (threadResetGenRef.current !== persistGeneration) return;
+        if (
+          threadResetGenRef.current !== persistGeneration ||
+          conversationTransitionRef.current ||
+          conversationIdRef.current !== convId
+        ) return;
         await saveConversationMessages(convId, msgs);
       } catch {
         /* persistence is best-effort */
@@ -1315,7 +1322,7 @@ export default function OraChatScreen() {
       attch: Attachment | null,
       opts?: { truncateTo?: number; forceSearch?: boolean },
     ) => {
-      if ((!text && !attch) || sending) return;
+      if ((!text && !attch) || sending || conversationTransitionRef.current) return;
       if (isSignedInRef.current) void markOraActive();
 
       // Capture this turn's temporary state so a toggle mid-send can't change
@@ -2575,7 +2582,9 @@ export default function OraChatScreen() {
   }, []);
 
   const newChat = useCallback(() => {
-    threadResetGenRef.current += 1;
+    conversationTransitionRef.current = true;
+    const resetGeneration = ++threadResetGenRef.current;
+    conversationIdRef.current = null;
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
     // A live realtime session is bound to the current conversation; switching
@@ -2598,6 +2607,9 @@ export default function OraChatScreen() {
     storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);
     storePendingClarification(DOC_REFS_STANDALONE_KEY, null);
     requestAnimationFrame(() => {
+      if (threadResetGenRef.current === resetGeneration) {
+        conversationTransitionRef.current = false;
+      }
       listRef.current?.scrollToOffset({ offset: 0, animated: false });
     });
   }, [stopRealtimeForContextSwitch]);
@@ -2869,7 +2881,9 @@ export default function OraChatScreen() {
   const loadConversation = useCallback(
     async (id: number) => {
       if (isSignedInRef.current) void markOraActive();
+      conversationTransitionRef.current = true;
       const loadGeneration = ++threadResetGenRef.current;
+      conversationIdRef.current = null;
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
       setSending(false);
@@ -2896,6 +2910,7 @@ export default function OraChatScreen() {
           loadPendingClarificationStore(),
         ]);
         if (threadResetGenRef.current !== loadGeneration) return;
+        conversationIdRef.current = id;
         setConversationId(id);
         // Restore THIS conversation's cached upload refs so a follow-up
         // "Revise ..." still targets the file uploaded here — even after the
@@ -2918,6 +2933,12 @@ export default function OraChatScreen() {
         scrollToEnd();
       } catch {
         /* ignore */
+      } finally {
+        requestAnimationFrame(() => {
+          if (threadResetGenRef.current === loadGeneration) {
+            conversationTransitionRef.current = false;
+          }
+        });
       }
     },
     [scrollToEnd, stopRealtimeForContextSwitch],

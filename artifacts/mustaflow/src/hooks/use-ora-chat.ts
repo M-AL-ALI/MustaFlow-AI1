@@ -1361,14 +1361,24 @@ export function useOraChat(): UseOraChatReturn {
   // belongs to a brand-new chat: create it — but only if the user is still on a
   // new chat (currentConversationId === null). If they navigated to an existing
   // conversation meanwhile, drop the save rather than clobber that conversation.
-  const saveToConversation = useCallback(async (msgs: OraMessage[], targetId: number | null) => {
+  const saveToConversation = useCallback(async (
+    msgs: OraMessage[],
+    targetId: number | null,
+    targetGeneration: number,
+  ) => {
     const c = convRef.current;
-    if (!c) return;
+    if (
+      !c ||
+      c.isConversationTransitioning() ||
+      c.conversationTransitionGeneration !== targetGeneration
+    ) return;
     let id = targetId;
+    let createdForSnapshot = false;
     if (id == null) {
       if (c.currentConversationId != null) return;
       const firstUser = msgs.find((m) => m.role === "user");
       id = await c.ensureConversation(firstUser?.content ?? "New chat");
+      createdForSnapshot = id != null;
       // Uploads that happened before this conversation existed were cached
       // under the "standalone" key — move them to the new conversation's key
       // so a later reload restores them for this conversation.
@@ -1383,15 +1393,23 @@ export function useOraChat(): UseOraChatReturn {
       }
     }
     if (id == null) return;
-    // Skip the load effect re-fetching the conversation we are actively writing.
-    loadedConvRef.current = id;
+    const latest = convRef.current;
+    if (
+      !latest ||
+      latest.isConversationTransitioning() ||
+      latest.conversationTransitionGeneration !== targetGeneration ||
+      (!createdForSnapshot && latest.currentConversationId !== id)
+    ) return;
     try {
       const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: serializeForStorage(msgs) }),
+        body: JSON.stringify({ conversationId: id, messages: serializeForStorage(msgs) }),
       });
-      if (res.ok) c.notifyPersisted();
+      if (res.ok) {
+        loadedConvRef.current = id;
+        latest.notifyPersisted();
+      }
     } catch {
       /* best-effort; silent on failure */
     }
@@ -1409,10 +1427,12 @@ export function useOraChat(): UseOraChatReturn {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const c = convRef.current;
       if (c) {
+        if (c.isConversationTransitioning()) return;
         // Snapshot the target conversation id NOW, before the debounce window.
         const targetId = c.currentConversationId;
+        const targetGeneration = c.conversationTransitionGeneration;
         saveTimerRef.current = setTimeout(() => {
-          void saveToConversation(msgs, targetId);
+          void saveToConversation(msgs, targetId, targetGeneration);
         }, 800);
       } else {
         saveTimerRef.current = setTimeout(() => {
@@ -1424,6 +1444,13 @@ export function useOraChat(): UseOraChatReturn {
     },
     [saveToConversation],
   );
+
+  useEffect(() => {
+    if (!conv) return;
+    return conv.registerConversationTransitionHandler((nextConversationId) => {
+      resetVisibleThread(nextConversationId == null);
+    });
+  }, [conv?.registerConversationTransitionHandler, resetVisibleThread]);
 
   // Phase 1: Session init — runs once on mount regardless of auth state
   useEffect(() => {
@@ -1596,23 +1623,28 @@ export function useOraChat(): UseOraChatReturn {
   // conversation we just created locally is skipped via loadedConvRef so a fresh
   // first-message exchange isn't clobbered by a server re-fetch.
   useEffect(() => {
-    if (!conv) return;
+    const conversationContext = convRef.current;
+    if (!conversationContext) return;
     // Temporary ("incognito") mode never reads persisted conversation history —
     // even if the user selects a prior conversation, we keep a blank slate so
     // long-term content can't leak into an incognito turn (it would otherwise be
     // re-sent as `body.messages`).
     if (temporaryRef.current) {
       resetVisibleThread(false);
+      conversationContext.completeConversationTransition(
+        conversationContext.conversationTransitionGeneration,
+      );
       return;
     }
-    const id = conv.currentConversationId;
+    const id = conversationContext.currentConversationId;
+    const transitionGeneration = conversationContext.conversationTransitionGeneration;
     if (id == null) {
       resetVisibleThread(true);
+      conversationContext.completeConversationTransition(transitionGeneration);
       return;
     }
-    if (id === loadedConvRef.current) return;
+    if (id === loadedConvRef.current && !conversationContext.isConversationTransitioning()) return;
     retireThreadWork();
-    loadedConvRef.current = id;
     // Switching conversations: the prior conversation's upload refs and rolling
     // summary no longer apply (they belong to a different transcript). Restore
     // THIS conversation's cached upload refs so follow-up "Revise ..." turns
@@ -1633,20 +1665,31 @@ export function useOraChat(): UseOraChatReturn {
         const res = await safeAuthFetch(`${BASE}/api/ora/conversations/${id}`);
         if (!res.ok) return;
         const data = (await res.json()) as { conversation: { messages: OraMessage[] } };
-        if (!cancelled && loadedConvRef.current === id && editGenRef.current === genAtStart) {
+        const latest = convRef.current;
+        if (
+          !cancelled &&
+          latest?.currentConversationId === id &&
+          latest.conversationTransitionGeneration === transitionGeneration &&
+          editGenRef.current === genAtStart
+        ) {
+          loadedConvRef.current = id;
           setMessages(data.conversation.messages ?? []);
         }
       } catch {
         /* best-effort */
+      } finally {
+        if (!cancelled) {
+          convRef.current?.completeConversationTransition(transitionGeneration);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [
-    conv,
     conv?.currentConversationId,
     conv?.newConversationTick,
+    conv?.conversationTransitionGeneration,
     resetVisibleThread,
     retireThreadWork,
   ]);
