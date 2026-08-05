@@ -23,6 +23,7 @@ const locator = {
 const runtimePath = `/_nabuflow/control/v1/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
 let deploymentVersion = "";
 let runtimeEnsured = false;
+let workerClockOffsetMs = 0;
 
 function nonce(label: string): string {
   return `${label}-${crypto.randomUUID()}`;
@@ -39,7 +40,7 @@ async function makeSignedRequest(input: {
 }): Promise<Request> {
   const method = input.method ?? "GET";
   const body = input.body === undefined ? "" : JSON.stringify(input.body);
-  const timestamp = String(input.timestampMs ?? Date.now());
+  const timestamp = String(input.timestampMs ?? Date.now() + workerClockOffsetMs);
   const bodySha256 = await sha256Hex(body);
   const idempotencyKey = input.idempotencyKey ?? "";
   const signature =
@@ -93,6 +94,16 @@ function assertStatus(step: string, actual: number, expected: number, body: unkn
 async function run(): Promise<void> {
   const unsigned = await fetch(`${controlUrl}/_nabuflow/control/v1/version`);
   assertStatus("auth.unsigned", unsigned.status, 401, await readResponse(unsigned));
+  const workerDate = unsigned.headers.get("date");
+  const workerTimeMs = workerDate === null ? Number.NaN : Date.parse(workerDate);
+  if (!Number.isFinite(workerTimeMs))
+    throw new Error("Unsigned Worker response omitted its Date header");
+  workerClockOffsetMs = workerTimeMs - Date.now();
+  transcript.push({
+    step: "auth.clock-source",
+    status: 200,
+    detail: { workerDate, offsetMs: workerClockOffsetMs },
+  });
 
   const tampered = await signedFetch({
     path: "/_nabuflow/control/v1/version",
@@ -104,7 +115,7 @@ async function run(): Promise<void> {
   const expired = await signedFetch({
     path: "/_nabuflow/control/v1/version",
     nonce: nonce("expired"),
-    timestampMs: Date.now() - 60_001,
+    timestampMs: Date.now() + workerClockOffsetMs - 60_001,
   });
   assertStatus("auth.expired", expired.response.status, 401, expired.body);
 
