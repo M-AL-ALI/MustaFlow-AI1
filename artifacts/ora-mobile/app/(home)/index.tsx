@@ -3556,14 +3556,6 @@ export default function OraChatScreen() {
               >
                 What can I help you work through?
               </Text>
-              {isSignedIn ? (
-                <OraHomeRecents
-                  conversations={conversations}
-                  projects={projects}
-                  activeProjectId={activeProjectId}
-                  onSelect={loadConversation}
-                />
-              ) : null}
               <View
                 style={{
                   width: "100%",
@@ -3620,6 +3612,15 @@ export default function OraChatScreen() {
                   ))}
                 </View>
               </View>
+              {isSignedIn ? (
+                <OraHomeRecents
+                  conversations={conversations}
+                  projects={projects}
+                  activeProjectId={activeProjectId}
+                  onSelect={loadConversation}
+                  collapsedByDefault
+                />
+              ) : null}
             </View>
           }
           renderItem={({ item }) => (

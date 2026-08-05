@@ -1728,7 +1728,6 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   <p className="text-sm text-muted-foreground">What can I help you work through?</p>
                 </div>
               </div>
-              <OraHomeRecents />
               <section
                 className="mt-6 border-t border-border/60 pt-5"
                 aria-label="Start a new chat"
@@ -1747,6 +1746,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   ))}
                 </div>
               </section>
+              <OraHomeRecents collapsedByDefault />
             </div>
           </div>
         ) : (

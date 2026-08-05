@@ -122,6 +122,24 @@ describe("Ora fresh-start home recents", () => {
     fireEvent.click(view.getByRole("button", { name: "Open conversation Conversation 7" }));
     expect(selectConversation).toHaveBeenCalledWith(7);
   });
+
+  it("can render recents collapsed so history does not dominate the empty chat", () => {
+    const value = conversationsContext(
+      Array.from({ length: 7 }, (_, index) => conversation(index + 1)),
+    );
+    const view = render(
+      <OraConversationsContext.Provider value={value}>
+        <OraHomeRecents collapsedByDefault />
+      </OraConversationsContext.Provider>,
+    );
+
+    expect(view.queryAllByRole("button", { name: /^Open conversation / })).toHaveLength(0);
+
+    fireEvent.click(view.getByRole("button", { name: "Show recent conversations" }));
+    expect(view.getAllByRole("button", { name: /^Open conversation / })).toHaveLength(
+      ORA_HOME_RECENT_LIMIT,
+    );
+  });
 });
 
 describe("Ora fresh-start website wiring", () => {
@@ -163,12 +181,12 @@ describe("Ora fresh-start website wiring", () => {
     expect(chat).toContain("if (!isTurnCurrent()) return;");
   });
 
-  it("puts recents before starter prompts in the compact home hierarchy", () => {
-    const recents = panel.indexOf("<OraHomeRecents />");
-    const starters = panel.indexOf('aria-label="Start a new chat"', recents);
+  it("puts starter prompts before collapsed recents in the compact home hierarchy", () => {
+    const starters = panel.indexOf('aria-label="Start a new chat"');
+    const recents = panel.indexOf("<OraHomeRecents collapsedByDefault", starters);
 
-    expect(recents).toBeGreaterThan(-1);
-    expect(starters).toBeGreaterThan(recents);
+    expect(starters).toBeGreaterThan(-1);
+    expect(recents).toBeGreaterThan(starters);
     expect(panel).toContain("What can I help you work through?");
     expect(panel).toContain("Start something new");
     expect(panel).not.toContain("Hi, I&apos;m Ora");

@@ -71,17 +71,19 @@ describe("Ora mobile fresh-start lifecycle wiring", () => {
   it("renders five recents with a working show-more path on the signed-in home", () => {
     expect(screen).toContain("<OraHomeRecents");
     expect(screen).toContain("onSelect={loadConversation}");
+    expect(screen).toContain("collapsedByDefault");
     expect(recents).toContain("allRecent.slice(0, ORA_HOME_RECENT_LIMIT)");
-    expect(recents).toContain("setExpanded((current) => !current)");
-    expect(recents).toContain('{expanded ? "Show less" : "Show more"}');
+    expect(recents).toContain("setShowAll((current) => !current)");
+    expect(recents).toContain('{showAll ? "Show less" : "Show more"}');
+    expect(recents).toContain("Show recent conversations");
   });
 
-  it("puts recents before starter prompts in the compact home hierarchy", () => {
-    const recentsPosition = screen.indexOf("<OraHomeRecents");
-    const startersPosition = screen.indexOf("Start something new", recentsPosition);
+  it("puts starter prompts before collapsed recents in the compact home hierarchy", () => {
+    const startersPosition = screen.indexOf("Start something new");
+    const recentsPosition = screen.indexOf("<OraHomeRecents", startersPosition);
 
-    expect(recentsPosition).toBeGreaterThan(-1);
-    expect(startersPosition).toBeGreaterThan(recentsPosition);
+    expect(startersPosition).toBeGreaterThan(-1);
+    expect(recentsPosition).toBeGreaterThan(startersPosition);
     expect(screen).toContain("What can I help you work through?");
     expect(screen).not.toContain("Hi, I'm Ora");
     expect(recents).toContain("fontSize: 14");

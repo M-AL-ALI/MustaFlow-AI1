@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Mic, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Mic, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const VOICE_TIP_STORAGE_KEY = "ora_voice_tip_seen";
@@ -55,6 +55,7 @@ export function OraVoiceTip({
   // Default to hidden; reveal only after confirming it has not been seen so the
   // tip never flashes for returning users.
   const [visible, setVisible] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!readVoiceTipSeen()) setVisible(true);
@@ -72,23 +73,40 @@ export function OraVoiceTip({
   return (
     <div
       className={cn(
-        "flex items-start gap-2.5 rounded-xl border border-[hsl(var(--ora-accent-hsl,265_85%_65%)/0.35)] bg-[hsl(var(--ora-accent-hsl,265_85%_65%)/0.07)] px-3 py-2 mb-2 text-xs",
+        "rounded-xl border border-[hsl(var(--ora-accent-hsl,265_85%_65%)/0.35)] bg-[hsl(var(--ora-accent-hsl,265_85%_65%)/0.07)] px-2.5 py-1.5 mb-2 text-xs",
         className,
       )}
       role="status"
     >
-      <Mic className="h-3.5 w-3.5 shrink-0 mt-0.5 text-[hsl(var(--ora-accent-hsl,265_85%_65%))]" />
-      <p className="flex-1 leading-snug text-foreground/90">
-        {buildTipText(voiceInputSupported, voiceOutputSupported)}
-      </p>
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label="Dismiss voice tip"
-        className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground/90"
+        >
+          <Mic className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--ora-accent-hsl,265_85%_65%))]" />
+          <span className="truncate font-medium">Voice tools available</span>
+          {expanded ? (
+            <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss voice tip"
+          className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {expanded ? (
+        <p className="mt-1.5 pl-5 leading-snug text-foreground/80">
+          {buildTipText(voiceInputSupported, voiceOutputSupported)}
+        </p>
+      ) : null}
     </div>
   );
 }
