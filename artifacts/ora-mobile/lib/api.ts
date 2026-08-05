@@ -1463,7 +1463,9 @@ export async function editImage(
   imageId: number,
   instruction: string,
   oraProjectId?: number | null,
+  onProgress?: (status: string) => void,
 ): Promise<{ displayUrl: string; newImageId: number }> {
+  onProgress?.("Rendering the edited image...");
   const { jobId, imageId: newImageId } = await jsonRequest<{ jobId: string; imageId: number }>(
     `/api/images/${imageId}/edit`,
     {
@@ -1497,6 +1499,7 @@ export async function editImage(
   }
   if (!completed) throw new Error("Image edit timed out. Please try again.");
 
+  onProgress?.("Loading the edited image...");
   const res = await fetchOrThrow(url(`/api/images/${newImageId}/file`));
   if (!res.ok) throw new Error("Could not load the edited image.");
   const blob = await res.blob();

@@ -1879,6 +1879,7 @@ export function useOraChat(): UseOraChatReturn {
         return next;
       });
       setIsLoading(true);
+      setStreamStatus("Rendering the edited image...");
       setError(null);
       // Fresh turn — drop any stale activity trace from the previous send.
       clearActivity();
@@ -2875,6 +2876,7 @@ export function useOraChat(): UseOraChatReturn {
         // URL) which an <img src> cannot fetch — that produced a "completed" edit
         // that rendered as a broken image. The /file route resolves the bytes
         // from whichever backend holds them (dev tmpdir or authenticated R2).
+        setStreamStatus("Loading the edited image...");
         const imgRes = await safeAuthFetch(`${BASE}/api/images/${newImageId}/file`);
         if (!isTurnCurrent()) return;
         if (!imgRes.ok) throw new Error("Could not load the edited image.");

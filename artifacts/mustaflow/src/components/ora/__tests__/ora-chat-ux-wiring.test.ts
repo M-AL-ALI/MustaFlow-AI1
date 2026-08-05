@@ -7,8 +7,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (relativePath: string) => readFileSync(resolve(here, relativePath), "utf8");
 
 const hookSource = read("../../../hooks/use-ora-chat.ts");
+const realtimeVoiceSource = read("../../../hooks/use-ora-realtime-voice.ts");
+const whisperRecorderSource = read("../../../hooks/use-whisper-recorder.ts");
 const panelSource = read("../../ora-panel.tsx");
 const bubbleSource = read("../../ora-bubble.tsx");
+const voicePanelSource = read("../ora-voice-mode-button.tsx");
 
 describe("Phase 9D — cancel file-edit preview wiring (website)", () => {
   it("panel has handleCancelFileEditPreview callback and sends the cancel message", () => {
@@ -162,5 +165,57 @@ describe("Ora chat UX response wiring", () => {
       /const showSuggestions =[\s\S]*Array\.isArray\(msg\.suggestions\)[\s\S]*msg\.suggestions\.length > 0/,
     );
     expect(bubbleSource).toMatch(/showSuggestions &&[\s\S]*msg\.suggestions!\.map/);
+  });
+});
+
+describe("Ora Item 5 quick wins (website)", () => {
+  it("keeps edited-image rendering visibly staged until the asset is loaded", () => {
+    expect(hookSource).toContain('setStreamStatus("Rendering the edited image...")');
+    expect(hookSource).toContain('setStreamStatus("Loading the edited image...")');
+    expect(hookSource).toMatch(/finally[\s\S]*setStreamStatus\(null\)/);
+  });
+
+  it("keeps generated images from being hidden behind the composer", () => {
+    expect(panelSource).toContain('"px-4 pt-4 pb-28"');
+    expect(panelSource).toContain('"max-w-3xl mx-auto w-full space-y-6 pt-6 pb-32"');
+    expect(panelSource).toContain("requestAnimationFrame(jumpToLatest)");
+    expect(bubbleSource).toContain('"px-4 pt-4 pb-28 space-y-5"');
+    expect(bubbleSource).toContain("requestAnimationFrame(jumpToLatest)");
+  });
+
+  it("confirms generated-file open/download actions and surfaces failed asset fetches", () => {
+    for (const source of [panelSource, bubbleSource]) {
+      expect(source).toContain("const showFileNotice =");
+      expect(source).toContain("throw new Error(`Download failed (${res.status}).`)");
+      expect(source).toContain("throw new Error(`Could not open file (${res.status}).`)");
+      expect(source).toContain("showFileNotice(`Opened ${file.fileName}.`)");
+      expect(source).toContain("showFileNotice(`Download started: ${file.fileName}`)");
+      expect(source).toContain("fileNotice &&");
+    }
+  });
+
+  it("renders no-microphone as a stable disabled voice state on both web shells", () => {
+    expect(whisperRecorderSource).toContain("isMicrophoneUnavailable");
+    expect(whisperRecorderSource).toContain(
+      "No microphone found on this device. Connect or enable a microphone, then tap Retry.",
+    );
+    expect(whisperRecorderSource).toContain("!permissionDenied && !microphoneUnavailable");
+    expect(realtimeVoiceSource).toContain(
+      "No microphone found. Connect or enable a microphone, then try again.",
+    );
+
+    for (const source of [panelSource, bubbleSource]) {
+      expect(source).toContain("whisperConv.isMicrophoneUnavailable");
+      expect(source).toContain(
+        "whisperMicrophoneUnavailable={whisperConv.isMicrophoneUnavailable}",
+      );
+    }
+
+    expect(voicePanelSource).toContain("whisperMicrophoneUnavailable");
+    expect(voicePanelSource).toContain('"No microphone found"');
+    expect(voicePanelSource).toContain(
+      "isNoMic ? false : isListening || isSpeaking || whisperRecording",
+    );
+    expect(voicePanelSource).toContain("No mic");
   });
 });

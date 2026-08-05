@@ -53,6 +53,12 @@ export interface UseWhisperRecorderReturn {
    * the session, avoiding an infinite retry loop.
    */
   isPermissionDenied: boolean;
+  /**
+   * True when the current device/browser has no usable input device. The error
+   * persists like a permission denial so Talk to Ora can show an honest no-mic
+   * state instead of flashing "Listening…" and auto-retrying forever.
+   */
+  isMicrophoneUnavailable: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,6 +114,7 @@ export function useWhisperRecorder(
   const [state, setState] = useState<WhisperState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isPermissionDenied, setIsPermissionDenied] = useState(false);
+  const [isMicrophoneUnavailable, setIsMicrophoneUnavailable] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -149,12 +156,13 @@ export function useWhisperRecorder(
   }, [stopAnalyser]);
 
   const handleError = useCallback(
-    (msg: string, permissionDenied = false) => {
+    (msg: string, permissionDenied = false, microphoneUnavailable = false) => {
       cleanup();
       setError(msg);
       setIsPermissionDenied(permissionDenied);
+      setIsMicrophoneUnavailable(microphoneUnavailable);
       setState("error");
-      if (!permissionDenied) {
+      if (!permissionDenied && !microphoneUnavailable) {
         setTimeout(() => {
           setState("idle");
           setError(null);
@@ -252,6 +260,7 @@ export function useWhisperRecorder(
       cancelledRef.current = false;
       setError(null);
       setIsPermissionDenied(false);
+      setIsMicrophoneUnavailable(false);
       chunksRef.current = [];
 
       let stream: MediaStream;
@@ -273,7 +282,11 @@ export function useWhisperRecorder(
             true,
           );
         } else if (name === "NotFoundError") {
-          handleError("No microphone found on this device.");
+          handleError(
+            "No microphone found on this device. Connect or enable a microphone, then tap Retry.",
+            false,
+            true,
+          );
         } else {
           handleError("Could not start recording. Please check your microphone.");
         }
@@ -397,5 +410,6 @@ export function useWhisperRecorder(
     cancelRecording,
     error,
     isPermissionDenied,
+    isMicrophoneUnavailable,
   };
 }

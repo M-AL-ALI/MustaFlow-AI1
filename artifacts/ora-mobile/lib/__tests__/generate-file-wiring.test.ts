@@ -110,6 +110,16 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(index).toContain("Revise");
   });
 
+  it("confirms generated-file save/download outcomes to the user", () => {
+    expect(index).toContain("function generatedFileSaveConfirmation");
+    expect(index).toContain('"Image saved to your photo library."');
+    expect(index).toContain("`${file.fileName} is ready in the share sheet.`");
+    expect(index).toContain("`Opened download for ${file.fileName}.`");
+    expect(index).toContain(
+      'Alert.alert("Saved", generatedFileSaveConfirmation(generatedFile, outcome))',
+    );
+  });
+
   it("renders a View action on non-image generated-file cards (website parity)", () => {
     // View button only for non-image files, wired to handleViewFile.
     expect(index).toContain('accessibilityLabel="View generated file"');

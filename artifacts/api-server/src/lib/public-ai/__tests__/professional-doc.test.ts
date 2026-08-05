@@ -20,8 +20,11 @@ import {
   buildDocumentSystemPrompt,
   buildPresentationSystemPrompt,
   buildTabularSystemPrompt,
+  generatedFileNameForPrompt,
   normalizeDocumentFileData,
+  requestedFileNameFromPrompt,
   resolveOraFileQualityProfile,
+  sanitizeRequestedFileName,
 } from "../file-builder.js";
 
 // Access the (unexported) buildDocumentSystemPrompt via the public API surface:
@@ -30,6 +33,38 @@ import {
 // against the documented public contracts.
 // For direct testing we inline the prompt builder test here using the public
 // normalizeDocumentFileData + detectProfessionalDocType combo.
+
+// ---------------------------------------------------------------------------
+// Requested file names
+// ---------------------------------------------------------------------------
+
+describe("requested file names", () => {
+  it("preserves a user-requested quoted filename with the selected extension", () => {
+    expect(
+      requestedFileNameFromPrompt(
+        'Create a board summary and save it as "Q3 Board Review.pdf".',
+        "pdf",
+      ),
+    ).toBe("Q3 Board Review.pdf");
+  });
+
+  it("sanitizes unsafe filename characters while preserving readable words", () => {
+    expect(sanitizeRequestedFileName("Q4/KPI*report.xlsx", "xlsx")).toBe("Q4_KPI_report.xlsx");
+  });
+
+  it("rejects empty or Windows-reserved names so the safe title fallback is used", () => {
+    expect(sanitizeRequestedFileName("../con.pdf", "pdf")).toBeNull();
+    expect(generatedFileNameForPrompt('Create a PDF named "../con.pdf"', "Board Pack", "pdf")).toBe(
+      "board-pack.pdf",
+    );
+  });
+
+  it("falls back to the generated title when the prompt does not request a filename", () => {
+    expect(
+      generatedFileNameForPrompt("Create an investor update deck", "Investor Update", "pptx"),
+    ).toBe("investor-update.pptx");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // detectProfessionalDocType
