@@ -227,7 +227,9 @@ describe("Ora fresh-start website wiring", () => {
         <>
           <button type="button" aria-label="Open Ora menu" onClick={() => setOpen(true)} />
           <div aria-label="Ora navigation" {...getOraSidebarDrawerState(open)}>
-            <button type="button" onClick={onNewConversation}>New conversation</button>
+            <button type="button" onClick={onNewConversation}>
+              New conversation
+            </button>
           </div>
         </>
       );

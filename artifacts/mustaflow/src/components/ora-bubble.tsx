@@ -231,7 +231,9 @@ function GeneratedFileCard({
         </div>
         <div className="flex-1 min-w-0">
           <p className={`${fileText} font-semibold truncate text-foreground`}>{file.fileName}</p>
-          <p className="text-[10px] text-muted-foreground/70 mt-0.5">{previewFormatLabel} · View or download</p>
+          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+            {previewFormatLabel} · View or download
+          </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
