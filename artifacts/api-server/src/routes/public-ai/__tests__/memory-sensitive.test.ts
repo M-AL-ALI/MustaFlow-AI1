@@ -73,11 +73,11 @@ describe("detectMemorySaveCandidate sensitive gate", () => {
     expect(c?.category).toBe("preference");
   });
 
-  it("non-sensitive implicit candidates stay low and not sensitive", () => {
+  it("keeps durable first-person implicit candidates high and not sensitive", () => {
     const c = detectMemorySaveCandidate("my favorite color is teal");
     if (c) {
       expect(c.sensitive).toBe(false);
-      expect(c.confidence).toBe("low");
+      expect(c.confidence).toBe("high");
     }
   });
 
