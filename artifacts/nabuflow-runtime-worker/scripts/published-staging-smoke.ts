@@ -1,15 +1,17 @@
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import {
   deriveRuntimeIdentity,
   sha256Hex,
   signControlRequest,
+  signPreviewGrant,
   signStagingHostOverride,
 } from "@workspace/tenant-runtime-contracts";
 import WebSocket from "ws";
 
 const controlUrl = required("CLOUDFLARE_RUNTIME_CONTROL_URL").replace(/\/$/, "");
 const controlToken = required("CLOUDFLARE_RUNTIME_CONTROL_TOKEN");
+const previewPrivateKey = required("CLOUDFLARE_RUNTIME_PREVIEW_PRIVATE_KEY");
 const deploymentNamespace = required("CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE");
 const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
 const readyPath = process.env.NABUFLOW_PUBLISHED_BROWSER_READY;
@@ -336,6 +338,8 @@ async function run(): Promise<void> {
   assertStatus("control.version.valid", versionResponse.status, 200, versionBody);
   deploymentVersion = (versionBody as { deploymentVersion?: string }).deploymentVersion ?? "";
   assertCondition(deploymentVersion, "Worker version response omitted deploymentVersion");
+
+  await verifyPreviewAuthRegression();
 
   runtimeIdentity = await deriveRuntimeIdentity({ namespace: deploymentNamespace, ...locator });
   manifestRevision = `published-manifest-${Date.now()}`;
@@ -682,6 +686,93 @@ async function run(): Promise<void> {
     body: await readResponse(selfInvalidated),
     elapsedMs: performance.now() - selfInvalidatedStarted,
   });
+}
+
+async function verifyPreviewAuthRegression(): Promise<void> {
+  const previewIdentity = await deriveRuntimeIdentity({
+    namespace: deploymentNamespace,
+    projectId: locator.projectId,
+    role: "preview",
+    slot: "primary",
+  });
+  const previewPath = `/_nabuflow/preview/v1/${previewIdentity}/`;
+  const nowSeconds = Math.floor((Date.now() + workerClockOffsetMs) / 1_000);
+  const claims = {
+    v: 1 as const,
+    iss: "nabuflow-api" as const,
+    aud: controlUrl,
+    sub: previewIdentity,
+    port: 8080,
+    iat: nowSeconds,
+    exp: nowSeconds + 300,
+    jti: crypto.randomUUID().replaceAll("-", ""),
+  };
+
+  const missing = await fetch(`${controlUrl}${previewPath}`, { redirect: "manual" });
+  assertStatus("preview.auth.missing", missing.status, 401, await readResponse(missing));
+
+  const validGrant = await signPreviewGrant(previewPrivateKey, claims);
+  const grantSegments = validGrant.split(".");
+  const firstSignatureCharacter = grantSegments[2][0];
+  grantSegments[2] = `${firstSignatureCharacter === "A" ? "B" : "A"}${grantSegments[2].slice(1)}`;
+  const tamperedGrant = grantSegments.join(".");
+  const tampered = await fetch(
+    `${controlUrl}${previewPath}?__nfg=${encodeURIComponent(tamperedGrant)}`,
+    { redirect: "manual" },
+  );
+  assertStatus("preview.auth.tampered", tampered.status, 401, await readResponse(tampered));
+
+  const expiredGrant = await signPreviewGrant(previewPrivateKey, {
+    ...claims,
+    iat: nowSeconds - 120,
+    exp: nowSeconds - 60,
+    jti: crypto.randomUUID().replaceAll("-", ""),
+  });
+  const expired = await fetch(
+    `${controlUrl}${previewPath}?__nfg=${encodeURIComponent(expiredGrant)}`,
+    { redirect: "manual" },
+  );
+  assertStatus("preview.auth.expired", expired.status, 401, await readResponse(expired));
+
+  const wrongKey = generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+  });
+  const forgedGrant = await signPreviewGrant(wrongKey.privateKey, {
+    ...claims,
+    jti: crypto.randomUUID().replaceAll("-", ""),
+  });
+  const forged = await fetch(
+    `${controlUrl}${previewPath}?__nfg=${encodeURIComponent(forgedGrant)}`,
+    { redirect: "manual" },
+  );
+  assertStatus("preview.auth.wrong-key", forged.status, 401, await readResponse(forged));
+
+  const validUrl = `${controlUrl}${previewPath}?__nfg=${encodeURIComponent(validGrant)}`;
+  const accepted = await fetch(validUrl, { redirect: "manual" });
+  const acceptedBody = await readResponse(accepted);
+  assertStatus("preview.auth.valid", accepted.status, 302, {
+    body: acceptedBody,
+    location: accepted.headers.get("location"),
+    setCookiePresent: accepted.headers.has("set-cookie"),
+  });
+  const sessionCookie = accepted.headers.get("set-cookie")?.split(";", 1)[0];
+  assertCondition(sessionCookie, "Valid preview grant did not mint a session cookie");
+
+  const replay = await fetch(validUrl, { redirect: "manual" });
+  assertStatus("preview.auth.replay", replay.status, 409, await readResponse(replay));
+
+  const session = await fetch(`${controlUrl}${previewPath}`, {
+    headers: { cookie: sessionCookie },
+    redirect: "manual",
+  });
+  const sessionBody = await readResponse(session);
+  assertStatus("preview.auth.session", session.status, 503, sessionBody);
+  assertCondition(
+    (sessionBody as { code?: string }).code === "preview_runtime_unavailable",
+    "Redeemed preview session fell back to missing-auth classification",
+  );
 }
 
 async function cleanup(): Promise<void> {
