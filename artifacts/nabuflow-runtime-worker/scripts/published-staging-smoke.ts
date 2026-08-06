@@ -149,6 +149,101 @@ async function signedFetch(input: Parameters<typeof makeSignedRequest>[0]) {
   return { response, body: await readResponse(response) };
 }
 
+function isPropagationRetryable(status: number, body: unknown): boolean {
+  const code = (body as { code?: string } | null)?.code;
+  return (
+    (status === 401 && code === "invalid_signature") ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+async function signedControlFetch(input: Parameters<typeof makeSignedRequest>[0], label: string) {
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const result = await signedFetch({
+      ...input,
+      nonce: attempt === 1 ? input.nonce : nonce(`${label}-retry-${attempt}`),
+    });
+    if (!isPropagationRetryable(result.response.status, result.body) || attempt === 8) {
+      return result;
+    }
+    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
+    record(`control.retry.${label}`, result.response.status, {
+      attempt,
+      backoffMs,
+      code: (result.body as { code?: string }).code,
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  throw new Error(`${label}: bounded control retry exhausted without a response`);
+}
+
+async function acceptedReplayableRequest(
+  input: Parameters<typeof makeSignedRequest>[0],
+  label: string,
+) {
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const request = await makeSignedRequest({
+      ...input,
+      nonce: attempt === 1 ? input.nonce : nonce(`${label}-retry-${attempt}`),
+    });
+    const response = await fetch(request.clone());
+    const body = await readResponse(response);
+    if (!isPropagationRetryable(response.status, body) || attempt === 8) {
+      return { request, response, body };
+    }
+    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
+    record(`control.retry.${label}`, response.status, {
+      attempt,
+      backoffMs,
+      code: (body as { code?: string }).code,
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  throw new Error(`${label}: bounded replayable retry exhausted without a response`);
+}
+
+async function waitForSustainedGreenWindow(): Promise<unknown> {
+  const startedAt = performance.now();
+  let consecutive = 0;
+  let totalProbes = 0;
+  let stableVersion = "";
+  let lastBody: unknown = null;
+  while (consecutive < 20 && totalProbes < 180) {
+    totalProbes += 1;
+    const result = await signedFetch({
+      path: "/_nabuflow/control/v1/version",
+      nonce: nonce(`sustained-green-${totalProbes}`),
+    });
+    lastBody = result.body;
+    const observedVersion = (result.body as { deploymentVersion?: string }).deploymentVersion ?? "";
+    if (result.response.status === 200 && observedVersion) {
+      if (stableVersion !== observedVersion) {
+        stableVersion = observedVersion;
+        consecutive = 0;
+      }
+      consecutive += 1;
+    } else {
+      consecutive = 0;
+      stableVersion = "";
+      record("control.version.sustained-green-reset", result.response.status, {
+        totalProbes,
+        body: result.body,
+      });
+    }
+    if (consecutive < 20) await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  assertCondition(consecutive === 20, "Control authentication did not sustain 20 green probes");
+  record("control.version.sustained-green", 200, {
+    consecutive,
+    totalProbes,
+    elapsedMs: performance.now() - startedAt,
+    deploymentVersion: stableVersion,
+  });
+  return lastBody;
+}
+
 async function overrideHeaders(
   host: string,
   pathAndQuery: string,
@@ -216,13 +311,16 @@ function deactivateBody(hostname: string) {
 
 async function activateRoute(hostname: string, label: string): Promise<void> {
   const path = `/_nabuflow/control/v1/routes/${hostname}/activate`;
-  const result = await signedFetch({
-    path,
-    method: "POST",
-    body: activateBody(hostname),
-    nonce: nonce(`${label}-activate`),
-    idempotencyKey: `${label}-activate-${locator.projectId}`,
-  });
+  const result = await signedControlFetch(
+    {
+      path,
+      method: "POST",
+      body: activateBody(hostname),
+      nonce: nonce(`${label}-activate`),
+      idempotencyKey: `${label}-activate-${locator.projectId}`,
+    },
+    `${label}.activate`,
+  );
   assertStatus(`${label}.activate`, result.response.status, 200, result.body);
   registeredHosts.add(hostname);
 }
@@ -230,13 +328,16 @@ async function activateRoute(hostname: string, label: string): Promise<void> {
 async function deactivateRoute(hostname: string, label: string): Promise<void> {
   if (!registeredHosts.has(hostname)) return;
   const path = `/_nabuflow/control/v1/routes/${hostname}`;
-  const result = await signedFetch({
-    path,
-    method: "DELETE",
-    body: deactivateBody(hostname),
-    nonce: nonce(`${label}-deactivate`),
-    idempotencyKey: `${label}-deactivate-${locator.projectId}-${crypto.randomUUID()}`,
-  });
+  const result = await signedControlFetch(
+    {
+      path,
+      method: "DELETE",
+      body: deactivateBody(hostname),
+      nonce: nonce(`${label}-deactivate`),
+      idempotencyKey: `${label}-deactivate-${locator.projectId}-${crypto.randomUUID()}`,
+    },
+    `${label}.deactivate`,
+  );
   record(`${label}.deactivate`, result.response.status, result.body);
   if (result.response.status !== 200 && result.response.status !== 404) {
     throw new Error(`${label} route cleanup failed`);
@@ -317,25 +418,8 @@ async function run(): Promise<void> {
   workerClockOffsetMs = workerTimeMs - Date.now();
   record("clock.offset", 200, { workerDate, offsetMs: workerClockOffsetMs });
 
-  let versionResponse: Response | null = null;
-  let versionBody: unknown = null;
-  for (let attempt = 1; attempt <= 18; attempt += 1) {
-    const request = await makeSignedRequest({
-      path: "/_nabuflow/control/v1/version",
-      nonce: nonce(`version-${attempt}`),
-    });
-    versionResponse = await fetch(request);
-    versionBody = await readResponse(versionResponse);
-    if (versionResponse.status === 200) break;
-    record("control.version.propagation-retry", versionResponse.status, {
-      attempt,
-      body: versionBody,
-    });
-    if (versionResponse.status !== 401 || attempt === 18) break;
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
-  }
-  assertCondition(versionResponse !== null, "Version propagation probe did not run");
-  assertStatus("control.version.valid", versionResponse.status, 200, versionBody);
+  const versionBody = await waitForSustainedGreenWindow();
+  record("control.version.valid", 200, versionBody);
   deploymentVersion = (versionBody as { deploymentVersion?: string }).deploymentVersion ?? "";
   assertCondition(deploymentVersion, "Worker version response omitted deploymentVersion");
 
@@ -343,44 +427,50 @@ async function run(): Promise<void> {
 
   runtimeIdentity = await deriveRuntimeIdentity({ namespace: deploymentNamespace, ...locator });
   manifestRevision = `published-manifest-${Date.now()}`;
-  const ensure = await signedFetch({
-    path: runtimePath,
-    method: "PUT",
-    body: {
-      locator,
-      expectedDeploymentVersion: deploymentVersion,
-      manifest: {
-        revision: manifestRevision,
-        runtime: "node",
-        buildCommand: ["node", "--version"],
-        startCommand: ["node", "-e", TENANT_SERVER_SOURCE],
-        servicePort: 8080,
-        healthPath: "/health",
-        resourceProfile: "dev",
-        public: true,
+  const ensure = await signedControlFetch(
+    {
+      path: runtimePath,
+      method: "PUT",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        manifest: {
+          revision: manifestRevision,
+          runtime: "node",
+          buildCommand: ["node", "--version"],
+          startCommand: ["node", "-e", TENANT_SERVER_SOURCE],
+          servicePort: 8080,
+          healthPath: "/health",
+          resourceProfile: "dev",
+          public: true,
+        },
       },
+      nonce: nonce("ensure"),
+      idempotencyKey: `published-ensure-${locator.projectId}`,
     },
-    nonce: nonce("ensure"),
-    idempotencyKey: `published-ensure-${locator.projectId}`,
-  });
+    "lifecycle.ensure",
+  );
   assertStatus("lifecycle.ensure", ensure.response.status, 200, ensure.body);
   runtimeEnsured = true;
 
   const artifactRevision = `published-artifact-${Date.now()}`;
   let start: Awaited<ReturnType<typeof signedFetch>> | null = null;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    start = await signedFetch({
-      path: `${runtimePath}/start`,
-      method: "POST",
-      body: {
-        locator,
-        expectedDeploymentVersion: deploymentVersion,
-        artifactRevision,
-        artifactSha256: await sha256Hex(artifactRevision),
+    start = await signedControlFetch(
+      {
+        path: `${runtimePath}/start`,
+        method: "POST",
+        body: {
+          locator,
+          expectedDeploymentVersion: deploymentVersion,
+          artifactRevision,
+          artifactSha256: await sha256Hex(artifactRevision),
+        },
+        nonce: nonce(`start-${attempt}`),
+        idempotencyKey: `published-start-${locator.projectId}`,
       },
-      nonce: nonce(`start-${attempt}`),
-      idempotencyKey: `published-start-${locator.projectId}`,
-    });
+      "lifecycle.start",
+    );
     if (start.response.status === 200) break;
     record("lifecycle.start.retry", start.response.status, { attempt, body: start.body });
     if (start.response.status !== 502 || attempt === 4) break;
@@ -459,22 +549,19 @@ async function run(): Promise<void> {
     "Production-green route did not return production_blue_required",
   );
 
-  const validActivateRequest = await makeSignedRequest({
-    path: activationPath,
-    method: "POST",
-    body: activationBody,
-    nonce: nonce("route-activate-valid"),
-    idempotencyKey: `route-activate-valid-${locator.projectId}`,
-  });
-  const validActivate = await fetch(validActivateRequest.clone());
-  assertStatus(
+  const validActivate = await acceptedReplayableRequest(
+    {
+      path: activationPath,
+      method: "POST",
+      body: activationBody,
+      nonce: nonce("route-activate-valid"),
+      idempotencyKey: `route-activate-valid-${locator.projectId}`,
+    },
     "route.activate.valid",
-    validActivate.status,
-    200,
-    await readResponse(validActivate),
   );
+  assertStatus("route.activate.valid", validActivate.response.status, 200, validActivate.body);
   registeredHosts.add(simulatedHost);
-  const replayActivate = await fetch(validActivateRequest);
+  const replayActivate = await fetch(validActivate.request);
   assertStatus(
     "route.activate.replay",
     replayActivate.status,
@@ -590,22 +677,25 @@ async function run(): Promise<void> {
     forbiddenDomain: ".mustaflow.com",
   });
 
-  const credentials = await signedFetch({
-    path: `${runtimePath}/exec`,
-    method: "POST",
-    body: {
-      locator,
-      argv: [
-        "node",
-        "-e",
-        "const names=Object.keys(process.env).filter(k=>/(TOKEN|SECRET|KEY|PASSWORD|DATABASE_URL)/i.test(k));console.log(names.length?names.join(','):'none')",
-      ],
-      cwd: "/workspace",
-      timeoutMs: 10_000,
+  const credentials = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          "const names=Object.keys(process.env).filter(k=>/(TOKEN|SECRET|KEY|PASSWORD|DATABASE_URL)/i.test(k));console.log(names.length?names.join(','):'none')",
+        ],
+        cwd: "/workspace",
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("credential-names"),
+      idempotencyKey: `published-credential-names-${locator.projectId}`,
     },
-    nonce: nonce("credential-names"),
-    idempotencyKey: `published-credential-names-${locator.projectId}`,
-  });
+    "security.container-credentials",
+  );
   assertStatus(
     "security.container-credentials",
     credentials.response.status,
@@ -653,17 +743,19 @@ async function run(): Promise<void> {
     timestampMs: Date.now() + workerClockOffsetMs - 60_001,
   });
   assertStatus("route.deactivate.expired", expiredDelete.response.status, 401, expiredDelete.body);
-  const validDeleteRequest = await makeSignedRequest({
-    path: deletePath,
-    method: "DELETE",
-    body: deleteBody,
-    nonce: nonce("route-deactivate-valid"),
-    idempotencyKey: `route-deactivate-valid-${locator.projectId}`,
-  });
-  const validDelete = await fetch(validDeleteRequest.clone());
-  assertStatus("route.deactivate.valid", validDelete.status, 200, await readResponse(validDelete));
+  const validDelete = await acceptedReplayableRequest(
+    {
+      path: deletePath,
+      method: "DELETE",
+      body: deleteBody,
+      nonce: nonce("route-deactivate-valid"),
+      idempotencyKey: `route-deactivate-valid-${locator.projectId}`,
+    },
+    "route.deactivate.valid",
+  );
+  assertStatus("route.deactivate.valid", validDelete.response.status, 200, validDelete.body);
   registeredHosts.delete(simulatedHost);
-  const replayDelete = await fetch(validDeleteRequest);
+  const replayDelete = await fetch(validDelete.request);
   assertStatus(
     "route.deactivate.replay",
     replayDelete.status,
@@ -780,30 +872,39 @@ async function cleanup(): Promise<void> {
     await deactivateRoute(hostname, "cleanup.route");
   }
   if (runtimeStarted) {
-    const stopped = await signedFetch({
-      path: `${runtimePath}/stop`,
-      method: "POST",
-      body: { locator, reason: "published staging smoke complete" },
-      nonce: nonce("cleanup-stop"),
-      idempotencyKey: `published-stop-${locator.projectId}-${crypto.randomUUID()}`,
-    });
+    const stopped = await signedControlFetch(
+      {
+        path: `${runtimePath}/stop`,
+        method: "POST",
+        body: { locator, reason: "published staging smoke complete" },
+        nonce: nonce("cleanup-stop"),
+        idempotencyKey: `published-stop-${locator.projectId}-${crypto.randomUUID()}`,
+      },
+      "cleanup.stop",
+    );
     record("cleanup.stop", stopped.response.status, stopped.body);
     if (stopped.response.status !== 200) throw new Error("Scratch stop failed");
     runtimeStarted = false;
   }
   if (runtimeEnsured) {
-    const destroyed = await signedFetch({
-      path: runtimePath,
-      method: "DELETE",
-      body: { locator, reason: "mandatory published staging cleanup" },
-      nonce: nonce("cleanup-destroy"),
-      idempotencyKey: `published-destroy-${locator.projectId}-${crypto.randomUUID()}`,
-    });
+    const destroyed = await signedControlFetch(
+      {
+        path: runtimePath,
+        method: "DELETE",
+        body: { locator, reason: "mandatory published staging cleanup" },
+        nonce: nonce("cleanup-destroy"),
+        idempotencyKey: `published-destroy-${locator.projectId}-${crypto.randomUUID()}`,
+      },
+      "cleanup.destroy",
+    );
     record("cleanup.destroy", destroyed.response.status, destroyed.body);
     if (destroyed.response.status !== 200) throw new Error("Scratch destroy failed");
     runtimeEnsured = false;
 
-    const status = await signedFetch({ path: runtimePath, nonce: nonce("cleanup-status") });
+    const status = await signedControlFetch(
+      { path: runtimePath, nonce: nonce("cleanup-status") },
+      "cleanup.status",
+    );
     record("cleanup.status-after-destroy", status.response.status, status.body);
     if (status.response.status !== 404) throw new Error("Destroyed runtime still resolves");
   }
