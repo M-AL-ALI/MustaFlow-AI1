@@ -1,4 +1,5 @@
 export * from "./config";
+export * from "./capability-request";
 export * from "./constants";
 export * from "./control-schemas";
 export * from "./preview-grant";

@@ -6,6 +6,9 @@ import {
   signControlRequest,
   signPreviewGrant,
   signStagingHostOverride,
+  type CapabilityDefinition,
+  type CapabilityIntent,
+  type CapabilityInvocation,
 } from "@workspace/tenant-runtime-contracts";
 import WebSocket from "ws";
 
@@ -17,6 +20,8 @@ const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
 const readyPath = process.env.NABUFLOW_PUBLISHED_BROWSER_READY;
 const evidencePath = process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH;
 const workerHost = new URL(controlUrl).hostname;
+const capabilityEndpoint = "/_nabuflow/capability/v1/invoke";
+const capabilityIntentUrl = "http://doorman.staging.nabuflow.internal/v1/invoke";
 
 const TENANT_SERVER_SOURCE = String.raw`
 const http=require('node:http');
@@ -63,8 +68,10 @@ const locator = {
   role: "production" as const,
   slot: "blue" as const,
 };
+const foreignExistingProjectId = locator.projectId + 1;
+const foreignMissingProjectId = locator.projectId + 2;
 const runtimePath = `/_nabuflow/control/v1/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
-const simulatedHost = `slice-2b-v-${locator.projectId}.apps.mustaflow.com`;
+const simulatedHost = `slice-2b-vi-${locator.projectId}.apps.mustaflow.com`;
 const registeredHosts = new Set<string>();
 let deploymentVersion = "";
 let workerClockOffsetMs = 0;
@@ -72,6 +79,23 @@ let runtimeEnsured = false;
 let runtimeStarted = false;
 let manifestRevision = "";
 let runtimeIdentity = "";
+let activeContainerId = "";
+const provisionedCapabilityProjects = new Set<number>();
+
+const echoCapabilityDefinition: CapabilityDefinition = {
+  name: "echo",
+  provider: "nabuflow-harness",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/echo" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 5_000,
+    maxRequestBytes: 32_768,
+    maxResponseBytes: 32_768,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
 
 function required(name: string): string {
   const value = process.env[name];
@@ -263,6 +287,139 @@ async function waitForSustainedGreenWindow(): Promise<unknown> {
   return lastBody;
 }
 
+function capabilityControlPath(projectId: number): string {
+  return `/_nabuflow/control/v1/capabilities/${projectId}/nabuflow-harness/echo`;
+}
+
+async function provisionCapability(projectId: number): Promise<void> {
+  const revision = `echo-v1-${projectId}`;
+  const result = await signedControlFetch(
+    {
+      path: capabilityControlPath(projectId),
+      method: "PUT",
+      body: { projectId, revision, definition: echoCapabilityDefinition },
+      nonce: nonce(`capability-provision-${projectId}`),
+      idempotencyKey: `capability-provision-${projectId}-${crypto.randomUUID()}`,
+    },
+    `capability.provision.${projectId}`,
+  );
+  assertStatus(`capability.provision.${projectId}`, result.response.status, 200, result.body);
+  assertCondition(
+    (result.body as { keyId?: string }).keyId === "v1",
+    "Capability provision did not use the active v1 envelope key",
+  );
+  provisionedCapabilityProjects.add(projectId);
+}
+
+async function revokeCapability(projectId: number): Promise<void> {
+  if (!provisionedCapabilityProjects.has(projectId)) return;
+  const result = await signedControlFetch(
+    {
+      path: capabilityControlPath(projectId),
+      method: "DELETE",
+      body: { projectId, expectedRevision: `echo-v1-${projectId}` },
+      nonce: nonce(`capability-revoke-${projectId}`),
+      idempotencyKey: `capability-revoke-${projectId}-${crypto.randomUUID()}`,
+    },
+    `capability.revoke.${projectId}`,
+  );
+  record(`capability.revoke.${projectId}`, result.response.status, result.body);
+  if (result.response.status !== 200 && result.response.status !== 404) {
+    throw new Error(`Capability cleanup failed for project ${projectId}`);
+  }
+  provisionedCapabilityProjects.delete(projectId);
+}
+
+function capabilityIntent(requestId: string, requestedProjectId?: number): CapabilityIntent {
+  return {
+    v: 1,
+    capability: { provider: "nabuflow-harness", name: "echo" },
+    action: "invoke",
+    requestId,
+    ...(requestedProjectId === undefined ? {} : { requestedProjectId }),
+    input: { message: "doorman-acted", projectId: locator.projectId },
+  };
+}
+
+function capabilityInvocation(
+  requestId: string,
+  containerId = activeContainerId,
+  requestedProjectId?: number,
+): CapabilityInvocation {
+  return {
+    ...capabilityIntent(requestId, requestedProjectId),
+    caller: { containerId, runtimeIdentity },
+  };
+}
+
+async function runContainerNode(label: string, source: string): Promise<unknown> {
+  const result = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: ["node", "-e", source],
+        cwd: "/workspace",
+        timeoutMs: 20_000,
+      },
+      nonce: nonce(`container-${label}`),
+      idempotencyKey: `container-${label}-${locator.projectId}-${crypto.randomUUID()}`,
+    },
+    `container.${label}`,
+  );
+  assertStatus(`container.${label}`, result.response.status, 200, result.body);
+  const stdout = (result.body as { stdout?: string }).stdout?.trim() ?? "";
+  const line = stdout.split(/\r?\n/u).filter(Boolean).at(-1);
+  assertCondition(line, `Container ${label} probe returned no output`);
+  try {
+    return JSON.parse(line) as unknown;
+  } catch {
+    throw new Error(`Container ${label} probe returned malformed JSON`);
+  }
+}
+
+async function invokeCapabilityFromContainer(
+  label: string,
+  intent: CapabilityIntent,
+): Promise<{ status: number; body: unknown }> {
+  const source = `const intent=${JSON.stringify(intent)};fetch(${JSON.stringify(capabilityIntentUrl)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(intent)}).then(async response=>console.log(JSON.stringify({status:response.status,body:await response.json()})))`;
+  return (await runContainerNode(label, source)) as { status: number; body: unknown };
+}
+
+async function websocketCapabilityRejection(): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`${controlUrl.replace(/^http/u, "ws")}${capabilityEndpoint}`);
+    const timeout = setTimeout(() => {
+      socket.terminate();
+      reject(new Error("Capability WebSocket rejection timed out"));
+    }, 20_000);
+    socket.once("open", () => {
+      clearTimeout(timeout);
+      socket.terminate();
+      reject(new Error("Capability endpoint unexpectedly accepted a WebSocket upgrade"));
+    });
+    socket.once("unexpected-response", (_request, response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => {
+        clearTimeout(timeout);
+        socket.terminate();
+        const text = Buffer.concat(chunks).toString("utf8");
+        try {
+          resolve({ status: response.statusCode ?? 0, body: JSON.parse(text) as unknown });
+        } catch {
+          resolve({ status: response.statusCode ?? 0, body: text });
+        }
+      });
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
 async function overrideHeaders(
   host: string,
   pathAndQuery: string,
@@ -285,17 +442,48 @@ async function overrideHeaders(
   };
 }
 
+async function signedHostOverrideFetch(
+  host: string,
+  pathAndQuery: string,
+  init: RequestInit,
+  label: string,
+): Promise<Response> {
+  const method = init.method ?? "GET";
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const headers = new Headers(init.headers);
+    const signedOverride = await overrideHeaders(host, pathAndQuery, method);
+    for (const [name, value] of Object.entries(signedOverride)) headers.set(name, value);
+    const response = await fetch(`${controlUrl}${pathAndQuery}`, { ...init, method, headers });
+    if (response.status !== 401) return response;
+    const body = await readResponse(response.clone());
+    const code = (body as { code?: string } | null)?.code;
+    const transientAuthFailure =
+      code === "invalid_staging_host_override" || code === "invalid_signature";
+    if (!transientAuthFailure || attempt === 8) return response;
+    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
+    record(`signed-staging.retry.${label}`, response.status, {
+      attempt,
+      backoffMs,
+      code,
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  throw new Error(`${label}: bounded signed staging retry exhausted without a response`);
+}
+
 async function publishedFetch(
   host: string,
   pathAndQuery: string,
   init: RequestInit = {},
 ): Promise<{ response: Response; body: unknown; elapsedMs: number }> {
   const method = init.method ?? "GET";
-  const headers = new Headers(init.headers);
-  const signedOverride = await overrideHeaders(host, pathAndQuery, method);
-  for (const [name, value] of Object.entries(signedOverride)) headers.set(name, value);
   const started = performance.now();
-  const response = await fetch(`${controlUrl}${pathAndQuery}`, { ...init, method, headers });
+  const response = await signedHostOverrideFetch(
+    host,
+    pathAndQuery,
+    { ...init, method },
+    `published.${method}.${pathAndQuery}`,
+  );
   const elapsedMs = performance.now() - started;
   return { response, body: await readResponse(response), elapsedMs };
 }
@@ -499,6 +687,164 @@ async function run(): Promise<void> {
   assertStatus("lifecycle.start", start.response.status, 200, start.body);
   runtimeStarted = true;
 
+  const binding = await signedControlFetch(
+    {
+      path: `${runtimePath}/capability-binding`,
+      nonce: nonce("capability-binding-active"),
+    },
+    "capability.binding.active",
+  );
+  assertStatus("capability.binding.active", binding.response.status, 200, binding.body);
+  const bindingBody = binding.body as { active?: boolean; containerId?: string };
+  assertCondition(
+    bindingBody.active === true && bindingBody.containerId,
+    "Runtime binding is not active",
+  );
+  activeContainerId = bindingBody.containerId;
+
+  await provisionCapability(locator.projectId);
+  await provisionCapability(foreignExistingProjectId);
+
+  const validContainerIntent = await invokeCapabilityFromContainer(
+    "capability-valid",
+    capabilityIntent(`capability-container-valid-${crypto.randomUUID()}`),
+  );
+  assertStatus(
+    "capability.intent.valid",
+    validContainerIntent.status,
+    200,
+    validContainerIntent.body,
+  );
+  assertCondition(
+    (validContainerIntent.body as { actedBy?: string }).actedBy === "capability-vault",
+    "Container capability request was not executed by the vault",
+  );
+  assertCondition(
+    !/credential|secret|ciphertext|envelope|keyId|canary|KEK/iu.test(
+      JSON.stringify(validContainerIntent.body),
+    ),
+    "Capability response exposed vault material",
+  );
+
+  const crossRequestId = `capability-cross-project-${crypto.randomUUID()}`;
+  const crossExisting = await invokeCapabilityFromContainer(
+    "capability-cross-existing",
+    capabilityIntent(crossRequestId, foreignExistingProjectId),
+  );
+  const crossMissing = await invokeCapabilityFromContainer(
+    "capability-cross-missing",
+    capabilityIntent(crossRequestId, foreignMissingProjectId),
+  );
+  assertStatus(
+    "capability.isolation.foreign-existing",
+    crossExisting.status,
+    403,
+    crossExisting.body,
+  );
+  assertStatus("capability.isolation.foreign-missing", crossMissing.status, 403, crossMissing.body);
+  assertCondition(
+    JSON.stringify(crossExisting.body) === JSON.stringify(crossMissing.body),
+    "Cross-project rejection leaks capability existence",
+  );
+  assertCondition(
+    (crossExisting.body as { code?: string }).code === "capability_tenant_mismatch",
+    "Cross-project request returned the wrong structured error",
+  );
+
+  const directInvocation = capabilityInvocation(`capability-direct-valid-${crypto.randomUUID()}`);
+  const unsignedCapability = await fetch(`${controlUrl}${capabilityEndpoint}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(directInvocation),
+  });
+  assertStatus(
+    "capability.auth.unsigned",
+    unsignedCapability.status,
+    401,
+    await readResponse(unsignedCapability),
+  );
+
+  const tamperedCapability = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: { ...directInvocation, requestId: `capability-tampered-${crypto.randomUUID()}` },
+    nonce: nonce("capability-tampered"),
+    idempotencyKey: `capability-tampered-${crypto.randomUUID()}`,
+    signatureOverride: "0".repeat(64),
+  });
+  assertStatus(
+    "capability.auth.tampered",
+    tamperedCapability.response.status,
+    401,
+    tamperedCapability.body,
+  );
+
+  const expiredRequestId = `capability-expired-${crypto.randomUUID()}`;
+  const expiredCapability = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: capabilityInvocation(expiredRequestId),
+    nonce: nonce("capability-expired"),
+    idempotencyKey: expiredRequestId,
+    timestampMs: Date.now() + workerClockOffsetMs - 60_001,
+  });
+  assertStatus(
+    "capability.auth.expired",
+    expiredCapability.response.status,
+    401,
+    expiredCapability.body,
+  );
+
+  const validDirectRequestId = `capability-direct-replay-${crypto.randomUUID()}`;
+  const validDirect = await acceptedReplayableRequest(
+    {
+      path: capabilityEndpoint,
+      method: "POST",
+      body: capabilityInvocation(validDirectRequestId),
+      nonce: nonce("capability-direct"),
+      idempotencyKey: validDirectRequestId,
+    },
+    "capability.auth.valid",
+  );
+  assertStatus("capability.auth.valid", validDirect.response.status, 200, validDirect.body);
+  const replayedCapability = await replaySignedRequest(
+    validDirect.request,
+    "capability.auth.replay",
+  );
+  assertStatus(
+    "capability.auth.replay",
+    replayedCapability.response.status,
+    409,
+    replayedCapability.body,
+  );
+
+  const missingBindingRequestId = `capability-missing-binding-${crypto.randomUUID()}`;
+  const missingBinding = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: capabilityInvocation(
+      missingBindingRequestId,
+      "0000000000000000000000000000000000000000000000000000000000000000",
+    ),
+    nonce: nonce("capability-missing-binding"),
+    idempotencyKey: missingBindingRequestId,
+  });
+  assertStatus(
+    "capability.isolation.missing-binding",
+    missingBinding.response.status,
+    403,
+    missingBinding.body,
+  );
+
+  const upgradeRejected = await websocketCapabilityRejection();
+  assertStatus("capability.upgrade.rejected", upgradeRejected.status, 426, upgradeRejected.body);
+
+  const directVault = (await runContainerNode(
+    "capability-vault-direct",
+    "fetch('http://capability-vault.staging.nabuflow.internal/v1/direct').then(async response=>console.log(JSON.stringify({status:response.status,body:await response.text()})))",
+  )) as { status: number; body: string };
+  assertStatus("capability.vault.direct-unreachable", directVault.status, 520, directVault.body);
+
   const activationPath = `/_nabuflow/control/v1/routes/${simulatedHost}/activate`;
   const activationBody = activateBody(simulatedHost);
   const unsignedActivate = await fetch(`${controlUrl}${activationPath}`, {
@@ -629,9 +975,13 @@ async function run(): Promise<void> {
   );
   assertCondition(largeResult.bodySha256 === largeHash, "Large body hash changed");
 
-  const sseHeaders = await overrideHeaders(simulatedHost, "/sse", "GET");
   const sseStarted = performance.now();
-  const sse = await fetch(`${controlUrl}/sse`, { headers: sseHeaders });
+  const sse = await signedHostOverrideFetch(
+    simulatedHost,
+    "/sse",
+    { method: "GET" },
+    "published.GET.sse",
+  );
   assertCondition(sse.status === 200 && sse.body, "Published SSE request failed");
   const sseReader = sse.body.getReader();
   const first = await sseReader.read();
@@ -894,6 +1244,50 @@ async function cleanup(): Promise<void> {
     record("cleanup.stop", stopped.response.status, stopped.body);
     if (stopped.response.status !== 200) throw new Error("Scratch stop failed");
     runtimeStarted = false;
+
+    const stoppedBinding = await signedControlFetch(
+      {
+        path: `${runtimePath}/capability-binding`,
+        nonce: nonce("cleanup-capability-binding"),
+      },
+      "cleanup.capability-binding",
+    );
+    assertStatus(
+      "cleanup.capability-binding",
+      stoppedBinding.response.status,
+      200,
+      stoppedBinding.body,
+    );
+    assertCondition(
+      (stoppedBinding.body as { active?: boolean; containerId?: string | null }).active === false &&
+        (stoppedBinding.body as { containerId?: string | null }).containerId === null,
+      "Stopped runtime retained an active capability binding",
+    );
+
+    const staleRequestId = `capability-stale-binding-${crypto.randomUUID()}`;
+    const staleInvocation = await signedControlFetch(
+      {
+        path: capabilityEndpoint,
+        method: "POST",
+        body: capabilityInvocation(staleRequestId, activeContainerId),
+        nonce: nonce("cleanup-capability-stale"),
+        idempotencyKey: staleRequestId,
+      },
+      "cleanup.capability-stale",
+    );
+    assertStatus(
+      "cleanup.capability-stale",
+      staleInvocation.response.status,
+      403,
+      staleInvocation.body,
+    );
+    assertCondition(
+      (staleInvocation.body as { code?: string }).code === "capability_runtime_unbound",
+      "Stopped runtime did not fail closed at the capability wall",
+    );
+  }
+  for (const projectId of [...provisionedCapabilityProjects]) {
+    await revokeCapability(projectId);
   }
   if (runtimeEnsured) {
     const destroyed = await signedControlFetch(

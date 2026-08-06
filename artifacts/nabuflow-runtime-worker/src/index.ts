@@ -1,10 +1,15 @@
-import { ContainerProxy } from "@cloudflare/sandbox";
 import type { WorkerBindings } from "./bindings";
+import { CapabilityVaultDurableObject } from "./capability-vault-durable-object";
 import { ControlDurableObject } from "./control-durable-object";
-import { NabuflowSandbox } from "./runtime-backend";
+import { ContainerProxy as NabuflowContainerProxy, NabuflowSandbox } from "./runtime-backend";
 import { handleWorkerRequest } from "./worker";
 
-export { ContainerProxy, ControlDurableObject, NabuflowSandbox };
+export {
+  CapabilityVaultDurableObject,
+  NabuflowContainerProxy as ContainerProxy,
+  ControlDurableObject,
+  NabuflowSandbox,
+};
 
 export default {
   fetch(request: Request, env: WorkerBindings): Promise<Response> {

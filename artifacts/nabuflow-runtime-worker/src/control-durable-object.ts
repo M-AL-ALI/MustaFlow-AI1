@@ -32,6 +32,10 @@ function routeKey(hostname: string): string {
   return `route:${hostname}`;
 }
 
+async function containerBindingKey(containerId: string): Promise<string> {
+  return `container-binding:${await sha256Hex(containerId)}`;
+}
+
 function formatCursor(sequence: number): string {
   return `log-${sequence.toString().padStart(10, "0")}`;
 }
@@ -161,6 +165,24 @@ export class ControlDurableObject
 
   async deleteRuntime(identity: string): Promise<void> {
     await this.ctx.storage.delete(runtimeKey(identity));
+  }
+
+  async bindContainer(containerId: string, identity: string): Promise<void> {
+    await this.ctx.storage.put(await containerBindingKey(containerId), identity);
+  }
+
+  async getContainerBinding(containerId: string): Promise<string | null> {
+    return (await this.ctx.storage.get<string>(await containerBindingKey(containerId))) ?? null;
+  }
+
+  async unbindContainer(containerId: string, expectedIdentity: string): Promise<boolean> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = await containerBindingKey(containerId);
+      const current = await transaction.get<string>(key);
+      if (current !== expectedIdentity) return false;
+      await transaction.delete(key);
+      return true;
+    });
   }
 
   async getRoute(hostname: string): Promise<RouteRecord | null> {

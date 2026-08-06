@@ -1,13 +1,26 @@
-import { ContainerProxy, Sandbox, getSandbox } from "@cloudflare/sandbox";
+import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@cloudflare/sandbox";
 import { argvToCommandString } from "@workspace/tenant-runtime-contracts";
 import type { ExecRuntimeRequest } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
+import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
 import type { StoredRuntime } from "./model";
 
-const DOORMAN_HOST = "doorman.staging.nabuflow.internal";
+export const DOORMAN_HOST = "doorman.staging.nabuflow.internal";
 const TENANT_PROCESS_ID = "tenant-service";
 
-export { ContainerProxy };
+export class ContainerProxy extends SandboxContainerProxy {
+  async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).hostname === DOORMAN_HOST) {
+      const props = this.ctx.props as { containerId: string };
+      return handleCapabilityIntentFromContainer(
+        request,
+        this.env as unknown as WorkerBindings,
+        props.containerId,
+      );
+    }
+    return super.fetch(request);
+  }
+}
 
 export class NabuflowSandbox extends Sandbox<WorkerBindings> {
   enableInternet = false;
@@ -18,10 +31,8 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
 // The SDK registry setter only runs on assignment. A static class field looks
 // equivalent but bypasses registration in @cloudflare/containers 0.3.7.
 NabuflowSandbox.outboundHandlers = {
-  stagingDoorman: async () =>
-    new Response("The staging doorman is not implemented in slice 2b-ii.", {
-      status: 501,
-    }),
+  capabilityDoorman: (request, env, context) =>
+    handleCapabilityIntentFromContainer(request, env as WorkerBindings, context.containerId),
 };
 
 export interface BackendStartResult {
@@ -56,7 +67,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
 
   async start(runtime: StoredRuntime): Promise<BackendStartResult> {
     const sandbox = this.sandbox(runtime.descriptor.identity, true);
-    await sandbox.setOutboundByHost(DOORMAN_HOST, "stagingDoorman");
+    await sandbox.setOutboundByHost(DOORMAN_HOST, "capabilityDoorman");
     await sandbox.setKeepAlive(true);
     await sandbox.killAllProcesses();
     const process = await sandbox.startProcess(argvToCommandString(runtime.manifest.startCommand), {

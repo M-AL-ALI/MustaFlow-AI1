@@ -11,6 +11,7 @@
   },
   "vars": {
     "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE": "staging",
+    "NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID": "v1",
     "NABUFLOW_RUNTIME_SLEEP_AFTER": "10m",
     "NABUFLOW_STAGING_HOST_OVERRIDE_ENABLED": "true",
     "NABUFLOW_STAGING_WORKER_HOST": "nabuflow-runtime-staging.mustafa-alali74.workers.dev",
@@ -32,12 +33,20 @@
         "name": "CONTROL_COORDINATOR",
         "class_name": "ControlDurableObject",
       },
+      {
+        "name": "CAPABILITY_VAULT",
+        "class_name": "CapabilityVaultDurableObject",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["NabuflowSandbox", "ControlDurableObject"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["CapabilityVaultDurableObject"],
     },
   ],
 }
