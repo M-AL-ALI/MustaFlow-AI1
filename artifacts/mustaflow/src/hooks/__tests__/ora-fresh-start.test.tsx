@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { useState } from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -9,6 +10,7 @@ import {
   shouldResumeOraConversation,
 } from "@workspace/ora-contracts";
 import { OraHomeRecents } from "@/components/ora/ora-home-recents";
+import { getOraSidebarDrawerState } from "@/components/layout/ora-sidebar";
 import {
   OraConversationsContext,
   type OraConversationSummary,
@@ -152,6 +154,7 @@ describe("Ora fresh-start website wiring", () => {
   const provider = read("../use-ora-conversations.tsx");
   const chat = read("../use-ora-chat.ts");
   const panel = read("../../components/ora-panel.tsx");
+  const bubble = read("../../components/ora-bubble.tsx");
 
   it("gates both local and server restoration while preserving project-route precedence", () => {
     expect(provider).toContain("idleGatedOraConversationId(getStoredCurrentId())");
@@ -209,6 +212,55 @@ describe("Ora fresh-start website wiring", () => {
     expect(chat).toContain("const targetId = c.getCurrentConversationId()");
     expect(chat).toContain("This conversation could not be saved");
     expect(chat).toContain("Your message was not sent");
+    expect(chat).toContain("let conversationBootstrapFailed = false");
+    expect(chat).toContain("} catch {");
+    expect(chat).toContain("} finally {");
+    expect(chat).toContain("conversationBootstrapFailed && isTurnCurrent()");
+  });
+
+  it("opens the drawer and asserts visibility before starting a new conversation", () => {
+    const onNewConversation = vi.fn();
+
+    function DrawerHarness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" aria-label="Open Ora menu" onClick={() => setOpen(true)} />
+          <div aria-label="Ora navigation" {...getOraSidebarDrawerState(open)}>
+            <button type="button" onClick={onNewConversation}>New conversation</button>
+          </div>
+        </>
+      );
+    }
+
+    const view = render(<DrawerHarness />);
+    expect(view.queryByRole("button", { name: "New conversation" })).toBeNull();
+    fireEvent.click(view.getByRole("button", { name: "Open Ora menu" }));
+
+    const drawer = view.getByLabelText("Ora navigation");
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(drawer).not.toHaveAttribute("inert");
+    const newConversation = view.getByRole("button", { name: "New conversation" });
+    expect(newConversation).toBeVisible();
+    fireEvent.click(newConversation);
+    expect(onNewConversation).toHaveBeenCalledOnce();
+  });
+
+  it("owns a timeout fallback so a consumer cannot leave transitions stuck", () => {
+    expect(provider).toContain("CONVERSATION_TRANSITION_FALLBACK_MS = 10_000");
+    expect(provider).toContain("transitionFallbackTimerRef");
+    expect(provider).toContain("clearConversationTransitionFallback()");
+    expect(provider).toContain("transitionInProgressRef.current = false");
+    expect(provider).toContain("setConversationTransitioning(false)");
+  });
+
+  it("routes TXT files through the same preview card path as PDFs", () => {
+    for (const component of [panel, bubble]) {
+      expect(component).toContain('file.format === "txt"');
+      expect(component).toContain('file.mimeType.startsWith("text/plain")');
+      expect(component).toContain("if (isPreviewable && (file.fileData || file.assetId != null))");
+      expect(component).toContain("View or download");
+    }
   });
 
   it("puts starter prompts before collapsed recents in the compact home hierarchy", () => {

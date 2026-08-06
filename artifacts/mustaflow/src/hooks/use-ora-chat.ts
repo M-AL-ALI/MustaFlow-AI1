@@ -1915,33 +1915,45 @@ export function useOraChat(): UseOraChatReturn {
       setIsLoading(true);
       setError(null);
 
-      if (
-        isSignedIn &&
-        conversationContext &&
-        !temporaryRef.current &&
-        conversationContext.getCurrentConversationId() == null
-      ) {
-        const transitionGeneration = conversationContext.conversationTransitionGeneration;
-        const createdId = await conversationContext.ensureConversation(content);
-        const latest = convRef.current;
+      let conversationBootstrapFailed = false;
+      try {
         if (
-          createdId == null ||
-          !latest ||
-          !isTurnCurrent() ||
-          latest.isConversationTransitioning() ||
-          latest.conversationTransitionGeneration !== transitionGeneration ||
-          latest.getCurrentConversationId() !== createdId
+          isSignedIn &&
+          conversationContext &&
+          !temporaryRef.current &&
+          conversationContext.getCurrentConversationId() == null
         ) {
-          sendStartRef.current = false;
-          if (isTurnCurrent()) {
-            setIsLoading(false);
-            setError("Ora could not create a saved conversation. Your message was not sent.");
+          const transitionGeneration = conversationContext.conversationTransitionGeneration;
+          const createdId = await conversationContext.ensureConversation(content);
+          const latest = convRef.current;
+          if (
+            createdId == null ||
+            !latest ||
+            !isTurnCurrent() ||
+            latest.isConversationTransitioning() ||
+            latest.conversationTransitionGeneration !== transitionGeneration ||
+            latest.getCurrentConversationId() !== createdId
+          ) {
+            conversationBootstrapFailed = true;
+            if (isTurnCurrent()) {
+              setError("Ora could not create a saved conversation. Your message was not sent.");
+            }
+            return;
           }
-          return;
+          loadedConvRef.current = createdId;
         }
-        loadedConvRef.current = createdId;
+      } catch {
+        conversationBootstrapFailed = true;
+        if (isTurnCurrent()) {
+          setError("Ora could not create a saved conversation. Your message was not sent.");
+        }
+        return;
+      } finally {
+        sendStartRef.current = false;
+        if (conversationBootstrapFailed && isTurnCurrent()) {
+          setIsLoading(false);
+        }
       }
-      sendStartRef.current = false;
 
       const currentAttachment = attachedFile;
       const baseMessages =
