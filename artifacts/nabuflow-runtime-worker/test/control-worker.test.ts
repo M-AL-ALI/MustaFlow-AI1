@@ -511,6 +511,17 @@ describe("authenticated staging control plane", () => {
     });
     expect(start.status).toBe(200);
     await expect(start.json()).resolves.toMatchObject({ runtime: { status: "running" } });
+    expect(coordinator.containerBindings).toHaveLength(1);
+    expect([...coordinator.containerBindings.values()][0]).toContain("-p42-preview-primary");
+    const activeBinding = await send({
+      path: `${base}/capability-binding`,
+      method: "GET",
+    });
+    expect(activeBinding.status).toBe(200);
+    await expect(activeBinding.json()).resolves.toMatchObject({
+      active: true,
+      containerId: expect.stringContaining("container:nrf-"),
+    });
 
     const status = await send({ path: base, method: "GET" });
     expect(status.status).toBe(200);
@@ -546,6 +557,16 @@ describe("authenticated staging control plane", () => {
       ).status,
     ).toBe(200);
     expect(backend.stops).toBe(1);
+    expect(coordinator.containerBindings).toHaveLength(0);
+    const stoppedBinding = await send({
+      path: `${base}/capability-binding`,
+      method: "GET",
+    });
+    expect(stoppedBinding.status).toBe(200);
+    await expect(stoppedBinding.json()).resolves.toMatchObject({
+      active: false,
+      containerId: null,
+    });
 
     expect(
       (
@@ -559,5 +580,6 @@ describe("authenticated staging control plane", () => {
     ).toBe(200);
     expect(backend.destroys).toBe(1);
     expect(coordinator.runtimes).toHaveLength(0);
+    expect(coordinator.containerBindings).toHaveLength(0);
   });
 });

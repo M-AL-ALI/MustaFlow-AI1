@@ -1,11 +1,15 @@
 import {
   sha256Hex,
   signControlRequest,
+  type CapabilityDefinition,
+  type CapabilityInvocation,
   type ExecRuntimeRequest,
   type RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "../src/bindings";
 import type {
+  CapabilityVault,
+  CapabilityVaultInvocationResult,
   ControlAuditRecord,
   ControlCoordinator,
   IdempotencyLookup,
@@ -32,6 +36,7 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly audits: ControlAuditRecord[] = [];
   readonly runtimes = new Map<string, StoredRuntime>();
   readonly routes = new Map<string, RouteRecord>();
+  readonly containerBindings = new Map<string, string>();
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
     if (this.nonces.has(nonce)) return false;
@@ -90,6 +95,20 @@ export class MemoryCoordinator implements ControlCoordinator {
 
   async deleteRuntime(identity: string): Promise<void> {
     this.runtimes.delete(identity);
+  }
+
+  async bindContainer(containerId: string, identity: string): Promise<void> {
+    this.containerBindings.set(containerId, identity);
+  }
+
+  async getContainerBinding(containerId: string): Promise<string | null> {
+    return this.containerBindings.get(containerId) ?? null;
+  }
+
+  async unbindContainer(containerId: string, expectedIdentity: string): Promise<boolean> {
+    if (this.containerBindings.get(containerId) !== expectedIdentity) return false;
+    this.containerBindings.delete(containerId);
+    return true;
   }
 
   async getRoute(hostname: string): Promise<RouteRecord | null> {
@@ -213,6 +232,66 @@ export class MockBackend implements RuntimeBackend {
   }
 }
 
+export class MemoryCapabilityVault implements CapabilityVault {
+  readonly records = new Map<number, { revision: string; definition: CapabilityDefinition }>();
+
+  async provisionEcho(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+  }): Promise<{ state: "provisioned"; keyId: string }> {
+    this.records.set(input.projectId, {
+      revision: input.revision,
+      definition: structuredClone(input.definition),
+    });
+    return { state: "provisioned", keyId: "v1" };
+  }
+
+  async revokeEcho(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict"> {
+    const record = this.records.get(input.projectId);
+    if (record === undefined) return "not_found";
+    if (record.revision !== input.expectedRevision) return "conflict";
+    this.records.delete(input.projectId);
+    return "revoked";
+  }
+
+  async invokeEcho(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult> {
+    const record = this.records.get(input.projectId);
+    if (record === undefined) return { state: "not_found" };
+    if (
+      input.invocation.requestedProjectId !== undefined &&
+      input.invocation.requestedProjectId !== input.projectId
+    ) {
+      return { state: "tenant_mismatch" };
+    }
+    if (
+      input.invocation.capability.provider !== record.definition.provider ||
+      input.invocation.capability.name !== record.definition.name ||
+      input.invocation.action !== "invoke"
+    ) {
+      return { state: "policy_rejected" };
+    }
+    return {
+      state: "success",
+      response: {
+        ok: true,
+        capability: input.invocation.capability,
+        requestId: input.invocation.requestId,
+        runtimeIdentity: input.invocation.caller.runtimeIdentity,
+        actedBy: "capability-vault",
+        proof: "a".repeat(64),
+        echo: input.invocation.input,
+      },
+    };
+  }
+}
+
 export function fakeEnv(): WorkerBindings {
   return {
     CF_VERSION_METADATA: {
@@ -221,9 +300,16 @@ export function fakeEnv(): WorkerBindings {
       timestamp: new Date(TEST_NOW_MS).toISOString(),
     },
     CLOUDFLARE_RUNTIME_CONTROL_TOKEN: TEST_SECRET,
+    CLOUDFLARE_CAPABILITY_VAULT_KEK_V1: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
     CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
     CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: "test-public-key",
     NABUFLOW_RUNTIME_SLEEP_AFTER: "10m",
+    NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID: "v1",
+    NABUFLOW_SANDBOX: {
+      idFromName(identity: string) {
+        return { toString: () => `container:${identity}` };
+      },
+    },
   } as WorkerBindings;
 }
 

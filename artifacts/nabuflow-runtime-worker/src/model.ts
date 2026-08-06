@@ -1,4 +1,7 @@
 import type {
+  CapabilityDefinition,
+  CapabilityEchoResponse,
+  CapabilityInvocation,
   LogsRuntimeResponse,
   RouteRecord,
   RuntimeDescriptor,
@@ -58,6 +61,9 @@ export interface ControlCoordinator {
   getRuntime(identity: string): Promise<StoredRuntime | null>;
   putRuntime(identity: string, runtime: StoredRuntime): Promise<void>;
   deleteRuntime(identity: string): Promise<void>;
+  bindContainer(containerId: string, identity: string): Promise<void>;
+  getContainerBinding(containerId: string): Promise<string | null>;
+  unbindContainer(containerId: string, expectedIdentity: string): Promise<boolean>;
   getRoute(hostname: string): Promise<RouteRecord | null>;
   activateRoute(
     route: RouteRecord,
@@ -75,4 +81,26 @@ export interface ControlCoordinator {
     cursor: string | undefined,
     limit: number,
   ): Promise<{ entries: RuntimeLogEntry[]; nextCursor: string | null }>;
+}
+
+export type CapabilityVaultInvocationResult =
+  | { state: "success"; response: CapabilityEchoResponse }
+  | { state: "not_found" }
+  | { state: "tenant_mismatch" }
+  | { state: "policy_rejected" };
+
+export interface CapabilityVault {
+  provisionEcho(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+  }): Promise<{ state: "provisioned"; keyId: string }>;
+  revokeEcho(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict">;
+  invokeEcho(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult>;
 }

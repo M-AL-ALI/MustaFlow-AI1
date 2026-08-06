@@ -7,6 +7,6 @@ describe("sandbox startup security policy", () => {
     expect(sandbox.enableInternet).toBe(false);
     expect(sandbox.interceptHttps).toBe(true);
     expect(sandbox.allowedHosts).toEqual(["doorman.staging.nabuflow.internal"]);
-    expect(NabuflowSandbox.outboundHandlers).toHaveProperty("stagingDoorman");
+    expect(NabuflowSandbox.outboundHandlers).toHaveProperty("capabilityDoorman");
   });
 });

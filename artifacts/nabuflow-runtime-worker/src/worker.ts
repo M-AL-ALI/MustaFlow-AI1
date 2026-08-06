@@ -3,6 +3,9 @@ import {
   RUNTIME_ROLES,
   activateRouteRequestSchema,
   activateRouteResponseSchema,
+  capabilityProvisionResponseSchema,
+  capabilityRevokeResponseSchema,
+  capabilityBindingResponseSchema,
   controlErrorResponseSchema,
   deactivateRouteRequestSchema,
   deactivateRouteResponseSchema,
@@ -16,6 +19,8 @@ import {
   logsRuntimeRequestSchema,
   logsRuntimeResponseSchema,
   parseRuntimeIdentityForNamespace,
+  provisionEchoCapabilityRequestSchema,
+  revokeEchoCapabilityRequestSchema,
   sha256Hex,
   startRuntimeRequestSchema,
   startRuntimeResponseSchema,
@@ -28,6 +33,8 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
+  ProvisionEchoCapabilityRequest,
+  RevokeEchoCapabilityRequest,
   DeactivateRouteRequest,
   DestroyRuntimeRequest,
   EnsureRuntimeRequest,
@@ -39,8 +46,15 @@ import type {
   StopRuntimeRequest,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
+import type { CapabilityVaultDurableObject } from "./capability-vault-durable-object";
+import { CAPABILITY_ENDPOINT, handleCapabilityRequest } from "./capability-endpoint";
 import type { ControlDurableObject } from "./control-durable-object";
-import type { ControlCoordinator, StoredHttpResponse, StoredRuntime } from "./model";
+import type {
+  CapabilityVault,
+  ControlCoordinator,
+  StoredHttpResponse,
+  StoredRuntime,
+} from "./model";
 import { handlePublishedDataPlaneRequest } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
@@ -55,6 +69,8 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "exec",
   "routeActivate",
   "routeDeactivate",
+  "capabilityProvision",
+  "capabilityRevoke",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -76,12 +92,16 @@ type Endpoint =
   | "exec"
   | "logs"
   | "routeActivate"
-  | "routeDeactivate";
+  | "routeDeactivate"
+  | "capabilityProvision"
+  | "capabilityRevoke"
+  | "capabilityBinding";
 
 interface MatchedRoute {
   endpoint: Endpoint;
   locator: RuntimeLocator | null;
   hostname?: string;
+  capability?: { projectId: number; provider: string; name: string };
 }
 
 interface WorkerDependencies {
@@ -90,6 +110,7 @@ interface WorkerDependencies {
   nowMs?: number;
   requestId?: string;
   context?: RequestExecutionContext;
+  vault?: CapabilityVault;
 }
 
 type ControlRequestStage =
@@ -136,6 +157,14 @@ export async function handleWorkerRequest(
         requestId,
         coordinator,
         context,
+      });
+    }
+    if (pathname === CAPABILITY_ENDPOINT) {
+      context.stage = "data_plane";
+      return await handleCapabilityRequest(request, env, {
+        coordinator,
+        nowMs: dependencies.nowMs,
+        requestId,
       });
     }
     context.stage = "data_plane";
@@ -314,6 +343,7 @@ export async function handleControlRequest(
         route.endpoint,
         route.locator,
         error,
+        route.capability?.projectId,
       );
       return errorResponse(error.status, error.code, error.message, error.retryable, requestId);
     }
@@ -326,19 +356,32 @@ export async function handleControlRequest(
       nowMs,
     );
     if (lookup.state === "replay") {
-      await recordAudit(coordinator, requestId, request.method, route.endpoint, route.locator, {
-        status: lookup.response.status,
-        code: "idempotency_replay",
-      });
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        route.endpoint,
+        route.locator,
+        {
+          status: lookup.response.status,
+          code: "idempotency_replay",
+        },
+        route.capability?.projectId,
+      );
       return jsonResponse(lookup.response.status, lookup.response.body);
     }
     if (lookup.state === "conflict" || lookup.state === "pending") {
       const code = lookup.state === "conflict" ? "idempotency_conflict" : "request_in_progress";
       const status = 409;
-      await recordAudit(coordinator, requestId, request.method, route.endpoint, route.locator, {
-        status,
-        code,
-      });
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        route.endpoint,
+        route.locator,
+        { status, code },
+        route.capability?.projectId,
+      );
       return errorResponse(
         status,
         code,
@@ -353,15 +396,27 @@ export async function handleControlRequest(
 
   context.stage = "execution";
   try {
-    const result = await executeEndpoint(route.endpoint, input, env, coordinator, backend);
+    const result = await executeEndpoint(
+      route.endpoint,
+      input,
+      env,
+      coordinator,
+      backend,
+      dependencies.vault,
+    );
     validateResponse(route.endpoint, result.body);
     if (needsIdempotency && idempotencyFingerprint !== null) {
       await coordinator.completeIdempotency(idempotencyKey, idempotencyFingerprint, result, nowMs);
     }
-    await recordAudit(coordinator, requestId, request.method, route.endpoint, route.locator, {
-      status: result.status,
-      code: "ok",
-    });
+    await recordAudit(
+      coordinator,
+      requestId,
+      request.method,
+      route.endpoint,
+      route.locator,
+      { status: result.status, code: "ok" },
+      route.capability?.projectId,
+    );
     return jsonResponse(result.status, result.body);
   } catch (error) {
     const controlError = toControlError(error);
@@ -385,6 +440,7 @@ export async function handleControlRequest(
       route.endpoint,
       route.locator,
       controlError,
+      route.capability?.projectId,
     );
     return errorResponse(
       controlError.status,
@@ -406,10 +462,19 @@ type ControlInput =
   | DestroyRuntimeRequest
   | StatusRuntimeRequest
   | ExecRuntimeRequest
-  | LogsRuntimeRequest;
+  | LogsRuntimeRequest
+  | ProvisionEchoCapabilityRequest
+  | RevokeEchoCapabilityRequest;
 
 function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableObject> {
   return env.CONTROL_COORDINATOR.get(env.CONTROL_COORDINATOR.idFromName("control-v1"));
+}
+
+function getCapabilityVault(
+  env: WorkerBindings,
+  projectId: number,
+): DurableObjectStub<CapabilityVaultDurableObject> {
+  return env.CAPABILITY_VAULT.get(env.CAPABILITY_VAULT.idFromName(`project:${projectId}`));
 }
 
 function matchRoute(method: string, pathname: string): MatchedRoute {
@@ -432,8 +497,21 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     }
     return { endpoint: "routeDeactivate", locator: null, hostname: deactivateRouteMatch[1] };
   }
+  const capabilityMatch = new RegExp(
+    `^${CONTROL_PREFIX}/capabilities/([1-9][0-9]*)/([a-z][a-z0-9-]*)/([a-z][a-z0-9-]*)$`,
+  ).exec(pathname);
+  if (capabilityMatch) {
+    const capability = {
+      projectId: Number(capabilityMatch[1]),
+      provider: capabilityMatch[2],
+      name: capabilityMatch[3],
+    };
+    if (method === "PUT") return { endpoint: "capabilityProvision", locator: null, capability };
+    if (method === "DELETE") return { endpoint: "capabilityRevoke", locator: null, capability };
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
   const match = new RegExp(
-    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|stop|exec|logs))?$`,
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|stop|exec|logs|capability-binding))?$`,
   ).exec(pathname);
   if (!match) throw new ControlHttpError(404, "not_found", "Control endpoint not found");
 
@@ -450,6 +528,9 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
   if (method === "GET" && suffix === undefined) return { endpoint: "status", locator };
   if (method === "POST" && suffix === "exec") return { endpoint: "exec", locator };
   if (method === "GET" && suffix === "logs") return { endpoint: "logs", locator };
+  if (method === "GET" && suffix === "capability-binding") {
+    return { endpoint: "capabilityBinding", locator };
+  }
   throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
 }
 
@@ -459,9 +540,14 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     assertEmptyBody(rawBody);
     return {};
   }
-  if (route.locator === null) return parseRouteInput(route, url, rawBody);
+  if (route.locator === null) {
+    if (route.endpoint === "capabilityProvision" || route.endpoint === "capabilityRevoke") {
+      return parseCapabilityControlInput(route, url, rawBody);
+    }
+    return parseRouteInput(route, url, rawBody);
+  }
 
-  if (route.endpoint === "status") {
+  if (route.endpoint === "status" || route.endpoint === "capabilityBinding") {
     assertNoQuery(url);
     assertEmptyBody(rawBody);
     return parseStrict(statusRuntimeRequestSchema, { locator: route.locator });
@@ -512,6 +598,45 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
   return parsed;
 }
 
+function parseCapabilityControlInput(
+  route: MatchedRoute,
+  url: URL,
+  rawBody: Uint8Array,
+): ProvisionEchoCapabilityRequest | RevokeEchoCapabilityRequest {
+  if (route.capability === undefined) {
+    throw new ControlHttpError(400, "invalid_capability", "Capability scope is required");
+  }
+  assertNoQuery(url);
+  const body = parseJsonBody(rawBody);
+  const parsed =
+    route.endpoint === "capabilityProvision"
+      ? parseStrict(provisionEchoCapabilityRequestSchema, body)
+      : parseStrict(revokeEchoCapabilityRequestSchema, body);
+  if (parsed.projectId !== route.capability.projectId) {
+    throw new ControlHttpError(400, "project_mismatch", "Path and body projects differ");
+  }
+  if (route.capability.provider !== "nabuflow-harness" || route.capability.name !== "echo") {
+    throw new ControlHttpError(
+      400,
+      "unsupported_capability",
+      "Only the staging echo capability is available in this slice",
+    );
+  }
+  if (
+    route.endpoint === "capabilityProvision" &&
+    (parsed as ProvisionEchoCapabilityRequest).definition.provider !== route.capability.provider
+  ) {
+    throw new ControlHttpError(400, "capability_mismatch", "Path and body capabilities differ");
+  }
+  if (
+    route.endpoint === "capabilityProvision" &&
+    (parsed as ProvisionEchoCapabilityRequest).definition.name !== route.capability.name
+  ) {
+    throw new ControlHttpError(400, "capability_mismatch", "Path and body capabilities differ");
+  }
+  return parsed;
+}
+
 function parseRouteInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): ControlInput {
   if (
     (route.endpoint !== "routeActivate" && route.endpoint !== "routeDeactivate") ||
@@ -557,6 +682,7 @@ async function executeEndpoint(
   env: WorkerBindings,
   coordinator: ControlCoordinator,
   backend: RuntimeBackend,
+  injectedVault?: CapabilityVault,
 ): Promise<StoredHttpResponse> {
   const deploymentVersion = env.CF_VERSION_METADATA.id;
   if (endpoint === "version") {
@@ -575,6 +701,49 @@ async function executeEndpoint(
   }
   if (endpoint === "routeDeactivate") {
     return deactivatePublishedRoute(input as DeactivateRouteRequest, coordinator);
+  }
+  if (endpoint === "capabilityProvision") {
+    const request = input as ProvisionEchoCapabilityRequest;
+    const result = await (
+      injectedVault ?? getCapabilityVault(env, request.projectId)
+    ).provisionEcho(request);
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId: request.projectId,
+        capability: {
+          provider: request.definition.provider,
+          name: request.definition.name,
+        },
+        revision: request.revision,
+        keyId: result.keyId,
+      },
+    };
+  }
+  if (endpoint === "capabilityRevoke") {
+    const request = input as RevokeEchoCapabilityRequest;
+    const result = await (injectedVault ?? getCapabilityVault(env, request.projectId)).revokeEcho(
+      request,
+    );
+    if (result === "not_found") {
+      throw new ControlHttpError(404, "capability_not_found", "Capability is not available");
+    }
+    if (result === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "capability_revision_conflict",
+        "Capability revision changed before revocation",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId: request.projectId,
+        capability: { provider: "nabuflow-harness", name: "echo" },
+      },
+    };
   }
 
   const locator = (input as { locator: RuntimeLocator }).locator;
@@ -639,6 +808,19 @@ async function executeEndpoint(
   }
 
   const runtime = await requireRuntime(coordinator, identity);
+  if (endpoint === "capabilityBinding") {
+    const containerId = runtimeContainerId(env, identity);
+    const binding = await coordinator.getContainerBinding(containerId);
+    const active = binding === identity && runtime.descriptor.status === "running";
+    return {
+      status: 200,
+      body: {
+        runtimeIdentity: identity,
+        active,
+        containerId: active ? containerId : null,
+      },
+    };
+  }
   if (endpoint === "start") {
     const request = input as StartRuntimeRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
@@ -659,12 +841,14 @@ async function executeEndpoint(
       current.descriptor.readyAt = started.readyAt;
       current.descriptor.lastError = null;
       await coordinator.putRuntime(identity, current);
+      await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
       await coordinator.appendSystemLog(identity, "Tenant service is ready.");
       return {
         status: 200,
         body: { runtime: (await requireRuntime(coordinator, identity)).descriptor },
       };
     } catch (error) {
+      await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
       const current = await requireRuntime(coordinator, identity);
       current.descriptor.status = "error";
       current.descriptor.lastError = safeErrorMessage(error);
@@ -679,6 +863,7 @@ async function executeEndpoint(
     }
   }
   if (endpoint === "stop") {
+    await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
     if (runtime.descriptor.status !== "stopped") await backend.stop(runtime);
     runtime.descriptor.status = "stopped";
     runtime.descriptor.readyAt = null;
@@ -691,6 +876,7 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "destroy") {
+    await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
     await backend.destroy(runtime);
     await coordinator.deleteRuntime(identity);
     return { status: 200, body: { ok: true } };
@@ -699,6 +885,7 @@ async function executeEndpoint(
     if (runtime.descriptor.status === "running" || runtime.descriptor.status === "starting") {
       const status = await backend.status(runtime);
       if (!status.running) {
+        await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
         runtime.descriptor.status = status.lastError === null ? "stopped" : "error";
         runtime.descriptor.lastError = status.lastError;
         runtime.descriptor.readyAt = null;
@@ -734,6 +921,10 @@ async function executeEndpoint(
     };
   }
   throw new ControlHttpError(404, "not_found", "Control endpoint not found");
+}
+
+function runtimeContainerId(env: WorkerBindings, identity: string): string {
+  return env.NABUFLOW_SANDBOX.idFromName(identity).toString();
 }
 
 async function activatePublishedRoute(
@@ -833,6 +1024,9 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     logs: logsRuntimeResponseSchema,
     routeActivate: activateRouteResponseSchema,
     routeDeactivate: deactivateRouteResponseSchema,
+    capabilityProvision: capabilityProvisionResponseSchema,
+    capabilityRevoke: capabilityRevokeResponseSchema,
+    capabilityBinding: capabilityBindingResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);
   if (!result.success)
@@ -1016,6 +1210,7 @@ async function recordAudit(
   endpoint: string,
   locator: RuntimeLocator | null,
   outcome: { status: number; code: string },
+  projectIdOverride?: number,
 ): Promise<void> {
   await coordinator.recordAudit({
     requestId,
@@ -1024,7 +1219,7 @@ async function recordAudit(
     endpoint,
     stage: null,
     outcome: outcome.code,
-    projectId: locator?.projectId ?? null,
+    projectId: locator?.projectId ?? projectIdOverride ?? null,
     role: locator?.role ?? null,
     slot: locator?.slot ?? null,
     status: outcome.status,

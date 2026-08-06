@@ -61,4 +61,28 @@ describe("published route Durable Object registry", () => {
     const afterDeleteRestart = new ControlDurableObject(state, fakeEnv());
     await expect(afterDeleteRestart.getRoute(route.hostname)).resolves.toBeNull();
   });
+
+  it("persists and conditionally invalidates platform container bindings", async () => {
+    const storage = new MemoryDurableStorage();
+    const state = { storage } as unknown as DurableObjectState;
+    const firstInstance = new ControlDurableObject(state, fakeEnv());
+    await firstInstance.bindContainer("container-platform-id-0001", "nrf-runtime-a");
+
+    const restartedInstance = new ControlDurableObject(state, fakeEnv());
+    await expect(restartedInstance.getContainerBinding("container-platform-id-0001")).resolves.toBe(
+      "nrf-runtime-a",
+    );
+    await expect(
+      restartedInstance.unbindContainer("container-platform-id-0001", "nrf-runtime-b"),
+    ).resolves.toBe(false);
+    await expect(restartedInstance.getContainerBinding("container-platform-id-0001")).resolves.toBe(
+      "nrf-runtime-a",
+    );
+    await expect(
+      restartedInstance.unbindContainer("container-platform-id-0001", "nrf-runtime-a"),
+    ).resolves.toBe(true);
+    await expect(
+      restartedInstance.getContainerBinding("container-platform-id-0001"),
+    ).resolves.toBeNull();
+  });
 });
