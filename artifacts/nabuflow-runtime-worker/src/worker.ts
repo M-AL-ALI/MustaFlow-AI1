@@ -1,7 +1,11 @@
 import {
   CONTROL_PROTOCOL_VERSION,
   RUNTIME_ROLES,
+  activateRouteRequestSchema,
+  activateRouteResponseSchema,
   controlErrorResponseSchema,
+  deactivateRouteRequestSchema,
+  deactivateRouteResponseSchema,
   deriveRuntimeIdentity,
   destroyRuntimeRequestSchema,
   destroyRuntimeResponseSchema,
@@ -11,6 +15,7 @@ import {
   execRuntimeResponseSchema,
   logsRuntimeRequestSchema,
   logsRuntimeResponseSchema,
+  parseRuntimeIdentityForNamespace,
   sha256Hex,
   startRuntimeRequestSchema,
   startRuntimeResponseSchema,
@@ -22,6 +27,8 @@ import {
   versionResponseSchema,
 } from "@workspace/tenant-runtime-contracts";
 import type {
+  ActivateRouteRequest,
+  DeactivateRouteRequest,
   DestroyRuntimeRequest,
   EnsureRuntimeRequest,
   ExecRuntimeRequest,
@@ -34,12 +41,21 @@ import type {
 import type { WorkerBindings } from "./bindings";
 import type { ControlDurableObject } from "./control-durable-object";
 import type { ControlCoordinator, StoredHttpResponse, StoredRuntime } from "./model";
+import { handlePublishedDataPlaneRequest } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
 
 const CONTROL_PREFIX = "/_nabuflow/control/v1";
 const MAX_REQUEST_BYTES = 256 * 1024;
-const MUTATION_ENDPOINTS = new Set<Endpoint>(["ensure", "start", "stop", "destroy", "exec"]);
+const MUTATION_ENDPOINTS = new Set<Endpoint>([
+  "ensure",
+  "start",
+  "stop",
+  "destroy",
+  "exec",
+  "routeActivate",
+  "routeDeactivate",
+]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 const AUTH_HEADERS = {
@@ -50,11 +66,22 @@ const AUTH_HEADERS = {
   idempotencyKey: "idempotency-key",
 } as const;
 
-type Endpoint = "version" | "ensure" | "start" | "stop" | "destroy" | "status" | "exec" | "logs";
+type Endpoint =
+  | "version"
+  | "ensure"
+  | "start"
+  | "stop"
+  | "destroy"
+  | "status"
+  | "exec"
+  | "logs"
+  | "routeActivate"
+  | "routeDeactivate";
 
 interface MatchedRoute {
   endpoint: Endpoint;
   locator: RuntimeLocator | null;
+  hostname?: string;
 }
 
 interface WorkerDependencies {
@@ -118,11 +145,10 @@ export async function handleWorkerRequest(
       requestId,
     });
     if (previewResponse !== null) return previewResponse;
-    return await handleControlRequest(request, env, {
-      ...dependencies,
-      requestId,
+    return await handlePublishedDataPlaneRequest(request, env, {
       coordinator,
-      context,
+      nowMs: dependencies.nowMs,
+      requestId,
     });
   } catch (error) {
     const failureStage = context.stage;
@@ -372,6 +398,8 @@ export async function handleControlRequest(
 
 type ControlInput =
   | Record<string, never>
+  | ActivateRouteRequest
+  | DeactivateRouteRequest
   | EnsureRuntimeRequest
   | StartRuntimeRequest
   | StopRuntimeRequest
@@ -387,6 +415,22 @@ function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableOb
 function matchRoute(method: string, pathname: string): MatchedRoute {
   if (method === "GET" && pathname === `${CONTROL_PREFIX}/version`) {
     return { endpoint: "version", locator: null };
+  }
+  const activateRouteMatch = new RegExp(`^${CONTROL_PREFIX}/routes/([^/]+)/activate$`).exec(
+    pathname,
+  );
+  if (activateRouteMatch) {
+    if (method !== "POST") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return { endpoint: "routeActivate", locator: null, hostname: activateRouteMatch[1] };
+  }
+  const deactivateRouteMatch = new RegExp(`^${CONTROL_PREFIX}/routes/([^/]+)$`).exec(pathname);
+  if (deactivateRouteMatch) {
+    if (method !== "DELETE") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return { endpoint: "routeDeactivate", locator: null, hostname: deactivateRouteMatch[1] };
   }
   const match = new RegExp(
     `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|stop|exec|logs))?$`,
@@ -415,8 +459,7 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     assertEmptyBody(rawBody);
     return {};
   }
-  if (route.locator === null)
-    throw new ControlHttpError(400, "invalid_locator", "Runtime locator is required");
+  if (route.locator === null) return parseRouteInput(route, url, rawBody);
 
   if (route.endpoint === "status") {
     assertNoQuery(url);
@@ -449,6 +492,15 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
 
   assertNoQuery(url);
   const body = parseJsonBody(rawBody);
+  if (
+    route.endpoint !== "ensure" &&
+    route.endpoint !== "start" &&
+    route.endpoint !== "stop" &&
+    route.endpoint !== "destroy" &&
+    route.endpoint !== "exec"
+  ) {
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
   const parsed = parseMutationInput(route.endpoint, body);
   if (
     parsed.locator.projectId !== route.locator.projectId ||
@@ -456,6 +508,29 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     parsed.locator.slot !== route.locator.slot
   ) {
     throw new ControlHttpError(400, "locator_mismatch", "Path and body runtime locators differ");
+  }
+  return parsed;
+}
+
+function parseRouteInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): ControlInput {
+  if (
+    (route.endpoint !== "routeActivate" && route.endpoint !== "routeDeactivate") ||
+    route.hostname === undefined
+  ) {
+    throw new ControlHttpError(400, "invalid_locator", "Runtime locator is required");
+  }
+  assertNoQuery(url);
+  const body = parseJsonBody(rawBody);
+  if (route.endpoint === "routeActivate") {
+    const parsed = parseStrict(activateRouteRequestSchema, body);
+    if (parsed.route.hostname !== route.hostname) {
+      throw new ControlHttpError(400, "hostname_mismatch", "Path and body hostnames differ");
+    }
+    return parsed;
+  }
+  const parsed = parseStrict(deactivateRouteRequestSchema, body);
+  if (parsed.hostname !== route.hostname) {
+    throw new ControlHttpError(400, "hostname_mismatch", "Path and body hostnames differ");
   }
   return parsed;
 }
@@ -495,8 +570,14 @@ async function executeEndpoint(
       },
     };
   }
+  if (endpoint === "routeActivate") {
+    return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator);
+  }
+  if (endpoint === "routeDeactivate") {
+    return deactivatePublishedRoute(input as DeactivateRouteRequest, coordinator);
+  }
 
-  const locator = (input as Exclude<ControlInput, Record<string, never>>).locator;
+  const locator = (input as { locator: RuntimeLocator }).locator;
   const identity = await deriveRuntimeIdentity({
     namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
     ...locator,
@@ -655,6 +736,91 @@ async function executeEndpoint(
   throw new ControlHttpError(404, "not_found", "Control endpoint not found");
 }
 
+async function activatePublishedRoute(
+  request: ActivateRouteRequest,
+  env: WorkerBindings,
+  coordinator: ControlCoordinator,
+): Promise<StoredHttpResponse> {
+  const route = request.route;
+  if (route.role !== "production" || route.activeSlot !== "blue") {
+    throw new ControlHttpError(
+      400,
+      "production_blue_required",
+      "Published routes require the production-blue runtime",
+    );
+  }
+  const parsedIdentity = await parseRuntimeIdentityForNamespace(
+    route.sandboxIdentity,
+    env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+  ).catch(() => null);
+  if (
+    parsedIdentity === null ||
+    parsedIdentity.projectId !== route.projectId ||
+    parsedIdentity.role !== "production" ||
+    parsedIdentity.slot !== "blue"
+  ) {
+    throw new ControlHttpError(
+      400,
+      "invalid_route_identity",
+      "Published route identity is invalid for this deployment",
+    );
+  }
+
+  const runtime = await coordinator.getRuntime(route.sandboxIdentity);
+  if (
+    runtime === null ||
+    runtime.descriptor.status !== "running" ||
+    runtime.descriptor.role !== "production" ||
+    runtime.descriptor.slot !== "blue" ||
+    runtime.descriptor.projectId !== route.projectId ||
+    runtime.descriptor.manifestRevision !== route.manifestRevision ||
+    runtime.manifest.revision !== route.manifestRevision ||
+    runtime.descriptor.servicePort !== route.servicePort ||
+    runtime.manifest.servicePort !== route.servicePort
+  ) {
+    throw new ControlHttpError(
+      409,
+      "published_runtime_not_ready",
+      "The production-blue runtime is not ready for route activation",
+      true,
+    );
+  }
+
+  const state = await coordinator.activateRoute(route, request.expectedPreviousManifestRevision);
+  if (state === "conflict") {
+    throw new ControlHttpError(
+      409,
+      "route_activation_conflict",
+      "The published route changed before activation",
+      true,
+    );
+  }
+  return { status: 200, body: { ok: true, route } };
+}
+
+async function deactivatePublishedRoute(
+  request: DeactivateRouteRequest,
+  coordinator: ControlCoordinator,
+): Promise<StoredHttpResponse> {
+  const state = await coordinator.deactivateRoute(
+    request.hostname,
+    request.expectedManifestRevision,
+    request.expectedSandboxIdentity,
+  );
+  if (state === "not_found") {
+    throw new ControlHttpError(404, "published_route_not_found", "Published route not found");
+  }
+  if (state === "conflict") {
+    throw new ControlHttpError(
+      409,
+      "route_deactivation_conflict",
+      "The published route changed before removal",
+      true,
+    );
+  }
+  return { status: 200, body: { ok: true, hostname: request.hostname } };
+}
+
 function validateResponse(endpoint: Endpoint, body: unknown): void {
   const schema = {
     version: versionResponseSchema,
@@ -665,6 +831,8 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     status: statusRuntimeResponseSchema,
     exec: execRuntimeResponseSchema,
     logs: logsRuntimeResponseSchema,
+    routeActivate: activateRouteResponseSchema,
+    routeDeactivate: deactivateRouteResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);
   if (!result.success)

@@ -3,7 +3,7 @@ import { HTTP_METHODS, RUNTIME_ROLES, RUNTIME_SLOTS, slotIsValidForRole } from "
 import { parseRuntimeIdentity } from "./runtime-identity";
 import { tenantServicePortSchema } from "./service-port";
 
-const hostnameSchema = z
+export const publishedHostnameSchema = z
   .string()
   .min(1)
   .max(253)
@@ -17,7 +17,7 @@ const runtimeSlotSchema = z.enum(RUNTIME_SLOTS);
 
 export const routeRecordSchema = z
   .object({
-    hostname: hostnameSchema,
+    hostname: publishedHostnameSchema,
     projectId: z.number().int().positive().safe(),
     role: runtimeRoleSchema,
     activeSlot: runtimeSlotSchema,
