@@ -44,6 +44,7 @@ export interface ControlAuditRecord {
 
 export interface ControlCoordinator {
   consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean>;
+  isConsumedOnce(nonce: string, nowMs: number): Promise<boolean>;
   beginIdempotency(key: string, fingerprint: string, nowMs: number): Promise<IdempotencyLookup>;
   completeIdempotency(
     key: string,

@@ -78,6 +78,24 @@ describe("authenticated staging control plane", () => {
     await expect(expiredResponse.json()).resolves.toMatchObject({ code: "expired_signature" });
   });
 
+  it("gives the control prefix precedence on the staging workers.dev host", async () => {
+    const request = await signedRequest({
+      path: "/_nabuflow/control/v1/version",
+      nonce: "nonce-workers-dev-control-0001",
+    });
+    const workersDevRequest = new Request(
+      `https://nabuflow-runtime-staging.mustafa-alali74.workers.dev${new URL(request.url).pathname}`,
+      request,
+    );
+    const response = await handleWorkerRequest(workersDevRequest, fakeEnv(), {
+      coordinator: new MemoryCoordinator(),
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ provider: "cloudflare" });
+  });
+
   it.each([
     ["tampered", "0".repeat(64)],
     ["truncated", "0".repeat(62)],

@@ -35,6 +35,7 @@ import { logger } from "../lib/logger";
 import { createHash, randomBytes } from "crypto";
 import { healthCheckPathForStack, waitForContainerHealthy } from "../lib/health-inject";
 import { getContainerSecretMap } from "../lib/container-secrets";
+import { mintCloudflarePreviewGrant } from "../lib/cloudflare-preview-grant";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
@@ -566,6 +567,9 @@ router.get("/projects/:id/preview-env/session", requireProjectOwnership, async (
     .select({
       activePreviewSessionId: projectsTable.activePreviewSessionId,
       testContainerStatus: projectsTable.testContainerStatus,
+      testContainerId: projectsTable.testContainerId,
+      runtimePort: projectsTable.runtimePort,
+      stack: projectsTable.stack,
       testingStatus: projectsTable.testingStatus,
       deletedAt: projectsTable.deletedAt,
     })
@@ -581,6 +585,26 @@ router.get("/projects/:id/preview-env/session", requireProjectOwnership, async (
     res.status(422).json({
       error: "Test container is not running. Start the test environment first.",
       testContainerStatus: project.testContainerStatus,
+    });
+    return;
+  }
+
+  const cloudflareGrant = await mintCloudflarePreviewGrant({
+    projectId,
+    runtimeId: project.testContainerId ?? "",
+    servicePort: resolveProjectRuntimeManifest({
+      runtimePort: project.runtimePort,
+      stack: project.stack,
+      legacyProfile: "fixed-node",
+    }).servicePort,
+  });
+  if (cloudflareGrant !== null) {
+    res.json({
+      sessionId: cloudflareGrant.runtimeId,
+      previewUrl: cloudflareGrant.previewUrl,
+      launchUrl: cloudflareGrant.launchUrl,
+      expiresAt: cloudflareGrant.expiresAt,
+      message: "Open launchUrl in the same browser to redeem the one-use staging preview grant.",
     });
     return;
   }

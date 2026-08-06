@@ -17,8 +17,10 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260730.1",
+    "@types/ws": "8.18.1",
     "tsx": "catalog:",
     "vitest": "^4.1.6",
-    "wrangler": "4.118.0"
+    "wrangler": "4.118.0",
+    "ws": "8.20.1"
   }
 }

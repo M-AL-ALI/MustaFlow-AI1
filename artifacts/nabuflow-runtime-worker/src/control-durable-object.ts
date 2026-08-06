@@ -64,6 +64,11 @@ export class ControlDurableObject
     return consumed;
   }
 
+  async isConsumedOnce(nonce: string, nowMs: number): Promise<boolean> {
+    const expiresAtMs = await this.ctx.storage.get<number>(`nonce:${await sha256Hex(nonce)}`);
+    return expiresAtMs !== undefined && expiresAtMs > nowMs;
+  }
+
   async beginIdempotency(
     key: string,
     fingerprint: string,
