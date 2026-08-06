@@ -195,6 +195,8 @@ function GeneratedFileCard({
   }
 
   const isPdf = file.format === "pdf";
+  const isPreviewable = isPdf || file.format === "txt" || file.mimeType.startsWith("text/plain");
+  const previewFormatLabel = isPdf ? "PDF" : "TXT";
   // Version history only exists for durable (signed-in) assets; anonymous
   // outputs carry no asset id, so the affordance is hidden entirely.
   const hasHistory = file.assetId != null;
@@ -243,7 +245,7 @@ function GeneratedFileCard({
     }
   };
 
-  if (isPdf && (file.fileData || file.assetId != null)) {
+  if (isPreviewable && (file.fileData || file.assetId != null)) {
     return (
       <div className="mt-2 w-full flex flex-wrap items-center gap-3 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.06)] px-3.5 py-3">
         <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--ora-accent-hsl)/0.15)]">
@@ -251,7 +253,9 @@ function GeneratedFileCard({
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold truncate text-foreground">{file.fileName}</p>
-          <p className="text-[10px] text-muted-foreground/70 mt-0.5">PDF · View or download</p>
+          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+            {previewFormatLabel} · View or download
+          </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button

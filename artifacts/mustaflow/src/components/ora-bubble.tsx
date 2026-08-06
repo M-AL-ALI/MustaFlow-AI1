@@ -172,6 +172,8 @@ function GeneratedFileCard({
   }
 
   const isPdf = file.format === "pdf";
+  const isPreviewable = isPdf || file.format === "txt" || file.mimeType.startsWith("text/plain");
+  const previewFormatLabel = isPdf ? "PDF" : "TXT";
   const iconBox = compact ? "h-8 w-8" : "h-9 w-9";
   const iconSize = compact ? "h-4 w-4" : "h-4.5 w-4.5";
   const cardPad = compact ? "px-3 py-2.5" : "px-3.5 py-3";
@@ -217,7 +219,7 @@ function GeneratedFileCard({
     }
   };
 
-  if (isPdf && (file.fileData || file.assetId != null)) {
+  if (isPreviewable && (file.fileData || file.assetId != null)) {
     return (
       <div
         className={`mt-2 w-full flex flex-wrap items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] ${cardPad}`}
@@ -229,7 +231,9 @@ function GeneratedFileCard({
         </div>
         <div className="flex-1 min-w-0">
           <p className={`${fileText} font-semibold truncate text-foreground`}>{file.fileName}</p>
-          <p className="text-[10px] text-muted-foreground/70 mt-0.5">PDF · View or download</p>
+          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+            {previewFormatLabel} · View or download
+          </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button

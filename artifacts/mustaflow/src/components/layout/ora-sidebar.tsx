@@ -1051,6 +1051,14 @@ interface OraSidebarProps {
  * Slide-out navigation for the standalone Ora assistant.
  * Toggled by the fixed logo button in the top-left corner.
  */
+export function getOraSidebarDrawerState(open: boolean) {
+  return {
+    "aria-hidden": !open,
+    "data-state": open ? "open" : "closed",
+    inert: open ? undefined : true,
+  } as const;
+}
+
 export function OraSidebar({ onNewConversation }: OraSidebarProps) {
   const [open, setOpen] = useState(false);
   const [location] = useLocation();
@@ -1090,9 +1098,11 @@ export function OraSidebar({ onNewConversation }: OraSidebarProps) {
 
       {/* Drawer */}
       <div
+        aria-label="Ora navigation"
+        {...getOraSidebarDrawerState(open)}
         className={cn(
           "fixed inset-y-0 left-0 z-40 w-72 bg-sidebar border-r border-border flex flex-col overflow-y-auto transition-transform duration-200 ease-out",
-          open ? "translate-x-0" : "-translate-x-full",
+          open ? "translate-x-0" : "-translate-x-full pointer-events-none",
         )}
       >
         {/* Header — logo + wordmark */}

@@ -68,6 +68,8 @@ function getStoredCurrentId(): number | null {
   }
 }
 
+const CONVERSATION_TRANSITION_FALLBACK_MS = 10_000;
+
 export function OraConversationsProvider({
   children,
   activeProjectId = null,
@@ -101,25 +103,48 @@ export function OraConversationsProvider({
   currentIdRef.current = currentConversationId;
   const transitionGenerationRef = useRef(0);
   const transitionInProgressRef = useRef(false);
+  const transitionFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionHandlerRef = useRef<((nextConversationId: number | null) => void) | null>(null);
 
-  const beginConversationTransition = useCallback((nextConversationId: number | null) => {
-    const generation = transitionGenerationRef.current + 1;
-    transitionGenerationRef.current = generation;
-    transitionInProgressRef.current = true;
-    setConversationTransitionGeneration(generation);
-    setConversationTransitioning(true);
-    transitionHandlerRef.current?.(nextConversationId);
-    return generation;
+  const clearConversationTransitionFallback = useCallback(() => {
+    if (transitionFallbackTimerRef.current == null) return;
+    clearTimeout(transitionFallbackTimerRef.current);
+    transitionFallbackTimerRef.current = null;
   }, []);
+
+  const beginConversationTransition = useCallback(
+    (nextConversationId: number | null) => {
+      clearConversationTransitionFallback();
+      const generation = transitionGenerationRef.current + 1;
+      transitionGenerationRef.current = generation;
+      transitionInProgressRef.current = true;
+      setConversationTransitionGeneration(generation);
+      setConversationTransitioning(true);
+      transitionFallbackTimerRef.current = setTimeout(() => {
+        if (transitionGenerationRef.current !== generation) return;
+        transitionFallbackTimerRef.current = null;
+        transitionInProgressRef.current = false;
+        setConversationTransitioning(false);
+      }, CONVERSATION_TRANSITION_FALLBACK_MS);
+      transitionHandlerRef.current?.(nextConversationId);
+      return generation;
+    },
+    [clearConversationTransitionFallback],
+  );
 
   const isConversationTransitioning = useCallback(() => transitionInProgressRef.current, []);
 
-  const completeConversationTransition = useCallback((generation: number) => {
-    if (transitionGenerationRef.current !== generation) return;
-    transitionInProgressRef.current = false;
-    setConversationTransitioning(false);
-  }, []);
+  const completeConversationTransition = useCallback(
+    (generation: number) => {
+      if (transitionGenerationRef.current !== generation) return;
+      clearConversationTransitionFallback();
+      transitionInProgressRef.current = false;
+      setConversationTransitioning(false);
+    },
+    [clearConversationTransitionFallback],
+  );
+
+  useEffect(() => clearConversationTransitionFallback, [clearConversationTransitionFallback]);
 
   const registerConversationTransitionHandler = useCallback(
     (handler: (nextConversationId: number | null) => void) => {
