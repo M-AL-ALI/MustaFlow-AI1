@@ -1206,7 +1206,7 @@ describe("k) Frontend wiring — authFetch, STT→input, TTS auto-speak dedup, s
 
   it("use-ora-chat conversation save captures targetId before debounce window (race guard)", () => {
     // The targetId must be captured at schedule time, not inside the debounced callback
-    expect(oraChat).toContain("const targetId = c.currentConversationId");
+    expect(oraChat).toContain("const targetId = c.getCurrentConversationId()");
     expect(oraChat).toMatch(/[Ss]napshot the target conversation id NOW|targetId is captured/);
   });
 
@@ -1248,13 +1248,18 @@ describe("n) Explicit file generation — POST /public-ai/generate-file", () => 
     expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
   });
 
-  it("returns 400 for an unsupported format", async () => {
+  it("returns a structured 415 for an unsupported explicit format", async () => {
     const res = await request(app)
       .post("/public-ai/generate-file")
       .set("Cookie", `ora-session=${makeSession()}`)
-      .send({ message: "Make a thing", format: "txt", messages: [] });
+      .send({ message: "Create a file named ora-test.exe", format: "pdf", messages: [] });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(415);
+    expect(res.body).toMatchObject({
+      ok: false,
+      code: "UNSUPPORTED_FILE_FORMAT",
+      requestedExtension: "exe",
+    });
     expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
   });
 
