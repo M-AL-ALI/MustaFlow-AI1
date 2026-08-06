@@ -34,6 +34,7 @@ import type {
 import type { WorkerBindings } from "./bindings";
 import type { ControlDurableObject } from "./control-durable-object";
 import type { ControlCoordinator, StoredHttpResponse, StoredRuntime } from "./model";
+import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
 
 const CONTROL_PREFIX = "/_nabuflow/control/v1";
@@ -66,6 +67,7 @@ interface WorkerDependencies {
 
 type ControlRequestStage =
   | "initialization"
+  | "data_plane"
   | "body_read"
   | "authentication"
   | "routing"
@@ -100,6 +102,22 @@ export async function handleWorkerRequest(
   let coordinator = dependencies.coordinator;
   try {
     coordinator ??= getCoordinator(env);
+    const pathname = new URL(request.url).pathname;
+    if (pathname === CONTROL_PREFIX || pathname.startsWith(`${CONTROL_PREFIX}/`)) {
+      return await handleControlRequest(request, env, {
+        ...dependencies,
+        requestId,
+        coordinator,
+        context,
+      });
+    }
+    context.stage = "data_plane";
+    const previewResponse = await handlePreviewDataPlaneRequest(request, env, {
+      coordinator,
+      nowMs: dependencies.nowMs,
+      requestId,
+    });
+    if (previewResponse !== null) return previewResponse;
     return await handleControlRequest(request, env, {
       ...dependencies,
       requestId,

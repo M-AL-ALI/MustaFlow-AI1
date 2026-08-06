@@ -37,6 +37,11 @@ export class MemoryCoordinator implements ControlCoordinator {
     return true;
   }
 
+  async isConsumedOnce(nonce: string, nowMs: number): Promise<boolean> {
+    const expiresAtMs = this.nonces.get(nonce);
+    return expiresAtMs !== undefined && expiresAtMs > nowMs;
+  }
+
   async beginIdempotency(
     key: string,
     fingerprint: string,
@@ -183,6 +188,7 @@ export function fakeEnv(): WorkerBindings {
     },
     CLOUDFLARE_RUNTIME_CONTROL_TOKEN: TEST_SECRET,
     CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+    CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: "test-public-key",
     NABUFLOW_RUNTIME_SLEEP_AFTER: "10m",
   } as WorkerBindings;
 }

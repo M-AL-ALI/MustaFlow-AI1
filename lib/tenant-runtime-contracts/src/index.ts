@@ -1,6 +1,7 @@
 export * from "./config";
 export * from "./constants";
 export * from "./control-schemas";
+export * from "./preview-grant";
 export * from "./request-signing";
 export * from "./route-capability";
 export * from "./runtime-identity";
