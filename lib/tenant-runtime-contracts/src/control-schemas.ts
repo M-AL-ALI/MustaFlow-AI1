@@ -6,7 +6,7 @@ import {
   RUNTIME_STATUSES,
   slotIsValidForRole,
 } from "./constants";
-import { routeRecordSchema } from "./route-capability";
+import { publishedHostnameSchema, routeRecordSchema } from "./route-capability";
 import { parseRuntimeIdentity } from "./runtime-identity";
 import { tenantServicePortSchema } from "./service-port";
 
@@ -294,6 +294,20 @@ export const activateRouteResponseSchema = z
   })
   .strict();
 
+export const deactivateRouteRequestSchema = z
+  .object({
+    hostname: publishedHostnameSchema,
+    expectedManifestRevision: revisionSchema,
+    expectedSandboxIdentity: z.string().min(1).max(200),
+  })
+  .strict();
+export const deactivateRouteResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    hostname: publishedHostnameSchema,
+  })
+  .strict();
+
 /**
  * Single registry for Worker and API implementations. Each endpoint receives
  * already-combined path/query/body input so the same strict schema is applied
@@ -315,6 +329,10 @@ export const controlEndpointSchemas = {
     response: environmentRuntimeResponseSchema,
   },
   routeActivate: { request: activateRouteRequestSchema, response: activateRouteResponseSchema },
+  routeDeactivate: {
+    request: deactivateRouteRequestSchema,
+    response: deactivateRouteResponseSchema,
+  },
 } as const;
 
 export const CONTROL_API_PREFIX = "/_nabuflow/control/v1" as const;
@@ -339,6 +357,7 @@ export const controlEndpointContracts = {
     path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/environment`,
   },
   routeActivate: { method: "POST", path: `${CONTROL_API_PREFIX}/routes/:hostname/activate` },
+  routeDeactivate: { method: "DELETE", path: `${CONTROL_API_PREFIX}/routes/:hostname` },
 } as const satisfies Record<keyof typeof controlEndpointSchemas, { method: string; path: string }>;
 
 export type EnsureRuntimeRequest = z.infer<typeof ensureRuntimeRequestSchema>;
@@ -352,6 +371,7 @@ export type FilesRuntimeRequest = z.infer<typeof filesRuntimeRequestSchema>;
 export type RestoreRuntimeRequest = z.infer<typeof restoreRuntimeRequestSchema>;
 export type EnvironmentRuntimeRequest = z.infer<typeof environmentRuntimeRequestSchema>;
 export type ActivateRouteRequest = z.infer<typeof activateRouteRequestSchema>;
+export type DeactivateRouteRequest = z.infer<typeof deactivateRouteRequestSchema>;
 export type ControlErrorResponse = z.infer<typeof controlErrorResponseSchema>;
 export type VersionRequest = z.infer<typeof versionRequestSchema>;
 export type VersionResponse = z.infer<typeof versionResponseSchema>;
@@ -366,3 +386,4 @@ export type FilesRuntimeResponse = z.infer<typeof filesRuntimeResponseSchema>;
 export type RestoreRuntimeResponse = z.infer<typeof restoreRuntimeResponseSchema>;
 export type EnvironmentRuntimeResponse = z.infer<typeof environmentRuntimeResponseSchema>;
 export type ActivateRouteResponse = z.infer<typeof activateRouteResponseSchema>;
+export type DeactivateRouteResponse = z.infer<typeof deactivateRouteResponseSchema>;

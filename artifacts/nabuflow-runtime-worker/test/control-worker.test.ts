@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { sha256Hex, signControlRequest } from "@workspace/tenant-runtime-contracts";
+import {
+  deriveRuntimeIdentity,
+  sha256Hex,
+  signControlRequest,
+} from "@workspace/tenant-runtime-contracts";
+import type { StoredRuntime } from "../src/model";
 import { handleControlRequest, handleWorkerRequest } from "../src/worker";
 import {
   MemoryCoordinator,
@@ -307,6 +312,158 @@ describe("authenticated staging control plane", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ code: "worker_version_not_ready" });
     expect(coordinator.runtimes).toHaveLength(0);
+  });
+
+  it("authenticates, CAS-activates, replay-protects, and removes a published route", async () => {
+    const coordinator = new MemoryCoordinator();
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 84,
+      role: "production",
+      slot: "blue",
+    });
+    const runtime: StoredRuntime = {
+      descriptor: {
+        identity,
+        projectId: 84,
+        role: "production",
+        slot: "blue",
+        status: "running",
+        servicePort: 8080,
+        manifestRevision: "published-manifest-1",
+        deploymentVersion: "worker-version-test-1",
+        endpoint: null,
+        readyAt: new Date(TEST_NOW_MS).toISOString(),
+        lastError: null,
+      },
+      manifest: {
+        revision: "published-manifest-1",
+        runtime: "node",
+        buildCommand: ["node", "--version"],
+        startCommand: ["node", "server.mjs"],
+        servicePort: 8080,
+        healthPath: "/health",
+        resourceProfile: "dev",
+        public: true,
+      },
+      artifactRevision: "published-artifact-1",
+      artifactSha256: "a".repeat(64),
+      processId: "published-service",
+      stdoutLength: 0,
+      stderrLength: 0,
+      nextLogSequence: 0,
+      logs: [],
+    };
+    await coordinator.putRuntime(identity, runtime);
+    const hostname = "project-84.apps.mustaflow.com";
+    const path = `/_nabuflow/control/v1/routes/${hostname}/activate`;
+    const body = {
+      route: {
+        hostname,
+        projectId: 84,
+        role: "production" as const,
+        activeSlot: "blue" as const,
+        manifestRevision: "published-manifest-1",
+        servicePort: 8080,
+        sandboxIdentity: identity,
+      },
+      expectedPreviousManifestRevision: null,
+    };
+    const dependencies = {
+      coordinator,
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+    };
+
+    const greenIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 84,
+      role: "production",
+      slot: "green",
+    });
+    const greenRejected = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-green-0000001",
+        idempotencyKey: "route-activate-green",
+        body: {
+          ...body,
+          route: { ...body.route, activeSlot: "green", sandboxIdentity: greenIdentity },
+        },
+      }),
+      fakeEnv(),
+      dependencies,
+    );
+    expect(greenRejected.status).toBe(400);
+    await expect(greenRejected.json()).resolves.toMatchObject({ code: "production_blue_required" });
+    expect(await coordinator.getRoute(hostname)).toBeNull();
+
+    const unsigned = await handleControlRequest(
+      new Request(`https://runtime.example${path}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      fakeEnv(),
+      dependencies,
+    );
+    expect(unsigned.status).toBe(401);
+
+    const tampered = await signedRequest({
+      path,
+      method: "POST",
+      nonce: "nonce-route-tampered-0001",
+      idempotencyKey: "route-activate-tampered",
+      body,
+    });
+    tampered.headers.set("x-nabuflow-signature", "0".repeat(64));
+    expect((await handleControlRequest(tampered, fakeEnv(), dependencies)).status).toBe(401);
+
+    const expired = await signedRequest({
+      path,
+      method: "POST",
+      nonce: "nonce-route-expired-00001",
+      idempotencyKey: "route-activate-expired",
+      timestamp: TEST_NOW_MS - 60_001,
+      body,
+    });
+    expect((await handleControlRequest(expired, fakeEnv(), dependencies)).status).toBe(401);
+
+    const valid = await signedRequest({
+      path,
+      method: "POST",
+      nonce: "nonce-route-valid-000001",
+      idempotencyKey: "route-activate-valid",
+      body,
+    });
+    const replay = valid.clone() as Request;
+    const activated = await handleControlRequest(valid, fakeEnv(), dependencies);
+    expect(activated.status).toBe(200);
+    await expect(activated.json()).resolves.toMatchObject({ ok: true, route: { hostname } });
+    expect((await coordinator.getRoute(hostname))?.sandboxIdentity).toBe(identity);
+    const replayed = await handleControlRequest(replay, fakeEnv(), dependencies);
+    expect(replayed.status).toBe(409);
+    await expect(replayed.json()).resolves.toMatchObject({ code: "replay_detected" });
+
+    const deletePath = `/_nabuflow/control/v1/routes/${hostname}`;
+    const deleted = await handleControlRequest(
+      await signedRequest({
+        path: deletePath,
+        method: "DELETE",
+        nonce: "nonce-route-delete-00001",
+        idempotencyKey: "route-delete-valid",
+        body: {
+          hostname,
+          expectedManifestRevision: "published-manifest-1",
+          expectedSandboxIdentity: identity,
+        },
+      }),
+      fakeEnv(),
+      dependencies,
+    );
+    expect(deleted.status).toBe(200);
+    await expect(deleted.json()).resolves.toEqual({ ok: true, hostname });
+    expect(await coordinator.getRoute(hostname)).toBeNull();
   });
 
   it("runs the complete control lifecycle through the shared schemas", async () => {

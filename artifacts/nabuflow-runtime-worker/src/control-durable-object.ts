@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { sha256Hex } from "@workspace/tenant-runtime-contracts";
+import type { RouteRecord } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type {
   ControlAuditRecord,
@@ -27,6 +28,10 @@ function runtimeKey(identity: string): string {
   return `runtime:${identity}`;
 }
 
+function routeKey(hostname: string): string {
+  return `route:${hostname}`;
+}
+
 function formatCursor(sequence: number): string {
   return `log-${sequence.toString().padStart(10, "0")}`;
 }
@@ -51,6 +56,8 @@ export class ControlDurableObject
   extends DurableObject<WorkerBindings>
   implements ControlCoordinator
 {
+  private readonly routeCache = new Map<string, RouteRecord | null>();
+
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
     const key = `nonce:${await sha256Hex(nonce)}`;
     const consumed = await this.ctx.storage.transaction(async (transaction) => {
@@ -154,6 +161,50 @@ export class ControlDurableObject
 
   async deleteRuntime(identity: string): Promise<void> {
     await this.ctx.storage.delete(runtimeKey(identity));
+  }
+
+  async getRoute(hostname: string): Promise<RouteRecord | null> {
+    if (this.routeCache.has(hostname)) return structuredClone(this.routeCache.get(hostname)!);
+    const route = (await this.ctx.storage.get<RouteRecord>(routeKey(hostname))) ?? null;
+    this.routeCache.set(hostname, route);
+    return structuredClone(route);
+  }
+
+  async activateRoute(
+    route: RouteRecord,
+    expectedPreviousManifestRevision: string | null,
+  ): Promise<"activated" | "conflict"> {
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<RouteRecord>(routeKey(route.hostname));
+      if ((current?.manifestRevision ?? null) !== expectedPreviousManifestRevision) {
+        return { state: "conflict" as const, current: current ?? null };
+      }
+      await transaction.put(routeKey(route.hostname), route);
+      return { state: "activated" as const, current: route };
+    });
+    this.routeCache.set(route.hostname, result.current);
+    return result.state;
+  }
+
+  async deactivateRoute(
+    hostname: string,
+    expectedManifestRevision: string,
+    expectedSandboxIdentity: string,
+  ): Promise<"deactivated" | "not_found" | "conflict"> {
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<RouteRecord>(routeKey(hostname));
+      if (current === undefined) return { state: "not_found" as const, current: null };
+      if (
+        current.manifestRevision !== expectedManifestRevision ||
+        current.sandboxIdentity !== expectedSandboxIdentity
+      ) {
+        return { state: "conflict" as const, current };
+      }
+      await transaction.delete(routeKey(hostname));
+      return { state: "deactivated" as const, current: null };
+    });
+    this.routeCache.set(hostname, result.current);
+    return result.state;
   }
 
   async appendSystemLog(identity: string, message: string): Promise<void> {

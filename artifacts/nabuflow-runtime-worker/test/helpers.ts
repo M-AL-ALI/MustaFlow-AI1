@@ -2,6 +2,7 @@ import {
   sha256Hex,
   signControlRequest,
   type ExecRuntimeRequest,
+  type RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "../src/bindings";
 import type {
@@ -30,6 +31,7 @@ export class MemoryCoordinator implements ControlCoordinator {
   >();
   readonly audits: ControlAuditRecord[] = [];
   readonly runtimes = new Map<string, StoredRuntime>();
+  readonly routes = new Map<string, RouteRecord>();
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
     if (this.nonces.has(nonce)) return false;
@@ -88,6 +90,38 @@ export class MemoryCoordinator implements ControlCoordinator {
 
   async deleteRuntime(identity: string): Promise<void> {
     this.runtimes.delete(identity);
+  }
+
+  async getRoute(hostname: string): Promise<RouteRecord | null> {
+    const route = this.routes.get(hostname);
+    return route === undefined ? null : structuredClone(route);
+  }
+
+  async activateRoute(
+    route: RouteRecord,
+    expectedPreviousManifestRevision: string | null,
+  ): Promise<"activated" | "conflict"> {
+    const current = this.routes.get(route.hostname);
+    if ((current?.manifestRevision ?? null) !== expectedPreviousManifestRevision) return "conflict";
+    this.routes.set(route.hostname, structuredClone(route));
+    return "activated";
+  }
+
+  async deactivateRoute(
+    hostname: string,
+    expectedManifestRevision: string,
+    expectedSandboxIdentity: string,
+  ): Promise<"deactivated" | "not_found" | "conflict"> {
+    const current = this.routes.get(hostname);
+    if (current === undefined) return "not_found";
+    if (
+      current.manifestRevision !== expectedManifestRevision ||
+      current.sandboxIdentity !== expectedSandboxIdentity
+    ) {
+      return "conflict";
+    }
+    this.routes.delete(hostname);
+    return "deactivated";
   }
 
   async appendSystemLog(identity: string, message: string): Promise<void> {

@@ -12,6 +12,8 @@
   "vars": {
     "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE": "staging",
     "NABUFLOW_RUNTIME_SLEEP_AFTER": "10m",
+    "NABUFLOW_STAGING_HOST_OVERRIDE_ENABLED": "true",
+    "NABUFLOW_STAGING_WORKER_HOST": "nabuflow-runtime-staging.mustafa-alali74.workers.dev",
   },
   "containers": [
     {

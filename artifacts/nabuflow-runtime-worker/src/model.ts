@@ -1,5 +1,6 @@
 import type {
   LogsRuntimeResponse,
+  RouteRecord,
   RuntimeDescriptor,
   RuntimeManifestContract,
 } from "@workspace/tenant-runtime-contracts";
@@ -57,6 +58,16 @@ export interface ControlCoordinator {
   getRuntime(identity: string): Promise<StoredRuntime | null>;
   putRuntime(identity: string, runtime: StoredRuntime): Promise<void>;
   deleteRuntime(identity: string): Promise<void>;
+  getRoute(hostname: string): Promise<RouteRecord | null>;
+  activateRoute(
+    route: RouteRecord,
+    expectedPreviousManifestRevision: string | null,
+  ): Promise<"activated" | "conflict">;
+  deactivateRoute(
+    hostname: string,
+    expectedManifestRevision: string,
+    expectedSandboxIdentity: string,
+  ): Promise<"deactivated" | "not_found" | "conflict">;
   appendSystemLog(identity: string, message: string): Promise<void>;
   mergeProcessLogs(identity: string, stdout: string, stderr: string): Promise<void>;
   listRuntimeLogs(

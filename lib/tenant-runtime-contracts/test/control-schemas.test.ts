@@ -23,11 +23,18 @@ const manifest = {
 } as const;
 const digest = "a".repeat(64);
 let sandboxIdentity = "";
+let productionSandboxIdentity = "";
 
 beforeAll(async () => {
   sandboxIdentity = await deriveRuntimeIdentity({
     namespace: "production-us-east",
     ...locator,
+  });
+  productionSandboxIdentity = await deriveRuntimeIdentity({
+    namespace: "production-us-east",
+    projectId: 42,
+    role: "production",
+    slot: "blue",
   });
 });
 
@@ -80,15 +87,20 @@ function requestFixtures(): Record<keyof typeof controlEndpointSchemas, unknown>
     },
     routeActivate: {
       route: {
-        hostname: "opaque.preview.mustaflow.com",
+        hostname: "project.apps.mustaflow.com",
         projectId: 42,
-        role: "preview",
-        activeSlot: "primary",
+        role: "production",
+        activeSlot: "blue",
         manifestRevision: "manifest-42-v7",
         servicePort: 8080,
-        sandboxIdentity,
+        sandboxIdentity: productionSandboxIdentity,
       },
       expectedPreviousManifestRevision: "manifest-42-v6",
+    },
+    routeDeactivate: {
+      hostname: "project.apps.mustaflow.com",
+      expectedManifestRevision: "manifest-42-v7",
+      expectedSandboxIdentity: productionSandboxIdentity,
     },
   };
 }
@@ -125,15 +137,16 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
     routeActivate: {
       ok: true,
       route: {
-        hostname: "opaque.preview.mustaflow.com",
+        hostname: "project.apps.mustaflow.com",
         projectId: 42,
-        role: "preview",
-        activeSlot: "primary",
+        role: "production",
+        activeSlot: "blue",
         manifestRevision: "manifest-42-v7",
         servicePort: 8080,
-        sandboxIdentity,
+        sandboxIdentity: productionSandboxIdentity,
       },
     },
+    routeDeactivate: { ok: true, hostname: "project.apps.mustaflow.com" },
   };
 }
 
@@ -152,6 +165,7 @@ describe("control-plane schemas", () => {
       "restore",
       "environment",
       "routeActivate",
+      "routeDeactivate",
     ]);
     expect(Object.keys(controlEndpointContracts)).toEqual(Object.keys(controlEndpointSchemas));
     expect(CONTROL_API_PREFIX).toBe("/_nabuflow/control/v1");
@@ -270,18 +284,18 @@ describe("route and capability records", () => {
     const route = {
       hostname: "project.apps.mustaflow.com",
       projectId: 42,
-      role: "preview",
-      activeSlot: "primary",
+      role: "production",
+      activeSlot: "blue",
       manifestRevision: "manifest-42-v7",
       servicePort: 8080,
-      sandboxIdentity,
+      sandboxIdentity: productionSandboxIdentity,
     };
     expect(routeRecordSchema.safeParse(route).success).toBe(true);
     expect(
       routeRecordSchema.safeParse({ ...route, hostname: "PROJECT.apps.mustaflow.com" }).success,
     ).toBe(false);
     expect(routeRecordSchema.safeParse({ ...route, projectId: 43 }).success).toBe(false);
-    expect(routeRecordSchema.safeParse({ ...route, activeSlot: "blue" }).success).toBe(false);
+    expect(routeRecordSchema.safeParse({ ...route, activeSlot: "primary" }).success).toBe(false);
   });
 
   it("validates a bounded typed connector capability", () => {
