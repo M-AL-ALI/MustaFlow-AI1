@@ -204,6 +204,25 @@ async function acceptedReplayableRequest(
   throw new Error(`${label}: bounded replayable retry exhausted without a response`);
 }
 
+async function replaySignedRequest(request: Request, label: string) {
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const response = await fetch(request.clone());
+    const body = await readResponse(response);
+    if (!isPropagationRetryable(response.status, body) || attempt === 8) {
+      return { response, body };
+    }
+    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
+    record(`control.retry.${label}`, response.status, {
+      attempt,
+      backoffMs,
+      code: (body as { code?: string }).code,
+      exactRequestReplay: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  throw new Error(`${label}: bounded exact-request replay exhausted without a response`);
+}
+
 async function waitForSustainedGreenWindow(): Promise<unknown> {
   const startedAt = performance.now();
   let consecutive = 0;
@@ -561,13 +580,8 @@ async function run(): Promise<void> {
   );
   assertStatus("route.activate.valid", validActivate.response.status, 200, validActivate.body);
   registeredHosts.add(simulatedHost);
-  const replayActivate = await fetch(validActivate.request);
-  assertStatus(
-    "route.activate.replay",
-    replayActivate.status,
-    409,
-    await readResponse(replayActivate),
-  );
+  const replayActivate = await replaySignedRequest(validActivate.request, "route.activate.replay");
+  assertStatus("route.activate.replay", replayActivate.response.status, 409, replayActivate.body);
 
   await activateRoute(workerHost, "route.self-host");
 
@@ -755,13 +769,8 @@ async function run(): Promise<void> {
   );
   assertStatus("route.deactivate.valid", validDelete.response.status, 200, validDelete.body);
   registeredHosts.delete(simulatedHost);
-  const replayDelete = await fetch(validDelete.request);
-  assertStatus(
-    "route.deactivate.replay",
-    replayDelete.status,
-    409,
-    await readResponse(replayDelete),
-  );
+  const replayDelete = await replaySignedRequest(validDelete.request, "route.deactivate.replay");
+  assertStatus("route.deactivate.replay", replayDelete.response.status, 409, replayDelete.body);
 
   const invalidated = await publishedFetch(simulatedHost, "/after-unregister");
   assertStatus("published.unregister-immediate", invalidated.response.status, 404, {
