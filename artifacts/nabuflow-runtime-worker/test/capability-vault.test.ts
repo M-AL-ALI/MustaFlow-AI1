@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   deriveRuntimeIdentity,
   type CapabilityDefinition,
@@ -48,6 +48,21 @@ const databaseDefinition: CapabilityDefinition = {
   },
 };
 
+const stripeDefinition: CapabilityDefinition = {
+  name: "payments",
+  provider: "stripe",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/payment-intents" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 8_192,
+    maxResponseBytes: 65_536,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
 class MemoryVaultStorage {
   private readonly values = new Map<string, unknown>();
 
@@ -59,8 +74,17 @@ class MemoryVaultStorage {
     this.values.set(key, structuredClone(value));
   }
 
-  async delete(key: string): Promise<boolean> {
+  async delete(key: string | string[]): Promise<boolean | number> {
+    if (Array.isArray(key)) {
+      let deleted = 0;
+      for (const entry of key) if (this.values.delete(entry)) deleted += 1;
+      return deleted;
+    }
     return this.values.delete(key);
+  }
+
+  async list(options: { prefix: string }): Promise<Map<string, unknown>> {
+    return new Map([...this.values.entries()].filter(([key]) => key.startsWith(options.prefix)));
   }
 
   async transaction<T>(callback: (transaction: MemoryVaultStorage) => Promise<T>): Promise<T> {
@@ -184,5 +208,214 @@ describe("capability vault envelope", () => {
     await expect(
       vault.revokeDatabase({ projectId: 42, expectedRevision: "database-v1" }),
     ).resolves.toBe("revoked");
+  });
+
+  it("encrypts a test-only Stripe key and rejects live keys before storage", async () => {
+    const storage = new MemoryVaultStorage();
+    const vault = new CapabilityVaultDurableObject(
+      { storage } as unknown as DurableObjectState,
+      fakeEnv(),
+    );
+    const testKey = `sk_test_${"a".repeat(32)}`;
+    await expect(
+      vault.provisionStripe({
+        projectId: 42,
+        revision: "stripe-v1",
+        definition: stripeDefinition,
+        policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+        credential: { kind: "stripe-test-secret-key", value: testKey },
+      }),
+    ).resolves.toEqual({ state: "provisioned", keyId: "v1" });
+    expect(storage.serialized()).not.toContain(testKey);
+    expect(storage.serialized()).toContain('"algorithm":"AES-256-GCM"');
+
+    const before = storage.serialized();
+    await expect(
+      vault.provisionStripe({
+        projectId: 42,
+        revision: "stripe-live-rejected",
+        definition: stripeDefinition,
+        policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+        credential: {
+          kind: "stripe-test-secret-key",
+          value: `sk_live_${"b".repeat(32)}`,
+        },
+      }),
+    ).rejects.toThrow("credential type");
+    expect(storage.serialized()).toBe(before);
+  });
+
+  it("enforces Stripe policy, durable idempotency, revision scope, and object ownership", async () => {
+    const storage = new MemoryVaultStorage();
+    const vault = new CapabilityVaultDurableObject(
+      { storage } as unknown as DurableObjectState,
+      fakeEnv(),
+    );
+    const testKey = `sk_test_${"a".repeat(32)}`;
+    await vault.provisionStripe({
+      projectId: 42,
+      revision: "stripe-v1",
+      definition: stripeDefinition,
+      policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+      credential: { kind: "stripe-test-secret-key", value: testKey },
+    });
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "production",
+      slot: "blue",
+    });
+    const providerFetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      expect(url.origin).toBe("https://api.stripe.com");
+      return Response.json({
+        id: "pi_test123",
+        status: "requires_payment_method",
+        amount: 1_099,
+        amount_received: 0,
+        currency: "usd",
+        created: 1_785_859_200,
+        livemode: false,
+      });
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    const createInvocation = {
+      v: 1 as const,
+      capability: { provider: "stripe", name: "payments" },
+      action: "execute",
+      requestId: "stripe-create-request-0001",
+      input: {
+        kind: "create-payment-intent",
+        idempotencyKey: "checkout-order-00000001",
+        amount: 1_099,
+        currency: "usd",
+      },
+      caller: { containerId: "container-platform-id-0001", runtimeIdentity: identity },
+    };
+    try {
+      await expect(
+        vault.invokeStripe({ projectId: 42, invocation: createInvocation }),
+      ).resolves.toMatchObject({
+        state: "success",
+        response: { idempotentReplay: false, paymentIntent: { id: "pi_test123" } },
+      });
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: { ...createInvocation, requestId: "stripe-create-request-0002" },
+        }),
+      ).resolves.toMatchObject({
+        state: "success",
+        response: { idempotentReplay: true, paymentIntent: { id: "pi_test123" } },
+      });
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: {
+            ...createInvocation,
+            requestId: "stripe-create-request-conflict",
+            input: { ...createInvocation.input, amount: 1_200 },
+          },
+        }),
+      ).resolves.toMatchObject({
+        state: "stripe_error",
+        status: 409,
+        code: "stripe_idempotency_conflict",
+      });
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+
+      for (const [requestId, input] of [
+        [
+          "stripe-over-max",
+          { ...createInvocation.input, idempotencyKey: "over-max-order-0000001", amount: 50_001 },
+        ],
+        [
+          "stripe-currency-denied",
+          { ...createInvocation.input, idempotencyKey: "currency-order-000001", currency: "eur" },
+        ],
+      ] as const) {
+        await expect(
+          vault.invokeStripe({
+            projectId: 42,
+            invocation: { ...createInvocation, requestId, input },
+          }),
+        ).resolves.toEqual({ state: "policy_rejected" });
+      }
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: {
+            ...createInvocation,
+            requestId: "stripe-retrieve-owned",
+            input: { kind: "retrieve-payment-intent", paymentIntentId: "pi_test123" },
+          },
+        }),
+      ).resolves.toMatchObject({
+        state: "success",
+        response: { paymentIntent: { id: "pi_test123" } },
+      });
+      expect(providerFetch).toHaveBeenCalledTimes(2);
+
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: {
+            ...createInvocation,
+            requestId: "stripe-retrieve-unowned",
+            input: { kind: "retrieve-payment-intent", paymentIntentId: "pi_foreign123" },
+          },
+        }),
+      ).resolves.toMatchObject({ state: "stripe_error", code: "stripe_invalid_request" });
+      expect(providerFetch).toHaveBeenCalledTimes(2);
+
+      await vault.provisionStripe({
+        projectId: 42,
+        revision: "stripe-v2",
+        definition: stripeDefinition,
+        policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+        credential: { kind: "stripe-test-secret-key", value: testKey },
+      });
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: { ...createInvocation, requestId: "stripe-revision-ambiguous" },
+        }),
+      ).resolves.toMatchObject({
+        state: "stripe_error",
+        status: 409,
+        code: "stripe_idempotency_conflict",
+      });
+      expect(providerFetch).toHaveBeenCalledTimes(2);
+
+      const foreignIdentity = await deriveRuntimeIdentity({
+        namespace: "staging",
+        projectId: 43,
+        role: "production",
+        slot: "blue",
+      });
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: {
+            ...createInvocation,
+            requestId: "stripe-foreign-runtime",
+            caller: { ...createInvocation.caller, runtimeIdentity: foreignIdentity },
+          },
+        }),
+      ).resolves.toEqual({ state: "tenant_mismatch" });
+
+      await expect(
+        vault.revokeStripe({ projectId: 42, expectedRevision: "stripe-v2" }),
+      ).resolves.toBe("revoked");
+      expect(storage.serialized()).not.toMatch(/stripe-idempotency|stripe-object|sk_test/iu);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

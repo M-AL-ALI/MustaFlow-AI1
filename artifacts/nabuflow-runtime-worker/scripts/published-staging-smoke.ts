@@ -1,5 +1,7 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, normalize, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   deriveRuntimeIdentity,
   sha256Hex,
@@ -18,9 +20,14 @@ const previewPrivateKey = required("CLOUDFLARE_RUNTIME_PREVIEW_PRIVATE_KEY");
 const deploymentNamespace = required("CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE");
 const neonDatabaseUrl = required("NEON_DATABASE_URL");
 const neonDatabaseHost = new URL(neonDatabaseUrl).hostname;
+const stripeTestSecretKey = required("STRIPE_TEST_SECRET_KEY");
+if (!/^sk_test_[A-Za-z0-9]+$/u.test(stripeTestSecretKey)) {
+  throw new Error("STRIPE_TEST_SECRET_KEY must be a Stripe test-mode secret key");
+}
 const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
 const readyPath = process.env.NABUFLOW_PUBLISHED_BROWSER_READY;
-const evidencePath = process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH;
+const workerPackageRoot = fileURLToPath(new URL("..", import.meta.url));
+const evidencePath = resolveWorkerOutputPath(process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH);
 const workerHost = new URL(controlUrl).hostname;
 const capabilityEndpoint = "/_nabuflow/capability/v1/invoke";
 const capabilityIntentUrl = "http://doorman.staging.nabuflow.internal/v1/invoke";
@@ -73,7 +80,7 @@ const locator = {
 const foreignExistingProjectId = locator.projectId + 1;
 const foreignMissingProjectId = locator.projectId + 2;
 const runtimePath = `/_nabuflow/control/v1/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
-const simulatedHost = `slice-2b-vii-${locator.projectId}.apps.mustaflow.com`;
+const simulatedHost = `slice-2b-viii-${locator.projectId}.apps.mustaflow.com`;
 const registeredHosts = new Set<string>();
 let deploymentVersion = "";
 let workerClockOffsetMs = 0;
@@ -84,6 +91,25 @@ let runtimeIdentity = "";
 let activeContainerId = "";
 const provisionedCapabilityProjects = new Set<number>();
 const provisionedDatabaseProjects = new Set<number>();
+const provisionedStripeProjects = new Set<number>();
+const stripeCapabilityRevisions = new Map<number, string>();
+const stripePaymentIntentIds = new Set<string>();
+let stripeAcceptanceStartedAtSeconds = 0;
+
+const stripeProviderLeakPatterns = [
+  /\breq_[A-Za-z0-9]+\b/u,
+  new RegExp(
+    "\\b(?:amount_too_small|api_connection_error|api_error|api_key_expired|authentication_error|" +
+      "card_error|idempotency_error|invalid_request_error|parameter_invalid_integer|parameter_missing|" +
+      "payment_intent_unexpected_state|rate_limit_error|resource_missing|testmode_charges_only)\\b",
+    "u",
+  ),
+  new RegExp(
+    "\\b(?:request-id|stripe-account|stripe-signature|stripe-should-retry|stripe-version|" +
+      "x-stripe-client-user-agent)\\b",
+    "iu",
+  ),
+];
 
 const echoCapabilityDefinition: CapabilityDefinition = {
   name: "echo",
@@ -115,6 +141,26 @@ const databaseCapabilityDefinition: CapabilityDefinition = {
   },
 };
 
+const stripeCapabilityDefinition: CapabilityDefinition = {
+  name: "payments",
+  provider: "stripe",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/payment-intents" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 8_192,
+    maxResponseBytes: 65_536,
+    maxRequestsPerMinute: 30,
+    maxConcurrent: 4,
+  },
+};
+
+const stripePolicy = {
+  allowedCurrencies: ["usd"],
+  maxAmount: 50_000,
+};
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required`);
@@ -131,6 +177,18 @@ function assertCondition(condition: unknown, message: string): asserts condition
 
 function record(step: string, status: number | string, detail: unknown): void {
   transcript.push({ step, status, detail });
+}
+
+function resolveWorkerOutputPath(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  if (isAbsolute(value)) return value;
+
+  const normalizedValue = normalize(value);
+  const workspacePackagePrefix = `${normalize("artifacts/nabuflow-runtime-worker")}${sep}`;
+  const packageRelativeValue = normalizedValue.startsWith(workspacePackagePrefix)
+    ? normalizedValue.slice(workspacePackagePrefix.length)
+    : normalizedValue;
+  return resolve(workerPackageRoot, packageRelativeValue);
 }
 
 function assertStatus(step: string, actual: number, expected: number, detail: unknown): void {
@@ -400,6 +458,155 @@ async function revokeDatabaseCapability(projectId: number): Promise<void> {
   provisionedDatabaseProjects.delete(projectId);
 }
 
+function stripeCapabilityControlPath(projectId: number): string {
+  return `/_nabuflow/control/v1/capabilities/${projectId}/stripe/payments`;
+}
+
+async function provisionStripeCapability(
+  projectId: number,
+  revision = `stripe-v1-${projectId}`,
+): Promise<void> {
+  const result = await signedControlFetch(
+    {
+      path: stripeCapabilityControlPath(projectId),
+      method: "PUT",
+      body: {
+        projectId,
+        revision,
+        definition: stripeCapabilityDefinition,
+        policy: stripePolicy,
+        credential: { kind: "stripe-test-secret-key", value: stripeTestSecretKey },
+      },
+      nonce: nonce(`stripe-provision-${projectId}`),
+      idempotencyKey: `stripe-provision-${projectId}-${crypto.randomUUID()}`,
+    },
+    `stripe.provision.${projectId}`,
+  );
+  assertStatus(`stripe.provision.${projectId}`, result.response.status, 200, result.body);
+  assertCondition(
+    (result.body as { keyId?: string }).keyId === "v1",
+    "Stripe capability provision did not use the active v1 envelope key",
+  );
+  const responseText = JSON.stringify(result.body);
+  assertCondition(
+    !responseText.includes(stripeTestSecretKey) && !responseText.includes("sk_test_"),
+    "Stripe provisioning response exposed credential material",
+  );
+  provisionedStripeProjects.add(projectId);
+  stripeCapabilityRevisions.set(projectId, revision);
+}
+
+async function revokeStripeCapability(projectId: number): Promise<void> {
+  if (!provisionedStripeProjects.has(projectId)) return;
+  const result = await signedControlFetch(
+    {
+      path: stripeCapabilityControlPath(projectId),
+      method: "DELETE",
+      body: {
+        projectId,
+        expectedRevision: stripeCapabilityRevisions.get(projectId) ?? `stripe-v1-${projectId}`,
+      },
+      nonce: nonce(`stripe-revoke-${projectId}`),
+      idempotencyKey: `stripe-revoke-${projectId}-${crypto.randomUUID()}`,
+    },
+    `stripe.revoke.${projectId}`,
+  );
+  record(`stripe.revoke.${projectId}`, result.response.status, result.body);
+  if (result.response.status !== 200 && result.response.status !== 404) {
+    throw new Error(`Stripe capability cleanup failed for project ${projectId}`);
+  }
+  provisionedStripeProjects.delete(projectId);
+  stripeCapabilityRevisions.delete(projectId);
+}
+
+function stripeIdempotencyDigest(projectId: number, tenantIdempotencyKey: string): string {
+  return createHash("sha256")
+    .update(
+      [
+        "nabuflow-stripe-idempotency-v1",
+        `project=${projectId}`,
+        "provider=stripe",
+        "name=payments",
+        "operation=create-payment-intent",
+        `key=${tenantIdempotencyKey}`,
+      ].join("\n"),
+    )
+    .digest("hex");
+}
+
+async function stripeTestApiFetch(
+  pathAndQuery: string,
+  init: RequestInit = {},
+): Promise<{ response: Response; body: unknown }> {
+  const headers = new Headers(init.headers);
+  headers.set(
+    "authorization",
+    `Basic ${Buffer.from(`${stripeTestSecretKey}:`, "utf8").toString("base64")}`,
+  );
+  headers.set("stripe-version", "2025-11-17.clover");
+  const response = await fetch(`https://api.stripe.com${pathAndQuery}`, { ...init, headers });
+  return { response, body: await readResponse(response) };
+}
+
+async function countStripeObjectsForDigest(digest: string): Promise<number> {
+  const query = new URLSearchParams({
+    limit: "100",
+    "created[gte]": String(stripeAcceptanceStartedAtSeconds),
+  });
+  const result = await stripeTestApiFetch(`/v1/payment_intents?${query.toString()}`);
+  if (result.response.status !== 200) {
+    throw new Error(`Stripe test-object inspection failed with HTTP ${result.response.status}`);
+  }
+  const data = (result.body as { data?: Array<{ id?: string; metadata?: Record<string, string> }> })
+    .data;
+  assertCondition(Array.isArray(data), "Stripe test-object inspection returned no data array");
+  return data.filter(
+    (paymentIntent) => paymentIntent.metadata?.nabuflow_idempotency_digest === digest,
+  ).length;
+}
+
+async function expectStripeObjectCount(
+  label: string,
+  digest: string,
+  expected: number,
+): Promise<void> {
+  let actual = -1;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    actual = await countStripeObjectsForDigest(digest);
+    if (actual === expected) break;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  record(label, 200, { matchingStripeObjects: actual, expected });
+  assertCondition(actual === expected, `${label}: expected ${expected} Stripe test object(s)`);
+}
+
+async function cleanupStripeTestObjects(): Promise<void> {
+  for (const paymentIntentId of stripePaymentIntentIds) {
+    const retrieved = await stripeTestApiFetch(
+      `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}`,
+    );
+    if (retrieved.response.status === 404) continue;
+    if (retrieved.response.status !== 200) {
+      throw new Error(`Stripe test-object retrieval failed with HTTP ${retrieved.response.status}`);
+    }
+    const status = (retrieved.body as { status?: string }).status;
+    if (status === "canceled" || status === "succeeded") continue;
+    const canceled = await stripeTestApiFetch(
+      `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}/cancel`,
+      { method: "POST" },
+    );
+    if (canceled.response.status !== 200) {
+      throw new Error(`Stripe test-object cleanup failed with HTTP ${canceled.response.status}`);
+    }
+    assertCondition(
+      (canceled.body as { status?: string; livemode?: boolean }).status === "canceled" &&
+        (canceled.body as { livemode?: boolean }).livemode === false,
+      "Stripe test PaymentIntent did not enter the expected test-mode canceled state",
+    );
+    record("stripe.cleanup.payment-intent", 200, { paymentIntentId, status: "canceled" });
+  }
+}
+
 function capabilityIntent(requestId: string, requestedProjectId?: number): CapabilityIntent {
   return {
     v: 1,
@@ -445,6 +652,33 @@ function databaseCapabilityInvocation(
 ): CapabilityInvocation {
   return {
     ...databaseCapabilityIntent(requestId, input, requestedProjectId),
+    caller: { containerId, runtimeIdentity },
+  };
+}
+
+function stripeCapabilityIntent(
+  requestId: string,
+  input: Record<string, unknown>,
+  requestedProjectId?: number,
+): CapabilityIntent {
+  return {
+    v: 1,
+    capability: { provider: "stripe", name: "payments" },
+    action: "execute",
+    requestId,
+    ...(requestedProjectId === undefined ? {} : { requestedProjectId }),
+    input,
+  };
+}
+
+function stripeCapabilityInvocation(
+  requestId: string,
+  input: Record<string, unknown>,
+  containerId = activeContainerId,
+  requestedProjectId?: number,
+): CapabilityInvocation {
+  return {
+    ...stripeCapabilityIntent(requestId, input, requestedProjectId),
     caller: { containerId, runtimeIdentity },
   };
 }
@@ -495,6 +729,20 @@ async function invokeDatabaseFromContainer(
     databaseCapabilityIntent(`database-${label}-${crypto.randomUUID()}`, input, requestedProjectId),
   );
   assertStatus(`database.${label}`, result.status, expectedStatus, result.body);
+  return result.body;
+}
+
+async function invokeStripeFromContainer(
+  label: string,
+  input: Record<string, unknown>,
+  expectedStatus = 200,
+  requestedProjectId?: number,
+): Promise<unknown> {
+  const result = await invokeCapabilityFromContainer(
+    label,
+    stripeCapabilityIntent(`stripe-${label}-${crypto.randomUUID()}`, input, requestedProjectId),
+  );
+  assertStatus(`stripe.${label}`, result.status, expectedStatus, result.body);
   return result.body;
 }
 
@@ -735,6 +983,12 @@ async function run(): Promise<void> {
   assertCondition(Number.isFinite(workerTimeMs), "Worker Date header is missing");
   workerClockOffsetMs = workerTimeMs - Date.now();
   record("clock.offset", 200, { workerDate, offsetMs: workerClockOffsetMs });
+  // Provider time predicates must use the measured per-run clock offset. The Windows lab
+  // clock is known to drift and raw Date.now() can otherwise query provider data in the future.
+  stripeAcceptanceStartedAtSeconds = Math.floor((Date.now() + workerClockOffsetMs) / 1_000) - 5;
+  record("clock.provider-predicate-start", 200, {
+    stripeAcceptanceStartedAtSeconds,
+  });
 
   const versionBody = await waitForSustainedGreenWindow();
   record("control.version.valid", 200, versionBody);
@@ -1169,6 +1423,274 @@ async function run(): Promise<void> {
     errorType: directDatabase.errorType ?? null,
   });
 
+  await provisionStripeCapability(locator.projectId);
+  await provisionStripeCapability(foreignExistingProjectId);
+
+  const stripeProbeKey = `stripe-auth-probe-${crypto.randomUUID()}`;
+  const stripeProbeInput = {
+    kind: "create-payment-intent",
+    idempotencyKey: stripeProbeKey,
+    amount: 1_099,
+    currency: "usd",
+  };
+  const stripeCrossRequestId = `stripe-cross-project-${crypto.randomUUID()}`;
+  const stripeCrossExisting = await invokeCapabilityFromContainer(
+    "stripe-cross-existing",
+    stripeCapabilityIntent(stripeCrossRequestId, stripeProbeInput, foreignExistingProjectId),
+  );
+  const stripeCrossMissing = await invokeCapabilityFromContainer(
+    "stripe-cross-missing",
+    stripeCapabilityIntent(stripeCrossRequestId, stripeProbeInput, foreignMissingProjectId),
+  );
+  assertStatus(
+    "stripe.isolation.foreign-existing",
+    stripeCrossExisting.status,
+    403,
+    stripeCrossExisting.body,
+  );
+  assertStatus(
+    "stripe.isolation.foreign-missing",
+    stripeCrossMissing.status,
+    403,
+    stripeCrossMissing.body,
+  );
+  assertCondition(
+    JSON.stringify(stripeCrossExisting.body) === JSON.stringify(stripeCrossMissing.body) &&
+      (stripeCrossExisting.body as { code?: string }).code === "capability_tenant_mismatch",
+    "Stripe cross-project rejection leaks capability existence",
+  );
+
+  const unsignedStripeInvocation = stripeCapabilityInvocation(
+    `stripe-unsigned-${crypto.randomUUID()}`,
+    stripeProbeInput,
+  );
+  const unsignedStripe = await fetch(`${controlUrl}${capabilityEndpoint}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(unsignedStripeInvocation),
+  });
+  assertStatus(
+    "stripe.auth.unsigned",
+    unsignedStripe.status,
+    401,
+    await readResponse(unsignedStripe),
+  );
+
+  const tamperedStripe = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: stripeCapabilityInvocation(`stripe-tampered-${crypto.randomUUID()}`, stripeProbeInput),
+    nonce: nonce("stripe-tampered"),
+    idempotencyKey: `stripe-tampered-${crypto.randomUUID()}`,
+    signatureOverride: "0".repeat(64),
+  });
+  assertStatus("stripe.auth.tampered", tamperedStripe.response.status, 401, tamperedStripe.body);
+
+  const expiredStripeRequestId = `stripe-expired-${crypto.randomUUID()}`;
+  const expiredStripe = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: stripeCapabilityInvocation(expiredStripeRequestId, stripeProbeInput),
+    nonce: nonce("stripe-expired"),
+    idempotencyKey: expiredStripeRequestId,
+    timestampMs: Date.now() + workerClockOffsetMs - 60_001,
+  });
+  assertStatus("stripe.auth.expired", expiredStripe.response.status, 401, expiredStripe.body);
+
+  const validStripeRequestId = `stripe-valid-${crypto.randomUUID()}`;
+  const validStripe = await acceptedReplayableRequest(
+    {
+      path: capabilityEndpoint,
+      method: "POST",
+      body: stripeCapabilityInvocation(validStripeRequestId, stripeProbeInput),
+      nonce: nonce("stripe-valid"),
+      idempotencyKey: validStripeRequestId,
+    },
+    "stripe.auth.valid",
+  );
+  assertStatus("stripe.auth.valid", validStripe.response.status, 200, validStripe.body);
+  const authPaymentIntent = (
+    validStripe.body as {
+      actedBy?: string;
+      paymentIntent?: { id?: string; livemode?: boolean };
+    }
+  ).paymentIntent;
+  assertCondition(
+    (validStripe.body as { actedBy?: string }).actedBy === "stripe-broker" &&
+      authPaymentIntent?.id &&
+      authPaymentIntent.livemode === false,
+    "Valid Stripe request did not return a test-mode PaymentIntent",
+  );
+  stripePaymentIntentIds.add(authPaymentIntent.id);
+  const replayedStripe = await replaySignedRequest(validStripe.request, "stripe.auth.replay");
+  assertStatus("stripe.auth.replay", replayedStripe.response.status, 409, replayedStripe.body);
+  await expectStripeObjectCount(
+    "stripe.auth.valid.provider-object-count",
+    stripeIdempotencyDigest(locator.projectId, stripeProbeKey),
+    1,
+  );
+
+  const businessIdempotencyKey = `stripe-business-payment-${crypto.randomUUID()}`;
+  const createInput = {
+    kind: "create-payment-intent",
+    idempotencyKey: businessIdempotencyKey,
+    amount: 2_499,
+    currency: "usd",
+  };
+  const created = await invokeStripeFromContainer("create", createInput);
+  const createdPaymentIntent = (
+    created as {
+      operation?: string;
+      idempotentReplay?: boolean;
+      paymentIntent?: {
+        id?: string;
+        amount?: number;
+        currency?: string;
+        livemode?: boolean;
+      };
+    }
+  ).paymentIntent;
+  assertCondition(
+    (created as { operation?: string }).operation === "create-payment-intent" &&
+      (created as { idempotentReplay?: boolean }).idempotentReplay === false &&
+      createdPaymentIntent?.id &&
+      createdPaymentIntent.amount === 2_499 &&
+      createdPaymentIntent.currency === "usd" &&
+      createdPaymentIntent.livemode === false,
+    "Stripe create did not return the expected sanitized test-mode result",
+  );
+  stripePaymentIntentIds.add(createdPaymentIntent.id);
+
+  const retrieved = await invokeStripeFromContainer("retrieve", {
+    kind: "retrieve-payment-intent",
+    paymentIntentId: createdPaymentIntent.id,
+  });
+  assertCondition(
+    (retrieved as { paymentIntent?: { id?: string; livemode?: boolean } }).paymentIntent?.id ===
+      createdPaymentIntent.id &&
+      (retrieved as { paymentIntent?: { livemode?: boolean } }).paymentIntent?.livemode === false,
+    "Stripe retrieve did not return the owned test-mode PaymentIntent",
+  );
+
+  const retried = await invokeStripeFromContainer("idempotent-retry", createInput);
+  assertCondition(
+    (retried as { paymentIntent?: { id?: string } }).paymentIntent?.id ===
+      createdPaymentIntent.id &&
+      (retried as { idempotentReplay?: boolean }).idempotentReplay === true,
+    "Stripe business retry did not resolve to the original durable result",
+  );
+  const businessDigest = stripeIdempotencyDigest(locator.projectId, businessIdempotencyKey);
+  await expectStripeObjectCount("stripe.idempotency.provider-object-count", businessDigest, 1);
+
+  const changedPayload = await invokeStripeFromContainer(
+    "idempotency-conflict",
+    { ...createInput, amount: 2_500 },
+    409,
+  );
+  assertCondition(
+    (changedPayload as { code?: string }).code === "stripe_idempotency_conflict",
+    "Same Stripe idempotency key with a different payload did not fail closed",
+  );
+  await expectStripeObjectCount(
+    "stripe.idempotency.conflict-provider-object-count",
+    businessDigest,
+    1,
+  );
+
+  const overMaxKey = `stripe-over-max-${crypto.randomUUID()}`;
+  const overMax = await invokeStripeFromContainer(
+    "policy-over-max",
+    {
+      kind: "create-payment-intent",
+      idempotencyKey: overMaxKey,
+      amount: stripePolicy.maxAmount + 1,
+      currency: "usd",
+    },
+    403,
+  );
+  assertCondition(
+    (overMax as { code?: string }).code === "capability_policy_rejected",
+    "Over-max Stripe request did not return a structured policy rejection",
+  );
+  await expectStripeObjectCount(
+    "stripe.policy.over-max-provider-object-count",
+    stripeIdempotencyDigest(locator.projectId, overMaxKey),
+    0,
+  );
+
+  const disallowedCurrencyKey = `stripe-disallowed-currency-${crypto.randomUUID()}`;
+  const disallowedCurrency = await invokeStripeFromContainer(
+    "policy-disallowed-currency",
+    {
+      kind: "create-payment-intent",
+      idempotencyKey: disallowedCurrencyKey,
+      amount: 1_099,
+      currency: "eur",
+    },
+    403,
+  );
+  assertCondition(
+    (disallowedCurrency as { code?: string }).code === "capability_policy_rejected",
+    "Disallowed Stripe currency did not return a structured policy rejection",
+  );
+  await expectStripeObjectCount(
+    "stripe.policy.disallowed-currency-provider-object-count",
+    stripeIdempotencyDigest(locator.projectId, disallowedCurrencyKey),
+    0,
+  );
+
+  const invalidAmountKey = `stripe-provider-invalid-${crypto.randomUUID()}`;
+  const stripeSanitizedError = await invokeStripeFromContainer(
+    "sanitized-error",
+    {
+      kind: "create-payment-intent",
+      idempotencyKey: invalidAmountKey,
+      amount: 1,
+      currency: "usd",
+    },
+    400,
+  );
+  const stripeSanitizedErrorText = JSON.stringify(stripeSanitizedError);
+  assertCondition(
+    (stripeSanitizedError as { code?: string }).code === "stripe_invalid_request" &&
+      !stripeSanitizedErrorText.includes(stripeTestSecretKey) &&
+      !stripeSanitizedErrorText.includes("sk_test_") &&
+      !stripeSanitizedErrorText.includes("api.stripe.com") &&
+      !stripeProviderLeakPatterns.some((pattern) => pattern.test(stripeSanitizedErrorText)),
+    "Sanitized Stripe error exposed provider or credential details",
+  );
+  await expectStripeObjectCount(
+    "stripe.sanitized-error-provider-object-count",
+    stripeIdempotencyDigest(locator.projectId, invalidAmountKey),
+    0,
+  );
+
+  await provisionStripeCapability(locator.projectId, `stripe-v2-${locator.projectId}`);
+  const revisionAmbiguity = await invokeStripeFromContainer(
+    "credential-revision-ambiguity",
+    createInput,
+    409,
+  );
+  assertCondition(
+    (revisionAmbiguity as { code?: string }).code === "stripe_idempotency_conflict",
+    "Stripe retry across a credential revision did not fail closed",
+  );
+  await expectStripeObjectCount(
+    "stripe.idempotency.revision-provider-object-count",
+    businessDigest,
+    1,
+  );
+
+  const directStripe = (await runContainerNode(
+    "stripe-host-direct",
+    "fetch('https://api.stripe.com/v1/payment_intents').then(response=>console.log(JSON.stringify({connected:response.status<500,status:response.status}))).catch(error=>console.log(JSON.stringify({connected:false,errorType:error&&error.name||'Error'})))",
+  )) as { connected: boolean; status?: number; errorType?: string };
+  assertCondition(directStripe.connected === false, "Tenant container reached api.stripe.com");
+  record("stripe.direct-host.blocked", directStripe.status ?? "blocked", {
+    connected: false,
+    errorType: directStripe.errorType ?? null,
+  });
+
   const activationPath = `/_nabuflow/control/v1/routes/${simulatedHost}/activate`;
   const activationBody = activateBody(simulatedHost);
   const unsignedActivate = await fetch(`${controlUrl}${activationPath}`, {
@@ -1551,8 +2073,16 @@ async function verifyPreviewAuthRegression(): Promise<void> {
 }
 
 async function cleanup(): Promise<void> {
+  let stripeObjectCleanupFailure: string | null = null;
   for (const hostname of [...registeredHosts]) {
     await deactivateRoute(hostname, "cleanup.route");
+  }
+  try {
+    await cleanupStripeTestObjects();
+  } catch (error) {
+    stripeObjectCleanupFailure =
+      error instanceof Error ? error.message : "Unknown Stripe test-object cleanup failure";
+    record("stripe.cleanup.failure", "failed", { message: stripeObjectCleanupFailure });
   }
   if (runtimeStarted) {
     const stopped = await signedControlFetch(
@@ -1630,6 +2160,35 @@ async function cleanup(): Promise<void> {
       (staleDatabase.body as { code?: string }).code === "capability_runtime_unbound",
       "Stopped runtime did not fail closed for the database capability",
     );
+
+    const staleStripeRequestId = `stripe-stale-binding-${crypto.randomUUID()}`;
+    const staleStripe = await signedControlFetch(
+      {
+        path: capabilityEndpoint,
+        method: "POST",
+        body: stripeCapabilityInvocation(
+          staleStripeRequestId,
+          {
+            kind: "create-payment-intent",
+            idempotencyKey: `stripe-stale-business-${crypto.randomUUID()}`,
+            amount: 1_099,
+            currency: "usd",
+          },
+          activeContainerId,
+        ),
+        nonce: nonce("cleanup-stripe-stale"),
+        idempotencyKey: staleStripeRequestId,
+      },
+      "cleanup.stripe-stale",
+    );
+    assertStatus("cleanup.stripe-stale", staleStripe.response.status, 403, staleStripe.body);
+    assertCondition(
+      (staleStripe.body as { code?: string }).code === "capability_runtime_unbound",
+      "Stopped runtime did not fail closed for the Stripe capability",
+    );
+  }
+  for (const projectId of [...provisionedStripeProjects]) {
+    await revokeStripeCapability(projectId);
   }
   for (const projectId of [...provisionedDatabaseProjects]) {
     await revokeDatabaseCapability(projectId);
@@ -1659,6 +2218,7 @@ async function cleanup(): Promise<void> {
     record("cleanup.status-after-destroy", status.response.status, status.body);
     if (status.response.status !== 404) throw new Error("Destroyed runtime still resolves");
   }
+  if (stripeObjectCleanupFailure !== null) throw new Error(stripeObjectCleanupFailure);
 }
 
 let failure: string | null = null;
@@ -1691,7 +2251,10 @@ const evidence = {
   transcript,
 };
 const envelope = { evidence, evidenceSha256: await sha256Hex(JSON.stringify(evidence)) };
-if (evidencePath) writeFileSync(evidencePath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+if (evidencePath) {
+  mkdirSync(dirname(evidencePath), { recursive: true, mode: 0o700 });
+  writeFileSync(evidencePath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+}
 // Redacted by construction: no token, private key, or request signature is retained.
 // eslint-disable-next-line no-console
 console.log(JSON.stringify(envelope, null, 2));

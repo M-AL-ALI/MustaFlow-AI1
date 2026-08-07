@@ -3,11 +3,14 @@ import {
   capabilityBindingResponseSchema,
   capabilityEchoResponseSchema,
   capabilityDatabaseResponseSchema,
+  capabilityStripeResponseSchema,
   databaseCapabilityInputSchema,
   capabilityIntentSchema,
   capabilityInvocationSchema,
   provisionEchoCapabilityRequestSchema,
   provisionDatabaseCapabilityRequestSchema,
+  provisionStripeCapabilityRequestSchema,
+  stripeCapabilityInputSchema,
 } from "../src/capability-request";
 
 const definition = {
@@ -127,6 +130,82 @@ describe("capability request contract", () => {
         definition,
       }),
     ).toMatchObject({ definition: { injection: { location: "worker-binding" } } });
+  });
+
+  it("defines a test-only, policy-bound Stripe capability contract", () => {
+    const stripeDefinition = {
+      ...definition,
+      name: "payments",
+      provider: "stripe",
+      allowedPaths: [{ match: "exact", path: "/v1/payment-intents" }],
+    } as const;
+    const provision = {
+      projectId: 42,
+      revision: "stripe-v1",
+      definition: stripeDefinition,
+      policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+      credential: { kind: "stripe-test-secret-key", value: `sk_test_${"a".repeat(32)}` },
+    } as const;
+    expect(provisionStripeCapabilityRequestSchema.parse(provision)).toMatchObject({
+      policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+      credential: { kind: "stripe-test-secret-key" },
+    });
+    expect(
+      provisionStripeCapabilityRequestSchema.safeParse({
+        ...provision,
+        credential: { ...provision.credential, value: `sk_live_${"a".repeat(32)}` },
+      }).success,
+    ).toBe(false);
+    expect(
+      provisionStripeCapabilityRequestSchema.safeParse({
+        ...provision,
+        policy: { allowedCurrencies: ["usd", "usd"], maxAmount: 50_000 },
+      }).success,
+    ).toBe(false);
+    expect(
+      stripeCapabilityInputSchema.parse({
+        kind: "create-payment-intent",
+        idempotencyKey: "checkout-order-00000001",
+        amount: 1_099,
+        currency: "usd",
+      }),
+    ).toMatchObject({ kind: "create-payment-intent", amount: 1_099 });
+    expect(
+      stripeCapabilityInputSchema.parse({
+        kind: "retrieve-payment-intent",
+        paymentIntentId: "pi_test123",
+      }),
+    ).toMatchObject({ kind: "retrieve-payment-intent" });
+  });
+
+  it("keeps Stripe responses test-mode and excludes provider secrets", () => {
+    const response = capabilityStripeResponseSchema.parse({
+      ok: true,
+      capability: { provider: "stripe", name: "payments" },
+      requestId: "stripe-request-0001",
+      runtimeIdentity: "nrf-aaaaaaaaaaaaaaaa-p42-production-blue",
+      actedBy: "stripe-broker",
+      operation: "create-payment-intent",
+      idempotentReplay: false,
+      paymentIntent: {
+        id: "pi_test123",
+        status: "requires_payment_method",
+        amount: 1_099,
+        amountReceived: 0,
+        currency: "usd",
+        created: 1_785_859_200,
+        livemode: false,
+      },
+    });
+    expect(JSON.stringify(response)).not.toMatch(
+      /client.secret|sk_test|authorization|credential/iu,
+    );
+    expect(
+      capabilityStripeResponseSchema.safeParse({
+        ...response,
+        paymentIntent: { ...response.paymentIntent, livemode: true },
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps the benign response proof credential-free", () => {

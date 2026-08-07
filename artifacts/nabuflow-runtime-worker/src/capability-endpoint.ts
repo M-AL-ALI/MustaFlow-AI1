@@ -349,7 +349,9 @@ export async function handleCapabilityRequest(
         : invocation.capability.provider === "neon-postgres" &&
             invocation.capability.name === "database"
           ? await vault.invokeDatabase({ projectId: caller.projectId, invocation })
-          : { state: "not_found" as const };
+          : invocation.capability.provider === "stripe" && invocation.capability.name === "payments"
+            ? await vault.invokeStripe({ projectId: caller.projectId, invocation })
+            : { state: "not_found" as const };
     let response: StoredHttpResponse;
     if (result.state === "success") {
       response = { status: 200, body: capabilitySuccessResponseSchema.parse(result.response) };
@@ -387,6 +389,13 @@ export async function handleCapabilityRequest(
         "The database operation could not be completed",
         result.retryable,
         sqlstate,
+      );
+    } else if (result.state === "stripe_error") {
+      throw new CapabilityHttpError(
+        result.status,
+        result.code,
+        "The payment operation could not be completed",
+        result.retryable,
       );
     } else {
       throw new CapabilityHttpError(404, "capability_not_available", "Capability is not available");
