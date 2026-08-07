@@ -1,5 +1,7 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, normalize, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   deriveRuntimeIdentity,
   sha256Hex,
@@ -24,7 +26,8 @@ if (!/^sk_test_[A-Za-z0-9]+$/u.test(stripeTestSecretKey)) {
 }
 const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
 const readyPath = process.env.NABUFLOW_PUBLISHED_BROWSER_READY;
-const evidencePath = process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH;
+const workerPackageRoot = fileURLToPath(new URL("..", import.meta.url));
+const evidencePath = resolveWorkerOutputPath(process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH);
 const workerHost = new URL(controlUrl).hostname;
 const capabilityEndpoint = "/_nabuflow/capability/v1/invoke";
 const capabilityIntentUrl = "http://doorman.staging.nabuflow.internal/v1/invoke";
@@ -91,7 +94,22 @@ const provisionedDatabaseProjects = new Set<number>();
 const provisionedStripeProjects = new Set<number>();
 const stripeCapabilityRevisions = new Map<number, string>();
 const stripePaymentIntentIds = new Set<string>();
-const stripeAcceptanceStartedAtSeconds = Math.floor(Date.now() / 1_000) - 5;
+let stripeAcceptanceStartedAtSeconds = 0;
+
+const stripeProviderLeakPatterns = [
+  /\breq_[A-Za-z0-9]+\b/u,
+  new RegExp(
+    "\\b(?:amount_too_small|api_connection_error|api_error|api_key_expired|authentication_error|" +
+      "card_error|idempotency_error|invalid_request_error|parameter_invalid_integer|parameter_missing|" +
+      "payment_intent_unexpected_state|rate_limit_error|resource_missing|testmode_charges_only)\\b",
+    "u",
+  ),
+  new RegExp(
+    "\\b(?:request-id|stripe-account|stripe-signature|stripe-should-retry|stripe-version|" +
+      "x-stripe-client-user-agent)\\b",
+    "iu",
+  ),
+];
 
 const echoCapabilityDefinition: CapabilityDefinition = {
   name: "echo",
@@ -159,6 +177,18 @@ function assertCondition(condition: unknown, message: string): asserts condition
 
 function record(step: string, status: number | string, detail: unknown): void {
   transcript.push({ step, status, detail });
+}
+
+function resolveWorkerOutputPath(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  if (isAbsolute(value)) return value;
+
+  const normalizedValue = normalize(value);
+  const workspacePackagePrefix = `${normalize("artifacts/nabuflow-runtime-worker")}${sep}`;
+  const packageRelativeValue = normalizedValue.startsWith(workspacePackagePrefix)
+    ? normalizedValue.slice(workspacePackagePrefix.length)
+    : normalizedValue;
+  return resolve(workerPackageRoot, packageRelativeValue);
 }
 
 function assertStatus(step: string, actual: number, expected: number, detail: unknown): void {
@@ -953,6 +983,12 @@ async function run(): Promise<void> {
   assertCondition(Number.isFinite(workerTimeMs), "Worker Date header is missing");
   workerClockOffsetMs = workerTimeMs - Date.now();
   record("clock.offset", 200, { workerDate, offsetMs: workerClockOffsetMs });
+  // Provider time predicates must use the measured per-run clock offset. The Windows lab
+  // clock is known to drift and raw Date.now() can otherwise query provider data in the future.
+  stripeAcceptanceStartedAtSeconds = Math.floor((Date.now() + workerClockOffsetMs) / 1_000) - 5;
+  record("clock.provider-predicate-start", 200, {
+    stripeAcceptanceStartedAtSeconds,
+  });
 
   const versionBody = await waitForSustainedGreenWindow();
   record("control.version.valid", 200, versionBody);
@@ -1620,7 +1656,7 @@ async function run(): Promise<void> {
       !stripeSanitizedErrorText.includes(stripeTestSecretKey) &&
       !stripeSanitizedErrorText.includes("sk_test_") &&
       !stripeSanitizedErrorText.includes("api.stripe.com") &&
-      !/request[_ -]?id|provider[_ -]?code/iu.test(stripeSanitizedErrorText),
+      !stripeProviderLeakPatterns.some((pattern) => pattern.test(stripeSanitizedErrorText)),
     "Sanitized Stripe error exposed provider or credential details",
   );
   await expectStripeObjectCount(
@@ -2215,7 +2251,10 @@ const evidence = {
   transcript,
 };
 const envelope = { evidence, evidenceSha256: await sha256Hex(JSON.stringify(evidence)) };
-if (evidencePath) writeFileSync(evidencePath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+if (evidencePath) {
+  mkdirSync(dirname(evidencePath), { recursive: true, mode: 0o700 });
+  writeFileSync(evidencePath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+}
 // Redacted by construction: no token, private key, or request signature is retained.
 // eslint-disable-next-line no-console
 console.log(JSON.stringify(envelope, null, 2));
