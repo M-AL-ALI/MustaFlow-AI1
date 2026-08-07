@@ -13,6 +13,7 @@
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "0.12.4",
+    "@neondatabase/serverless": "1.1.0",
     "@workspace/tenant-runtime-contracts": "workspace:*"
   },
   "devDependencies": {

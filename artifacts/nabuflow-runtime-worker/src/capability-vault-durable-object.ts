@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   capabilityDefinitionSchema,
+  capabilityDatabaseResponseSchema,
   capabilityEchoResponseSchema,
   parseRuntimeIdentity,
   type CapabilityDefinition,
@@ -8,11 +9,16 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVault, CapabilityVaultInvocationResult } from "./model";
+import { DatabaseBrokerError, executeDatabaseCapability } from "./database-broker";
 
 const ECHO_PROVIDER = "nabuflow-harness";
 const ECHO_NAME = "echo";
 const ECHO_STORAGE_KEY = `capability:${ECHO_PROVIDER}:${ECHO_NAME}`;
+const DATABASE_PROVIDER = "neon-postgres";
+const DATABASE_NAME = "database";
+const DATABASE_STORAGE_KEY = `capability:${DATABASE_PROVIDER}:${DATABASE_NAME}`;
 const textEncoder = new TextEncoder();
+const credentialDecoder = new TextDecoder("utf-8", { fatal: true });
 
 interface EncryptedCapabilityEnvelope {
   algorithm: "AES-256-GCM";
@@ -136,6 +142,34 @@ function validateEchoDefinition(definition: CapabilityDefinition): CapabilityDef
   return parsed;
 }
 
+function validateDatabaseDefinition(definition: CapabilityDefinition): CapabilityDefinition {
+  const parsed = capabilityDefinitionSchema.parse(definition);
+  const exactPolicy =
+    parsed.provider === DATABASE_PROVIDER &&
+    parsed.name === DATABASE_NAME &&
+    parsed.allowedMethods.length === 1 &&
+    parsed.allowedMethods[0] === "POST" &&
+    parsed.allowedPaths.length === 1 &&
+    parsed.allowedPaths[0]?.match === "exact" &&
+    parsed.allowedPaths[0]?.path === "/v1/query" &&
+    parsed.injection.location === "worker-binding";
+  if (!exactPolicy) throw new Error("Database capability policy is invalid");
+  return parsed;
+}
+
+function ownsInvocation(
+  projectId: number,
+  record: StoredCapabilityRecord,
+  invocation: CapabilityInvocation,
+): boolean {
+  try {
+    const identity = parseRuntimeIdentity(invocation.caller.runtimeIdentity);
+    return identity.projectId === projectId && record.projectId === projectId;
+  } catch {
+    return false;
+  }
+}
+
 function readKek(env: WorkerBindings, keyId: string): string {
   if (keyId !== "v1") throw new Error("Vault envelope references an unavailable key version");
   return env.CLOUDFLARE_CAPABILITY_VAULT_KEK_V1;
@@ -210,23 +244,66 @@ export class CapabilityVaultDurableObject
     });
   }
 
+  async provisionDatabase(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    credential: { kind: "neon-connection-string"; value: string };
+  }): Promise<{ state: "provisioned"; keyId: string }> {
+    const definition = validateDatabaseDefinition(input.definition);
+    if (input.credential.kind !== "neon-connection-string") {
+      throw new Error("Database credential type is invalid");
+    }
+    const keyId = this.env.NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID;
+    if (keyId !== "v1") throw new Error("The configured vault key version is unsupported");
+    const context = {
+      projectId: input.projectId,
+      provider: definition.provider,
+      name: definition.name,
+      revision: input.revision,
+    };
+    const plaintext = textEncoder.encode(input.credential.value);
+    try {
+      const envelope = await encryptCapabilityMaterial(
+        readKek(this.env, keyId),
+        keyId,
+        context,
+        plaintext,
+      );
+      await this.ctx.storage.put(DATABASE_STORAGE_KEY, {
+        projectId: input.projectId,
+        revision: input.revision,
+        definition,
+        envelope,
+      } satisfies StoredCapabilityRecord);
+      return { state: "provisioned", keyId };
+    } finally {
+      plaintext.fill(0);
+    }
+  }
+
+  async revokeDatabase(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const record = await transaction.get<StoredCapabilityRecord>(DATABASE_STORAGE_KEY);
+      if (record === undefined) return "not_found" as const;
+      if (record.projectId !== input.projectId || record.revision !== input.expectedRevision) {
+        return "conflict" as const;
+      }
+      await transaction.delete(DATABASE_STORAGE_KEY);
+      return "revoked" as const;
+    });
+  }
+
   async invokeEcho(input: {
     projectId: number;
     invocation: CapabilityInvocation;
   }): Promise<CapabilityVaultInvocationResult> {
     const record = await this.ctx.storage.get<StoredCapabilityRecord>(ECHO_STORAGE_KEY);
     if (record === undefined) return { state: "not_found" };
-    let identity;
-    try {
-      identity = parseRuntimeIdentity(input.invocation.caller.runtimeIdentity);
-    } catch {
-      identity = null;
-    }
-    if (
-      identity === null ||
-      identity.projectId !== input.projectId ||
-      record.projectId !== input.projectId
-    ) {
+    if (!ownsInvocation(input.projectId, record, input.invocation)) {
       return { state: "tenant_mismatch" };
     }
     if (
@@ -260,6 +337,73 @@ export class CapabilityVaultDurableObject
       return { state: "success", response };
     } finally {
       canary.fill(0);
+    }
+  }
+
+  async invokeDatabase(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult> {
+    const record = await this.ctx.storage.get<StoredCapabilityRecord>(DATABASE_STORAGE_KEY);
+    if (record === undefined) return { state: "not_found" };
+    if (!ownsInvocation(input.projectId, record, input.invocation)) {
+      return { state: "tenant_mismatch" };
+    }
+    if (
+      input.invocation.capability.provider !== record.definition.provider ||
+      input.invocation.capability.name !== record.definition.name ||
+      input.invocation.action !== "query"
+    ) {
+      return { state: "policy_rejected" };
+    }
+    const context = {
+      projectId: record.projectId,
+      provider: record.definition.provider,
+      name: record.definition.name,
+      revision: record.revision,
+    };
+    let credentialBytes: Uint8Array | null = null;
+    try {
+      credentialBytes = await decryptCapabilityMaterial(
+        readKek(this.env, record.envelope.keyId),
+        context,
+        record.envelope,
+      );
+      const result = await executeDatabaseCapability(
+        credentialDecoder.decode(credentialBytes),
+        input.invocation.input,
+        { timeoutMs: record.definition.limits.timeoutMs },
+      );
+      return {
+        state: "success",
+        response: capabilityDatabaseResponseSchema.parse({
+          ok: true,
+          capability: input.invocation.capability,
+          requestId: input.invocation.requestId,
+          runtimeIdentity: input.invocation.caller.runtimeIdentity,
+          actedBy: "database-broker",
+          result,
+        }),
+      };
+    } catch (error) {
+      if (error instanceof DatabaseBrokerError) {
+        return {
+          state: "database_error",
+          status: error.status,
+          code: error.code,
+          retryable: error.retryable,
+          sqlstate: error.sqlstate,
+        };
+      }
+      return {
+        state: "database_error",
+        status: 503,
+        code: "database_unavailable",
+        retryable: true,
+        sqlstate: null,
+      };
+    } finally {
+      credentialBytes?.fill(0);
     }
   }
 }

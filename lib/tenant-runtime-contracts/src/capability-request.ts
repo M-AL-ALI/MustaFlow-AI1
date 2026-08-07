@@ -15,7 +15,7 @@ const requestTokenSchema = z
 
 const boundedInputSchema = z.record(z.string(), z.unknown()).refine((value) => {
   try {
-    return JSON.stringify(value).length <= 32 * 1024;
+    return JSON.stringify(value).length <= 64 * 1024;
   } catch {
     return false;
   }
@@ -28,7 +28,24 @@ export const capabilityReferenceSchema = z
   })
   .strict();
 
-export const capabilityIntentSchema = z
+function enforceCapabilityInputLimit(
+  intent: { capability: { provider: string; name: string }; input: Record<string, unknown> },
+  context: z.RefinementCtx,
+): void {
+  if (
+    intent.capability.provider === "nabuflow-harness" &&
+    intent.capability.name === "echo" &&
+    JSON.stringify(intent.input).length > 32 * 1024
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["input"],
+      message: "Echo capability input is too large",
+    });
+  }
+}
+
+const capabilityIntentObjectSchema = z
   .object({
     v: z.literal(1),
     capability: capabilityReferenceSchema,
@@ -39,7 +56,11 @@ export const capabilityIntentSchema = z
   })
   .strict();
 
-export const capabilityInvocationSchema = capabilityIntentSchema
+export const capabilityIntentSchema = capabilityIntentObjectSchema.superRefine(
+  enforceCapabilityInputLimit,
+);
+
+export const capabilityInvocationSchema = capabilityIntentObjectSchema
   .extend({
     caller: z
       .object({
@@ -48,7 +69,8 @@ export const capabilityInvocationSchema = capabilityIntentSchema
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine(enforceCapabilityInputLimit);
 
 export const provisionEchoCapabilityRequestSchema = z
   .object({
@@ -64,6 +86,72 @@ export const revokeEchoCapabilityRequestSchema = z
     expectedRevision: z.string().min(1).max(200),
   })
   .strict();
+
+export const provisionDatabaseCapabilityRequestSchema = z
+  .object({
+    projectId: z.number().int().positive().safe(),
+    revision: z.string().min(1).max(200),
+    definition: capabilityDefinitionSchema,
+    credential: z
+      .object({
+        kind: z.literal("neon-connection-string"),
+        value: z.string().min(1).max(4_096),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const revokeDatabaseCapabilityRequestSchema = revokeEchoCapabilityRequestSchema;
+
+const databaseParameterSchema = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
+
+export const databaseStatementSchema = z
+  .object({
+    sql: z
+      .string()
+      .min(1)
+      .max(16 * 1024)
+      .refine((value) => !value.includes("\0"), {
+        message: "SQL cannot contain NUL bytes",
+      }),
+    params: z.array(databaseParameterSchema).max(100),
+  })
+  .strict();
+
+export const databaseCapabilityInputSchema = z.discriminatedUnion("kind", [
+  databaseStatementSchema.extend({ kind: z.literal("statement") }).strict(),
+  z
+    .object({
+      kind: z.literal("atomic-batch"),
+      statements: z.array(databaseStatementSchema).min(1).max(20),
+    })
+    .strict(),
+]);
+
+const databaseRowSchema = z.record(z.string(), z.unknown());
+
+export const databaseStatementResultSchema = z
+  .object({
+    command: z.string().min(1).max(40),
+    rowCount: z.number().int().nonnegative(),
+    rows: z.array(databaseRowSchema).max(100),
+  })
+  .strict();
+
+const databaseResultSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("statement"),
+      result: databaseStatementResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("atomic-batch"),
+      results: z.array(databaseStatementResultSchema).min(1).max(20),
+    })
+    .strict(),
+]);
 
 export const capabilityProvisionResponseSchema = z
   .object({
@@ -95,6 +183,32 @@ export const capabilityEchoResponseSchema = z
   })
   .strict();
 
+export const capabilityDatabaseResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    capability: capabilityReferenceSchema,
+    requestId: requestTokenSchema,
+    runtimeIdentity: z.string().min(1).max(200),
+    actedBy: z.literal("database-broker"),
+    result: databaseResultSchema,
+  })
+  .strict()
+  .refine(
+    (value) => {
+      try {
+        return JSON.stringify(value).length <= 256 * 1024;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Database response is too large or is not JSON serializable" },
+  );
+
+export const capabilitySuccessResponseSchema = z.union([
+  capabilityEchoResponseSchema,
+  capabilityDatabaseResponseSchema,
+]);
+
 export const capabilityBindingResponseSchema = z
   .object({
     runtimeIdentity: z.string().min(1).max(200),
@@ -108,7 +222,16 @@ export type CapabilityIntent = z.infer<typeof capabilityIntentSchema>;
 export type CapabilityInvocation = z.infer<typeof capabilityInvocationSchema>;
 export type ProvisionEchoCapabilityRequest = z.infer<typeof provisionEchoCapabilityRequestSchema>;
 export type RevokeEchoCapabilityRequest = z.infer<typeof revokeEchoCapabilityRequestSchema>;
+export type ProvisionDatabaseCapabilityRequest = z.infer<
+  typeof provisionDatabaseCapabilityRequestSchema
+>;
+export type RevokeDatabaseCapabilityRequest = z.infer<typeof revokeDatabaseCapabilityRequestSchema>;
+export type DatabaseStatement = z.infer<typeof databaseStatementSchema>;
+export type DatabaseCapabilityInput = z.infer<typeof databaseCapabilityInputSchema>;
+export type DatabaseStatementResult = z.infer<typeof databaseStatementResultSchema>;
 export type CapabilityProvisionResponse = z.infer<typeof capabilityProvisionResponseSchema>;
 export type CapabilityRevokeResponse = z.infer<typeof capabilityRevokeResponseSchema>;
 export type CapabilityEchoResponse = z.infer<typeof capabilityEchoResponseSchema>;
+export type CapabilityDatabaseResponse = z.infer<typeof capabilityDatabaseResponseSchema>;
+export type CapabilitySuccessResponse = z.infer<typeof capabilitySuccessResponseSchema>;
 export type CapabilityBindingResponse = z.infer<typeof capabilityBindingResponseSchema>;

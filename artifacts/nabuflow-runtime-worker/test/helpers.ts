@@ -234,6 +234,10 @@ export class MockBackend implements RuntimeBackend {
 
 export class MemoryCapabilityVault implements CapabilityVault {
   readonly records = new Map<number, { revision: string; definition: CapabilityDefinition }>();
+  readonly databaseRecords = new Map<
+    number,
+    { revision: string; definition: CapabilityDefinition; credential: string }
+  >();
 
   async provisionEcho(input: {
     projectId: number;
@@ -287,6 +291,81 @@ export class MemoryCapabilityVault implements CapabilityVault {
         actedBy: "capability-vault",
         proof: "a".repeat(64),
         echo: input.invocation.input,
+      },
+    };
+  }
+
+  async provisionDatabase(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    credential: { kind: "neon-connection-string"; value: string };
+  }): Promise<{ state: "provisioned"; keyId: string }> {
+    this.databaseRecords.set(input.projectId, {
+      revision: input.revision,
+      definition: structuredClone(input.definition),
+      credential: input.credential.value,
+    });
+    return { state: "provisioned", keyId: "v1" };
+  }
+
+  async revokeDatabase(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict"> {
+    const record = this.databaseRecords.get(input.projectId);
+    if (record === undefined) return "not_found";
+    if (record.revision !== input.expectedRevision) return "conflict";
+    this.databaseRecords.delete(input.projectId);
+    return "revoked";
+  }
+
+  async invokeDatabase(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult> {
+    const record = this.databaseRecords.get(input.projectId);
+    if (record === undefined) return { state: "not_found" };
+    if (
+      input.invocation.requestedProjectId !== undefined &&
+      input.invocation.requestedProjectId !== input.projectId
+    ) {
+      return { state: "tenant_mismatch" };
+    }
+    if (
+      input.invocation.capability.provider !== record.definition.provider ||
+      input.invocation.capability.name !== record.definition.name ||
+      input.invocation.action !== "query"
+    ) {
+      return { state: "policy_rejected" };
+    }
+    const statement =
+      input.invocation.input.kind === "atomic-batch"
+        ? {
+            kind: "atomic-batch" as const,
+            results: (input.invocation.input.statements as unknown[]).map(() => ({
+              command: "SELECT",
+              rowCount: 1,
+              rows: [{ value: "memory-database" }],
+            })),
+          }
+        : {
+            kind: "statement" as const,
+            result: {
+              command: "SELECT",
+              rowCount: 1,
+              rows: [{ value: "memory-database" }],
+            },
+          };
+    return {
+      state: "success",
+      response: {
+        ok: true,
+        capability: input.invocation.capability,
+        requestId: input.invocation.requestId,
+        runtimeIdentity: input.invocation.caller.runtimeIdentity,
+        actedBy: "database-broker",
+        result: statement,
       },
     };
   }

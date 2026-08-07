@@ -33,6 +33,21 @@ const definition: CapabilityDefinition = {
   },
 };
 
+const databaseDefinition: CapabilityDefinition = {
+  name: "database",
+  provider: "neon-postgres",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/query" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 65_536,
+    maxResponseBytes: 262_144,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
 class MemoryVaultStorage {
   private readonly values = new Map<string, unknown>();
 
@@ -122,6 +137,52 @@ describe("capability vault envelope", () => {
     });
     await expect(
       restarted.revokeEcho({ projectId: 42, expectedRevision: "echo-v1" }),
+    ).resolves.toBe("revoked");
+  });
+
+  it("stores the database connection string only inside an encrypted project-bound envelope", async () => {
+    const storage = new MemoryVaultStorage();
+    const state = { storage } as unknown as DurableObjectState;
+    const vault = new CapabilityVaultDurableObject(state, fakeEnv());
+    const credential =
+      "postgresql://slice_user:staging-password@ep-db-broker.us-east-2.aws.neon.tech/slice_db";
+    await expect(
+      vault.provisionDatabase({
+        projectId: 42,
+        revision: "database-v1",
+        definition: databaseDefinition,
+        credential: { kind: "neon-connection-string", value: credential },
+      }),
+    ).resolves.toEqual({ state: "provisioned", keyId: "v1" });
+    const serialized = storage.serialized();
+    expect(serialized).not.toContain(credential);
+    expect(serialized).not.toContain("staging-password");
+    expect(serialized).toContain('"algorithm":"AES-256-GCM"');
+
+    const foreignIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 43,
+      role: "production",
+      slot: "blue",
+    });
+    await expect(
+      vault.invokeDatabase({
+        projectId: 42,
+        invocation: {
+          v: 1,
+          capability: { provider: "neon-postgres", name: "database" },
+          action: "query",
+          requestId: "database-foreign-project",
+          input: { kind: "statement", sql: "select 1", params: [] },
+          caller: {
+            containerId: "container-platform-id-foreign",
+            runtimeIdentity: foreignIdentity,
+          },
+        },
+      }),
+    ).resolves.toEqual({ state: "tenant_mismatch" });
+    await expect(
+      vault.revokeDatabase({ projectId: 42, expectedRevision: "database-v1" }),
     ).resolves.toBe("revoked");
   });
 });
