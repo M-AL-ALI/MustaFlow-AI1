@@ -48,6 +48,21 @@ const databaseDefinition: CapabilityDefinition = {
   },
 };
 
+const stripeDefinition: CapabilityDefinition = {
+  name: "payments",
+  provider: "stripe",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/payment-intents" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 8_192,
+    maxResponseBytes: 65_536,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
 async function setup(projectId = 42) {
   const env = fakeEnv();
   const coordinator = new MemoryCoordinator();
@@ -355,6 +370,89 @@ describe("signed capability endpoint", () => {
         kind: "statement",
         result: { command: "SELECT", rows: [{ value: "memory-database" }] },
       },
+    });
+  });
+
+  it("dispatches a container Stripe intent without exposing the test key", async () => {
+    const state = await setup();
+    const testKey = `sk_test_${"a".repeat(32)}`;
+    await state.vault.provisionStripe({
+      projectId: 42,
+      revision: "stripe-v1",
+      definition: stripeDefinition,
+      policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+      credential: { kind: "stripe-test-secret-key", value: testKey },
+    });
+    const intent = {
+      v: 1,
+      capability: { provider: "stripe", name: "payments" },
+      action: "execute",
+      requestId: "stripe-container-intent",
+      input: {
+        kind: "create-payment-intent",
+        idempotencyKey: "checkout-order-00000001",
+        amount: 1_099,
+        currency: "usd",
+      },
+    } as const;
+    const response = await handleCapabilityIntentFromContainer(
+      new Request("http://doorman.staging.nabuflow.internal/v1/invoke", {
+        method: "POST",
+        body: JSON.stringify(intent),
+      }),
+      state.env,
+      state.containerId,
+      {
+        coordinator: state.coordinator,
+        vault: state.vault,
+        nowMs: TEST_NOW_MS,
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(JSON.parse(body)).toMatchObject({
+      requestId: intent.requestId,
+      runtimeIdentity: state.identity,
+      actedBy: "stripe-broker",
+      operation: "create-payment-intent",
+      paymentIntent: { id: "pi_memory123", livemode: false },
+    });
+    expect(body).not.toContain(testKey);
+    expect(body).not.toMatch(/client.secret|authorization/iu);
+  });
+
+  it("returns Stripe broker failures without provider details", async () => {
+    const state = await setup();
+    state.vault.invokeStripe = async () => ({
+      state: "stripe_error",
+      status: 429,
+      code: "stripe_rate_limited",
+      retryable: true,
+    });
+    const response = await invoke(
+      state,
+      {
+        ...invocation(state.identity, state.containerId, {
+          requestId: "stripe-sanitized-error-request",
+        }),
+        capability: { provider: "stripe", name: "payments" },
+        action: "execute",
+        input: {
+          kind: "create-payment-intent",
+          idempotencyKey: "checkout-order-00000002",
+          amount: 1_099,
+          currency: "usd",
+        },
+      },
+      "stripe-sanitized-error-nonce",
+    );
+    expect(response.status).toBe(429);
+    const body = await response.text();
+    expect(body).toContain('"code":"stripe_rate_limited"');
+    expect(body).not.toMatch(/request.log|provider|sk_test|stripe.request/iu);
+    expect(state.coordinator.audits.at(-1)).toMatchObject({
+      outcome: "stripe_rate_limited",
+      status: 429,
     });
   });
 

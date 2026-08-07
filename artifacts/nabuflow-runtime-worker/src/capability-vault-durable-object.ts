@@ -3,13 +3,23 @@ import {
   capabilityDefinitionSchema,
   capabilityDatabaseResponseSchema,
   capabilityEchoResponseSchema,
+  capabilityStripeResponseSchema,
   parseRuntimeIdentity,
+  stripeCapabilityInputSchema,
+  stripeCapabilityPolicySchema,
   type CapabilityDefinition,
   type CapabilityInvocation,
+  type StripeCapabilityPolicy,
+  type StripePaymentIntent,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVault, CapabilityVaultInvocationResult } from "./model";
 import { DatabaseBrokerError, executeDatabaseCapability } from "./database-broker";
+import {
+  createStripePaymentIntent,
+  retrieveStripePaymentIntent,
+  StripeBrokerError,
+} from "./stripe-broker";
 
 const ECHO_PROVIDER = "nabuflow-harness";
 const ECHO_NAME = "echo";
@@ -17,6 +27,9 @@ const ECHO_STORAGE_KEY = `capability:${ECHO_PROVIDER}:${ECHO_NAME}`;
 const DATABASE_PROVIDER = "neon-postgres";
 const DATABASE_NAME = "database";
 const DATABASE_STORAGE_KEY = `capability:${DATABASE_PROVIDER}:${DATABASE_NAME}`;
+const STRIPE_PROVIDER = "stripe";
+const STRIPE_NAME = "payments";
+const STRIPE_STORAGE_KEY = `capability:${STRIPE_PROVIDER}:${STRIPE_NAME}`;
 const textEncoder = new TextEncoder();
 const credentialDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -32,6 +45,24 @@ interface StoredCapabilityRecord {
   revision: string;
   definition: CapabilityDefinition;
   envelope: EncryptedCapabilityEnvelope;
+}
+
+interface StoredStripeCapabilityRecord extends StoredCapabilityRecord {
+  policy: StripeCapabilityPolicy;
+}
+
+interface StripeIdempotencyRecord {
+  projectId: number;
+  revision: string;
+  fingerprint: string;
+  state: "pending" | "completed";
+  paymentIntent?: StripePaymentIntent;
+}
+
+interface StripeOwnershipRecord {
+  projectId: number;
+  revision: string;
+  paymentIntentId: string;
 }
 
 interface EnvelopeContext {
@@ -155,6 +186,34 @@ function validateDatabaseDefinition(definition: CapabilityDefinition): Capabilit
     parsed.injection.location === "worker-binding";
   if (!exactPolicy) throw new Error("Database capability policy is invalid");
   return parsed;
+}
+
+function validateStripeDefinition(definition: CapabilityDefinition): CapabilityDefinition {
+  const parsed = capabilityDefinitionSchema.parse(definition);
+  const exactPolicy =
+    parsed.provider === STRIPE_PROVIDER &&
+    parsed.name === STRIPE_NAME &&
+    parsed.allowedMethods.length === 1 &&
+    parsed.allowedMethods[0] === "POST" &&
+    parsed.allowedPaths.length === 1 &&
+    parsed.allowedPaths[0]?.match === "exact" &&
+    parsed.allowedPaths[0]?.path === "/v1/payment-intents" &&
+    parsed.injection.location === "worker-binding";
+  if (!exactPolicy) throw new Error("Stripe capability policy is invalid");
+  return parsed;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", textEncoder.encode(value)));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function stripeIdempotencyStorageKey(digest: string): string {
+  return `stripe-idempotency:${digest}`;
+}
+
+function stripeOwnershipStorageKey(paymentIntentId: string): string {
+  return `stripe-object:${paymentIntentId}`;
 }
 
 function ownsInvocation(
@@ -297,6 +356,72 @@ export class CapabilityVaultDurableObject
     });
   }
 
+  async provisionStripe(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    policy: StripeCapabilityPolicy;
+    credential: { kind: "stripe-test-secret-key"; value: string };
+  }): Promise<{ state: "provisioned"; keyId: string }> {
+    const definition = validateStripeDefinition(input.definition);
+    const policy = stripeCapabilityPolicySchema.parse(input.policy);
+    if (
+      input.credential.kind !== "stripe-test-secret-key" ||
+      !/^sk_test_[A-Za-z0-9]+$/u.test(input.credential.value)
+    ) {
+      throw new Error("Stripe credential type is invalid");
+    }
+    const keyId = this.env.NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID;
+    if (keyId !== "v1") throw new Error("The configured vault key version is unsupported");
+    const context = {
+      projectId: input.projectId,
+      provider: definition.provider,
+      name: definition.name,
+      revision: input.revision,
+    };
+    const plaintext = textEncoder.encode(input.credential.value);
+    try {
+      const envelope = await encryptCapabilityMaterial(
+        readKek(this.env, keyId),
+        keyId,
+        context,
+        plaintext,
+      );
+      await this.ctx.storage.put(STRIPE_STORAGE_KEY, {
+        projectId: input.projectId,
+        revision: input.revision,
+        definition,
+        policy,
+        envelope,
+      } satisfies StoredStripeCapabilityRecord);
+      return { state: "provisioned", keyId };
+    } finally {
+      plaintext.fill(0);
+    }
+  }
+
+  async revokeStripe(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict"> {
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const record = await transaction.get<StoredStripeCapabilityRecord>(STRIPE_STORAGE_KEY);
+      if (record === undefined) return "not_found" as const;
+      if (record.projectId !== input.projectId || record.revision !== input.expectedRevision) {
+        return "conflict" as const;
+      }
+      await transaction.delete(STRIPE_STORAGE_KEY);
+      return "revoked" as const;
+    });
+    if (result === "revoked") {
+      const idempotencyRecords = await this.ctx.storage.list({ prefix: "stripe-idempotency:" });
+      const ownershipRecords = await this.ctx.storage.list({ prefix: "stripe-object:" });
+      const keys = [...idempotencyRecords.keys(), ...ownershipRecords.keys()];
+      if (keys.length > 0) await this.ctx.storage.delete(keys);
+    }
+    return result;
+  }
+
   async invokeEcho(input: {
     projectId: number;
     invocation: CapabilityInvocation;
@@ -401,6 +526,185 @@ export class CapabilityVaultDurableObject
         code: "database_unavailable",
         retryable: true,
         sqlstate: null,
+      };
+    } finally {
+      credentialBytes?.fill(0);
+    }
+  }
+
+  async invokeStripe(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult> {
+    const record = await this.ctx.storage.get<StoredStripeCapabilityRecord>(STRIPE_STORAGE_KEY);
+    if (record === undefined) return { state: "not_found" };
+    if (!ownsInvocation(input.projectId, record, input.invocation)) {
+      return { state: "tenant_mismatch" };
+    }
+    if (
+      input.invocation.capability.provider !== record.definition.provider ||
+      input.invocation.capability.name !== record.definition.name ||
+      input.invocation.action !== "execute"
+    ) {
+      return { state: "policy_rejected" };
+    }
+    const parsedInput = stripeCapabilityInputSchema.safeParse(input.invocation.input);
+    if (!parsedInput.success) {
+      return {
+        state: "stripe_error",
+        status: 400,
+        code: "stripe_invalid_request",
+        retryable: false,
+      };
+    }
+
+    const stripeInput = parsedInput.data;
+    if (
+      stripeInput.kind === "create-payment-intent" &&
+      (stripeInput.amount > record.policy.maxAmount ||
+        !record.policy.allowedCurrencies.includes(stripeInput.currency))
+    ) {
+      return { state: "policy_rejected" };
+    }
+
+    let idempotencyDigest: string | null = null;
+    let idempotencyFingerprint: string | null = null;
+    if (stripeInput.kind === "create-payment-intent") {
+      idempotencyDigest = await sha256Hex(
+        [
+          "nabuflow-stripe-idempotency-v1",
+          `project=${record.projectId}`,
+          `provider=${STRIPE_PROVIDER}`,
+          `name=${STRIPE_NAME}`,
+          "operation=create-payment-intent",
+          `key=${stripeInput.idempotencyKey}`,
+        ].join("\n"),
+      );
+      idempotencyFingerprint = await sha256Hex(
+        JSON.stringify({ amount: stripeInput.amount, currency: stripeInput.currency }),
+      );
+      const ledgerKey = stripeIdempotencyStorageKey(idempotencyDigest);
+      const existing = await this.ctx.storage.get<StripeIdempotencyRecord>(ledgerKey);
+      if (
+        existing !== undefined &&
+        (existing.projectId !== record.projectId ||
+          existing.revision !== record.revision ||
+          existing.fingerprint !== idempotencyFingerprint)
+      ) {
+        return {
+          state: "stripe_error",
+          status: 409,
+          code: "stripe_idempotency_conflict",
+          retryable: false,
+        };
+      }
+      if (existing?.state === "completed" && existing.paymentIntent !== undefined) {
+        return {
+          state: "success",
+          response: capabilityStripeResponseSchema.parse({
+            ok: true,
+            capability: input.invocation.capability,
+            requestId: input.invocation.requestId,
+            runtimeIdentity: input.invocation.caller.runtimeIdentity,
+            actedBy: "stripe-broker",
+            operation: stripeInput.kind,
+            idempotentReplay: true,
+            paymentIntent: existing.paymentIntent,
+          }),
+        };
+      }
+      if (existing === undefined) {
+        await this.ctx.storage.put(ledgerKey, {
+          projectId: record.projectId,
+          revision: record.revision,
+          fingerprint: idempotencyFingerprint,
+          state: "pending",
+        } satisfies StripeIdempotencyRecord);
+      }
+    }
+
+    const context = {
+      projectId: record.projectId,
+      provider: record.definition.provider,
+      name: record.definition.name,
+      revision: record.revision,
+    };
+    let credentialBytes: Uint8Array | null = null;
+    try {
+      credentialBytes = await decryptCapabilityMaterial(
+        readKek(this.env, record.envelope.keyId),
+        context,
+        record.envelope,
+      );
+      const secretKey = credentialDecoder.decode(credentialBytes);
+      let paymentIntent: StripePaymentIntent;
+      const idempotentReplay = false;
+      if (stripeInput.kind === "create-payment-intent") {
+        paymentIntent = await createStripePaymentIntent(
+          secretKey,
+          { amount: stripeInput.amount, currency: stripeInput.currency },
+          `nfg1-${idempotencyDigest!}`,
+          { timeoutMs: record.definition.limits.timeoutMs },
+        );
+        await this.ctx.storage.put(stripeOwnershipStorageKey(paymentIntent.id), {
+          projectId: record.projectId,
+          revision: record.revision,
+          paymentIntentId: paymentIntent.id,
+        } satisfies StripeOwnershipRecord);
+        await this.ctx.storage.put(stripeIdempotencyStorageKey(idempotencyDigest!), {
+          projectId: record.projectId,
+          revision: record.revision,
+          fingerprint: idempotencyFingerprint!,
+          state: "completed",
+          paymentIntent,
+        } satisfies StripeIdempotencyRecord);
+      } else {
+        const ownership = await this.ctx.storage.get<StripeOwnershipRecord>(
+          stripeOwnershipStorageKey(stripeInput.paymentIntentId),
+        );
+        if (
+          ownership === undefined ||
+          ownership.projectId !== record.projectId ||
+          ownership.revision !== record.revision
+        ) {
+          return {
+            state: "stripe_error",
+            status: 400,
+            code: "stripe_invalid_request",
+            retryable: false,
+          };
+        }
+        paymentIntent = await retrieveStripePaymentIntent(secretKey, stripeInput.paymentIntentId, {
+          timeoutMs: record.definition.limits.timeoutMs,
+        });
+      }
+      return {
+        state: "success",
+        response: capabilityStripeResponseSchema.parse({
+          ok: true,
+          capability: input.invocation.capability,
+          requestId: input.invocation.requestId,
+          runtimeIdentity: input.invocation.caller.runtimeIdentity,
+          actedBy: "stripe-broker",
+          operation: stripeInput.kind,
+          idempotentReplay,
+          paymentIntent,
+        }),
+      };
+    } catch (error) {
+      if (error instanceof StripeBrokerError) {
+        return {
+          state: "stripe_error",
+          status: error.status,
+          code: error.code,
+          retryable: error.retryable,
+        };
+      }
+      return {
+        state: "stripe_error",
+        status: 503,
+        code: "stripe_unavailable",
+        retryable: true,
       };
     } finally {
       credentialBytes?.fill(0);

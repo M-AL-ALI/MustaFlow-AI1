@@ -43,6 +43,17 @@ function enforceCapabilityInputLimit(
       message: "Echo capability input is too large",
     });
   }
+  if (
+    intent.capability.provider === "stripe" &&
+    intent.capability.name === "payments" &&
+    JSON.stringify(intent.input).length > 8 * 1024
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["input"],
+      message: "Stripe capability input is too large",
+    });
+  }
 }
 
 const capabilityIntentObjectSchema = z
@@ -103,6 +114,71 @@ export const provisionDatabaseCapabilityRequestSchema = z
 
 export const revokeDatabaseCapabilityRequestSchema = revokeEchoCapabilityRequestSchema;
 
+export const stripeCurrencySchema = z.string().regex(/^[a-z]{3}$/u);
+
+export const stripeCapabilityPolicySchema = z
+  .object({
+    allowedCurrencies: z
+      .array(stripeCurrencySchema)
+      .min(1)
+      .max(20)
+      .refine((currencies) => new Set(currencies).size === currencies.length, {
+        message: "Allowed Stripe currencies must be unique",
+      }),
+    maxAmount: z.number().int().positive().max(99_999_999),
+  })
+  .strict();
+
+export const provisionStripeCapabilityRequestSchema = z
+  .object({
+    projectId: z.number().int().positive().safe(),
+    revision: z.string().min(1).max(200),
+    definition: capabilityDefinitionSchema,
+    policy: stripeCapabilityPolicySchema,
+    credential: z
+      .object({
+        kind: z.literal("stripe-test-secret-key"),
+        value: z
+          .string()
+          .min(16)
+          .max(4_096)
+          .regex(/^sk_test_[A-Za-z0-9]+$/u),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const revokeStripeCapabilityRequestSchema = revokeEchoCapabilityRequestSchema;
+
+const stripeIdempotencyKeySchema = z
+  .string()
+  .min(16)
+  .max(200)
+  .regex(/^[\x21-\x7e]+$/u, "Expected a printable Stripe idempotency key");
+
+export const stripePaymentIntentIdSchema = z
+  .string()
+  .min(4)
+  .max(200)
+  .regex(/^pi_[A-Za-z0-9]+$/u);
+
+export const stripeCapabilityInputSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("create-payment-intent"),
+      idempotencyKey: stripeIdempotencyKeySchema,
+      amount: z.number().int().positive().max(99_999_999),
+      currency: stripeCurrencySchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("retrieve-payment-intent"),
+      paymentIntentId: stripePaymentIntentIdSchema,
+    })
+    .strict(),
+]);
+
 const databaseParameterSchema = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
 
 export const databaseStatementSchema = z
@@ -152,6 +228,18 @@ const databaseResultSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
+export const stripePaymentIntentSchema = z
+  .object({
+    id: stripePaymentIntentIdSchema,
+    status: z.string().min(1).max(100),
+    amount: z.number().int().nonnegative().max(99_999_999),
+    amountReceived: z.number().int().nonnegative().max(99_999_999),
+    currency: stripeCurrencySchema,
+    created: z.number().int().nonnegative().safe(),
+    livemode: z.literal(false),
+  })
+  .strict();
 
 export const capabilityProvisionResponseSchema = z
   .object({
@@ -204,9 +292,23 @@ export const capabilityDatabaseResponseSchema = z
     { message: "Database response is too large or is not JSON serializable" },
   );
 
+export const capabilityStripeResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    capability: capabilityReferenceSchema,
+    requestId: requestTokenSchema,
+    runtimeIdentity: z.string().min(1).max(200),
+    actedBy: z.literal("stripe-broker"),
+    operation: z.enum(["create-payment-intent", "retrieve-payment-intent"]),
+    idempotentReplay: z.boolean(),
+    paymentIntent: stripePaymentIntentSchema,
+  })
+  .strict();
+
 export const capabilitySuccessResponseSchema = z.union([
   capabilityEchoResponseSchema,
   capabilityDatabaseResponseSchema,
+  capabilityStripeResponseSchema,
 ]);
 
 export const capabilityBindingResponseSchema = z
@@ -226,6 +328,13 @@ export type ProvisionDatabaseCapabilityRequest = z.infer<
   typeof provisionDatabaseCapabilityRequestSchema
 >;
 export type RevokeDatabaseCapabilityRequest = z.infer<typeof revokeDatabaseCapabilityRequestSchema>;
+export type StripeCapabilityPolicy = z.infer<typeof stripeCapabilityPolicySchema>;
+export type ProvisionStripeCapabilityRequest = z.infer<
+  typeof provisionStripeCapabilityRequestSchema
+>;
+export type RevokeStripeCapabilityRequest = z.infer<typeof revokeStripeCapabilityRequestSchema>;
+export type StripeCapabilityInput = z.infer<typeof stripeCapabilityInputSchema>;
+export type StripePaymentIntent = z.infer<typeof stripePaymentIntentSchema>;
 export type DatabaseStatement = z.infer<typeof databaseStatementSchema>;
 export type DatabaseCapabilityInput = z.infer<typeof databaseCapabilityInputSchema>;
 export type DatabaseStatementResult = z.infer<typeof databaseStatementResultSchema>;
@@ -233,5 +342,6 @@ export type CapabilityProvisionResponse = z.infer<typeof capabilityProvisionResp
 export type CapabilityRevokeResponse = z.infer<typeof capabilityRevokeResponseSchema>;
 export type CapabilityEchoResponse = z.infer<typeof capabilityEchoResponseSchema>;
 export type CapabilityDatabaseResponse = z.infer<typeof capabilityDatabaseResponseSchema>;
+export type CapabilityStripeResponse = z.infer<typeof capabilityStripeResponseSchema>;
 export type CapabilitySuccessResponse = z.infer<typeof capabilitySuccessResponseSchema>;
 export type CapabilityBindingResponse = z.infer<typeof capabilityBindingResponseSchema>;

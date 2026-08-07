@@ -40,6 +40,21 @@ const databaseDefinition: CapabilityDefinition = {
   },
 };
 
+const stripeDefinition: CapabilityDefinition = {
+  name: "payments",
+  provider: "stripe",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/payment-intents" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 8_192,
+    maxResponseBytes: 65_536,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
 describe("capability vault control endpoints", () => {
   it("provisions and CAS-revokes the staging echo record under signed control auth", async () => {
     const coordinator = new MemoryCoordinator();
@@ -167,5 +182,82 @@ describe("capability vault control endpoints", () => {
     expect(revoked.status).toBe(200);
     expect(vault.databaseRecords.has(42)).toBe(false);
     expect(JSON.stringify(coordinator.audits)).not.toContain(credential);
+  });
+
+  it("provisions only a test-mode Stripe key and revokes it without disclosure", async () => {
+    const coordinator = new MemoryCoordinator();
+    const vault = new MemoryCapabilityVault();
+    const env = fakeEnv();
+    const dependencies = {
+      coordinator,
+      vault,
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+    };
+    const path = "/_nabuflow/control/v1/capabilities/42/stripe/payments";
+    const testKey = `sk_test_${"a".repeat(32)}`;
+    const requestBody = {
+      projectId: 42,
+      revision: "stripe-v1",
+      definition: stripeDefinition,
+      policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+      credential: { kind: "stripe-test-secret-key", value: testKey },
+    } as const;
+    const provisioned = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        body: requestBody,
+        nonce: "stripe-provision-valid",
+        idempotencyKey: "stripe-provision-42-v1",
+      }),
+      env,
+      dependencies,
+    );
+    expect(provisioned.status).toBe(200);
+    const provisionText = await provisioned.text();
+    expect(provisionText).not.toContain(testKey);
+    expect(JSON.parse(provisionText)).toEqual({
+      ok: true,
+      projectId: 42,
+      capability: { provider: "stripe", name: "payments" },
+      revision: "stripe-v1",
+      keyId: "v1",
+    });
+
+    const liveRejected = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        body: {
+          ...requestBody,
+          credential: {
+            kind: "stripe-test-secret-key",
+            value: `sk_live_${"b".repeat(32)}`,
+          },
+        },
+        nonce: "stripe-provision-live-rejected",
+        idempotencyKey: "stripe-provision-live-rejected",
+      }),
+      env,
+      dependencies,
+    );
+    expect(liveRejected.status).toBe(400);
+    expect(vault.stripeRecords.get(42)?.credential).toBe(testKey);
+
+    const revoked = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "DELETE",
+        body: { projectId: 42, expectedRevision: "stripe-v1" },
+        nonce: "stripe-revoke-valid",
+        idempotencyKey: "stripe-revoke-42-v1",
+      }),
+      env,
+      dependencies,
+    );
+    expect(revoked.status).toBe(200);
+    expect(vault.stripeRecords.has(42)).toBe(false);
+    expect(JSON.stringify(coordinator.audits)).not.toContain(testKey);
   });
 });

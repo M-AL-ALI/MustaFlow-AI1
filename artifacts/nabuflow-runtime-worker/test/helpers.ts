@@ -5,6 +5,7 @@ import {
   type CapabilityInvocation,
   type ExecRuntimeRequest,
   type RouteRecord,
+  type StripeCapabilityPolicy,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "../src/bindings";
 import type {
@@ -238,6 +239,15 @@ export class MemoryCapabilityVault implements CapabilityVault {
     number,
     { revision: string; definition: CapabilityDefinition; credential: string }
   >();
+  readonly stripeRecords = new Map<
+    number,
+    {
+      revision: string;
+      definition: CapabilityDefinition;
+      policy: StripeCapabilityPolicy;
+      credential: string;
+    }
+  >();
 
   async provisionEcho(input: {
     projectId: number;
@@ -366,6 +376,84 @@ export class MemoryCapabilityVault implements CapabilityVault {
         runtimeIdentity: input.invocation.caller.runtimeIdentity,
         actedBy: "database-broker",
         result: statement,
+      },
+    };
+  }
+
+  async provisionStripe(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    policy: StripeCapabilityPolicy;
+    credential: { kind: "stripe-test-secret-key"; value: string };
+  }): Promise<{ state: "provisioned"; keyId: string }> {
+    this.stripeRecords.set(input.projectId, {
+      revision: input.revision,
+      definition: structuredClone(input.definition),
+      policy: structuredClone(input.policy),
+      credential: input.credential.value,
+    });
+    return { state: "provisioned", keyId: "v1" };
+  }
+
+  async revokeStripe(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict"> {
+    const record = this.stripeRecords.get(input.projectId);
+    if (record === undefined) return "not_found";
+    if (record.revision !== input.expectedRevision) return "conflict";
+    this.stripeRecords.delete(input.projectId);
+    return "revoked";
+  }
+
+  async invokeStripe(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult> {
+    const record = this.stripeRecords.get(input.projectId);
+    if (record === undefined) return { state: "not_found" };
+    if (
+      input.invocation.requestedProjectId !== undefined &&
+      input.invocation.requestedProjectId !== input.projectId
+    ) {
+      return { state: "tenant_mismatch" };
+    }
+    if (
+      input.invocation.capability.provider !== record.definition.provider ||
+      input.invocation.capability.name !== record.definition.name ||
+      input.invocation.action !== "execute"
+    ) {
+      return { state: "policy_rejected" };
+    }
+    const operation = input.invocation.input.kind;
+    if (operation !== "create-payment-intent" && operation !== "retrieve-payment-intent") {
+      return {
+        state: "stripe_error",
+        status: 400,
+        code: "stripe_invalid_request",
+        retryable: false,
+      };
+    }
+    return {
+      state: "success",
+      response: {
+        ok: true,
+        capability: input.invocation.capability,
+        requestId: input.invocation.requestId,
+        runtimeIdentity: input.invocation.caller.runtimeIdentity,
+        actedBy: "stripe-broker",
+        operation,
+        idempotentReplay: false,
+        paymentIntent: {
+          id: "pi_memory123",
+          status: "requires_payment_method",
+          amount: 1_099,
+          amountReceived: 0,
+          currency: "usd",
+          created: 1_785_859_200,
+          livemode: false,
+        },
       },
     };
   }

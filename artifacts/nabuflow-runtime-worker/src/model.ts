@@ -2,6 +2,7 @@ import type {
   CapabilityDefinition,
   CapabilityDatabaseResponse,
   CapabilityEchoResponse,
+  CapabilityStripeResponse,
   CapabilityInvocation,
   LogsRuntimeResponse,
   RouteRecord,
@@ -86,7 +87,10 @@ export interface ControlCoordinator {
 }
 
 export type CapabilityVaultInvocationResult =
-  | { state: "success"; response: CapabilityEchoResponse | CapabilityDatabaseResponse }
+  | {
+      state: "success";
+      response: CapabilityEchoResponse | CapabilityDatabaseResponse | CapabilityStripeResponse;
+    }
   | { state: "not_found" }
   | { state: "tenant_mismatch" }
   | { state: "policy_rejected" }
@@ -103,6 +107,18 @@ export type CapabilityVaultInvocationResult =
         | "database_response_too_large";
       retryable: boolean;
       sqlstate: string | null;
+    }
+  | {
+      state: "stripe_error";
+      status: 400 | 409 | 429 | 502 | 503 | 504;
+      code:
+        | "stripe_invalid_request"
+        | "stripe_idempotency_conflict"
+        | "stripe_rate_limited"
+        | "stripe_timeout"
+        | "stripe_unavailable"
+        | "stripe_execution_failed";
+      retryable: boolean;
     };
 
 export interface CapabilityVault {
@@ -130,6 +146,21 @@ export interface CapabilityVault {
     expectedRevision: string;
   }): Promise<"revoked" | "not_found" | "conflict">;
   invokeDatabase(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult>;
+  provisionStripe(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    policy: { allowedCurrencies: string[]; maxAmount: number };
+    credential: { kind: "stripe-test-secret-key"; value: string };
+  }): Promise<{ state: "provisioned"; keyId: string }>;
+  revokeStripe(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict">;
+  invokeStripe(input: {
     projectId: number;
     invocation: CapabilityInvocation;
   }): Promise<CapabilityVaultInvocationResult>;

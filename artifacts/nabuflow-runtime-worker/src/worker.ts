@@ -21,8 +21,10 @@ import {
   parseRuntimeIdentityForNamespace,
   provisionDatabaseCapabilityRequestSchema,
   provisionEchoCapabilityRequestSchema,
+  provisionStripeCapabilityRequestSchema,
   revokeDatabaseCapabilityRequestSchema,
   revokeEchoCapabilityRequestSchema,
+  revokeStripeCapabilityRequestSchema,
   sha256Hex,
   startRuntimeRequestSchema,
   startRuntimeResponseSchema,
@@ -37,8 +39,10 @@ import type {
   ActivateRouteRequest,
   ProvisionDatabaseCapabilityRequest,
   ProvisionEchoCapabilityRequest,
+  ProvisionStripeCapabilityRequest,
   RevokeDatabaseCapabilityRequest,
   RevokeEchoCapabilityRequest,
+  RevokeStripeCapabilityRequest,
   DeactivateRouteRequest,
   DestroyRuntimeRequest,
   EnsureRuntimeRequest,
@@ -77,6 +81,8 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "capabilityRevoke",
   "databaseCapabilityProvision",
   "databaseCapabilityRevoke",
+  "stripeCapabilityProvision",
+  "stripeCapabilityRevoke",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -103,6 +109,8 @@ type Endpoint =
   | "capabilityRevoke"
   | "databaseCapabilityProvision"
   | "databaseCapabilityRevoke"
+  | "stripeCapabilityProvision"
+  | "stripeCapabilityRevoke"
   | "capabilityBinding";
 
 interface MatchedRoute {
@@ -474,7 +482,9 @@ type ControlInput =
   | ProvisionEchoCapabilityRequest
   | RevokeEchoCapabilityRequest
   | ProvisionDatabaseCapabilityRequest
-  | RevokeDatabaseCapabilityRequest;
+  | RevokeDatabaseCapabilityRequest
+  | ProvisionStripeCapabilityRequest
+  | RevokeStripeCapabilityRequest;
 
 function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableObject> {
   return env.CONTROL_COORDINATOR.get(env.CONTROL_COORDINATOR.idFromName("control-v1"));
@@ -518,19 +528,28 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     };
     const isEcho = capability.provider === "nabuflow-harness" && capability.name === "echo";
     const isDatabase = capability.provider === "neon-postgres" && capability.name === "database";
-    if (!isEcho && !isDatabase) {
+    const isStripe = capability.provider === "stripe" && capability.name === "payments";
+    if (!isEcho && !isDatabase && !isStripe) {
       throw new ControlHttpError(400, "unsupported_capability", "Capability is not supported");
     }
     if (method === "PUT") {
       return {
-        endpoint: isEcho ? "capabilityProvision" : "databaseCapabilityProvision",
+        endpoint: isEcho
+          ? "capabilityProvision"
+          : isDatabase
+            ? "databaseCapabilityProvision"
+            : "stripeCapabilityProvision",
         locator: null,
         capability,
       };
     }
     if (method === "DELETE") {
       return {
-        endpoint: isEcho ? "capabilityRevoke" : "databaseCapabilityRevoke",
+        endpoint: isEcho
+          ? "capabilityRevoke"
+          : isDatabase
+            ? "databaseCapabilityRevoke"
+            : "stripeCapabilityRevoke",
         locator: null,
         capability,
       };
@@ -572,7 +591,9 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
       route.endpoint === "capabilityProvision" ||
       route.endpoint === "capabilityRevoke" ||
       route.endpoint === "databaseCapabilityProvision" ||
-      route.endpoint === "databaseCapabilityRevoke"
+      route.endpoint === "databaseCapabilityRevoke" ||
+      route.endpoint === "stripeCapabilityProvision" ||
+      route.endpoint === "stripeCapabilityRevoke"
     ) {
       return parseCapabilityControlInput(route, url, rawBody);
     }
@@ -638,7 +659,9 @@ function parseCapabilityControlInput(
   | ProvisionEchoCapabilityRequest
   | RevokeEchoCapabilityRequest
   | ProvisionDatabaseCapabilityRequest
-  | RevokeDatabaseCapabilityRequest {
+  | RevokeDatabaseCapabilityRequest
+  | ProvisionStripeCapabilityRequest
+  | RevokeStripeCapabilityRequest {
   if (route.capability === undefined) {
     throw new ControlHttpError(400, "invalid_capability", "Capability scope is required");
   }
@@ -649,25 +672,39 @@ function parseCapabilityControlInput(
       ? parseStrict(provisionEchoCapabilityRequestSchema, body)
       : route.endpoint === "databaseCapabilityProvision"
         ? parseStrict(provisionDatabaseCapabilityRequestSchema, body)
-        : route.endpoint === "databaseCapabilityRevoke"
-          ? parseStrict(revokeDatabaseCapabilityRequestSchema, body)
-          : parseStrict(revokeEchoCapabilityRequestSchema, body);
+        : route.endpoint === "stripeCapabilityProvision"
+          ? parseStrict(provisionStripeCapabilityRequestSchema, body)
+          : route.endpoint === "stripeCapabilityRevoke"
+            ? parseStrict(revokeStripeCapabilityRequestSchema, body)
+            : route.endpoint === "databaseCapabilityRevoke"
+              ? parseStrict(revokeDatabaseCapabilityRequestSchema, body)
+              : parseStrict(revokeEchoCapabilityRequestSchema, body);
   if (parsed.projectId !== route.capability.projectId) {
     throw new ControlHttpError(400, "project_mismatch", "Path and body projects differ");
   }
   if (
     (route.endpoint === "capabilityProvision" ||
-      route.endpoint === "databaseCapabilityProvision") &&
-    (parsed as ProvisionEchoCapabilityRequest | ProvisionDatabaseCapabilityRequest).definition
-      .provider !== route.capability.provider
+      route.endpoint === "databaseCapabilityProvision" ||
+      route.endpoint === "stripeCapabilityProvision") &&
+    (
+      parsed as
+        | ProvisionEchoCapabilityRequest
+        | ProvisionDatabaseCapabilityRequest
+        | ProvisionStripeCapabilityRequest
+    ).definition.provider !== route.capability.provider
   ) {
     throw new ControlHttpError(400, "capability_mismatch", "Path and body capabilities differ");
   }
   if (
     (route.endpoint === "capabilityProvision" ||
-      route.endpoint === "databaseCapabilityProvision") &&
-    (parsed as ProvisionEchoCapabilityRequest | ProvisionDatabaseCapabilityRequest).definition
-      .name !== route.capability.name
+      route.endpoint === "databaseCapabilityProvision" ||
+      route.endpoint === "stripeCapabilityProvision") &&
+    (
+      parsed as
+        | ProvisionEchoCapabilityRequest
+        | ProvisionDatabaseCapabilityRequest
+        | ProvisionStripeCapabilityRequest
+    ).definition.name !== route.capability.name
   ) {
     throw new ControlHttpError(400, "capability_mismatch", "Path and body capabilities differ");
   }
@@ -777,6 +814,25 @@ async function executeEndpoint(
       },
     };
   }
+  if (endpoint === "stripeCapabilityProvision") {
+    const request = input as ProvisionStripeCapabilityRequest;
+    const result = await (
+      injectedVault ?? getCapabilityVault(env, request.projectId)
+    ).provisionStripe(request);
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId: request.projectId,
+        capability: {
+          provider: request.definition.provider,
+          name: request.definition.name,
+        },
+        revision: request.revision,
+        keyId: result.keyId,
+      },
+    };
+  }
   if (endpoint === "capabilityRevoke") {
     const request = input as RevokeEchoCapabilityRequest;
     const result = await (injectedVault ?? getCapabilityVault(env, request.projectId)).revokeEcho(
@@ -822,6 +878,30 @@ async function executeEndpoint(
         ok: true,
         projectId: request.projectId,
         capability: { provider: "neon-postgres", name: "database" },
+      },
+    };
+  }
+  if (endpoint === "stripeCapabilityRevoke") {
+    const request = input as RevokeStripeCapabilityRequest;
+    const result = await (injectedVault ?? getCapabilityVault(env, request.projectId)).revokeStripe(
+      request,
+    );
+    if (result === "not_found") {
+      throw new ControlHttpError(404, "capability_not_found", "Capability is not available");
+    }
+    if (result === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "capability_revision_conflict",
+        "Capability revision changed before revocation",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId: request.projectId,
+        capability: { provider: "stripe", name: "payments" },
       },
     };
   }
@@ -1108,6 +1188,8 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     capabilityRevoke: capabilityRevokeResponseSchema,
     databaseCapabilityProvision: capabilityProvisionResponseSchema,
     databaseCapabilityRevoke: capabilityRevokeResponseSchema,
+    stripeCapabilityProvision: capabilityProvisionResponseSchema,
+    stripeCapabilityRevoke: capabilityRevokeResponseSchema,
     capabilityBinding: capabilityBindingResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);
