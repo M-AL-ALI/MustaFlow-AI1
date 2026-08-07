@@ -16,6 +16,8 @@ const controlUrl = required("CLOUDFLARE_RUNTIME_CONTROL_URL").replace(/\/$/, "")
 const controlToken = required("CLOUDFLARE_RUNTIME_CONTROL_TOKEN");
 const previewPrivateKey = required("CLOUDFLARE_RUNTIME_PREVIEW_PRIVATE_KEY");
 const deploymentNamespace = required("CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE");
+const neonDatabaseUrl = required("NEON_DATABASE_URL");
+const neonDatabaseHost = new URL(neonDatabaseUrl).hostname;
 const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
 const readyPath = process.env.NABUFLOW_PUBLISHED_BROWSER_READY;
 const evidencePath = process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH;
@@ -71,7 +73,7 @@ const locator = {
 const foreignExistingProjectId = locator.projectId + 1;
 const foreignMissingProjectId = locator.projectId + 2;
 const runtimePath = `/_nabuflow/control/v1/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
-const simulatedHost = `slice-2b-vi-${locator.projectId}.apps.mustaflow.com`;
+const simulatedHost = `slice-2b-vii-${locator.projectId}.apps.mustaflow.com`;
 const registeredHosts = new Set<string>();
 let deploymentVersion = "";
 let workerClockOffsetMs = 0;
@@ -81,6 +83,7 @@ let manifestRevision = "";
 let runtimeIdentity = "";
 let activeContainerId = "";
 const provisionedCapabilityProjects = new Set<number>();
+const provisionedDatabaseProjects = new Set<number>();
 
 const echoCapabilityDefinition: CapabilityDefinition = {
   name: "echo",
@@ -92,6 +95,21 @@ const echoCapabilityDefinition: CapabilityDefinition = {
     timeoutMs: 5_000,
     maxRequestBytes: 32_768,
     maxResponseBytes: 32_768,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
+const databaseCapabilityDefinition: CapabilityDefinition = {
+  name: "database",
+  provider: "neon-postgres",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/query" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 65_536,
+    maxResponseBytes: 262_144,
     maxRequestsPerMinute: 60,
     maxConcurrent: 4,
   },
@@ -330,6 +348,58 @@ async function revokeCapability(projectId: number): Promise<void> {
   provisionedCapabilityProjects.delete(projectId);
 }
 
+function databaseCapabilityControlPath(projectId: number): string {
+  return `/_nabuflow/control/v1/capabilities/${projectId}/neon-postgres/database`;
+}
+
+async function provisionDatabaseCapability(projectId: number): Promise<void> {
+  const revision = `database-v1-${projectId}`;
+  const result = await signedControlFetch(
+    {
+      path: databaseCapabilityControlPath(projectId),
+      method: "PUT",
+      body: {
+        projectId,
+        revision,
+        definition: databaseCapabilityDefinition,
+        credential: { kind: "neon-connection-string", value: neonDatabaseUrl },
+      },
+      nonce: nonce(`database-provision-${projectId}`),
+      idempotencyKey: `database-provision-${projectId}-${crypto.randomUUID()}`,
+    },
+    `database.provision.${projectId}`,
+  );
+  assertStatus(`database.provision.${projectId}`, result.response.status, 200, result.body);
+  assertCondition(
+    (result.body as { keyId?: string }).keyId === "v1",
+    "Database capability provision did not use the active v1 envelope key",
+  );
+  assertCondition(
+    !JSON.stringify(result.body).includes(neonDatabaseUrl),
+    "Database provisioning response exposed the credential",
+  );
+  provisionedDatabaseProjects.add(projectId);
+}
+
+async function revokeDatabaseCapability(projectId: number): Promise<void> {
+  if (!provisionedDatabaseProjects.has(projectId)) return;
+  const result = await signedControlFetch(
+    {
+      path: databaseCapabilityControlPath(projectId),
+      method: "DELETE",
+      body: { projectId, expectedRevision: `database-v1-${projectId}` },
+      nonce: nonce(`database-revoke-${projectId}`),
+      idempotencyKey: `database-revoke-${projectId}-${crypto.randomUUID()}`,
+    },
+    `database.revoke.${projectId}`,
+  );
+  record(`database.revoke.${projectId}`, result.response.status, result.body);
+  if (result.response.status !== 200 && result.response.status !== 404) {
+    throw new Error(`Database capability cleanup failed for project ${projectId}`);
+  }
+  provisionedDatabaseProjects.delete(projectId);
+}
+
 function capabilityIntent(requestId: string, requestedProjectId?: number): CapabilityIntent {
   return {
     v: 1,
@@ -348,6 +418,33 @@ function capabilityInvocation(
 ): CapabilityInvocation {
   return {
     ...capabilityIntent(requestId, requestedProjectId),
+    caller: { containerId, runtimeIdentity },
+  };
+}
+
+function databaseCapabilityIntent(
+  requestId: string,
+  input: Record<string, unknown>,
+  requestedProjectId?: number,
+): CapabilityIntent {
+  return {
+    v: 1,
+    capability: { provider: "neon-postgres", name: "database" },
+    action: "query",
+    requestId,
+    ...(requestedProjectId === undefined ? {} : { requestedProjectId }),
+    input,
+  };
+}
+
+function databaseCapabilityInvocation(
+  requestId: string,
+  input: Record<string, unknown>,
+  containerId = activeContainerId,
+  requestedProjectId?: number,
+): CapabilityInvocation {
+  return {
+    ...databaseCapabilityIntent(requestId, input, requestedProjectId),
     caller: { containerId, runtimeIdentity },
   };
 }
@@ -385,6 +482,20 @@ async function invokeCapabilityFromContainer(
 ): Promise<{ status: number; body: unknown }> {
   const source = `const intent=${JSON.stringify(intent)};fetch(${JSON.stringify(capabilityIntentUrl)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(intent)}).then(async response=>console.log(JSON.stringify({status:response.status,body:await response.json()})))`;
   return (await runContainerNode(label, source)) as { status: number; body: unknown };
+}
+
+async function invokeDatabaseFromContainer(
+  label: string,
+  input: Record<string, unknown>,
+  expectedStatus = 200,
+  requestedProjectId?: number,
+): Promise<unknown> {
+  const result = await invokeCapabilityFromContainer(
+    label,
+    databaseCapabilityIntent(`database-${label}-${crypto.randomUUID()}`, input, requestedProjectId),
+  );
+  assertStatus(`database.${label}`, result.status, expectedStatus, result.body);
+  return result.body;
 }
 
 async function websocketCapabilityRejection(): Promise<{ status: number; body: unknown }> {
@@ -845,6 +956,219 @@ async function run(): Promise<void> {
   )) as { status: number; body: string };
   assertStatus("capability.vault.direct-unreachable", directVault.status, 520, directVault.body);
 
+  await provisionDatabaseCapability(locator.projectId);
+  await provisionDatabaseCapability(foreignExistingProjectId);
+
+  const databaseProbeInput = {
+    kind: "statement",
+    sql: "select $1::text as value",
+    params: ["auth-probe"],
+  };
+  const databaseCrossRequestId = `database-cross-project-${crypto.randomUUID()}`;
+  const databaseCrossExisting = await invokeCapabilityFromContainer(
+    "database-cross-existing",
+    databaseCapabilityIntent(databaseCrossRequestId, databaseProbeInput, foreignExistingProjectId),
+  );
+  const databaseCrossMissing = await invokeCapabilityFromContainer(
+    "database-cross-missing",
+    databaseCapabilityIntent(databaseCrossRequestId, databaseProbeInput, foreignMissingProjectId),
+  );
+  assertStatus(
+    "database.isolation.foreign-existing",
+    databaseCrossExisting.status,
+    403,
+    databaseCrossExisting.body,
+  );
+  assertStatus(
+    "database.isolation.foreign-missing",
+    databaseCrossMissing.status,
+    403,
+    databaseCrossMissing.body,
+  );
+  assertCondition(
+    JSON.stringify(databaseCrossExisting.body) === JSON.stringify(databaseCrossMissing.body),
+    "Database cross-project rejection leaks capability existence",
+  );
+
+  const unsignedDatabaseInvocation = databaseCapabilityInvocation(
+    `database-unsigned-${crypto.randomUUID()}`,
+    databaseProbeInput,
+  );
+  const unsignedDatabase = await fetch(`${controlUrl}${capabilityEndpoint}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(unsignedDatabaseInvocation),
+  });
+  assertStatus(
+    "database.auth.unsigned",
+    unsignedDatabase.status,
+    401,
+    await readResponse(unsignedDatabase),
+  );
+
+  const tamperedDatabase = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: databaseCapabilityInvocation(
+      `database-tampered-${crypto.randomUUID()}`,
+      databaseProbeInput,
+    ),
+    nonce: nonce("database-tampered"),
+    idempotencyKey: `database-tampered-${crypto.randomUUID()}`,
+    signatureOverride: "0".repeat(64),
+  });
+  assertStatus(
+    "database.auth.tampered",
+    tamperedDatabase.response.status,
+    401,
+    tamperedDatabase.body,
+  );
+
+  const expiredDatabaseRequestId = `database-expired-${crypto.randomUUID()}`;
+  const expiredDatabase = await signedFetch({
+    path: capabilityEndpoint,
+    method: "POST",
+    body: databaseCapabilityInvocation(expiredDatabaseRequestId, databaseProbeInput),
+    nonce: nonce("database-expired"),
+    idempotencyKey: expiredDatabaseRequestId,
+    timestampMs: Date.now() + workerClockOffsetMs - 60_001,
+  });
+  assertStatus("database.auth.expired", expiredDatabase.response.status, 401, expiredDatabase.body);
+
+  const validDatabaseRequestId = `database-valid-${crypto.randomUUID()}`;
+  const validDatabase = await acceptedReplayableRequest(
+    {
+      path: capabilityEndpoint,
+      method: "POST",
+      body: databaseCapabilityInvocation(validDatabaseRequestId, databaseProbeInput),
+      nonce: nonce("database-valid"),
+      idempotencyKey: validDatabaseRequestId,
+    },
+    "database.auth.valid",
+  );
+  assertStatus("database.auth.valid", validDatabase.response.status, 200, validDatabase.body);
+  assertCondition(
+    (validDatabase.body as { actedBy?: string }).actedBy === "database-broker",
+    "Valid database request was not executed by the broker",
+  );
+  const replayedDatabase = await replaySignedRequest(validDatabase.request, "database.auth.replay");
+  assertStatus(
+    "database.auth.replay",
+    replayedDatabase.response.status,
+    409,
+    replayedDatabase.body,
+  );
+
+  await invokeDatabaseFromContainer("create-table", {
+    kind: "statement",
+    sql: "create table gateway_items (id integer primary key, value text not null)",
+    params: [],
+  });
+  const inserted = await invokeDatabaseFromContainer("insert", {
+    kind: "statement",
+    sql: "insert into gateway_items(id, value) values ($1, $2) returning id, value",
+    params: [1, "created"],
+  });
+  assertCondition(
+    JSON.stringify(inserted).includes('"value":"created"'),
+    "Database insert did not round-trip",
+  );
+  const selected = await invokeDatabaseFromContainer("parameterized-select", {
+    kind: "statement",
+    sql: "select id, value from gateway_items where id = $1",
+    params: [1],
+  });
+  assertCondition(
+    JSON.stringify(selected).includes('"value":"created"'),
+    "Parameterized select did not return the inserted row",
+  );
+  const updated = await invokeDatabaseFromContainer("update", {
+    kind: "statement",
+    sql: "update gateway_items set value = $1 where id = $2 returning id, value",
+    params: ["updated", 1],
+  });
+  assertCondition(
+    JSON.stringify(updated).includes('"value":"updated"'),
+    "Database update did not round-trip",
+  );
+  const deleted = await invokeDatabaseFromContainer("delete", {
+    kind: "statement",
+    sql: "delete from gateway_items where id = $1 returning id",
+    params: [1],
+  });
+  assertCondition(
+    JSON.stringify(deleted).includes('"rowCount":1'),
+    "Database delete did not affect one row",
+  );
+
+  const committedBatch = await invokeDatabaseFromContainer("batch-commit", {
+    kind: "atomic-batch",
+    statements: [
+      { sql: "insert into gateway_items(id, value) values ($1, $2)", params: [2, "two"] },
+      { sql: "insert into gateway_items(id, value) values ($1, $2)", params: [3, "three"] },
+      { sql: "select count(*)::int as count from gateway_items", params: [] },
+    ],
+  });
+  assertCondition(
+    JSON.stringify(committedBatch).includes('"count":2'),
+    "Atomic batch did not commit all statements together",
+  );
+  const failedBatch = await invokeDatabaseFromContainer(
+    "batch-rollback",
+    {
+      kind: "atomic-batch",
+      statements: [
+        { sql: "insert into gateway_items(id, value) values ($1, $2)", params: [4, "four"] },
+        {
+          sql: "insert into gateway_items(id, value) values ($1, $2)",
+          params: [2, "duplicate"],
+        },
+      ],
+    },
+    409,
+  );
+  assertCondition(
+    (failedBatch as { code?: string }).code === "database_conflict",
+    "Failed atomic batch returned an unexpected sanitized error",
+  );
+  const rollbackCheck = await invokeDatabaseFromContainer("batch-rollback-check", {
+    kind: "statement",
+    sql: "select id from gateway_items where id = $1",
+    params: [4],
+  });
+  assertCondition(
+    JSON.stringify(rollbackCheck).includes('"rows":[]'),
+    "Failed atomic batch left a partially committed row",
+  );
+
+  const inducedError = await invokeDatabaseFromContainer(
+    "sanitized-error",
+    {
+      kind: "statement",
+      sql: "select * from table_that_does_not_exist_2b_vii",
+      params: [],
+    },
+    400,
+  );
+  const inducedErrorText = JSON.stringify(inducedError);
+  assertCondition(
+    (inducedError as { code?: string }).code === "database_invalid_query" &&
+      !inducedErrorText.includes(neonDatabaseHost) &&
+      !/postgres(?:ql)?:\/\//iu.test(inducedErrorText) &&
+      !inducedErrorText.includes("staging-password"),
+    "Sanitized database error exposed connection details",
+  );
+
+  const directDatabase = (await runContainerNode(
+    "database-host-direct",
+    `fetch(${JSON.stringify(`https://${neonDatabaseHost}/sql`)},{method:'POST'}).then(async response=>console.log(JSON.stringify({connected:response.status<500,status:response.status}))).catch(error=>console.log(JSON.stringify({connected:false,errorType:error&&error.name||'Error'})))`,
+  )) as { connected: boolean; status?: number; errorType?: string };
+  assertCondition(directDatabase.connected === false, "Tenant container reached the Neon host");
+  record("database.direct-host.blocked", directDatabase.status ?? "blocked", {
+    connected: false,
+    errorType: directDatabase.errorType ?? null,
+  });
+
   const activationPath = `/_nabuflow/control/v1/routes/${simulatedHost}/activate`;
   const activationBody = activateBody(simulatedHost);
   const unsignedActivate = await fetch(`${controlUrl}${activationPath}`, {
@@ -1285,6 +1609,30 @@ async function cleanup(): Promise<void> {
       (staleInvocation.body as { code?: string }).code === "capability_runtime_unbound",
       "Stopped runtime did not fail closed at the capability wall",
     );
+
+    const staleDatabaseRequestId = `database-stale-binding-${crypto.randomUUID()}`;
+    const staleDatabase = await signedControlFetch(
+      {
+        path: capabilityEndpoint,
+        method: "POST",
+        body: databaseCapabilityInvocation(
+          staleDatabaseRequestId,
+          { kind: "statement", sql: "select 1", params: [] },
+          activeContainerId,
+        ),
+        nonce: nonce("cleanup-database-stale"),
+        idempotencyKey: staleDatabaseRequestId,
+      },
+      "cleanup.database-stale",
+    );
+    assertStatus("cleanup.database-stale", staleDatabase.response.status, 403, staleDatabase.body);
+    assertCondition(
+      (staleDatabase.body as { code?: string }).code === "capability_runtime_unbound",
+      "Stopped runtime did not fail closed for the database capability",
+    );
+  }
+  for (const projectId of [...provisionedDatabaseProjects]) {
+    await revokeDatabaseCapability(projectId);
   }
   for (const projectId of [...provisionedCapabilityProjects]) {
     await revokeCapability(projectId);

@@ -25,6 +25,21 @@ const definition: CapabilityDefinition = {
   },
 };
 
+const databaseDefinition: CapabilityDefinition = {
+  name: "database",
+  provider: "neon-postgres",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/query" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 65_536,
+    maxResponseBytes: 262_144,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
 describe("capability vault control endpoints", () => {
   it("provisions and CAS-revokes the staging echo record under signed control auth", async () => {
     const coordinator = new MemoryCoordinator();
@@ -96,5 +111,61 @@ describe("capability vault control endpoints", () => {
     expect(coordinator.audits.filter((record) => record.projectId === 42).length).toBeGreaterThan(
       0,
     );
+  });
+
+  it("provisions and revokes an encrypted database credential without returning it", async () => {
+    const coordinator = new MemoryCoordinator();
+    const vault = new MemoryCapabilityVault();
+    const env = fakeEnv();
+    const dependencies = {
+      coordinator,
+      vault,
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+    };
+    const path = "/_nabuflow/control/v1/capabilities/42/neon-postgres/database";
+    const credential =
+      "postgresql://slice_user:staging-password@ep-db-broker.us-east-2.aws.neon.tech/slice_db";
+    const provisioned = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "PUT",
+        body: {
+          projectId: 42,
+          revision: "database-v1",
+          definition: databaseDefinition,
+          credential: { kind: "neon-connection-string", value: credential },
+        },
+        nonce: "database-provision-valid",
+        idempotencyKey: "database-provision-42-v1",
+      }),
+      env,
+      dependencies,
+    );
+    expect(provisioned.status).toBe(200);
+    const provisionBody = await provisioned.text();
+    expect(provisionBody).not.toContain(credential);
+    expect(JSON.parse(provisionBody)).toEqual({
+      ok: true,
+      projectId: 42,
+      capability: { provider: "neon-postgres", name: "database" },
+      revision: "database-v1",
+      keyId: "v1",
+    });
+
+    const revoked = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "DELETE",
+        body: { projectId: 42, expectedRevision: "database-v1" },
+        nonce: "database-revoke-valid",
+        idempotencyKey: "database-revoke-42-v1",
+      }),
+      env,
+      dependencies,
+    );
+    expect(revoked.status).toBe(200);
+    expect(vault.databaseRecords.has(42)).toBe(false);
+    expect(JSON.stringify(coordinator.audits)).not.toContain(credential);
   });
 });

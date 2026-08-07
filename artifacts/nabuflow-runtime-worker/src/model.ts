@@ -1,5 +1,6 @@
 import type {
   CapabilityDefinition,
+  CapabilityDatabaseResponse,
   CapabilityEchoResponse,
   CapabilityInvocation,
   LogsRuntimeResponse,
@@ -44,6 +45,7 @@ export interface ControlAuditRecord {
   role: string | null;
   slot: string | null;
   status: number;
+  databaseSqlstate?: string;
 }
 
 export interface ControlCoordinator {
@@ -84,10 +86,24 @@ export interface ControlCoordinator {
 }
 
 export type CapabilityVaultInvocationResult =
-  | { state: "success"; response: CapabilityEchoResponse }
+  | { state: "success"; response: CapabilityEchoResponse | CapabilityDatabaseResponse }
   | { state: "not_found" }
   | { state: "tenant_mismatch" }
-  | { state: "policy_rejected" };
+  | { state: "policy_rejected" }
+  | {
+      state: "database_error";
+      status: 400 | 409 | 502 | 503 | 504;
+      code:
+        | "database_invalid_query"
+        | "database_constraint_violation"
+        | "database_conflict"
+        | "database_timeout"
+        | "database_unavailable"
+        | "database_execution_failed"
+        | "database_response_too_large";
+      retryable: boolean;
+      sqlstate: string | null;
+    };
 
 export interface CapabilityVault {
   provisionEcho(input: {
@@ -100,6 +116,20 @@ export interface CapabilityVault {
     expectedRevision: string;
   }): Promise<"revoked" | "not_found" | "conflict">;
   invokeEcho(input: {
+    projectId: number;
+    invocation: CapabilityInvocation;
+  }): Promise<CapabilityVaultInvocationResult>;
+  provisionDatabase(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    credential: { kind: "neon-connection-string"; value: string };
+  }): Promise<{ state: "provisioned"; keyId: string }>;
+  revokeDatabase(input: {
+    projectId: number;
+    expectedRevision: string;
+  }): Promise<"revoked" | "not_found" | "conflict">;
+  invokeDatabase(input: {
     projectId: number;
     invocation: CapabilityInvocation;
   }): Promise<CapabilityVaultInvocationResult>;

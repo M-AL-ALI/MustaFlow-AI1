@@ -19,7 +19,9 @@ import {
   logsRuntimeRequestSchema,
   logsRuntimeResponseSchema,
   parseRuntimeIdentityForNamespace,
+  provisionDatabaseCapabilityRequestSchema,
   provisionEchoCapabilityRequestSchema,
+  revokeDatabaseCapabilityRequestSchema,
   revokeEchoCapabilityRequestSchema,
   sha256Hex,
   startRuntimeRequestSchema,
@@ -33,7 +35,9 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
+  ProvisionDatabaseCapabilityRequest,
   ProvisionEchoCapabilityRequest,
+  RevokeDatabaseCapabilityRequest,
   RevokeEchoCapabilityRequest,
   DeactivateRouteRequest,
   DestroyRuntimeRequest,
@@ -71,6 +75,8 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "routeDeactivate",
   "capabilityProvision",
   "capabilityRevoke",
+  "databaseCapabilityProvision",
+  "databaseCapabilityRevoke",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -95,6 +101,8 @@ type Endpoint =
   | "routeDeactivate"
   | "capabilityProvision"
   | "capabilityRevoke"
+  | "databaseCapabilityProvision"
+  | "databaseCapabilityRevoke"
   | "capabilityBinding";
 
 interface MatchedRoute {
@@ -464,7 +472,9 @@ type ControlInput =
   | ExecRuntimeRequest
   | LogsRuntimeRequest
   | ProvisionEchoCapabilityRequest
-  | RevokeEchoCapabilityRequest;
+  | RevokeEchoCapabilityRequest
+  | ProvisionDatabaseCapabilityRequest
+  | RevokeDatabaseCapabilityRequest;
 
 function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableObject> {
   return env.CONTROL_COORDINATOR.get(env.CONTROL_COORDINATOR.idFromName("control-v1"));
@@ -506,8 +516,25 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
       provider: capabilityMatch[2],
       name: capabilityMatch[3],
     };
-    if (method === "PUT") return { endpoint: "capabilityProvision", locator: null, capability };
-    if (method === "DELETE") return { endpoint: "capabilityRevoke", locator: null, capability };
+    const isEcho = capability.provider === "nabuflow-harness" && capability.name === "echo";
+    const isDatabase = capability.provider === "neon-postgres" && capability.name === "database";
+    if (!isEcho && !isDatabase) {
+      throw new ControlHttpError(400, "unsupported_capability", "Capability is not supported");
+    }
+    if (method === "PUT") {
+      return {
+        endpoint: isEcho ? "capabilityProvision" : "databaseCapabilityProvision",
+        locator: null,
+        capability,
+      };
+    }
+    if (method === "DELETE") {
+      return {
+        endpoint: isEcho ? "capabilityRevoke" : "databaseCapabilityRevoke",
+        locator: null,
+        capability,
+      };
+    }
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const match = new RegExp(
@@ -541,7 +568,12 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     return {};
   }
   if (route.locator === null) {
-    if (route.endpoint === "capabilityProvision" || route.endpoint === "capabilityRevoke") {
+    if (
+      route.endpoint === "capabilityProvision" ||
+      route.endpoint === "capabilityRevoke" ||
+      route.endpoint === "databaseCapabilityProvision" ||
+      route.endpoint === "databaseCapabilityRevoke"
+    ) {
       return parseCapabilityControlInput(route, url, rawBody);
     }
     return parseRouteInput(route, url, rawBody);
@@ -602,7 +634,11 @@ function parseCapabilityControlInput(
   route: MatchedRoute,
   url: URL,
   rawBody: Uint8Array,
-): ProvisionEchoCapabilityRequest | RevokeEchoCapabilityRequest {
+):
+  | ProvisionEchoCapabilityRequest
+  | RevokeEchoCapabilityRequest
+  | ProvisionDatabaseCapabilityRequest
+  | RevokeDatabaseCapabilityRequest {
   if (route.capability === undefined) {
     throw new ControlHttpError(400, "invalid_capability", "Capability scope is required");
   }
@@ -611,26 +647,27 @@ function parseCapabilityControlInput(
   const parsed =
     route.endpoint === "capabilityProvision"
       ? parseStrict(provisionEchoCapabilityRequestSchema, body)
-      : parseStrict(revokeEchoCapabilityRequestSchema, body);
+      : route.endpoint === "databaseCapabilityProvision"
+        ? parseStrict(provisionDatabaseCapabilityRequestSchema, body)
+        : route.endpoint === "databaseCapabilityRevoke"
+          ? parseStrict(revokeDatabaseCapabilityRequestSchema, body)
+          : parseStrict(revokeEchoCapabilityRequestSchema, body);
   if (parsed.projectId !== route.capability.projectId) {
     throw new ControlHttpError(400, "project_mismatch", "Path and body projects differ");
   }
-  if (route.capability.provider !== "nabuflow-harness" || route.capability.name !== "echo") {
-    throw new ControlHttpError(
-      400,
-      "unsupported_capability",
-      "Only the staging echo capability is available in this slice",
-    );
-  }
   if (
-    route.endpoint === "capabilityProvision" &&
-    (parsed as ProvisionEchoCapabilityRequest).definition.provider !== route.capability.provider
+    (route.endpoint === "capabilityProvision" ||
+      route.endpoint === "databaseCapabilityProvision") &&
+    (parsed as ProvisionEchoCapabilityRequest | ProvisionDatabaseCapabilityRequest).definition
+      .provider !== route.capability.provider
   ) {
     throw new ControlHttpError(400, "capability_mismatch", "Path and body capabilities differ");
   }
   if (
-    route.endpoint === "capabilityProvision" &&
-    (parsed as ProvisionEchoCapabilityRequest).definition.name !== route.capability.name
+    (route.endpoint === "capabilityProvision" ||
+      route.endpoint === "databaseCapabilityProvision") &&
+    (parsed as ProvisionEchoCapabilityRequest | ProvisionDatabaseCapabilityRequest).definition
+      .name !== route.capability.name
   ) {
     throw new ControlHttpError(400, "capability_mismatch", "Path and body capabilities differ");
   }
@@ -721,6 +758,25 @@ async function executeEndpoint(
       },
     };
   }
+  if (endpoint === "databaseCapabilityProvision") {
+    const request = input as ProvisionDatabaseCapabilityRequest;
+    const result = await (
+      injectedVault ?? getCapabilityVault(env, request.projectId)
+    ).provisionDatabase(request);
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId: request.projectId,
+        capability: {
+          provider: request.definition.provider,
+          name: request.definition.name,
+        },
+        revision: request.revision,
+        keyId: result.keyId,
+      },
+    };
+  }
   if (endpoint === "capabilityRevoke") {
     const request = input as RevokeEchoCapabilityRequest;
     const result = await (injectedVault ?? getCapabilityVault(env, request.projectId)).revokeEcho(
@@ -742,6 +798,30 @@ async function executeEndpoint(
         ok: true,
         projectId: request.projectId,
         capability: { provider: "nabuflow-harness", name: "echo" },
+      },
+    };
+  }
+  if (endpoint === "databaseCapabilityRevoke") {
+    const request = input as RevokeDatabaseCapabilityRequest;
+    const result = await (
+      injectedVault ?? getCapabilityVault(env, request.projectId)
+    ).revokeDatabase(request);
+    if (result === "not_found") {
+      throw new ControlHttpError(404, "capability_not_found", "Capability is not available");
+    }
+    if (result === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "capability_revision_conflict",
+        "Capability revision changed before revocation",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId: request.projectId,
+        capability: { provider: "neon-postgres", name: "database" },
       },
     };
   }
@@ -1026,6 +1106,8 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     routeDeactivate: deactivateRouteResponseSchema,
     capabilityProvision: capabilityProvisionResponseSchema,
     capabilityRevoke: capabilityRevokeResponseSchema,
+    databaseCapabilityProvision: capabilityProvisionResponseSchema,
+    databaseCapabilityRevoke: capabilityRevokeResponseSchema,
     capabilityBinding: capabilityBindingResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);

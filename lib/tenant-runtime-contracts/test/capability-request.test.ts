@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   capabilityBindingResponseSchema,
   capabilityEchoResponseSchema,
+  capabilityDatabaseResponseSchema,
+  databaseCapabilityInputSchema,
   capabilityIntentSchema,
   capabilityInvocationSchema,
   provisionEchoCapabilityRequestSchema,
+  provisionDatabaseCapabilityRequestSchema,
 } from "../src/capability-request";
 
 const definition = {
@@ -56,6 +59,64 @@ describe("capability request contract", () => {
       capabilityIntentSchema.safeParse({ ...intent, input: { value: "x".repeat(33 * 1024) } })
         .success,
     ).toBe(false);
+  });
+
+  it("defines bounded parameterized statements and atomic batches", () => {
+    expect(
+      databaseCapabilityInputSchema.parse({
+        kind: "statement",
+        sql: "select $1::text as value",
+        params: ["hello"],
+      }),
+    ).toMatchObject({ kind: "statement", params: ["hello"] });
+    expect(
+      databaseCapabilityInputSchema.parse({
+        kind: "atomic-batch",
+        statements: [
+          { sql: "insert into items(value) values ($1)", params: ["one"] },
+          { sql: "select count(*) from items", params: [] },
+        ],
+      }),
+    ).toMatchObject({ kind: "atomic-batch", statements: expect.any(Array) });
+    expect(
+      databaseCapabilityInputSchema.safeParse({
+        kind: "statement",
+        sql: "select $1",
+        params: [{ credential: "not-a-scalar" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps database credentials control-only and results sanitized", () => {
+    const databaseDefinition = {
+      ...definition,
+      name: "database",
+      provider: "neon-postgres",
+      allowedPaths: [{ match: "exact", path: "/v1/query" }],
+    } as const;
+    expect(
+      provisionDatabaseCapabilityRequestSchema.parse({
+        projectId: 42,
+        revision: "database-v1",
+        definition: databaseDefinition,
+        credential: {
+          kind: "neon-connection-string",
+          value: "postgresql://user:password@ep-test.us-east-2.aws.neon.tech/db",
+        },
+      }),
+    ).toMatchObject({ credential: { kind: "neon-connection-string" } });
+    const response = capabilityDatabaseResponseSchema.parse({
+      ok: true,
+      capability: { provider: "neon-postgres", name: "database" },
+      requestId: "database-request-0001",
+      runtimeIdentity: "nrf-aaaaaaaaaaaaaaaa-p42-production-blue",
+      actedBy: "database-broker",
+      result: {
+        kind: "statement",
+        result: { command: "SELECT", rowCount: 1, rows: [{ value: "hello" }] },
+      },
+    });
+    expect(JSON.stringify(response)).not.toMatch(/password|hostname|connection|credential/i);
   });
 
   it("uses the shipped capability policy for echo provisioning", () => {

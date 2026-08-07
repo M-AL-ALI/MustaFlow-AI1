@@ -3,7 +3,7 @@ import {
   type CapabilityDefinition,
   type CapabilityInvocation,
 } from "@workspace/tenant-runtime-contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CAPABILITY_ENDPOINT,
   handleCapabilityIntentFromContainer,
@@ -28,6 +28,21 @@ const definition: CapabilityDefinition = {
     timeoutMs: 5_000,
     maxRequestBytes: 32_768,
     maxResponseBytes: 32_768,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 4,
+  },
+};
+
+const databaseDefinition: CapabilityDefinition = {
+  name: "database",
+  provider: "neon-postgres",
+  allowedMethods: ["POST"],
+  allowedPaths: [{ match: "exact", path: "/v1/query" }],
+  injection: { location: "worker-binding" },
+  limits: {
+    timeoutMs: 10_000,
+    maxRequestBytes: 65_536,
+    maxResponseBytes: 262_144,
     maxRequestsPerMinute: 60,
     maxConcurrent: 4,
   },
@@ -297,6 +312,95 @@ describe("signed capability endpoint", () => {
       runtimeIdentity: state.identity,
       echo: intent.input,
     });
+  });
+
+  it("dispatches a container database intent through the identity-bound vault", async () => {
+    const state = await setup();
+    await state.vault.provisionDatabase({
+      projectId: 42,
+      revision: "database-v1",
+      definition: databaseDefinition,
+      credential: {
+        kind: "neon-connection-string",
+        value:
+          "postgresql://slice_user:staging-password@ep-db-broker.us-east-2.aws.neon.tech/slice_db",
+      },
+    });
+    const intent = {
+      v: 1,
+      capability: { provider: "neon-postgres", name: "database" },
+      action: "query",
+      requestId: "database-container-intent",
+      input: { kind: "statement", sql: "select $1::text as value", params: ["hello"] },
+    } as const;
+    const response = await handleCapabilityIntentFromContainer(
+      new Request("http://doorman.staging.nabuflow.internal/v1/invoke", {
+        method: "POST",
+        body: JSON.stringify(intent),
+      }),
+      state.env,
+      state.containerId,
+      {
+        coordinator: state.coordinator,
+        vault: state.vault,
+        nowMs: TEST_NOW_MS,
+      },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      requestId: intent.requestId,
+      runtimeIdentity: state.identity,
+      actedBy: "database-broker",
+      result: {
+        kind: "statement",
+        result: { command: "SELECT", rows: [{ value: "memory-database" }] },
+      },
+    });
+  });
+
+  it("records SQLSTATE only in trusted diagnostics and never tenant responses", async () => {
+    const state = await setup();
+    state.vault.invokeDatabase = async () => ({
+      state: "database_error",
+      status: 400,
+      code: "database_invalid_query",
+      retryable: false,
+      sqlstate: "42501",
+    });
+    const diagnostic = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestId = "database-diagnostic-request";
+    const response = await invoke(
+      state,
+      {
+        ...invocation(state.identity, state.containerId, { requestId }),
+        capability: { provider: "neon-postgres", name: "database" },
+        action: "query",
+        input: { kind: "statement", sql: "create table hidden(value text)", params: [] },
+      },
+      "database-diagnostic-nonce",
+    );
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(body).toContain('"code":"database_invalid_query"');
+    expect(body).not.toMatch(/42501|sqlstate|create table|hidden/iu);
+    expect(state.coordinator.audits.at(-1)).toMatchObject({
+      outcome: "database_invalid_query",
+      databaseSqlstate: "42501",
+    });
+    const diagnosticRecord = JSON.parse(String(diagnostic.mock.calls[0]?.[0])) as Record<
+      string,
+      unknown
+    >;
+    expect(diagnosticRecord).toEqual({
+      event: "database_broker_error",
+      requestId: expect.any(String),
+      projectId: 42,
+      sqlstate: "42501",
+    });
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toMatch(
+      /create table|hidden|credential|host/iu,
+    );
+    diagnostic.mockRestore();
   });
 
   it("keeps audit records free of keys, envelopes, and credential material", async () => {

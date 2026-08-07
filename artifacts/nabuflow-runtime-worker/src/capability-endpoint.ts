@@ -1,5 +1,5 @@
 import {
-  capabilityEchoResponseSchema,
+  capabilitySuccessResponseSchema,
   capabilityIntentSchema,
   capabilityInvocationSchema,
   controlErrorResponseSchema,
@@ -41,6 +41,7 @@ class CapabilityHttpError extends Error {
     readonly code: string,
     message: string,
     readonly retryable = false,
+    readonly databaseSqlstate: string | null = null,
   ) {
     super(message);
   }
@@ -160,6 +161,7 @@ async function audit(
   status: number,
   projectId: number | null,
   stage: string | null = null,
+  databaseSqlstate: string | null = null,
 ): Promise<void> {
   await coordinator.recordAudit({
     requestId,
@@ -172,6 +174,7 @@ async function audit(
     role: null,
     slot: null,
     status,
+    ...(databaseSqlstate === null ? {} : { databaseSqlstate }),
   });
 }
 
@@ -340,10 +343,16 @@ export async function handleCapabilityRequest(
     ownedIdempotency = { key: idempotencyKey, fingerprint };
 
     const vault = dependencies.vault ?? getVault(env, caller.projectId);
-    const result = await vault.invokeEcho({ projectId: caller.projectId, invocation });
+    const result =
+      invocation.capability.provider === "nabuflow-harness" && invocation.capability.name === "echo"
+        ? await vault.invokeEcho({ projectId: caller.projectId, invocation })
+        : invocation.capability.provider === "neon-postgres" &&
+            invocation.capability.name === "database"
+          ? await vault.invokeDatabase({ projectId: caller.projectId, invocation })
+          : { state: "not_found" as const };
     let response: StoredHttpResponse;
     if (result.state === "success") {
-      response = { status: 200, body: capabilityEchoResponseSchema.parse(result.response) };
+      response = { status: 200, body: capabilitySuccessResponseSchema.parse(result.response) };
     } else if (result.state === "tenant_mismatch") {
       throw new CapabilityHttpError(
         403,
@@ -355,6 +364,29 @@ export async function handleCapabilityRequest(
         403,
         "capability_policy_rejected",
         "The capability action is not allowed",
+      );
+    } else if (result.state === "database_error") {
+      const sqlstate =
+        result.sqlstate !== null && /^[0-9A-Z]{5}$/u.test(result.sqlstate) ? result.sqlstate : null;
+      if (sqlstate !== null) {
+        // SQLSTATE is the sole approved database diagnostic field. Raw driver
+        // errors, SQL text, schema names, hosts, and credentials stay excluded.
+        // eslint-disable-next-line no-console
+        console.warn(
+          JSON.stringify({
+            event: "database_broker_error",
+            requestId: auditRequestId,
+            projectId: caller.projectId,
+            sqlstate,
+          }),
+        );
+      }
+      throw new CapabilityHttpError(
+        result.status,
+        result.code,
+        "The database operation could not be completed",
+        result.retryable,
+        sqlstate,
       );
     } else {
       throw new CapabilityHttpError(404, "capability_not_available", "Capability is not available");
@@ -407,6 +439,7 @@ export async function handleCapabilityRequest(
       capabilityError.status,
       auditProjectId,
       "capability_request",
+      capabilityError.databaseSqlstate,
     );
     return errorResponse(capabilityError, auditRequestId);
   }
