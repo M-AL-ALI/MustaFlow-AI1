@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  MAX_RUNTIME_ARTIFACT_FILE_BYTES,
+  MAX_RUNTIME_ARTIFACT_BYTES,
+  RUNTIME_ARTIFACT_CHUNK_BYTES,
   deriveRuntimeIdentity,
   sha256Hex,
   signControlRequest,
@@ -13,6 +16,11 @@ import {
   type CapabilityInvocation,
 } from "@workspace/tenant-runtime-contracts";
 import WebSocket from "ws";
+import { deliverScratchArtifact } from "./artifact-delivery";
+import {
+  RuntimeArtifactSealError,
+  sealRuntimeArtifact,
+} from "../../api-server/src/lib/runtime-artifact";
 
 const controlUrl = required("CLOUDFLARE_RUNTIME_CONTROL_URL").replace(/\/$/, "");
 const controlToken = required("CLOUDFLARE_RUNTIME_CONTROL_TOKEN");
@@ -28,9 +36,22 @@ const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
 const readyPath = process.env.NABUFLOW_PUBLISHED_BROWSER_READY;
 const workerPackageRoot = fileURLToPath(new URL("..", import.meta.url));
 const evidencePath = resolveWorkerOutputPath(process.env.NABUFLOW_PUBLISHED_EVIDENCE_PATH);
+const stopAfterManifestFailure = process.env.NABUFLOW_STOP_AFTER_MANIFEST_FAILURE === "1";
+const manifestFailureIterations = readBoundedInteger(
+  process.env.NABUFLOW_MANIFEST_FAILURE_ITERATIONS,
+  1,
+  1,
+  25,
+  "NABUFLOW_MANIFEST_FAILURE_ITERATIONS",
+);
 const workerHost = new URL(controlUrl).hostname;
 const capabilityEndpoint = "/_nabuflow/capability/v1/invoke";
 const capabilityIntentUrl = "http://doorman.staging.nabuflow.internal/v1/invoke";
+const ARTIFACT_BINARY_PATH = "assets/runtime-fixture.bin";
+const ARTIFACT_BINARY_FIXTURE = Uint8Array.from(
+  { length: 4_097 },
+  (_value, index) => (index * 73 + 19) % 256,
+);
 
 const TENANT_SERVER_SOURCE = String.raw`
 const http=require('node:http');
@@ -39,7 +60,7 @@ const collect=async(req)=>{const chunks=[];for await(const chunk of req)chunks.p
 const sendJson=(res,value)=>{res.statusCode=200;res.setHeader('content-type','application/json');res.end(JSON.stringify(value))};
 const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url||'/','http://tenant.invalid');
-  if(url.pathname==='/health'){res.statusCode=200;res.end('healthy');return}
+  if(url.pathname==='/health'||url.pathname==='/health-old'){res.statusCode=200;res.end('healthy');return}
   if(url.pathname==='/sse'){
     res.statusCode=200;res.setHeader('content-type','text/event-stream');res.setHeader('cache-control','no-cache');
     res.write('event: ready\ndata: first\n\n');
@@ -48,6 +69,7 @@ const server=http.createServer(async(req,res)=>{
   if(url.pathname==='/cookie-bad'){
     res.statusCode=200;res.setHeader('set-cookie','tenant_session=secret; Domain=.mustaflow.com; Path=/');res.end('cookie');return
   }
+  if(url.pathname==='/intentionally-missing-health'){res.statusCode=503;res.end('unhealthy');return}
   if(url.pathname==='/'){
     res.statusCode=200;res.setHeader('content-type','text/html; charset=utf-8');
     const servedAt=new Date().toISOString();const receivedCookie=req.headers.cookie||'none';
@@ -92,6 +114,7 @@ let activeContainerId = "";
 const provisionedCapabilityProjects = new Set<number>();
 const provisionedDatabaseProjects = new Set<number>();
 const provisionedStripeProjects = new Set<number>();
+const readinessCapabilityRevisions = new Map<number, string>();
 const stripeCapabilityRevisions = new Map<number, string>();
 const stripePaymentIntentIds = new Set<string>();
 let stripeAcceptanceStartedAtSeconds = 0;
@@ -167,6 +190,21 @@ function required(name: string): string {
   return value;
 }
 
+function readBoundedInteger(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  name: string,
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
 function nonce(label: string): string {
   return `${label}-${crypto.randomUUID()}`;
 }
@@ -209,16 +247,21 @@ async function readResponse(response: Response): Promise<unknown> {
 async function makeSignedRequest(input: {
   path: string;
   method?: string;
-  body?: unknown;
+  body?: unknown | Uint8Array;
   timestampMs?: number;
   nonce: string;
   idempotencyKey?: string;
   signatureOverride?: string;
 }): Promise<Request> {
   const method = input.method ?? "GET";
-  const body = input.body === undefined ? "" : JSON.stringify(input.body);
+  const rawBody =
+    input.body instanceof Uint8Array
+      ? input.body
+      : input.body === undefined
+        ? ""
+        : JSON.stringify(input.body);
   const timestamp = String(input.timestampMs ?? Date.now() + workerClockOffsetMs);
-  const bodySha256 = await sha256Hex(body);
+  const bodySha256 = await sha256Hex(rawBody);
   const idempotencyKey = input.idempotencyKey ?? "";
   const signature =
     input.signatureOverride ??
@@ -232,9 +275,15 @@ async function makeSignedRequest(input: {
     }));
   return new Request(`${controlUrl}${input.path}`, {
     method,
-    body: body || undefined,
+    body:
+      typeof rawBody === "string" ? rawBody || undefined : (rawBody.slice().buffer as ArrayBuffer),
     headers: {
-      ...(body ? { "content-type": "application/json" } : {}),
+      ...(rawBody
+        ? {
+            "content-type":
+              typeof rawBody === "string" ? "application/json" : "application/octet-stream",
+          }
+        : {}),
       "x-nabuflow-timestamp": timestamp,
       "x-nabuflow-nonce": input.nonce,
       "x-nabuflow-body-sha256": bodySha256,
@@ -253,7 +302,7 @@ function isPropagationRetryable(status: number, body: unknown): boolean {
   const code = (body as { code?: string } | null)?.code;
   return (
     (status === 401 && code === "invalid_signature") ||
-    status === 502 ||
+    (status === 502 && code !== "runtime_restart_failed") ||
     status === 503 ||
     status === 504
   );
@@ -277,6 +326,31 @@ async function signedControlFetch(input: Parameters<typeof makeSignedRequest>[0]
     await new Promise((resolve) => setTimeout(resolve, backoffMs));
   }
   throw new Error(`${label}: bounded control retry exhausted without a response`);
+}
+
+async function signedAuthStableFetch(
+  input: Parameters<typeof makeSignedRequest>[0],
+  label: string,
+) {
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const result = await signedFetch({
+      ...input,
+      nonce: attempt === 1 ? input.nonce : nonce(`${label}-auth-retry-${attempt}`),
+    });
+    const code = (result.body as { code?: string } | null)?.code;
+    if (!(result.response.status === 401 && code === "invalid_signature") || attempt === 8) {
+      return result;
+    }
+    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
+    record(`control.retry.${label}`, result.response.status, {
+      attempt,
+      backoffMs,
+      code,
+      targetResponseMayBeNonSuccess: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  throw new Error(`${label}: bounded authentication retry exhausted without a response`);
 }
 
 async function acceptedReplayableRequest(
@@ -323,40 +397,256 @@ async function replaySignedRequest(request: Request, label: string) {
   throw new Error(`${label}: bounded exact-request replay exhausted without a response`);
 }
 
+const SUSTAINED_GREEN_REQUIRED = 20;
+const SUSTAINED_GREEN_MAX_PROBES = 600;
+const SUSTAINED_GREEN_MAX_ELAPSED_MS = 5 * 60 * 1_000;
+
+interface ReadinessSurface {
+  consecutive: number;
+  totalProbes: number;
+  firstGreenMs?: number;
+  completedMs?: number;
+  lastStatus?: number;
+  lastCode?: string;
+}
+
+async function probePreviewGrantReadiness(probeNumber: number): Promise<{
+  status: number;
+  body: unknown;
+}> {
+  const previewIdentity = await deriveRuntimeIdentity({
+    namespace: deploymentNamespace,
+    projectId: locator.projectId,
+    role: "preview",
+    slot: "primary",
+  });
+  const nowSeconds = Math.floor((Date.now() + workerClockOffsetMs) / 1_000);
+  const grant = await signPreviewGrant(previewPrivateKey, {
+    v: 1,
+    iss: "nabuflow-api",
+    aud: controlUrl,
+    sub: previewIdentity,
+    port: 8080,
+    iat: nowSeconds,
+    exp: nowSeconds + 300,
+    jti: `readiness${probeNumber}${crypto.randomUUID().replaceAll("-", "")}`,
+  });
+  const path = `/_nabuflow/preview/v1/${previewIdentity}/`;
+  const response = await fetch(`${controlUrl}${path}?__nfg=${encodeURIComponent(grant)}`, {
+    redirect: "manual",
+  });
+  return { status: response.status, body: await readResponse(response) };
+}
+
+async function probePreviewGrantReplayReadiness(probeNumber: number): Promise<{
+  status: number;
+  body: unknown;
+  green: boolean;
+  requestCount: number;
+}> {
+  const previewIdentity = await deriveRuntimeIdentity({
+    namespace: deploymentNamespace,
+    projectId: locator.projectId,
+    role: "preview",
+    slot: "primary",
+  });
+  const nowSeconds = Math.floor((Date.now() + workerClockOffsetMs) / 1_000);
+  const grant = await signPreviewGrant(previewPrivateKey, {
+    v: 1,
+    iss: "nabuflow-api",
+    aud: controlUrl,
+    sub: previewIdentity,
+    port: 8080,
+    iat: nowSeconds,
+    exp: nowSeconds + 300,
+    jti: `readinesspair${probeNumber}${crypto.randomUUID().replaceAll("-", "")}`,
+  });
+  const path = `/_nabuflow/preview/v1/${previewIdentity}/`;
+  const url = `${controlUrl}${path}?__nfg=${encodeURIComponent(grant)}`;
+  const redeemed = await fetch(url, { redirect: "manual" });
+  const redeemedBody = await readResponse(redeemed);
+  const replayed = await fetch(url, { redirect: "manual" });
+  const replayedBody = await readResponse(replayed);
+  const replayCode = (replayedBody as { code?: string } | null)?.code;
+  return {
+    status: replayed.status,
+    body: {
+      code: replayCode,
+      redeemStatus: redeemed.status,
+      redeemCode: (redeemedBody as { code?: string } | null)?.code,
+      replayStatus: replayed.status,
+      replayCode,
+    },
+    green:
+      redeemed.status === 302 && replayed.status === 409 && replayCode === "preview_grant_replayed",
+    requestCount: 2,
+  };
+}
+
+async function probeVaultKekReadiness(probeNumber: number): Promise<{
+  status: number;
+  body: unknown;
+}> {
+  const projectId = 700_000_000 + (locator.projectId % 90_000_000);
+  const revision = `readiness-v1-${projectId}-${crypto.randomUUID()}`;
+  const path = capabilityControlPath(projectId);
+  const provision = await signedFetch({
+    path,
+    method: "PUT",
+    body: { projectId, revision, definition: echoCapabilityDefinition },
+    nonce: nonce(`vault-readiness-provision-${probeNumber}`),
+    idempotencyKey: `vault-readiness-provision-${projectId}-${crypto.randomUUID()}`,
+  });
+  if (provision.response.status !== 200) {
+    return { status: provision.response.status, body: provision.body };
+  }
+  readinessCapabilityRevisions.set(projectId, revision);
+
+  const revoke = await signedFetch({
+    path,
+    method: "DELETE",
+    body: { projectId, expectedRevision: revision },
+    nonce: nonce(`vault-readiness-revoke-${probeNumber}`),
+    idempotencyKey: `vault-readiness-revoke-${projectId}-${crypto.randomUUID()}`,
+  });
+  if (revoke.response.status === 200 || revoke.response.status === 404) {
+    readinessCapabilityRevisions.delete(projectId);
+  }
+  return { status: revoke.response.status, body: revoke.body };
+}
+
 async function waitForSustainedGreenWindow(): Promise<unknown> {
   const startedAt = performance.now();
-  let consecutive = 0;
-  let totalProbes = 0;
+  const surfaces: Record<
+    "controlHmac" | "previewGrant" | "previewGrantReplay" | "vaultKek",
+    ReadinessSurface
+  > = {
+    controlHmac: { consecutive: 0, totalProbes: 0 },
+    previewGrant: { consecutive: 0, totalProbes: 0 },
+    previewGrantReplay: { consecutive: 0, totalProbes: 0 },
+    vaultKek: { consecutive: 0, totalProbes: 0 },
+  };
+  let totalRequests = 0;
   let stableVersion = "";
   let lastBody: unknown = null;
-  while (consecutive < 20 && totalProbes < 180) {
-    totalProbes += 1;
-    const result = await signedFetch({
-      path: "/_nabuflow/control/v1/version",
-      nonce: nonce(`sustained-green-${totalProbes}`),
-    });
-    lastBody = result.body;
-    const observedVersion = (result.body as { deploymentVersion?: string }).deploymentVersion ?? "";
-    if (result.response.status === 200 && observedVersion) {
-      if (stableVersion !== observedVersion) {
-        stableVersion = observedVersion;
-        consecutive = 0;
+  record("auth.sustained-green.surfaces", "enumerated", {
+    atomicSecretEntries: [
+      {
+        name: "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
+        surface: "signed control /version",
+      },
+      {
+        name: "CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY",
+        surface: "fresh ES256 preview-grant redemption",
+      },
+      {
+        name: "CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY",
+        surface: "fresh ES256 preview-grant redeem plus replay-detection pair",
+      },
+      {
+        name: "CLOUDFLARE_CAPABILITY_VAULT_KEK_V1",
+        surface: "echo-vault envelope encrypt and strict-body revoke",
+      },
+      {
+        name: "CLOUFLOW_RUNTIME_CONTROL_TOKEN",
+        surface: "legacy adapter alias; same value as control token; no Worker binding",
+      },
+    ],
+    requiredConsecutivePerSurface: SUSTAINED_GREEN_REQUIRED,
+    maxElapsedMs: SUSTAINED_GREEN_MAX_ELAPSED_MS,
+    maxRequests: SUSTAINED_GREEN_MAX_PROBES,
+  });
+
+  const allComplete = () =>
+    Object.values(surfaces).every((surface) => surface.consecutive >= SUSTAINED_GREEN_REQUIRED);
+  const updateSurface = (
+    name: keyof typeof surfaces,
+    green: boolean,
+    status: number,
+    body: unknown,
+  ) => {
+    const surface = surfaces[name];
+    surface.totalProbes += 1;
+    surface.lastStatus = status;
+    surface.lastCode = (body as { code?: string } | null)?.code;
+    if (green) {
+      surface.consecutive += 1;
+      surface.firstGreenMs ??= performance.now() - startedAt;
+      if (surface.consecutive === SUSTAINED_GREEN_REQUIRED) {
+        surface.completedMs = performance.now() - startedAt;
       }
-      consecutive += 1;
-    } else {
-      consecutive = 0;
-      stableVersion = "";
-      record("control.version.sustained-green-reset", result.response.status, {
-        totalProbes,
-        body: result.body,
-      });
+      return;
     }
-    if (consecutive < 20) await new Promise((resolve) => setTimeout(resolve, 1_000));
+    surface.consecutive = 0;
+    surface.firstGreenMs = undefined;
+    surface.completedMs = undefined;
+    record(`auth.sustained-green.${name}.reset`, status, {
+      totalProbes: surface.totalProbes,
+      code: surface.lastCode,
+    });
+  };
+
+  while (
+    !allComplete() &&
+    totalRequests < SUSTAINED_GREEN_MAX_PROBES &&
+    performance.now() - startedAt < SUSTAINED_GREEN_MAX_ELAPSED_MS
+  ) {
+    if (surfaces.controlHmac.consecutive < SUSTAINED_GREEN_REQUIRED) {
+      totalRequests += 1;
+      const result = await signedFetch({
+        path: "/_nabuflow/control/v1/version",
+        nonce: nonce(`sustained-green-control-${surfaces.controlHmac.totalProbes + 1}`),
+      });
+      lastBody = result.body;
+      const observedVersion =
+        (result.body as { deploymentVersion?: string }).deploymentVersion ?? "";
+      const green = result.response.status === 200 && observedVersion.length > 0;
+      if (green && stableVersion && stableVersion !== observedVersion) {
+        surfaces.controlHmac.consecutive = 0;
+      }
+      stableVersion = green ? observedVersion : "";
+      updateSurface("controlHmac", green, result.response.status, result.body);
+    }
+
+    if (
+      surfaces.previewGrant.consecutive < SUSTAINED_GREEN_REQUIRED &&
+      totalRequests < SUSTAINED_GREEN_MAX_PROBES
+    ) {
+      totalRequests += 1;
+      const result = await probePreviewGrantReadiness(surfaces.previewGrant.totalProbes + 1);
+      updateSurface("previewGrant", result.status === 302, result.status, result.body);
+    }
+
+    if (
+      surfaces.vaultKek.consecutive < SUSTAINED_GREEN_REQUIRED &&
+      totalRequests + 1 < SUSTAINED_GREEN_MAX_PROBES
+    ) {
+      totalRequests += 2;
+      const result = await probeVaultKekReadiness(surfaces.vaultKek.totalProbes + 1);
+      updateSurface("vaultKek", result.status === 200, result.status, result.body);
+    }
+
+    if (
+      surfaces.previewGrantReplay.consecutive < SUSTAINED_GREEN_REQUIRED &&
+      totalRequests + 1 < SUSTAINED_GREEN_MAX_PROBES
+    ) {
+      const result = await probePreviewGrantReplayReadiness(
+        surfaces.previewGrantReplay.totalProbes + 1,
+      );
+      totalRequests += result.requestCount;
+      updateSurface("previewGrantReplay", result.green, result.status, result.body);
+    }
+
+    if (!allComplete()) await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
-  assertCondition(consecutive === 20, "Control authentication did not sustain 20 green probes");
-  record("control.version.sustained-green", 200, {
-    consecutive,
-    totalProbes,
+
+  assertCondition(
+    allComplete(),
+    `Multi-surface authentication did not converge: ${JSON.stringify(surfaces)}`,
+  );
+  record("auth.sustained-green.multi-surface", 200, {
+    surfaces,
+    totalRequests,
     elapsedMs: performance.now() - startedAt,
     deploymentVersion: stableVersion,
   });
@@ -970,6 +1260,498 @@ async function waitForBrowser(): Promise<void> {
   record("browser.confirmed", 200, { signalReceived: true });
 }
 
+async function verifyArtifactRejectionMatrix(initialManifestRevision: string): Promise<void> {
+  let fakeCredentialEnvelopeProduced = false;
+  try {
+    await sealRuntimeArtifact({
+      targetRuntimeIdentity: runtimeIdentity,
+      manifestRevision: initialManifestRevision,
+      artifactRevision: `fake-secret-${Date.now()}`,
+      sourceRevision: "fake-secret-fixture",
+      files: [
+        {
+          path: "fixture.txt",
+          content: "sk_test_FAKEONLYNOTAREALSECRET1234567890",
+        },
+      ],
+    });
+    fakeCredentialEnvelopeProduced = true;
+  } catch (error) {
+    assertCondition(
+      error instanceof RuntimeArtifactSealError && error.code === "artifact_secret_detected",
+      "Fake credential was rejected for an unexpected reason",
+    );
+  }
+  assertCondition(!fakeCredentialEnvelopeProduced, "Fake credential produced a sealed envelope");
+  record("artifact.local-secret-scan", "refused", {
+    code: "artifact_secret_detected",
+    envelopeProduced: false,
+    uploadBegun: false,
+  });
+
+  await expectSealError(
+    "artifact.local-oversized",
+    "artifact_too_large",
+    new Uint8Array(MAX_RUNTIME_ARTIFACT_FILE_BYTES + 1),
+    "oversized.bin",
+    initialManifestRevision,
+  );
+  await expectSealError(
+    "artifact.local-traversal",
+    "artifact_invalid_path",
+    new TextEncoder().encode("safe fixture"),
+    "../escape.mjs",
+    initialManifestRevision,
+  );
+
+  const probe = await sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision: initialManifestRevision,
+    artifactRevision: `artifact-negative-${Date.now()}`,
+    sourceRevision: "artifact-negative-fixture",
+    files: [{ path: "server.mjs", content: "console.log('fixture')\n" }],
+  });
+  const artifactPath = `${runtimePath}/artifacts/${probe.envelope.sealedArtifactSha256}`;
+  const begin = await signedControlFetch(
+    {
+      path: `${artifactPath}/begin`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: probe.envelope,
+      },
+      nonce: nonce("artifact-integrity-begin"),
+      idempotencyKey: `artifact-integrity-begin-${crypto.randomUUID()}`,
+    },
+    "artifact.integrity.begin",
+  );
+  assertStatus("artifact.integrity.begin", begin.response.status, 200, begin.body);
+  const altered = probe.chunks[0].slice();
+  altered[0] ^= 0xff;
+  const signedOriginalChunk = await makeSignedRequest({
+    path: `${artifactPath}/chunks/0`,
+    method: "PUT",
+    body: probe.chunks[0],
+    nonce: nonce("artifact-chunk-tampered"),
+    idempotencyKey: `artifact-chunk-tampered-${crypto.randomUUID()}`,
+  });
+  const tamperedChunkResponse = await fetch(
+    new Request(signedOriginalChunk, {
+      body: altered.slice().buffer as ArrayBuffer,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" }),
+  );
+  assertStatus(
+    "artifact.chunk-tampered",
+    tamperedChunkResponse.status,
+    401,
+    await readResponse(tamperedChunkResponse),
+  );
+  const badChunk = await signedControlFetch(
+    {
+      path: `${artifactPath}/chunks/0`,
+      method: "PUT",
+      body: altered,
+      nonce: nonce("artifact-integrity-chunk"),
+      idempotencyKey: `artifact-integrity-chunk-${crypto.randomUUID()}`,
+    },
+    "artifact.integrity.chunk",
+  );
+  assertStatus("artifact.integrity.chunk", badChunk.response.status, 422, badChunk.body);
+  const removedProbe = await removeArtifact(
+    probe.envelope.sealedArtifactSha256,
+    "artifact.integrity.remove",
+  );
+  assertStatus("artifact.integrity.remove", removedProbe.response.status, 200, removedProbe.body);
+
+  const tamperedEnvelope = structuredClone(probe.envelope);
+  tamperedEnvelope.manifestRevision = `${initialManifestRevision}-tampered`;
+  const tampered = await signedControlFetch(
+    {
+      path: `${artifactPath}/begin`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: tamperedEnvelope,
+      },
+      nonce: nonce("artifact-envelope-tampered"),
+      idempotencyKey: `artifact-envelope-tampered-${crypto.randomUUID()}`,
+    },
+    "artifact.envelope-tampered",
+  );
+  assertStatus("artifact.envelope-tampered", tampered.response.status, 422, tampered.body);
+
+  const traversalEnvelope = structuredClone(probe.envelope);
+  traversalEnvelope.content.files[0].path = "../escape.mjs";
+  const traversal = await signedControlFetch(
+    {
+      path: `${artifactPath}/begin`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: traversalEnvelope,
+      },
+      nonce: nonce("artifact-receiver-traversal"),
+      idempotencyKey: `artifact-receiver-traversal-${crypto.randomUUID()}`,
+    },
+    "artifact.receiver-traversal",
+  );
+  assertStatus("artifact.receiver-traversal", traversal.response.status, 400, traversal.body);
+
+  const oversizedEnvelope = structuredClone(probe.envelope);
+  oversizedEnvelope.content.payloadBytes = MAX_RUNTIME_ARTIFACT_BYTES + 1;
+  oversizedEnvelope.content.files[0].size = MAX_RUNTIME_ARTIFACT_BYTES + 1;
+  const oversized = await signedControlFetch(
+    {
+      path: `${artifactPath}/begin`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: oversizedEnvelope,
+      },
+      nonce: nonce("artifact-receiver-oversized"),
+      idempotencyKey: `artifact-receiver-oversized-${crypto.randomUUID()}`,
+    },
+    "artifact.receiver-oversized",
+  );
+  assertStatus("artifact.receiver-oversized", oversized.response.status, 413, oversized.body);
+
+  const foreignProjectId = locator.projectId + 91;
+  const foreignLocator = { projectId: foreignProjectId, role: locator.role, slot: locator.slot };
+  const foreignIdentity = await deriveRuntimeIdentity({
+    namespace: deploymentNamespace,
+    ...foreignLocator,
+  });
+  const existingRuntimeMismatchEnvelope = structuredClone(probe.envelope);
+  existingRuntimeMismatchEnvelope.targetRuntimeIdentity = foreignIdentity;
+  const existingRuntimeMismatch = await signedControlFetch(
+    {
+      path: `${artifactPath}/begin`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: existingRuntimeMismatchEnvelope,
+      },
+      nonce: nonce("artifact-cross-existing"),
+      idempotencyKey: `artifact-cross-existing-${crypto.randomUUID()}`,
+    },
+    "artifact.cross-existing",
+  );
+  const missingRuntimePath = `/_nabuflow/control/v1/runtimes/${foreignProjectId}/${locator.role}/${locator.slot}/artifacts/${probe.envelope.sealedArtifactSha256}`;
+  const missingRuntimeMismatch = await signedControlFetch(
+    {
+      path: `${missingRuntimePath}/begin`,
+      method: "POST",
+      body: {
+        locator: foreignLocator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: probe.envelope,
+      },
+      nonce: nonce("artifact-cross-missing"),
+      idempotencyKey: `artifact-cross-missing-${crypto.randomUUID()}`,
+    },
+    "artifact.cross-missing",
+  );
+  assertStatus(
+    "artifact.cross-existing",
+    existingRuntimeMismatch.response.status,
+    403,
+    existingRuntimeMismatch.body,
+  );
+  assertStatus(
+    "artifact.cross-missing",
+    missingRuntimeMismatch.response.status,
+    403,
+    missingRuntimeMismatch.body,
+  );
+  assertCondition(
+    comparableError(existingRuntimeMismatch.body) === comparableError(missingRuntimeMismatch.body),
+    "Artifact cross-runtime response leaked whether the addressed runtime exists",
+  );
+
+  const paddingBytes = RUNTIME_ARTIFACT_CHUNK_BYTES + 17;
+  const incomplete = await sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision: initialManifestRevision,
+    artifactRevision: `artifact-incomplete-${Date.now()}`,
+    sourceRevision: "artifact-incomplete-fixture",
+    files: [{ path: "large.bin", content: new Uint8Array(paddingBytes) }],
+  });
+  const incompletePath = `${runtimePath}/artifacts/${incomplete.envelope.sealedArtifactSha256}`;
+  await beginArtifact(incompletePath, incomplete.envelope, "artifact.incomplete.begin");
+  const firstChunk = await signedControlFetch(
+    {
+      path: `${incompletePath}/chunks/0`,
+      method: "PUT",
+      body: incomplete.chunks[0],
+      nonce: nonce("artifact-incomplete-chunk"),
+      idempotencyKey: `artifact-incomplete-chunk-${crypto.randomUUID()}`,
+    },
+    "artifact.incomplete.chunk",
+  );
+  assertStatus("artifact.incomplete.chunk", firstChunk.response.status, 200, firstChunk.body);
+  const incompleteCommit = await commitArtifact(
+    incompletePath,
+    incomplete.envelope.sealedArtifactSha256,
+    "artifact.incomplete.commit",
+  );
+  assertStatus(
+    "artifact.incomplete.commit",
+    incompleteCommit.response.status,
+    409,
+    incompleteCommit.body,
+  );
+  assertCondition(
+    (incompleteCommit.body as { code?: string }).code === "artifact_incomplete",
+    "Incomplete artifact returned the wrong error code",
+  );
+  await beginArtifact(incompletePath, incomplete.envelope, "artifact.incomplete.rebegin");
+  const emptyCommit = await commitArtifact(
+    incompletePath,
+    incomplete.envelope.sealedArtifactSha256,
+    "artifact.incomplete.empty-commit",
+  );
+  assertStatus(
+    "artifact.incomplete.empty-commit",
+    emptyCommit.response.status,
+    409,
+    emptyCommit.body,
+  );
+  record("artifact.incomplete.cleaned", 200, {
+    rebeginAccepted: true,
+    pendingStateCleanedTwice: true,
+  });
+
+  const duplicate = await sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision: initialManifestRevision,
+    artifactRevision: `artifact-duplicate-${Date.now()}`,
+    sourceRevision: "artifact-duplicate-fixture",
+    files: [{ path: "duplicate.txt", content: "duplicate upload fixture\n" }],
+  });
+  const duplicatePath = `${runtimePath}/artifacts/${duplicate.envelope.sealedArtifactSha256}`;
+  const duplicateBeginKey = `artifact-duplicate-begin-${crypto.randomUUID()}`;
+  const duplicateBeginBody = {
+    locator,
+    expectedDeploymentVersion: deploymentVersion,
+    envelope: duplicate.envelope,
+  };
+  const duplicateBeginFirst = await signedControlFetch(
+    {
+      path: `${duplicatePath}/begin`,
+      method: "POST",
+      body: duplicateBeginBody,
+      nonce: nonce("artifact-duplicate-begin-first"),
+      idempotencyKey: duplicateBeginKey,
+    },
+    "artifact.duplicate.begin-first",
+  );
+  const duplicateBeginRetry = await signedControlFetch(
+    {
+      path: `${duplicatePath}/begin`,
+      method: "POST",
+      body: duplicateBeginBody,
+      nonce: nonce("artifact-duplicate-begin-retry"),
+      idempotencyKey: duplicateBeginKey,
+    },
+    "artifact.duplicate.begin-retry",
+  );
+  assertStatus(
+    "artifact.duplicate.begin-first",
+    duplicateBeginFirst.response.status,
+    200,
+    duplicateBeginFirst.body,
+  );
+  assertStatus(
+    "artifact.duplicate.begin-retry",
+    duplicateBeginRetry.response.status,
+    200,
+    duplicateBeginRetry.body,
+  );
+  assertCondition(
+    JSON.stringify(duplicateBeginFirst.body) === JSON.stringify(duplicateBeginRetry.body),
+    "Duplicate artifact begin did not return the cached response",
+  );
+
+  const duplicateChunkKey = `artifact-duplicate-chunk-${crypto.randomUUID()}`;
+  const duplicateChunkFirst = await signedControlFetch(
+    {
+      path: `${duplicatePath}/chunks/0`,
+      method: "PUT",
+      body: duplicate.chunks[0],
+      nonce: nonce("artifact-duplicate-chunk-first"),
+      idempotencyKey: duplicateChunkKey,
+    },
+    "artifact.duplicate.chunk-first",
+  );
+  const duplicateChunkRetry = await signedControlFetch(
+    {
+      path: `${duplicatePath}/chunks/0`,
+      method: "PUT",
+      body: duplicate.chunks[0],
+      nonce: nonce("artifact-duplicate-chunk-retry"),
+      idempotencyKey: duplicateChunkKey,
+    },
+    "artifact.duplicate.chunk-retry",
+  );
+  assertStatus(
+    "artifact.duplicate.chunk-first",
+    duplicateChunkFirst.response.status,
+    200,
+    duplicateChunkFirst.body,
+  );
+  assertStatus(
+    "artifact.duplicate.chunk-retry",
+    duplicateChunkRetry.response.status,
+    200,
+    duplicateChunkRetry.body,
+  );
+  assertCondition(
+    JSON.stringify(duplicateChunkFirst.body) === JSON.stringify(duplicateChunkRetry.body),
+    "Duplicate artifact chunk did not return the cached response",
+  );
+
+  const duplicateCommitKey = `artifact-duplicate-commit-${crypto.randomUUID()}`;
+  const duplicateCommitBody = {
+    locator,
+    expectedDeploymentVersion: deploymentVersion,
+    sealedArtifactSha256: duplicate.envelope.sealedArtifactSha256,
+  };
+  const duplicateCommitFirst = await signedControlFetch(
+    {
+      path: `${duplicatePath}/commit`,
+      method: "POST",
+      body: duplicateCommitBody,
+      nonce: nonce("artifact-duplicate-commit-first"),
+      idempotencyKey: duplicateCommitKey,
+    },
+    "artifact.duplicate.commit-first",
+  );
+  const duplicateCommitRetry = await signedControlFetch(
+    {
+      path: `${duplicatePath}/commit`,
+      method: "POST",
+      body: duplicateCommitBody,
+      nonce: nonce("artifact-duplicate-commit-retry"),
+      idempotencyKey: duplicateCommitKey,
+    },
+    "artifact.duplicate.commit-retry",
+  );
+  assertStatus(
+    "artifact.duplicate.commit-first",
+    duplicateCommitFirst.response.status,
+    200,
+    duplicateCommitFirst.body,
+  );
+  assertStatus(
+    "artifact.duplicate.commit-retry",
+    duplicateCommitRetry.response.status,
+    200,
+    duplicateCommitRetry.body,
+  );
+  assertCondition(
+    JSON.stringify(duplicateCommitFirst.body) === JSON.stringify(duplicateCommitRetry.body),
+    "Duplicate artifact commit did not return the cached response",
+  );
+  record("artifact.duplicate.idempotency", 200, {
+    beginCached: true,
+    chunkCached: true,
+    commitCached: true,
+    logicalArtifacts: 1,
+  });
+  const duplicateRemoved = await removeArtifact(
+    duplicate.envelope.sealedArtifactSha256,
+    "artifact.duplicate.remove",
+  );
+  assertStatus(
+    "artifact.duplicate.remove",
+    duplicateRemoved.response.status,
+    200,
+    duplicateRemoved.body,
+  );
+}
+
+async function expectSealError(
+  label: string,
+  expectedCode: RuntimeArtifactSealError["code"],
+  content: Uint8Array,
+  path: string,
+  manifest: string,
+): Promise<void> {
+  try {
+    await sealRuntimeArtifact({
+      targetRuntimeIdentity: runtimeIdentity,
+      manifestRevision: manifest,
+      artifactRevision: `${label}-${Date.now()}`,
+      sourceRevision: `${label}-fixture`,
+      files: [{ path, content }],
+    });
+    throw new Error(`${label}: sealer unexpectedly accepted the fixture`);
+  } catch (error) {
+    assertCondition(
+      error instanceof RuntimeArtifactSealError && error.code === expectedCode,
+      `${label}: sealer returned an unexpected error`,
+    );
+  }
+  record(label, "refused", { code: expectedCode, envelopeProduced: false, uploadBegun: false });
+}
+
+async function beginArtifact(path: string, envelope: unknown, label: string) {
+  const result = await signedControlFetch(
+    {
+      path: `${path}/begin`,
+      method: "POST",
+      body: { locator, expectedDeploymentVersion: deploymentVersion, envelope },
+      nonce: nonce(label),
+      idempotencyKey: `${label}-${crypto.randomUUID()}`,
+    },
+    label,
+  );
+  assertStatus(label, result.response.status, 200, result.body);
+  return result;
+}
+
+function commitArtifact(path: string, sealedArtifactSha256: string, label: string) {
+  return signedControlFetch(
+    {
+      path: `${path}/commit`,
+      method: "POST",
+      body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256 },
+      nonce: nonce(label),
+      idempotencyKey: `${label}-${crypto.randomUUID()}`,
+    },
+    label,
+  );
+}
+
+function removeArtifact(sealedArtifactSha256: string, label: string) {
+  return signedControlFetch(
+    {
+      path: `${runtimePath}/artifacts/${sealedArtifactSha256}`,
+      method: "DELETE",
+      body: { locator, sealedArtifactSha256 },
+      nonce: nonce(label),
+      idempotencyKey: `${label}-${crypto.randomUUID()}`,
+    },
+    label,
+  );
+}
+
+function comparableError(body: unknown): string {
+  const error = body as { ok?: boolean; code?: string; message?: string; retryable?: boolean };
+  return JSON.stringify({
+    ok: error.ok,
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+  });
+}
+
 async function run(): Promise<void> {
   const unsignedVersion = await fetch(`${controlUrl}/_nabuflow/control/v1/version`);
   assertStatus(
@@ -994,11 +1776,18 @@ async function run(): Promise<void> {
   record("control.version.valid", 200, versionBody);
   deploymentVersion = (versionBody as { deploymentVersion?: string }).deploymentVersion ?? "";
   assertCondition(deploymentVersion, "Worker version response omitted deploymentVersion");
+  const features = (versionBody as { features?: string[] }).features ?? [];
+  assertCondition(
+    features.includes("artifact-v1") && features.includes("manifest-update-v1"),
+    "Worker version does not advertise the artifact loading dock",
+  );
+  record("artifact.version-advertisement", 200, { features });
 
   await verifyPreviewAuthRegression();
 
   runtimeIdentity = await deriveRuntimeIdentity({ namespace: deploymentNamespace, ...locator });
-  manifestRevision = `published-manifest-${Date.now()}`;
+  const initialManifestRevision = `artifact-react-vite-${Date.now()}`;
+  manifestRevision = `artifact-node-api-${Date.now()}`;
   const ensure = await signedControlFetch(
     {
       path: runtimePath,
@@ -1007,12 +1796,12 @@ async function run(): Promise<void> {
         locator,
         expectedDeploymentVersion: deploymentVersion,
         manifest: {
-          revision: manifestRevision,
-          runtime: "node",
+          revision: initialManifestRevision,
+          runtime: "react-vite",
           buildCommand: ["node", "--version"],
-          startCommand: ["node", "-e", TENANT_SERVER_SOURCE],
-          servicePort: 8080,
-          healthPath: "/health",
+          startCommand: ["node", "server.cjs"],
+          servicePort: 8081,
+          healthPath: "/health-old",
           resourceProfile: "dev",
           public: true,
         },
@@ -1025,32 +1814,559 @@ async function run(): Promise<void> {
   assertStatus("lifecycle.ensure", ensure.response.status, 200, ensure.body);
   runtimeEnsured = true;
 
-  const artifactRevision = `published-artifact-${Date.now()}`;
-  let start: Awaited<ReturnType<typeof signedFetch>> | null = null;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    start = await signedControlFetch(
+  await verifyArtifactRejectionMatrix(initialManifestRevision);
+
+  const uncommittedArtifactSha256 = await sha256Hex(
+    new TextEncoder().encode(`uncommitted-artifact-${locator.projectId}`),
+  );
+  const uncommittedStart = await signedControlFetch(
+    {
+      path: `${runtimePath}/start`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        artifactRevision: `uncommitted-${Date.now()}`,
+        artifactSha256: uncommittedArtifactSha256,
+      },
+      nonce: nonce("artifact-uncommitted-start"),
+      idempotencyKey: `artifact-uncommitted-start-${locator.projectId}`,
+    },
+    "artifact.uncommitted-start",
+  );
+  assertStatus(
+    "artifact.uncommitted-start",
+    uncommittedStart.response.status,
+    409,
+    uncommittedStart.body,
+  );
+  assertCondition(
+    (uncommittedStart.body as { code?: string }).code === "artifact_not_committed",
+    "Start with an uncommitted artifact hash returned the wrong error",
+  );
+
+  const initialArtifact = await deliverScratchArtifact({
+    runtimePath,
+    locator,
+    deploymentVersion,
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision: initialManifestRevision,
+    artifactRevision: `artifact-react-vite-${Date.now()}`,
+    sourceRevision: `source-react-vite-${Date.now()}`,
+    serverSource: TENANT_SERVER_SOURCE,
+    send: signedControlFetch,
+  });
+  const initialStart = await signedControlFetch(
+    {
+      path: `${runtimePath}/start`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        artifactRevision: initialArtifact.artifactRevision,
+        artifactSha256: initialArtifact.sealedArtifactSha256,
+      },
+      nonce: nonce("initial-start"),
+      idempotencyKey: `artifact-initial-start-${locator.projectId}`,
+    },
+    "artifact.initial-start",
+  );
+  assertStatus("artifact.initial-start", initialStart.response.status, 200, initialStart.body);
+  assertCondition(
+    (initialStart.body as { runtime?: { servicePort?: number } }).runtime?.servicePort === 8081,
+    "Initial react-vite manifest did not start on port 8081",
+  );
+  runtimeStarted = true;
+
+  const nextManifest = {
+    revision: manifestRevision,
+    runtime: "node-api",
+    buildCommand: ["node", "--version"],
+    startCommand: ["node", "server.cjs"],
+    servicePort: 8080,
+    healthPath: "/health",
+    resourceProfile: "dev",
+    public: true,
+  };
+  const artifact = await deliverScratchArtifact({
+    runtimePath,
+    locator,
+    deploymentVersion,
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision,
+    artifactRevision: `artifact-node-api-${Date.now()}`,
+    sourceRevision: `source-node-api-${Date.now()}`,
+    serverSource: TENANT_SERVER_SOURCE,
+    additionalFiles: [{ path: ARTIFACT_BINARY_PATH, content: ARTIFACT_BINARY_FIXTURE }],
+    send: signedControlFetch,
+  });
+  const staleManifestUpdate = await signedControlFetch(
+    {
+      path: `${runtimePath}/manifest`,
+      method: "PUT",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        expectedManifestRevision: "stale-manifest-revision",
+        manifest: nextManifest,
+        restart: "restart",
+        sealedArtifactSha256: artifact.sealedArtifactSha256,
+      },
+      nonce: nonce("manifest-stale"),
+      idempotencyKey: `artifact-manifest-stale-${locator.projectId}`,
+    },
+    "artifact.manifest-stale",
+  );
+  assertStatus(
+    "artifact.manifest-stale",
+    staleManifestUpdate.response.status,
+    409,
+    staleManifestUpdate.body,
+  );
+  const immutableManifestUpdate = await signedControlFetch(
+    {
+      path: `${runtimePath}/manifest`,
+      method: "PUT",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        expectedManifestRevision: initialManifestRevision,
+        manifest: { ...nextManifest, resourceProfile: "prod" },
+        restart: "restart",
+        sealedArtifactSha256: artifact.sealedArtifactSha256,
+      },
+      nonce: nonce("manifest-immutable"),
+      idempotencyKey: `artifact-manifest-immutable-${locator.projectId}`,
+    },
+    "artifact.manifest-immutable",
+  );
+  assertStatus(
+    "artifact.manifest-immutable",
+    immutableManifestUpdate.response.status,
+    400,
+    immutableManifestUpdate.body,
+  );
+  const implicitRestart = await signedControlFetch(
+    {
+      path: `${runtimePath}/manifest`,
+      method: "PUT",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        expectedManifestRevision: initialManifestRevision,
+        manifest: nextManifest,
+        restart: "reject-if-running",
+      },
+      nonce: nonce("manifest-running-reject"),
+      idempotencyKey: `artifact-manifest-running-reject-${locator.projectId}`,
+    },
+    "artifact.manifest-running-reject",
+  );
+  assertStatus(
+    "artifact.manifest-running-reject",
+    implicitRestart.response.status,
+    409,
+    implicitRestart.body,
+  );
+  const manifestUpdate = await signedControlFetch(
+    {
+      path: `${runtimePath}/manifest`,
+      method: "PUT",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        expectedManifestRevision: initialManifestRevision,
+        manifest: nextManifest,
+        restart: "restart",
+        sealedArtifactSha256: artifact.sealedArtifactSha256,
+      },
+      nonce: nonce("manifest-update"),
+      idempotencyKey: `artifact-manifest-update-${locator.projectId}`,
+    },
+    "artifact.manifest-update",
+  );
+  assertStatus(
+    "artifact.manifest-update",
+    manifestUpdate.response.status,
+    200,
+    manifestUpdate.body,
+  );
+  assertCondition(
+    (
+      manifestUpdate.body as {
+        runtime?: { manifestRevision?: string; servicePort?: number; status?: string };
+      }
+    ).runtime?.manifestRevision === manifestRevision &&
+      (manifestUpdate.body as { runtime?: { servicePort?: number } }).runtime?.servicePort ===
+        8080 &&
+      (manifestUpdate.body as { runtime?: { status?: string } }).runtime?.status === "running",
+    "Manifest update did not restart node-api on port 8080",
+  );
+
+  const expectedServerHash = await sha256Hex(TENANT_SERVER_SOURCE);
+  const expectedBinaryHash = await sha256Hex(ARTIFACT_BINARY_FIXTURE);
+  const binaryRoundTrip = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          `const c=require('node:crypto'),f=require('node:fs');const b=f.readFileSync('${ARTIFACT_BINARY_PATH}');console.log(JSON.stringify({bytes:b.length,sha256:c.createHash('sha256').update(b).digest('hex')}))`,
+        ],
+        cwd: `/workspace/.nabuflow/releases/${artifact.sealedArtifactSha256}/app`,
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("artifact-binary-round-trip"),
+      idempotencyKey: `artifact-binary-round-trip-${locator.projectId}`,
+    },
+    "artifact.binary-round-trip",
+  );
+  assertStatus(
+    "artifact.binary-round-trip",
+    binaryRoundTrip.response.status,
+    200,
+    binaryRoundTrip.body,
+  );
+  const binaryRoundTripOutput = JSON.parse(
+    (binaryRoundTrip.body as { stdout?: string }).stdout?.trim() ?? "{}",
+  ) as { bytes?: number; sha256?: string };
+  assertCondition(
+    binaryRoundTripOutput.bytes === ARTIFACT_BINARY_FIXTURE.byteLength &&
+      binaryRoundTripOutput.sha256 === expectedBinaryHash,
+    "Binary artifact did not round-trip byte-for-byte",
+  );
+  record("artifact.binary-round-trip.verified", 200, {
+    bytes: ARTIFACT_BINARY_FIXTURE.byteLength,
+    sha256: expectedBinaryHash,
+    exact: true,
+  });
+
+  const releaseRemoval = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: ["rm", "-rf", "--", `/workspace/.nabuflow/releases/${artifact.sealedArtifactSha256}`],
+        cwd: "/workspace",
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("artifact-release-remove"),
+      idempotencyKey: `artifact-release-remove-${locator.projectId}`,
+    },
+    "artifact.rehydrate.release-remove",
+  );
+  assertStatus(
+    "artifact.rehydrate.release-remove",
+    releaseRemoval.response.status,
+    200,
+    releaseRemoval.body,
+  );
+  assertCondition(
+    (releaseRemoval.body as { ok?: boolean }).ok === true,
+    "Release removal probe failed",
+  );
+  record("artifact.rehydrate.eviction-purpose", 200, {
+    deliveryMechanism: "sealed-dock-only",
+    execPurpose: "destruction-for-ephemeral-restart-simulation",
+    evictedWhileRunning: true,
+  });
+  const rehydrateStop = await signedControlFetch(
+    {
+      path: `${runtimePath}/stop`,
+      method: "POST",
+      body: { locator, reason: "artifact restart rehydration proof" },
+      nonce: nonce("artifact-rehydrate-stop"),
+      idempotencyKey: `artifact-rehydrate-stop-${locator.projectId}`,
+    },
+    "artifact.rehydrate.stop",
+  );
+  assertStatus("artifact.rehydrate.stop", rehydrateStop.response.status, 200, rehydrateStop.body);
+  runtimeStarted = false;
+  const rehydratedStart = await signedControlFetch(
+    {
+      path: `${runtimePath}/start`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        artifactRevision: artifact.artifactRevision,
+        artifactSha256: artifact.sealedArtifactSha256,
+      },
+      nonce: nonce("artifact-rehydrate-start"),
+      idempotencyKey: `artifact-rehydrate-start-${locator.projectId}`,
+    },
+    "artifact.rehydrate.start",
+  );
+  assertStatus(
+    "artifact.rehydrate.start",
+    rehydratedStart.response.status,
+    200,
+    rehydratedStart.body,
+  );
+  runtimeStarted = true;
+  const rehydratedHash = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          "const c=require('node:crypto'),f=require('node:fs');console.log(c.createHash('sha256').update(f.readFileSync('server.cjs')).digest('hex'))",
+        ],
+        cwd: `/workspace/.nabuflow/releases/${artifact.sealedArtifactSha256}/app`,
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("artifact-rehydrate-hash"),
+      idempotencyKey: `artifact-rehydrate-hash-${locator.projectId}`,
+    },
+    "artifact.rehydrate.hash",
+  );
+  assertStatus("artifact.rehydrate.hash", rehydratedHash.response.status, 200, rehydratedHash.body);
+  assertCondition(
+    (rehydratedHash.body as { stdout?: string }).stdout?.trim() === expectedServerHash,
+    "Rehydrated release file hash did not match the sealed artifact",
+  );
+  record("artifact.rehydrate.verified", 200, {
+    releaseEvictedWhileRunning: true,
+    source: "private-r2",
+    perFileSha256Verified: true,
+    manifestRevision,
+    servicePort: 8080,
+  });
+
+  const tamperRelease = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          `const f=require('node:fs');f.writeFileSync('server.cjs','tampered server');f.writeFileSync('${ARTIFACT_BINARY_PATH}',Buffer.from([0,1,2,3]))`,
+        ],
+        cwd: `/workspace/.nabuflow/releases/${artifact.sealedArtifactSha256}/app`,
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("artifact-tamper-release"),
+      idempotencyKey: `artifact-tamper-release-${locator.projectId}`,
+    },
+    "artifact.tamper-release",
+  );
+  assertStatus("artifact.tamper-release", tamperRelease.response.status, 200, tamperRelease.body);
+  const tamperStop = await signedControlFetch(
+    {
+      path: `${runtimePath}/stop`,
+      method: "POST",
+      body: { locator, reason: "artifact tamper restore proof" },
+      nonce: nonce("artifact-tamper-stop"),
+      idempotencyKey: `artifact-tamper-stop-${locator.projectId}`,
+    },
+    "artifact.tamper-restart.stop",
+  );
+  assertStatus("artifact.tamper-restart.stop", tamperStop.response.status, 200, tamperStop.body);
+  runtimeStarted = false;
+  const tamperRestart = await signedControlFetch(
+    {
+      path: `${runtimePath}/start`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        artifactRevision: artifact.artifactRevision,
+        artifactSha256: artifact.sealedArtifactSha256,
+      },
+      nonce: nonce("artifact-tamper-restart"),
+      idempotencyKey: `artifact-tamper-restart-${locator.projectId}`,
+    },
+    "artifact.tamper-restart.start",
+  );
+  assertStatus(
+    "artifact.tamper-restart.start",
+    tamperRestart.response.status,
+    200,
+    tamperRestart.body,
+  );
+  runtimeStarted = true;
+  const restoredHashes = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          `const c=require('node:crypto'),f=require('node:fs'),h=p=>c.createHash('sha256').update(f.readFileSync(p)).digest('hex');console.log(JSON.stringify({server:h('server.cjs'),binary:h('${ARTIFACT_BINARY_PATH}')}))`,
+        ],
+        cwd: `/workspace/.nabuflow/releases/${artifact.sealedArtifactSha256}/app`,
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("artifact-tamper-restored-hashes"),
+      idempotencyKey: `artifact-tamper-restored-hashes-${locator.projectId}`,
+    },
+    "artifact.tamper-restart.hashes",
+  );
+  assertStatus(
+    "artifact.tamper-restart.hashes",
+    restoredHashes.response.status,
+    200,
+    restoredHashes.body,
+  );
+  const restoredHashOutput = JSON.parse(
+    (restoredHashes.body as { stdout?: string }).stdout?.trim() ?? "{}",
+  ) as { server?: string; binary?: string };
+  assertCondition(
+    restoredHashOutput.server === expectedServerHash &&
+      restoredHashOutput.binary === expectedBinaryHash,
+    "Restart did not restore every tampered file from the sealed R2 artifact",
+  );
+  record("artifact.tamper-restart.verified", 200, {
+    source: "private-r2",
+    filesVerified: ["server.cjs", ARTIFACT_BINARY_PATH],
+    perFileSha256Verified: true,
+  });
+
+  const manifestFailureProof: Array<{
+    iteration: number;
+    requestId: string | null;
+    failedRevision: string;
+    recoveredRevision: string;
+  }> = [];
+  for (let iteration = 1; iteration <= manifestFailureIterations; iteration += 1) {
+    const iterationLabel = `artifact.manifest-failure.${iteration}`;
+    const failureManifestRevision = `artifact-health-failure-${iteration}-${Date.now()}`;
+    const failureArtifact = await deliverScratchArtifact({
+      runtimePath,
+      locator,
+      deploymentVersion,
+      targetRuntimeIdentity: runtimeIdentity,
+      manifestRevision: failureManifestRevision,
+      artifactRevision: `artifact-health-failure-${iteration}-${Date.now()}`,
+      sourceRevision: `source-health-failure-${iteration}-${Date.now()}`,
+      serverSource: TENANT_SERVER_SOURCE,
+      send: signedControlFetch,
+    });
+    const failedRestart = await signedAuthStableFetch(
+      {
+        path: `${runtimePath}/manifest`,
+        method: "PUT",
+        body: {
+          locator,
+          expectedDeploymentVersion: deploymentVersion,
+          expectedManifestRevision: manifestRevision,
+          manifest: {
+            ...nextManifest,
+            revision: failureManifestRevision,
+            healthPath: "/intentionally-missing-health",
+          },
+          restart: "restart",
+          sealedArtifactSha256: failureArtifact.sealedArtifactSha256,
+        },
+        nonce: nonce(`manifest-failure-${iteration}`),
+        idempotencyKey: `artifact-manifest-failure-${locator.projectId}-${iteration}`,
+      },
+      iterationLabel,
+    );
+    assertStatus(iterationLabel, failedRestart.response.status, 502, failedRestart.body);
+    assertCondition(
+      (failedRestart.body as { code?: string }).code === "runtime_restart_failed",
+      `Manifest failure iteration ${iteration} escaped the typed error boundary`,
+    );
+    runtimeStarted = false;
+    const failedStatus = await signedControlFetch(
+      { path: runtimePath, nonce: nonce(`manifest-failure-status-${iteration}`) },
+      `${iterationLabel}.status`,
+    );
+    assertStatus(`${iterationLabel}.status`, failedStatus.response.status, 200, failedStatus.body);
+    assertCondition(
+      (failedStatus.body as { runtime?: { manifestRevision?: string; status?: string } }).runtime
+        ?.manifestRevision === failureManifestRevision &&
+        (failedStatus.body as { runtime?: { status?: string } }).runtime?.status === "error",
+      "Failed manifest restart silently rolled back or did not enter error state",
+    );
+    const recoveryManifestRevision = `artifact-node-api-recovery-${iteration}-${Date.now()}`;
+    const recoveryArtifact = await deliverScratchArtifact({
+      runtimePath,
+      locator,
+      deploymentVersion,
+      targetRuntimeIdentity: runtimeIdentity,
+      manifestRevision: recoveryManifestRevision,
+      artifactRevision: `artifact-node-api-recovery-${iteration}-${Date.now()}`,
+      sourceRevision: `source-node-api-recovery-${iteration}-${Date.now()}`,
+      serverSource: TENANT_SERVER_SOURCE,
+      send: signedControlFetch,
+    });
+    const recoveredManifest = await signedControlFetch(
+      {
+        path: `${runtimePath}/manifest`,
+        method: "PUT",
+        body: {
+          locator,
+          expectedDeploymentVersion: deploymentVersion,
+          expectedManifestRevision: failureManifestRevision,
+          manifest: { ...nextManifest, revision: recoveryManifestRevision },
+          restart: "reject-if-running",
+        },
+        nonce: nonce(`manifest-recovery-${iteration}`),
+        idempotencyKey: `artifact-manifest-recovery-${locator.projectId}-${iteration}`,
+      },
+      `${iterationLabel}.recovery`,
+    );
+    assertStatus(
+      `${iterationLabel}.recovery`,
+      recoveredManifest.response.status,
+      200,
+      recoveredManifest.body,
+    );
+    const recoveredStart = await signedControlFetch(
       {
         path: `${runtimePath}/start`,
         method: "POST",
         body: {
           locator,
           expectedDeploymentVersion: deploymentVersion,
-          artifactRevision,
-          artifactSha256: await sha256Hex(artifactRevision),
+          artifactRevision: recoveryArtifact.artifactRevision,
+          artifactSha256: recoveryArtifact.sealedArtifactSha256,
         },
-        nonce: nonce(`start-${attempt}`),
-        idempotencyKey: `published-start-${locator.projectId}`,
+        nonce: nonce(`manifest-recovery-start-${iteration}`),
+        idempotencyKey: `artifact-manifest-recovery-start-${locator.projectId}-${iteration}`,
       },
-      "lifecycle.start",
+      `${iterationLabel}.recovery-start`,
     );
-    if (start.response.status === 200) break;
-    record("lifecycle.start.retry", start.response.status, { attempt, body: start.body });
-    if (start.response.status !== 502 || attempt === 4) break;
-    await new Promise((resolve) => setTimeout(resolve, 2 ** (attempt - 1) * 1_000));
+    assertStatus(
+      `${iterationLabel}.recovery-start`,
+      recoveredStart.response.status,
+      200,
+      recoveredStart.body,
+    );
+    manifestRevision = recoveryManifestRevision;
+    runtimeStarted = true;
+    manifestFailureProof.push({
+      iteration,
+      requestId: (failedRestart.body as { requestId?: string }).requestId ?? null,
+      failedRevision: failureManifestRevision,
+      recoveredRevision: recoveryManifestRevision,
+    });
   }
-  assertCondition(start !== null, "Start probe did not run");
-  assertStatus("lifecycle.start", start.response.status, 200, start.body);
-  runtimeStarted = true;
+  record("artifact.manifest-failure-state", 200, {
+    iterations: manifestFailureProof,
+    typed502Count: manifestFailureProof.length,
+    silentRollback: false,
+  });
+
+  if (stopAfterManifestFailure) {
+    record("diagnostic.stop-after-manifest-failure", 200, {
+      purpose: "credential-free manifest failure-path diagnosis",
+    });
+    return;
+  }
 
   const binding = await signedControlFetch(
     {
@@ -2074,6 +3390,23 @@ async function verifyPreviewAuthRegression(): Promise<void> {
 
 async function cleanup(): Promise<void> {
   let stripeObjectCleanupFailure: string | null = null;
+  for (const [projectId, expectedRevision] of [...readinessCapabilityRevisions]) {
+    const result = await signedControlFetch(
+      {
+        path: capabilityControlPath(projectId),
+        method: "DELETE",
+        body: { projectId, expectedRevision },
+        nonce: nonce(`cleanup-vault-readiness-${projectId}`),
+        idempotencyKey: `cleanup-vault-readiness-${projectId}-${crypto.randomUUID()}`,
+      },
+      `cleanup.vault-readiness.${projectId}`,
+    );
+    record(`cleanup.vault-readiness.${projectId}`, result.response.status, result.body);
+    if (result.response.status !== 200 && result.response.status !== 404) {
+      throw new Error(`Vault readiness cleanup failed for project ${projectId}`);
+    }
+    readinessCapabilityRevisions.delete(projectId);
+  }
   for (const hostname of [...registeredHosts]) {
     await deactivateRoute(hostname, "cleanup.route");
   }
@@ -2118,74 +3451,85 @@ async function cleanup(): Promise<void> {
       "Stopped runtime retained an active capability binding",
     );
 
-    const staleRequestId = `capability-stale-binding-${crypto.randomUUID()}`;
-    const staleInvocation = await signedControlFetch(
-      {
-        path: capabilityEndpoint,
-        method: "POST",
-        body: capabilityInvocation(staleRequestId, activeContainerId),
-        nonce: nonce("cleanup-capability-stale"),
-        idempotencyKey: staleRequestId,
-      },
-      "cleanup.capability-stale",
-    );
-    assertStatus(
-      "cleanup.capability-stale",
-      staleInvocation.response.status,
-      403,
-      staleInvocation.body,
-    );
-    assertCondition(
-      (staleInvocation.body as { code?: string }).code === "capability_runtime_unbound",
-      "Stopped runtime did not fail closed at the capability wall",
-    );
+    if (activeContainerId) {
+      const staleRequestId = `capability-stale-binding-${crypto.randomUUID()}`;
+      const staleInvocation = await signedControlFetch(
+        {
+          path: capabilityEndpoint,
+          method: "POST",
+          body: capabilityInvocation(staleRequestId, activeContainerId),
+          nonce: nonce("cleanup-capability-stale"),
+          idempotencyKey: staleRequestId,
+        },
+        "cleanup.capability-stale",
+      );
+      assertStatus(
+        "cleanup.capability-stale",
+        staleInvocation.response.status,
+        403,
+        staleInvocation.body,
+      );
+      assertCondition(
+        (staleInvocation.body as { code?: string }).code === "capability_runtime_unbound",
+        "Stopped runtime did not fail closed at the capability wall",
+      );
 
-    const staleDatabaseRequestId = `database-stale-binding-${crypto.randomUUID()}`;
-    const staleDatabase = await signedControlFetch(
-      {
-        path: capabilityEndpoint,
-        method: "POST",
-        body: databaseCapabilityInvocation(
-          staleDatabaseRequestId,
-          { kind: "statement", sql: "select 1", params: [] },
-          activeContainerId,
-        ),
-        nonce: nonce("cleanup-database-stale"),
-        idempotencyKey: staleDatabaseRequestId,
-      },
-      "cleanup.database-stale",
-    );
-    assertStatus("cleanup.database-stale", staleDatabase.response.status, 403, staleDatabase.body);
-    assertCondition(
-      (staleDatabase.body as { code?: string }).code === "capability_runtime_unbound",
-      "Stopped runtime did not fail closed for the database capability",
-    );
+      const staleDatabaseRequestId = `database-stale-binding-${crypto.randomUUID()}`;
+      const staleDatabase = await signedControlFetch(
+        {
+          path: capabilityEndpoint,
+          method: "POST",
+          body: databaseCapabilityInvocation(
+            staleDatabaseRequestId,
+            { kind: "statement", sql: "select 1", params: [] },
+            activeContainerId,
+          ),
+          nonce: nonce("cleanup-database-stale"),
+          idempotencyKey: staleDatabaseRequestId,
+        },
+        "cleanup.database-stale",
+      );
+      assertStatus(
+        "cleanup.database-stale",
+        staleDatabase.response.status,
+        403,
+        staleDatabase.body,
+      );
+      assertCondition(
+        (staleDatabase.body as { code?: string }).code === "capability_runtime_unbound",
+        "Stopped runtime did not fail closed for the database capability",
+      );
 
-    const staleStripeRequestId = `stripe-stale-binding-${crypto.randomUUID()}`;
-    const staleStripe = await signedControlFetch(
-      {
-        path: capabilityEndpoint,
-        method: "POST",
-        body: stripeCapabilityInvocation(
-          staleStripeRequestId,
-          {
-            kind: "create-payment-intent",
-            idempotencyKey: `stripe-stale-business-${crypto.randomUUID()}`,
-            amount: 1_099,
-            currency: "usd",
-          },
-          activeContainerId,
-        ),
-        nonce: nonce("cleanup-stripe-stale"),
-        idempotencyKey: staleStripeRequestId,
-      },
-      "cleanup.stripe-stale",
-    );
-    assertStatus("cleanup.stripe-stale", staleStripe.response.status, 403, staleStripe.body);
-    assertCondition(
-      (staleStripe.body as { code?: string }).code === "capability_runtime_unbound",
-      "Stopped runtime did not fail closed for the Stripe capability",
-    );
+      const staleStripeRequestId = `stripe-stale-binding-${crypto.randomUUID()}`;
+      const staleStripe = await signedControlFetch(
+        {
+          path: capabilityEndpoint,
+          method: "POST",
+          body: stripeCapabilityInvocation(
+            staleStripeRequestId,
+            {
+              kind: "create-payment-intent",
+              idempotencyKey: `stripe-stale-business-${crypto.randomUUID()}`,
+              amount: 1_099,
+              currency: "usd",
+            },
+            activeContainerId,
+          ),
+          nonce: nonce("cleanup-stripe-stale"),
+          idempotencyKey: staleStripeRequestId,
+        },
+        "cleanup.stripe-stale",
+      );
+      assertStatus("cleanup.stripe-stale", staleStripe.response.status, 403, staleStripe.body);
+      assertCondition(
+        (staleStripe.body as { code?: string }).code === "capability_runtime_unbound",
+        "Stopped runtime did not fail closed for the Stripe capability",
+      );
+    } else {
+      record("cleanup.capability-stale", "skipped", {
+        reason: "No active container binding was observed before the stopped run",
+      });
+    }
   }
   for (const projectId of [...provisionedStripeProjects]) {
     await revokeStripeCapability(projectId);

@@ -113,6 +113,7 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
       deploymentVersion: "worker-2026-08-04.1",
       provider: "cloudflare",
       supportedRoles: ["preview", "production"],
+      features: ["artifact-v1", "manifest-update-v1"],
     },
     ensure: { runtime },
     start: { runtime },

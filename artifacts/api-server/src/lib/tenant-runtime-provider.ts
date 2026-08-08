@@ -1,3 +1,8 @@
+import type {
+  RuntimeArtifactEnvelope,
+  RuntimeManifestContract,
+} from "@workspace/tenant-runtime-contracts";
+
 /**
  * Provider-neutral contract for a project's isolated runtime.
  *
@@ -55,6 +60,46 @@ export interface RuntimeProductionOptions {
 
 export interface RuntimeServiceOptions {
   servicePort?: number | null;
+}
+
+export interface RuntimeArtifactDeployment {
+  envelope: RuntimeArtifactEnvelope;
+  chunks: Uint8Array[];
+}
+
+export interface RuntimeArtifactDeploymentResult {
+  sealedArtifactSha256: string;
+  contentSha256: string;
+  filesWritten: number;
+  materialized: boolean;
+}
+
+export interface ArtifactDeployingTenantRuntimeProvider extends TenantRuntimeProvider {
+  deployArtifact(
+    runtimeId: string,
+    projectId: number,
+    artifact: RuntimeArtifactDeployment,
+  ): Promise<RuntimeArtifactDeploymentResult>;
+  updateRuntimeManifest(
+    runtimeId: string,
+    projectId: number,
+    input: {
+      expectedManifestRevision: string;
+      manifest: RuntimeManifestContract;
+      restart?: "reject-if-running" | "restart";
+      sealedArtifactSha256?: string;
+    },
+  ): Promise<RuntimeInfo>;
+}
+
+export function supportsArtifactDeployment(
+  provider: TenantRuntimeProvider,
+): provider is ArtifactDeployingTenantRuntimeProvider {
+  const candidate = provider as Partial<ArtifactDeployingTenantRuntimeProvider>;
+  return (
+    typeof candidate.deployArtifact === "function" &&
+    typeof candidate.updateRuntimeManifest === "function"
+  );
 }
 
 export type RuntimeLogLevel = "stdout" | "stderr" | "system";

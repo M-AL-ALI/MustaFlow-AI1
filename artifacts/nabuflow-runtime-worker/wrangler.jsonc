@@ -23,6 +23,12 @@
       "max_instances": 5,
     },
   ],
+  "r2_buckets": [
+    {
+      "binding": "NABUFLOW_RUNTIME_ARTIFACTS",
+      "bucket_name": "nabuflow-runtime-artifacts-staging",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

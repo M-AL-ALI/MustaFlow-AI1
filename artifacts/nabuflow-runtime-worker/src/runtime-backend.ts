@@ -1,9 +1,10 @@
 import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@cloudflare/sandbox";
-import { argvToCommandString } from "@workspace/tenant-runtime-contracts";
+import { argvToCommandString, sha256Hex } from "@workspace/tenant-runtime-contracts";
 import type { ExecRuntimeRequest } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
-import type { StoredRuntime } from "./model";
+import type { StoredRuntime, StoredRuntimeArtifact } from "./model";
+import { artifactChunkKey } from "./artifact-storage";
 
 export const DOORMAN_HOST = "doorman.staging.nabuflow.internal";
 const TENANT_PROCESS_ID = "tenant-service";
@@ -60,6 +61,10 @@ export interface RuntimeBackend {
   status(runtime: StoredRuntime): Promise<BackendStatusResult>;
   exec(runtime: StoredRuntime, request: ExecRuntimeRequest): Promise<BackendExecResult>;
   logs(runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }>;
+  materialize(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+  ): Promise<{ filesWritten: number }>;
 }
 
 export class CloudflareSandboxBackend implements RuntimeBackend {
@@ -70,8 +75,9 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     await sandbox.setOutboundByHost(DOORMAN_HOST, "capabilityDoorman");
     await sandbox.setKeepAlive(true);
     await sandbox.killAllProcesses();
+    if (runtime.artifactSha256 === null) throw new Error("A committed artifact is required");
     const process = await sandbox.startProcess(argvToCommandString(runtime.manifest.startCommand), {
-      cwd: "/workspace",
+      cwd: releaseAppRoot(runtime.artifactSha256),
       env: {
         HOST: "0.0.0.0",
         PORT: String(runtime.manifest.servicePort),
@@ -160,11 +166,113 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     }
   }
 
-  private sandbox(identity: string, keepAlive: boolean): NabuflowSandbox {
-    return getSandbox(this.env.NABUFLOW_SANDBOX, identity, {
-      keepAlive,
-      sleepAfter: this.env.NABUFLOW_RUNTIME_SLEEP_AFTER,
-      enableDefaultSession: true,
-    }) as NabuflowSandbox;
+  async materialize(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+  ): Promise<{ filesWritten: number }> {
+    const sandbox = this.sandbox(runtime.descriptor.identity, true);
+    const releaseRoot = releaseRootFor(artifact.envelope.sealedArtifactSha256);
+    const appRoot = `${releaseRoot}/app`;
+    await sandbox.killAllProcesses();
+    const removed = await sandbox.exec(argvToCommandString(["rm", "-rf", "--", releaseRoot]), {
+      cwd: "/workspace",
+      timeout: 30_000,
+    });
+    if (!removed.success) throw new Error("Previous artifact release could not be cleared");
+    await sandbox.mkdir(appRoot, { recursive: true });
+
+    for (const file of artifact.envelope.content.files) {
+      const bytes = await this.readArtifactRange(artifact, file.offset, file.size);
+      if ((await sha256Hex(bytes)) !== file.sha256) {
+        throw new Error("Materialized artifact file failed integrity verification");
+      }
+      const target = `${appRoot}/${file.path}`;
+      const parent = target.slice(0, target.lastIndexOf("/"));
+      await sandbox.mkdir(parent, { recursive: true });
+      await sandbox.writeFile(
+        target,
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+      );
+      if (file.mode === 0o755) {
+        const result = await sandbox.exec(argvToCommandString(["chmod", "755", "--", target]), {
+          cwd: appRoot,
+          timeout: 30_000,
+        });
+        if (!result.success) throw new Error("Artifact executable mode could not be applied");
+      }
+    }
+    await sandbox.writeFile(
+      `${releaseRoot}/seal.json`,
+      JSON.stringify({
+        contentSha256: artifact.envelope.contentSha256,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        manifestRevision: artifact.envelope.manifestRevision,
+      }),
+    );
+    return { filesWritten: artifact.envelope.content.files.length };
   }
+
+  private async readArtifactRange(
+    artifact: StoredRuntimeArtifact,
+    offset: number,
+    length: number,
+  ): Promise<Uint8Array> {
+    const output = new Uint8Array(length);
+    let written = 0;
+    while (written < length) {
+      const absoluteOffset = offset + written;
+      const chunkIndex = Math.floor(absoluteOffset / artifact.envelope.content.chunkBytes);
+      const chunkOffset = absoluteOffset % artifact.envelope.content.chunkBytes;
+      const readLength = Math.min(
+        length - written,
+        artifact.envelope.content.chunkBytes - chunkOffset,
+      );
+      const object = await this.env.NABUFLOW_RUNTIME_ARTIFACTS.get(
+        artifactChunkKey(
+          artifact.runtimeIdentity,
+          artifact.envelope.sealedArtifactSha256,
+          chunkIndex,
+        ),
+        { range: { offset: chunkOffset, length: readLength } },
+      );
+      if (object === null) throw new Error("Committed artifact chunk is unavailable");
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      if (bytes.byteLength !== readLength) throw new Error("Artifact chunk range is incomplete");
+      output.set(bytes, written);
+      written += bytes.byteLength;
+    }
+    return output;
+  }
+
+  private sandbox(identity: string, keepAlive: boolean): NabuflowSandbox {
+    return getSandbox(
+      this.env.NABUFLOW_SANDBOX,
+      identity,
+      runtimeSandboxOptions(keepAlive, this.env.NABUFLOW_RUNTIME_SLEEP_AFTER),
+    ) as NabuflowSandbox;
+  }
+}
+
+export function runtimeSandboxOptions(keepAlive: boolean, sleepAfter: string) {
+  return {
+    keepAlive,
+    sleepAfter,
+    enableDefaultSession: true,
+    // Artifact materialization uses streamed writeFile. The Sandbox SDK defaults to HTTP,
+    // whose file client rejects streams; RPC is required to carry the stream into the DO.
+    transport: "rpc" as const,
+  };
+}
+
+function releaseRootFor(sealedArtifactSha256: string): string {
+  return `/workspace/.nabuflow/releases/${sealedArtifactSha256}`;
+}
+
+function releaseAppRoot(sealedArtifactSha256: string): string {
+  return `${releaseRootFor(sealedArtifactSha256)}/app`;
 }

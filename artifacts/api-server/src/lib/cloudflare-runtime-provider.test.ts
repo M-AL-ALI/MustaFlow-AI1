@@ -49,6 +49,7 @@ describe("CloudflareRuntimeProvider", () => {
           deploymentVersion: "staging-v1",
           provider: "cloudflare",
           supportedRoles: ["preview", "production"],
+          features: ["artifact-v1", "manifest-update-v1"],
         }),
       )
       .mockResolvedValueOnce(
@@ -95,6 +96,132 @@ describe("CloudflareRuntimeProvider", () => {
         { consumeOnce: async () => true },
       ),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("routes syncFiles through sealed begin, raw chunk, commit, and committed start", async () => {
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "preview",
+      slot: "primary",
+    });
+    let sealedArtifactSha256 = "";
+    let contentSha256 = "";
+    const calls: Array<{ path: string; method: string; contentType: string | null }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const headers = new Headers(init?.headers);
+      calls.push({ path, method, contentType: headers.get("content-type") });
+      if (path.endsWith("/version") && init?.headers === undefined) {
+        return json({ ok: false }, 401);
+      }
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-v1", "manifest-update-v1"],
+        });
+      }
+      if (path.endsWith("/begin")) {
+        const body = JSON.parse(String(init?.body)) as {
+          envelope: {
+            sealedArtifactSha256: string;
+            contentSha256: string;
+            content: { chunks: string[] };
+          };
+        };
+        sealedArtifactSha256 = body.envelope.sealedArtifactSha256;
+        contentSha256 = body.envelope.contentSha256;
+        return json({
+          ok: true,
+          sealedArtifactSha256,
+          chunksExpected: body.envelope.content.chunks.length,
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        expect(init?.body).toBeInstanceOf(ArrayBuffer);
+        return json({ ok: true, sealedArtifactSha256, chunkIndex: 0 });
+      }
+      if (path.endsWith("/commit")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256,
+          contentSha256,
+          filesWritten: 1,
+          materialized: true,
+        });
+      }
+      return json({
+        runtime: {
+          identity,
+          projectId: 42,
+          role: "preview",
+          slot: "primary",
+          status: method === "POST" ? "running" : "stopped",
+          servicePort: 8080,
+          manifestRevision: "manifest-1",
+          deploymentVersion: "staging-v1",
+          endpoint: null,
+          readyAt: null,
+          lastError: null,
+        },
+      });
+    });
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await provider.ensureInfrastructure();
+    await provider.syncFiles(identity, 42, [{ path: "server.mjs", content: "safe source" }]);
+    await expect(provider.start(identity, 42)).resolves.toBe(true);
+
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "GET /_nabuflow/control/v1/version",
+      "GET /_nabuflow/control/v1/version",
+      "GET /_nabuflow/control/v1/runtimes/42/preview/primary",
+      expect.stringMatching(/^POST .*\/artifacts\/[0-9a-f]{64}\/begin$/u),
+      expect.stringMatching(/^PUT .*\/artifacts\/[0-9a-f]{64}\/chunks\/0$/u),
+      expect.stringMatching(/^POST .*\/artifacts\/[0-9a-f]{64}\/commit$/u),
+      "POST /_nabuflow/control/v1/runtimes/42/preview/primary/start",
+    ]);
+    expect(calls[4].contentType).toBe("application/octet-stream");
+    expect(sealedArtifactSha256).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  it("refuses a fake credential before any artifact upload begins", async () => {
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      json({
+        runtime: {
+          identity,
+          projectId: 42,
+          role: "preview",
+          slot: "primary",
+          status: "stopped",
+          servicePort: 8080,
+          manifestRevision: "manifest-1",
+          deploymentVersion: "staging-v1",
+          endpoint: null,
+          readyAt: null,
+          lastError: null,
+        },
+      }),
+    );
+    const provider = new CloudflareRuntimeProvider(config);
+
+    await expect(
+      provider.syncFiles(identity, 42, [
+        { path: "fixture.txt", content: "sk_test_FAKEONLYNOTAREALSECRET1234567890" },
+      ]),
+    ).rejects.toMatchObject({ code: "artifact_secret_detected" });
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).not.toContain("/artifacts/");
   });
 
   it("fails the self-check when the Worker clock is outside the signing window", async () => {
@@ -272,8 +399,6 @@ describe("CloudflareRuntimeProvider", () => {
     const unsupported: Array<[string, () => unknown]> = [
       ["secret-environment-at-create", () => provider.create(1, null, { SECRET: "value" })],
       ["file-write", () => provider.writeFile("runtime", "app.ts", "", 1)],
-      ["file-sync", () => provider.syncFiles("runtime", 1, [])],
-      ["file-restore", () => provider.restoreFiles("runtime", 1, [])],
       ["secret-environment", () => provider.updateEnvironment("runtime", 1, {})],
       ["secret-environment", () => provider.restartWithProjectEnvironment(1, {})],
       ["artifact-provision", () => provider.provision(1, [])],

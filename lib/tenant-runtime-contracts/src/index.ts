@@ -2,6 +2,7 @@ export * from "./config";
 export * from "./capability-request";
 export * from "./constants";
 export * from "./control-schemas";
+export * from "./runtime-artifact";
 export * from "./preview-grant";
 export * from "./request-signing";
 export * from "./route-capability";

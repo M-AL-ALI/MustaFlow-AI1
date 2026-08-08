@@ -27,6 +27,8 @@ export class Sandbox<_Env = unknown> {
   async getProcessLogs(..._args: unknown[]): Promise<{ stdout: string; stderr: string }> {
     return { stdout: "", stderr: "" };
   }
+  async writeFile(..._args: unknown[]): Promise<void> {}
+  async mkdir(..._args: unknown[]): Promise<void> {}
 }
 
 export function getSandbox<Instance extends Sandbox>(
