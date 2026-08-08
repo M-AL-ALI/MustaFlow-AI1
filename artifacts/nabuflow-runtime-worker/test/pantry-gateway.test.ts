@@ -137,4 +137,46 @@ describe("signed Pantry service-binding gateway", () => {
       code: "pantry_infrastructure_unavailable",
     });
   });
+
+  it("exposes assembly progress only through a signed read proxy", async () => {
+    const env = fakeEnv();
+    const assemblyId = `passembly_${"b".repeat(64)}`;
+    let calls = 0;
+    env.PANTRY_CATALOG = {
+      async fetch(request: Request) {
+        calls += 1;
+        expect(new URL(request.url).pathname).toBe(`/internal/v1/assemblies/${assemblyId}`);
+        expect(request.headers.get("x-nabuflow-pantry-principal")).toBe("builder-readonly");
+        return Response.json({
+          ok: true,
+          assemblyId,
+          ingest: { state: "running", attempt: 1 },
+          stagedObjects: 3,
+        });
+      },
+    } as unknown as Fetcher;
+    const path = `/_nabuflow/control/v1/pantry/assemblies/${assemblyId}`;
+    expect(
+      (
+        await handleControlRequest(new Request(`https://runtime.example${path}`), env, {
+          coordinator: new MemoryCoordinator(),
+          backend: new MockBackend(),
+          nowMs: TEST_NOW_MS,
+          requestId: "pantry-progress-unsigned",
+        })
+      ).status,
+    ).toBe(401);
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "pantry-progress-signed-0001" }),
+      env,
+      {
+        coordinator: new MemoryCoordinator(),
+        backend: new MockBackend(),
+        nowMs: TEST_NOW_MS,
+        requestId: "pantry-progress-signed",
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toBe(1);
+  });
 });

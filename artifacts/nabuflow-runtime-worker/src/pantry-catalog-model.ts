@@ -2,6 +2,7 @@ import type {
   PantryCatalogObjectReference,
   PantryCatalogShelfRecord,
   PantryCatalogStockRequest,
+  PantryErrorCode,
   PantryRevisionState,
 } from "@workspace/tenant-runtime-contracts";
 import type { PantryCatalogDurableObject } from "./pantry-catalog-durable-object";
@@ -12,6 +13,22 @@ export interface PantryStockQueueMessage {
   requestSha256: string;
 }
 
+export interface PantryIngestFailureRecord {
+  code: PantryErrorCode;
+  message: string;
+  retryable: boolean;
+  failedAt: string;
+  negativeCacheUntil: string;
+}
+
+export interface PantryIngestProgress {
+  state: "queued" | "running" | "failed";
+  attempt: number;
+  updatedAt: string;
+  leaseUntil: string | null;
+  failure: PantryIngestFailureRecord | null;
+}
+
 export interface StoredPantryAssembly {
   assemblyId: string;
   request: PantryCatalogStockRequest;
@@ -19,6 +36,7 @@ export interface StoredPantryAssembly {
   objects: PantryCatalogObjectReference[];
   expiresAtMs: number;
   queueDeliveries: number;
+  ingest?: PantryIngestProgress;
 }
 
 export type PantryStockLookup =
@@ -43,11 +61,25 @@ export interface PantryCatalogDiagnostics {
   committedObjects: number;
   externalReferences: number;
   queueDeliveries: number;
+  failedIngests: number;
 }
+
+export type PantryIngestClaim =
+  | { state: "claimed"; assembly: StoredPantryAssembly }
+  | { state: "busy" | "failed"; assembly: StoredPantryAssembly }
+  | { state: "not_found" };
 
 export interface PantryCatalogCoordinator {
   beginStock(request: PantryCatalogStockRequest): Promise<PantryStockLookup>;
   markQueueDelivery(assemblyId: string): Promise<"recorded" | "not_found">;
+  claimIngest(assemblyId: string, now: string, leaseUntil: string): Promise<PantryIngestClaim>;
+  recordIngestFailure(
+    assemblyId: string,
+    failure: PantryIngestFailureRecord,
+  ): Promise<"recorded" | "not_found">;
+  allocateRevisionIdentity(
+    date: string,
+  ): Promise<{ revisionId: string; parentRootSha256: string | null }>;
   getAssembly(assemblyId: string): Promise<StoredPantryAssembly | null>;
   recordStagedObject(
     assemblyId: string,
@@ -83,4 +115,6 @@ export interface PantryWorkerBindings {
   PANTRY_CATALOG_COORDINATOR: DurableObjectNamespace<PantryCatalogDurableObject>;
   PANTRY_CATALOG_OBJECTS: R2Bucket;
   PANTRY_INGEST_QUEUE?: Queue<PantryStockQueueMessage>;
+  PANTRY_INGEST_SIGNING_KEY_ID?: string;
+  PANTRY_INGEST_SIGNING_PRIVATE_KEY?: string;
 }

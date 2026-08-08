@@ -6,6 +6,7 @@ import {
   PANTRY_CATALOG_STAMP_FORMAT,
   deriveRuntimeIdentity,
   pantryCatalogCommitRequestSchema,
+  pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
   sha256Hex,
   signControlRequest,
@@ -45,6 +46,7 @@ interface GateSurface {
 const transcript: TranscriptEntry[] = [];
 const readinessRevisions = new Map<number, string>();
 const cleanupFixtures: PantryFixture[] = [];
+const cleanupIngestRoots: string[] = [];
 let controlToken = "";
 let previewPrivateKey = "";
 let previewPublicKey = "";
@@ -500,6 +502,15 @@ async function transition(
 }
 
 async function collect(root: string, nowMs: number, label: string): Promise<ControlResult> {
+  return collectWithNamespace(root, nowMs, "staging-acceptance", label);
+}
+
+async function collectWithNamespace(
+  root: string,
+  nowMs: number,
+  retentionNamespace: string,
+  label: string,
+): Promise<ControlResult> {
   return pantryCall(
     "/gc",
     "POST",
@@ -507,10 +518,146 @@ async function collect(root: string, nowMs: number, label: string): Promise<Cont
       scope: "retired-unreferenced",
       now: new Date(nowMs).toISOString(),
       maxDeletes: 20,
-      retentionNamespace: "staging-acceptance",
+      retentionNamespace,
     },
     label,
   );
+}
+
+async function runLiveNpmIngest(nowMs: number): Promise<void> {
+  const identity = {
+    intents: [{ ecosystem: "npm" as const, name: "is-number", selector: "7.0.0" }],
+    platform: {
+      runtime: "node" as const,
+      runtimeVersion: "22.18.0",
+      nodeAbi: "127",
+      os: "linux" as const,
+      cpu: "x64" as const,
+      libc: "glibc" as const,
+      toolchainImageDigest: `sha256:${"8".repeat(64)}`,
+    },
+  };
+  const request = pantryCatalogStockRequestSchema.parse({
+    schemaVersion: 1,
+    ...identity,
+    requestSha256: await pantryCatalogStockRequestHash(identity),
+    requestedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + 60 * 60_000).toISOString(),
+  });
+  const before = await pantryDiagnostics("ingest.queue.before");
+  assertStatus("ingest.queue.before", before, 200);
+  const queueBefore = queueDeliveryCount(before);
+  const begin = await pantryCall("/stock-requests", "POST", request, "ingest.public.begin");
+  assertCondition(
+    begin.response.status === 200 || begin.response.status === 201,
+    "Public npm stock request was rejected",
+  );
+  let root: string | null =
+    (begin.body as { revisionRootSha256?: string | null }).revisionRootSha256 ?? null;
+  for (let attempt = 1; root === null && attempt <= 90; attempt += 1) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+    const status = await pantryCall(
+      `/assemblies/passembly_${request.requestSha256}`,
+      "GET",
+      undefined,
+      `ingest.public.progress.${attempt}`,
+    );
+    if (status.response.status === 200) {
+      const ingest = (
+        status.body as {
+          ingest?: { state?: string; failure?: { code?: string } | null };
+        }
+      ).ingest;
+      assertCondition(
+        ingest?.state !== "failed",
+        `Public npm ingest failed (${ingest?.failure?.code ?? "unknown"})`,
+      );
+    }
+    const lookup = await pantryCall(
+      "/stock-requests",
+      "POST",
+      request,
+      `ingest.public.lookup.${attempt}`,
+    );
+    assertCondition(
+      lookup.response.status === 200 || lookup.response.status === 201,
+      "Public npm ingest lookup failed",
+    );
+    root = (lookup.body as { revisionRootSha256?: string | null }).revisionRootSha256 ?? null;
+  }
+  assertCondition(root !== null, "Public npm ingest did not commit within three minutes");
+  cleanupIngestRoots.push(root);
+  const shelf = await pantryCall(
+    `/revisions/by-root/${root}`,
+    "GET",
+    undefined,
+    "ingest.public.shelf",
+  );
+  assertStatus("ingest.public.shelf", shelf, 200);
+  const shelfBody = shelf.body as {
+    shelf?: {
+      revision?: {
+        content?: {
+          closure?: {
+            ingredients?: Array<{
+              package?: { name?: string; version?: string };
+              provenance?: { registrySignatureVerified?: boolean };
+            }>;
+          };
+        };
+      };
+      objectReferences?: unknown[];
+    };
+  };
+  const ingredient = shelfBody.shelf?.revision?.content?.closure?.ingredients?.[0];
+  assertCondition(
+    ingredient?.package?.name === "is-number" &&
+      ingredient.package.version === "7.0.0" &&
+      ingredient.provenance?.registrySignatureVerified === true,
+    "Committed public npm shelf did not retain exact verified origin evidence",
+  );
+  const after = await pantryDiagnostics("ingest.queue.after");
+  assertStatus("ingest.queue.after", after, 200);
+  const queueAfter = queueDeliveryCount(after);
+  assertCondition(
+    queueAfter - queueBefore === 1,
+    "One cold miss did not produce exactly one queue delivery",
+  );
+  const warm = await pantryCall("/stock-requests", "POST", request, "ingest.public.warm");
+  assertStatus("ingest.public.warm", warm, 200);
+  assertCondition(
+    (warm.body as { state?: string }).state === "committed",
+    "Warm Pantry hit did not return the immutable shelf",
+  );
+  const warmDiagnostics = await pantryDiagnostics("ingest.queue.warm");
+  assertCondition(
+    queueDeliveryCount(warmDiagnostics) === queueAfter,
+    "Warm Pantry hit emitted an upstream ingest queue delivery",
+  );
+  record("ingest.public-npm.exact-shelf", 200, {
+    root,
+    coordinate: "is-number@7.0.0",
+    registrySignatureVerified: true,
+    objects: shelfBody.shelf?.objectReferences?.length ?? 0,
+    coldQueueDeliveries: 1,
+    warmQueueDeliveries: 0,
+  });
+  await transition(root, 1, "quarantined", nowMs + 1_000, "ingest.public.quarantine");
+  await transition(root, 2, "retired", nowMs + 2_000, "ingest.public.retire");
+  const collected = await collectWithNamespace(
+    root,
+    nowMs + 366 * 24 * 60 * 60_000,
+    "pantry-ingest",
+    "ingest.public.collect",
+  );
+  assertStatus("ingest.public.collect", collected, 200);
+  assertCondition(
+    ((collected.body as { deletedRevisionRoots?: string[] }).deletedRevisionRoots ?? []).includes(
+      root,
+    ),
+    "Public npm shelf cleanup failed",
+  );
+  cleanupIngestRoots.splice(cleanupIngestRoots.indexOf(root), 1);
 }
 
 async function pantryDiagnostics(label: string): Promise<ControlResult> {
@@ -836,6 +983,8 @@ async function runCatalogAcceptance(): Promise<void> {
     "Final shelf was not collected",
   );
 
+  await runLiveNpmIngest(nowMs + 30_000);
+
   const diagnostics = await pantryDiagnostics("catalog.cleanup.diagnostics");
   assertStatus("catalog.cleanup.diagnostics", diagnostics, 200);
   const body = diagnostics.body as {
@@ -920,6 +1069,47 @@ async function bestEffortCatalogCleanup(): Promise<void> {
       ).catch(() => undefined);
     }
     await collect(root, nowMs, `cleanup.collect.${root.slice(0, 8)}`).catch(() => undefined);
+  }
+  for (const root of [...cleanupIngestRoots].reverse()) {
+    const lookup = await pantryCall(
+      `/revisions/by-root/${root}`,
+      "GET",
+      undefined,
+      `cleanup.ingest.lookup.${root.slice(0, 8)}`,
+    ).catch(() => null);
+    const lifecycle = (
+      lookup?.body as { lifecycle?: { state?: string; stateRevision?: number } } | undefined
+    )?.lifecycle;
+    if (lifecycle?.state === "committed") {
+      await transition(
+        root,
+        lifecycle.stateRevision ?? 1,
+        "quarantined",
+        nowMs - 2_000,
+        `cleanup.ingest.quarantine.${root.slice(0, 8)}`,
+      ).catch(() => undefined);
+      await transition(
+        root,
+        (lifecycle.stateRevision ?? 1) + 1,
+        "retired",
+        nowMs - 1_000,
+        `cleanup.ingest.retire.${root.slice(0, 8)}`,
+      ).catch(() => undefined);
+    } else if (lifecycle?.state === "quarantined") {
+      await transition(
+        root,
+        lifecycle.stateRevision ?? 2,
+        "retired",
+        nowMs - 1_000,
+        `cleanup.ingest.retire.${root.slice(0, 8)}`,
+      ).catch(() => undefined);
+    }
+    await collectWithNamespace(
+      root,
+      nowMs,
+      "pantry-ingest",
+      `cleanup.ingest.collect.${root.slice(0, 8)}`,
+    ).catch(() => undefined);
   }
 }
 

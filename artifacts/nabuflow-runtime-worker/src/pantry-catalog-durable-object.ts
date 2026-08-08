@@ -11,6 +11,8 @@ import {
 import type {
   PantryCatalogCoordinator,
   PantryCatalogDiagnostics,
+  PantryIngestClaim,
+  PantryIngestFailureRecord,
   PantryShelfLookup,
   PantryStockLookup,
   PantryWorkerBindings,
@@ -102,6 +104,13 @@ export class PantryCatalogDurableObject
         objects: [],
         expiresAtMs: Date.parse(request.expiresAt),
         queueDeliveries: 0,
+        ingest: {
+          state: "queued",
+          attempt: 0,
+          updatedAt: request.requestedAt,
+          leaseUntil: null,
+          failure: null,
+        },
       };
       await transaction.put({
         [assemblyKey(assemblyId)]: assembly,
@@ -115,6 +124,74 @@ export class PantryCatalogDurableObject
     });
     if (result.state === "created") await this.scheduleCleanup(result.assembly.expiresAtMs);
     return result;
+  }
+
+  async claimIngest(
+    assemblyId: string,
+    now: string,
+    leaseUntil: string,
+  ): Promise<PantryIngestClaim> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = assemblyKey(assemblyId);
+      const assembly = await transaction.get<StoredPantryAssembly>(key);
+      if (assembly === undefined) return { state: "not_found" } as const;
+      const progress = assembly.ingest;
+      if (
+        progress?.state === "running" &&
+        progress.leaseUntil !== null &&
+        Date.parse(progress.leaseUntil) > Date.parse(now)
+      ) {
+        return { state: "busy", assembly } as const;
+      }
+      if (
+        progress?.state === "failed" &&
+        progress.failure !== null &&
+        Date.parse(progress.failure.negativeCacheUntil) > Date.parse(now)
+      ) {
+        return { state: "failed", assembly } as const;
+      }
+      assembly.ingest = {
+        state: "running",
+        attempt: (progress?.attempt ?? 0) + 1,
+        updatedAt: now,
+        leaseUntil,
+        failure: null,
+      };
+      await transaction.put(key, assembly);
+      return { state: "claimed", assembly } as const;
+    });
+  }
+
+  async recordIngestFailure(
+    assemblyId: string,
+    failure: PantryIngestFailureRecord,
+  ): Promise<"recorded" | "not_found"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = assemblyKey(assemblyId);
+      const assembly = await transaction.get<StoredPantryAssembly>(key);
+      if (assembly === undefined) return "not_found" as const;
+      assembly.ingest = {
+        state: "failed",
+        attempt: assembly.ingest?.attempt ?? 1,
+        updatedAt: failure.failedAt,
+        leaseUntil: null,
+        failure,
+      };
+      await transaction.put(key, assembly);
+      return "recorded" as const;
+    });
+  }
+
+  async allocateRevisionIdentity(
+    date: string,
+  ): Promise<{ revisionId: string; parentRootSha256: string | null }> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const sequenceKey = `revision-sequence:${date}`;
+      const sequence = ((await transaction.get<number>(sequenceKey)) ?? 0) + 1;
+      const parentRootSha256 = (await transaction.get<string>("shelf:latest-root")) ?? null;
+      await transaction.put(sequenceKey, sequence);
+      return { revisionId: `pantry-${date}.${sequence}`, parentRootSha256 };
+    });
   }
 
   async markQueueDelivery(assemblyId: string): Promise<"recorded" | "not_found"> {
@@ -345,6 +422,9 @@ export class PantryCatalogDurableObject
       committedObjects: objects.size,
       externalReferences: references.size,
       queueDeliveries: queueDeliveries ?? 0,
+      failedIngests: [...assemblies.values()].filter(
+        (assembly) => assembly.ingest?.state === "failed",
+      ).length,
     };
   }
 

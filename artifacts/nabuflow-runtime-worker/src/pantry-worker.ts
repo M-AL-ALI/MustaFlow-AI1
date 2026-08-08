@@ -1,4 +1,7 @@
 import {
+  PANTRY_CATALOG_SCHEMA_VERSION,
+  PANTRY_CATALOG_SHELF_FORMAT,
+  PANTRY_REVISION_FORMAT,
   canonicalPantryJson,
   pantryCatalogCommitRequestSchema,
   pantryCatalogGcRequestSchema,
@@ -12,13 +15,18 @@ import {
   pantryCatalogStateTransitionRequestSchema,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
+  pantryDependencyClosureHash,
+  pantryIngredientMerkleRoot,
+  pantryRevisionRoot,
   pantryRevisionIsCommittable,
+  signPantryDigest,
   verifyPantryRevisionRecord,
   sha256Hex,
   type PantryCatalogCommitRequest,
   type PantryCatalogErrorResponse,
   type PantryCatalogShelfRecord,
 } from "@workspace/tenant-runtime-contracts";
+import { ingestErrorDefaults, ingestPantryStockRequest } from "./pantry-ingest";
 import type {
   PantryCatalogCoordinator,
   PantryStockQueueMessage,
@@ -29,7 +37,9 @@ import type { PantryCatalogDurableObject } from "./pantry-catalog-durable-object
 const INTERNAL_PREFIX = "/internal/v1";
 const PRINCIPAL_HEADER = "x-nabuflow-pantry-principal";
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
-const MAX_FIXTURE_OBJECT_BYTES = 16 * 1024 * 1024;
+const MAX_CATALOG_OBJECT_BYTES = 32 * 1024 * 1024;
+const INGEST_LEASE_MS = 3 * 60 * 1_000;
+const NEGATIVE_CACHE_MS = 5 * 60 * 1_000;
 
 type PantryPrincipal = "catalog-admin" | "builder-readonly" | "catalog-gc";
 
@@ -255,6 +265,30 @@ async function handleStockRequest(
   });
 }
 
+async function handleAssemblyStatus(
+  request: Request,
+  coordinator: PantryCatalogCoordinator,
+  assemblyId: string,
+): Promise<Response> {
+  requirePrincipal(request, ["catalog-admin", "builder-readonly"]);
+  const assembly = await coordinator.getAssembly(assemblyId);
+  if (assembly === null) {
+    throw new PantryHttpError(404, "catalog_not_found", "Pantry assembly was not found");
+  }
+  return jsonResponse(200, {
+    ok: true,
+    assemblyId,
+    ingest: assembly.ingest ?? {
+      state: "queued",
+      attempt: 0,
+      updatedAt: assembly.request.requestedAt,
+      leaseUntil: null,
+      failure: null,
+    },
+    stagedObjects: assembly.objects.length,
+  });
+}
+
 async function handleStageObject(
   request: Request,
   env: PantryWorkerBindings,
@@ -265,7 +299,7 @@ async function handleStageObject(
 ): Promise<Response> {
   requirePrincipal(request, ["catalog-admin"]);
   const kind = strictParse(pantryCatalogObjectKindSchema, rawKind);
-  const bytes = await readCappedBytes(request, MAX_FIXTURE_OBJECT_BYTES);
+  const bytes = await readCappedBytes(request, MAX_CATALOG_OBJECT_BYTES);
   if (bytes.byteLength === 0 || (await sha256Hex(bytes)) !== sha256) {
     throw new PantryHttpError(
       422,
@@ -556,6 +590,19 @@ export async function handlePantryWorkerRequest(
     if (request.method === "POST" && pathname === `${INTERNAL_PREFIX}/stock-requests`) {
       return await handleStockRequest(request, env, coordinator);
     }
+    const statusMatch = new RegExp(`^${INTERNAL_PREFIX}/assemblies/(passembly_[0-9a-f]{64})$`).exec(
+      pathname,
+    );
+    if (statusMatch !== null) {
+      if (request.method !== "GET") {
+        throw new PantryHttpError(
+          405,
+          "catalog_method_not_allowed",
+          "Pantry method is not allowed",
+        );
+      }
+      return await handleAssemblyStatus(request, coordinator, statusMatch[1]);
+    }
     const objectMatch = new RegExp(
       `^${INTERNAL_PREFIX}/assemblies/(passembly_[0-9a-f]{64})/objects/([0-9a-f]{64})/([a-z-]+)$`,
     ).exec(pathname);
@@ -734,6 +781,7 @@ export async function handlePantryQueue(
   batch: MessageBatch<PantryStockQueueMessage>,
   env: PantryWorkerBindings,
   injectedCoordinator?: PantryCatalogCoordinator,
+  injectedIngest: typeof ingestPantryStockRequest = ingestPantryStockRequest,
 ): Promise<void> {
   const coordinator = injectedCoordinator ?? getCoordinator(env);
   for (const message of batch.messages) {
@@ -747,6 +795,172 @@ export async function handlePantryQueue(
       continue;
     }
     await coordinator.markQueueDelivery(body.assemblyId);
-    message.ack();
+    const now = new Date();
+    const claim = await coordinator.claimIngest(
+      body.assemblyId,
+      now.toISOString(),
+      new Date(now.getTime() + INGEST_LEASE_MS).toISOString(),
+    );
+    if (claim.state === "not_found" || claim.state === "busy" || claim.state === "failed") {
+      message.ack();
+      continue;
+    }
+    try {
+      await ingestAndCommitAssembly(env, coordinator, claim.assembly, injectedIngest);
+      message.ack();
+    } catch (error) {
+      const typed = ingestErrorDefaults(error);
+      const failedAt = new Date().toISOString();
+      await coordinator.recordIngestFailure(body.assemblyId, {
+        ...typed,
+        failedAt,
+        negativeCacheUntil: new Date(
+          Date.parse(failedAt) + (typed.retryable ? 10_000 : NEGATIVE_CACHE_MS),
+        ).toISOString(),
+      });
+      if (typed.retryable) message.retry({ delaySeconds: 10 });
+      else message.ack();
+    }
   }
+}
+
+function requireIngestSigner(env: PantryWorkerBindings): { kid: string; privateKeyPem: string } {
+  if (
+    typeof env.PANTRY_INGEST_SIGNING_KEY_ID !== "string" ||
+    env.PANTRY_INGEST_SIGNING_KEY_ID.length === 0 ||
+    typeof env.PANTRY_INGEST_SIGNING_PRIVATE_KEY !== "string" ||
+    !env.PANTRY_INGEST_SIGNING_PRIVATE_KEY.includes("BEGIN PRIVATE KEY")
+  ) {
+    throw new PantryHttpError(
+      503,
+      "catalog_infrastructure_unavailable",
+      "Pantry ingest signing is not configured",
+      true,
+    );
+  }
+  return {
+    kid: env.PANTRY_INGEST_SIGNING_KEY_ID,
+    privateKeyPem: env.PANTRY_INGEST_SIGNING_PRIVATE_KEY,
+  };
+}
+
+async function internalPantryCall(
+  request: Request,
+  env: PantryWorkerBindings,
+  coordinator: PantryCatalogCoordinator,
+): Promise<unknown> {
+  const response = await handlePantryWorkerRequest(request, env, coordinator);
+  const body = (await response.json()) as unknown;
+  if (!response.ok) {
+    const input = body as { message?: unknown; retryable?: unknown };
+    throw new Error(
+      typeof input.message === "string" ? input.message : "Pantry internal operation failed",
+    );
+  }
+  return body;
+}
+
+async function ingestAndCommitAssembly(
+  env: PantryWorkerBindings,
+  coordinator: PantryCatalogCoordinator,
+  assembly: NonNullable<Awaited<ReturnType<PantryCatalogCoordinator["getAssembly"]>>>,
+  ingest: typeof ingestPantryStockRequest,
+): Promise<void> {
+  const signer = requireIngestSigner(env);
+  const build = await ingest(assembly.request);
+  for (const object of build.objects) {
+    await internalPantryCall(
+      new Request(
+        `https://pantry.internal${INTERNAL_PREFIX}/assemblies/${assembly.assemblyId}/objects/${object.sha256}/${object.kind}`,
+        {
+          method: "PUT",
+          headers: {
+            [PRINCIPAL_HEADER]: "catalog-admin",
+            "content-type": "application/octet-stream",
+          },
+          body: object.bytes.slice().buffer,
+        },
+      ),
+      env,
+      coordinator,
+    );
+  }
+  const createdAt = new Date().toISOString();
+  const identity = await coordinator.allocateRevisionIdentity(createdAt.slice(0, 10));
+  const dependencyClosureSha256 = await pantryDependencyClosureHash(build.closure);
+  const ingredientMerkleRootSha256 = await pantryIngredientMerkleRoot(build.closure);
+  const content = {
+    format: PANTRY_REVISION_FORMAT,
+    schemaVersion: 1 as const,
+    revisionId: identity.revisionId,
+    createdAt,
+    parentRootSha256: identity.parentRootSha256,
+    closure: build.closure,
+    dependencyClosureSha256,
+    ingredientMerkleRootSha256,
+    layers: [],
+    scannerPolicy: {
+      policyVersion: "nabu-pantry-ingest-scan/v1",
+      secretScan: "warning" as const,
+      malwareScan: "warning" as const,
+      vulnerabilityScan: "warning" as const,
+      licenseScan: build.closure.ingredients.every(
+        (ingredient) => ingredient.scan.licenseScan === "passed",
+      )
+        ? ("passed" as const)
+        : ("warning" as const),
+    },
+    provenanceStatus: build.provenanceStatus,
+  };
+  const rootSha256 = await pantryRevisionRoot(content);
+  const revision = {
+    content,
+    rootSha256,
+    signature: await signPantryDigest(signer.privateKeyPem, {
+      kind: "revision",
+      kid: signer.kid,
+      payloadSha256: rootSha256,
+    }),
+  };
+  const objectReferences = build.objects
+    .map((object) => ({ kind: object.kind, sha256: object.sha256, bytes: object.bytes.byteLength }))
+    .sort((left, right) => {
+      const a = `${left.sha256}\0${left.kind}`;
+      const b = `${right.sha256}\0${right.kind}`;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  const commit = pantryCatalogCommitRequestSchema.parse({
+    format: PANTRY_CATALOG_SHELF_FORMAT,
+    schemaVersion: PANTRY_CATALOG_SCHEMA_VERSION,
+    assemblyId: assembly.assemblyId,
+    revision,
+    state: {
+      schemaVersion: 1,
+      revisionId: identity.revisionId,
+      rootSha256,
+      state: "assembling",
+      stateRevision: 0,
+      updatedAt: createdAt,
+    },
+    objectReferences,
+    lockfileSha256: build.lockfileSha256,
+    sbomSha256: build.sbomSha256,
+    toolchainAttestationSha256: build.toolchainAttestationSha256,
+    retention: {
+      namespace: "pantry-ingest",
+      retainUntil: new Date(Date.parse(createdAt) + 365 * 24 * 60 * 60 * 1_000).toISOString(),
+    },
+  });
+  await internalPantryCall(
+    new Request(
+      `https://pantry.internal${INTERNAL_PREFIX}/assemblies/${assembly.assemblyId}/commit`,
+      {
+        method: "POST",
+        headers: { [PRINCIPAL_HEADER]: "catalog-admin", "content-type": "application/json" },
+        body: JSON.stringify(commit),
+      },
+    ),
+    env,
+    coordinator,
+  );
 }

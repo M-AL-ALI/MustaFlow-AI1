@@ -631,6 +631,7 @@ function matchPantryRoute(method: string, pathname: string): MatchedRoute {
   const readPatterns = [
     /^\/health$/u,
     /^\/diagnostics$/u,
+    /^\/assemblies\/passembly_[0-9a-f]{64}$/u,
     /^\/revisions\/by-root\/[0-9a-f]{64}$/u,
     /^\/revisions\/pantry-\d{4}-\d{2}-\d{2}\.[1-9]\d*$/u,
   ];
