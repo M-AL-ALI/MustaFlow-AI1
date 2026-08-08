@@ -153,3 +153,13 @@ The first staging attempt committed and verified the real npm shelf, then stoppe
 - npm public registry API: <https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md>
 - npm registry signature verification: <https://docs.npmjs.com/verifying-registry-signatures/>
 - npm provenance posture: <https://docs.npmjs.com/generating-provenance-statements/>
+
+## Dated release-profile addendum — 2026-08-08
+
+After the implementation and report were committed, the clean-tree Ora release profile ran on branch commit `0f0ea4947396bc9a57a4a414f1b50a80ee884d4e`. It completed with 18 passes, 0 warnings, and exactly 3 failed gate rows:
+
+1. `api-release-extended`: the two database-backed `ora-realtime-usage.test.ts` cases failed with `ECONNREFUSED 127.0.0.1:5432`.
+2. `api-account-billing-history`: the two database-backed `ora-memory-consolidation.test.ts` cases received 500 instead of 201 because the local database was unavailable.
+3. `web-build`: the production bundle and bundle-size check passed, then dynamic prerender failed with `ECONNREFUSED 127.0.0.1:5432`.
+
+A clean detached checkout at exact audited base `c4db2ffd35fd109296560999e5c72b6367dd38a4` was populated with repository-pinned pnpm 10.26.1 using the isolated proof store (`--frozen-lockfile --prefer-offline`): 2,258 packages, 2,226 store reuses, zero downloads, 166.1 seconds, clean tree. The identical release command on that base also completed with 18 passes, 0 warnings, and the exact same 3 failed rows, same test names/assertion shapes, and same localhost PostgreSQL refusal. This is exact base parity. The failures are the documented no-local-PostgreSQL Windows-lab baseline, not a Pantry ingest regression. Replit's PostgreSQL-backed merge gate remains the authoritative ship gate.
