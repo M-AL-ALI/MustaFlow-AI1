@@ -18,6 +18,9 @@ import type {
   StoredHttpResponse,
   StoredRuntime,
   StoredRuntimeArtifact,
+  StoredRuntimeLayer,
+  StoredRuntimeLayeredArtifact,
+  RemovedRuntimeLayeredArtifact,
 } from "../src/model";
 import type {
   BackendExecResult,
@@ -40,6 +43,9 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly routes = new Map<string, RouteRecord>();
   readonly containerBindings = new Map<string, string>();
   readonly artifacts = new Map<string, StoredRuntimeArtifact>();
+  readonly layeredArtifacts = new Map<string, StoredRuntimeLayeredArtifact>();
+  readonly runtimeLayers = new Map<string, StoredRuntimeLayer>();
+  layerChunkWrites = 0;
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
     if (this.nonces.has(nonce)) return false;
@@ -179,6 +185,164 @@ export class MemoryCoordinator implements ControlCoordinator {
       records.push(structuredClone(artifact));
     }
     return records;
+  }
+
+  async beginLayeredArtifact(
+    record: StoredRuntimeLayeredArtifact,
+  ): Promise<"created" | "exists" | "conflict"> {
+    const key = `${record.runtimeIdentity}:${record.envelope.sealedArtifactSha256}`;
+    const existing = this.layeredArtifacts.get(key);
+    if (existing !== undefined) {
+      return existing.envelope.contentSha256 === record.envelope.contentSha256
+        ? "exists"
+        : "conflict";
+    }
+    for (const content of record.envelope.content.layers) {
+      const layer = this.runtimeLayers.get(content.descriptor.contentSha256);
+      if (
+        layer !== undefined &&
+        layer.content.descriptor.unpackedManifestSha256 !==
+          content.descriptor.unpackedManifestSha256
+      ) {
+        return "conflict";
+      }
+    }
+    this.layeredArtifacts.set(key, structuredClone(record));
+    for (const content of record.envelope.content.layers) {
+      const layer = this.runtimeLayers.get(content.descriptor.contentSha256);
+      if (layer === undefined) {
+        this.runtimeLayers.set(content.descriptor.contentSha256, {
+          content: structuredClone(content),
+          state: "pending",
+          receivedChunks: content.chunks.map(() => null),
+          pendingArtifacts: [key],
+          artifactReferences: [],
+        });
+      } else if (!layer.pendingArtifacts.includes(key)) {
+        layer.pendingArtifacts.push(key);
+      }
+    }
+    return "created";
+  }
+
+  async getLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeLayeredArtifact | null> {
+    return structuredClone(
+      this.layeredArtifacts.get(`${identity}:${sealedArtifactSha256}`) ?? null,
+    );
+  }
+
+  async getRuntimeLayer(contentSha256: string): Promise<StoredRuntimeLayer | null> {
+    return structuredClone(this.runtimeLayers.get(contentSha256) ?? null);
+  }
+
+  async recordLayeredArtifactAppChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict"> {
+    const artifact = this.layeredArtifacts.get(`${identity}:${sealedArtifactSha256}`);
+    if (artifact === undefined || artifact.state !== "pending") return "not_found";
+    if (chunkIndex < 0 || chunkIndex >= artifact.receivedAppChunks.length) return "conflict";
+    const current = artifact.receivedAppChunks[chunkIndex];
+    if (current !== null) return current === chunkSha256 ? "replay" : "conflict";
+    if (artifact.envelope.content.appArtifact.content.chunks[chunkIndex] !== chunkSha256)
+      return "conflict";
+    artifact.receivedAppChunks[chunkIndex] = chunkSha256;
+    return "recorded";
+  }
+
+  async recordRuntimeLayerChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    contentSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict"> {
+    const reference = `${identity}:${sealedArtifactSha256}`;
+    const artifact = this.layeredArtifacts.get(reference);
+    const layer = this.runtimeLayers.get(contentSha256);
+    if (
+      artifact === undefined ||
+      artifact.state !== "pending" ||
+      layer === undefined ||
+      (!layer.pendingArtifacts.includes(reference) && !layer.artifactReferences.includes(reference))
+    ) {
+      return "not_found";
+    }
+    if (layer.state === "committed") return "replay";
+    if (chunkIndex < 0 || chunkIndex >= layer.receivedChunks.length) return "conflict";
+    const current = layer.receivedChunks[chunkIndex];
+    if (current !== null) return current === chunkSha256 ? "replay" : "conflict";
+    if (layer.content.chunks[chunkIndex] !== chunkSha256) return "conflict";
+    layer.receivedChunks[chunkIndex] = chunkSha256;
+    this.layerChunkWrites += 1;
+    return "recorded";
+  }
+
+  async commitLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<"committed" | "incomplete" | "not_found" | "conflict"> {
+    const reference = `${identity}:${sealedArtifactSha256}`;
+    const artifact = this.layeredArtifacts.get(reference);
+    if (artifact === undefined) return "not_found";
+    if (artifact.state === "committed") return "committed";
+    if (artifact.receivedAppChunks.some((chunk) => chunk === null)) return "incomplete";
+    const layers: StoredRuntimeLayer[] = [];
+    for (const content of artifact.envelope.content.layers) {
+      const layer = this.runtimeLayers.get(content.descriptor.contentSha256);
+      if (layer === undefined) return "conflict";
+      if (layer.state !== "committed" && layer.receivedChunks.some((chunk) => chunk === null)) {
+        return "incomplete";
+      }
+      layers.push(layer);
+    }
+    artifact.state = "committed";
+    artifact.expiresAtMs = null;
+    for (const layer of layers) {
+      layer.state = "committed";
+      layer.pendingArtifacts = layer.pendingArtifacts.filter(
+        (candidate) => candidate !== reference,
+      );
+      if (!layer.artifactReferences.includes(reference)) layer.artifactReferences.push(reference);
+    }
+    return "committed";
+  }
+
+  async removeLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<RemovedRuntimeLayeredArtifact | null> {
+    const reference = `${identity}:${sealedArtifactSha256}`;
+    const artifact = this.layeredArtifacts.get(reference);
+    if (artifact === undefined) return null;
+    const unreferencedLayers: StoredRuntimeLayer[] = [];
+    for (const content of artifact.envelope.content.layers) {
+      const layer = this.runtimeLayers.get(content.descriptor.contentSha256);
+      if (layer === undefined) continue;
+      layer.pendingArtifacts = layer.pendingArtifacts.filter(
+        (candidate) => candidate !== reference,
+      );
+      layer.artifactReferences = layer.artifactReferences.filter(
+        (candidate) => candidate !== reference,
+      );
+      if (layer.pendingArtifacts.length === 0 && layer.artifactReferences.length === 0) {
+        this.runtimeLayers.delete(content.descriptor.contentSha256);
+        unreferencedLayers.push(structuredClone(layer));
+      }
+    }
+    this.layeredArtifacts.delete(reference);
+    return { artifact: structuredClone(artifact), unreferencedLayers };
+  }
+
+  async listLayeredArtifacts(identity: string): Promise<StoredRuntimeLayeredArtifact[]> {
+    return [...this.layeredArtifacts.values()]
+      .filter((artifact) => artifact.runtimeIdentity === identity)
+      .map((artifact) => structuredClone(artifact));
   }
 
   async bindContainer(containerId: string, identity: string): Promise<void> {
@@ -322,6 +486,20 @@ export class MockBackend implements RuntimeBackend {
   ): Promise<{ filesWritten: number }> {
     this.materializations += 1;
     return { filesWritten: artifact.envelope.content.files.length };
+  }
+
+  async materializeLayered(
+    _runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    _layers: StoredRuntimeLayer[],
+  ): Promise<{ filesWritten: number; layersMaterialized: number }> {
+    this.materializations += 1;
+    return {
+      filesWritten:
+        artifact.envelope.content.appArtifact.content.files.length +
+        artifact.envelope.content.layers.reduce((total, layer) => total + layer.files.length, 0),
+      layersMaterialized: artifact.envelope.content.layers.length,
+    };
   }
 }
 
@@ -608,6 +786,8 @@ export function fakeEnv(): WorkerBindings {
     CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
     CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: "test-public-key",
     NABUFLOW_RUNTIME_SLEEP_AFTER: "10m",
+    NABUFLOW_RUNTIME_LAYER_PLATFORM:
+      '{"runtime":"node","runtimeVersion":"22.18.0","nodeAbi":"127","os":"linux","cpu":"x64","libc":"glibc","toolchainImageDigest":"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738"}',
     NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID: "v1",
     NABUFLOW_RUNTIME_ARTIFACTS: artifactBucket as unknown as R2Bucket,
     NABUFLOW_SANDBOX: {

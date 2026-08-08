@@ -10,8 +10,15 @@ import type {
   StoredHttpResponse,
   StoredRuntime,
   StoredRuntimeArtifact,
+  StoredRuntimeLayer,
+  StoredRuntimeLayeredArtifact,
+  RemovedRuntimeLayeredArtifact,
 } from "./model";
 import { deleteArtifactObjects } from "./artifact-storage";
+import {
+  deleteDependencyLayerObjects,
+  deleteLayeredArtifactAppObjects,
+} from "./artifact-layer-storage";
 
 const IDEMPOTENCY_PENDING_TTL_MS = 10 * 60 * 1_000;
 const IDEMPOTENCY_COMPLETED_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -36,6 +43,18 @@ function routeKey(hostname: string): string {
 
 function artifactKey(identity: string, sealedArtifactSha256: string): string {
   return `artifact:${identity}:${sealedArtifactSha256}`;
+}
+
+function layeredArtifactKey(identity: string, sealedArtifactSha256: string): string {
+  return `layered-artifact:${identity}:${sealedArtifactSha256}`;
+}
+
+function runtimeLayerKey(contentSha256: string): string {
+  return `runtime-layer:${contentSha256}`;
+}
+
+function layeredArtifactReference(identity: string, sealedArtifactSha256: string): string {
+  return `${identity}:${sealedArtifactSha256}`;
 }
 
 async function containerBindingKey(containerId: string): Promise<string> {
@@ -275,6 +294,215 @@ export class ControlDurableObject
     return [...records.values()];
   }
 
+  async beginLayeredArtifact(
+    record: StoredRuntimeLayeredArtifact,
+  ): Promise<"created" | "exists" | "conflict"> {
+    const key = layeredArtifactKey(record.runtimeIdentity, record.envelope.sealedArtifactSha256);
+    const reference = layeredArtifactReference(
+      record.runtimeIdentity,
+      record.envelope.sealedArtifactSha256,
+    );
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const existing = await transaction.get<StoredRuntimeLayeredArtifact>(key);
+      if (existing !== undefined) {
+        return existing.envelope.contentSha256 === record.envelope.contentSha256 &&
+          existing.envelope.manifestRevision === record.envelope.manifestRevision
+          ? ("exists" as const)
+          : ("conflict" as const);
+      }
+      for (const content of record.envelope.content.layers) {
+        const layerKey = runtimeLayerKey(content.descriptor.contentSha256);
+        const layer = await transaction.get<StoredRuntimeLayer>(layerKey);
+        if (
+          layer !== undefined &&
+          layer.content.descriptor.unpackedManifestSha256 !==
+            content.descriptor.unpackedManifestSha256
+        ) {
+          return "conflict" as const;
+        }
+      }
+      await transaction.put(key, record);
+      for (const content of record.envelope.content.layers) {
+        const layerKey = runtimeLayerKey(content.descriptor.contentSha256);
+        const existingLayer = await transaction.get<StoredRuntimeLayer>(layerKey);
+        if (existingLayer === undefined) {
+          await transaction.put(layerKey, {
+            content,
+            state: "pending",
+            receivedChunks: content.chunks.map(() => null),
+            pendingArtifacts: [reference],
+            artifactReferences: [],
+          } satisfies StoredRuntimeLayer);
+        } else if (
+          !existingLayer.pendingArtifacts.includes(reference) &&
+          !existingLayer.artifactReferences.includes(reference)
+        ) {
+          existingLayer.pendingArtifacts.push(reference);
+          await transaction.put(layerKey, existingLayer);
+        }
+      }
+      return "created" as const;
+    });
+    if (result === "created" && record.expiresAtMs !== null) {
+      await this.scheduleCleanup(this.ctx.storage, record.expiresAtMs);
+    }
+    return result;
+  }
+
+  async getLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeLayeredArtifact | null> {
+    return (
+      (await this.ctx.storage.get<StoredRuntimeLayeredArtifact>(
+        layeredArtifactKey(identity, sealedArtifactSha256),
+      )) ?? null
+    );
+  }
+
+  async getRuntimeLayer(contentSha256: string): Promise<StoredRuntimeLayer | null> {
+    return (await this.ctx.storage.get<StoredRuntimeLayer>(runtimeLayerKey(contentSha256))) ?? null;
+  }
+
+  async recordLayeredArtifactAppChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = layeredArtifactKey(identity, sealedArtifactSha256);
+      const artifact = await transaction.get<StoredRuntimeLayeredArtifact>(key);
+      if (artifact === undefined || artifact.state !== "pending") return "not_found" as const;
+      if (chunkIndex < 0 || chunkIndex >= artifact.receivedAppChunks.length)
+        return "conflict" as const;
+      const current = artifact.receivedAppChunks[chunkIndex];
+      if (current !== null) return current === chunkSha256 ? "replay" : "conflict";
+      if (artifact.envelope.content.appArtifact.content.chunks[chunkIndex] !== chunkSha256)
+        return "conflict" as const;
+      artifact.receivedAppChunks[chunkIndex] = chunkSha256;
+      await transaction.put(key, artifact);
+      return "recorded" as const;
+    });
+  }
+
+  async recordRuntimeLayerChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    contentSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict"> {
+    const reference = layeredArtifactReference(identity, sealedArtifactSha256);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const artifact = await transaction.get<StoredRuntimeLayeredArtifact>(
+        layeredArtifactKey(identity, sealedArtifactSha256),
+      );
+      const layerKey = runtimeLayerKey(contentSha256);
+      const layer = await transaction.get<StoredRuntimeLayer>(layerKey);
+      if (
+        artifact === undefined ||
+        artifact.state !== "pending" ||
+        layer === undefined ||
+        (!layer.pendingArtifacts.includes(reference) &&
+          !layer.artifactReferences.includes(reference))
+      ) {
+        return "not_found" as const;
+      }
+      if (layer.state === "committed") return "replay" as const;
+      if (chunkIndex < 0 || chunkIndex >= layer.receivedChunks.length) return "conflict" as const;
+      const current = layer.receivedChunks[chunkIndex];
+      if (current !== null) return current === chunkSha256 ? "replay" : "conflict";
+      if (layer.content.chunks[chunkIndex] !== chunkSha256) return "conflict" as const;
+      layer.receivedChunks[chunkIndex] = chunkSha256;
+      await transaction.put(layerKey, layer);
+      return "recorded" as const;
+    });
+  }
+
+  async commitLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<"committed" | "incomplete" | "not_found" | "conflict"> {
+    const reference = layeredArtifactReference(identity, sealedArtifactSha256);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = layeredArtifactKey(identity, sealedArtifactSha256);
+      const artifact = await transaction.get<StoredRuntimeLayeredArtifact>(key);
+      if (artifact === undefined) return "not_found" as const;
+      if (artifact.state === "committed") return "committed" as const;
+      if (artifact.receivedAppChunks.some((chunk) => chunk === null)) return "incomplete" as const;
+      const layers: Array<{ key: string; layer: StoredRuntimeLayer }> = [];
+      for (const content of artifact.envelope.content.layers) {
+        const layerKey = runtimeLayerKey(content.descriptor.contentSha256);
+        const layer = await transaction.get<StoredRuntimeLayer>(layerKey);
+        if (
+          layer === undefined ||
+          layer.content.descriptor.unpackedManifestSha256 !==
+            content.descriptor.unpackedManifestSha256
+        ) {
+          return "conflict" as const;
+        }
+        if (layer.state !== "committed" && layer.receivedChunks.some((chunk) => chunk === null)) {
+          return "incomplete" as const;
+        }
+        layers.push({ key: layerKey, layer });
+      }
+      artifact.state = "committed";
+      artifact.expiresAtMs = null;
+      await transaction.put(key, artifact);
+      for (const entry of layers) {
+        entry.layer.state = "committed";
+        entry.layer.pendingArtifacts = entry.layer.pendingArtifacts.filter(
+          (candidate) => candidate !== reference,
+        );
+        if (!entry.layer.artifactReferences.includes(reference)) {
+          entry.layer.artifactReferences.push(reference);
+        }
+        await transaction.put(entry.key, entry.layer);
+      }
+      return "committed" as const;
+    });
+  }
+
+  async removeLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<RemovedRuntimeLayeredArtifact | null> {
+    const reference = layeredArtifactReference(identity, sealedArtifactSha256);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = layeredArtifactKey(identity, sealedArtifactSha256);
+      const artifact = await transaction.get<StoredRuntimeLayeredArtifact>(key);
+      if (artifact === undefined) return null;
+      const unreferencedLayers: StoredRuntimeLayer[] = [];
+      for (const content of artifact.envelope.content.layers) {
+        const layerKey = runtimeLayerKey(content.descriptor.contentSha256);
+        const layer = await transaction.get<StoredRuntimeLayer>(layerKey);
+        if (layer === undefined) continue;
+        layer.pendingArtifacts = layer.pendingArtifacts.filter(
+          (candidate) => candidate !== reference,
+        );
+        layer.artifactReferences = layer.artifactReferences.filter(
+          (candidate) => candidate !== reference,
+        );
+        if (layer.pendingArtifacts.length === 0 && layer.artifactReferences.length === 0) {
+          await transaction.delete(layerKey);
+          unreferencedLayers.push(layer);
+        } else {
+          await transaction.put(layerKey, layer);
+        }
+      }
+      await transaction.delete(key);
+      return { artifact, unreferencedLayers };
+    });
+  }
+
+  async listLayeredArtifacts(identity: string): Promise<StoredRuntimeLayeredArtifact[]> {
+    const records = await this.ctx.storage.list<StoredRuntimeLayeredArtifact>({
+      prefix: `layered-artifact:${identity}:`,
+    });
+    return [...records.values()];
+  }
+
   async bindContainer(containerId: string, identity: string): Promise<void> {
     await this.ctx.storage.put(await containerBindingKey(containerId), identity);
   }
@@ -411,6 +639,40 @@ export class ControlDurableObject
     }
     if (nextArtifactExpiry !== null)
       await this.scheduleCleanup(this.ctx.storage, nextArtifactExpiry);
+
+    const layeredArtifacts = await this.ctx.storage.list<StoredRuntimeLayeredArtifact>({
+      prefix: "layered-artifact:",
+    });
+    let nextLayeredArtifactExpiry: number | null = null;
+    for (const artifact of layeredArtifacts.values()) {
+      if (
+        artifact.state === "pending" &&
+        artifact.expiresAtMs !== null &&
+        artifact.expiresAtMs <= nowMs
+      ) {
+        const removed = await this.removeLayeredArtifact(
+          artifact.runtimeIdentity,
+          artifact.envelope.sealedArtifactSha256,
+        );
+        if (removed !== null) {
+          await deleteLayeredArtifactAppObjects(
+            this.env.NABUFLOW_RUNTIME_ARTIFACTS,
+            removed.artifact,
+          );
+          for (const layer of removed.unreferencedLayers) {
+            await deleteDependencyLayerObjects(this.env.NABUFLOW_RUNTIME_ARTIFACTS, layer);
+          }
+        }
+      } else if (artifact.expiresAtMs !== null) {
+        nextLayeredArtifactExpiry =
+          nextLayeredArtifactExpiry === null
+            ? artifact.expiresAtMs
+            : Math.min(nextLayeredArtifactExpiry, artifact.expiresAtMs);
+      }
+    }
+    if (nextLayeredArtifactExpiry !== null) {
+      await this.scheduleCleanup(this.ctx.storage, nextLayeredArtifactExpiry);
+    }
   }
 
   private appendLogEntries(

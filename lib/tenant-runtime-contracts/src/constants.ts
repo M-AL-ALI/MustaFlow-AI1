@@ -1,5 +1,9 @@
 export const CONTROL_PROTOCOL_VERSION = "1" as const;
-export const CONTROL_FEATURES = ["artifact-v1", "manifest-update-v1"] as const;
+export const CONTROL_FEATURES = [
+  "artifact-v1",
+  "manifest-update-v1",
+  "artifact-layers-v1",
+] as const;
 
 export const RUNTIME_ROLES = ["preview", "production"] as const;
 export type RuntimeRole = (typeof RUNTIME_ROLES)[number];

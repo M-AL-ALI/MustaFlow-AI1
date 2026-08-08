@@ -8,6 +8,8 @@ import type {
   RouteRecord,
   RuntimeDescriptor,
   RuntimeArtifactEnvelope,
+  RuntimeArtifactLayerContent,
+  RuntimeLayeredArtifactEnvelope,
   RuntimeManifestContract,
 } from "@workspace/tenant-runtime-contracts";
 
@@ -18,6 +20,7 @@ export interface StoredRuntime {
   manifest: RuntimeManifestContract;
   artifactRevision: string | null;
   artifactSha256: string | null;
+  artifactKind?: "v1" | "layers-v1" | null;
   processId: string | null;
   stdoutLength: number;
   stderrLength: number;
@@ -31,6 +34,27 @@ export interface StoredRuntimeArtifact {
   state: "pending" | "committed";
   receivedChunks: Array<string | null>;
   expiresAtMs: number | null;
+}
+
+export interface StoredRuntimeLayer {
+  content: RuntimeArtifactLayerContent;
+  state: "pending" | "committed";
+  receivedChunks: Array<string | null>;
+  pendingArtifacts: string[];
+  artifactReferences: string[];
+}
+
+export interface StoredRuntimeLayeredArtifact {
+  runtimeIdentity: string;
+  envelope: RuntimeLayeredArtifactEnvelope;
+  state: "pending" | "committed";
+  receivedAppChunks: Array<string | null>;
+  expiresAtMs: number | null;
+}
+
+export interface RemovedRuntimeLayeredArtifact {
+  artifact: StoredRuntimeLayeredArtifact;
+  unreferencedLayers: StoredRuntimeLayer[];
 }
 
 export interface StoredHttpResponse {
@@ -98,6 +122,36 @@ export interface ControlCoordinator {
     sealedArtifactSha256: string,
   ): Promise<StoredRuntimeArtifact | null>;
   listArtifacts(identity: string): Promise<StoredRuntimeArtifact[]>;
+  beginLayeredArtifact(
+    record: StoredRuntimeLayeredArtifact,
+  ): Promise<"created" | "exists" | "conflict">;
+  getLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeLayeredArtifact | null>;
+  getRuntimeLayer(contentSha256: string): Promise<StoredRuntimeLayer | null>;
+  recordLayeredArtifactAppChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict">;
+  recordRuntimeLayerChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    contentSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict">;
+  commitLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<"committed" | "incomplete" | "not_found" | "conflict">;
+  removeLayeredArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<RemovedRuntimeLayeredArtifact | null>;
+  listLayeredArtifacts(identity: string): Promise<StoredRuntimeLayeredArtifact[]>;
   bindContainer(containerId: string, identity: string): Promise<void>;
   getContainerBinding(containerId: string): Promise<string | null>;
   unbindContainer(containerId: string, expectedIdentity: string): Promise<boolean>;

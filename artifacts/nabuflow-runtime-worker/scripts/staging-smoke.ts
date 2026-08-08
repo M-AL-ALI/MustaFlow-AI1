@@ -527,6 +527,8 @@ async function run(): Promise<void> {
     manifestRevision: ensureRequestBody.manifest.revision,
     artifactRevision,
     sourceRevision: `smoke-source-${Date.now()}`,
+    manifestStartCommand: ensureRequestBody.manifest.startCommand,
+    serverPath: "server.cjs",
     serverSource: TENANT_SERVER_SOURCE,
     send: signedControlFetch,
   });
