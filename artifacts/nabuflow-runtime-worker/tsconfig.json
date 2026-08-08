@@ -3,7 +3,7 @@
   "compilerOptions": {
     "lib": ["ES2023", "WebWorker"],
     "noEmit": true,
-    "types": ["@cloudflare/workers-types", "vitest/globals"]
+    "types": ["@cloudflare/workers-types", "node", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

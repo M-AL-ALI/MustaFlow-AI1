@@ -6,6 +6,7 @@ import {
 import { PantryCatalogDurableObject } from "../src/pantry-catalog-durable-object";
 import type { PantryStockQueueMessage, PantryWorkerBindings } from "../src/pantry-catalog-model";
 import { handlePantryQueue, handlePantryWorkerRequest } from "../src/pantry-worker";
+import { PantryIngestError } from "../src/pantry-registry-client";
 import { MemoryR2Bucket } from "./helpers";
 import {
   makePantryFixture,
@@ -83,6 +84,8 @@ function context(): TestContext {
     PANTRY_REVISION_PUBLIC_KEYS: JSON.stringify({
       [PANTRY_TEST_KEY.kid]: PANTRY_TEST_KEY.publicKeyPem,
     }),
+    PANTRY_INGEST_SIGNING_KEY_ID: PANTRY_TEST_KEY.kid,
+    PANTRY_INGEST_SIGNING_PRIVATE_KEY: PANTRY_TEST_KEY.privateKeyPem,
   } as unknown as PantryWorkerBindings;
   const coordinator = new PantryCatalogDurableObject(
     { storage } as unknown as DurableObjectState,
@@ -226,7 +229,20 @@ describe("private Pantry catalog Worker", () => {
       } as unknown as MessageBatch<PantryStockQueueMessage>,
       test.env,
       test.coordinator,
+      async () => {
+        throw new PantryIngestError("package_not_found", "fixture intentionally not ingested");
+      },
     );
+    const failedStatus = await call(test, `/internal/v1/assemblies/${fixture.commit.assemblyId}`, {
+      principal: "builder-readonly",
+    });
+    expect(failedStatus.status).toBe(200);
+    await expect(failedStatus.json()).resolves.toMatchObject({
+      ingest: {
+        state: "failed",
+        failure: { code: "package_not_found", retryable: false },
+      },
+    });
     await beginAndStage(test, fixture);
     await beginAndStage(test, fixture);
     expect((await commit(test, fixture)).status).toBe(201);
@@ -243,6 +259,70 @@ describe("private Pantry catalog Worker", () => {
         committedObjects: fixture.objects.size,
         queueDeliveries: 1,
       },
+      r2: { quarantineObjects: 0 },
+    });
+  });
+
+  it("runs one successful ingest and immutable commit for 100 concurrent cold misses", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await Promise.all(
+      Array.from({ length: 100 }, () =>
+        call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        }),
+      ),
+    );
+    expect(test.queueMessages).toHaveLength(1);
+    let ingestCalls = 0;
+    let acknowledgements = 0;
+    await handlePantryQueue(
+      {
+        queue: "pantry-test",
+        messages: test.queueMessages.map((body) => ({
+          body,
+          ack: () => {
+            acknowledgements += 1;
+          },
+          retry: () => {
+            throw new Error("successful ingest must not retry");
+          },
+        })),
+      } as unknown as MessageBatch<PantryStockQueueMessage>,
+      test.env,
+      test.coordinator,
+      async () => {
+        ingestCalls += 1;
+        return {
+          closure: fixture.commit.revision.content.closure,
+          objects: [...fixture.objects.entries()].map(([sha256, object]) => ({
+            ...object,
+            sha256,
+          })),
+          lockfileSha256: fixture.commit.lockfileSha256,
+          sbomSha256: fixture.commit.sbomSha256,
+          toolchainAttestationSha256: fixture.commit.toolchainAttestationSha256,
+          provenanceStatus: "unavailable",
+        };
+      },
+    );
+    expect(ingestCalls).toBe(1);
+    expect(acknowledgements).toBe(1);
+    const warm = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: fixture.request,
+    });
+    expect(warm.status).toBe(200);
+    await expect(warm.json()).resolves.toMatchObject({ state: "committed" });
+    expect(test.queueMessages).toHaveLength(1);
+    const diagnostics = await call(test, "/internal/v1/diagnostics", {
+      principal: "catalog-admin",
+    });
+    await expect(diagnostics.json()).resolves.toMatchObject({
+      ledger: { assemblies: 0, shelves: 1, queueDeliveries: 1, failedIngests: 0 },
       r2: { quarantineObjects: 0 },
     });
   });
