@@ -113,3 +113,19 @@ No `package.json` or `pnpm-lock.yaml` changed, so the standing pristine isolated
 Proceed to slice 2 only after this contract is merged and published. That slice should add the layered artifact extension without reinterpreting `nabu-artifact/v1`, consume these exact layer/revision/attestation hashes, reject unknown `kid` or wrong-platform records before materialization, and leave Fly optional-interface behavior untouched.
 
 PG-1 remains open: this contract provides protected key IDs and active-key-set verification, but issuance cutover, overlap windows, retirement, and long-term verification-material retention belong to the dedicated key-rotation work. PG-5 likewise remains open until Pantry storage, ingest, offline reproducibility, quarantine, builder separation, layered delivery, and cross-substrate portability are proven in their serial slices.
+
+## Addendum - 2026-08-07 release-gate environment parity
+
+After the original findings above were committed, the clean-tree Ora release profile was run as an additional local gate. It completed with 18 passes, 0 warnings, and 3 failed gate rows. All three rows attempted to use PostgreSQL at `127.0.0.1:5432`:
+
+| Release gate row              | Exact failure set                                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `api-release-extended`        | Two `ora-realtime-usage.test.ts` cases failed with `ECONNREFUSED 127.0.0.1:5432`                                     |
+| `api-account-billing-history` | Two `ora-memory-consolidation.test.ts` cases returned 500 instead of 201 when their database setup could not connect |
+| `web-build`                   | Production bundle and size check completed, then dynamic-route prerender failed with `ECONNREFUSED 127.0.0.1:5432`   |
+
+Machine inspection found PostgreSQL absent rather than stopped: there was no port 5432 listener, Windows service, PostgreSQL process, `psql`/`postgres`/`pg_ctl` executable, standard `C:\Program Files\PostgreSQL` installation, or PostgreSQL installed-program registry entry. No database software or configuration was installed or changed.
+
+The exact release profile was then run in a clean, detached scratch worktree at the audited base `8bef8406e454a09ec3e8e37110ee39fb73cbc8d3`, after a clean `pnpm install --frozen-lockfile` with pinned pnpm 10.26.1. Base produced the identical terminal result: 18 passes, 0 warnings, and the same 3 failed gate rows with the same four failing database tests and the same dynamic-prerender connection refusal at `127.0.0.1:5432`. No additional base or branch failure appeared.
+
+This establishes exact base parity and classifies the release-only failures as a pre-existing Windows-lab environment dependency, not a Pantry regression. The Pantry contract suite, Worker/API regressions, repository typecheck/lint, and fast stability profile remain green as recorded above. Replit's full merge gate remains the authoritative ship gate.
