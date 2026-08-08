@@ -154,3 +154,17 @@ The branch adds the Pantry catalog contract/tests, coordinator DO, private Worke
 5. **PG-1 remains open.** The catalog consumes signed revisions with `kid`, but staging currently uses a fixed public fixture key. Production needs active verification-key sets, overlap/cutover semantics, retirement, and long-term verification material before real shelves.
 6. **PG-3 remains open and unchanged.** No database behavior changed. Pantry-provided database client ingredients will later need the database gate's policy, migration, quota, timeout, and credential-custody guarantees.
 7. **PG-5 advances but remains a hard gate.** This slice proves immutable catalog storage, exact closure/Merkle/stamp verification, single-flight, quarantine TTL, scoped retention/GC, and a private service boundary. Trusted ingest/provenance, poisoning response, reproducible builders, dependency-complete real Zero output, cross-substrate portability, and production operational controls remain unproven.
+
+## Addendum — 2026-08-08 clean release-profile base parity
+
+After the implementation and original report were committed at `cf7d6a66`, the clean-tree Ora release profile ran on the branch. It completed with 18 passes, 0 warnings, and exactly 3 failed rows:
+
+| Release row                   | Exact failure set                                                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `api-release-extended`        | The same two `ora-realtime-usage.test.ts` cases failed with `ECONNREFUSED 127.0.0.1:5432`                                        |
+| `api-account-billing-history` | The same two `ora-memory-consolidation.test.ts` cases returned 500 instead of 201 because local database setup could not connect |
+| `web-build`                   | Bundle and size checks passed; dynamic-route prerender then failed with `ECONNREFUSED 127.0.0.1:5432`                            |
+
+A clean detached worktree at exact audited base `bdc8622b6ecec085d62c8dfe704b1112fe07c432` was populated with repository-pinned pnpm 10.26.1 using `pnpm install --frozen-lockfile --prefer-offline`. The 60-minute slow-disk bound was active. It reused 2,226 packages, downloaded zero, and completed in 9m04.2s without changing the lockfile.
+
+The identical clean release profile on that base also completed with 18 passes, 0 warnings, and the exact same 3 failed rows, test names, assertion shapes, and `127.0.0.1:5432` refusal. This is exact base parity. The failures are the documented no-local-PostgreSQL Windows-lab baseline, not a Pantry catalog regression. Replit's PostgreSQL-backed merge gate remains the authoritative ship gate.
