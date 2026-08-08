@@ -30,6 +30,12 @@
       "bucket_name": "nabuflow-runtime-artifacts-staging",
     },
   ],
+  "services": [
+    {
+      "binding": "PANTRY_CATALOG",
+      "service": "nabuflow-pantry-staging",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

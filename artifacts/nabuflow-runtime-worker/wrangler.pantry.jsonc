@@ -1,0 +1,50 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nabuflow-pantry-staging",
+  "main": "src/pantry-index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    // Public fixture verification material only. The matching private key is checked-in test data;
+    // a production attestor/key set is a later PG-1-gated slice.
+    "PANTRY_REVISION_PUBLIC_KEYS": "{\"pantry-test-key-2026-08\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXHJlSjkMbQPfJ+GNR+sF7VOOGYfb\\n43i267BeEYixk9Sw94y9GoJoICyKtGl13iDud4+VNR41lSrziU8t2AeKJw==\\n-----END PUBLIC KEY-----\\n\"}",
+  },
+  "r2_buckets": [
+    {
+      "binding": "PANTRY_CATALOG_OBJECTS",
+      "bucket_name": "nabuflow-pantry-catalog-staging",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "PANTRY_INGEST_QUEUE",
+        "queue": "nabuflow-pantry-ingest-staging",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "nabuflow-pantry-ingest-staging",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+    ],
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PANTRY_CATALOG_COORDINATOR",
+        "class_name": "PantryCatalogDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["PantryCatalogDurableObject"],
+    },
+  ],
+}

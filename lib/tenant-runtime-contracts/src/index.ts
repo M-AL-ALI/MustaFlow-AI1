@@ -3,6 +3,7 @@ export * from "./capability-request";
 export * from "./constants";
 export * from "./control-schemas";
 export * from "./pantry";
+export * from "./pantry-catalog";
 export * from "./runtime-artifact";
 export * from "./runtime-artifact-layers";
 export * from "./preview-grant";

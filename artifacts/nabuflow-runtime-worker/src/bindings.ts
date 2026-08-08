@@ -10,6 +10,7 @@ export interface WorkerVersionMetadataBinding {
 
 export interface WorkerBindings {
   NABUFLOW_RUNTIME_ARTIFACTS: R2Bucket;
+  PANTRY_CATALOG: Fetcher;
   CAPABILITY_VAULT: DurableObjectNamespace<CapabilityVaultDurableObject>;
   CONTROL_COORDINATOR: DurableObjectNamespace<ControlDurableObject>;
   NABUFLOW_SANDBOX: DurableObjectNamespace<Sandbox<WorkerBindings>>;

@@ -61,6 +61,7 @@ import {
   uploadRuntimeLayeredArtifactChunkResponseSchema,
   canonicalJson,
   pantryPlatformSchema,
+  pantryCatalogErrorResponseSchema,
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
@@ -140,6 +141,7 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "layeredArtifactCommit",
   "layeredArtifactRemove",
   "manifestUpdate",
+  "pantryMutation",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -178,7 +180,9 @@ type Endpoint =
   | "layeredArtifactLayerChunk"
   | "layeredArtifactCommit"
   | "layeredArtifactRemove"
-  | "manifestUpdate";
+  | "manifestUpdate"
+  | "pantryRead"
+  | "pantryMutation";
 
 interface MatchedRoute {
   endpoint: Endpoint;
@@ -188,6 +192,9 @@ interface MatchedRoute {
   artifactSha256?: string;
   layerContentSha256?: string;
   chunkIndex?: number;
+  pantryPath?: string;
+  pantryMethod?: string;
+  pantryPrincipal?: "catalog-admin" | "builder-readonly" | "catalog-gc";
 }
 
 interface WorkerDependencies {
@@ -618,9 +625,74 @@ function getCapabilityVault(
   return env.CAPABILITY_VAULT.get(env.CAPABILITY_VAULT.idFromName(`project:${projectId}`));
 }
 
+function matchPantryRoute(method: string, pathname: string): MatchedRoute {
+  const prefix = `${CONTROL_PREFIX}/pantry`;
+  const suffix = pathname.slice(prefix.length);
+  const readPatterns = [
+    /^\/health$/u,
+    /^\/diagnostics$/u,
+    /^\/revisions\/by-root\/[0-9a-f]{64}$/u,
+    /^\/revisions\/pantry-\d{4}-\d{2}-\d{2}\.[1-9]\d*$/u,
+  ];
+  const mutationPatterns: ReadonlyArray<{ method: string; pattern: RegExp }> = [
+    { method: "POST", pattern: /^\/stock-requests$/u },
+    {
+      method: "PUT",
+      pattern: /^\/assemblies\/passembly_[0-9a-f]{64}\/objects\/[0-9a-f]{64}\/[a-z-]+$/u,
+    },
+    {
+      method: "POST",
+      pattern: /^\/assemblies\/passembly_[0-9a-f]{64}\/commit$/u,
+    },
+    { method: "POST", pattern: /^\/revisions\/[0-9a-f]{64}\/state$/u },
+    { method: "POST", pattern: /^\/revisions\/[0-9a-f]{64}\/references$/u },
+    { method: "DELETE", pattern: /^\/revisions\/[0-9a-f]{64}\/references$/u },
+    { method: "POST", pattern: /^\/stamps\/verify$/u },
+    { method: "POST", pattern: /^\/gc$/u },
+  ];
+  const pantryPath = `/internal/v1${suffix}`;
+  if (method === "GET" && readPatterns.some((pattern) => pattern.test(suffix))) {
+    return {
+      endpoint: "pantryRead",
+      locator: null,
+      pantryPath,
+      pantryMethod: method,
+      pantryPrincipal:
+        suffix === "/diagnostics" || suffix === "/health" ? "catalog-admin" : "builder-readonly",
+    };
+  }
+  const mutation = mutationPatterns.find(
+    (candidate) => candidate.method === method && candidate.pattern.test(suffix),
+  );
+  if (mutation !== undefined) {
+    return {
+      endpoint: "pantryMutation",
+      locator: null,
+      pantryPath,
+      pantryMethod: method,
+      pantryPrincipal:
+        suffix === "/gc"
+          ? "catalog-gc"
+          : suffix === "/stamps/verify"
+            ? "builder-readonly"
+            : "catalog-admin",
+    };
+  }
+  const knownPath =
+    readPatterns.some((pattern) => pattern.test(suffix)) ||
+    mutationPatterns.some((candidate) => candidate.pattern.test(suffix));
+  if (knownPath) {
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
+  throw new ControlHttpError(404, "not_found", "Control endpoint not found");
+}
+
 function matchRoute(method: string, pathname: string): MatchedRoute {
   if (method === "GET" && pathname === `${CONTROL_PREFIX}/version`) {
     return { endpoint: "version", locator: null };
+  }
+  if (pathname.startsWith(`${CONTROL_PREFIX}/pantry/`)) {
+    return matchPantryRoute(method, pathname);
   }
   const activateRouteMatch = new RegExp(`^${CONTROL_PREFIX}/routes/([^/]+)/activate$`).exec(
     pathname,
@@ -786,11 +858,97 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
   throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
 }
 
+async function proxyPantryRequest(
+  endpoint: "pantryRead" | "pantryMutation",
+  body: Uint8Array,
+  env: WorkerBindings,
+  route: MatchedRoute | undefined,
+): Promise<StoredHttpResponse> {
+  if (
+    route?.pantryPath === undefined ||
+    route.pantryMethod === undefined ||
+    route.pantryPrincipal === undefined ||
+    !env.PANTRY_CATALOG ||
+    typeof env.PANTRY_CATALOG.fetch !== "function"
+  ) {
+    throw new ControlHttpError(
+      503,
+      "pantry_infrastructure_unavailable",
+      "The Pantry catalog service is not configured",
+      false,
+    );
+  }
+  const request = new Request(`https://pantry.internal${route.pantryPath}`, {
+    method: route.pantryMethod,
+    headers: {
+      "content-type": route.pantryPath.includes("/objects/")
+        ? "application/octet-stream"
+        : "application/json",
+      "x-nabuflow-pantry-principal": route.pantryPrincipal,
+    },
+    ...(endpoint === "pantryRead" ? {} : { body: body.slice().buffer }),
+  });
+  let response: Response;
+  try {
+    response = await env.PANTRY_CATALOG.fetch(request);
+  } catch {
+    throw new ControlHttpError(
+      503,
+      "pantry_infrastructure_unavailable",
+      "The Pantry catalog service is unavailable",
+      true,
+    );
+  }
+  const responseBytes = new Uint8Array(await response.arrayBuffer());
+  if (responseBytes.byteLength > 2 * 1024 * 1024) {
+    throw new ControlHttpError(
+      503,
+      "pantry_infrastructure_unavailable",
+      "The Pantry catalog response exceeded its trusted limit",
+      false,
+    );
+  }
+  let responseBody: unknown;
+  try {
+    responseBody = JSON.parse(textDecoder.decode(responseBytes));
+  } catch {
+    throw new ControlHttpError(
+      503,
+      "pantry_infrastructure_unavailable",
+      "The Pantry catalog returned an invalid response",
+      false,
+    );
+  }
+  if (!response.ok) {
+    const parsed = pantryCatalogErrorResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid error response",
+        false,
+      );
+    }
+    throw new ControlHttpError(
+      response.status,
+      parsed.data.code,
+      parsed.data.message,
+      parsed.data.retryable,
+    );
+  }
+  return { status: response.status, body: responseBody };
+}
+
 function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): ControlInput {
   if (route.endpoint === "version") {
     assertNoQuery(url);
     assertEmptyBody(rawBody);
     return {};
+  }
+  if (route.endpoint === "pantryRead" || route.endpoint === "pantryMutation") {
+    assertNoQuery(url);
+    if (route.endpoint === "pantryRead") assertEmptyBody(rawBody);
+    return rawBody;
   }
   if (route.locator === null) {
     if (
@@ -1055,6 +1213,9 @@ async function executeEndpoint(
         ),
       },
     };
+  }
+  if (endpoint === "pantryRead" || endpoint === "pantryMutation") {
+    return proxyPantryRequest(endpoint, input as Uint8Array, env, matchedRoute);
   }
   if (endpoint === "routeActivate") {
     return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator);
@@ -2013,6 +2174,21 @@ async function deactivatePublishedRoute(
 }
 
 function validateResponse(endpoint: Endpoint, body: unknown): void {
+  if (endpoint === "pantryRead" || endpoint === "pantryMutation") {
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      Array.isArray(body) ||
+      (body as { ok?: unknown }).ok !== true
+    ) {
+      throw new ControlHttpError(
+        500,
+        "invalid_worker_response",
+        "Pantry service produced an invalid response",
+      );
+    }
+    return;
+  }
   const schema = {
     version: versionResponseSchema,
     ensure: ensureRuntimeResponseSchema,
@@ -2207,6 +2383,13 @@ async function deleteRemovedLayeredArtifact(
 }
 
 function requestBodyLimit(pathname: string): number {
+  if (
+    new RegExp(
+      `^${CONTROL_PREFIX}/pantry/assemblies/passembly_[0-9a-f]{64}/objects/[0-9a-f]{64}/[a-z-]+$`,
+    ).test(pathname)
+  ) {
+    return 16 * 1024 * 1024;
+  }
   if (/\/artifacts\/[0-9a-f]{64}\/chunks\/[0-9]+$/u.test(pathname))
     return RUNTIME_ARTIFACT_CHUNK_BYTES;
   if (/\/artifacts\/[0-9a-f]{64}\/begin$/u.test(pathname))
