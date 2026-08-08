@@ -1,19 +1,26 @@
 import {
   CONTROL_API_PREFIX,
   CONTROL_FEATURES,
+  canonicalJson,
   beginRuntimeArtifactResponseSchema,
+  beginRuntimeLayeredArtifactResponseSchema,
   commitRuntimeArtifactResponseSchema,
+  commitRuntimeLayeredArtifactResponseSchema,
   controlErrorResponseSchema,
   deriveRuntimeIdentity,
   execRuntimeResponseSchema,
   parseRuntimeIdentityForNamespace,
   runtimeDescriptorSchema,
   runtimeArtifactEnvelopeSchema,
+  runtimeArtifactLayerContentSchema,
+  runtimeLayeredArtifactEnvelopeSchema,
   sha256Hex,
   signControlRequest,
   versionResponseSchema,
   uploadRuntimeArtifactChunkResponseSchema,
+  uploadRuntimeLayeredArtifactChunkResponseSchema,
   verifyRuntimeArtifactEnvelope,
+  verifyRuntimeLayeredArtifactEnvelope,
   type RuntimeManifestContract,
   type RuntimeDescriptor,
   type RuntimeLocator,
@@ -25,8 +32,11 @@ import { logger } from "./logger";
 import {
   RuntimeProviderUnavailableError,
   type ArtifactDeployingTenantRuntimeProvider,
+  type LayeredArtifactDeployingTenantRuntimeProvider,
   type RuntimeArtifactDeployment,
   type RuntimeArtifactDeploymentResult,
+  type RuntimeLayeredArtifactDeployment,
+  type RuntimeLayeredArtifactDeploymentResult,
   type RuntimeCreateResult,
   type RuntimeExecResult,
   type RuntimeFile,
@@ -86,6 +96,42 @@ function parseJson(text: string): unknown {
   }
 }
 
+function invalidLayeredArtifact(): CloudflareRuntimeControlError {
+  return new CloudflareRuntimeControlError(
+    400,
+    "invalid_layered_artifact",
+    false,
+    "Layered runtime artifact failed local validation",
+  );
+}
+
+async function validateArtifactChunks(
+  chunks: Uint8Array[],
+  payloadBytes: number,
+  chunkBytes: number,
+  expectedHashes: string[],
+  collect = false,
+): Promise<Uint8Array> {
+  if (chunks.length !== expectedHashes.length) throw invalidLayeredArtifact();
+  const payload = new Uint8Array(collect ? payloadBytes : 0);
+  let offset = 0;
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    const chunk = chunks[chunkIndex];
+    const isFinal = chunkIndex === chunks.length - 1;
+    const expectedLength = isFinal ? payloadBytes % chunkBytes || chunkBytes : chunkBytes;
+    if (
+      chunk.byteLength !== expectedLength ||
+      (await sha256Hex(chunk)) !== expectedHashes[chunkIndex]
+    ) {
+      throw invalidLayeredArtifact();
+    }
+    if (collect) payload.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  if (offset !== payloadBytes) throw invalidLayeredArtifact();
+  return payload;
+}
+
 function commandForStack(stack?: string | null): string[] {
   if (stack === "python-flask") return ["python", "app.py"];
   if (stack === "python-fastapi") return ["uvicorn", "main:app", "--host", "0.0.0.0"];
@@ -102,7 +148,10 @@ function toInfo(runtime: RuntimeDescriptor): RuntimeInfo {
 }
 
 export class CloudflareRuntimeProvider
-  implements TenantRuntimeProvider, ArtifactDeployingTenantRuntimeProvider
+  implements
+    TenantRuntimeProvider,
+    ArtifactDeployingTenantRuntimeProvider,
+    LayeredArtifactDeployingTenantRuntimeProvider
 {
   readonly providerId = "cloudflare";
   private subsystemStatus: RuntimeSubsystemStatus | null = null;
@@ -111,7 +160,11 @@ export class CloudflareRuntimeProvider
   private controlFeatures = new Set<string>();
   private readonly deployedArtifacts = new Map<
     string,
-    { artifactRevision: string; sealedArtifactSha256: string }
+    {
+      artifactRevision: string;
+      sealedArtifactSha256: string;
+      feature: (typeof CONTROL_FEATURES)[number];
+    }
   >();
 
   private readonly sleep: (delayMs: number) => Promise<void>;
@@ -411,7 +464,6 @@ export class CloudflareRuntimeProvider
 
   async start(runtimeId: string, projectId: number): Promise<boolean> {
     const locator = await this.locator(runtimeId, projectId);
-    await this.requireControlFeature("artifact-v1");
     const deployed = this.deployedArtifacts.get(runtimeId);
     if (deployed === undefined) {
       throw new CloudflareRuntimeControlError(
@@ -421,6 +473,7 @@ export class CloudflareRuntimeProvider
         "A committed Cloudflare artifact is required before start",
       );
     }
+    await this.requireControlFeature(deployed.feature);
     await this.descriptorRequest(locator, "POST", "/start", {
       locator,
       expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
@@ -582,6 +635,103 @@ export class CloudflareRuntimeProvider
     this.deployedArtifacts.set(runtimeId, {
       artifactRevision: envelope.artifactRevision,
       sealedArtifactSha256: envelope.sealedArtifactSha256,
+      feature: "artifact-v1",
+    });
+    return result;
+  }
+
+  async deployLayeredArtifact(
+    runtimeId: string,
+    projectId: number,
+    artifact: RuntimeLayeredArtifactDeployment,
+  ): Promise<RuntimeLayeredArtifactDeploymentResult> {
+    await this.requireControlFeature("artifact-layers-v1");
+    const locator = await this.locator(runtimeId, projectId);
+    const envelope = runtimeLayeredArtifactEnvelopeSchema.parse(artifact.envelope);
+    if (
+      envelope.targetRuntimeIdentity !== runtimeId ||
+      !(await verifyRuntimeLayeredArtifactEnvelope(envelope)) ||
+      artifact.appChunks.length !== envelope.content.appArtifact.content.chunks.length ||
+      artifact.layers.length !== envelope.content.layers.length
+    ) {
+      throw invalidLayeredArtifact();
+    }
+    await validateArtifactChunks(
+      artifact.appChunks,
+      envelope.content.appArtifact.content.payloadBytes,
+      envelope.content.appArtifact.content.chunkBytes,
+      envelope.content.appArtifact.content.chunks,
+    );
+    const providedLayers = new Map(
+      artifact.layers.map((layer) => [layer.content.descriptor.contentSha256, layer]),
+    );
+    for (const content of envelope.content.layers) {
+      const provided = providedLayers.get(content.descriptor.contentSha256);
+      if (
+        provided === undefined ||
+        canonicalJson(runtimeArtifactLayerContentSchema.parse(provided.content)) !==
+          canonicalJson(content)
+      ) {
+        throw invalidLayeredArtifact();
+      }
+      const payload = await validateArtifactChunks(
+        provided.chunks,
+        content.payloadBytes,
+        content.chunkBytes,
+        content.chunks,
+        true,
+      );
+      if ((await sha256Hex(payload)) !== content.descriptor.contentSha256) {
+        throw invalidLayeredArtifact();
+      }
+    }
+
+    const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+    const suffix = `/layered-artifacts/${envelope.sealedArtifactSha256}`;
+    const begin = await this.request({
+      method: "POST",
+      path: this.path(locator, `${suffix}/begin`),
+      body: { locator, expectedDeploymentVersion, envelope },
+      idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:begin`,
+      parse: beginRuntimeLayeredArtifactResponseSchema,
+    });
+    for (let chunkIndex = 0; chunkIndex < artifact.appChunks.length; chunkIndex += 1) {
+      await this.requestBytes({
+        method: "PUT",
+        path: this.path(locator, `${suffix}/app/chunks/${chunkIndex}`),
+        body: artifact.appChunks[chunkIndex],
+        idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:app:${chunkIndex}`,
+        parse: uploadRuntimeLayeredArtifactChunkResponseSchema,
+      });
+    }
+    for (const layer of artifact.layers) {
+      const contentSha256 = layer.content.descriptor.contentSha256;
+      if (!begin.layerContentSha256ToUpload.includes(contentSha256)) continue;
+      for (let chunkIndex = 0; chunkIndex < layer.chunks.length; chunkIndex += 1) {
+        await this.requestBytes({
+          method: "PUT",
+          path: this.path(locator, `${suffix}/layers/${contentSha256}/chunks/${chunkIndex}`),
+          body: layer.chunks[chunkIndex],
+          idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:layer:${contentSha256}:${chunkIndex}`,
+          parse: uploadRuntimeLayeredArtifactChunkResponseSchema,
+        });
+      }
+    }
+    const result = await this.request({
+      method: "POST",
+      path: this.path(locator, `${suffix}/commit`),
+      body: {
+        locator,
+        expectedDeploymentVersion,
+        sealedArtifactSha256: envelope.sealedArtifactSha256,
+      },
+      idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:commit`,
+      parse: commitRuntimeLayeredArtifactResponseSchema,
+    });
+    this.deployedArtifacts.set(runtimeId, {
+      artifactRevision: envelope.artifactRevision,
+      sealedArtifactSha256: envelope.sealedArtifactSha256,
+      feature: "artifact-layers-v1",
     });
     return result;
   }

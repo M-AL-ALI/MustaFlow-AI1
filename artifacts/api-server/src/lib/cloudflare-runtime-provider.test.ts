@@ -6,6 +6,8 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { RuntimeProviderUnavailableError } from "./tenant-runtime-provider";
+import { sealRuntimeArtifact } from "./runtime-artifact";
+import { sealLayeredRuntimeArtifact, sealRuntimeArtifactLayer } from "./runtime-artifact-layers";
 
 const token = "control-token-with-at-least-thirty-two-characters";
 const config = {
@@ -187,6 +189,134 @@ describe("CloudflareRuntimeProvider", () => {
     ]);
     expect(calls[4].contentType).toBe("application/octet-stream");
     expect(sealedArtifactSha256).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  it("routes additive app and dependency chunks through the layered dock capability", async () => {
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "preview",
+      slot: "primary",
+    });
+    const platform = {
+      runtime: "node" as const,
+      runtimeVersion: "22.18.0",
+      nodeAbi: "127",
+      os: "linux" as const,
+      cpu: "x64" as const,
+      libc: "glibc" as const,
+      toolchainImageDigest: `sha256:${"1".repeat(64)}`,
+    };
+    const app = await sealRuntimeArtifact({
+      targetRuntimeIdentity: identity,
+      manifestRevision: "manifest-1",
+      artifactRevision: "app-1",
+      sourceRevision: "source-1",
+      files: [{ path: "server.mjs", content: "console.log('app')\n" }],
+    });
+    const layer = await sealRuntimeArtifactLayer({
+      mountPath: "node_modules",
+      platform,
+      files: [{ path: "demo/index.js", content: "export default 42;\n" }],
+    });
+    const artifact = await sealLayeredRuntimeArtifact({
+      app,
+      layers: [layer],
+      pantryRevision: {
+        schemaVersion: 1,
+        revisionId: "pantry-2026-08-08.1",
+        rootSha256: "4".repeat(64),
+        state: "committed",
+        stateRevision: 1,
+        updatedAt: "2026-08-08T00:00:00.000Z",
+      },
+      dependencyClosureSha256: "2".repeat(64),
+      buildAttestationSha256: "3".repeat(64),
+      platform,
+      artifactRevision: "layered-1",
+    });
+    const calls: string[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${path}`);
+      if (path.endsWith("/version") && init?.headers === undefined) return json({ ok: false }, 401);
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-v1", "manifest-update-v1", "artifact-layers-v1"],
+        });
+      }
+      if (path.endsWith("/begin")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          appChunksExpected: 1,
+          layersExpected: 1,
+          layerContentSha256ToUpload: [
+            artifact.envelope.content.layers[0].descriptor.contentSha256,
+          ],
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        const layerSha = artifact.envelope.content.layers[0].descriptor.contentSha256;
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          contentSha256: path.includes(`/layers/${layerSha}/`)
+            ? layerSha
+            : app.envelope.contentSha256,
+          chunkIndex: 0,
+        });
+      }
+      if (path.endsWith("/commit")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          contentSha256: artifact.envelope.contentSha256,
+          filesWritten: 2,
+          layersMaterialized: 1,
+          materialized: true,
+        });
+      }
+      return json({
+        runtime: {
+          identity,
+          projectId: 42,
+          role: "preview",
+          slot: "primary",
+          status: "running",
+          servicePort: 8080,
+          manifestRevision: "manifest-1",
+          deploymentVersion: "staging-v1",
+          endpoint: null,
+          readyAt: null,
+          lastError: null,
+        },
+      });
+    });
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await provider.ensureInfrastructure();
+    await expect(provider.deployLayeredArtifact(identity, 42, artifact)).resolves.toMatchObject({
+      filesWritten: 2,
+      layersMaterialized: 1,
+    });
+    await expect(provider.start(identity, 42)).resolves.toBe(true);
+    expect(calls).toEqual([
+      "GET /_nabuflow/control/v1/version",
+      "GET /_nabuflow/control/v1/version",
+      expect.stringMatching(/^POST .*\/layered-artifacts\/[0-9a-f]{64}\/begin$/u),
+      expect.stringMatching(/^PUT .*\/layered-artifacts\/[0-9a-f]{64}\/app\/chunks\/0$/u),
+      expect.stringMatching(
+        /^PUT .*\/layered-artifacts\/[0-9a-f]{64}\/layers\/[0-9a-f]{64}\/chunks\/0$/u,
+      ),
+      expect.stringMatching(/^POST .*\/layered-artifacts\/[0-9a-f]{64}\/commit$/u),
+      "POST /_nabuflow/control/v1/runtimes/42/preview/primary/start",
+    ]);
   });
 
   it("refuses a fake credential before any artifact upload begins", async () => {

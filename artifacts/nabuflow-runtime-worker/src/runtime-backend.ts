@@ -3,8 +3,14 @@ import { argvToCommandString, sha256Hex } from "@workspace/tenant-runtime-contra
 import type { ExecRuntimeRequest } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
-import type { StoredRuntime, StoredRuntimeArtifact } from "./model";
+import type {
+  StoredRuntime,
+  StoredRuntimeArtifact,
+  StoredRuntimeLayer,
+  StoredRuntimeLayeredArtifact,
+} from "./model";
 import { artifactChunkKey } from "./artifact-storage";
+import { dependencyLayerChunkKey, layeredArtifactAppChunkKey } from "./artifact-layer-storage";
 
 export const DOORMAN_HOST = "doorman.staging.nabuflow.internal";
 const TENANT_PROCESS_ID = "tenant-service";
@@ -65,6 +71,11 @@ export interface RuntimeBackend {
     runtime: StoredRuntime,
     artifact: StoredRuntimeArtifact,
   ): Promise<{ filesWritten: number }>;
+  materializeLayered(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+  ): Promise<{ filesWritten: number; layersMaterialized: number }>;
 }
 
 export class CloudflareSandboxBackend implements RuntimeBackend {
@@ -217,6 +228,79 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     return { filesWritten: artifact.envelope.content.files.length };
   }
 
+  async materializeLayered(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+  ): Promise<{ filesWritten: number; layersMaterialized: number }> {
+    const sandbox = this.sandbox(runtime.descriptor.identity, true);
+    const releaseRoot = releaseRootFor(artifact.envelope.sealedArtifactSha256);
+    const appRoot = `${releaseRoot}/app`;
+    await sandbox.killAllProcesses();
+    const removed = await sandbox.exec(argvToCommandString(["rm", "-rf", "--", releaseRoot]), {
+      cwd: "/workspace",
+      timeout: 30_000,
+    });
+    if (!removed.success) throw new Error("Previous layered release could not be cleared");
+    await sandbox.mkdir(appRoot, { recursive: true });
+
+    const app = artifact.envelope.content.appArtifact;
+    for (const file of app.content.files) {
+      const bytes = await this.readLayeredAppRange(artifact, file.offset, file.size);
+      if ((await sha256Hex(bytes)) !== file.sha256) {
+        throw new Error("Materialized layered app file failed integrity verification");
+      }
+      await this.writeReleaseFile(sandbox, appRoot, file.path, file.mode, bytes);
+    }
+
+    for (const content of artifact.envelope.content.layers) {
+      const layer = layers.find(
+        (candidate) =>
+          candidate.content.descriptor.contentSha256 === content.descriptor.contentSha256,
+      );
+      if (layer === undefined || layer.state !== "committed") {
+        throw new Error("Committed dependency layer is unavailable");
+      }
+      if (content.descriptor.compression !== "none") {
+        throw new Error("Dependency layer compression is unsupported");
+      }
+      const payload = await this.readLayerRange(layer, 0, content.payloadBytes);
+      if ((await sha256Hex(payload)) !== content.descriptor.contentSha256) {
+        throw new Error("Dependency layer content failed integrity verification");
+      }
+      for (const file of content.files) {
+        const bytes = payload.slice(file.offset, file.offset + file.size);
+        if ((await sha256Hex(bytes)) !== file.sha256) {
+          throw new Error("Materialized dependency file failed integrity verification");
+        }
+        await this.writeReleaseFile(
+          sandbox,
+          appRoot,
+          `${content.descriptor.mountPath}/${file.path}`,
+          file.mode,
+          bytes,
+        );
+      }
+    }
+    await sandbox.writeFile(
+      `${releaseRoot}/seal.json`,
+      JSON.stringify({
+        format: artifact.envelope.content.format,
+        contentSha256: artifact.envelope.contentSha256,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        manifestRevision: artifact.envelope.manifestRevision,
+        finalMergedReleaseSha256: artifact.envelope.content.finalMergedReleaseSha256,
+        layers: artifact.envelope.content.layers.map((layer) => layer.descriptor.contentSha256),
+      }),
+    );
+    return {
+      filesWritten:
+        app.content.files.length +
+        artifact.envelope.content.layers.reduce((total, layer) => total + layer.files.length, 0),
+      layersMaterialized: artifact.envelope.content.layers.length,
+    };
+  }
+
   private async readArtifactRange(
     artifact: StoredRuntimeArtifact,
     offset: number,
@@ -247,6 +331,94 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       written += bytes.byteLength;
     }
     return output;
+  }
+
+  private async readLayeredAppRange(
+    artifact: StoredRuntimeLayeredArtifact,
+    offset: number,
+    length: number,
+  ): Promise<Uint8Array> {
+    const app = artifact.envelope.content.appArtifact.content;
+    return this.readR2Range(
+      offset,
+      length,
+      app.chunkBytes,
+      (chunkIndex) =>
+        layeredArtifactAppChunkKey(
+          artifact.runtimeIdentity,
+          artifact.envelope.sealedArtifactSha256,
+          chunkIndex,
+        ),
+      "Layered app chunk is unavailable",
+    );
+  }
+
+  private async readLayerRange(
+    layer: StoredRuntimeLayer,
+    offset: number,
+    length: number,
+  ): Promise<Uint8Array> {
+    return this.readR2Range(
+      offset,
+      length,
+      layer.content.chunkBytes,
+      (chunkIndex) => dependencyLayerChunkKey(layer.content.descriptor.contentSha256, chunkIndex),
+      "Dependency layer chunk is unavailable",
+    );
+  }
+
+  private async readR2Range(
+    offset: number,
+    length: number,
+    chunkBytes: number,
+    keyForChunk: (chunkIndex: number) => string,
+    missingMessage: string,
+  ): Promise<Uint8Array> {
+    const output = new Uint8Array(length);
+    let written = 0;
+    while (written < length) {
+      const absoluteOffset = offset + written;
+      const chunkIndex = Math.floor(absoluteOffset / chunkBytes);
+      const chunkOffset = absoluteOffset % chunkBytes;
+      const readLength = Math.min(length - written, chunkBytes - chunkOffset);
+      const object = await this.env.NABUFLOW_RUNTIME_ARTIFACTS.get(keyForChunk(chunkIndex), {
+        range: { offset: chunkOffset, length: readLength },
+      });
+      if (object === null) throw new Error(missingMessage);
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      if (bytes.byteLength !== readLength) throw new Error("Dependency layer range is incomplete");
+      output.set(bytes, written);
+      written += bytes.byteLength;
+    }
+    return output;
+  }
+
+  private async writeReleaseFile(
+    sandbox: NabuflowSandbox,
+    appRoot: string,
+    relativePath: string,
+    mode: 420 | 493,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    const target = `${appRoot}/${relativePath}`;
+    const parent = target.slice(0, target.lastIndexOf("/"));
+    await sandbox.mkdir(parent, { recursive: true });
+    await sandbox.writeFile(
+      target,
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+    );
+    if (mode === 0o755) {
+      const result = await sandbox.exec(argvToCommandString(["chmod", "755", "--", target]), {
+        cwd: appRoot,
+        timeout: 30_000,
+      });
+      if (!result.success) throw new Error("Dependency executable mode could not be applied");
+    }
   }
 
   private sandbox(identity: string, keepAlive: boolean): NabuflowSandbox {

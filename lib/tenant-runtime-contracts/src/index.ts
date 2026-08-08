@@ -4,6 +4,7 @@ export * from "./constants";
 export * from "./control-schemas";
 export * from "./pantry";
 export * from "./runtime-artifact";
+export * from "./runtime-artifact-layers";
 export * from "./preview-grant";
 export * from "./request-signing";
 export * from "./route-capability";

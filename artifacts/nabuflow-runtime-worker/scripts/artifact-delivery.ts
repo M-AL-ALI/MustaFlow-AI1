@@ -22,6 +22,8 @@ export async function deliverScratchArtifact(input: {
   manifestRevision: string;
   artifactRevision: string;
   sourceRevision: string;
+  manifestStartCommand: readonly string[];
+  serverPath: string;
   serverSource: string;
   additionalFiles?: Array<{
     path: string;
@@ -34,12 +36,20 @@ export async function deliverScratchArtifact(input: {
   sealedArtifactSha256: string;
   contentSha256: string;
 }> {
+  const files = [
+    { path: input.serverPath, content: input.serverSource },
+    ...(input.additionalFiles ?? []),
+  ];
+  assertDeclaredEntrypointDelivered(
+    input.manifestStartCommand,
+    files.map((file) => file.path),
+  );
   const artifact = await sealRuntimeArtifact({
     targetRuntimeIdentity: input.targetRuntimeIdentity,
     manifestRevision: input.manifestRevision,
     artifactRevision: input.artifactRevision,
     sourceRevision: input.sourceRevision,
-    files: [{ path: "server.cjs", content: input.serverSource }, ...(input.additionalFiles ?? [])],
+    files,
   });
   const artifactPath = `${input.runtimePath}/artifacts/${artifact.envelope.sealedArtifactSha256}`;
   const begin = await input.send(
@@ -93,6 +103,24 @@ export async function deliverScratchArtifact(input: {
     sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
     contentSha256: artifact.envelope.contentSha256,
   };
+}
+
+export function assertDeclaredEntrypointDelivered(
+  manifestStartCommand: readonly string[],
+  deliveredPaths: readonly string[],
+): void {
+  const [executable, rawEntrypoint] = manifestStartCommand;
+  if (executable !== "node" || !rawEntrypoint || rawEntrypoint.startsWith("-")) {
+    throw new Error(
+      "HARNESS_ENTRYPOINT_UNRESOLVED: scratch artifact harness requires a direct node entrypoint",
+    );
+  }
+  const entrypoint = rawEntrypoint.replace(/^\.\//u, "");
+  if (!deliveredPaths.includes(entrypoint)) {
+    throw new Error(
+      `HARNESS_ENTRYPOINT_MISSING: manifest declares ${JSON.stringify(entrypoint)}, but the sealed file set does not contain it`,
+    );
+  }
 }
 
 function assertControlStatus(label: string, result: ArtifactControlResult, expected: number): void {

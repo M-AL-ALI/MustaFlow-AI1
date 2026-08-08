@@ -1853,6 +1853,8 @@ async function run(): Promise<void> {
     manifestRevision: initialManifestRevision,
     artifactRevision: `artifact-react-vite-${Date.now()}`,
     sourceRevision: `source-react-vite-${Date.now()}`,
+    manifestStartCommand: ["node", "server.cjs"],
+    serverPath: "server.cjs",
     serverSource: TENANT_SERVER_SOURCE,
     send: signedControlFetch,
   });
@@ -1896,6 +1898,8 @@ async function run(): Promise<void> {
     manifestRevision,
     artifactRevision: `artifact-node-api-${Date.now()}`,
     sourceRevision: `source-node-api-${Date.now()}`,
+    manifestStartCommand: nextManifest.startCommand,
+    serverPath: "server.cjs",
     serverSource: TENANT_SERVER_SOURCE,
     additionalFiles: [{ path: ARTIFACT_BINARY_PATH, content: ARTIFACT_BINARY_FIXTURE }],
     send: signedControlFetch,
@@ -2250,6 +2254,8 @@ async function run(): Promise<void> {
       manifestRevision: failureManifestRevision,
       artifactRevision: `artifact-health-failure-${iteration}-${Date.now()}`,
       sourceRevision: `source-health-failure-${iteration}-${Date.now()}`,
+      manifestStartCommand: ["node", "server.cjs"],
+      serverPath: "server.cjs",
       serverSource: TENANT_SERVER_SOURCE,
       send: signedControlFetch,
     });
@@ -2300,6 +2306,8 @@ async function run(): Promise<void> {
       manifestRevision: recoveryManifestRevision,
       artifactRevision: `artifact-node-api-recovery-${iteration}-${Date.now()}`,
       sourceRevision: `source-node-api-recovery-${iteration}-${Date.now()}`,
+      manifestStartCommand: ["node", "server.cjs"],
+      serverPath: "server.cjs",
       serverSource: TENANT_SERVER_SOURCE,
       send: signedControlFetch,
     });

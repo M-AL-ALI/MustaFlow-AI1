@@ -15,6 +15,7 @@
     "NABUFLOW_RUNTIME_SLEEP_AFTER": "10m",
     "NABUFLOW_STAGING_HOST_OVERRIDE_ENABLED": "true",
     "NABUFLOW_STAGING_WORKER_HOST": "nabuflow-runtime-staging.mustafa-alali74.workers.dev",
+    "NABUFLOW_RUNTIME_LAYER_PLATFORM": "{\"runtime\":\"node\",\"runtimeVersion\":\"22.18.0\",\"nodeAbi\":\"127\",\"os\":\"linux\",\"cpu\":\"x64\",\"libc\":\"glibc\",\"toolchainImageDigest\":\"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738\"}",
   },
   "containers": [
     {

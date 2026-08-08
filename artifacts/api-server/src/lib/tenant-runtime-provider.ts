@@ -1,5 +1,7 @@
 import type {
   RuntimeArtifactEnvelope,
+  RuntimeArtifactLayerContent,
+  RuntimeLayeredArtifactEnvelope,
   RuntimeManifestContract,
 } from "@workspace/tenant-runtime-contracts";
 
@@ -74,6 +76,16 @@ export interface RuntimeArtifactDeploymentResult {
   materialized: boolean;
 }
 
+export interface RuntimeLayeredArtifactDeployment {
+  envelope: RuntimeLayeredArtifactEnvelope;
+  appChunks: Uint8Array[];
+  layers: Array<{ content: RuntimeArtifactLayerContent; chunks: Uint8Array[] }>;
+}
+
+export interface RuntimeLayeredArtifactDeploymentResult extends RuntimeArtifactDeploymentResult {
+  layersMaterialized: number;
+}
+
 export interface ArtifactDeployingTenantRuntimeProvider extends TenantRuntimeProvider {
   deployArtifact(
     runtimeId: string,
@@ -99,6 +111,23 @@ export function supportsArtifactDeployment(
   return (
     typeof candidate.deployArtifact === "function" &&
     typeof candidate.updateRuntimeManifest === "function"
+  );
+}
+
+export interface LayeredArtifactDeployingTenantRuntimeProvider extends ArtifactDeployingTenantRuntimeProvider {
+  deployLayeredArtifact(
+    runtimeId: string,
+    projectId: number,
+    artifact: RuntimeLayeredArtifactDeployment,
+  ): Promise<RuntimeLayeredArtifactDeploymentResult>;
+}
+
+export function supportsLayeredArtifactDeployment(
+  provider: TenantRuntimeProvider,
+): provider is LayeredArtifactDeployingTenantRuntimeProvider {
+  const candidate = provider as Partial<LayeredArtifactDeployingTenantRuntimeProvider>;
+  return (
+    supportsArtifactDeployment(provider) && typeof candidate.deployLayeredArtifact === "function"
   );
 }
 

@@ -5,6 +5,7 @@ import {
   MAX_RUNTIME_ARTIFACT_FILE_BYTES,
   MAX_RUNTIME_ARTIFACT_FILES,
   MAX_RUNTIME_ARTIFACT_MANIFEST_BYTES,
+  MAX_RUNTIME_ARTIFACT_LAYERED_MANIFEST_BYTES,
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   RUNTIME_ARTIFACT_PENDING_TTL_MS,
   RUNTIME_ROLES,
@@ -15,8 +16,12 @@ import {
   capabilityBindingResponseSchema,
   beginRuntimeArtifactRequestSchema,
   beginRuntimeArtifactResponseSchema,
+  beginRuntimeLayeredArtifactRequestSchema,
+  beginRuntimeLayeredArtifactResponseSchema,
   commitRuntimeArtifactRequestSchema,
   commitRuntimeArtifactResponseSchema,
+  commitRuntimeLayeredArtifactRequestSchema,
+  commitRuntimeLayeredArtifactResponseSchema,
   controlErrorResponseSchema,
   deactivateRouteRequestSchema,
   deactivateRouteResponseSchema,
@@ -32,6 +37,8 @@ import {
   parseRuntimeIdentityForNamespace,
   removeRuntimeArtifactRequestSchema,
   removeRuntimeArtifactResponseSchema,
+  removeRuntimeLayeredArtifactRequestSchema,
+  removeRuntimeLayeredArtifactResponseSchema,
   provisionDatabaseCapabilityRequestSchema,
   provisionEchoCapabilityRequestSchema,
   provisionStripeCapabilityRequestSchema,
@@ -47,14 +54,20 @@ import {
   stopRuntimeResponseSchema,
   verifyControlRequestSignature,
   verifyRuntimeArtifactEnvelope,
+  verifyRuntimeLayeredArtifactEnvelope,
   versionResponseSchema,
   updateRuntimeManifestRequestSchema,
   uploadRuntimeArtifactChunkResponseSchema,
+  uploadRuntimeLayeredArtifactChunkResponseSchema,
+  canonicalJson,
+  pantryPlatformSchema,
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
   BeginRuntimeArtifactRequest,
+  BeginRuntimeLayeredArtifactRequest,
   CommitRuntimeArtifactRequest,
+  CommitRuntimeLayeredArtifactRequest,
   ProvisionDatabaseCapabilityRequest,
   ProvisionEchoCapabilityRequest,
   ProvisionStripeCapabilityRequest,
@@ -68,10 +81,13 @@ import type {
   LogsRuntimeRequest,
   RuntimeLocator,
   RemoveRuntimeArtifactRequest,
+  RemoveRuntimeLayeredArtifactRequest,
   StartRuntimeRequest,
   StatusRuntimeRequest,
   StopRuntimeRequest,
   UpdateRuntimeManifestRequest,
+  PantryPlatform,
+  RuntimeArtifactLayerContent,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVaultDurableObject } from "./capability-vault-durable-object";
@@ -83,8 +99,17 @@ import type {
   StoredHttpResponse,
   StoredRuntime,
   StoredRuntimeArtifact,
+  StoredRuntimeLayer,
+  StoredRuntimeLayeredArtifact,
+  RemovedRuntimeLayeredArtifact,
 } from "./model";
 import { artifactChunkKey, deleteArtifactObjects } from "./artifact-storage";
+import {
+  deleteDependencyLayerObjects,
+  deleteLayeredArtifactAppObjects,
+  dependencyLayerChunkKey,
+  layeredArtifactAppChunkKey,
+} from "./artifact-layer-storage";
 import { handlePublishedDataPlaneRequest } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
@@ -109,6 +134,11 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "artifactChunk",
   "artifactCommit",
   "artifactRemove",
+  "layeredArtifactBegin",
+  "layeredArtifactAppChunk",
+  "layeredArtifactLayerChunk",
+  "layeredArtifactCommit",
+  "layeredArtifactRemove",
   "manifestUpdate",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
@@ -143,6 +173,11 @@ type Endpoint =
   | "artifactChunk"
   | "artifactCommit"
   | "artifactRemove"
+  | "layeredArtifactBegin"
+  | "layeredArtifactAppChunk"
+  | "layeredArtifactLayerChunk"
+  | "layeredArtifactCommit"
+  | "layeredArtifactRemove"
   | "manifestUpdate";
 
 interface MatchedRoute {
@@ -151,6 +186,7 @@ interface MatchedRoute {
   hostname?: string;
   capability?: { projectId: number; provider: string; name: string };
   artifactSha256?: string;
+  layerContentSha256?: string;
   chunkIndex?: number;
 }
 
@@ -162,6 +198,14 @@ interface WorkerDependencies {
   context?: RequestExecutionContext;
   vault?: CapabilityVault;
 }
+
+type CommittedRuntimeArtifact =
+  | { kind: "v1"; artifact: StoredRuntimeArtifact }
+  | {
+      kind: "layers-v1";
+      artifact: StoredRuntimeLayeredArtifact;
+      layers: StoredRuntimeLayer[];
+    };
 
 type ControlRequestStage =
   | "initialization"
@@ -633,6 +677,50 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     }
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
+  const layeredArtifactMatch = new RegExp(
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/layered-artifacts/([0-9a-f]{64})(?:/(begin|commit|app/chunks/([0-9]+)|layers/([0-9a-f]{64})/chunks/([0-9]+)))?$`,
+  ).exec(pathname);
+  if (layeredArtifactMatch) {
+    const locator = {
+      projectId: Number(layeredArtifactMatch[1]),
+      role: layeredArtifactMatch[2] as RuntimeLocator["role"],
+      slot: layeredArtifactMatch[3] as RuntimeLocator["slot"],
+    };
+    const artifactSha256 = layeredArtifactMatch[4];
+    const suffix = layeredArtifactMatch[5];
+    if (method === "POST" && suffix === "begin") {
+      return { endpoint: "layeredArtifactBegin", locator, artifactSha256 };
+    }
+    if (method === "POST" && suffix === "commit") {
+      return { endpoint: "layeredArtifactCommit", locator, artifactSha256 };
+    }
+    if (method === "PUT" && suffix?.startsWith("app/chunks/") && layeredArtifactMatch[6]) {
+      return {
+        endpoint: "layeredArtifactAppChunk",
+        locator,
+        artifactSha256,
+        chunkIndex: Number(layeredArtifactMatch[6]),
+      };
+    }
+    if (
+      method === "PUT" &&
+      suffix?.startsWith("layers/") &&
+      layeredArtifactMatch[7] &&
+      layeredArtifactMatch[8]
+    ) {
+      return {
+        endpoint: "layeredArtifactLayerChunk",
+        locator,
+        artifactSha256,
+        layerContentSha256: layeredArtifactMatch[7],
+        chunkIndex: Number(layeredArtifactMatch[8]),
+      };
+    }
+    if (method === "DELETE" && suffix === undefined) {
+      return { endpoint: "layeredArtifactRemove", locator, artifactSha256 };
+    }
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
   const artifactMatch = new RegExp(
     `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/artifacts/([0-9a-f]{64})(?:/(begin|commit|chunks/([0-9]+)))?$`,
   ).exec(pathname);
@@ -747,7 +835,11 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     return parseStrict(logsRuntimeRequestSchema, raw);
   }
 
-  if (route.endpoint === "artifactChunk") {
+  if (
+    route.endpoint === "artifactChunk" ||
+    route.endpoint === "layeredArtifactAppChunk" ||
+    route.endpoint === "layeredArtifactLayerChunk"
+  ) {
     assertNoQuery(url);
     if (rawBody.byteLength === 0)
       throw new ControlHttpError(400, "invalid_request", "Artifact chunk body is required");
@@ -765,6 +857,9 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     route.endpoint !== "artifactBegin" &&
     route.endpoint !== "artifactCommit" &&
     route.endpoint !== "artifactRemove" &&
+    route.endpoint !== "layeredArtifactBegin" &&
+    route.endpoint !== "layeredArtifactCommit" &&
+    route.endpoint !== "layeredArtifactRemove" &&
     route.endpoint !== "manifestUpdate"
   ) {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
@@ -873,6 +968,9 @@ function parseMutationInput(
     | "artifactBegin"
     | "artifactCommit"
     | "artifactRemove"
+    | "layeredArtifactBegin"
+    | "layeredArtifactCommit"
+    | "layeredArtifactRemove"
     | "manifestUpdate",
   body: unknown,
 ):
@@ -884,6 +982,9 @@ function parseMutationInput(
   | BeginRuntimeArtifactRequest
   | CommitRuntimeArtifactRequest
   | RemoveRuntimeArtifactRequest
+  | BeginRuntimeLayeredArtifactRequest
+  | CommitRuntimeLayeredArtifactRequest
+  | RemoveRuntimeLayeredArtifactRequest
   | UpdateRuntimeManifestRequest {
   if (endpoint === "ensure") return parseStrict(ensureRuntimeRequestSchema, body);
   if (endpoint === "start") return parseStrict(startRuntimeRequestSchema, body);
@@ -916,6 +1017,15 @@ function parseMutationInput(
   }
   if (endpoint === "artifactCommit") return parseStrict(commitRuntimeArtifactRequestSchema, body);
   if (endpoint === "artifactRemove") return parseStrict(removeRuntimeArtifactRequestSchema, body);
+  if (endpoint === "layeredArtifactBegin") {
+    return parseStrict(beginRuntimeLayeredArtifactRequestSchema, body);
+  }
+  if (endpoint === "layeredArtifactCommit") {
+    return parseStrict(commitRuntimeLayeredArtifactRequestSchema, body);
+  }
+  if (endpoint === "layeredArtifactRemove") {
+    return parseStrict(removeRuntimeLayeredArtifactRequestSchema, body);
+  }
   if (endpoint === "manifestUpdate") return parseStrict(updateRuntimeManifestRequestSchema, body);
   return parseStrict(execRuntimeRequestSchema, body);
 }
@@ -930,6 +1040,7 @@ async function executeEndpoint(
   matchedRoute?: MatchedRoute,
 ): Promise<StoredHttpResponse> {
   assertArtifactInfrastructure(env);
+  if (endpoint.startsWith("layeredArtifact")) assertLayeredArtifactInfrastructure(env);
   const deploymentVersion = env.CF_VERSION_METADATA.id;
   if (endpoint === "version") {
     return {
@@ -939,7 +1050,9 @@ async function executeEndpoint(
         deploymentVersion,
         provider: "cloudflare",
         supportedRoles: [...RUNTIME_ROLES],
-        features: [...CONTROL_FEATURES],
+        features: CONTROL_FEATURES.filter(
+          (feature) => feature !== "artifact-layers-v1" || configuredLayerPlatform(env) !== null,
+        ),
       },
     };
   }
@@ -1087,6 +1200,236 @@ async function executeEndpoint(
     namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
     ...locator,
   });
+  if (endpoint === "layeredArtifactBegin") {
+    const request = input as BeginRuntimeLayeredArtifactRequest;
+    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    if (
+      matchedRoute?.artifactSha256 !== request.envelope.sealedArtifactSha256 ||
+      request.envelope.targetRuntimeIdentity !== identity
+    ) {
+      throw artifactRuntimeMismatch();
+    }
+    if (!(await verifyRuntimeLayeredArtifactEnvelope(request.envelope))) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Layered artifact integrity verification failed",
+      );
+    }
+    assertLayerPlatform(request.envelope.content.platform, env);
+    if (request.envelope.content.layers.some((layer) => layer.descriptor.compression !== "none")) {
+      throw new ControlHttpError(
+        422,
+        "layer_compression_unsupported",
+        "Dependency layer compression is not supported by this deployment",
+      );
+    }
+    await requireRuntime(coordinator, identity);
+    const record: StoredRuntimeLayeredArtifact = {
+      runtimeIdentity: identity,
+      envelope: request.envelope,
+      state: "pending",
+      receivedAppChunks: request.envelope.content.appArtifact.content.chunks.map(() => null),
+      expiresAtMs: Date.now() + RUNTIME_ARTIFACT_PENDING_TTL_MS,
+    };
+    const result = await coordinator.beginLayeredArtifact(record);
+    if (result === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "artifact_conflict",
+        "Layered artifact address is already bound to different metadata",
+      );
+    }
+    const layerContentSha256ToUpload: string[] = [];
+    for (const content of request.envelope.content.layers) {
+      const layer = await coordinator.getRuntimeLayer(content.descriptor.contentSha256);
+      if (layer === null || layer.state !== "committed") {
+        layerContentSha256ToUpload.push(content.descriptor.contentSha256);
+      }
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        sealedArtifactSha256: request.envelope.sealedArtifactSha256,
+        appChunksExpected: request.envelope.content.appArtifact.content.chunks.length,
+        layersExpected: request.envelope.content.layers.length,
+        layerContentSha256ToUpload,
+      },
+    };
+  }
+  if (endpoint === "layeredArtifactAppChunk" || endpoint === "layeredArtifactLayerChunk") {
+    if (
+      matchedRoute?.artifactSha256 === undefined ||
+      matchedRoute.chunkIndex === undefined ||
+      !(input instanceof Uint8Array)
+    ) {
+      throw new ControlHttpError(
+        400,
+        "invalid_request",
+        "Layered artifact chunk route is incomplete",
+      );
+    }
+    const artifact = await coordinator.getLayeredArtifact(identity, matchedRoute.artifactSha256);
+    if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    const chunkIndex = matchedRoute.chunkIndex;
+    const isAppChunk = endpoint === "layeredArtifactAppChunk";
+    const appContent = artifact.envelope.content.appArtifact.content;
+    const layerContent = !isAppChunk
+      ? artifact.envelope.content.layers.find(
+          (layer) => layer.descriptor.contentSha256 === matchedRoute.layerContentSha256,
+        )
+      : null;
+    if (!isAppChunk && layerContent === undefined) {
+      throw artifactRuntimeMismatch();
+    }
+    const content = layerContent ?? appContent;
+    const expectedLength = expectedChunkLength(
+      content.payloadBytes,
+      content.chunkBytes,
+      content.chunks.length,
+      chunkIndex,
+    );
+    if (expectedLength === null || input.byteLength !== expectedLength) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Layered artifact chunk does not match the sealed envelope",
+      );
+    }
+    const chunkSha256 = await sha256Hex(input);
+    if (chunkSha256 !== content.chunks[chunkIndex]) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Layered artifact chunk does not match the sealed envelope",
+      );
+    }
+    const contentSha256 =
+      layerContent?.descriptor.contentSha256 ?? artifact.envelope.content.appArtifact.contentSha256;
+    const key = isAppChunk
+      ? layeredArtifactAppChunkKey(identity, artifact.envelope.sealedArtifactSha256, chunkIndex)
+      : dependencyLayerChunkKey(layerContent!.descriptor.contentSha256, chunkIndex);
+    await env.NABUFLOW_RUNTIME_ARTIFACTS.put(key, input.slice().buffer);
+    const recorded = isAppChunk
+      ? await coordinator.recordLayeredArtifactAppChunk(
+          identity,
+          artifact.envelope.sealedArtifactSha256,
+          chunkIndex,
+          chunkSha256,
+        )
+      : await coordinator.recordRuntimeLayerChunk(
+          identity,
+          artifact.envelope.sealedArtifactSha256,
+          layerContent!.descriptor.contentSha256,
+          chunkIndex,
+          chunkSha256,
+        );
+    if (recorded === "not_found") throw artifactRuntimeMismatch();
+    if (recorded === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "artifact_chunk_conflict",
+        "Layered artifact chunk conflicts",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        contentSha256,
+        chunkIndex,
+      },
+    };
+  }
+  if (endpoint === "layeredArtifactCommit") {
+    const request = input as CommitRuntimeLayeredArtifactRequest;
+    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    if (matchedRoute?.artifactSha256 !== request.sealedArtifactSha256) {
+      throw artifactRuntimeMismatch();
+    }
+    const artifact = await coordinator.getLayeredArtifact(identity, request.sealedArtifactSha256);
+    if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    for (const content of artifact.envelope.content.layers) {
+      const storedLayer = await coordinator.getRuntimeLayer(content.descriptor.contentSha256);
+      if (
+        storedLayer !== null &&
+        (storedLayer.state === "committed" ||
+          storedLayer.receivedChunks.every((chunk) => chunk !== null))
+      ) {
+        await verifyStoredLayerIntegrity(env.NABUFLOW_RUNTIME_ARTIFACTS, content);
+      }
+    }
+    const commit = await coordinator.commitLayeredArtifact(identity, request.sealedArtifactSha256);
+    if (commit === "incomplete") {
+      const removed = await coordinator.removeLayeredArtifact(
+        identity,
+        request.sealedArtifactSha256,
+      );
+      if (removed !== null) await deleteRemovedLayeredArtifact(env, removed);
+      throw new ControlHttpError(
+        409,
+        "artifact_incomplete",
+        "Layered artifact upload is incomplete",
+      );
+    }
+    if (commit === "not_found") throw artifactRuntimeMismatch();
+    if (commit === "conflict") {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Dependency layer metadata does not match the sealed envelope",
+      );
+    }
+    const runtime = await requireRuntime(coordinator, identity);
+    const materialized = artifact.envelope.manifestRevision === runtime.manifest.revision;
+    let filesWritten = 0;
+    let layersMaterialized = 0;
+    if (materialized) {
+      const layers = await loadCommittedLayers(coordinator, artifact);
+      const result = await backend.materializeLayered(runtime, artifact, layers);
+      filesWritten = result.filesWritten;
+      layersMaterialized = result.layersMaterialized;
+      runtime.artifactRevision = artifact.envelope.artifactRevision;
+      runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
+      runtime.artifactKind = "layers-v1";
+      await coordinator.putRuntime(identity, runtime);
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        contentSha256: artifact.envelope.contentSha256,
+        filesWritten,
+        layersMaterialized,
+        materialized,
+      },
+    };
+  }
+  if (endpoint === "layeredArtifactRemove") {
+    const request = input as RemoveRuntimeLayeredArtifactRequest;
+    if (matchedRoute?.artifactSha256 !== request.sealedArtifactSha256) {
+      throw artifactRuntimeMismatch();
+    }
+    const runtime = await coordinator.getRuntime(identity);
+    if (
+      runtime !== null &&
+      (runtime.descriptor.status === "running" || runtime.descriptor.status === "starting") &&
+      runtime.artifactSha256 === request.sealedArtifactSha256
+    ) {
+      throw new ControlHttpError(
+        409,
+        "runtime_busy",
+        "Stop the runtime before removing its layered artifact",
+      );
+    }
+    const removed = await coordinator.removeLayeredArtifact(identity, request.sealedArtifactSha256);
+    if (removed === null) throw artifactRuntimeMismatch();
+    await deleteRemovedLayeredArtifact(env, removed);
+    return { status: 200, body: { ok: true } };
+  }
   if (endpoint === "artifactBegin") {
     const request = input as BeginRuntimeArtifactRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
@@ -1207,6 +1550,7 @@ async function executeEndpoint(
       filesWritten = result.filesWritten;
       runtime.artifactRevision = artifact.envelope.artifactRevision;
       runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
+      runtime.artifactKind = "v1";
       await coordinator.putRuntime(identity, runtime);
     }
     return {
@@ -1280,7 +1624,7 @@ async function executeEndpoint(
         true,
       );
     }
-    let restartArtifact: StoredRuntimeArtifact | null = null;
+    let restartArtifact: CommittedRuntimeArtifact | null = null;
     if (wasRunning) {
       if (request.sealedArtifactSha256 === undefined) {
         throw new ControlHttpError(
@@ -1289,11 +1633,14 @@ async function executeEndpoint(
           "A committed artifact for the next manifest is required",
         );
       }
-      restartArtifact = await coordinator.getArtifact(identity, request.sealedArtifactSha256);
+      restartArtifact = await getCommittedRuntimeArtifact(
+        coordinator,
+        identity,
+        request.sealedArtifactSha256,
+      );
       if (
         restartArtifact === null ||
-        restartArtifact.state !== "committed" ||
-        restartArtifact.envelope.manifestRevision !== request.manifest.revision
+        restartArtifact.artifact.envelope.manifestRevision !== request.manifest.revision
       ) {
         throw new ControlHttpError(
           409,
@@ -1322,8 +1669,9 @@ async function executeEndpoint(
     runtime.descriptor.lastError = null;
     runtime.processId = null;
     if (restartArtifact !== null) {
-      runtime.artifactRevision = restartArtifact.envelope.artifactRevision;
-      runtime.artifactSha256 = restartArtifact.envelope.sealedArtifactSha256;
+      runtime.artifactRevision = restartArtifact.artifact.envelope.artifactRevision;
+      runtime.artifactSha256 = restartArtifact.artifact.envelope.sealedArtifactSha256;
+      runtime.artifactKind = restartArtifact.kind;
     }
     const persisted = await coordinator.putRuntimeIfManifestRevision(
       identity,
@@ -1345,7 +1693,7 @@ async function executeEndpoint(
         // Materialization already kills every tenant process before replacing the sealed release.
         // Fully stopping the Sandbox here makes the immediately-following filesystem RPC race the
         // container shutdown and fail before the first release-directory operation.
-        await backend.materialize(runtime, restartArtifact);
+        await materializeCommittedRuntimeArtifact(backend, runtime, restartArtifact);
         const started = await backend.start(runtime);
         runtime.processId = started.processId;
         runtime.descriptor.status = "running";
@@ -1400,6 +1748,7 @@ async function executeEndpoint(
       manifest: request.manifest,
       artifactRevision: null,
       artifactSha256: null,
+      artifactKind: null,
       processId: null,
       stdoutLength: 0,
       stderrLength: 0,
@@ -1442,13 +1791,16 @@ async function executeEndpoint(
   if (endpoint === "start") {
     const request = input as StartRuntimeRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
-    const artifact = await coordinator.getArtifact(identity, request.artifactSha256);
+    const artifact = await getCommittedRuntimeArtifact(
+      coordinator,
+      identity,
+      request.artifactSha256,
+    );
     if (
       artifact === null ||
-      artifact.state !== "committed" ||
-      artifact.runtimeIdentity !== identity ||
-      artifact.envelope.artifactRevision !== request.artifactRevision ||
-      artifact.envelope.manifestRevision !== runtime.manifest.revision
+      artifact.artifact.runtimeIdentity !== identity ||
+      artifact.artifact.envelope.artifactRevision !== request.artifactRevision ||
+      artifact.artifact.envelope.manifestRevision !== runtime.manifest.revision
     ) {
       throw new ControlHttpError(
         409,
@@ -1458,13 +1810,14 @@ async function executeEndpoint(
     }
     runtime.artifactRevision = request.artifactRevision;
     runtime.artifactSha256 = request.artifactSha256;
+    runtime.artifactKind = artifact.kind;
     runtime.descriptor.status = "starting";
     runtime.descriptor.lastError = null;
     runtime.descriptor.readyAt = null;
     await coordinator.putRuntime(identity, runtime);
     await coordinator.appendSystemLog(identity, "Starting the tenant service.");
     try {
-      await backend.materialize(runtime, artifact);
+      await materializeCommittedRuntimeArtifact(backend, runtime, artifact);
       const started = await backend.start(runtime);
       const current = await requireRuntime(coordinator, identity);
       current.processId = started.processId;
@@ -1516,6 +1869,14 @@ async function executeEndpoint(
     for (const artifact of artifacts) {
       await deleteArtifactObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
       await coordinator.removeArtifact(identity, artifact.envelope.sealedArtifactSha256);
+    }
+    const layeredArtifacts = await coordinator.listLayeredArtifacts(identity);
+    for (const artifact of layeredArtifacts) {
+      const removed = await coordinator.removeLayeredArtifact(
+        identity,
+        artifact.envelope.sealedArtifactSha256,
+      );
+      if (removed !== null) await deleteRemovedLayeredArtifact(env, removed);
     }
     await coordinator.deleteRuntime(identity);
     return { status: 200, body: { ok: true } };
@@ -1674,6 +2035,11 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     artifactChunk: uploadRuntimeArtifactChunkResponseSchema,
     artifactCommit: commitRuntimeArtifactResponseSchema,
     artifactRemove: removeRuntimeArtifactResponseSchema,
+    layeredArtifactBegin: beginRuntimeLayeredArtifactResponseSchema,
+    layeredArtifactAppChunk: uploadRuntimeLayeredArtifactChunkResponseSchema,
+    layeredArtifactLayerChunk: uploadRuntimeLayeredArtifactChunkResponseSchema,
+    layeredArtifactCommit: commitRuntimeLayeredArtifactResponseSchema,
+    layeredArtifactRemove: removeRuntimeLayeredArtifactResponseSchema,
     manifestUpdate: ensureRuntimeResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);
@@ -1693,11 +2059,168 @@ function artifactRuntimeMismatch(): ControlHttpError {
   );
 }
 
+function configuredLayerPlatform(env: WorkerBindings): PantryPlatform | null {
+  if (!env.NABUFLOW_RUNTIME_LAYER_PLATFORM) return null;
+  try {
+    const parsed = pantryPlatformSchema.safeParse(JSON.parse(env.NABUFLOW_RUNTIME_LAYER_PLATFORM));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function assertLayeredArtifactInfrastructure(env: WorkerBindings): void {
+  if (configuredLayerPlatform(env) === null) {
+    throw new ControlHttpError(
+      503,
+      "artifact_layer_infrastructure_unavailable",
+      "The runtime dependency-layer infrastructure is not configured",
+      false,
+    );
+  }
+}
+
+function assertLayerPlatform(platform: PantryPlatform, env: WorkerBindings): void {
+  const configured = configuredLayerPlatform(env);
+  if (configured === null || canonicalJson(platform) !== canonicalJson(configured)) {
+    throw new ControlHttpError(
+      422,
+      "artifact_layer_platform_mismatch",
+      "Dependency layers do not target this runtime platform",
+    );
+  }
+}
+
+function expectedChunkLength(
+  payloadBytes: number,
+  chunkBytes: number,
+  chunks: number,
+  chunkIndex: number,
+): number | null {
+  if (chunkIndex < 0 || chunkIndex >= chunks) return null;
+  const isFinal = chunkIndex === chunks - 1;
+  return isFinal ? payloadBytes % chunkBytes || chunkBytes : chunkBytes;
+}
+
+async function loadCommittedLayers(
+  coordinator: ControlCoordinator,
+  artifact: StoredRuntimeLayeredArtifact,
+): Promise<StoredRuntimeLayer[]> {
+  const layers: StoredRuntimeLayer[] = [];
+  for (const content of artifact.envelope.content.layers) {
+    const layer = await coordinator.getRuntimeLayer(content.descriptor.contentSha256);
+    if (layer === null || layer.state !== "committed") {
+      throw new ControlHttpError(
+        409,
+        "artifact_not_committed",
+        "A committed dependency layer is required",
+      );
+    }
+    layers.push(layer);
+  }
+  return layers;
+}
+
+async function getCommittedRuntimeArtifact(
+  coordinator: ControlCoordinator,
+  identity: string,
+  sealedArtifactSha256: string,
+): Promise<CommittedRuntimeArtifact | null> {
+  const v1 = await coordinator.getArtifact(identity, sealedArtifactSha256);
+  if (v1 !== null && v1.state === "committed") return { kind: "v1", artifact: v1 };
+  const layered = await coordinator.getLayeredArtifact(identity, sealedArtifactSha256);
+  if (layered === null || layered.state !== "committed") return null;
+  return {
+    kind: "layers-v1",
+    artifact: layered,
+    layers: await loadCommittedLayers(coordinator, layered),
+  };
+}
+
+async function materializeCommittedRuntimeArtifact(
+  backend: RuntimeBackend,
+  runtime: StoredRuntime,
+  artifact: CommittedRuntimeArtifact,
+): Promise<void> {
+  if (artifact.kind === "v1") {
+    await backend.materialize(runtime, artifact.artifact);
+    return;
+  }
+  await backend.materializeLayered(runtime, artifact.artifact, artifact.layers);
+}
+
+async function verifyStoredLayerIntegrity(
+  bucket: R2Bucket,
+  content: RuntimeArtifactLayerContent,
+): Promise<void> {
+  const payload = new Uint8Array(content.payloadBytes);
+  let offset = 0;
+  for (let index = 0; index < content.chunks.length; index += 1) {
+    const object = await bucket.get(
+      dependencyLayerChunkKey(content.descriptor.contentSha256, index),
+    );
+    if (object === null) {
+      throw new ControlHttpError(
+        409,
+        "artifact_incomplete",
+        "Dependency layer upload is incomplete",
+      );
+    }
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    const expectedLength = expectedChunkLength(
+      content.payloadBytes,
+      content.chunkBytes,
+      content.chunks.length,
+      index,
+    );
+    if (
+      expectedLength === null ||
+      bytes.byteLength !== expectedLength ||
+      (await sha256Hex(bytes)) !== content.chunks[index]
+    ) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Dependency layer object failed integrity verification",
+      );
+    }
+    payload.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+  if ((await sha256Hex(payload)) !== content.descriptor.contentSha256) {
+    throw new ControlHttpError(
+      422,
+      "artifact_integrity_mismatch",
+      "Dependency layer content failed integrity verification",
+    );
+  }
+}
+
+async function deleteRemovedLayeredArtifact(
+  env: WorkerBindings,
+  removed: RemovedRuntimeLayeredArtifact,
+): Promise<void> {
+  await deleteLayeredArtifactAppObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, removed.artifact);
+  for (const layer of removed.unreferencedLayers) {
+    await deleteDependencyLayerObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, layer);
+  }
+}
+
 function requestBodyLimit(pathname: string): number {
   if (/\/artifacts\/[0-9a-f]{64}\/chunks\/[0-9]+$/u.test(pathname))
     return RUNTIME_ARTIFACT_CHUNK_BYTES;
   if (/\/artifacts\/[0-9a-f]{64}\/begin$/u.test(pathname))
     return MAX_RUNTIME_ARTIFACT_MANIFEST_BYTES;
+  if (
+    /\/layered-artifacts\/[0-9a-f]{64}\/(?:app\/|layers\/[0-9a-f]{64}\/)?chunks\/[0-9]+$/u.test(
+      pathname,
+    )
+  ) {
+    return RUNTIME_ARTIFACT_CHUNK_BYTES;
+  }
+  if (/\/layered-artifacts\/[0-9a-f]{64}\/begin$/u.test(pathname)) {
+    return MAX_RUNTIME_ARTIFACT_LAYERED_MANIFEST_BYTES;
+  }
   return MAX_REQUEST_BYTES;
 }
 
