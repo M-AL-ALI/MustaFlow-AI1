@@ -544,9 +544,7 @@ async function runLiveNpmIngest(nowMs: number): Promise<void> {
     requestedAt: new Date(nowMs).toISOString(),
     expiresAt: new Date(nowMs + 60 * 60_000).toISOString(),
   });
-  const before = await pantryDiagnostics("ingest.queue.before");
-  assertStatus("ingest.queue.before", before, 200);
-  const queueBefore = queueDeliveryCount(before);
+  const queueBefore = await waitForStableQueue("ingest.queue.before");
   const begin = await pantryCall("/stock-requests", "POST", request, "ingest.public.begin");
   assertCondition(
     begin.response.status === 200 || begin.response.status === 201,
@@ -616,9 +614,7 @@ async function runLiveNpmIngest(nowMs: number): Promise<void> {
       ingredient.provenance?.registrySignatureVerified === true,
     "Committed public npm shelf did not retain exact verified origin evidence",
   );
-  const after = await pantryDiagnostics("ingest.queue.after");
-  assertStatus("ingest.queue.after", after, 200);
-  const queueAfter = queueDeliveryCount(after);
+  const queueAfter = await waitForStableQueue("ingest.queue.after");
   assertCondition(
     queueAfter - queueBefore === 1,
     "One cold miss did not produce exactly one queue delivery",
@@ -629,9 +625,9 @@ async function runLiveNpmIngest(nowMs: number): Promise<void> {
     (warm.body as { state?: string }).state === "committed",
     "Warm Pantry hit did not return the immutable shelf",
   );
-  const warmDiagnostics = await pantryDiagnostics("ingest.queue.warm");
+  const warmQueue = await waitForStableQueue("ingest.queue.warm");
   assertCondition(
-    queueDeliveryCount(warmDiagnostics) === queueAfter,
+    warmQueue === queueAfter,
     "Warm Pantry hit emitted an upstream ingest queue delivery",
   );
   record("ingest.public-npm.exact-shelf", 200, {
@@ -680,6 +676,21 @@ async function waitForQueueDelivery(baseline: number): Promise<number> {
   throw new Error("Queue delivery was not observed within 20 seconds");
 }
 
+async function waitForStableQueue(label: string): Promise<number> {
+  let previous: number | null = null;
+  let consecutive = 0;
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    const result = await pantryDiagnostics(`${label}.${attempt}`);
+    assertStatus(`${label}.${attempt}`, result, 200);
+    const current = queueDeliveryCount(result);
+    consecutive = previous === current ? consecutive + 1 : 1;
+    previous = current;
+    if (consecutive >= 3) return current;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error("Pantry queue did not become stable within 30 seconds");
+}
+
 async function runCatalogAcceptance(): Promise<void> {
   const health = await pantryCall("/health", "GET", undefined, "pantry.health");
   assertStatus("pantry.health", health, 200);
@@ -692,6 +703,19 @@ async function runCatalogAcceptance(): Promise<void> {
     direct === null || direct.status !== 200,
     "Private Pantry Worker unexpectedly exposed a public route",
   );
+
+  const staleIngestCleanup = await pantryCall(
+    "/gc",
+    "POST",
+    {
+      scope: "retired-unreferenced",
+      now: new Date(Date.now() + workerClockOffsetMs + 366 * 24 * 60 * 60_000).toISOString(),
+      maxDeletes: 1_000,
+      retentionNamespace: "pantry-ingest",
+    },
+    "cleanup.preflight.ingest",
+  );
+  assertStatus("cleanup.preflight.ingest", staleIngestCleanup, 200);
 
   const nowMs = Date.now() + workerClockOffsetMs;
   const sequence = 10_000 + (Math.floor(nowMs / 1_000) % 80_000);
@@ -1027,6 +1051,7 @@ async function cleanupReadiness(): Promise<void> {
 
 async function bestEffortCatalogCleanup(): Promise<void> {
   const nowMs = Date.now() + workerClockOffsetMs + 5 * 60 * 60_000;
+  const ingestGcNowMs = Date.now() + workerClockOffsetMs + 366 * 24 * 60 * 60_000;
   await pantryCall(
     "/gc",
     "POST",
@@ -1106,7 +1131,7 @@ async function bestEffortCatalogCleanup(): Promise<void> {
     }
     await collectWithNamespace(
       root,
-      nowMs,
+      ingestGcNowMs,
       "pantry-ingest",
       `cleanup.ingest.collect.${root.slice(0, 8)}`,
     ).catch(() => undefined);
