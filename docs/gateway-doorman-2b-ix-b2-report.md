@@ -145,3 +145,17 @@ No `package.json` or `pnpm-lock.yaml` changed, so the standing pristine isolated
 5. **Keep Fly separate.** The eventual Fly dual-run should consume dependency-complete output through its existing path. It must not inherit Cloudflare R2 routes or optional-interface assumptions.
 
 PG-1, PG-2, PG-3, and PG-4 are unchanged by this slice. No key-rotation claim is expanded; the acceptance rotation uses the existing single-key staging mechanism only.
+
+## Addendum - 2026-08-08 clean release-profile base parity
+
+After the complete slice was committed at `5f1e324f42b1d889cbacd92f0428a974bac86a8d`, the clean-tree release profile ran on the branch. It completed with 18 passes, 0 warnings, and 3 failed rows:
+
+| Release row                   | Exact failure set                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `api-release-extended`        | Two `ora-realtime-usage.test.ts` cases failed with `ECONNREFUSED 127.0.0.1:5432`                                  |
+| `api-account-billing-history` | Two `ora-memory-consolidation.test.ts` cases returned 500 instead of 201 because database setup could not connect |
+| `web-build`                   | Bundle and size checks passed; dynamic-route prerender then failed with `ECONNREFUSED 127.0.0.1:5432`             |
+
+A fresh detached worktree at the exact audited base `81c3f978723a98af5c8decac3d5c29e8496d18ad` was populated with `pnpm install --frozen-lockfile` using repository-pinned pnpm 10.26.1. The install reused the healthy store, changed no lockfile, and completed after 8m29s on the known slow Windows filesystem. The identical clean release command then produced 18 passes, 0 warnings, and the exact same 3 failed rows, test names, assertion shapes, and `127.0.0.1:5432` refusal.
+
+This is exact base parity. The release-only failures are the documented no-local-PostgreSQL environment baseline, not an artifact-layer regression. No additional branch or base failure occurred; Replit's PostgreSQL-backed full merge gate remains authoritative.
