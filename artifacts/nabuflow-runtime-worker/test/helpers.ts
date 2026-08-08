@@ -506,7 +506,12 @@ export class MockBackend implements RuntimeBackend {
 export class MemoryR2Bucket {
   readonly objects = new Map<string, Uint8Array>();
 
-  async put(key: string, value: ArrayBuffer | ArrayBufferView | string): Promise<unknown> {
+  async put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | string,
+    options?: { onlyIf?: { etagDoesNotMatch?: string } },
+  ): Promise<unknown | null> {
+    if (options?.onlyIf?.etagDoesNotMatch === "*" && this.objects.has(key)) return null;
     const bytes =
       typeof value === "string"
         ? new TextEncoder().encode(value)
@@ -544,6 +549,31 @@ export class MemoryR2Bucket {
 
   async delete(keys: string | string[]): Promise<void> {
     for (const key of typeof keys === "string" ? [keys] : keys) this.objects.delete(key);
+  }
+
+  async head(key: string): Promise<{ key: string; size: number } | null> {
+    const stored = this.objects.get(key);
+    return stored === undefined ? null : { key, size: stored.byteLength };
+  }
+
+  async list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
+    objects: Array<{ key: string; size: number }>;
+    truncated: boolean;
+    cursor?: string;
+  }> {
+    const prefix = options?.prefix ?? "";
+    const offset = options?.cursor === undefined ? 0 : Number(options.cursor);
+    const limit = options?.limit ?? 1_000;
+    const matches = [...this.objects.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .sort(([left], [right]) => left.localeCompare(right));
+    const page = matches.slice(offset, offset + limit);
+    const next = offset + page.length;
+    return {
+      objects: page.map(([key, bytes]) => ({ key, size: bytes.byteLength })),
+      truncated: next < matches.length,
+      ...(next < matches.length ? { cursor: String(next) } : {}),
+    };
   }
 }
 
