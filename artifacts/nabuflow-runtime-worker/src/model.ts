@@ -7,6 +7,7 @@ import type {
   LogsRuntimeResponse,
   RouteRecord,
   RuntimeDescriptor,
+  RuntimeArtifactEnvelope,
   RuntimeManifestContract,
 } from "@workspace/tenant-runtime-contracts";
 
@@ -22,6 +23,14 @@ export interface StoredRuntime {
   stderrLength: number;
   nextLogSequence: number;
   logs: RuntimeLogEntry[];
+}
+
+export interface StoredRuntimeArtifact {
+  runtimeIdentity: string;
+  envelope: RuntimeArtifactEnvelope;
+  state: "pending" | "committed";
+  receivedChunks: Array<string | null>;
+  expiresAtMs: number | null;
 }
 
 export interface StoredHttpResponse {
@@ -63,7 +72,32 @@ export interface ControlCoordinator {
   recordAudit(record: ControlAuditRecord): Promise<void>;
   getRuntime(identity: string): Promise<StoredRuntime | null>;
   putRuntime(identity: string, runtime: StoredRuntime): Promise<void>;
+  putRuntimeIfManifestRevision(
+    identity: string,
+    expectedManifestRevision: string,
+    runtime: StoredRuntime,
+  ): Promise<"updated" | "not_found" | "conflict">;
   deleteRuntime(identity: string): Promise<void>;
+  beginArtifact(record: StoredRuntimeArtifact): Promise<"created" | "exists" | "conflict">;
+  getArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeArtifact | null>;
+  recordArtifactChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict">;
+  commitArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<"committed" | "incomplete" | "not_found">;
+  removeArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeArtifact | null>;
+  listArtifacts(identity: string): Promise<StoredRuntimeArtifact[]>;
   bindContainer(containerId: string, identity: string): Promise<void>;
   getContainerBinding(containerId: string): Promise<string | null>;
   unbindContainer(containerId: string, expectedIdentity: string): Promise<boolean>;

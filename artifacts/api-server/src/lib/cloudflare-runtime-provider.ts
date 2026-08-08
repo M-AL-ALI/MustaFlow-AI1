@@ -1,21 +1,32 @@
 import {
   CONTROL_API_PREFIX,
+  CONTROL_FEATURES,
+  beginRuntimeArtifactResponseSchema,
+  commitRuntimeArtifactResponseSchema,
   controlErrorResponseSchema,
   deriveRuntimeIdentity,
   execRuntimeResponseSchema,
   parseRuntimeIdentityForNamespace,
   runtimeDescriptorSchema,
+  runtimeArtifactEnvelopeSchema,
   sha256Hex,
   signControlRequest,
   versionResponseSchema,
+  uploadRuntimeArtifactChunkResponseSchema,
+  verifyRuntimeArtifactEnvelope,
+  type RuntimeManifestContract,
   type RuntimeDescriptor,
   type RuntimeLocator,
   type TenantRuntimeConfig,
 } from "@workspace/tenant-runtime-contracts";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
+import { sealRuntimeArtifact } from "./runtime-artifact";
 import { logger } from "./logger";
 import {
   RuntimeProviderUnavailableError,
+  type ArtifactDeployingTenantRuntimeProvider,
+  type RuntimeArtifactDeployment,
+  type RuntimeArtifactDeploymentResult,
   type RuntimeCreateResult,
   type RuntimeExecResult,
   type RuntimeFile,
@@ -90,11 +101,18 @@ function toInfo(runtime: RuntimeDescriptor): RuntimeInfo {
   };
 }
 
-export class CloudflareRuntimeProvider implements TenantRuntimeProvider {
+export class CloudflareRuntimeProvider
+  implements TenantRuntimeProvider, ArtifactDeployingTenantRuntimeProvider
+{
   readonly providerId = "cloudflare";
   private subsystemStatus: RuntimeSubsystemStatus | null = null;
   private deploymentVersion: string | null = null;
   private clockOffsetMs = 0;
+  private controlFeatures = new Set<string>();
+  private readonly deployedArtifacts = new Map<
+    string,
+    { artifactRevision: string; sealedArtifactSha256: string }
+  >();
 
   private readonly sleep: (delayMs: number) => Promise<void>;
 
@@ -179,7 +197,20 @@ export class CloudflareRuntimeProvider implements TenantRuntimeProvider {
       parse: versionResponseSchema,
     });
     this.deploymentVersion = version.deploymentVersion;
+    this.controlFeatures = new Set(version.features);
     return version.deploymentVersion;
+  }
+
+  private async requireControlFeature(feature: (typeof CONTROL_FEATURES)[number]): Promise<void> {
+    if (this.deploymentVersion === null) await this.refreshVersion();
+    if (!this.controlFeatures.has(feature)) {
+      throw new CloudflareRuntimeControlError(
+        503,
+        "control_feature_unavailable",
+        false,
+        `Cloudflare control feature ${feature} is unavailable`,
+      );
+    }
   }
 
   private async request<T>(input: {
@@ -191,6 +222,34 @@ export class CloudflareRuntimeProvider implements TenantRuntimeProvider {
   }): Promise<T> {
     const method = input.method ?? "GET";
     const body = input.body === undefined ? "" : JSON.stringify(input.body);
+    return this.requestEncoded({
+      ...input,
+      method,
+      body,
+      contentType: body ? "application/json" : undefined,
+    });
+  }
+
+  private async requestBytes<T>(input: {
+    method: string;
+    path: string;
+    body: Uint8Array;
+    idempotencyKey: string;
+    parse: { parse(value: unknown): T };
+  }): Promise<T> {
+    return this.requestEncoded({ ...input, contentType: "application/octet-stream" });
+  }
+
+  private async requestEncoded<T>(input: {
+    method: string;
+    path: string;
+    body: string | Uint8Array;
+    contentType?: string;
+    idempotencyKey?: string;
+    parse: { parse(value: unknown): T };
+  }): Promise<T> {
+    const method = input.method;
+    const body = input.body;
     const bodySha256 = await sha256Hex(body);
     const idempotencyKey = input.idempotencyKey ?? "";
     for (let attempt = 0; ; attempt += 1) {
@@ -208,10 +267,10 @@ export class CloudflareRuntimeProvider implements TenantRuntimeProvider {
       try {
         response = await fetch(`${this.config.controlUrl}${input.path}`, {
           method,
-          body: body || undefined,
+          body: typeof body === "string" ? body || undefined : (body.slice().buffer as ArrayBuffer),
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           headers: {
-            ...(body ? { "content-type": "application/json" } : {}),
+            ...(input.contentType ? { "content-type": input.contentType } : {}),
             "x-nabuflow-timestamp": timestamp,
             "x-nabuflow-nonce": nonce,
             "x-nabuflow-body-sha256": bodySha256,
@@ -352,12 +411,21 @@ export class CloudflareRuntimeProvider implements TenantRuntimeProvider {
 
   async start(runtimeId: string, projectId: number): Promise<boolean> {
     const locator = await this.locator(runtimeId, projectId);
-    const revision = `start-${Date.now()}`;
+    await this.requireControlFeature("artifact-v1");
+    const deployed = this.deployedArtifacts.get(runtimeId);
+    if (deployed === undefined) {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "artifact_not_committed",
+        false,
+        "A committed Cloudflare artifact is required before start",
+      );
+    }
     await this.descriptorRequest(locator, "POST", "/start", {
       locator,
       expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
-      artifactRevision: revision,
-      artifactSha256: await sha256Hex(revision),
+      artifactRevision: deployed.artifactRevision,
+      artifactSha256: deployed.sealedArtifactSha256,
     });
     return true;
   }
@@ -426,12 +494,127 @@ export class CloudflareRuntimeProvider implements TenantRuntimeProvider {
     return this.unavailable("file-write");
   }
 
-  async syncFiles(_runtimeId: string, _projectId: number, _files: RuntimeFile[]): Promise<void> {
-    this.unavailable("file-sync");
+  async syncFiles(runtimeId: string, projectId: number, files: RuntimeFile[]): Promise<void> {
+    const locator = await this.locator(runtimeId, projectId);
+    const runtime = await this.descriptorRequest(locator, "GET", "");
+    const revision = crypto.randomUUID();
+    const artifact = await sealRuntimeArtifact({
+      targetRuntimeIdentity: runtimeId,
+      manifestRevision: runtime.manifestRevision,
+      artifactRevision: `snapshot-${revision}`,
+      sourceRevision: revision,
+      files,
+    });
+    await this.deployArtifact(runtimeId, projectId, artifact);
   }
 
-  restoreFiles(_runtimeId: string, _projectId: number, _files: RuntimeFile[]): Promise<void> {
-    return this.unavailable("file-restore");
+  restoreFiles(runtimeId: string, projectId: number, files: RuntimeFile[]): Promise<void> {
+    return this.syncFiles(runtimeId, projectId, files);
+  }
+
+  async deployArtifact(
+    runtimeId: string,
+    projectId: number,
+    artifact: RuntimeArtifactDeployment,
+  ): Promise<RuntimeArtifactDeploymentResult> {
+    await this.requireControlFeature("artifact-v1");
+    const locator = await this.locator(runtimeId, projectId);
+    const envelope = runtimeArtifactEnvelopeSchema.parse(artifact.envelope);
+    if (
+      envelope.targetRuntimeIdentity !== runtimeId ||
+      !(await verifyRuntimeArtifactEnvelope(envelope)) ||
+      artifact.chunks.length !== envelope.content.chunks.length
+    ) {
+      throw new CloudflareRuntimeControlError(
+        400,
+        "invalid_artifact",
+        false,
+        "Runtime artifact failed local validation",
+      );
+    }
+    for (let chunkIndex = 0; chunkIndex < artifact.chunks.length; chunkIndex += 1) {
+      const chunk = artifact.chunks[chunkIndex];
+      const isFinal = chunkIndex === artifact.chunks.length - 1;
+      const finalLength =
+        envelope.content.payloadBytes % envelope.content.chunkBytes || envelope.content.chunkBytes;
+      const expectedLength = isFinal ? finalLength : envelope.content.chunkBytes;
+      if (
+        chunk.byteLength !== expectedLength ||
+        (await sha256Hex(chunk)) !== envelope.content.chunks[chunkIndex]
+      ) {
+        throw new CloudflareRuntimeControlError(
+          400,
+          "invalid_artifact",
+          false,
+          "Runtime artifact chunk failed local validation",
+        );
+      }
+    }
+    const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+    const suffix = `/artifacts/${envelope.sealedArtifactSha256}`;
+    await this.request({
+      method: "POST",
+      path: this.path(locator, `${suffix}/begin`),
+      body: { locator, expectedDeploymentVersion, envelope },
+      idempotencyKey: `artifact:${envelope.sealedArtifactSha256}:begin`,
+      parse: beginRuntimeArtifactResponseSchema,
+    });
+    for (let chunkIndex = 0; chunkIndex < artifact.chunks.length; chunkIndex += 1) {
+      await this.requestBytes({
+        method: "PUT",
+        path: this.path(locator, `${suffix}/chunks/${chunkIndex}`),
+        body: artifact.chunks[chunkIndex],
+        idempotencyKey: `artifact:${envelope.sealedArtifactSha256}:chunk:${chunkIndex}`,
+        parse: uploadRuntimeArtifactChunkResponseSchema,
+      });
+    }
+    const result = await this.request({
+      method: "POST",
+      path: this.path(locator, `${suffix}/commit`),
+      body: {
+        locator,
+        expectedDeploymentVersion,
+        sealedArtifactSha256: envelope.sealedArtifactSha256,
+      },
+      idempotencyKey: `artifact:${envelope.sealedArtifactSha256}:commit`,
+      parse: commitRuntimeArtifactResponseSchema,
+    });
+    this.deployedArtifacts.set(runtimeId, {
+      artifactRevision: envelope.artifactRevision,
+      sealedArtifactSha256: envelope.sealedArtifactSha256,
+    });
+    return result;
+  }
+
+  async updateRuntimeManifest(
+    runtimeId: string,
+    projectId: number,
+    input: {
+      expectedManifestRevision: string;
+      manifest: RuntimeManifestContract;
+      restart?: "reject-if-running" | "restart";
+      sealedArtifactSha256?: string;
+    },
+  ): Promise<RuntimeInfo> {
+    await this.requireControlFeature("manifest-update-v1");
+    const locator = await this.locator(runtimeId, projectId);
+    const runtime = await this.descriptorRequest(locator, "PUT", "/manifest", {
+      locator,
+      expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
+      expectedManifestRevision: input.expectedManifestRevision,
+      manifest: input.manifest,
+      restart: input.restart ?? "reject-if-running",
+      ...(input.sealedArtifactSha256 ? { sealedArtifactSha256: input.sealedArtifactSha256 } : {}),
+    });
+    if (input.sealedArtifactSha256 !== undefined) {
+      const deployed = this.deployedArtifacts.get(runtimeId);
+      if (deployed !== undefined)
+        this.deployedArtifacts.set(runtimeId, {
+          ...deployed,
+          sealedArtifactSha256: input.sealedArtifactSha256,
+        });
+    }
+    return toInfo(runtime);
   }
   async updateEnvironment(
     _runtimeId: string,

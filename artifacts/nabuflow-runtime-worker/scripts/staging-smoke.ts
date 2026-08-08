@@ -7,6 +7,7 @@ import {
   signPreviewGrant,
 } from "@workspace/tenant-runtime-contracts";
 import { mintCloudflarePreviewGrant } from "../../api-server/src/lib/cloudflare-preview-grant";
+import { deliverScratchArtifact } from "./artifact-delivery";
 import WebSocket from "ws";
 
 const controlUrl = process.env.CLOUDFLARE_RUNTIME_CONTROL_URL;
@@ -88,16 +89,21 @@ function nonce(label: string): string {
 async function makeSignedRequest(input: {
   path: string;
   method?: string;
-  body?: unknown;
+  body?: unknown | Uint8Array;
   timestampMs?: number;
   nonce: string;
   idempotencyKey?: string;
   signatureOverride?: string;
 }): Promise<Request> {
   const method = input.method ?? "GET";
-  const body = input.body === undefined ? "" : JSON.stringify(input.body);
+  const rawBody =
+    input.body instanceof Uint8Array
+      ? input.body
+      : input.body === undefined
+        ? ""
+        : JSON.stringify(input.body);
   const timestamp = String(input.timestampMs ?? Date.now() + workerClockOffsetMs);
-  const bodySha256 = await sha256Hex(body);
+  const bodySha256 = await sha256Hex(rawBody);
   const idempotencyKey = input.idempotencyKey ?? "";
   const signature =
     input.signatureOverride ??
@@ -111,9 +117,15 @@ async function makeSignedRequest(input: {
     }));
   return new Request(`${controlUrl}${input.path}`, {
     method,
-    body: body || undefined,
+    body:
+      typeof rawBody === "string" ? rawBody || undefined : (rawBody.slice().buffer as ArrayBuffer),
     headers: {
-      ...(body ? { "content-type": "application/json" } : {}),
+      ...(rawBody
+        ? {
+            "content-type":
+              typeof rawBody === "string" ? "application/json" : "application/octet-stream",
+          }
+        : {}),
       "x-nabuflow-timestamp": timestamp,
       "x-nabuflow-nonce": input.nonce,
       "x-nabuflow-body-sha256": bodySha256,
@@ -138,6 +150,30 @@ async function signedFetch(input: Parameters<typeof makeSignedRequest>[0]): Prom
 }> {
   const response = await fetch(await makeSignedRequest(input));
   return { response, body: await readResponse(response) };
+}
+
+async function signedControlFetch(input: Parameters<typeof makeSignedRequest>[0], label: string) {
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const result = await signedFetch({
+      ...input,
+      nonce: attempt === 1 ? input.nonce : nonce(`${label}-retry-${attempt}`),
+    });
+    const code = (result.body as { code?: string } | null)?.code;
+    const retryable =
+      (result.response.status === 401 && code === "invalid_signature") ||
+      result.response.status === 502 ||
+      result.response.status === 503 ||
+      result.response.status === 504;
+    if (!retryable || attempt === 8) return result;
+    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
+    transcript.push({
+      step: `control.retry.${label}`,
+      status: result.response.status,
+      detail: { attempt, backoffMs, code },
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  throw new Error(`${label}: bounded control retry exhausted without a response`);
 }
 
 function assertStatus(step: string, actual: number, expected: number, body: unknown): void {
@@ -330,7 +366,9 @@ async function run(): Promise<void> {
   let replayRequest: Request | null = null;
   let firstReplayResponse: Response | null = null;
   let firstReplayBody: unknown = null;
-  for (let attempt = 1; attempt <= 18; attempt += 1) {
+  let consecutiveSignedProbes = 0;
+  let stableDeploymentVersion = "";
+  for (let attempt = 1; attempt <= 600; attempt += 1) {
     replayRequest = await makeSignedRequest({
       path: "/_nabuflow/control/v1/version",
       nonce: nonce(`replay-${attempt}`),
@@ -338,31 +376,48 @@ async function run(): Promise<void> {
     firstReplayResponse = await fetch(replayRequest.clone());
     firstReplayBody = await readResponse(firstReplayResponse);
     if (firstReplayResponse.status === 200) {
-      transcript.push({
-        step: "auth.key-propagated",
-        status: firstReplayResponse.status,
-        detail: { attempt },
-      });
-      break;
+      const observedVersion =
+        (firstReplayBody as { deploymentVersion?: string }).deploymentVersion ?? "";
+      if (observedVersion && observedVersion === stableDeploymentVersion) {
+        consecutiveSignedProbes += 1;
+      } else {
+        stableDeploymentVersion = observedVersion;
+        consecutiveSignedProbes = observedVersion ? 1 : 0;
+      }
+      if (consecutiveSignedProbes >= 20) {
+        transcript.push({
+          step: "auth.sustained-green",
+          status: firstReplayResponse.status,
+          detail: { attempt, consecutiveSignedProbes, deploymentVersion: observedVersion },
+        });
+        break;
+      }
+    } else {
+      consecutiveSignedProbes = 0;
+      stableDeploymentVersion = "";
     }
-    transcript.push({
-      step: "auth.key-propagation-retry",
-      status: firstReplayResponse.status,
-      detail: { attempt, body: firstReplayBody },
-    });
-    if (firstReplayResponse.status !== 401 || attempt === 18) break;
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
   assertCondition(
     replayRequest !== null && firstReplayResponse !== null,
     "Control-key propagation gate did not issue a request",
   );
+  assertCondition(
+    consecutiveSignedProbes >= 20,
+    "Control-key propagation gate did not reach 20 consecutive signed probes",
+  );
   assertStatus("auth.signed", firstReplayResponse.status, 200, firstReplayBody);
   const replayedResponse = await fetch(replayRequest);
   assertStatus("auth.replayed", replayedResponse.status, 409, await readResponse(replayedResponse));
 
-  const versionBody = firstReplayBody as { deploymentVersion?: string };
+  const versionBody = firstReplayBody as { deploymentVersion?: string; features?: string[] };
   if (!versionBody.deploymentVersion) throw new Error("/version omitted deploymentVersion");
+  if (
+    !versionBody.features?.includes("artifact-v1") ||
+    !versionBody.features.includes("manifest-update-v1")
+  ) {
+    throw new Error("/version omitted loading-dock feature advertisement");
+  }
   deploymentVersion = versionBody.deploymentVersion;
   transcript.push({
     step: "version.propagated",
@@ -422,7 +477,7 @@ async function run(): Promise<void> {
       revision: `smoke-manifest-${Date.now()}`,
       runtime: "node",
       buildCommand: ["node", "--version"],
-      startCommand: ["node", "-e", TENANT_SERVER_SOURCE],
+      startCommand: ["node", "server.cjs"],
       servicePort: 8080,
       healthPath: "/health",
       resourceProfile: "dev",
@@ -430,23 +485,29 @@ async function run(): Promise<void> {
     },
   };
   const ensureKey = `smoke-ensure-${locator.projectId}`;
-  const ensured = await signedFetch({
-    path: runtimePath,
-    method: "PUT",
-    body: ensureRequestBody,
-    nonce: nonce("ensure"),
-    idempotencyKey: ensureKey,
-  });
+  const ensured = await signedControlFetch(
+    {
+      path: runtimePath,
+      method: "PUT",
+      body: ensureRequestBody,
+      nonce: nonce("ensure"),
+      idempotencyKey: ensureKey,
+    },
+    "lifecycle.ensure",
+  );
   assertStatus("lifecycle.ensure", ensured.response.status, 200, ensured.body);
   runtimeEnsured = true;
 
-  const ensuredReplay = await signedFetch({
-    path: runtimePath,
-    method: "PUT",
-    body: ensureRequestBody,
-    nonce: nonce("ensure-replay"),
-    idempotencyKey: ensureKey,
-  });
+  const ensuredReplay = await signedControlFetch(
+    {
+      path: runtimePath,
+      method: "PUT",
+      body: ensureRequestBody,
+      nonce: nonce("ensure-replay"),
+      idempotencyKey: ensureKey,
+    },
+    "lifecycle.ensure-replay",
+  );
   assertStatus(
     "idempotency.response-replay",
     ensuredReplay.response.status,
@@ -458,34 +519,39 @@ async function run(): Promise<void> {
   }
 
   const artifactRevision = `smoke-artifact-${Date.now()}`;
+  const artifact = await deliverScratchArtifact({
+    runtimePath,
+    locator,
+    deploymentVersion,
+    targetRuntimeIdentity: runtimeId,
+    manifestRevision: ensureRequestBody.manifest.revision,
+    artifactRevision,
+    sourceRevision: `smoke-source-${Date.now()}`,
+    serverSource: TENANT_SERVER_SOURCE,
+    send: signedControlFetch,
+  });
   const startBody = {
     locator,
     expectedDeploymentVersion: deploymentVersion,
-    artifactRevision,
-    artifactSha256: await sha256Hex(artifactRevision),
+    artifactRevision: artifact.artifactRevision,
+    artifactSha256: artifact.sealedArtifactSha256,
   };
-  let started: Awaited<ReturnType<typeof signedFetch>> | null = null;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    started = await signedFetch({
+  const started = await signedControlFetch(
+    {
       path: `${runtimePath}/start`,
       method: "POST",
       body: startBody,
-      nonce: nonce(`start-${attempt}`),
+      nonce: nonce("start"),
       idempotencyKey: `smoke-start-${locator.projectId}`,
-    });
-    if (started.response.status === 200) break;
-    transcript.push({
-      step: "lifecycle.start.retry",
-      status: started.response.status,
-      detail: { attempt, body: started.body },
-    });
-    if (started.response.status !== 502 || attempt === 4) break;
-    await new Promise((resolve) => setTimeout(resolve, 2 ** (attempt - 1) * 1_000));
-  }
-  assertCondition(started !== null, "Start retry loop did not issue a request");
+    },
+    "lifecycle.start",
+  );
   assertStatus("lifecycle.start", started.response.status, 200, started.body);
 
-  const status = await signedFetch({ path: runtimePath, nonce: nonce("status") });
+  const status = await signedControlFetch(
+    { path: runtimePath, nonce: nonce("status") },
+    "lifecycle.status",
+  );
   assertStatus("lifecycle.status", status.response.status, 200, status.body);
 
   let previewGrant = await mintCloudflarePreviewGrant(
@@ -697,10 +763,13 @@ async function run(): Promise<void> {
     }
   }
   if (websocket === null) {
-    const diagnosticLogs = await signedFetch({
-      path: `${runtimePath}/logs?limit=100`,
-      nonce: nonce("websocket-diagnostic-logs"),
-    });
+    const diagnosticLogs = await signedControlFetch(
+      {
+        path: `${runtimePath}/logs?limit=100`,
+        nonce: nonce("websocket-diagnostic-logs"),
+      },
+      "preview.websocket.diagnostic-logs",
+    );
     transcript.push({
       step: "preview.websocket.diagnostic-logs",
       status: diagnosticLogs.response.status,
@@ -792,39 +861,45 @@ async function run(): Promise<void> {
     return founderGrant.launchUrl;
   });
 
-  const exec = await signedFetch({
-    path: `${runtimePath}/exec`,
-    method: "POST",
-    body: {
-      locator,
-      argv: ["node", "-e", "console.log('nabuflow-control-plane-ok')"],
-      cwd: "/workspace",
-      timeoutMs: 10_000,
+  const exec = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: ["node", "-e", "console.log('nabuflow-control-plane-ok')"],
+        cwd: "/workspace",
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("exec"),
+      idempotencyKey: `smoke-exec-${locator.projectId}`,
     },
-    nonce: nonce("exec"),
-    idempotencyKey: `smoke-exec-${locator.projectId}`,
-  });
+    "lifecycle.exec",
+  );
   assertStatus("lifecycle.exec", exec.response.status, 200, exec.body);
   if (!JSON.stringify(exec.body).includes("nabuflow-control-plane-ok")) {
     throw new Error("Scratch exec output was not returned");
   }
 
-  const credentialNames = await signedFetch({
-    path: `${runtimePath}/exec`,
-    method: "POST",
-    body: {
-      locator,
-      argv: [
-        "node",
-        "-e",
-        "const names=Object.keys(process.env).filter(k=>/(TOKEN|SECRET|KEY|PASSWORD|DATABASE_URL)/i.test(k));console.log(names.length?names.join(','):'none')",
-      ],
-      cwd: "/workspace",
-      timeoutMs: 10_000,
+  const credentialNames = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          "const names=Object.keys(process.env).filter(k=>/(TOKEN|SECRET|KEY|PASSWORD|DATABASE_URL)/i.test(k));console.log(names.length?names.join(','):'none')",
+        ],
+        cwd: "/workspace",
+        timeoutMs: 10_000,
+      },
+      nonce: nonce("credential-names"),
+      idempotencyKey: `smoke-credential-names-${locator.projectId}`,
     },
-    nonce: nonce("credential-names"),
-    idempotencyKey: `smoke-credential-names-${locator.projectId}`,
-  });
+    "security.container-credential-names",
+  );
   assertStatus(
     "security.container-credential-names",
     credentialNames.response.status,
@@ -832,52 +907,64 @@ async function run(): Promise<void> {
     credentialNames.body,
   );
 
-  const blockedEgress = await signedFetch({
-    path: `${runtimePath}/exec`,
-    method: "POST",
-    body: {
-      locator,
-      argv: [
-        "node",
-        "-e",
-        "fetch('https://www.cloudflare.com').then(async r=>{console.log('status='+r.status);process.exit(r.status===520?0:2)}).catch(e=>{console.error('blocked='+e.name);process.exit(3)})",
-      ],
-      cwd: "/workspace",
-      timeoutMs: 15_000,
+  const blockedEgress = await signedControlFetch(
+    {
+      path: `${runtimePath}/exec`,
+      method: "POST",
+      body: {
+        locator,
+        argv: [
+          "node",
+          "-e",
+          "fetch('https://www.cloudflare.com').then(async r=>{console.log('status='+r.status);process.exit(r.status===520?0:2)}).catch(e=>{console.error('blocked='+e.name);process.exit(3)})",
+        ],
+        cwd: "/workspace",
+        timeoutMs: 15_000,
+      },
+      nonce: nonce("egress"),
+      idempotencyKey: `smoke-egress-${locator.projectId}`,
     },
-    nonce: nonce("egress"),
-    idempotencyKey: `smoke-egress-${locator.projectId}`,
-  });
+    "security.egress",
+  );
   assertStatus("security.egress", blockedEgress.response.status, 200, blockedEgress.body);
   if (!JSON.stringify(blockedEgress.body).includes("status=520")) {
     throw new Error("Non-allowlisted HTTPS egress did not return Cloudflare's 520 block response");
   }
 
-  const logs = await signedFetch({
-    path: `${runtimePath}/logs?limit=100`,
-    nonce: nonce("logs"),
-  });
+  const logs = await signedControlFetch(
+    {
+      path: `${runtimePath}/logs?limit=100`,
+      nonce: nonce("logs"),
+    },
+    "lifecycle.logs",
+  );
   assertStatus("lifecycle.logs", logs.response.status, 200, logs.body);
 
-  const stopped = await signedFetch({
-    path: `${runtimePath}/stop`,
-    method: "POST",
-    body: { locator, reason: "staging smoke test complete" },
-    nonce: nonce("stop"),
-    idempotencyKey: `smoke-stop-${locator.projectId}`,
-  });
+  const stopped = await signedControlFetch(
+    {
+      path: `${runtimePath}/stop`,
+      method: "POST",
+      body: { locator, reason: "staging smoke test complete" },
+      nonce: nonce("stop"),
+      idempotencyKey: `smoke-stop-${locator.projectId}`,
+    },
+    "lifecycle.stop",
+  );
   assertStatus("lifecycle.stop", stopped.response.status, 200, stopped.body);
 }
 
 async function destroyScratchRuntime(): Promise<void> {
   if (!runtimeEnsured) return;
-  const destroyed = await signedFetch({
-    path: runtimePath,
-    method: "DELETE",
-    body: { locator, reason: "mandatory staging smoke cleanup" },
-    nonce: nonce("destroy"),
-    idempotencyKey: `smoke-destroy-${locator.projectId}-${crypto.randomUUID()}`,
-  });
+  const destroyed = await signedControlFetch(
+    {
+      path: runtimePath,
+      method: "DELETE",
+      body: { locator, reason: "mandatory staging smoke cleanup" },
+      nonce: nonce("destroy"),
+      idempotencyKey: `smoke-destroy-${locator.projectId}-${crypto.randomUUID()}`,
+    },
+    "cleanup.destroy",
+  );
   transcript.push({
     step: "cleanup.destroy",
     status: destroyed.response.status,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CONTROL_PROTOCOL_VERSION,
+  CONTROL_FEATURES,
   RUNTIME_ROLES,
   RUNTIME_SLOTS,
   RUNTIME_STATUSES,
@@ -146,6 +147,7 @@ export const versionResponseSchema = z
     deploymentVersion: deploymentVersionSchema,
     provider: z.literal("cloudflare"),
     supportedRoles: z.array(runtimeRoleSchema).min(1),
+    features: z.array(z.enum(CONTROL_FEATURES)),
   })
   .strict();
 

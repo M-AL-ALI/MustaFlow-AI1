@@ -9,7 +9,9 @@ import type {
   RuntimeLogEntry,
   StoredHttpResponse,
   StoredRuntime,
+  StoredRuntimeArtifact,
 } from "./model";
+import { deleteArtifactObjects } from "./artifact-storage";
 
 const IDEMPOTENCY_PENDING_TTL_MS = 10 * 60 * 1_000;
 const IDEMPOTENCY_COMPLETED_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -30,6 +32,10 @@ function runtimeKey(identity: string): string {
 
 function routeKey(hostname: string): string {
   return `route:${hostname}`;
+}
+
+function artifactKey(identity: string, sealedArtifactSha256: string): string {
+  return `artifact:${identity}:${sealedArtifactSha256}`;
 }
 
 async function containerBindingKey(containerId: string): Promise<string> {
@@ -163,8 +169,110 @@ export class ControlDurableObject
     await this.ctx.storage.put(runtimeKey(identity), runtime);
   }
 
+  async putRuntimeIfManifestRevision(
+    identity: string,
+    expectedManifestRevision: string,
+    runtime: StoredRuntime,
+  ): Promise<"updated" | "not_found" | "conflict"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = runtimeKey(identity);
+      const existing = await transaction.get<StoredRuntime>(key);
+      if (existing === undefined) return "not_found" as const;
+      if (existing.manifest.revision !== expectedManifestRevision) return "conflict" as const;
+      await transaction.put(key, runtime);
+      return "updated" as const;
+    });
+  }
+
   async deleteRuntime(identity: string): Promise<void> {
     await this.ctx.storage.delete(runtimeKey(identity));
+  }
+
+  async beginArtifact(record: StoredRuntimeArtifact): Promise<"created" | "exists" | "conflict"> {
+    const key = artifactKey(record.runtimeIdentity, record.envelope.sealedArtifactSha256);
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const existing = await transaction.get<StoredRuntimeArtifact>(key);
+      if (existing !== undefined) {
+        return existing.envelope.contentSha256 === record.envelope.contentSha256 &&
+          existing.envelope.manifestRevision === record.envelope.manifestRevision
+          ? ("exists" as const)
+          : ("conflict" as const);
+      }
+      await transaction.put(key, record);
+      return "created" as const;
+    });
+    if (result === "created" && record.expiresAtMs !== null) {
+      await this.scheduleCleanup(this.ctx.storage, record.expiresAtMs);
+    }
+    return result;
+  }
+
+  async getArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeArtifact | null> {
+    return (
+      (await this.ctx.storage.get<StoredRuntimeArtifact>(
+        artifactKey(identity, sealedArtifactSha256),
+      )) ?? null
+    );
+  }
+
+  async recordArtifactChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = artifactKey(identity, sealedArtifactSha256);
+      const artifact = await transaction.get<StoredRuntimeArtifact>(key);
+      if (artifact === undefined || artifact.state !== "pending") return "not_found" as const;
+      if (chunkIndex < 0 || chunkIndex >= artifact.receivedChunks.length)
+        return "conflict" as const;
+      const current = artifact.receivedChunks[chunkIndex];
+      if (current !== null) return current === chunkSha256 ? "replay" : "conflict";
+      if (artifact.envelope.content.chunks[chunkIndex] !== chunkSha256) return "conflict" as const;
+      artifact.receivedChunks[chunkIndex] = chunkSha256;
+      await transaction.put(key, artifact);
+      return "recorded" as const;
+    });
+  }
+
+  async commitArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<"committed" | "incomplete" | "not_found"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = artifactKey(identity, sealedArtifactSha256);
+      const artifact = await transaction.get<StoredRuntimeArtifact>(key);
+      if (artifact === undefined) return "not_found" as const;
+      if (artifact.receivedChunks.some((chunk) => chunk === null)) return "incomplete" as const;
+      artifact.state = "committed";
+      artifact.expiresAtMs = null;
+      await transaction.put(key, artifact);
+      return "committed" as const;
+    });
+  }
+
+  async removeArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeArtifact | null> {
+    const key = artifactKey(identity, sealedArtifactSha256);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const artifact = await transaction.get<StoredRuntimeArtifact>(key);
+      if (artifact === undefined) return null;
+      await transaction.delete(key);
+      return artifact;
+    });
+  }
+
+  async listArtifacts(identity: string): Promise<StoredRuntimeArtifact[]> {
+    const records = await this.ctx.storage.list<StoredRuntimeArtifact>({
+      prefix: `artifact:${identity}:`,
+    });
+    return [...records.values()];
   }
 
   async bindContainer(containerId: string, identity: string): Promise<void> {
@@ -284,6 +392,25 @@ export class ControlDurableObject
       if (expired.length > 0) await this.ctx.storage.delete(expired);
       if (nextExpiry !== null) await this.scheduleCleanup(this.ctx.storage, nextExpiry);
     }
+    const artifacts = await this.ctx.storage.list<StoredRuntimeArtifact>({ prefix: "artifact:" });
+    let nextArtifactExpiry: number | null = null;
+    for (const [key, artifact] of artifacts) {
+      if (
+        artifact.state === "pending" &&
+        artifact.expiresAtMs !== null &&
+        artifact.expiresAtMs <= nowMs
+      ) {
+        await deleteArtifactObjects(this.env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
+        await this.ctx.storage.delete(key);
+      } else if (artifact.expiresAtMs !== null) {
+        nextArtifactExpiry =
+          nextArtifactExpiry === null
+            ? artifact.expiresAtMs
+            : Math.min(nextArtifactExpiry, artifact.expiresAtMs);
+      }
+    }
+    if (nextArtifactExpiry !== null)
+      await this.scheduleCleanup(this.ctx.storage, nextArtifactExpiry);
   }
 
   private appendLogEntries(

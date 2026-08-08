@@ -17,6 +17,7 @@ import type {
   RuntimeLogEntry,
   StoredHttpResponse,
   StoredRuntime,
+  StoredRuntimeArtifact,
 } from "../src/model";
 import type {
   BackendExecResult,
@@ -38,6 +39,7 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly runtimes = new Map<string, StoredRuntime>();
   readonly routes = new Map<string, RouteRecord>();
   readonly containerBindings = new Map<string, string>();
+  readonly artifacts = new Map<string, StoredRuntimeArtifact>();
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
     if (this.nonces.has(nonce)) return false;
@@ -94,8 +96,89 @@ export class MemoryCoordinator implements ControlCoordinator {
     this.runtimes.set(identity, structuredClone(runtime));
   }
 
+  async putRuntimeIfManifestRevision(
+    identity: string,
+    expectedManifestRevision: string,
+    runtime: StoredRuntime,
+  ): Promise<"updated" | "not_found" | "conflict"> {
+    const existing = this.runtimes.get(identity);
+    if (existing === undefined) return "not_found";
+    if (existing.manifest.revision !== expectedManifestRevision) return "conflict";
+    this.runtimes.set(identity, structuredClone(runtime));
+    return "updated";
+  }
+
   async deleteRuntime(identity: string): Promise<void> {
     this.runtimes.delete(identity);
+  }
+
+  async beginArtifact(record: StoredRuntimeArtifact): Promise<"created" | "exists" | "conflict"> {
+    const key = `${record.runtimeIdentity}:${record.envelope.sealedArtifactSha256}`;
+    const existing = this.artifacts.get(key);
+    if (existing !== undefined) {
+      return existing.envelope.contentSha256 === record.envelope.contentSha256 &&
+        existing.envelope.manifestRevision === record.envelope.manifestRevision
+        ? "exists"
+        : "conflict";
+    }
+    this.artifacts.set(key, structuredClone(record));
+    return "created";
+  }
+
+  async getArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeArtifact | null> {
+    return structuredClone(this.artifacts.get(`${identity}:${sealedArtifactSha256}`) ?? null);
+  }
+
+  async recordArtifactChunk(
+    identity: string,
+    sealedArtifactSha256: string,
+    chunkIndex: number,
+    chunkSha256: string,
+  ): Promise<"recorded" | "replay" | "not_found" | "conflict"> {
+    const key = `${identity}:${sealedArtifactSha256}`;
+    const artifact = this.artifacts.get(key);
+    if (artifact === undefined || artifact.state !== "pending") return "not_found";
+    if (chunkIndex < 0 || chunkIndex >= artifact.receivedChunks.length) return "conflict";
+    const current = artifact.receivedChunks[chunkIndex];
+    if (current !== null) return current === chunkSha256 ? "replay" : "conflict";
+    if (artifact.envelope.content.chunks[chunkIndex] !== chunkSha256) return "conflict";
+    artifact.receivedChunks[chunkIndex] = chunkSha256;
+    return "recorded";
+  }
+
+  async commitArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<"committed" | "incomplete" | "not_found"> {
+    const artifact = this.artifacts.get(`${identity}:${sealedArtifactSha256}`);
+    if (artifact === undefined) return "not_found";
+    if (artifact.receivedChunks.some((chunk) => chunk === null)) return "incomplete";
+    artifact.state = "committed";
+    artifact.expiresAtMs = null;
+    return "committed";
+  }
+
+  async removeArtifact(
+    identity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredRuntimeArtifact | null> {
+    const key = `${identity}:${sealedArtifactSha256}`;
+    const artifact = this.artifacts.get(key);
+    if (artifact === undefined) return null;
+    this.artifacts.delete(key);
+    return structuredClone(artifact);
+  }
+
+  async listArtifacts(identity: string): Promise<StoredRuntimeArtifact[]> {
+    const records: StoredRuntimeArtifact[] = [];
+    for (const artifact of this.artifacts.values()) {
+      if (artifact.runtimeIdentity !== identity) continue;
+      records.push(structuredClone(artifact));
+    }
+    return records;
   }
 
   async bindContainer(containerId: string, identity: string): Promise<void> {
@@ -198,6 +281,7 @@ export class MockBackend implements RuntimeBackend {
   stops = 0;
   destroys = 0;
   execs = 0;
+  materializations = 0;
   processLogs = { stdout: "server ready\n", stderr: "" };
 
   async start(_runtime: StoredRuntime): Promise<BackendStartResult> {
@@ -230,6 +314,58 @@ export class MockBackend implements RuntimeBackend {
 
   async logs(_runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }> {
     return this.processLogs;
+  }
+
+  async materialize(
+    _runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+  ): Promise<{ filesWritten: number }> {
+    this.materializations += 1;
+    return { filesWritten: artifact.envelope.content.files.length };
+  }
+}
+
+export class MemoryR2Bucket {
+  readonly objects = new Map<string, Uint8Array>();
+
+  async put(key: string, value: ArrayBuffer | ArrayBufferView | string): Promise<unknown> {
+    const bytes =
+      typeof value === "string"
+        ? new TextEncoder().encode(value)
+        : value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    this.objects.set(key, new Uint8Array(bytes));
+    return {};
+  }
+
+  async get(
+    key: string,
+    options?: { range?: { offset: number; length: number } },
+  ): Promise<{
+    body: ReadableStream<Uint8Array>;
+    arrayBuffer(): Promise<ArrayBuffer>;
+  } | null> {
+    const stored = this.objects.get(key);
+    if (stored === undefined) return null;
+    const offset = options?.range?.offset ?? 0;
+    const length = options?.range?.length ?? stored.byteLength - offset;
+    const bytes = stored.slice(offset, offset + length);
+    return {
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+      async arrayBuffer() {
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      },
+    };
+  }
+
+  async delete(keys: string | string[]): Promise<void> {
+    for (const key of typeof keys === "string" ? [keys] : keys) this.objects.delete(key);
   }
 }
 
@@ -460,6 +596,7 @@ export class MemoryCapabilityVault implements CapabilityVault {
 }
 
 export function fakeEnv(): WorkerBindings {
+  const artifactBucket = new MemoryR2Bucket();
   return {
     CF_VERSION_METADATA: {
       id: "worker-version-test-1",
@@ -472,6 +609,7 @@ export function fakeEnv(): WorkerBindings {
     CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: "test-public-key",
     NABUFLOW_RUNTIME_SLEEP_AFTER: "10m",
     NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID: "v1",
+    NABUFLOW_RUNTIME_ARTIFACTS: artifactBucket as unknown as R2Bucket,
     NABUFLOW_SANDBOX: {
       idFromName(identity: string) {
         return { toString: () => `container:${identity}` };
@@ -513,6 +651,39 @@ export async function signedRequest(input: {
       "x-nabuflow-body-sha256": bodySha256,
       "x-nabuflow-signature": signature,
       ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+    },
+  });
+}
+
+export async function signedRawRequest(input: {
+  path: string;
+  method: string;
+  body: Uint8Array;
+  timestamp?: number;
+  nonce: string;
+  idempotencyKey: string;
+  secret?: string;
+}): Promise<Request> {
+  const timestamp = String(input.timestamp ?? TEST_NOW_MS);
+  const bodySha256 = await sha256Hex(input.body);
+  const signature = await signControlRequest(input.secret ?? TEST_SECRET, {
+    method: input.method,
+    pathAndQuery: input.path,
+    timestamp,
+    nonce: input.nonce,
+    bodySha256,
+    idempotencyKey: input.idempotencyKey,
+  });
+  return new Request(`https://runtime.example${input.path}`, {
+    method: input.method,
+    body: input.body.slice().buffer as ArrayBuffer,
+    headers: {
+      "content-type": "application/octet-stream",
+      "x-nabuflow-timestamp": timestamp,
+      "x-nabuflow-nonce": input.nonce,
+      "x-nabuflow-body-sha256": bodySha256,
+      "x-nabuflow-signature": signature,
+      "idempotency-key": input.idempotencyKey,
     },
   });
 }

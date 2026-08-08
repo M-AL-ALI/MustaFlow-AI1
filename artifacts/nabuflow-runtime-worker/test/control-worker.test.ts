@@ -4,7 +4,7 @@ import {
   sha256Hex,
   signControlRequest,
 } from "@workspace/tenant-runtime-contracts";
-import type { StoredRuntime } from "../src/model";
+import type { StoredRuntime, StoredRuntimeArtifact } from "../src/model";
 import { handleControlRequest, handleWorkerRequest } from "../src/worker";
 import {
   MemoryCoordinator,
@@ -498,6 +498,34 @@ describe("authenticated staging control plane", () => {
       ).status,
     ).toBe(200);
 
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      ...ensureBody().locator,
+    });
+    const artifactSha256 = "a".repeat(64);
+    coordinator.artifacts.set(`${identity}:${artifactSha256}`, {
+      runtimeIdentity: identity,
+      state: "committed",
+      receivedChunks: [],
+      expiresAtMs: null,
+      envelope: {
+        content: {
+          format: "nabu-artifact/v1",
+          payloadBytes: 0,
+          chunkBytes: 1024 * 1024,
+          chunks: [],
+          files: [],
+        },
+        contentSha256: "b".repeat(64),
+        sealedArtifactSha256: artifactSha256,
+        targetRuntimeIdentity: identity,
+        manifestRevision: "manifest-1",
+        artifactRevision: "artifact-1",
+        sourceRevision: "source-lifecycle",
+        scan: { policyVersion: "nabu-secret-scan/v1", zeroMatches: true },
+      },
+    } satisfies StoredRuntimeArtifact);
+
     const start = await send({
       path: `${base}/start`,
       method: "POST",
@@ -506,7 +534,7 @@ describe("authenticated staging control plane", () => {
         locator: ensureBody().locator,
         expectedDeploymentVersion: "worker-version-test-1",
         artifactRevision: "artifact-1",
-        artifactSha256: "a".repeat(64),
+        artifactSha256,
       },
     });
     expect(start.status).toBe(200);

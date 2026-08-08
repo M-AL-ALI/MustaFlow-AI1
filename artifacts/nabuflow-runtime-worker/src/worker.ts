@@ -1,11 +1,22 @@
 import {
   CONTROL_PROTOCOL_VERSION,
+  CONTROL_FEATURES,
+  MAX_RUNTIME_ARTIFACT_BYTES,
+  MAX_RUNTIME_ARTIFACT_FILE_BYTES,
+  MAX_RUNTIME_ARTIFACT_FILES,
+  MAX_RUNTIME_ARTIFACT_MANIFEST_BYTES,
+  RUNTIME_ARTIFACT_CHUNK_BYTES,
+  RUNTIME_ARTIFACT_PENDING_TTL_MS,
   RUNTIME_ROLES,
   activateRouteRequestSchema,
   activateRouteResponseSchema,
   capabilityProvisionResponseSchema,
   capabilityRevokeResponseSchema,
   capabilityBindingResponseSchema,
+  beginRuntimeArtifactRequestSchema,
+  beginRuntimeArtifactResponseSchema,
+  commitRuntimeArtifactRequestSchema,
+  commitRuntimeArtifactResponseSchema,
   controlErrorResponseSchema,
   deactivateRouteRequestSchema,
   deactivateRouteResponseSchema,
@@ -19,6 +30,8 @@ import {
   logsRuntimeRequestSchema,
   logsRuntimeResponseSchema,
   parseRuntimeIdentityForNamespace,
+  removeRuntimeArtifactRequestSchema,
+  removeRuntimeArtifactResponseSchema,
   provisionDatabaseCapabilityRequestSchema,
   provisionEchoCapabilityRequestSchema,
   provisionStripeCapabilityRequestSchema,
@@ -33,10 +46,15 @@ import {
   stopRuntimeRequestSchema,
   stopRuntimeResponseSchema,
   verifyControlRequestSignature,
+  verifyRuntimeArtifactEnvelope,
   versionResponseSchema,
+  updateRuntimeManifestRequestSchema,
+  uploadRuntimeArtifactChunkResponseSchema,
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
+  BeginRuntimeArtifactRequest,
+  CommitRuntimeArtifactRequest,
   ProvisionDatabaseCapabilityRequest,
   ProvisionEchoCapabilityRequest,
   ProvisionStripeCapabilityRequest,
@@ -49,9 +67,11 @@ import type {
   ExecRuntimeRequest,
   LogsRuntimeRequest,
   RuntimeLocator,
+  RemoveRuntimeArtifactRequest,
   StartRuntimeRequest,
   StatusRuntimeRequest,
   StopRuntimeRequest,
+  UpdateRuntimeManifestRequest,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVaultDurableObject } from "./capability-vault-durable-object";
@@ -62,7 +82,9 @@ import type {
   ControlCoordinator,
   StoredHttpResponse,
   StoredRuntime,
+  StoredRuntimeArtifact,
 } from "./model";
+import { artifactChunkKey, deleteArtifactObjects } from "./artifact-storage";
 import { handlePublishedDataPlaneRequest } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
@@ -83,6 +105,11 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "databaseCapabilityRevoke",
   "stripeCapabilityProvision",
   "stripeCapabilityRevoke",
+  "artifactBegin",
+  "artifactChunk",
+  "artifactCommit",
+  "artifactRemove",
+  "manifestUpdate",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -111,13 +138,20 @@ type Endpoint =
   | "databaseCapabilityRevoke"
   | "stripeCapabilityProvision"
   | "stripeCapabilityRevoke"
-  | "capabilityBinding";
+  | "capabilityBinding"
+  | "artifactBegin"
+  | "artifactChunk"
+  | "artifactCommit"
+  | "artifactRemove"
+  | "manifestUpdate";
 
 interface MatchedRoute {
   endpoint: Endpoint;
   locator: RuntimeLocator | null;
   hostname?: string;
   capability?: { projectId: number; provider: string; name: string };
+  artifactSha256?: string;
+  chunkIndex?: number;
 }
 
 interface WorkerDependencies {
@@ -257,7 +291,7 @@ export async function handleControlRequest(
 
   context.stage = "body_read";
   try {
-    rawBody = await readCappedBody(request, MAX_REQUEST_BYTES);
+    rawBody = await readCappedBody(request, requestBodyLimit(url.pathname));
   } catch (error) {
     if (error instanceof RequestTooLargeError) {
       return errorResponse(
@@ -278,6 +312,18 @@ export async function handleControlRequest(
   }
 
   context.stage = "authentication";
+  if (
+    typeof env.CLOUDFLARE_RUNTIME_CONTROL_TOKEN !== "string" ||
+    env.CLOUDFLARE_RUNTIME_CONTROL_TOKEN.length < 32
+  ) {
+    return errorResponse(
+      503,
+      "control_configuration_unavailable",
+      "The staging control plane is not configured",
+      false,
+      requestId,
+    );
+  }
   const signed = readSignedRequest(request, pathAndQuery, rawBody);
   if (signed === null) {
     return errorResponse(
@@ -419,6 +465,7 @@ export async function handleControlRequest(
       coordinator,
       backend,
       dependencies.vault,
+      route,
     );
     validateResponse(route.endpoint, result.body);
     if (needsIdempotency && idempotencyFingerprint !== null) {
@@ -435,29 +482,54 @@ export async function handleControlRequest(
     );
     return jsonResponse(result.status, result.body);
   } catch (error) {
+    if (!(error instanceof ControlHttpError)) {
+      // Keep unexpected control failures diagnosable without emitting request or artifact content.
+      // eslint-disable-next-line no-console -- metadata-only trace for the top-level boundary
+      console.error(
+        JSON.stringify({
+          event: "control_endpoint_unexpected_error",
+          requestId,
+          endpoint: route.endpoint,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+    }
     const controlError = toControlError(error);
     if (needsIdempotency && idempotencyFingerprint !== null) {
-      if (controlError.status >= 500) {
-        await coordinator.abandonIdempotency(idempotencyKey, idempotencyFingerprint);
-      } else {
-        const body = errorBody(controlError, requestId);
-        await coordinator.completeIdempotency(
-          idempotencyKey,
-          idempotencyFingerprint,
-          { status: controlError.status, body },
-          nowMs,
+      try {
+        if (controlError.status >= 500) {
+          await coordinator.abandonIdempotency(idempotencyKey, idempotencyFingerprint);
+        } else {
+          const body = errorBody(controlError, requestId);
+          await coordinator.completeIdempotency(
+            idempotencyKey,
+            idempotencyFingerprint,
+            { status: controlError.status, body },
+            nowMs,
+          );
+        }
+      } catch (finalizationError) {
+        logControlErrorFinalizationFailure(
+          requestId,
+          route.endpoint,
+          "idempotency",
+          finalizationError,
         );
       }
     }
-    await recordAudit(
-      coordinator,
-      requestId,
-      request.method,
-      route.endpoint,
-      route.locator,
-      controlError,
-      route.capability?.projectId,
-    );
+    try {
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        route.endpoint,
+        route.locator,
+        controlError,
+        route.capability?.projectId,
+      );
+    } catch (finalizationError) {
+      logControlErrorFinalizationFailure(requestId, route.endpoint, "audit", finalizationError);
+    }
     return errorResponse(
       controlError.status,
       controlError.code,
@@ -470,6 +542,11 @@ export async function handleControlRequest(
 
 type ControlInput =
   | Record<string, never>
+  | Uint8Array
+  | BeginRuntimeArtifactRequest
+  | CommitRuntimeArtifactRequest
+  | RemoveRuntimeArtifactRequest
+  | UpdateRuntimeManifestRequest
   | ActivateRouteRequest
   | DeactivateRouteRequest
   | EnsureRuntimeRequest
@@ -556,6 +633,47 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     }
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
+  const artifactMatch = new RegExp(
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/artifacts/([0-9a-f]{64})(?:/(begin|commit|chunks/([0-9]+)))?$`,
+  ).exec(pathname);
+  if (artifactMatch) {
+    const locator = {
+      projectId: Number(artifactMatch[1]),
+      role: artifactMatch[2] as RuntimeLocator["role"],
+      slot: artifactMatch[3] as RuntimeLocator["slot"],
+    };
+    const artifactSha256 = artifactMatch[4];
+    const suffix = artifactMatch[5];
+    if (method === "POST" && suffix === "begin")
+      return { endpoint: "artifactBegin", locator, artifactSha256 };
+    if (method === "POST" && suffix === "commit")
+      return { endpoint: "artifactCommit", locator, artifactSha256 };
+    if (method === "PUT" && suffix?.startsWith("chunks/") && artifactMatch[6] !== undefined)
+      return {
+        endpoint: "artifactChunk",
+        locator,
+        artifactSha256,
+        chunkIndex: Number(artifactMatch[6]),
+      };
+    if (method === "DELETE" && suffix === undefined)
+      return { endpoint: "artifactRemove", locator, artifactSha256 };
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
+  const manifestMatch = new RegExp(
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/manifest$`,
+  ).exec(pathname);
+  if (manifestMatch) {
+    if (method !== "PUT")
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    return {
+      endpoint: "manifestUpdate",
+      locator: {
+        projectId: Number(manifestMatch[1]),
+        role: manifestMatch[2] as RuntimeLocator["role"],
+        slot: manifestMatch[3] as RuntimeLocator["slot"],
+      },
+    };
+  }
   const match = new RegExp(
     `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|stop|exec|logs|capability-binding))?$`,
   ).exec(pathname);
@@ -629,6 +747,13 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     return parseStrict(logsRuntimeRequestSchema, raw);
   }
 
+  if (route.endpoint === "artifactChunk") {
+    assertNoQuery(url);
+    if (rawBody.byteLength === 0)
+      throw new ControlHttpError(400, "invalid_request", "Artifact chunk body is required");
+    return rawBody;
+  }
+
   assertNoQuery(url);
   const body = parseJsonBody(rawBody);
   if (
@@ -636,7 +761,11 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     route.endpoint !== "start" &&
     route.endpoint !== "stop" &&
     route.endpoint !== "destroy" &&
-    route.endpoint !== "exec"
+    route.endpoint !== "exec" &&
+    route.endpoint !== "artifactBegin" &&
+    route.endpoint !== "artifactCommit" &&
+    route.endpoint !== "artifactRemove" &&
+    route.endpoint !== "manifestUpdate"
   ) {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
@@ -735,18 +864,59 @@ function parseRouteInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Co
 }
 
 function parseMutationInput(
-  endpoint: "ensure" | "start" | "stop" | "destroy" | "exec",
+  endpoint:
+    | "ensure"
+    | "start"
+    | "stop"
+    | "destroy"
+    | "exec"
+    | "artifactBegin"
+    | "artifactCommit"
+    | "artifactRemove"
+    | "manifestUpdate",
   body: unknown,
 ):
   | EnsureRuntimeRequest
   | StartRuntimeRequest
   | StopRuntimeRequest
   | DestroyRuntimeRequest
-  | ExecRuntimeRequest {
+  | ExecRuntimeRequest
+  | BeginRuntimeArtifactRequest
+  | CommitRuntimeArtifactRequest
+  | RemoveRuntimeArtifactRequest
+  | UpdateRuntimeManifestRequest {
   if (endpoint === "ensure") return parseStrict(ensureRuntimeRequestSchema, body);
   if (endpoint === "start") return parseStrict(startRuntimeRequestSchema, body);
   if (endpoint === "stop") return parseStrict(stopRuntimeRequestSchema, body);
   if (endpoint === "destroy") return parseStrict(destroyRuntimeRequestSchema, body);
+  if (endpoint === "artifactBegin") {
+    const result = beginRuntimeArtifactRequestSchema.safeParse(body);
+    if (!result.success) {
+      const content = (body as { envelope?: { content?: Record<string, unknown> } } | null)
+        ?.envelope?.content;
+      const files = content?.files;
+      const exceedsDeclaredLimit =
+        (typeof content?.payloadBytes === "number" &&
+          content.payloadBytes > MAX_RUNTIME_ARTIFACT_BYTES) ||
+        (Array.isArray(files) && files.length > MAX_RUNTIME_ARTIFACT_FILES) ||
+        (Array.isArray(files) &&
+          files.some(
+            (file) =>
+              typeof file === "object" &&
+              file !== null &&
+              typeof (file as { size?: unknown }).size === "number" &&
+              (file as { size: number }).size > MAX_RUNTIME_ARTIFACT_FILE_BYTES,
+          ));
+      if (exceedsDeclaredLimit) {
+        throw new ControlHttpError(413, "artifact_too_large", "Artifact exceeds staging limits");
+      }
+      return parseStrict(beginRuntimeArtifactRequestSchema, body);
+    }
+    return result.data;
+  }
+  if (endpoint === "artifactCommit") return parseStrict(commitRuntimeArtifactRequestSchema, body);
+  if (endpoint === "artifactRemove") return parseStrict(removeRuntimeArtifactRequestSchema, body);
+  if (endpoint === "manifestUpdate") return parseStrict(updateRuntimeManifestRequestSchema, body);
   return parseStrict(execRuntimeRequestSchema, body);
 }
 
@@ -757,7 +927,9 @@ async function executeEndpoint(
   coordinator: ControlCoordinator,
   backend: RuntimeBackend,
   injectedVault?: CapabilityVault,
+  matchedRoute?: MatchedRoute,
 ): Promise<StoredHttpResponse> {
+  assertArtifactInfrastructure(env);
   const deploymentVersion = env.CF_VERSION_METADATA.id;
   if (endpoint === "version") {
     return {
@@ -767,6 +939,7 @@ async function executeEndpoint(
         deploymentVersion,
         provider: "cloudflare",
         supportedRoles: [...RUNTIME_ROLES],
+        features: [...CONTROL_FEATURES],
       },
     };
   }
@@ -906,11 +1079,296 @@ async function executeEndpoint(
     };
   }
 
-  const locator = (input as { locator: RuntimeLocator }).locator;
+  const locator = matchedRoute?.locator ?? (input as { locator: RuntimeLocator }).locator;
+  if (locator === null) {
+    throw new ControlHttpError(400, "invalid_request", "Runtime locator is required");
+  }
   const identity = await deriveRuntimeIdentity({
     namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
     ...locator,
   });
+  if (endpoint === "artifactBegin") {
+    const request = input as BeginRuntimeArtifactRequest;
+    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    if (
+      matchedRoute?.artifactSha256 !== request.envelope.sealedArtifactSha256 ||
+      request.envelope.targetRuntimeIdentity !== identity
+    ) {
+      throw artifactRuntimeMismatch();
+    }
+    if (!(await verifyRuntimeArtifactEnvelope(request.envelope))) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Artifact integrity verification failed",
+      );
+    }
+    await requireRuntime(coordinator, identity);
+    const record: StoredRuntimeArtifact = {
+      runtimeIdentity: identity,
+      envelope: request.envelope,
+      state: "pending",
+      receivedChunks: request.envelope.content.chunks.map(() => null),
+      expiresAtMs: Date.now() + RUNTIME_ARTIFACT_PENDING_TTL_MS,
+    };
+    const result = await coordinator.beginArtifact(record);
+    if (result === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "artifact_conflict",
+        "Artifact address is already bound to different metadata",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        sealedArtifactSha256: request.envelope.sealedArtifactSha256,
+        chunksExpected: request.envelope.content.chunks.length,
+      },
+    };
+  }
+  if (endpoint === "artifactChunk") {
+    if (
+      matchedRoute?.artifactSha256 === undefined ||
+      matchedRoute.chunkIndex === undefined ||
+      !(input instanceof Uint8Array)
+    ) {
+      throw new ControlHttpError(400, "invalid_request", "Artifact chunk route is incomplete");
+    }
+    const artifact = await coordinator.getArtifact(identity, matchedRoute.artifactSha256);
+    if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    const chunkIndex = matchedRoute.chunkIndex;
+    const isFinal = chunkIndex === artifact.envelope.content.chunks.length - 1;
+    const finalLength =
+      artifact.envelope.content.payloadBytes % artifact.envelope.content.chunkBytes ||
+      artifact.envelope.content.chunkBytes;
+    const expectedLength = isFinal ? finalLength : artifact.envelope.content.chunkBytes;
+    if (
+      chunkIndex >= artifact.envelope.content.chunks.length ||
+      input.byteLength !== expectedLength
+    ) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Artifact chunk does not match the sealed envelope",
+      );
+    }
+    const chunkSha256 = await sha256Hex(input);
+    if (chunkSha256 !== artifact.envelope.content.chunks[chunkIndex]) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Artifact chunk does not match the sealed envelope",
+      );
+    }
+    await env.NABUFLOW_RUNTIME_ARTIFACTS.put(
+      artifactChunkKey(identity, artifact.envelope.sealedArtifactSha256, chunkIndex),
+      input.slice().buffer,
+    );
+    const recorded = await coordinator.recordArtifactChunk(
+      identity,
+      artifact.envelope.sealedArtifactSha256,
+      chunkIndex,
+      chunkSha256,
+    );
+    if (recorded === "not_found") throw artifactRuntimeMismatch();
+    if (recorded === "conflict") {
+      throw new ControlHttpError(409, "artifact_chunk_conflict", "Artifact chunk conflicts");
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        chunkIndex,
+      },
+    };
+  }
+  if (endpoint === "artifactCommit") {
+    const request = input as CommitRuntimeArtifactRequest;
+    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    if (matchedRoute?.artifactSha256 !== request.sealedArtifactSha256)
+      throw artifactRuntimeMismatch();
+    const artifact = await coordinator.getArtifact(identity, request.sealedArtifactSha256);
+    if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    const commit = await coordinator.commitArtifact(identity, request.sealedArtifactSha256);
+    if (commit === "incomplete") {
+      await deleteArtifactObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
+      await coordinator.removeArtifact(identity, request.sealedArtifactSha256);
+      throw new ControlHttpError(409, "artifact_incomplete", "Artifact upload is incomplete");
+    }
+    if (commit === "not_found") throw artifactRuntimeMismatch();
+    const runtime = await requireRuntime(coordinator, identity);
+    const materialized = artifact.envelope.manifestRevision === runtime.manifest.revision;
+    let filesWritten = 0;
+    if (materialized) {
+      const result = await backend.materialize(runtime, artifact);
+      filesWritten = result.filesWritten;
+      runtime.artifactRevision = artifact.envelope.artifactRevision;
+      runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
+      await coordinator.putRuntime(identity, runtime);
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        contentSha256: artifact.envelope.contentSha256,
+        filesWritten,
+        materialized,
+      },
+    };
+  }
+  if (endpoint === "artifactRemove") {
+    const request = input as RemoveRuntimeArtifactRequest;
+    if (matchedRoute?.artifactSha256 !== request.sealedArtifactSha256)
+      throw artifactRuntimeMismatch();
+    const runtime = await coordinator.getRuntime(identity);
+    if (
+      runtime !== null &&
+      (runtime.descriptor.status === "running" || runtime.descriptor.status === "starting") &&
+      runtime.artifactSha256 === request.sealedArtifactSha256
+    ) {
+      throw new ControlHttpError(
+        409,
+        "runtime_busy",
+        "Stop the runtime before removing its artifact",
+      );
+    }
+    const artifact = await coordinator.getArtifact(identity, request.sealedArtifactSha256);
+    if (artifact === null) throw artifactRuntimeMismatch();
+    await deleteArtifactObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
+    await coordinator.removeArtifact(identity, request.sealedArtifactSha256);
+    return { status: 200, body: { ok: true } };
+  }
+  if (endpoint === "manifestUpdate") {
+    const request = input as UpdateRuntimeManifestRequest;
+    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    const runtime = await requireRuntime(coordinator, identity);
+    if (runtime.descriptor.status === "starting") {
+      throw new ControlHttpError(
+        409,
+        "runtime_busy",
+        "Runtime manifest update is already in progress",
+        true,
+      );
+    }
+    if (runtime.manifest.revision !== request.expectedManifestRevision) {
+      throw new ControlHttpError(
+        409,
+        "manifest_revision_conflict",
+        "Runtime manifest revision changed before update",
+      );
+    }
+    if (
+      runtime.manifest.resourceProfile !== request.manifest.resourceProfile ||
+      runtime.manifest.public !== request.manifest.public
+    ) {
+      throw new ControlHttpError(
+        400,
+        "manifest_immutable_field",
+        "Manifest update attempted to change an immutable field",
+      );
+    }
+    const wasRunning = runtime.descriptor.status === "running";
+    if (wasRunning && request.restart !== "restart") {
+      throw new ControlHttpError(
+        409,
+        "runtime_busy",
+        "Explicit restart is required to update a running runtime",
+        true,
+      );
+    }
+    let restartArtifact: StoredRuntimeArtifact | null = null;
+    if (wasRunning) {
+      if (request.sealedArtifactSha256 === undefined) {
+        throw new ControlHttpError(
+          409,
+          "artifact_not_committed",
+          "A committed artifact for the next manifest is required",
+        );
+      }
+      restartArtifact = await coordinator.getArtifact(identity, request.sealedArtifactSha256);
+      if (
+        restartArtifact === null ||
+        restartArtifact.state !== "committed" ||
+        restartArtifact.envelope.manifestRevision !== request.manifest.revision
+      ) {
+        throw new ControlHttpError(
+          409,
+          "artifact_not_committed",
+          "A committed artifact for the next manifest is required",
+        );
+      }
+      const unbound = await coordinator.unbindContainer(
+        runtimeContainerId(env, identity),
+        identity,
+      );
+      if (!unbound) {
+        throw new ControlHttpError(
+          409,
+          "runtime_busy",
+          "Runtime binding changed before manifest update",
+          true,
+        );
+      }
+    }
+    runtime.manifest = request.manifest;
+    runtime.descriptor.servicePort = request.manifest.servicePort;
+    runtime.descriptor.manifestRevision = request.manifest.revision;
+    runtime.descriptor.status = wasRunning ? "starting" : "stopped";
+    runtime.descriptor.readyAt = null;
+    runtime.descriptor.lastError = null;
+    runtime.processId = null;
+    if (restartArtifact !== null) {
+      runtime.artifactRevision = restartArtifact.envelope.artifactRevision;
+      runtime.artifactSha256 = restartArtifact.envelope.sealedArtifactSha256;
+    }
+    const persisted = await coordinator.putRuntimeIfManifestRevision(
+      identity,
+      request.expectedManifestRevision,
+      runtime,
+    );
+    if (persisted !== "updated") {
+      if (wasRunning) await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+      throw new ControlHttpError(
+        persisted === "not_found" ? 404 : 409,
+        persisted === "not_found" ? "runtime_not_found" : "manifest_revision_conflict",
+        persisted === "not_found"
+          ? "Runtime not found"
+          : "Runtime manifest revision changed before update",
+      );
+    }
+    if (restartArtifact !== null) {
+      try {
+        // Materialization already kills every tenant process before replacing the sealed release.
+        // Fully stopping the Sandbox here makes the immediately-following filesystem RPC race the
+        // container shutdown and fail before the first release-directory operation.
+        await backend.materialize(runtime, restartArtifact);
+        const started = await backend.start(runtime);
+        runtime.processId = started.processId;
+        runtime.descriptor.status = "running";
+        runtime.descriptor.readyAt = started.readyAt;
+        await coordinator.putRuntime(identity, runtime);
+        await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+      } catch {
+        await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
+        await safelyStopFailedRuntime(backend, runtime);
+        runtime.descriptor.status = "error";
+        runtime.descriptor.lastError = "Runtime failed after manifest update";
+        runtime.processId = null;
+        await coordinator.putRuntime(identity, runtime);
+        throw new ControlHttpError(
+          502,
+          "runtime_restart_failed",
+          "Runtime failed after manifest update",
+          true,
+        );
+      }
+    }
+    return { status: 200, body: { runtime: runtime.descriptor } };
+  }
   if (endpoint === "ensure") {
     const request = input as EnsureRuntimeRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
@@ -984,6 +1442,20 @@ async function executeEndpoint(
   if (endpoint === "start") {
     const request = input as StartRuntimeRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    const artifact = await coordinator.getArtifact(identity, request.artifactSha256);
+    if (
+      artifact === null ||
+      artifact.state !== "committed" ||
+      artifact.runtimeIdentity !== identity ||
+      artifact.envelope.artifactRevision !== request.artifactRevision ||
+      artifact.envelope.manifestRevision !== runtime.manifest.revision
+    ) {
+      throw new ControlHttpError(
+        409,
+        "artifact_not_committed",
+        "A committed artifact for this runtime manifest is required",
+      );
+    }
     runtime.artifactRevision = request.artifactRevision;
     runtime.artifactSha256 = request.artifactSha256;
     runtime.descriptor.status = "starting";
@@ -992,6 +1464,7 @@ async function executeEndpoint(
     await coordinator.putRuntime(identity, runtime);
     await coordinator.appendSystemLog(identity, "Starting the tenant service.");
     try {
+      await backend.materialize(runtime, artifact);
       const started = await backend.start(runtime);
       const current = await requireRuntime(coordinator, identity);
       current.processId = started.processId;
@@ -1009,6 +1482,7 @@ async function executeEndpoint(
       };
     } catch (error) {
       await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
+      await safelyStopFailedRuntime(backend, runtime);
       const current = await requireRuntime(coordinator, identity);
       current.descriptor.status = "error";
       current.descriptor.lastError = safeErrorMessage(error);
@@ -1038,6 +1512,11 @@ async function executeEndpoint(
   if (endpoint === "destroy") {
     await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
     await backend.destroy(runtime);
+    const artifacts = await coordinator.listArtifacts(identity);
+    for (const artifact of artifacts) {
+      await deleteArtifactObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
+      await coordinator.removeArtifact(identity, artifact.envelope.sealedArtifactSha256);
+    }
     await coordinator.deleteRuntime(identity);
     return { status: 200, body: { ok: true } };
   }
@@ -1191,6 +1670,11 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     stripeCapabilityProvision: capabilityProvisionResponseSchema,
     stripeCapabilityRevoke: capabilityRevokeResponseSchema,
     capabilityBinding: capabilityBindingResponseSchema,
+    artifactBegin: beginRuntimeArtifactResponseSchema,
+    artifactChunk: uploadRuntimeArtifactChunkResponseSchema,
+    artifactCommit: commitRuntimeArtifactResponseSchema,
+    artifactRemove: removeRuntimeArtifactResponseSchema,
+    manifestUpdate: ensureRuntimeResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);
   if (!result.success)
@@ -1199,6 +1683,74 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
       "invalid_worker_response",
       "Worker produced an invalid response",
     );
+}
+
+function artifactRuntimeMismatch(): ControlHttpError {
+  return new ControlHttpError(
+    403,
+    "artifact_runtime_mismatch",
+    "Artifact is not available for this runtime",
+  );
+}
+
+function requestBodyLimit(pathname: string): number {
+  if (/\/artifacts\/[0-9a-f]{64}\/chunks\/[0-9]+$/u.test(pathname))
+    return RUNTIME_ARTIFACT_CHUNK_BYTES;
+  if (/\/artifacts\/[0-9a-f]{64}\/begin$/u.test(pathname))
+    return MAX_RUNTIME_ARTIFACT_MANIFEST_BYTES;
+  return MAX_REQUEST_BYTES;
+}
+
+function assertArtifactInfrastructure(env: WorkerBindings): void {
+  if (
+    typeof env.CF_VERSION_METADATA?.id !== "string" ||
+    env.CF_VERSION_METADATA.id.length === 0 ||
+    typeof env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE !== "string" ||
+    env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE.length === 0 ||
+    !env.NABUFLOW_RUNTIME_ARTIFACTS ||
+    typeof env.NABUFLOW_RUNTIME_ARTIFACTS.get !== "function" ||
+    typeof env.NABUFLOW_RUNTIME_ARTIFACTS.put !== "function" ||
+    typeof env.NABUFLOW_RUNTIME_ARTIFACTS.delete !== "function"
+  ) {
+    throw new ControlHttpError(
+      503,
+      "artifact_infrastructure_unavailable",
+      "The runtime artifact infrastructure is not configured",
+      false,
+    );
+  }
+}
+
+async function safelyStopFailedRuntime(
+  backend: RuntimeBackend,
+  runtime: StoredRuntime,
+): Promise<void> {
+  try {
+    await backend.stop(runtime);
+  } catch {
+    // Preserve the typed start/restart failure; the runtime remains unbound and the cleanup path
+    // can retry the stop or destroy operation without exposing the failed process to traffic.
+  }
+}
+
+function logControlErrorFinalizationFailure(
+  requestId: string,
+  endpoint: Endpoint,
+  operation: "idempotency" | "audit",
+  error: unknown,
+): void {
+  // The client-facing error has already been classified. These Durable Object writes are
+  // best-effort finalization and must never replace that primary typed response.
+  // eslint-disable-next-line no-console -- metadata-only last-resort observability
+  console.error(
+    JSON.stringify({
+      event: "control_error_finalization_failed",
+      requestId,
+      endpoint,
+      operation,
+      errorType: error instanceof Error ? error.name : "UnknownError",
+    }),
+  );
 }
 
 async function requireRuntime(
