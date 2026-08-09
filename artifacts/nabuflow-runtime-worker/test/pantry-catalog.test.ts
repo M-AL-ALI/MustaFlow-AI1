@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PANTRY_CATALOG_STAMP_FORMAT,
+  pantryShelfContentHashesHash,
+  pantryShelfContentHashesResponseSchema,
+  sha256Hex,
+  verifyPantryDigestSignature,
   type PantryCatalogShelfRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { PantryCatalogDurableObject } from "../src/pantry-catalog-durable-object";
@@ -161,6 +165,10 @@ async function commit(test: TestContext, fixture: PantryFixture): Promise<Respon
 }
 
 describe("private Pantry catalog Worker", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("commits a multi-package shelf and verifies its exact stamp and object bytes", async () => {
     const test = context();
     const fixture = await makePantryFixture({ nowMs: Date.now() });
@@ -200,6 +208,103 @@ describe("private Pantry catalog Worker", () => {
       principal: "builder-readonly",
     });
     expect(new Uint8Array(await objectRead.arrayBuffer())).toEqual(firstObject[1].bytes);
+    const rangeEnd = Math.min(7, firstObject[1].bytes.byteLength - 1);
+    const rangeRead = await handlePantryWorkerRequest(
+      new Request(`https://pantry.internal/internal/v1/objects/${firstObject[0]}`, {
+        headers: {
+          "x-nabuflow-pantry-principal": "builder-readonly",
+          range: `bytes=0-${rangeEnd}`,
+        },
+      }),
+      test.env,
+      test.coordinator,
+    );
+    expect(rangeRead.status).toBe(206);
+    expect(rangeRead.headers.get("content-range")).toBe(
+      `bytes 0-${rangeEnd}/${firstObject[1].bytes.byteLength}`,
+    );
+    expect(rangeRead.headers.get("x-nabuflow-content-sha256")).toBe(firstObject[0]);
+    expect(new Uint8Array(await rangeRead.arrayBuffer())).toEqual(
+      firstObject[1].bytes.slice(0, rangeEnd + 1),
+    );
+    const invalidRange = await handlePantryWorkerRequest(
+      new Request(`https://pantry.internal/internal/v1/objects/${firstObject[0]}`, {
+        headers: {
+          "x-nabuflow-pantry-principal": "builder-readonly",
+          range: "bytes=0-1048576",
+        },
+      }),
+      test.env,
+      test.coordinator,
+    );
+    expect(invalidRange.status).toBe(400);
+  });
+
+  it("serves only an attested shelf-content hash set to the builder identity", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const root = fixture.commit.revision.rootSha256;
+    const path = `/internal/v1/revisions/by-root/${root}/content-hashes`;
+    const response = await call(test, path, { principal: "builder-readonly" });
+    expect(response.status).toBe(200);
+    const body = pantryShelfContentHashesResponseSchema.parse(await response.json());
+    expect(body.statement).toMatchObject({
+      pantryRevisionRootSha256: root,
+      pantryRevisionId: fixture.commit.revision.content.revisionId,
+    });
+    expect(body.statement.contentHashes).toEqual(
+      [
+        await sha256Hex(new TextEncoder().encode("module.exports=1")),
+        await sha256Hex(new TextEncoder().encode("module.exports='leaf'")),
+      ].sort(),
+    );
+    expect(JSON.stringify(body)).not.toContain("module.exports");
+    expect(await pantryShelfContentHashesHash(body.statement)).toBe(body.statementSha256);
+    await expect(
+      verifyPantryDigestSignature(
+        new Map([[PANTRY_TEST_KEY.kid, PANTRY_TEST_KEY.publicKeyPem]]),
+        body.signature,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    const denied = await Promise.all([
+      call(test, path, { principal: "catalog-admin" }),
+      call(test, path, { principal: "tenant" }),
+    ]);
+    expect(denied.map((attempt) => attempt.status)).toEqual([403, 403]);
+    expect(await denied[0].text()).toBe(await denied[1].text());
+
+    const unknown = await call(
+      test,
+      `/internal/v1/revisions/by-root/${"f".repeat(64)}/content-hashes`,
+      { principal: "builder-readonly" },
+    );
+    expect(unknown.status).toBe(404);
+    await expect(unknown.json()).resolves.toMatchObject({ code: "catalog_not_found" });
+  });
+
+  it("rejects a provenance read when trusted shelf bytes are tampered", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const normalized = [...fixture.objects].find(
+      ([, object]) => object.kind === "normalized-package",
+    );
+    expect(normalized).toBeDefined();
+    const [sha256, object] = normalized!;
+    const tampered = object.bytes.slice();
+    tampered[tampered.byteLength - 1] ^= 1;
+    test.bucket.objects.set(`cas/sha256/${sha256}`, tampered);
+    const response = await call(
+      test,
+      `/internal/v1/revisions/by-root/${fixture.commit.revision.rootSha256}/content-hashes`,
+      { principal: "builder-readonly" },
+    );
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({ code: "catalog_integrity_mismatch" });
   });
 
   it("coalesces 100 identical misses and makes staging and commit retries idempotent", async () => {
@@ -577,5 +682,53 @@ describe("private Pantry catalog Worker", () => {
       ledger: { assemblies: 0, shelves: 0, committedObjects: 0, externalReferences: 0 },
       r2: { objects: 0, bytes: 0 },
     });
+  });
+
+  it("captures a verified build resource into a new immutable derived shelf", async () => {
+    const test = context();
+    const now = new Date().toISOString();
+    await test.storage.put(`revision-sequence:${now.slice(0, 10)}`, 1);
+    const fixture = await makePantryFixture({ nowMs: Date.parse(now) });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const bytes = new TextEncoder().encode("trusted-captured-resource\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(bytes, {
+            headers: {
+              "content-type": "application/octet-stream",
+              "content-length": String(bytes.byteLength),
+            },
+          }),
+      ),
+    );
+    const captured = await call(test, "/internal/v1/build-resources", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: {
+        schemaVersion: 1,
+        parentRevisionRootSha256: fixture.commit.revision.rootSha256,
+        url: "https://assets.example.test/build-input.bin",
+        expectedSha256: null,
+        maxBytes: 1024,
+        requestedAt: new Date(Date.parse(now) + 60_000).toISOString(),
+      },
+    });
+    expect(captured.status).toBe(201);
+    const body = (await captured.json()) as { shelf: PantryCatalogShelfRecord; resource: unknown };
+    expect(body.shelf.revision.content.parentRootSha256).toBe(fixture.commit.revision.rootSha256);
+    expect(body.shelf.revision.content.capturedBuildResources).toHaveLength(1);
+    expect(body.shelf.objectReferences).toContainEqual(
+      expect.objectContaining({ kind: "captured-build-resource" }),
+    );
+    expect(body.resource).toEqual(body.shelf.revision.content.capturedBuildResources?.[0]);
+    const read = await call(
+      test,
+      `/internal/v1/revisions/by-root/${body.shelf.revision.rootSha256}`,
+      { principal: "builder-readonly" },
+    );
+    expect(read.status).toBe(200);
   });
 });

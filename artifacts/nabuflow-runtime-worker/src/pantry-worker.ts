@@ -1,9 +1,13 @@
 import {
   PANTRY_CATALOG_SCHEMA_VERSION,
   PANTRY_CATALOG_SHELF_FORMAT,
+  PANTRY_SHELF_CONTENT_HASHES_FORMAT,
   PANTRY_REVISION_FORMAT,
+  MAX_PANTRY_SHELF_CONTENT_HASHES,
   canonicalPantryJson,
+  compareUtf8,
   pantryCatalogCommitRequestSchema,
+  pantryCaptureBuildResourceRequestSchema,
   pantryCatalogGcRequestSchema,
   pantryCatalogObjectKindSchema,
   pantryCatalogObjectReferenceSchema,
@@ -15,8 +19,12 @@ import {
   pantryCatalogStateTransitionRequestSchema,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
+  pantryNormalizedPackageManifestSchema,
+  pantryShelfContentHashesHash,
+  pantryShelfContentHashesResponseSchema,
   pantryDependencyClosureHash,
   pantryIngredientMerkleRoot,
+  pantryErrorStatus,
   pantryRevisionRoot,
   pantryRevisionIsCommittable,
   signPantryDigest,
@@ -26,6 +34,7 @@ import {
   type PantryCatalogErrorResponse,
   type PantryCatalogShelfRecord,
 } from "@workspace/tenant-runtime-contracts";
+import { capturePantryBuildResource } from "./pantry-build-resource";
 import { ingestErrorDefaults, ingestPantryStockRequest } from "./pantry-ingest";
 import type {
   PantryCatalogCoordinator,
@@ -128,6 +137,57 @@ function quarantineObjectKey(assemblyId: string, sha256: string): string {
 
 function committedObjectKey(sha256: string): string {
   return `cas/sha256/${sha256}`;
+}
+
+const PANTRY_BUILD_STREAM_CHUNK_BYTES = 1024 * 1024;
+
+async function readCommittedObjectRange(
+  bucket: R2Bucket,
+  sha256: string,
+  rangeHeader: string,
+): Promise<Response> {
+  const match = /^bytes=(0|[1-9][0-9]*)-(0|[1-9][0-9]*)$/u.exec(rangeHeader);
+  const head = await bucket.head(committedObjectKey(sha256));
+  if (match === null || head === null) {
+    throw new PantryHttpError(400, "catalog_invalid_request", "Pantry object range is invalid");
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const length = end - start + 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    end >= head.size ||
+    length > PANTRY_BUILD_STREAM_CHUNK_BYTES
+  ) {
+    throw new PantryHttpError(400, "catalog_invalid_request", "Pantry object range is invalid");
+  }
+  const object = await bucket.get(committedObjectKey(sha256), {
+    range: { offset: start, length },
+  });
+  if (object === null) {
+    throw new PantryHttpError(409, "catalog_incomplete", "Pantry catalog object is missing");
+  }
+  const bytes = new Uint8Array(await object.arrayBuffer());
+  if (bytes.byteLength !== length) {
+    throw new PantryHttpError(
+      422,
+      "catalog_integrity_mismatch",
+      "Pantry catalog integrity verification failed",
+    );
+  }
+  return new Response(bytes, {
+    status: 206,
+    headers: {
+      "cache-control": "no-store",
+      "content-length": String(bytes.byteLength),
+      "content-range": `bytes ${start}-${end}/${head.size}`,
+      "content-type": "application/octet-stream",
+      "x-nabuflow-content-sha256": sha256,
+    },
+  });
 }
 
 function revisionManifestKey(shelf: PantryCatalogShelfRecord): string {
@@ -453,6 +513,160 @@ async function handleCommit(
   });
 }
 
+async function handleCaptureBuildResource(
+  request: Request,
+  env: PantryWorkerBindings,
+  coordinator: PantryCatalogCoordinator,
+): Promise<Response> {
+  requirePrincipal(request, ["catalog-admin"]);
+  const input = strictParse(pantryCaptureBuildResourceRequestSchema, await readJson(request));
+  const parent = await coordinator.getShelfByRoot(input.parentRevisionRootSha256);
+  if (parent === null || parent.lifecycle.state !== "committed") {
+    throw new PantryHttpError(404, "catalog_not_found", "Parent Pantry revision was not found");
+  }
+  const existing = parent.shelf.revision.content.capturedBuildResources?.find(
+    (resource) =>
+      resource.url === input.url &&
+      (input.expectedSha256 === null || resource.contentSha256 === input.expectedSha256),
+  );
+  if (existing !== undefined) {
+    return jsonResponse(200, {
+      ok: true,
+      state: "replay",
+      shelf: parent.shelf,
+      lifecycle: parent.lifecycle,
+      resource: existing,
+    });
+  }
+  let captured: Awaited<ReturnType<typeof capturePantryBuildResource>>;
+  try {
+    captured = await capturePantryBuildResource(input);
+  } catch (error) {
+    const typed = ingestErrorDefaults(error);
+    throw new PantryHttpError(
+      pantryErrorStatus(typed.code),
+      typed.code === "stocking_size_limit"
+        ? "catalog_invalid_request"
+        : typed.code === "integrity_mismatch"
+          ? "catalog_integrity_mismatch"
+          : "catalog_infrastructure_unavailable",
+      typed.message,
+      typed.retryable,
+    );
+  }
+  const resourceReference = pantryCatalogObjectReferenceSchema.parse({
+    kind: "captured-build-resource",
+    sha256: captured.contentSha256,
+    bytes: captured.bytes.byteLength,
+  });
+  await putImmutableObject(
+    env.PANTRY_CATALOG_OBJECTS,
+    committedObjectKey(captured.contentSha256),
+    captured.bytes,
+    captured.contentSha256,
+  );
+  const identity = await coordinator.allocateRevisionIdentity(input.requestedAt.slice(0, 10));
+  if (identity.parentRootSha256 !== input.parentRevisionRootSha256) {
+    throw new PantryHttpError(
+      409,
+      "catalog_conflict",
+      "Pantry advanced while the build resource was captured",
+      true,
+    );
+  }
+  const signer = requireIngestSigner(env);
+  const resources = [
+    ...(parent.shelf.revision.content.capturedBuildResources ?? []),
+    {
+      url: captured.url,
+      contentSha256: captured.contentSha256,
+      bytes: captured.bytes.byteLength,
+      mediaType: captured.mediaType,
+    },
+  ].sort((left, right) => {
+    const a = `${left.url}\0${left.contentSha256}`;
+    const b = `${right.url}\0${right.contentSha256}`;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  const revisionContent = {
+    ...parent.shelf.revision.content,
+    revisionId: identity.revisionId,
+    createdAt: input.requestedAt,
+    parentRootSha256: input.parentRevisionRootSha256,
+    capturedBuildResources: resources,
+  };
+  const rootSha256 = await pantryRevisionRoot(revisionContent);
+  const revision = {
+    content: revisionContent,
+    rootSha256,
+    signature: await signPantryDigest(signer.privateKeyPem, {
+      kind: "revision",
+      kid: signer.kid,
+      payloadSha256: rootSha256,
+    }),
+  };
+  const objectReferences = [
+    ...parent.shelf.objectReferences,
+    ...(parent.shelf.objectReferences.some(
+      (reference) => reference.sha256 === resourceReference.sha256,
+    )
+      ? []
+      : [resourceReference]),
+  ].sort((left, right) => {
+    const a = `${left.sha256}\0${left.kind}`;
+    const b = `${right.sha256}\0${right.kind}`;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  const committedAt = input.requestedAt;
+  const withoutHash = {
+    format: parent.shelf.format,
+    schemaVersion: parent.shelf.schemaVersion,
+    revision,
+    state: {
+      schemaVersion: 1 as const,
+      revisionId: identity.revisionId,
+      rootSha256,
+      state: "committed" as const,
+      stateRevision: 1,
+      updatedAt: committedAt,
+    },
+    objectReferences,
+    lockfileSha256: parent.shelf.lockfileSha256,
+    sbomSha256: parent.shelf.sbomSha256,
+    toolchainAttestationSha256: parent.shelf.toolchainAttestationSha256,
+    retention: parent.shelf.retention,
+    committedAt,
+  };
+  const shelf = pantryCatalogShelfRecordSchema.parse({
+    ...withoutHash,
+    manifestSha256: await pantryCatalogShelfManifestHash(withoutHash),
+  });
+  const manifestBytes = new TextEncoder().encode(canonicalPantryJson(shelf));
+  await putImmutableObject(
+    env.PANTRY_CATALOG_OBJECTS,
+    revisionManifestKey(shelf),
+    manifestBytes,
+    await sha256Hex(manifestBytes),
+  );
+  const committed = await coordinator.commitDerivedShelf(input.parentRevisionRootSha256, shelf);
+  if (committed === "not_found") {
+    throw new PantryHttpError(404, "catalog_not_found", "Parent Pantry revision was not found");
+  }
+  if (committed === "conflict") {
+    throw new PantryHttpError(409, "catalog_conflict", "Pantry derived revision conflicts", true);
+  }
+  return jsonResponse(committed === "committed" ? 201 : 200, {
+    ok: true,
+    state: committed,
+    shelf,
+    lifecycle: shelf.state,
+    resource: resources.find(
+      (resource) =>
+        resource.url === captured.url && resource.contentSha256 === captured.contentSha256,
+    ),
+  });
+}
+
 async function verifyStoredShelf(bucket: R2Bucket, shelf: PantryCatalogShelfRecord): Promise<void> {
   const manifest = await readAndVerifyObject(
     bucket,
@@ -489,6 +703,107 @@ async function shelfLookupResponse(
   }
   await verifyStoredShelf(env.PANTRY_CATALOG_OBJECTS, lookup.shelf);
   return jsonResponse(200, { ok: true, ...lookup });
+}
+
+async function shelfContentHashesResponse(
+  env: PantryWorkerBindings,
+  lookup: Awaited<ReturnType<PantryCatalogCoordinator["getShelfByRoot"]>>,
+): Promise<Response> {
+  if (lookup === null || lookup.lifecycle.state !== "committed") {
+    throw new PantryHttpError(404, "catalog_not_found", "Pantry revision was not found");
+  }
+  const shelf = lookup.shelf;
+  await verifyStoredShelf(env.PANTRY_CATALOG_OBJECTS, shelf);
+  const revisionVerification = await verifyPantryRevisionRecord(
+    shelf.revision,
+    configuredPublicKeys(env),
+  );
+  if (!revisionVerification.ok) {
+    throw new PantryHttpError(
+      422,
+      "catalog_integrity_mismatch",
+      "Pantry revision attestation did not verify",
+    );
+  }
+  const references = new Map(
+    shelf.objectReferences
+      .filter((reference) => reference.kind === "normalized-package")
+      .map((reference) => [reference.sha256, reference.bytes]),
+  );
+  const addresses = [
+    ...new Set(
+      shelf.revision.content.closure.ingredients.map(
+        (ingredient) => ingredient.normalizedContentSha256,
+      ),
+    ),
+  ].sort(compareUtf8);
+  const hashes = new Set<string>();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (const address of addresses) {
+    const expectedBytes = references.get(address);
+    if (expectedBytes === undefined) {
+      throw new PantryHttpError(
+        422,
+        "catalog_integrity_mismatch",
+        "Pantry normalized package attestation is incomplete",
+      );
+    }
+    const bytes = await readAndVerifyObject(
+      env.PANTRY_CATALOG_OBJECTS,
+      committedObjectKey(address),
+      address,
+      expectedBytes,
+    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(decoder.decode(bytes));
+    } catch {
+      throw new PantryHttpError(
+        422,
+        "catalog_integrity_mismatch",
+        "Pantry normalized package attestation is invalid",
+      );
+    }
+    const manifest = pantryNormalizedPackageManifestSchema.safeParse(parsed);
+    if (!manifest.success || canonicalPantryJson(manifest.data) !== decoder.decode(bytes)) {
+      throw new PantryHttpError(
+        422,
+        "catalog_integrity_mismatch",
+        "Pantry normalized package attestation is invalid",
+      );
+    }
+    for (const entry of manifest.data.entries) hashes.add(entry.sha256);
+    if (hashes.size > MAX_PANTRY_SHELF_CONTENT_HASHES) {
+      throw new PantryHttpError(
+        422,
+        "catalog_integrity_mismatch",
+        "Pantry shelf exceeds the sealed layer content-hash bound",
+      );
+    }
+  }
+  const statement = {
+    format: PANTRY_SHELF_CONTENT_HASHES_FORMAT,
+    schemaVersion: PANTRY_CATALOG_SCHEMA_VERSION,
+    pantryRevisionId: shelf.revision.content.revisionId,
+    pantryRevisionRootSha256: shelf.revision.rootSha256,
+    shelfManifestSha256: shelf.manifestSha256,
+    contentHashes: [...hashes].sort(compareUtf8),
+  };
+  const statementSha256 = await pantryShelfContentHashesHash(statement);
+  const signer = requireIngestSigner(env);
+  return jsonResponse(
+    200,
+    pantryShelfContentHashesResponseSchema.parse({
+      ok: true,
+      statement,
+      statementSha256,
+      signature: await signPantryDigest(signer.privateKeyPem, {
+        kind: "shelf-content-hashes",
+        kid: signer.kid,
+        payloadSha256: statementSha256,
+      }),
+    }),
+  );
 }
 
 async function listR2(
@@ -590,6 +905,9 @@ export async function handlePantryWorkerRequest(
     if (request.method === "POST" && pathname === `${INTERNAL_PREFIX}/stock-requests`) {
       return await handleStockRequest(request, env, coordinator);
     }
+    if (request.method === "POST" && pathname === `${INTERNAL_PREFIX}/build-resources`) {
+      return await handleCaptureBuildResource(request, env, coordinator);
+    }
     const statusMatch = new RegExp(`^${INTERNAL_PREFIX}/assemblies/(passembly_[0-9a-f]{64})$`).exec(
       pathname,
     );
@@ -648,6 +966,22 @@ export async function handlePantryWorkerRequest(
         );
       requirePrincipal(request, ["catalog-admin", "builder-readonly"]);
       return await shelfLookupResponse(env, await coordinator.getShelfByRoot(rootLookup[1]));
+    }
+    const contentHashesLookup = new RegExp(
+      `^${INTERNAL_PREFIX}/revisions/by-root/([0-9a-f]{64})/content-hashes$`,
+    ).exec(pathname);
+    if (contentHashesLookup !== null) {
+      if (request.method !== "GET")
+        throw new PantryHttpError(
+          405,
+          "catalog_method_not_allowed",
+          "Pantry method is not allowed",
+        );
+      requirePrincipal(request, ["builder-readonly"]);
+      return await shelfContentHashesResponse(
+        env,
+        await coordinator.getShelfByRoot(contentHashesLookup[1]),
+      );
     }
     const revisionLookup = new RegExp(
       `^${INTERNAL_PREFIX}/revisions/(pantry-\\d{4}-\\d{2}-\\d{2}\\.[1-9]\\d*)$`,
@@ -746,6 +1080,10 @@ export async function handlePantryWorkerRequest(
           "Pantry method is not allowed",
         );
       requirePrincipal(request, ["builder-readonly"]);
+      const range = request.headers.get("range");
+      if (range !== null) {
+        return await readCommittedObjectRange(env.PANTRY_CATALOG_OBJECTS, objectRead[1], range);
+      }
       const bytes = await readAndVerifyObject(
         env.PANTRY_CATALOG_OBJECTS,
         committedObjectKey(objectRead[1]),

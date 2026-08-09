@@ -283,6 +283,80 @@ export class PantryCatalogDurableObject
     });
   }
 
+  async commitDerivedShelf(
+    parentRootSha256: string,
+    shelf: PantryCatalogShelfRecord,
+  ): Promise<"committed" | "replay" | "not_found" | "conflict"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const existingShelf = await transaction.get<PantryCatalogShelfRecord>(
+        shelfKey(shelf.revision.rootSha256),
+      );
+      if (existingShelf !== undefined) {
+        return existingShelf.manifestSha256 === shelf.manifestSha256 ? "replay" : "conflict";
+      }
+      const parent = await transaction.get<PantryCatalogShelfRecord>(shelfKey(parentRootSha256));
+      const lifecycle = await transaction.get<PantryRevisionState>(lifecycleKey(parentRootSha256));
+      if (parent === undefined || lifecycle?.state !== "committed") return "not_found";
+      const latestRoot = (await transaction.get<string>("shelf:latest-root")) ?? null;
+      const parentResources = parent.revision.content.capturedBuildResources ?? [];
+      const nextResources = shelf.revision.content.capturedBuildResources ?? [];
+      const parentResourceKeys = new Set(
+        parentResources.map((resource) => `${resource.url}\0${resource.contentSha256}`),
+      );
+      const addedResources = nextResources.filter(
+        (resource) => !parentResourceKeys.has(`${resource.url}\0${resource.contentSha256}`),
+      );
+      const expectedReferences = new Set(
+        parent.objectReferences.map((reference) => `${reference.sha256}\0${reference.kind}`),
+      );
+      for (const resource of addedResources) {
+        expectedReferences.add(`${resource.contentSha256}\0captured-build-resource`);
+      }
+      const actualReferences = new Set(
+        shelf.objectReferences.map((reference) => `${reference.sha256}\0${reference.kind}`),
+      );
+      if (
+        latestRoot !== parentRootSha256 ||
+        shelf.revision.content.parentRootSha256 !== parentRootSha256 ||
+        shelf.revision.content.dependencyClosureSha256 !==
+          parent.revision.content.dependencyClosureSha256 ||
+        canonicalPantryJson(shelf.revision.content.closure) !==
+          canonicalPantryJson(parent.revision.content.closure) ||
+        shelf.lockfileSha256 !== parent.lockfileSha256 ||
+        shelf.sbomSha256 !== parent.sbomSha256 ||
+        shelf.toolchainAttestationSha256 !== parent.toolchainAttestationSha256 ||
+        nextResources.length !== parentResources.length + 1 ||
+        addedResources.length !== 1 ||
+        parentResources.some(
+          (resource) =>
+            !nextResources.some(
+              (next) => next.url === resource.url && next.contentSha256 === resource.contentSha256,
+            ),
+        ) ||
+        expectedReferences.size !== actualReferences.size ||
+        [...expectedReferences].some((reference) => !actualReferences.has(reference))
+      ) {
+        return "conflict";
+      }
+      const existingRevisionRoot = await transaction.get<string>(
+        revisionKey(shelf.revision.content.revisionId),
+      );
+      if (existingRevisionRoot !== undefined) return "conflict";
+      const puts: Record<string, unknown> = {
+        [shelfKey(shelf.revision.rootSha256)]: shelf,
+        [lifecycleKey(shelf.revision.rootSha256)]: shelf.state,
+        [revisionKey(shelf.revision.content.revisionId)]: shelf.revision.rootSha256,
+        "shelf:latest-root": shelf.revision.rootSha256,
+      };
+      for (const reference of shelf.objectReferences) {
+        const key = objectReferenceKey(reference.sha256);
+        puts[key] = ((await transaction.get<number>(key)) ?? 0) + 1;
+      }
+      await transaction.put(puts);
+      return "committed";
+    });
+  }
+
   async getShelfByRoot(rootSha256: string): Promise<PantryShelfLookup | null> {
     const shelf = await this.ctx.storage.get<PantryCatalogShelfRecord>(shelfKey(rootSha256));
     if (shelf === undefined) return null;

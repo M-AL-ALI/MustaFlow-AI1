@@ -1,0 +1,76 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nabuflow-build-staging",
+  "main": "src/trusted-build-index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "TRUSTED_BUILD_MAX_ACTIVE": "32",
+    // Staging-only, internal queue fault marker used by the live lease-recovery acceptance probe.
+    // The build service has no public route and production configuration must omit this flag.
+    "TRUSTED_BUILD_STAGING_LIVE_RECOVERY_PROBE": "enabled",
+    "TRUSTED_BUILD_PLATFORM": "{\"runtime\":\"node\",\"runtimeVersion\":\"22.18.0\",\"nodeAbi\":\"127\",\"os\":\"linux\",\"cpu\":\"x64\",\"libc\":\"glibc\",\"toolchainImageDigest\":\"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738\"}",
+    // Public staging fixture signer only. Both halves are checked-in test data and convey no
+    // production authority; a production build attestor is blocked on PG-1 key custody/overlap.
+    "TRUSTED_BUILD_SIGNING_KEY_ID": "pantry-test-key-2026-08",
+    "TRUSTED_BUILD_SIGNING_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZqQSR1D+CC69JD0Q\ng0cVWWv9GV9xRDwJACmeFbbvu9ihRANCAARccmVKOQxtA98n4Y1H6wXtU44Zh9vj\neLbrsF4RiLGT1LD3jL0agmggLIq0aXXeIO53j5U1HjWVKvOJTy3YB4on\n-----END PRIVATE KEY-----\n",
+    "TRUSTED_BUILD_PUBLIC_KEYS": "{\"pantry-test-key-2026-08\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXHJlSjkMbQPfJ+GNR+sF7VOOGYfb\\n43i267BeEYixk9Sw94y9GoJoICyKtGl13iDud4+VNR41lSrziU8t2AeKJw==\\n-----END PUBLIC KEY-----\\n\"}",
+  },
+  "containers": [
+    {
+      "class_name": "TrustedBuildSandbox",
+      "image": "docker.io/cloudflare/sandbox:0.12.4",
+      "instance_type": "standard-1",
+      "max_instances": 5,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "TRUSTED_BUILD_OBJECTS",
+      "bucket_name": "nabuflow-trusted-build-staging",
+    },
+  ],
+  "services": [
+    {
+      "binding": "PANTRY_CATALOG",
+      "service": "nabuflow-pantry-staging",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "TRUSTED_BUILD_QUEUE",
+        "queue": "nabuflow-trusted-build-staging",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "nabuflow-trusted-build-staging",
+        "max_batch_size": 5,
+        "max_batch_timeout": 2,
+        "max_retries": 3,
+        "dead_letter_queue": "nabuflow-trusted-build-dead-letter-staging",
+      },
+    ],
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TRUSTED_BUILD_SANDBOX",
+        "class_name": "TrustedBuildSandbox",
+      },
+      {
+        "name": "TRUSTED_BUILD_COORDINATOR",
+        "class_name": "TrustedBuildDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TrustedBuildSandbox", "TrustedBuildDurableObject"],
+    },
+  ],
+}

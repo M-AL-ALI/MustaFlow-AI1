@@ -5,7 +5,8 @@ import {
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
 } from "@workspace/tenant-runtime-contracts";
-import { ingestPantryStockRequest } from "../src/pantry-ingest";
+import { assertPantryClosureComplete, ingestPantryStockRequest } from "../src/pantry-ingest";
+import type { PantryRuntimeDependencyDeclarations } from "../src/pantry-ingest";
 import {
   NPM_REGISTRY_ORIGIN,
   NpmRegistryClient,
@@ -70,6 +71,7 @@ interface FixturePackage {
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
+  bin?: string | Record<string, string>;
   os?: string[];
   integrityOverride?: string;
   fileCount?: number;
@@ -123,6 +125,7 @@ async function registryFixture(packages: Record<string, FixturePackage>): Promis
             optionalDependencies: fixture.optionalDependencies ?? {},
             peerDependencies: fixture.peerDependencies ?? {},
             scripts: fixture.scripts ?? {},
+            bin: fixture.bin,
             os: fixture.os,
             license: "MIT",
             dist: {
@@ -203,6 +206,37 @@ describe("trusted npm Pantry ingest", () => {
     );
     expect(requests.every((request) => request.headers.get("authorization") === null)).toBe(true);
     expect(requests.every((request) => request.headers.get("cookie") === null)).toBe(true);
+  });
+
+  it("fails shelving when any declared runtime dependency is absent and preserves bin metadata", async () => {
+    const { client } = await registryFixture({
+      "bin-parent": { dependencies: { "bin-tool": "^1.0.0" } },
+      "bin-tool": { bin: { "bin-tool": "cli.js" } },
+    });
+    const result = await ingestPantryStockRequest(await stockRequest(["bin-parent"]), client);
+    expect(
+      result.closure.ingredients.find((ingredient) => ingredient.package.name === "bin-tool")?.bins,
+    ).toEqual({ "bin-tool": "cli.js" });
+    const declarations: PantryRuntimeDependencyDeclarations = new Map<
+      string,
+      { dependencies: Record<string, string>; optionalDependencies: Record<string, string> }
+    >([
+      [
+        "npm:bin-parent@1.0.0",
+        { dependencies: { "bin-tool": "^1.0.0" }, optionalDependencies: {} },
+      ],
+      ["npm:bin-tool@1.0.0", { dependencies: {}, optionalDependencies: {} }],
+    ]);
+    expect(() => assertPantryClosureComplete(result.closure, declarations)).not.toThrow();
+    const incomplete = structuredClone(result.closure);
+    const parent = incomplete.ingredients.find(
+      (ingredient) => ingredient.package.name === "bin-parent",
+    );
+    expect(parent).toBeDefined();
+    parent!.dependencies = [];
+    expect(() => assertPantryClosureComplete(incomplete, declarations)).toThrow(
+      expect.objectContaining({ code: "dependency_conflict", retryable: false }),
+    );
   });
 
   it("verifies normalized SHA-512 SRI and rejects a mutated tarball", async () => {

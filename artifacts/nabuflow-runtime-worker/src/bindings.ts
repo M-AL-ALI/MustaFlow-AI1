@@ -11,6 +11,7 @@ export interface WorkerVersionMetadataBinding {
 export interface WorkerBindings {
   NABUFLOW_RUNTIME_ARTIFACTS: R2Bucket;
   PANTRY_CATALOG: Fetcher;
+  TRUSTED_BUILD_PLANE?: Fetcher;
   CAPABILITY_VAULT: DurableObjectNamespace<CapabilityVaultDurableObject>;
   CONTROL_COORDINATOR: DurableObjectNamespace<ControlDurableObject>;
   NABUFLOW_SANDBOX: DurableObjectNamespace<Sandbox<WorkerBindings>>;
@@ -24,4 +25,6 @@ export interface WorkerBindings {
   NABUFLOW_STAGING_HOST_OVERRIDE_ENABLED?: string;
   NABUFLOW_STAGING_WORKER_HOST?: string;
   NABUFLOW_RUNTIME_LAYER_PLATFORM?: string;
+  /** Staging-only fault injection for live coordinator-owned artifact commit recovery proofs. */
+  NABUFLOW_STAGING_ARTIFACT_COMMIT_RECOVERY_PROBE?: string;
 }

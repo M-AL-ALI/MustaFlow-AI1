@@ -11,6 +11,8 @@ import type { WorkerBindings } from "../src/bindings";
 import type {
   CapabilityVault,
   CapabilityVaultInvocationResult,
+  ArtifactCommitClaim,
+  ArtifactCommitCheckpoint,
   ControlAuditRecord,
   ControlCoordinator,
   IdempotencyLookup,
@@ -20,12 +22,14 @@ import type {
   StoredRuntimeArtifact,
   StoredRuntimeLayer,
   StoredRuntimeLayeredArtifact,
+  StoredArtifactCommitJob,
   RemovedRuntimeLayeredArtifact,
 } from "../src/model";
 import type {
   BackendExecResult,
   BackendStartResult,
   BackendStatusResult,
+  RuntimeMaterializationTicket,
   RuntimeBackend,
 } from "../src/runtime-backend";
 
@@ -45,6 +49,7 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly artifacts = new Map<string, StoredRuntimeArtifact>();
   readonly layeredArtifacts = new Map<string, StoredRuntimeLayeredArtifact>();
   readonly runtimeLayers = new Map<string, StoredRuntimeLayer>();
+  readonly artifactCommitJobs = new Map<string, StoredArtifactCommitJob>();
   layerChunkWrites = 0;
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
@@ -87,6 +92,127 @@ export class MemoryCoordinator implements ControlCoordinator {
 
   async abandonIdempotency(key: string, fingerprint: string): Promise<void> {
     if (this.idempotency.get(key)?.fingerprint === fingerprint) this.idempotency.delete(key);
+  }
+
+  async claimArtifactCommit(input: {
+    key: string;
+    fingerprint: string;
+    ownerId: string;
+    kind: "v1" | "layers-v1";
+    runtimeIdentity: string;
+    sealedArtifactSha256: string;
+    nowMs: number;
+  }): Promise<ArtifactCommitClaim> {
+    const idempotency = this.idempotency.get(input.key);
+    if (idempotency !== undefined && idempotency.fingerprint !== input.fingerprint) {
+      return { state: "conflict" };
+    }
+    if (idempotency !== undefined && !idempotency.pending && idempotency.response !== undefined) {
+      return { state: "replay", response: structuredClone(idempotency.response) };
+    }
+    const jobKey = `artifact-commit-job:${input.runtimeIdentity}:${input.sealedArtifactSha256}:${input.key}`;
+    const existing = this.artifactCommitJobs.get(jobKey);
+    if (existing?.response !== undefined && existing.state !== "active") {
+      return { state: "replay", response: structuredClone(existing.response) };
+    }
+    if (existing !== undefined) {
+      if (existing.leaseUntilMs !== null && existing.leaseUntilMs > input.nowMs) {
+        return { state: "pending" };
+      }
+      existing.ownerId = input.ownerId;
+      existing.attempt += 1;
+      existing.leaseUntilMs = input.nowMs + 15_000;
+      existing.abandonAtMs = input.nowMs + 45_000;
+      existing.updatedAtMs = input.nowMs;
+      this.idempotency.set(input.key, { fingerprint: input.fingerprint, pending: true });
+      return { state: "adopted", job: structuredClone(existing) };
+    }
+    const job: StoredArtifactCommitJob = {
+      jobKey,
+      kind: input.kind,
+      runtimeIdentity: input.runtimeIdentity,
+      sealedArtifactSha256: input.sealedArtifactSha256,
+      fingerprint: input.fingerprint,
+      idempotencyStorageKey: input.key,
+      state: "active",
+      checkpoint: "initialized",
+      ownerId: input.ownerId,
+      attempt: 1,
+      leaseUntilMs: input.nowMs + 15_000,
+      abandonAtMs: input.nowMs + 45_000,
+      deadlineMs: input.nowMs + 5 * 60_000,
+      updatedAtMs: input.nowMs,
+    };
+    this.artifactCommitJobs.set(jobKey, job);
+    this.idempotency.set(input.key, { fingerprint: input.fingerprint, pending: true });
+    return { state: "new", job: structuredClone(job) };
+  }
+
+  async renewArtifactCommit(jobKey: string, ownerId: string, nowMs: number) {
+    const job = this.artifactCommitJobs.get(jobKey);
+    if (job === undefined || job.state !== "active") return "terminal" as const;
+    if (job.ownerId !== ownerId) return "not_owner" as const;
+    job.leaseUntilMs = nowMs + 15_000;
+    job.abandonAtMs = nowMs + 45_000;
+    return "renewed" as const;
+  }
+
+  async checkpointArtifactCommit(input: {
+    jobKey: string;
+    ownerId: string;
+    checkpoint: ArtifactCommitCheckpoint;
+    payloadContentSha256s?: string[];
+    nowMs: number;
+  }): Promise<StoredArtifactCommitJob> {
+    const job = this.artifactCommitJobs.get(input.jobKey);
+    if (job === undefined || job.ownerId !== input.ownerId || job.state !== "active") {
+      throw new Error("Artifact commit checkpoint owner is no longer active");
+    }
+    job.checkpoint = input.checkpoint;
+    job.updatedAtMs = input.nowMs;
+    if (input.payloadContentSha256s !== undefined) {
+      job.payloadContentSha256s = [...input.payloadContentSha256s];
+    }
+    return structuredClone(job);
+  }
+
+  async completeArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    response: StoredHttpResponse,
+  ): Promise<void> {
+    await this.finishArtifactCommit(jobKey, ownerId, "succeeded", response);
+  }
+
+  async failArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    response: StoredHttpResponse,
+  ): Promise<void> {
+    await this.finishArtifactCommit(jobKey, ownerId, "failed", response);
+  }
+
+  private async finishArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    state: "succeeded" | "failed",
+    response: StoredHttpResponse,
+  ): Promise<void> {
+    const job = this.artifactCommitJobs.get(jobKey);
+    if (job === undefined || job.ownerId !== ownerId || job.state !== "active") {
+      throw new Error("Artifact commit finalization owner is no longer active");
+    }
+    job.state = state;
+    job.ownerId = null;
+    job.leaseUntilMs = null;
+    job.abandonAtMs = null;
+    job.response = structuredClone(response);
+    const idempotencyKey = job.idempotencyStorageKey;
+    this.idempotency.set(idempotencyKey, {
+      fingerprint: job.fingerprint,
+      pending: false,
+      response: structuredClone(response),
+    });
   }
 
   async recordAudit(record: ControlAuditRecord): Promise<void> {
@@ -492,6 +618,50 @@ export class MockBackend implements RuntimeBackend {
     _runtime: StoredRuntime,
     artifact: StoredRuntimeLayeredArtifact,
     _layers: StoredRuntimeLayer[],
+  ): Promise<{ filesWritten: number; layersMaterialized: number }> {
+    this.materializations += 1;
+    return {
+      filesWritten:
+        artifact.envelope.content.appArtifact.content.files.length +
+        artifact.envelope.content.layers.reduce((total, layer) => total + layer.files.length, 0),
+      layersMaterialized: artifact.envelope.content.layers.length,
+    };
+  }
+
+  async stageMaterialization(
+    _runtime: StoredRuntime,
+    _artifact: StoredRuntimeArtifact,
+  ): Promise<RuntimeMaterializationTicket> {
+    return { payloadContentSha256s: ["a".repeat(64)] };
+  }
+
+  async unpackMaterialization(
+    _runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+    _ticket: RuntimeMaterializationTicket,
+  ): Promise<{ filesWritten: number }> {
+    this.materializations += 1;
+    return { filesWritten: artifact.envelope.content.files.length };
+  }
+
+  async stageLayeredMaterialization(
+    _runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    _layers: StoredRuntimeLayer[],
+  ): Promise<RuntimeMaterializationTicket> {
+    return {
+      payloadContentSha256s: [
+        "a".repeat(64),
+        ...artifact.envelope.content.layers.map((layer) => layer.descriptor.contentSha256),
+      ],
+    };
+  }
+
+  async unpackLayeredMaterialization(
+    _runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    _layers: StoredRuntimeLayer[],
+    _ticket: RuntimeMaterializationTicket,
   ): Promise<{ filesWritten: number; layersMaterialized: number }> {
     this.materializations += 1;
     return {
