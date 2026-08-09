@@ -10,6 +10,7 @@ export * from "./preview-grant";
 export * from "./request-signing";
 export * from "./route-capability";
 export * from "./runtime-identity";
+export * from "./runtime-sdk";
 export * from "./service-port";
 export * from "./shell-escape";
 export * from "./staging-host-override";

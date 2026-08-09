@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { capabilityDefinitionSchema } from "./route-capability";
+import {
+  DATABASE_BATCH_MAX_STATEMENTS,
+  DATABASE_PARAMETER_MAX_COUNT,
+  DATABASE_RESULT_MAX_ROWS,
+  DATABASE_SQL_MAX_CHARS,
+} from "./runtime-sdk-limits";
 
 const capabilityComponentSchema = z
   .string()
@@ -186,11 +192,11 @@ export const databaseStatementSchema = z
     sql: z
       .string()
       .min(1)
-      .max(16 * 1024)
+      .max(DATABASE_SQL_MAX_CHARS)
       .refine((value) => !value.includes("\0"), {
         message: "SQL cannot contain NUL bytes",
       }),
-    params: z.array(databaseParameterSchema).max(100),
+    params: z.array(databaseParameterSchema).max(DATABASE_PARAMETER_MAX_COUNT),
   })
   .strict();
 
@@ -199,7 +205,7 @@ export const databaseCapabilityInputSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("atomic-batch"),
-      statements: z.array(databaseStatementSchema).min(1).max(20),
+      statements: z.array(databaseStatementSchema).min(1).max(DATABASE_BATCH_MAX_STATEMENTS),
     })
     .strict(),
 ]);
@@ -210,7 +216,7 @@ export const databaseStatementResultSchema = z
   .object({
     command: z.string().min(1).max(40),
     rowCount: z.number().int().nonnegative(),
-    rows: z.array(databaseRowSchema).max(100),
+    rows: z.array(databaseRowSchema).max(DATABASE_RESULT_MAX_ROWS),
   })
   .strict();
 
