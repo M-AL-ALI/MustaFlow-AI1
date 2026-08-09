@@ -1,6 +1,11 @@
 import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@cloudflare/sandbox";
 import { createHash } from "node:crypto";
-import { argvToCommandString, compareUtf8, sha256Hex } from "@workspace/tenant-runtime-contracts";
+import {
+  CAPABILITY_DOORMAN_HOST,
+  argvToCommandString,
+  compareUtf8,
+  sha256Hex,
+} from "@workspace/tenant-runtime-contracts";
 import type { ExecRuntimeRequest } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
@@ -26,7 +31,7 @@ import {
   verifyRuntimeMaterializationRequest,
 } from "./runtime-materialization";
 
-export const DOORMAN_HOST = "doorman.staging.nabuflow.internal";
+export const DOORMAN_HOST = CAPABILITY_DOORMAN_HOST;
 const TENANT_PROCESS_ID = "tenant-service";
 
 export class ContainerProxy extends SandboxContainerProxy {

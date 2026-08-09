@@ -1,14 +1,13 @@
 import { neon, type FullQueryResults } from "@neondatabase/serverless";
 import {
+  DATABASE_OPERATION_DEFAULT_TIMEOUT_MS,
+  DATABASE_RESULT_MAX_BYTES,
+  DATABASE_RESULT_MAX_ROWS,
   databaseCapabilityInputSchema,
   databaseStatementResultSchema,
   type DatabaseCapabilityInput,
   type DatabaseStatementResult,
 } from "@workspace/tenant-runtime-contracts";
-
-const MAX_ROWS = 100;
-const MAX_RESPONSE_BYTES = 256 * 1024;
-const DEFAULT_TIMEOUT_MS = 10_000;
 
 export type DatabaseBrokerErrorCode =
   | "database_invalid_query"
@@ -80,7 +79,7 @@ function validateConnectionString(connectionString: string): void {
 }
 
 function sanitizedResult(result: FullQueryResults<false>): DatabaseStatementResult {
-  if (result.rows.length > MAX_ROWS) {
+  if (result.rows.length > DATABASE_RESULT_MAX_ROWS) {
     throw new DatabaseBrokerError(502, "database_response_too_large", false);
   }
   let rows: Array<Record<string, unknown>>;
@@ -148,7 +147,10 @@ export async function executeDatabaseCapability(
   }
   const input: DatabaseCapabilityInput = parsedInput.data;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? DATABASE_OPERATION_DEFAULT_TIMEOUT_MS,
+  );
   try {
     const adapter = options.adapter ?? neonExecutionAdapter;
     const result =
@@ -169,7 +171,7 @@ export async function executeDatabaseCapability(
               await adapter.atomicBatch(connectionString, input.statements, controller.signal)
             ).map(sanitizedResult),
           };
-    if (JSON.stringify(result).length > MAX_RESPONSE_BYTES) {
+    if (JSON.stringify(result).length > DATABASE_RESULT_MAX_BYTES) {
       throw new DatabaseBrokerError(502, "database_response_too_large", false);
     }
     return result;

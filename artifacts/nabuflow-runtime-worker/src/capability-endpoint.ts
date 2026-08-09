@@ -1,4 +1,5 @@
 import {
+  CAPABILITY_INTENT_PATH as CONTRACT_CAPABILITY_INTENT_PATH,
   capabilitySuccessResponseSchema,
   capabilityIntentSchema,
   capabilityInvocationSchema,
@@ -16,7 +17,7 @@ import type { ControlDurableObject } from "./control-durable-object";
 import type { CapabilityVault, ControlCoordinator, StoredHttpResponse } from "./model";
 
 export const CAPABILITY_ENDPOINT = "/_nabuflow/capability/v1/invoke";
-export const CAPABILITY_INTENT_PATH = "/v1/invoke";
+export const CAPABILITY_INTENT_PATH = CONTRACT_CAPABILITY_INTENT_PATH;
 const MAX_CAPABILITY_BYTES = 64 * 1024;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
