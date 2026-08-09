@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import {
+  PANTRY_SHELF_CONTENT_HASHES_FORMAT,
+  pantryShelfContentHashesHash,
+  signPantryDigest,
+} from "@workspace/tenant-runtime-contracts";
 import { handleControlRequest } from "../src/worker";
 import { MockBackend, MemoryCoordinator, TEST_NOW_MS, fakeEnv, signedRequest } from "./helpers";
+import { PANTRY_TEST_KEY } from "../scripts/pantry-catalog-fixture";
 
 describe("signed Pantry service-binding gateway", () => {
   it("forwards only an authenticated allowlisted route with the trusted principal", async () => {
@@ -178,5 +184,79 @@ describe("signed Pantry service-binding gateway", () => {
     );
     expect(response.status).toBe(200);
     expect(calls).toBe(1);
+  });
+
+  it("exposes attested content hashes only through the signed builder-only route", async () => {
+    const env = fakeEnv();
+    const root = "a".repeat(64);
+    const statement = {
+      format: PANTRY_SHELF_CONTENT_HASHES_FORMAT,
+      schemaVersion: 1 as const,
+      pantryRevisionId: "pantry-2026-08-09.1",
+      pantryRevisionRootSha256: root,
+      shelfManifestSha256: "b".repeat(64),
+      contentHashes: ["c".repeat(64)],
+    };
+    const statementSha256 = await pantryShelfContentHashesHash(statement);
+    const captured: Array<{ path: string; principal: string | null }> = [];
+    env.PANTRY_CATALOG = {
+      async fetch(request: Request) {
+        captured.push({
+          path: new URL(request.url).pathname,
+          principal: request.headers.get("x-nabuflow-pantry-principal"),
+        });
+        return Response.json({
+          ok: true,
+          statement,
+          statementSha256,
+          signature: await signPantryDigest(PANTRY_TEST_KEY.privateKeyPem, {
+            kind: "shelf-content-hashes",
+            kid: PANTRY_TEST_KEY.kid,
+            payloadSha256: statementSha256,
+          }),
+        });
+      },
+    } as unknown as Fetcher;
+    const dependencies = {
+      coordinator: new MemoryCoordinator(),
+      backend: new MockBackend(),
+      nowMs: TEST_NOW_MS,
+      requestId: "pantry-provenance",
+    };
+    const path = `/_nabuflow/control/v1/pantry/revisions/by-root/${root}/content-hashes`;
+    const unsigned = await handleControlRequest(
+      new Request(`https://runtime.example${path}`),
+      env,
+      dependencies,
+    );
+    expect(unsigned.status).toBe(401);
+    const missigned = await handleControlRequest(
+      await signedRequest({
+        path,
+        nonce: "pantry-provenance-missigned-0001",
+        secret: "wrong-control-secret-material-00000000",
+      }),
+      env,
+      dependencies,
+    );
+    expect(missigned.status).toBe(401);
+    await expect(missigned.json()).resolves.toMatchObject({ code: "invalid_signature" });
+
+    const signed = await signedRequest({
+      path,
+      nonce: "pantry-provenance-signed-0001",
+    });
+    signed.headers.set("x-nabuflow-pantry-principal", "catalog-admin");
+    const response = await handleControlRequest(signed, env, dependencies);
+    expect(response.status).toBe(200);
+    expect(captured).toEqual([
+      {
+        path: `/internal/v1/revisions/by-root/${root}/content-hashes`,
+        principal: "builder-readonly",
+      },
+    ]);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toHaveProperty("statement");
+    expect(JSON.stringify(body)).not.toContain("contentBase64");
   });
 });

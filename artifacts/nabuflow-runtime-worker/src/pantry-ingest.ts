@@ -9,7 +9,7 @@ import {
   type PantryErrorCode,
   type PantryResolvedIngredient,
 } from "@workspace/tenant-runtime-contracts";
-import { maxSatisfying, satisfies, valid } from "semver";
+import { maxSatisfying, satisfies, valid, validRange } from "semver";
 import {
   NpmRegistryClient,
   PantryIngestError,
@@ -57,6 +57,64 @@ function orderedRecord(input: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(input).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
   );
+}
+
+export type PantryRuntimeDependencyDeclarations = ReadonlyMap<
+  string,
+  Pick<NpmVersionDocument, "dependencies" | "optionalDependencies">
+>;
+
+export function assertPantryClosureComplete(
+  closure: PantryDependencyClosure,
+  declarations: PantryRuntimeDependencyDeclarations,
+): void {
+  const ingredientCoordinates = new Set(
+    closure.ingredients.map((ingredient) =>
+      coordinateKey(ingredient.package.name, ingredient.package.version),
+    ),
+  );
+  for (const ingredient of closure.ingredients) {
+    const key = coordinateKey(ingredient.package.name, ingredient.package.version);
+    const declared = declarations.get(key);
+    if (declared === undefined) {
+      throw new PantryIngestError(
+        "dependency_conflict",
+        "Pantry closure lacks immutable dependency declarations",
+      );
+    }
+    const optionalNames = new Set(Object.keys(declared.optionalDependencies));
+    const runtimeDeclarations = Object.entries(declared.dependencies).filter(
+      ([name]) => !optionalNames.has(name),
+    );
+    const runtimeEdges = ingredient.dependencies.filter((edge) => edge.kind === "runtime");
+    if (runtimeEdges.length !== runtimeDeclarations.length) {
+      throw new PantryIngestError(
+        "dependency_conflict",
+        "Pantry closure is missing a declared runtime dependency",
+      );
+    }
+    for (const [name, selector] of runtimeDeclarations) {
+      const edge = runtimeEdges.find((candidate) => candidate.name === name);
+      const selectorMatches = (() => {
+        try {
+          const range = validRange(selector);
+          return edge !== undefined && (range === null || satisfies(edge.version, range));
+        } catch {
+          return false;
+        }
+      })();
+      if (
+        edge === undefined ||
+        !selectorMatches ||
+        !ingredientCoordinates.has(coordinateKey(edge.name, edge.version))
+      ) {
+        throw new PantryIngestError(
+          "dependency_conflict",
+          "Pantry closure is missing a declared runtime dependency",
+        );
+      }
+    }
+  }
 }
 
 function resolveVersion(packument: NpmPackument, selector: string): string {
@@ -163,6 +221,10 @@ export async function ingestPantryStockRequest(
   const startedAt = now();
   const packuments = new Map<string, Promise<{ packument: NpmPackument; bytes: Uint8Array }>>();
   const ingredients = new Map<string, Promise<PantryResolvedIngredient>>();
+  const dependencyDeclarations = new Map<
+    string,
+    Pick<NpmVersionDocument, "dependencies" | "optionalDependencies">
+  >();
   const objects = new Map<string, PantryIngestObject>();
   const keysPromise = client.fetchRegistryKeys();
   let edgeCount = 0;
@@ -236,6 +298,10 @@ export async function ingestPantryStockRequest(
       const document = packumentResult.packument.versions[version];
       if (document === undefined)
         throw new PantryIngestError("version_not_found", "Resolved package version disappeared");
+      dependencyDeclarations.set(key, {
+        dependencies: document.dependencies,
+        optionalDependencies: document.optionalDependencies,
+      });
       try {
         assertPlatform(document, request);
       } catch (error) {
@@ -305,6 +371,7 @@ export async function ingestPantryStockRequest(
           dependencies: orderedRecord(document.dependencies),
           optionalDependencies: orderedRecord(document.optionalDependencies),
           peerDependencies: orderedRecord(document.peerDependencies),
+          bins: orderedRecord(document.bins),
           engines: orderedRecord(document.engines),
           os: document.os ?? null,
           cpu: document.cpu ?? null,
@@ -428,6 +495,7 @@ export async function ingestPantryStockRequest(
         publishTime: parsePublishedAt(packumentResult.packument.publishTimes[version]),
         deprecated: document.deprecated,
         dependencies,
+        bins: orderedRecord(document.bins),
         lifecycleScripts: Object.keys(document.scripts).some((script) =>
           ["preinstall", "install", "postinstall"].includes(script),
         )
@@ -473,6 +541,7 @@ export async function ingestPantryStockRequest(
     roots,
     ingredients: resolvedIngredients,
   });
+  assertPantryClosureComplete(closure, dependencyDeclarations);
 
   const lockfileBytes = new TextEncoder().encode(
     canonicalPantryJson({

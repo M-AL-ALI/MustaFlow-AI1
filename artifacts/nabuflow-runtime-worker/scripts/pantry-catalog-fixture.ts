@@ -3,6 +3,7 @@ import {
   PANTRY_CATALOG_SHELF_FORMAT,
   PANTRY_CLOSURE_FORMAT,
   PANTRY_REVISION_FORMAT,
+  canonicalPantryJson,
   pantryCatalogCommitRequestSchema,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
@@ -62,24 +63,60 @@ export async function makePantryFixture(input?: {
   sequence?: number;
   parentRootSha256?: string | null;
   selector?: string;
+  publicRootBytes?: Uint8Array;
 }): Promise<PantryFixture> {
   const nowMs = input?.nowMs ?? Date.parse("2026-08-08T17:00:00.000Z");
   const createdAt = new Date(nowMs).toISOString();
   const revisionId = `pantry-${createdAt.slice(0, 10)}.${input?.sequence ?? 1}`;
   const encoder = new TextEncoder();
   const objects = new Map<string, { kind: PantryCatalogObjectKind; bytes: Uint8Array }>();
-  const addObject = async (kind: PantryCatalogObjectKind, label: string): Promise<string> => {
-    const bytes = encoder.encode(`fixture:${label}\n`);
+  const addObject = async (
+    kind: PantryCatalogObjectKind,
+    label: string | Uint8Array,
+  ): Promise<string> => {
+    const bytes = typeof label === "string" ? encoder.encode(`fixture:${label}\n`) : label;
     const sha256 = await sha256Hex(bytes);
     objects.set(sha256, { kind, bytes });
     return sha256;
   };
   const rootMetadata = await addObject("registry-metadata", "root-metadata");
   const rootTarball = await addObject("package-tarball", "root-tarball");
-  const rootNormalized = await addObject("normalized-package", "root-normalized");
+  const publicRootBytes = input?.publicRootBytes ?? encoder.encode("module.exports=1");
+  const rootNormalized = await addObject(
+    "normalized-package",
+    encoder.encode(
+      canonicalPantryJson({
+        format: "nabu-pantry-normalized-package/v1",
+        entries: [
+          {
+            path: "index.js",
+            mode: 0o644,
+            bytes: publicRootBytes.byteLength,
+            sha256: await sha256Hex(publicRootBytes),
+          },
+        ],
+      }),
+    ),
+  );
   const leafMetadata = await addObject("registry-metadata", "leaf-metadata");
   const leafTarball = await addObject("package-tarball", "leaf-tarball");
-  const leafNormalized = await addObject("normalized-package", "leaf-normalized");
+  const publicLeafBytes = encoder.encode("module.exports='leaf'");
+  const leafNormalized = await addObject(
+    "normalized-package",
+    encoder.encode(
+      canonicalPantryJson({
+        format: "nabu-pantry-normalized-package/v1",
+        entries: [
+          {
+            path: "index.js",
+            mode: 0o644,
+            bytes: publicLeafBytes.byteLength,
+            sha256: await sha256Hex(publicLeafBytes),
+          },
+        ],
+      }),
+    ),
+  );
   const lockfileSha256 = await addObject("lockfile", "exact-lockfile");
   const sbomSha256 = await addObject("sbom", "cyclonedx-sbom");
   const toolchainAttestationSha256 = await addObject(

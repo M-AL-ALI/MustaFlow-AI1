@@ -33,6 +33,7 @@ export interface NpmVersionDocument {
   optionalDependencies: Record<string, string>;
   peerDependencies: Record<string, string>;
   peerDependenciesMeta: Record<string, { optional?: boolean }>;
+  bins: Record<string, string>;
   engines: Record<string, string>;
   os?: string[];
   cpu?: string[];
@@ -77,6 +78,16 @@ function optionalStringArray(value: unknown): string[] | undefined {
   if (typeof value === "string") return [value];
   if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) return undefined;
   return value;
+}
+
+function binRecord(packageName: string, value: unknown): Record<string, string> {
+  if (typeof value === "string") {
+    const commandName = packageName.includes("/")
+      ? packageName.slice(packageName.lastIndexOf("/") + 1)
+      : packageName;
+    return { [commandName]: value };
+  }
+  return stringRecord(value);
 }
 
 function parseVersionDocument(value: unknown): NpmVersionDocument | null {
@@ -133,6 +144,7 @@ function parseVersionDocument(value: unknown): NpmVersionDocument | null {
     optionalDependencies: stringRecord(input.optionalDependencies),
     peerDependencies: stringRecord(input.peerDependencies),
     peerDependenciesMeta,
+    bins: binRecord(input.name, input.bin),
     engines: stringRecord(input.engines),
     os: optionalStringArray(input.os),
     cpu: optionalStringArray(input.cpu),

@@ -89,6 +89,10 @@ export interface PantryCatalogCoordinator {
     assemblyId: string,
     shelf: PantryCatalogShelfRecord,
   ): Promise<"committed" | "replay" | "not_found" | "incomplete" | "conflict">;
+  commitDerivedShelf(
+    parentRootSha256: string,
+    shelf: PantryCatalogShelfRecord,
+  ): Promise<"committed" | "replay" | "not_found" | "conflict">;
   getShelfByRoot(rootSha256: string): Promise<PantryShelfLookup | null>;
   getShelfByRevisionId(revisionId: string): Promise<PantryShelfLookup | null>;
   transitionShelf(

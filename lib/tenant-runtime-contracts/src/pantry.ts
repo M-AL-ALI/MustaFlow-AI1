@@ -236,6 +236,29 @@ export const pantryResolvedIngredientSchema = z
     publishTime: z.string().datetime({ offset: true }),
     deprecated: z.boolean(),
     dependencies: z.array(pantryDependencyEdgeSchema).max(10_000),
+    bins: z
+      .record(
+        z
+          .string()
+          .min(1)
+          .max(128)
+          .regex(/^[A-Za-z0-9@][A-Za-z0-9@._-]*$/u),
+        z
+          .string()
+          .min(1)
+          .max(1_024)
+          .refine(
+            (path) =>
+              !path.startsWith("/") &&
+              !path.includes("\\") &&
+              path
+                .replace(/^\.\//u, "")
+                .split("/")
+                .every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+            "Package bin paths must remain relative to the package root",
+          ),
+      )
+      .optional(),
     lifecycleScripts: z.enum(["absent", "disabled", "isolated-passed", "isolated-failed"]),
     provenance: pantryProvenanceSchema,
     scan: pantryScannerPolicySchema,
@@ -388,6 +411,23 @@ export async function pantryLayerDescriptorHash(input: PantryLayerDescriptor): P
   );
 }
 
+export const pantryCapturedBuildResourceSchema = z
+  .object({
+    url: httpsUrlSchema,
+    contentSha256: pantrySha256Schema,
+    bytes: z
+      .number()
+      .int()
+      .positive()
+      .max(32 * 1024 * 1024),
+    mediaType: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[\x20-\x7e]+$/u),
+  })
+  .strict();
+
 export const pantryRevisionContentSchema = z
   .object({
     format: z.literal(PANTRY_REVISION_FORMAT),
@@ -401,6 +441,7 @@ export const pantryRevisionContentSchema = z
     layers: z.array(pantryLayerDescriptorSchema).max(10_000),
     scannerPolicy: pantryScannerPolicySchema,
     provenanceStatus: z.enum(["verified", "mixed", "unavailable", "rejected"]),
+    capturedBuildResources: z.array(pantryCapturedBuildResourceSchema).max(1_000).optional(),
   })
   .strict()
   .superRefine((revision, context) => {
@@ -425,6 +466,25 @@ export const pantryRevisionContentSchema = z
       previousPath = layer.mountPath;
       contentHashes.add(layer.contentSha256);
     }
+    let previousResource: string | null = null;
+    const resourceHashes = new Set<string>();
+    for (let index = 0; index < (revision.capturedBuildResources?.length ?? 0); index += 1) {
+      const resource = revision.capturedBuildResources?.[index];
+      if (resource === undefined) continue;
+      const key = `${resource.url}\0${resource.contentSha256}`;
+      if (
+        resourceHashes.has(resource.contentSha256) ||
+        (previousResource !== null && compareUtf8(previousResource, key) >= 0)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["capturedBuildResources", index],
+          message: "Captured build resources must be unique and sorted",
+        });
+      }
+      resourceHashes.add(resource.contentSha256);
+      previousResource = key;
+    }
   });
 
 export async function pantryRevisionRoot(input: PantryRevisionContent): Promise<string> {
@@ -435,7 +495,7 @@ export const pantrySignedDigestSchema = z
   .object({
     schemaVersion: z.literal(PANTRY_SCHEMA_VERSION),
     algorithm: z.literal(PANTRY_SIGNATURE_ALGORITHM),
-    kind: z.enum(["revision", "build-attestation"]),
+    kind: z.enum(["revision", "build-attestation", "shelf-content-hashes"]),
     kid: pantryKeyIdSchema,
     payloadSha256: pantrySha256Schema,
     signature: z
@@ -840,6 +900,7 @@ export type PantryPlatform = z.infer<typeof pantryPlatformSchema>;
 export type PantryResolvedIngredient = z.infer<typeof pantryResolvedIngredientSchema>;
 export type PantryDependencyClosure = z.infer<typeof pantryDependencyClosureSchema>;
 export type PantryLayerDescriptor = z.infer<typeof pantryLayerDescriptorSchema>;
+export type PantryCapturedBuildResource = z.infer<typeof pantryCapturedBuildResourceSchema>;
 export type PantryRevisionContent = z.infer<typeof pantryRevisionContentSchema>;
 export type PantrySignedDigest = z.infer<typeof pantrySignedDigestSchema>;
 export type PantryRevisionRecord = z.infer<typeof pantryRevisionRecordSchema>;

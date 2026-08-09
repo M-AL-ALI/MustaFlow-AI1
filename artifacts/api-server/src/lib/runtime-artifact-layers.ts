@@ -7,7 +7,13 @@ import {
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   RUNTIME_ARTIFACT_LAYERS_FORMAT,
   compareUtf8,
+  pantryCatalogShelfManifestHash,
+  pantryCatalogShelfMatchesStamp,
+  pantryCatalogShelfRecordSchema,
   pantryPlatformSchema,
+  pantryShelfContentHashesHash,
+  pantryShelfContentHashesResponseSchema,
+  sha256Hex,
   runtimeArtifactLayerContentSchema,
   runtimeArtifactLayerUnpackedManifestHash,
   runtimeLayeredArtifactContentHash,
@@ -15,8 +21,12 @@ import {
   runtimeLayeredArtifactEnvelopeSchema,
   runtimeLayeredArtifactMergedReleaseHash,
   runtimeLayeredArtifactSealedHash,
-  sha256Hex,
+  verifyPantryDigestSignature,
+  verifyPantryRevisionRecord,
   validateRuntimeArtifactPath,
+  type PantryCatalogShelfRecord,
+  type PantryCatalogShelfStamp,
+  type PantryShelfContentHashesResponse,
   type PantryPlatform,
   type PantryRevisionState,
   type RuntimeArtifactLayerContent,
@@ -43,6 +53,11 @@ const SECRET_PATTERNS = [
 export interface SealedRuntimeArtifactLayer {
   content: RuntimeArtifactLayerContent;
   chunks: Uint8Array[];
+  scanSummary: {
+    policyVersion: "nabu-secret-scan/v1";
+    scannedFiles: number;
+    shelfExemptFiles: number;
+  };
 }
 
 export interface SealedLayeredRuntimeArtifact {
@@ -57,7 +72,8 @@ export class RuntimeArtifactLayerSealError extends Error {
       | "artifact_invalid_path"
       | "artifact_duplicate_path"
       | "artifact_too_large"
-      | "artifact_secret_detected",
+      | "artifact_secret_detected"
+      | "artifact_invalid_provenance",
     message: string,
   ) {
     super(message);
@@ -65,10 +81,67 @@ export class RuntimeArtifactLayerSealError extends Error {
   }
 }
 
+export interface TrustedPantryLayerSealProvenance {
+  readonly pantryRevisionRootSha256: string;
+}
+
+const trustedPantryContentHashes = new WeakMap<
+  TrustedPantryLayerSealProvenance,
+  ReadonlySet<string>
+>();
+
+function invalidProvenance(): RuntimeArtifactLayerSealError {
+  return new RuntimeArtifactLayerSealError(
+    "artifact_invalid_provenance",
+    "Layer provenance did not verify",
+  );
+}
+
+export async function resolveTrustedPantryLayerSealProvenance(input: {
+  shelf: PantryCatalogShelfRecord;
+  expectedShelf: PantryCatalogShelfStamp;
+  attestation: PantryShelfContentHashesResponse;
+  publicKeys: ReadonlyMap<string, string>;
+}): Promise<TrustedPantryLayerSealProvenance> {
+  const parsedShelf = pantryCatalogShelfRecordSchema.safeParse(input.shelf);
+  const parsedAttestation = pantryShelfContentHashesResponseSchema.safeParse(input.attestation);
+  if (
+    !parsedShelf.success ||
+    !parsedAttestation.success ||
+    !pantryCatalogShelfMatchesStamp(parsedShelf.data, input.expectedShelf)
+  ) {
+    throw invalidProvenance();
+  }
+  const { manifestSha256, ...manifest } = parsedShelf.data;
+  if (
+    (await pantryCatalogShelfManifestHash(manifest)) !== manifestSha256 ||
+    !(await verifyPantryRevisionRecord(parsedShelf.data.revision, input.publicKeys)).ok ||
+    parsedAttestation.data.statement.pantryRevisionId !==
+      parsedShelf.data.revision.content.revisionId ||
+    parsedAttestation.data.statement.pantryRevisionRootSha256 !==
+      parsedShelf.data.revision.rootSha256 ||
+    parsedAttestation.data.statement.shelfManifestSha256 !== manifestSha256 ||
+    (await pantryShelfContentHashesHash(parsedAttestation.data.statement)) !==
+      parsedAttestation.data.statementSha256 ||
+    !(await verifyPantryDigestSignature(input.publicKeys, parsedAttestation.data.signature)).ok
+  ) {
+    throw invalidProvenance();
+  }
+  const provenance = Object.freeze({
+    pantryRevisionRootSha256: parsedShelf.data.revision.rootSha256,
+  });
+  trustedPantryContentHashes.set(
+    provenance,
+    new Set(parsedAttestation.data.statement.contentHashes),
+  );
+  return provenance;
+}
+
 export async function sealRuntimeArtifactLayer(input: {
   mountPath: string;
   platform: PantryPlatform;
   files: RuntimeArtifactSourceFile[];
+  provenance?: TrustedPantryLayerSealProvenance;
 }): Promise<SealedRuntimeArtifactLayer> {
   if (validateRuntimeArtifactPath(input.mountPath) === null) {
     throw new RuntimeArtifactLayerSealError("artifact_invalid_path", "Layer mount path is invalid");
@@ -77,34 +150,46 @@ export async function sealRuntimeArtifactLayer(input: {
     throw new RuntimeArtifactLayerSealError("artifact_too_large", "Layer contains too many files");
   }
   const platform = pantryPlatformSchema.parse(input.platform);
-  const normalized = input.files
-    .map((file) => {
-      if (
-        validateRuntimeArtifactPath(file.path) === null ||
-        FORBIDDEN_LAYER_PATHS.some((pattern) => pattern.test(file.path))
-      ) {
-        throw new RuntimeArtifactLayerSealError(
-          "artifact_invalid_path",
-          "Layer contains an invalid or forbidden path",
-        );
-      }
-      const bytes = typeof file.content === "string" ? encoder.encode(file.content) : file.content;
-      if (bytes.byteLength > MAX_RUNTIME_ARTIFACT_LAYER_FILE_BYTES) {
-        throw new RuntimeArtifactLayerSealError("artifact_too_large", "Layer file is too large");
-      }
-      if (containsSecret(bytes)) {
-        throw new RuntimeArtifactLayerSealError(
-          "artifact_secret_detected",
-          "Layer secret scan did not pass",
-        );
-      }
-      return {
-        path: file.path,
-        bytes: new Uint8Array(bytes),
-        mode: file.executable ? (0o755 as const) : (0o644 as const),
-      };
-    })
-    .sort((left, right) => compareUtf8(left.path, right.path));
+  const publicContentHashes =
+    input.provenance === undefined ? null : trustedPantryContentHashes.get(input.provenance);
+  if (input.provenance !== undefined && publicContentHashes === undefined)
+    throw invalidProvenance();
+  let scannedFiles = 0;
+  let shelfExemptFiles = 0;
+  const normalized = (
+    await Promise.all(
+      input.files.map(async (file) => {
+        if (
+          validateRuntimeArtifactPath(file.path) === null ||
+          FORBIDDEN_LAYER_PATHS.some((pattern) => pattern.test(file.path))
+        ) {
+          throw new RuntimeArtifactLayerSealError(
+            "artifact_invalid_path",
+            "Layer contains an invalid or forbidden path",
+          );
+        }
+        const bytes =
+          typeof file.content === "string" ? encoder.encode(file.content) : file.content;
+        if (bytes.byteLength > MAX_RUNTIME_ARTIFACT_LAYER_FILE_BYTES) {
+          throw new RuntimeArtifactLayerSealError("artifact_too_large", "Layer file is too large");
+        }
+        const publicContent = publicContentHashes?.has(await sha256Hex(bytes)) === true;
+        if (publicContent) shelfExemptFiles += 1;
+        else scannedFiles += 1;
+        if (!publicContent && containsSecret(bytes)) {
+          throw new RuntimeArtifactLayerSealError(
+            "artifact_secret_detected",
+            "Layer secret scan did not pass",
+          );
+        }
+        return {
+          path: file.path,
+          bytes: new Uint8Array(bytes),
+          mode: file.executable ? (0o755 as const) : (0o644 as const),
+        };
+      }),
+    )
+  ).sort((left, right) => compareUtf8(left.path, right.path));
 
   for (let index = 1; index < normalized.length; index += 1) {
     if (normalized[index - 1].path === normalized[index].path) {
@@ -165,7 +250,15 @@ export async function sealRuntimeArtifactLayer(input: {
     chunks: chunkHashes,
     files,
   });
-  return { content, chunks };
+  return {
+    content,
+    chunks,
+    scanSummary: {
+      policyVersion: "nabu-secret-scan/v1",
+      scannedFiles,
+      shelfExemptFiles,
+    },
+  };
 }
 
 export async function sealLayeredRuntimeArtifact(input: {
@@ -220,6 +313,7 @@ export async function sealLayeredRuntimeArtifact(input: {
     layers: input.layers.map((layer) => ({
       content: structuredClone(layer.content),
       chunks: layer.chunks.map((chunk) => chunk.slice()),
+      scanSummary: structuredClone(layer.scanSummary),
     })),
   };
 }

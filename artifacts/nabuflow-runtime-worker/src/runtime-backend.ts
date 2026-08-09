@@ -1,5 +1,6 @@
 import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@cloudflare/sandbox";
-import { argvToCommandString, sha256Hex } from "@workspace/tenant-runtime-contracts";
+import { createHash } from "node:crypto";
+import { argvToCommandString, compareUtf8, sha256Hex } from "@workspace/tenant-runtime-contracts";
 import type { ExecRuntimeRequest } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
@@ -11,6 +12,19 @@ import type {
 } from "./model";
 import { artifactChunkKey } from "./artifact-storage";
 import { dependencyLayerChunkKey, layeredArtifactAppChunkKey } from "./artifact-layer-storage";
+import { StagingArtifactCommitOwnerLossError } from "./artifact-commit-recovery";
+import {
+  RUNTIME_MATERIALIZER_SOURCE,
+  RUNTIME_RELEASE_ROOT,
+  type RuntimeMaterializationFile,
+  type RuntimeMaterializationManifest,
+  type RuntimeMaterializationPayload,
+  type RuntimeMaterializationRequest,
+  runtimeMaterializationPayloadPath,
+  runtimeMaterializationStageRoot,
+  sealRuntimeMaterializationManifest,
+  verifyRuntimeMaterializationRequest,
+} from "./runtime-materialization";
 
 export const DOORMAN_HOST = "doorman.staging.nabuflow.internal";
 const TENANT_PROCESS_ID = "tenant-service";
@@ -33,6 +47,135 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
   enableInternet = false;
   interceptHttps = true;
   allowedHosts = [DOORMAN_HOST];
+
+  async prepareRuntimeMaterialization(sealedArtifactSha256: string): Promise<{ ok: true }> {
+    const stageRoot = runtimeMaterializationStageRoot(sealedArtifactSha256);
+    const scope = new RuntimeMaterializationRpcScope();
+    try {
+      await consumeRuntimeMaterializationRpcResult(
+        scope,
+        this.exec(
+          argvToCommandString(["sh", "-c", 'rm -rf -- "$1" && mkdir -p -- "$1"', "sh", stageRoot]),
+          { cwd: "/workspace", timeout: 30_000 },
+        ),
+        (result) => {
+          if (!result.success) throw new Error("Runtime materialization staging failed");
+        },
+      );
+      return { ok: true };
+    } finally {
+      scope.close();
+    }
+  }
+
+  async materializeRuntimeAggregate(
+    request: RuntimeMaterializationRequest,
+  ): Promise<{ ok: true; filesWritten: number; bytesWritten: number }> {
+    const manifest = await verifyRuntimeMaterializationRequest(request);
+    const stageRoot = runtimeMaterializationStageRoot(manifest.sealedArtifactSha256);
+    const releaseRoot = `${RUNTIME_RELEASE_ROOT}/${manifest.sealedArtifactSha256}`;
+    const manifestPath = `${stageRoot}/manifest.json`;
+    const scriptPath = `${stageRoot}/materialize.mjs`;
+    const scope = new RuntimeMaterializationRpcScope();
+    const startedAt = Date.now();
+    try {
+      await consumeRuntimeMaterializationRpcResult(
+        scope,
+        this.writeFile(manifestPath, request.canonicalManifest),
+        (result) => {
+          if (!result.success) throw new Error("Runtime materialization manifest write failed");
+        },
+      );
+      await consumeRuntimeMaterializationRpcResult(
+        scope,
+        this.writeFile(scriptPath, RUNTIME_MATERIALIZER_SOURCE),
+        (result) => {
+          if (!result.success) throw new Error("Runtime materializer write failed");
+        },
+      );
+      // eslint-disable-next-line no-console -- metadata-only materialization liveness evidence
+      console.log(
+        JSON.stringify({
+          event: "runtime.materialization.started",
+          sealedArtifactSha256: manifest.sealedArtifactSha256,
+          filesExpected: manifest.files.length,
+          payloadsExpected: manifest.payloads.length,
+        }),
+      );
+      const output = await consumeRuntimeMaterializationRpcResult(
+        scope,
+        this.exec(
+          argvToCommandString([
+            "node",
+            scriptPath,
+            manifestPath,
+            stageRoot,
+            releaseRoot,
+            String(request.stagingAbortAfterFiles ?? 0),
+          ]),
+          {
+            cwd: "/workspace",
+            timeout: 270_000,
+          },
+        ),
+        (result) => {
+          if (!result.success) throw new Error("Runtime aggregate materialization failed");
+          try {
+            return JSON.parse(result.stdout) as unknown;
+          } catch {
+            throw new Error("Runtime materializer returned malformed evidence");
+          }
+        },
+      );
+      if (
+        typeof output !== "object" ||
+        output === null ||
+        (output as { ok?: unknown }).ok !== true ||
+        !Number.isSafeInteger((output as { filesWritten?: unknown }).filesWritten) ||
+        !Number.isSafeInteger((output as { bytesWritten?: unknown }).bytesWritten) ||
+        (output as { filesWritten: number }).filesWritten !== manifest.files.length
+      ) {
+        throw new Error("Runtime materializer returned invalid evidence");
+      }
+      // eslint-disable-next-line no-console -- metadata-only materialization liveness evidence
+      console.log(
+        JSON.stringify({
+          event: "runtime.materialization.complete",
+          sealedArtifactSha256: manifest.sealedArtifactSha256,
+          filesWritten: manifest.files.length,
+          bytesWritten: (output as { bytesWritten: number }).bytesWritten,
+          durationMs: Date.now() - startedAt,
+        }),
+      );
+      return {
+        ok: true,
+        filesWritten: manifest.files.length,
+        bytesWritten: (output as { bytesWritten: number }).bytesWritten,
+      };
+    } finally {
+      try {
+        await consumeRuntimeMaterializationRpcResult(
+          scope,
+          this.exec(argvToCommandString(["rm", "-rf", "--", stageRoot]), {
+            cwd: "/workspace",
+            timeout: 30_000,
+          }),
+          () => undefined,
+        );
+      } catch (error) {
+        // eslint-disable-next-line no-console -- cleanup failures must stay visible without replacing the response
+        console.error(
+          JSON.stringify({
+            event: "runtime.materialization.cleanup_failed",
+            sealedArtifactSha256: manifest.sealedArtifactSha256,
+            error: error instanceof Error ? error.name : "UnknownError",
+          }),
+        );
+      } finally {
+        scope.close();
+      }
+    }
+  }
 }
 
 // The SDK registry setter only runs on assignment. A static class field looks
@@ -60,6 +203,15 @@ export interface BackendStatusResult {
   lastError: string | null;
 }
 
+export interface RuntimeMaterializationTicket {
+  payloadContentSha256s: string[];
+}
+
+export interface RuntimeMaterializationOptions {
+  /** Staging-only live owner-loss probe; production callers never set it. */
+  stagingAbortAfterFiles?: number;
+}
+
 export interface RuntimeBackend {
   start(runtime: StoredRuntime): Promise<BackendStartResult>;
   stop(runtime: StoredRuntime): Promise<void>;
@@ -75,6 +227,28 @@ export interface RuntimeBackend {
     runtime: StoredRuntime,
     artifact: StoredRuntimeLayeredArtifact,
     layers: StoredRuntimeLayer[],
+  ): Promise<{ filesWritten: number; layersMaterialized: number }>;
+  stageMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+  ): Promise<RuntimeMaterializationTicket>;
+  unpackMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+    ticket: RuntimeMaterializationTicket,
+    options?: RuntimeMaterializationOptions,
+  ): Promise<{ filesWritten: number }>;
+  stageLayeredMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+  ): Promise<RuntimeMaterializationTicket>;
+  unpackLayeredMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+    ticket: RuntimeMaterializationTicket,
+    options?: RuntimeMaterializationOptions,
   ): Promise<{ filesWritten: number; layersMaterialized: number }>;
 }
 
@@ -181,51 +355,8 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     runtime: StoredRuntime,
     artifact: StoredRuntimeArtifact,
   ): Promise<{ filesWritten: number }> {
-    const sandbox = this.sandbox(runtime.descriptor.identity, true);
-    const releaseRoot = releaseRootFor(artifact.envelope.sealedArtifactSha256);
-    const appRoot = `${releaseRoot}/app`;
-    await sandbox.killAllProcesses();
-    const removed = await sandbox.exec(argvToCommandString(["rm", "-rf", "--", releaseRoot]), {
-      cwd: "/workspace",
-      timeout: 30_000,
-    });
-    if (!removed.success) throw new Error("Previous artifact release could not be cleared");
-    await sandbox.mkdir(appRoot, { recursive: true });
-
-    for (const file of artifact.envelope.content.files) {
-      const bytes = await this.readArtifactRange(artifact, file.offset, file.size);
-      if ((await sha256Hex(bytes)) !== file.sha256) {
-        throw new Error("Materialized artifact file failed integrity verification");
-      }
-      const target = `${appRoot}/${file.path}`;
-      const parent = target.slice(0, target.lastIndexOf("/"));
-      await sandbox.mkdir(parent, { recursive: true });
-      await sandbox.writeFile(
-        target,
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(bytes);
-            controller.close();
-          },
-        }),
-      );
-      if (file.mode === 0o755) {
-        const result = await sandbox.exec(argvToCommandString(["chmod", "755", "--", target]), {
-          cwd: appRoot,
-          timeout: 30_000,
-        });
-        if (!result.success) throw new Error("Artifact executable mode could not be applied");
-      }
-    }
-    await sandbox.writeFile(
-      `${releaseRoot}/seal.json`,
-      JSON.stringify({
-        contentSha256: artifact.envelope.contentSha256,
-        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
-        manifestRevision: artifact.envelope.manifestRevision,
-      }),
-    );
-    return { filesWritten: artifact.envelope.content.files.length };
+    const ticket = await this.stageMaterialization(runtime, artifact);
+    return this.unpackMaterialization(runtime, artifact, ticket);
   }
 
   async materializeLayered(
@@ -233,26 +364,116 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     artifact: StoredRuntimeLayeredArtifact,
     layers: StoredRuntimeLayer[],
   ): Promise<{ filesWritten: number; layersMaterialized: number }> {
-    const sandbox = this.sandbox(runtime.descriptor.identity, true);
-    const releaseRoot = releaseRootFor(artifact.envelope.sealedArtifactSha256);
-    const appRoot = `${releaseRoot}/app`;
-    await sandbox.killAllProcesses();
-    const removed = await sandbox.exec(argvToCommandString(["rm", "-rf", "--", releaseRoot]), {
-      cwd: "/workspace",
-      timeout: 30_000,
-    });
-    if (!removed.success) throw new Error("Previous layered release could not be cleared");
-    await sandbox.mkdir(appRoot, { recursive: true });
+    const ticket = await this.stageLayeredMaterialization(runtime, artifact, layers);
+    return this.unpackLayeredMaterialization(runtime, artifact, layers, ticket);
+  }
 
+  async stageMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+  ): Promise<RuntimeMaterializationTicket> {
+    return this.stageAggregateRelease(
+      runtime,
+      artifact.envelope.sealedArtifactSha256,
+      this.artifactSources(artifact),
+    );
+  }
+
+  async unpackMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeArtifact,
+    ticket: RuntimeMaterializationTicket,
+    options?: RuntimeMaterializationOptions,
+  ): Promise<{ filesWritten: number }> {
+    const result = await this.unpackAggregateRelease(
+      runtime,
+      artifact.envelope.sealedArtifactSha256,
+      this.artifactSources(artifact),
+      ticket,
+      {
+        contentSha256: artifact.envelope.contentSha256,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        manifestRevision: artifact.envelope.manifestRevision,
+      },
+      0,
+      options,
+    );
+    return { filesWritten: result.filesWritten };
+  }
+
+  async stageLayeredMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+  ): Promise<RuntimeMaterializationTicket> {
+    return this.stageAggregateRelease(
+      runtime,
+      artifact.envelope.sealedArtifactSha256,
+      this.layeredArtifactSources(artifact, layers),
+    );
+  }
+
+  async unpackLayeredMaterialization(
+    runtime: StoredRuntime,
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+    ticket: RuntimeMaterializationTicket,
+    options?: RuntimeMaterializationOptions,
+  ): Promise<{ filesWritten: number; layersMaterialized: number }> {
+    return this.unpackAggregateRelease(
+      runtime,
+      artifact.envelope.sealedArtifactSha256,
+      this.layeredArtifactSources(artifact, layers),
+      ticket,
+      {
+        format: artifact.envelope.content.format,
+        contentSha256: artifact.envelope.contentSha256,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        manifestRevision: artifact.envelope.manifestRevision,
+        finalMergedReleaseSha256: artifact.envelope.content.finalMergedReleaseSha256,
+        layers: artifact.envelope.content.layers.map((layer) => layer.descriptor.contentSha256),
+      },
+      artifact.envelope.content.layers.length,
+      options,
+    );
+  }
+
+  private artifactSources(artifact: StoredRuntimeArtifact): RuntimeAggregateSource[] {
+    return [
+      {
+        bytes: artifact.envelope.content.payloadBytes,
+        chunkBytes: artifact.envelope.content.chunkBytes,
+        chunks: artifact.envelope.content.chunks,
+        keyForChunk: (chunkIndex) =>
+          artifactChunkKey(
+            artifact.runtimeIdentity,
+            artifact.envelope.sealedArtifactSha256,
+            chunkIndex,
+          ),
+        files: artifact.envelope.content.files,
+      },
+    ];
+  }
+
+  private layeredArtifactSources(
+    artifact: StoredRuntimeLayeredArtifact,
+    layers: StoredRuntimeLayer[],
+  ): RuntimeAggregateSource[] {
     const app = artifact.envelope.content.appArtifact;
-    for (const file of app.content.files) {
-      const bytes = await this.readLayeredAppRange(artifact, file.offset, file.size);
-      if ((await sha256Hex(bytes)) !== file.sha256) {
-        throw new Error("Materialized layered app file failed integrity verification");
-      }
-      await this.writeReleaseFile(sandbox, appRoot, file.path, file.mode, bytes);
-    }
-
+    const sources: RuntimeAggregateSource[] = [
+      {
+        bytes: app.content.payloadBytes,
+        chunkBytes: app.content.chunkBytes,
+        chunks: app.content.chunks,
+        keyForChunk: (chunkIndex) =>
+          layeredArtifactAppChunkKey(
+            artifact.runtimeIdentity,
+            artifact.envelope.sealedArtifactSha256,
+            chunkIndex,
+          ),
+        files: app.content.files,
+      },
+    ];
     for (const content of artifact.envelope.content.layers) {
       const layer = layers.find(
         (candidate) =>
@@ -264,161 +485,156 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       if (content.descriptor.compression !== "none") {
         throw new Error("Dependency layer compression is unsupported");
       }
-      const payload = await this.readLayerRange(layer, 0, content.payloadBytes);
-      if ((await sha256Hex(payload)) !== content.descriptor.contentSha256) {
-        throw new Error("Dependency layer content failed integrity verification");
-      }
-      for (const file of content.files) {
-        const bytes = payload.slice(file.offset, file.offset + file.size);
-        if ((await sha256Hex(bytes)) !== file.sha256) {
-          throw new Error("Materialized dependency file failed integrity verification");
-        }
-        await this.writeReleaseFile(
-          sandbox,
-          appRoot,
-          `${content.descriptor.mountPath}/${file.path}`,
-          file.mode,
-          bytes,
+      sources.push({
+        bytes: content.payloadBytes,
+        chunkBytes: content.chunkBytes,
+        chunks: content.chunks,
+        expectedContentSha256: content.descriptor.contentSha256,
+        keyForChunk: (chunkIndex) =>
+          dependencyLayerChunkKey(layer.content.descriptor.contentSha256, chunkIndex),
+        files: content.files.map((file) => ({
+          ...file,
+          path: `${content.descriptor.mountPath}/${file.path}`,
+        })),
+      });
+    }
+    return sources;
+  }
+
+  private async stageAggregateRelease(
+    runtime: StoredRuntime,
+    sealedArtifactSha256: string,
+    sources: RuntimeAggregateSource[],
+  ): Promise<RuntimeMaterializationTicket> {
+    const scope = new RuntimeMaterializationRpcScope();
+    const sandbox = scope.track(this.sandbox(runtime.descriptor.identity, true));
+    try {
+      await consumeRuntimeMaterializationRpcResult(
+        scope,
+        sandbox.killAllProcesses(),
+        () => undefined,
+      );
+      await consumeRuntimeMaterializationRpcResult(
+        scope,
+        sandbox.prepareRuntimeMaterialization(sealedArtifactSha256),
+        () => undefined,
+      );
+      const payloads: RuntimeMaterializationPayload[] = [];
+      for (let index = 0; index < sources.length; index += 1) {
+        payloads.push(
+          await this.transferAggregatePayload(
+            scope,
+            sandbox,
+            sealedArtifactSha256,
+            index,
+            sources[index],
+          ),
         );
       }
+      return { payloadContentSha256s: payloads.map((payload) => payload.contentSha256) };
+    } finally {
+      scope.close();
     }
-    await sandbox.writeFile(
-      `${releaseRoot}/seal.json`,
-      JSON.stringify({
-        format: artifact.envelope.content.format,
-        contentSha256: artifact.envelope.contentSha256,
-        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
-        manifestRevision: artifact.envelope.manifestRevision,
-        finalMergedReleaseSha256: artifact.envelope.content.finalMergedReleaseSha256,
-        layers: artifact.envelope.content.layers.map((layer) => layer.descriptor.contentSha256),
-      }),
-    );
-    return {
-      filesWritten:
-        app.content.files.length +
-        artifact.envelope.content.layers.reduce((total, layer) => total + layer.files.length, 0),
-      layersMaterialized: artifact.envelope.content.layers.length,
-    };
   }
 
-  private async readArtifactRange(
-    artifact: StoredRuntimeArtifact,
-    offset: number,
-    length: number,
-  ): Promise<Uint8Array> {
-    const output = new Uint8Array(length);
-    let written = 0;
-    while (written < length) {
-      const absoluteOffset = offset + written;
-      const chunkIndex = Math.floor(absoluteOffset / artifact.envelope.content.chunkBytes);
-      const chunkOffset = absoluteOffset % artifact.envelope.content.chunkBytes;
-      const readLength = Math.min(
-        length - written,
-        artifact.envelope.content.chunkBytes - chunkOffset,
-      );
-      const object = await this.env.NABUFLOW_RUNTIME_ARTIFACTS.get(
-        artifactChunkKey(
-          artifact.runtimeIdentity,
-          artifact.envelope.sealedArtifactSha256,
-          chunkIndex,
-        ),
-        { range: { offset: chunkOffset, length: readLength } },
-      );
-      if (object === null) throw new Error("Committed artifact chunk is unavailable");
-      const bytes = new Uint8Array(await object.arrayBuffer());
-      if (bytes.byteLength !== readLength) throw new Error("Artifact chunk range is incomplete");
-      output.set(bytes, written);
-      written += bytes.byteLength;
+  private async unpackAggregateRelease(
+    runtime: StoredRuntime,
+    sealedArtifactSha256: string,
+    sources: RuntimeAggregateSource[],
+    ticket: RuntimeMaterializationTicket,
+    seal: RuntimeMaterializationManifest["seal"],
+    layersMaterialized: number,
+    options?: RuntimeMaterializationOptions,
+  ): Promise<{ filesWritten: number; layersMaterialized: number }> {
+    if (ticket.payloadContentSha256s.length !== sources.length) {
+      throw new Error("Runtime materialization ticket does not match its payloads");
     }
-    return output;
-  }
-
-  private async readLayeredAppRange(
-    artifact: StoredRuntimeLayeredArtifact,
-    offset: number,
-    length: number,
-  ): Promise<Uint8Array> {
-    const app = artifact.envelope.content.appArtifact.content;
-    return this.readR2Range(
-      offset,
-      length,
-      app.chunkBytes,
-      (chunkIndex) =>
-        layeredArtifactAppChunkKey(
-          artifact.runtimeIdentity,
-          artifact.envelope.sealedArtifactSha256,
-          chunkIndex,
-        ),
-      "Layered app chunk is unavailable",
-    );
-  }
-
-  private async readLayerRange(
-    layer: StoredRuntimeLayer,
-    offset: number,
-    length: number,
-  ): Promise<Uint8Array> {
-    return this.readR2Range(
-      offset,
-      length,
-      layer.content.chunkBytes,
-      (chunkIndex) => dependencyLayerChunkKey(layer.content.descriptor.contentSha256, chunkIndex),
-      "Dependency layer chunk is unavailable",
-    );
-  }
-
-  private async readR2Range(
-    offset: number,
-    length: number,
-    chunkBytes: number,
-    keyForChunk: (chunkIndex: number) => string,
-    missingMessage: string,
-  ): Promise<Uint8Array> {
-    const output = new Uint8Array(length);
-    let written = 0;
-    while (written < length) {
-      const absoluteOffset = offset + written;
-      const chunkIndex = Math.floor(absoluteOffset / chunkBytes);
-      const chunkOffset = absoluteOffset % chunkBytes;
-      const readLength = Math.min(length - written, chunkBytes - chunkOffset);
-      const object = await this.env.NABUFLOW_RUNTIME_ARTIFACTS.get(keyForChunk(chunkIndex), {
-        range: { offset: chunkOffset, length: readLength },
+    const payloads = sources.map((source, index) => {
+      const contentSha256 = ticket.payloadContentSha256s[index];
+      if (
+        !/^[0-9a-f]{64}$/u.test(contentSha256) ||
+        (source.expectedContentSha256 !== undefined &&
+          source.expectedContentSha256 !== contentSha256)
+      ) {
+        throw new Error("Runtime materialization ticket failed integrity verification");
+      }
+      return { index, contentSha256, size: source.bytes };
+    });
+    const scope = new RuntimeMaterializationRpcScope();
+    const sandbox = scope.track(this.sandbox(runtime.descriptor.identity, true));
+    try {
+      const files: RuntimeMaterializationFile[] = sources
+        .flatMap((source, payloadIndex) => source.files.map((file) => ({ ...file, payloadIndex })))
+        .sort((left, right) => compareUtf8(left.path, right.path));
+      const request = await sealRuntimeMaterializationManifest({
+        format: "nabu-runtime-materialization/v1",
+        sealedArtifactSha256,
+        payloads,
+        files,
+        seal,
       });
-      if (object === null) throw new Error(missingMessage);
-      const bytes = new Uint8Array(await object.arrayBuffer());
-      if (bytes.byteLength !== readLength) throw new Error("Dependency layer range is incomplete");
-      output.set(bytes, written);
-      written += bytes.byteLength;
+      if (options?.stagingAbortAfterFiles !== undefined) {
+        request.stagingAbortAfterFiles = options.stagingAbortAfterFiles;
+      }
+      let result: { ok: true; filesWritten: number; bytesWritten: number };
+      try {
+        result = await consumeRuntimeMaterializationRpcResult(
+          scope,
+          sandbox.materializeRuntimeAggregate(request),
+          (materialized) => materialized,
+        );
+      } catch (error) {
+        if (options?.stagingAbortAfterFiles !== undefined) {
+          throw new StagingArtifactCommitOwnerLossError("mid-materialization");
+        }
+        throw error;
+      }
+      return { filesWritten: result.filesWritten, layersMaterialized };
+    } finally {
+      scope.close();
     }
-    return output;
   }
 
-  private async writeReleaseFile(
+  private async transferAggregatePayload(
+    scope: RuntimeMaterializationRpcScope,
     sandbox: NabuflowSandbox,
-    appRoot: string,
-    relativePath: string,
-    mode: 420 | 493,
-    bytes: Uint8Array,
-  ): Promise<void> {
-    const target = `${appRoot}/${relativePath}`;
-    const parent = target.slice(0, target.lastIndexOf("/"));
-    await sandbox.mkdir(parent, { recursive: true });
-    await sandbox.writeFile(
-      target,
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(bytes);
-          controller.close();
-        },
-      }),
+    sealedArtifactSha256: string,
+    index: number,
+    source: RuntimeAggregateSource,
+  ): Promise<RuntimeMaterializationPayload> {
+    const transfer = verifiedRuntimePayloadStream(this.env.NABUFLOW_RUNTIME_ARTIFACTS, source);
+    const stageRoot = runtimeMaterializationStageRoot(sealedArtifactSha256);
+    const pendingPath = `${stageRoot}/${String(index).padStart(2, "0")}.pending`;
+    await consumeRuntimeMaterializationRpcResult(
+      scope,
+      sandbox.writeFile(pendingPath, transfer.stream),
+      (result) => {
+        if (
+          !result.success ||
+          !("bytesWritten" in result) ||
+          result.bytesWritten !== source.bytes
+        ) {
+          throw new Error("Runtime aggregate payload transfer is incomplete");
+        }
+      },
     );
-    if (mode === 0o755) {
-      const result = await sandbox.exec(argvToCommandString(["chmod", "755", "--", target]), {
-        cwd: appRoot,
-        timeout: 30_000,
-      });
-      if (!result.success) throw new Error("Dependency executable mode could not be applied");
+    const contentSha256 = transfer.digest();
+    if (
+      source.expectedContentSha256 !== undefined &&
+      source.expectedContentSha256 !== contentSha256
+    ) {
+      throw new Error("Runtime aggregate payload failed integrity verification");
     }
+    const payload = { index, contentSha256, size: source.bytes };
+    await consumeRuntimeMaterializationRpcResult(
+      scope,
+      sandbox.renameFile(
+        pendingPath,
+        runtimeMaterializationPayloadPath(sealedArtifactSha256, payload),
+      ),
+      () => undefined,
+    );
+    return payload;
   }
 
   private sandbox(identity: string, keepAlive: boolean): NabuflowSandbox {
@@ -428,6 +644,139 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       runtimeSandboxOptions(keepAlive, this.env.NABUFLOW_RUNTIME_SLEEP_AFTER),
     ) as NabuflowSandbox;
   }
+}
+
+interface RuntimeAggregateSource {
+  bytes: number;
+  chunkBytes: number;
+  chunks: string[];
+  expectedContentSha256?: string;
+  keyForChunk: (chunkIndex: number) => string;
+  files: Array<{
+    path: string;
+    mode: 420 | 493;
+    offset: number;
+    size: number;
+    sha256: string;
+  }>;
+}
+
+type RuntimeRpcDisposable = { [Symbol.dispose]?: () => void };
+
+export class RuntimeMaterializationRpcScope {
+  private readonly resources: RuntimeRpcDisposable[] = [];
+  private closed = false;
+
+  track<T>(resource: T): T {
+    if (
+      typeof resource === "object" &&
+      resource !== null &&
+      typeof (resource as RuntimeRpcDisposable)[Symbol.dispose] === "function"
+    ) {
+      this.resources.push(resource as RuntimeRpcDisposable);
+    }
+    return resource;
+  }
+
+  dispose(resource: unknown): void {
+    if (typeof resource !== "object" || resource === null) return;
+    const disposable = resource as RuntimeRpcDisposable;
+    const index = this.resources.lastIndexOf(disposable);
+    if (index >= 0) this.resources.splice(index, 1);
+    try {
+      disposable[Symbol.dispose]?.();
+    } catch {
+      // Materialization teardown must continue after a best-effort RPC release.
+    }
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const resource of this.resources.reverse()) {
+      try {
+        resource[Symbol.dispose]?.();
+      } catch {
+        // A cancellation must still release every remaining RPC capability.
+      }
+    }
+    this.resources.length = 0;
+  }
+}
+
+export async function consumeRuntimeMaterializationRpcResult<T, R>(
+  scope: RuntimeMaterializationRpcScope,
+  pending: Promise<T>,
+  consume: (result: T) => R | Promise<R>,
+): Promise<R> {
+  const result = scope.track(await pending);
+  try {
+    return await consume(result);
+  } finally {
+    scope.dispose(result);
+  }
+}
+
+function verifiedRuntimePayloadStream(
+  bucket: R2Bucket,
+  source: RuntimeAggregateSource,
+): { stream: ReadableStream<Uint8Array>; digest(): string } {
+  const aggregateHasher = createHash("sha256");
+  let index = 0;
+  let bytesRead = 0;
+  let contentSha256: string | null = null;
+  let failure: Error | null = null;
+  let canceled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (index >= source.chunks.length) {
+          if (bytesRead !== source.bytes) {
+            throw new Error("Runtime aggregate payload length is invalid");
+          }
+          contentSha256 = aggregateHasher.digest("hex");
+          controller.close();
+          return;
+        }
+        const chunkIndex = index;
+        const object = await bucket.get(source.keyForChunk(chunkIndex));
+        if (object === null) throw new Error("Runtime aggregate payload chunk is unavailable");
+        const bytes = new Uint8Array(await object.arrayBuffer());
+        const expectedLength = Math.min(
+          source.chunkBytes,
+          source.bytes - chunkIndex * source.chunkBytes,
+        );
+        if (
+          expectedLength < 0 ||
+          bytes.byteLength !== expectedLength ||
+          (await sha256Hex(bytes)) !== source.chunks[chunkIndex]
+        ) {
+          throw new Error("Runtime aggregate payload chunk failed integrity verification");
+        }
+        aggregateHasher.update(bytes);
+        bytesRead += bytes.byteLength;
+        index += 1;
+        controller.enqueue(bytes);
+      } catch (error) {
+        failure = error instanceof Error ? error : new Error("Runtime aggregate transfer failed");
+        controller.error(failure);
+      }
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  return {
+    stream,
+    digest() {
+      if (failure !== null) throw failure;
+      if (canceled) throw new Error("Runtime aggregate payload transfer was canceled");
+      if (contentSha256 === null) {
+        throw new Error("Runtime aggregate payload transfer did not complete");
+      }
+      return contentSha256;
+    },
+  };
 }
 
 export function runtimeSandboxOptions(keepAlive: boolean, sleepAfter: string) {

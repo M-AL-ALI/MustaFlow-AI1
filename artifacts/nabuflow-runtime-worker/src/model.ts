@@ -68,6 +68,39 @@ export type IdempotencyLookup =
   | { state: "conflict" }
   | { state: "replay"; response: StoredHttpResponse };
 
+export type ArtifactCommitKind = "v1" | "layers-v1";
+export type ArtifactCommitCheckpoint =
+  | "initialized"
+  | "verification-complete"
+  | "payloads-transferred"
+  | "unpack-complete"
+  | "finalized";
+
+export interface StoredArtifactCommitJob {
+  jobKey: string;
+  kind: ArtifactCommitKind;
+  runtimeIdentity: string;
+  sealedArtifactSha256: string;
+  fingerprint: string;
+  idempotencyStorageKey: string;
+  state: "active" | "succeeded" | "failed";
+  checkpoint: ArtifactCommitCheckpoint;
+  ownerId: string | null;
+  attempt: number;
+  leaseUntilMs: number | null;
+  abandonAtMs: number | null;
+  deadlineMs: number;
+  payloadContentSha256s?: string[];
+  response?: StoredHttpResponse;
+  updatedAtMs: number;
+}
+
+export type ArtifactCommitClaim =
+  | { state: "new" | "adopted"; job: StoredArtifactCommitJob }
+  | { state: "pending" }
+  | { state: "conflict" }
+  | { state: "replay"; response: StoredHttpResponse };
+
 export interface ControlAuditRecord {
   requestId: string;
   timestamp: string;
@@ -93,6 +126,39 @@ export interface ControlCoordinator {
     nowMs: number,
   ): Promise<void>;
   abandonIdempotency(key: string, fingerprint: string): Promise<void>;
+  claimArtifactCommit(input: {
+    key: string;
+    fingerprint: string;
+    ownerId: string;
+    kind: ArtifactCommitKind;
+    runtimeIdentity: string;
+    sealedArtifactSha256: string;
+    nowMs: number;
+  }): Promise<ArtifactCommitClaim>;
+  renewArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<"renewed" | "not_owner" | "terminal">;
+  checkpointArtifactCommit(input: {
+    jobKey: string;
+    ownerId: string;
+    checkpoint: ArtifactCommitCheckpoint;
+    payloadContentSha256s?: string[];
+    nowMs: number;
+  }): Promise<StoredArtifactCommitJob>;
+  completeArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<void>;
+  failArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<void>;
   recordAudit(record: ControlAuditRecord): Promise<void>;
   getRuntime(identity: string): Promise<StoredRuntime | null>;
   putRuntime(identity: string, runtime: StoredRuntime): Promise<void>;

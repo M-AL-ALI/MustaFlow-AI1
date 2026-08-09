@@ -13,3 +13,4 @@ export * from "./runtime-identity";
 export * from "./service-port";
 export * from "./shell-escape";
 export * from "./staging-host-override";
+export * from "./trusted-build";

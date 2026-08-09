@@ -6,6 +6,7 @@ import {
   MAX_RUNTIME_ARTIFACT_FILES,
   MAX_RUNTIME_ARTIFACT_MANIFEST_BYTES,
   MAX_RUNTIME_ARTIFACT_LAYERED_MANIFEST_BYTES,
+  TRUSTED_BUILD_MAX_REQUEST_BYTES,
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   RUNTIME_ARTIFACT_PENDING_TTL_MS,
   RUNTIME_ROLES,
@@ -62,6 +63,7 @@ import {
   canonicalJson,
   pantryPlatformSchema,
   pantryCatalogErrorResponseSchema,
+  pantryShelfContentHashesResponseSchema,
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
@@ -90,12 +92,14 @@ import type {
   PantryPlatform,
   RuntimeArtifactLayerContent,
 } from "@workspace/tenant-runtime-contracts";
+import { createHash } from "node:crypto";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVaultDurableObject } from "./capability-vault-durable-object";
 import { CAPABILITY_ENDPOINT, handleCapabilityRequest } from "./capability-endpoint";
 import type { ControlDurableObject } from "./control-durable-object";
 import type {
   CapabilityVault,
+  StoredArtifactCommitJob,
   ControlCoordinator,
   StoredHttpResponse,
   StoredRuntime,
@@ -114,6 +118,11 @@ import {
 import { handlePublishedDataPlaneRequest } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
+import {
+  ARTIFACT_COMMIT_ABORT_BEFORE_PREFIX,
+  ARTIFACT_COMMIT_ABORT_MID_PREFIX,
+  StagingArtifactCommitOwnerLossError,
+} from "./artifact-commit-recovery";
 
 const CONTROL_PREFIX = "/_nabuflow/control/v1";
 const MAX_REQUEST_BYTES = 256 * 1024;
@@ -142,7 +151,9 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "layeredArtifactRemove",
   "manifestUpdate",
   "pantryMutation",
+  "buildMutation",
 ]);
+const ARTIFACT_COMMIT_ENDPOINTS = new Set<Endpoint>(["artifactCommit", "layeredArtifactCommit"]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 const AUTH_HEADERS = {
@@ -182,7 +193,9 @@ type Endpoint =
   | "layeredArtifactRemove"
   | "manifestUpdate"
   | "pantryRead"
-  | "pantryMutation";
+  | "pantryMutation"
+  | "buildRead"
+  | "buildMutation";
 
 interface MatchedRoute {
   endpoint: Endpoint;
@@ -195,6 +208,9 @@ interface MatchedRoute {
   pantryPath?: string;
   pantryMethod?: string;
   pantryPrincipal?: "catalog-admin" | "builder-readonly" | "catalog-gc";
+  buildPath?: string;
+  buildMethod?: string;
+  buildPrincipal?: "build-control" | "build-readonly" | "build-gc";
 }
 
 interface WorkerDependencies {
@@ -226,6 +242,11 @@ type ControlRequestStage =
 
 interface RequestExecutionContext {
   stage: ControlRequestStage;
+}
+
+interface ArtifactCommitExecution {
+  job: StoredArtifactCommitJob;
+  ownerId: string;
 }
 
 class ControlHttpError extends Error {
@@ -440,7 +461,9 @@ export async function handleControlRequest(
 
   const idempotencyKey = request.headers.get(AUTH_HEADERS.idempotencyKey) ?? "";
   const needsIdempotency = MUTATION_ENDPOINTS.has(route.endpoint);
+  const needsArtifactCommitJob = ARTIFACT_COMMIT_ENDPOINTS.has(route.endpoint);
   let idempotencyFingerprint: string | null = null;
+  let artifactCommitExecution: ArtifactCommitExecution | null = null;
   if (needsIdempotency) {
     context.stage = "idempotency";
     if (!idempotencyKey) {
@@ -463,11 +486,17 @@ export async function handleControlRequest(
     idempotencyFingerprint = await sha256Hex(
       `${request.method}\n${pathAndQuery}\n${signed.bodySha256}`,
     );
-    const lookup = await coordinator.beginIdempotency(
-      idempotencyKey,
-      idempotencyFingerprint,
-      nowMs,
-    );
+    const lookup = needsArtifactCommitJob
+      ? await coordinator.claimArtifactCommit({
+          key: idempotencyKey,
+          fingerprint: idempotencyFingerprint,
+          ownerId: requestId,
+          kind: route.endpoint === "artifactCommit" ? "v1" : "layers-v1",
+          runtimeIdentity: await runtimeIdentityForRoute(route, env),
+          sealedArtifactSha256: (input as CommitRuntimeArtifactRequest).sealedArtifactSha256,
+          nowMs,
+        })
+      : await coordinator.beginIdempotency(idempotencyKey, idempotencyFingerprint, nowMs);
     if (lookup.state === "replay") {
       await recordAudit(
         coordinator,
@@ -486,6 +515,16 @@ export async function handleControlRequest(
     if (lookup.state === "conflict" || lookup.state === "pending") {
       const code = lookup.state === "conflict" ? "idempotency_conflict" : "request_in_progress";
       const status = 409;
+      if (needsArtifactCommitJob && lookup.state === "pending") {
+        // eslint-disable-next-line no-console -- metadata-only lease evidence
+        console.log(
+          JSON.stringify({
+            event: "artifact_commit_live_owner_preserved",
+            requestId,
+            endpoint: route.endpoint,
+          }),
+        );
+      }
       await recordAudit(
         coordinator,
         requestId,
@@ -505,9 +544,30 @@ export async function handleControlRequest(
         requestId,
       );
     }
+    if (
+      needsArtifactCommitJob &&
+      (lookup.state === "new" || lookup.state === "adopted") &&
+      "job" in lookup
+    ) {
+      artifactCommitExecution = { job: lookup.job, ownerId: requestId };
+      // eslint-disable-next-line no-console -- metadata-only coordinator recovery evidence
+      console.log(
+        JSON.stringify({
+          event: lookup.state === "adopted" ? "artifact_commit_adopted" : "artifact_commit_started",
+          requestId,
+          kind: lookup.job.kind,
+          attempt: lookup.job.attempt,
+          checkpoint: lookup.job.checkpoint,
+        }),
+      );
+    }
   }
 
   context.stage = "execution";
+  const heartbeat =
+    artifactCommitExecution === null
+      ? null
+      : startArtifactCommitHeartbeat(coordinator, artifactCommitExecution, dependencies.nowMs);
   try {
     const result = await executeEndpoint(
       route.endpoint,
@@ -517,9 +577,17 @@ export async function handleControlRequest(
       backend,
       dependencies.vault,
       route,
+      artifactCommitExecution,
     );
     validateResponse(route.endpoint, result.body);
-    if (needsIdempotency && idempotencyFingerprint !== null) {
+    if (artifactCommitExecution !== null) {
+      await coordinator.completeArtifactCommit(
+        artifactCommitExecution.job.jobKey,
+        artifactCommitExecution.ownerId,
+        result,
+        dependencies.nowMs ?? Date.now(),
+      );
+    } else if (needsIdempotency && idempotencyFingerprint !== null) {
       await coordinator.completeIdempotency(idempotencyKey, idempotencyFingerprint, result, nowMs);
     }
     await recordAudit(
@@ -533,6 +601,28 @@ export async function handleControlRequest(
     );
     return jsonResponse(result.status, result.body);
   } catch (error) {
+    if (error instanceof StagingArtifactCommitOwnerLossError && artifactCommitExecution !== null) {
+      // This staging-only fault leaves the durable job active. Its lease—not this request—owns
+      // adoption or terminal fallback, matching a request/consumer disappearing at this point.
+      // eslint-disable-next-line no-console -- metadata-only staging recovery evidence
+      console.error(
+        JSON.stringify({
+          event: "artifact_commit_staging_owner_terminated",
+          requestId,
+          kind: artifactCommitExecution.job.kind,
+          attempt: artifactCommitExecution.job.attempt,
+          checkpoint: artifactCommitExecution.job.checkpoint,
+          stage: error.stage,
+        }),
+      );
+      return errorResponse(
+        503,
+        "artifact_commit_owner_lost",
+        "The staging artifact commit owner was terminated",
+        true,
+        requestId,
+      );
+    }
     if (!(error instanceof ControlHttpError)) {
       // Keep unexpected control failures diagnosable without emitting request or artifact content.
       // eslint-disable-next-line no-console -- metadata-only trace for the top-level boundary
@@ -546,7 +636,24 @@ export async function handleControlRequest(
       );
     }
     const controlError = toControlError(error);
-    if (needsIdempotency && idempotencyFingerprint !== null) {
+    if (artifactCommitExecution !== null) {
+      try {
+        const body = errorBody(controlError, requestId);
+        await coordinator.failArtifactCommit(
+          artifactCommitExecution.job.jobKey,
+          artifactCommitExecution.ownerId,
+          { status: controlError.status, body },
+          dependencies.nowMs ?? Date.now(),
+        );
+      } catch (finalizationError) {
+        logControlErrorFinalizationFailure(
+          requestId,
+          route.endpoint,
+          "idempotency",
+          finalizationError,
+        );
+      }
+    } else if (needsIdempotency && idempotencyFingerprint !== null) {
       try {
         if (controlError.status >= 500) {
           await coordinator.abandonIdempotency(idempotencyKey, idempotencyFingerprint);
@@ -588,6 +695,8 @@ export async function handleControlRequest(
       controlError.retryable,
       requestId,
     );
+  } finally {
+    heartbeat?.stop();
   }
 }
 
@@ -618,6 +727,75 @@ function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableOb
   return env.CONTROL_COORDINATOR.get(env.CONTROL_COORDINATOR.idFromName("control-v1"));
 }
 
+async function runtimeIdentityForRoute(route: MatchedRoute, env: WorkerBindings): Promise<string> {
+  if (route.locator === null || route.artifactSha256 === undefined) {
+    throw new ControlHttpError(400, "invalid_request", "Artifact commit route is incomplete");
+  }
+  return deriveRuntimeIdentity({
+    namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+    ...route.locator,
+  });
+}
+
+function startArtifactCommitHeartbeat(
+  coordinator: ControlCoordinator,
+  execution: ArtifactCommitExecution,
+  fixedNowMs: number | undefined,
+): { stop(): void } {
+  const localStartedAt = Date.now();
+  const timer = setInterval(() => {
+    const nowMs =
+      fixedNowMs === undefined ? Date.now() : fixedNowMs + (Date.now() - localStartedAt);
+    void coordinator
+      .renewArtifactCommit(execution.job.jobKey, execution.ownerId, nowMs)
+      .catch(() => undefined);
+  }, 5_000);
+  return { stop: () => clearInterval(timer) };
+}
+
+function stagingCommitRecoveryEnabled(env: WorkerBindings): boolean {
+  return env.NABUFLOW_STAGING_ARTIFACT_COMMIT_RECOVERY_PROBE === "enabled";
+}
+
+function maybeAbortStagingCommitBeforeMaterializer(
+  env: WorkerBindings,
+  artifactRevision: string,
+  job: StoredArtifactCommitJob,
+): void {
+  if (
+    stagingCommitRecoveryEnabled(env) &&
+    job.attempt === 1 &&
+    artifactRevision.startsWith(ARTIFACT_COMMIT_ABORT_BEFORE_PREFIX)
+  ) {
+    throw new StagingArtifactCommitOwnerLossError("before-materializer");
+  }
+}
+
+function stagingMaterializationOptions(
+  env: WorkerBindings,
+  artifactRevision: string,
+  job: StoredArtifactCommitJob,
+): { stagingAbortAfterFiles: number } | undefined {
+  return stagingCommitRecoveryEnabled(env) &&
+    job.attempt === 1 &&
+    artifactRevision.startsWith(ARTIFACT_COMMIT_ABORT_MID_PREFIX)
+    ? { stagingAbortAfterFiles: 1 }
+    : undefined;
+}
+
+function logArtifactCommitCheckpoint(job: StoredArtifactCommitJob): void {
+  // eslint-disable-next-line no-console -- metadata-only durable checkpoint evidence
+  console.log(
+    JSON.stringify({
+      event: "artifact_commit_checkpoint",
+      kind: job.kind,
+      attempt: job.attempt,
+      checkpoint: job.checkpoint,
+      payloads: job.payloadContentSha256s?.length ?? 0,
+    }),
+  );
+}
+
 function getCapabilityVault(
   env: WorkerBindings,
   projectId: number,
@@ -633,10 +811,12 @@ function matchPantryRoute(method: string, pathname: string): MatchedRoute {
     /^\/diagnostics$/u,
     /^\/assemblies\/passembly_[0-9a-f]{64}$/u,
     /^\/revisions\/by-root\/[0-9a-f]{64}$/u,
+    /^\/revisions\/by-root\/[0-9a-f]{64}\/content-hashes$/u,
     /^\/revisions\/pantry-\d{4}-\d{2}-\d{2}\.[1-9]\d*$/u,
   ];
   const mutationPatterns: ReadonlyArray<{ method: string; pattern: RegExp }> = [
     { method: "POST", pattern: /^\/stock-requests$/u },
+    { method: "POST", pattern: /^\/build-resources$/u },
     {
       method: "PUT",
       pattern: /^\/assemblies\/passembly_[0-9a-f]{64}\/objects\/[0-9a-f]{64}\/[a-z-]+$/u,
@@ -688,12 +868,61 @@ function matchPantryRoute(method: string, pathname: string): MatchedRoute {
   throw new ControlHttpError(404, "not_found", "Control endpoint not found");
 }
 
+function matchBuildRoute(method: string, pathname: string): MatchedRoute {
+  const prefix = `${CONTROL_PREFIX}/build-plane`;
+  const suffix = pathname.slice(prefix.length);
+  const readPatterns = [
+    /^\/health$/u,
+    /^\/diagnostics$/u,
+    /^\/builds\/pbuild_[A-Za-z0-9_-]{22,128}$/u,
+    /^\/builds\/pbuild_[A-Za-z0-9_-]{22,128}\/outputs\/(?:app|layer)\/[0-9a-f]{64}\/chunks\/[0-9]+$/u,
+  ];
+  const mutationPatterns: ReadonlyArray<{ method: string; pattern: RegExp }> = [
+    { method: "POST", pattern: /^\/builds$/u },
+    { method: "DELETE", pattern: /^\/builds\/pbuild_[A-Za-z0-9_-]{22,128}$/u },
+    { method: "POST", pattern: /^\/gc$/u },
+  ];
+  const buildPath = `/internal/v1${suffix}`;
+  if (method === "GET" && readPatterns.some((pattern) => pattern.test(suffix))) {
+    return {
+      endpoint: "buildRead",
+      locator: null,
+      buildPath,
+      buildMethod: method,
+      buildPrincipal:
+        suffix === "/diagnostics" || suffix === "/health" ? "build-control" : "build-readonly",
+    };
+  }
+  const mutation = mutationPatterns.find(
+    (candidate) => candidate.method === method && candidate.pattern.test(suffix),
+  );
+  if (mutation !== undefined) {
+    return {
+      endpoint: "buildMutation",
+      locator: null,
+      buildPath,
+      buildMethod: method,
+      buildPrincipal: suffix === "/gc" ? "build-gc" : "build-control",
+    };
+  }
+  const knownPath =
+    readPatterns.some((pattern) => pattern.test(suffix)) ||
+    mutationPatterns.some((candidate) => candidate.pattern.test(suffix));
+  if (knownPath) {
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
+  throw new ControlHttpError(404, "not_found", "Control endpoint not found");
+}
+
 function matchRoute(method: string, pathname: string): MatchedRoute {
   if (method === "GET" && pathname === `${CONTROL_PREFIX}/version`) {
     return { endpoint: "version", locator: null };
   }
   if (pathname.startsWith(`${CONTROL_PREFIX}/pantry/`)) {
     return matchPantryRoute(method, pathname);
+  }
+  if (pathname.startsWith(`${CONTROL_PREFIX}/build-plane/`)) {
+    return matchBuildRoute(method, pathname);
   }
   const activateRouteMatch = new RegExp(`^${CONTROL_PREFIX}/routes/([^/]+)/activate$`).exec(
     pathname,
@@ -937,6 +1166,105 @@ async function proxyPantryRequest(
       parsed.data.retryable,
     );
   }
+  if (route.pantryPath.endsWith("/content-hashes")) {
+    const parsed = pantryShelfContentHashesResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid provenance response",
+        false,
+      );
+    }
+    responseBody = parsed.data;
+  }
+  return { status: response.status, body: responseBody };
+}
+
+async function proxyBuildRequest(
+  endpoint: "buildRead" | "buildMutation",
+  body: Uint8Array,
+  env: WorkerBindings,
+  route: MatchedRoute | undefined,
+): Promise<StoredHttpResponse> {
+  if (
+    route?.buildPath === undefined ||
+    route.buildMethod === undefined ||
+    route.buildPrincipal === undefined ||
+    !env.TRUSTED_BUILD_PLANE ||
+    typeof env.TRUSTED_BUILD_PLANE.fetch !== "function"
+  ) {
+    throw new ControlHttpError(
+      503,
+      "build_infrastructure_unavailable",
+      "The trusted build plane is not configured",
+      false,
+    );
+  }
+  const request = new Request(`https://build.internal${route.buildPath}`, {
+    method: route.buildMethod,
+    headers: {
+      "content-type": "application/json",
+      "x-nabuflow-build-principal": route.buildPrincipal,
+    },
+    ...(endpoint === "buildRead" ? {} : { body: body.slice().buffer }),
+  });
+  let response: Response;
+  try {
+    response = await env.TRUSTED_BUILD_PLANE.fetch(request);
+  } catch {
+    throw new ControlHttpError(
+      503,
+      "build_infrastructure_unavailable",
+      "The trusted build plane is unavailable",
+      true,
+    );
+  }
+  const responseBytes = new Uint8Array(await response.arrayBuffer());
+  if (responseBytes.byteLength > 2 * 1024 * 1024) {
+    throw new ControlHttpError(
+      503,
+      "build_infrastructure_unavailable",
+      "The trusted build response exceeded its limit",
+      false,
+    );
+  }
+  let responseBody: unknown;
+  try {
+    responseBody = JSON.parse(textDecoder.decode(responseBytes));
+  } catch {
+    throw new ControlHttpError(
+      503,
+      "build_infrastructure_unavailable",
+      "The trusted build plane returned an invalid response",
+      false,
+    );
+  }
+  if (!response.ok) {
+    const candidate = responseBody as {
+      code?: unknown;
+      message?: unknown;
+      retryable?: unknown;
+    };
+    if (
+      typeof candidate.code !== "string" ||
+      typeof candidate.message !== "string" ||
+      typeof candidate.retryable !== "boolean"
+    ) {
+      throw new ControlHttpError(
+        503,
+        "build_infrastructure_unavailable",
+        "The trusted build plane returned an invalid error",
+        false,
+      );
+    }
+    throw new ControlHttpError(
+      response.status,
+      candidate.code,
+      candidate.message,
+      candidate.retryable,
+    );
+  }
   return { status: response.status, body: responseBody };
 }
 
@@ -946,9 +1274,14 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     assertEmptyBody(rawBody);
     return {};
   }
-  if (route.endpoint === "pantryRead" || route.endpoint === "pantryMutation") {
+  if (
+    route.endpoint === "pantryRead" ||
+    route.endpoint === "pantryMutation" ||
+    route.endpoint === "buildRead" ||
+    route.endpoint === "buildMutation"
+  ) {
     assertNoQuery(url);
-    if (route.endpoint === "pantryRead") assertEmptyBody(rawBody);
+    if (route.endpoint === "pantryRead" || route.endpoint === "buildRead") assertEmptyBody(rawBody);
     return rawBody;
   }
   if (route.locator === null) {
@@ -1197,6 +1530,7 @@ async function executeEndpoint(
   backend: RuntimeBackend,
   injectedVault?: CapabilityVault,
   matchedRoute?: MatchedRoute,
+  artifactCommitExecution?: ArtifactCommitExecution | null,
 ): Promise<StoredHttpResponse> {
   assertArtifactInfrastructure(env);
   if (endpoint.startsWith("layeredArtifact")) assertLayeredArtifactInfrastructure(env);
@@ -1209,14 +1543,21 @@ async function executeEndpoint(
         deploymentVersion,
         provider: "cloudflare",
         supportedRoles: [...RUNTIME_ROLES],
-        features: CONTROL_FEATURES.filter(
-          (feature) => feature !== "artifact-layers-v1" || configuredLayerPlatform(env) !== null,
-        ),
+        features: CONTROL_FEATURES.filter((feature) => {
+          if (feature === "artifact-layers-v1") return configuredLayerPlatform(env) !== null;
+          if (feature === "trusted-build-v1") {
+            return env.TRUSTED_BUILD_PLANE !== undefined;
+          }
+          return true;
+        }),
       },
     };
   }
   if (endpoint === "pantryRead" || endpoint === "pantryMutation") {
     return proxyPantryRequest(endpoint, input as Uint8Array, env, matchedRoute);
+  }
+  if (endpoint === "buildRead" || endpoint === "buildMutation") {
+    return proxyBuildRequest(endpoint, input as Uint8Array, env, matchedRoute);
   }
   if (endpoint === "routeActivate") {
     return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator);
@@ -1506,6 +1847,9 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "layeredArtifactCommit") {
+    if (artifactCommitExecution === undefined || artifactCommitExecution === null) {
+      throw new Error("Layered artifact commit job is unavailable");
+    }
     const request = input as CommitRuntimeLayeredArtifactRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
     if (matchedRoute?.artifactSha256 !== request.sealedArtifactSha256) {
@@ -1513,16 +1857,19 @@ async function executeEndpoint(
     }
     const artifact = await coordinator.getLayeredArtifact(identity, request.sealedArtifactSha256);
     if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
-    for (const content of artifact.envelope.content.layers) {
-      const storedLayer = await coordinator.getRuntimeLayer(content.descriptor.contentSha256);
-      if (
-        storedLayer !== null &&
-        (storedLayer.state === "committed" ||
-          storedLayer.receivedChunks.every((chunk) => chunk !== null))
-      ) {
-        await verifyStoredLayerIntegrity(env.NABUFLOW_RUNTIME_ARTIFACTS, content);
-      }
-    }
+    const checkpoint = async (
+      next: StoredArtifactCommitJob["checkpoint"],
+      payloadContentSha256s?: string[],
+    ) => {
+      artifactCommitExecution.job = await coordinator.checkpointArtifactCommit({
+        jobKey: artifactCommitExecution.job.jobKey,
+        ownerId: artifactCommitExecution.ownerId,
+        checkpoint: next,
+        ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
+        nowMs: Date.now(),
+      });
+      logArtifactCommitCheckpoint(artifactCommitExecution.job);
+    };
     const commit = await coordinator.commitLayeredArtifact(identity, request.sealedArtifactSha256);
     if (commit === "incomplete") {
       const removed = await coordinator.removeLayeredArtifact(
@@ -1544,19 +1891,91 @@ async function executeEndpoint(
         "Dependency layer metadata does not match the sealed envelope",
       );
     }
+    if (artifactCommitExecution.job.checkpoint === "initialized") {
+      try {
+        await verifyStoredArtifactChunks(
+          env.NABUFLOW_RUNTIME_ARTIFACTS,
+          artifact.envelope.content.appArtifact.content,
+          (index) => layeredArtifactAppChunkKey(identity, request.sealedArtifactSha256, index),
+        );
+        for (const content of artifact.envelope.content.layers) {
+          await verifyStoredLayerIntegrity(env.NABUFLOW_RUNTIME_ARTIFACTS, content);
+        }
+      } catch (error) {
+        const removed = await coordinator.removeLayeredArtifact(
+          identity,
+          request.sealedArtifactSha256,
+        );
+        if (removed !== null) await deleteRemovedLayeredArtifact(env, removed);
+        throw error;
+      }
+      await checkpoint("verification-complete");
+    }
     const runtime = await requireRuntime(coordinator, identity);
     const materialized = artifact.envelope.manifestRevision === runtime.manifest.revision;
     let filesWritten = 0;
     let layersMaterialized = 0;
     if (materialized) {
       const layers = await loadCommittedLayers(coordinator, artifact);
-      const result = await backend.materializeLayered(runtime, artifact, layers);
-      filesWritten = result.filesWritten;
-      layersMaterialized = result.layersMaterialized;
-      runtime.artifactRevision = artifact.envelope.artifactRevision;
-      runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
-      runtime.artifactKind = "layers-v1";
-      await coordinator.putRuntime(identity, runtime);
+      let ticket =
+        artifactCommitExecution.job.payloadContentSha256s === undefined
+          ? null
+          : {
+              payloadContentSha256s: artifactCommitExecution.job.payloadContentSha256s,
+            };
+      if (artifactCommitExecution.job.checkpoint === "verification-complete") {
+        ticket = await backend.stageLayeredMaterialization(runtime, artifact, layers);
+        await checkpoint("payloads-transferred", ticket.payloadContentSha256s);
+      } else if (artifactCommitExecution.job.checkpoint === "payloads-transferred") {
+        const restaged = await backend.stageLayeredMaterialization(runtime, artifact, layers);
+        if (
+          ticket === null ||
+          canonicalJson(restaged.payloadContentSha256s) !==
+            canonicalJson(ticket.payloadContentSha256s)
+        ) {
+          throw new Error("Adopted layered artifact payload hashes changed");
+        }
+        ticket = restaged;
+      }
+      if (artifactCommitExecution.job.checkpoint === "payloads-transferred") {
+        if (ticket === null) throw new Error("Layered materialization ticket is unavailable");
+        maybeAbortStagingCommitBeforeMaterializer(
+          env,
+          artifact.envelope.artifactRevision,
+          artifactCommitExecution.job,
+        );
+        const result = await backend.unpackLayeredMaterialization(
+          runtime,
+          artifact,
+          layers,
+          ticket,
+          stagingMaterializationOptions(
+            env,
+            artifact.envelope.artifactRevision,
+            artifactCommitExecution.job,
+          ),
+        );
+        filesWritten = result.filesWritten;
+        layersMaterialized = result.layersMaterialized;
+        await checkpoint("unpack-complete");
+      } else {
+        filesWritten =
+          artifact.envelope.content.appArtifact.content.files.length +
+          artifact.envelope.content.layers.reduce((total, layer) => total + layer.files.length, 0);
+        layersMaterialized = artifact.envelope.content.layers.length;
+      }
+    } else if (artifactCommitExecution.job.checkpoint === "verification-complete") {
+      await checkpoint("payloads-transferred", []);
+      await checkpoint("unpack-complete");
+    }
+    if (artifactCommitExecution.job.checkpoint === "unpack-complete") {
+      if (materialized) {
+        runtime.artifactRevision = artifact.envelope.artifactRevision;
+        runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
+        runtime.artifactKind = "layers-v1";
+        await coordinator.putRuntime(identity, runtime);
+      }
+      await checkpoint("finalized");
     }
     return {
       status: 200,
@@ -1691,12 +2110,28 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "artifactCommit") {
+    if (artifactCommitExecution === undefined || artifactCommitExecution === null) {
+      throw new Error("Artifact commit job is unavailable");
+    }
     const request = input as CommitRuntimeArtifactRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
     if (matchedRoute?.artifactSha256 !== request.sealedArtifactSha256)
       throw artifactRuntimeMismatch();
     const artifact = await coordinator.getArtifact(identity, request.sealedArtifactSha256);
     if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    const checkpoint = async (
+      next: StoredArtifactCommitJob["checkpoint"],
+      payloadContentSha256s?: string[],
+    ) => {
+      artifactCommitExecution.job = await coordinator.checkpointArtifactCommit({
+        jobKey: artifactCommitExecution.job.jobKey,
+        ownerId: artifactCommitExecution.ownerId,
+        checkpoint: next,
+        ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
+        nowMs: Date.now(),
+      });
+      logArtifactCommitCheckpoint(artifactCommitExecution.job);
+    };
     const commit = await coordinator.commitArtifact(identity, request.sealedArtifactSha256);
     if (commit === "incomplete") {
       await deleteArtifactObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
@@ -1704,16 +2139,76 @@ async function executeEndpoint(
       throw new ControlHttpError(409, "artifact_incomplete", "Artifact upload is incomplete");
     }
     if (commit === "not_found") throw artifactRuntimeMismatch();
+    if (artifactCommitExecution.job.checkpoint === "initialized") {
+      try {
+        await verifyStoredArtifactChunks(
+          env.NABUFLOW_RUNTIME_ARTIFACTS,
+          artifact.envelope.content,
+          (index) => artifactChunkKey(identity, artifact.envelope.sealedArtifactSha256, index),
+        );
+      } catch (error) {
+        await deleteArtifactObjects(env.NABUFLOW_RUNTIME_ARTIFACTS, artifact);
+        await coordinator.removeArtifact(identity, request.sealedArtifactSha256);
+        throw error;
+      }
+      await checkpoint("verification-complete");
+    }
     const runtime = await requireRuntime(coordinator, identity);
     const materialized = artifact.envelope.manifestRevision === runtime.manifest.revision;
     let filesWritten = 0;
     if (materialized) {
-      const result = await backend.materialize(runtime, artifact);
-      filesWritten = result.filesWritten;
-      runtime.artifactRevision = artifact.envelope.artifactRevision;
-      runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
-      runtime.artifactKind = "v1";
-      await coordinator.putRuntime(identity, runtime);
+      let ticket =
+        artifactCommitExecution.job.payloadContentSha256s === undefined
+          ? null
+          : { payloadContentSha256s: artifactCommitExecution.job.payloadContentSha256s };
+      if (artifactCommitExecution.job.checkpoint === "verification-complete") {
+        ticket = await backend.stageMaterialization(runtime, artifact);
+        await checkpoint("payloads-transferred", ticket.payloadContentSha256s);
+      } else if (artifactCommitExecution.job.checkpoint === "payloads-transferred") {
+        const restaged = await backend.stageMaterialization(runtime, artifact);
+        if (
+          ticket === null ||
+          canonicalJson(restaged.payloadContentSha256s) !==
+            canonicalJson(ticket.payloadContentSha256s)
+        ) {
+          throw new Error("Adopted artifact payload hashes changed");
+        }
+        ticket = restaged;
+      }
+      if (artifactCommitExecution.job.checkpoint === "payloads-transferred") {
+        if (ticket === null) throw new Error("Materialization ticket is unavailable");
+        maybeAbortStagingCommitBeforeMaterializer(
+          env,
+          artifact.envelope.artifactRevision,
+          artifactCommitExecution.job,
+        );
+        const result = await backend.unpackMaterialization(
+          runtime,
+          artifact,
+          ticket,
+          stagingMaterializationOptions(
+            env,
+            artifact.envelope.artifactRevision,
+            artifactCommitExecution.job,
+          ),
+        );
+        filesWritten = result.filesWritten;
+        await checkpoint("unpack-complete");
+      } else {
+        filesWritten = artifact.envelope.content.files.length;
+      }
+    } else if (artifactCommitExecution.job.checkpoint === "verification-complete") {
+      await checkpoint("payloads-transferred", []);
+      await checkpoint("unpack-complete");
+    }
+    if (artifactCommitExecution.job.checkpoint === "unpack-complete") {
+      if (materialized) {
+        runtime.artifactRevision = artifact.envelope.artifactRevision;
+        runtime.artifactSha256 = artifact.envelope.sealedArtifactSha256;
+        runtime.artifactKind = "v1";
+        await coordinator.putRuntime(identity, runtime);
+      }
+      await checkpoint("finalized");
     }
     return {
       status: 200,
@@ -2175,7 +2670,12 @@ async function deactivatePublishedRoute(
 }
 
 function validateResponse(endpoint: Endpoint, body: unknown): void {
-  if (endpoint === "pantryRead" || endpoint === "pantryMutation") {
+  if (
+    endpoint === "pantryRead" ||
+    endpoint === "pantryMutation" ||
+    endpoint === "buildRead" ||
+    endpoint === "buildMutation"
+  ) {
     if (
       typeof body !== "object" ||
       body === null ||
@@ -2330,8 +2830,8 @@ async function verifyStoredLayerIntegrity(
   bucket: R2Bucket,
   content: RuntimeArtifactLayerContent,
 ): Promise<void> {
-  const payload = new Uint8Array(content.payloadBytes);
-  let offset = 0;
+  const payloadHash = createHash("sha256");
+  let verifiedBytes = 0;
   for (let index = 0; index < content.chunks.length; index += 1) {
     const object = await bucket.get(
       dependencyLayerChunkKey(content.descriptor.contentSha256, index),
@@ -2361,15 +2861,49 @@ async function verifyStoredLayerIntegrity(
         "Dependency layer object failed integrity verification",
       );
     }
-    payload.set(bytes, offset);
-    offset += bytes.byteLength;
+    payloadHash.update(bytes);
+    verifiedBytes += bytes.byteLength;
   }
-  if ((await sha256Hex(payload)) !== content.descriptor.contentSha256) {
+  if (
+    verifiedBytes !== content.payloadBytes ||
+    payloadHash.digest("hex") !== content.descriptor.contentSha256
+  ) {
     throw new ControlHttpError(
       422,
       "artifact_integrity_mismatch",
       "Dependency layer content failed integrity verification",
     );
+  }
+}
+
+async function verifyStoredArtifactChunks(
+  bucket: R2Bucket,
+  content: { chunks: string[]; payloadBytes: number; chunkBytes: number },
+  keyForChunk: (chunkIndex: number) => string,
+): Promise<void> {
+  for (let index = 0; index < content.chunks.length; index += 1) {
+    const object = await bucket.get(keyForChunk(index));
+    if (object === null) {
+      throw new ControlHttpError(409, "artifact_incomplete", "Artifact upload is incomplete");
+    }
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    const expectedLength = expectedChunkLength(
+      content.payloadBytes,
+      content.chunkBytes,
+      content.chunks.length,
+      index,
+    );
+    if (
+      expectedLength === null ||
+      bytes.byteLength !== expectedLength ||
+      (await sha256Hex(bytes)) !== content.chunks[index]
+    ) {
+      throw new ControlHttpError(
+        422,
+        "artifact_integrity_mismatch",
+        "Artifact object failed integrity verification",
+      );
+    }
   }
 }
 
@@ -2404,6 +2938,9 @@ function requestBodyLimit(pathname: string): number {
   }
   if (/\/layered-artifacts\/[0-9a-f]{64}\/begin$/u.test(pathname)) {
     return MAX_RUNTIME_ARTIFACT_LAYERED_MANIFEST_BYTES;
+  }
+  if (pathname === `${CONTROL_PREFIX}/build-plane/builds`) {
+    return TRUSTED_BUILD_MAX_REQUEST_BYTES;
   }
   return MAX_REQUEST_BYTES;
 }

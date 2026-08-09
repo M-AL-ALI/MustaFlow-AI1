@@ -5,6 +5,8 @@ import type { WorkerBindings } from "./bindings";
 import type {
   ControlAuditRecord,
   ControlCoordinator,
+  ArtifactCommitClaim,
+  ArtifactCommitCheckpoint,
   IdempotencyLookup,
   RuntimeLogEntry,
   StoredHttpResponse,
@@ -12,6 +14,7 @@ import type {
   StoredRuntimeArtifact,
   StoredRuntimeLayer,
   StoredRuntimeLayeredArtifact,
+  StoredArtifactCommitJob,
   RemovedRuntimeLayeredArtifact,
 } from "./model";
 import { deleteArtifactObjects } from "./artifact-storage";
@@ -22,6 +25,9 @@ import {
 
 const IDEMPOTENCY_PENDING_TTL_MS = 10 * 60 * 1_000;
 const IDEMPOTENCY_COMPLETED_TTL_MS = 24 * 60 * 60 * 1_000;
+const ARTIFACT_COMMIT_LEASE_MS = 15_000;
+const ARTIFACT_COMMIT_ADOPTION_GRACE_MS = 30_000;
+const ARTIFACT_COMMIT_DEADLINE_MS = 5 * 60_000;
 const MAX_AUDIT_RECORDS = 1_000;
 const MAX_RUNTIME_LOGS = 1_000;
 const MAX_LOG_MESSAGE_LENGTH = 100_000;
@@ -31,6 +37,9 @@ interface StoredIdempotencyRecord {
   state: "pending" | "completed";
   expiresAtMs: number;
   response?: StoredHttpResponse;
+  ownerId?: string;
+  leaseUntilMs?: number;
+  jobKey?: string;
 }
 
 function runtimeKey(identity: string): string {
@@ -56,6 +65,34 @@ function runtimeLayerKey(contentSha256: string): string {
 function layeredArtifactReference(identity: string, sealedArtifactSha256: string): string {
   return `${identity}:${sealedArtifactSha256}`;
 }
+
+function artifactCommitJobKey(
+  identity: string,
+  sealedArtifactSha256: string,
+  idempotencyStorageKey: string,
+): string {
+  return `artifact-commit-job:${identity}:${sealedArtifactSha256}:${idempotencyStorageKey.slice("idempotency:".length)}`;
+}
+
+function artifactCommitAbandonedResponse(): StoredHttpResponse {
+  return {
+    status: 503,
+    body: {
+      ok: false,
+      code: "artifact_commit_abandoned",
+      message: "The artifact commit owner disappeared before the operation completed",
+      retryable: false,
+    },
+  };
+}
+
+const ARTIFACT_COMMIT_CHECKPOINTS: ArtifactCommitCheckpoint[] = [
+  "initialized",
+  "verification-complete",
+  "payloads-transferred",
+  "unpack-complete",
+  "finalized",
+];
 
 async function containerBindingKey(containerId: string): Promise<string> {
   return `container-binding:${await sha256Hex(containerId)}`;
@@ -165,6 +202,242 @@ export class ControlDurableObject
         await transaction.delete(storageKey);
       }
     });
+  }
+
+  async claimArtifactCommit(input: {
+    key: string;
+    fingerprint: string;
+    ownerId: string;
+    kind: "v1" | "layers-v1";
+    runtimeIdentity: string;
+    sealedArtifactSha256: string;
+    nowMs: number;
+  }): Promise<ArtifactCommitClaim> {
+    const idempotencyStorageKey = `idempotency:${await sha256Hex(input.key)}`;
+    const jobKey = artifactCommitJobKey(
+      input.runtimeIdentity,
+      input.sealedArtifactSha256,
+      idempotencyStorageKey,
+    );
+    const leaseUntilMs = input.nowMs + ARTIFACT_COMMIT_LEASE_MS;
+    const abandonAtMs = leaseUntilMs + ARTIFACT_COMMIT_ADOPTION_GRACE_MS;
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const idempotency = await transaction.get<StoredIdempotencyRecord>(idempotencyStorageKey);
+      if (idempotency !== undefined && idempotency.expiresAtMs > input.nowMs) {
+        if (idempotency.fingerprint !== input.fingerprint) return { state: "conflict" } as const;
+        if (idempotency.state === "completed" && idempotency.response !== undefined) {
+          return { state: "replay", response: idempotency.response } as const;
+        }
+      }
+      const existing = await transaction.get<StoredArtifactCommitJob>(jobKey);
+      if (existing?.response !== undefined && existing.state !== "active") {
+        await transaction.put(idempotencyStorageKey, {
+          fingerprint: input.fingerprint,
+          state: "completed",
+          expiresAtMs: input.nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+          response: existing.response,
+          jobKey,
+        } satisfies StoredIdempotencyRecord);
+        return { state: "replay", response: existing.response } as const;
+      }
+      if (existing !== undefined) {
+        if (
+          existing.fingerprint !== input.fingerprint ||
+          existing.kind !== input.kind ||
+          existing.runtimeIdentity !== input.runtimeIdentity ||
+          existing.sealedArtifactSha256 !== input.sealedArtifactSha256
+        ) {
+          return { state: "conflict" } as const;
+        }
+        if (
+          existing.deadlineMs <= input.nowMs ||
+          (existing.abandonAtMs !== null && existing.abandonAtMs <= input.nowMs)
+        ) {
+          const response = artifactCommitAbandonedResponse();
+          existing.state = "failed";
+          existing.ownerId = null;
+          existing.leaseUntilMs = null;
+          existing.abandonAtMs = null;
+          existing.response = response;
+          existing.updatedAtMs = input.nowMs;
+          await transaction.put(jobKey, existing);
+          await transaction.put(idempotencyStorageKey, {
+            fingerprint: input.fingerprint,
+            state: "completed",
+            expiresAtMs: input.nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+            response,
+            jobKey,
+          } satisfies StoredIdempotencyRecord);
+          return { state: "replay", response } as const;
+        }
+        if (existing.leaseUntilMs !== null && existing.leaseUntilMs > input.nowMs) {
+          return { state: "pending" } as const;
+        }
+        existing.ownerId = input.ownerId;
+        existing.attempt += 1;
+        existing.leaseUntilMs = leaseUntilMs;
+        existing.abandonAtMs = abandonAtMs;
+        existing.updatedAtMs = input.nowMs;
+        existing.idempotencyStorageKey = idempotencyStorageKey;
+        await transaction.put(jobKey, existing);
+        await transaction.put(idempotencyStorageKey, {
+          fingerprint: input.fingerprint,
+          state: "pending",
+          expiresAtMs: input.nowMs + IDEMPOTENCY_PENDING_TTL_MS,
+          ownerId: input.ownerId,
+          leaseUntilMs,
+          jobKey,
+        } satisfies StoredIdempotencyRecord);
+        return { state: "adopted", job: existing } as const;
+      }
+      if (
+        idempotency?.state === "pending" &&
+        idempotency.expiresAtMs > input.nowMs &&
+        idempotency.jobKey === undefined
+      ) {
+        return { state: "pending" } as const;
+      }
+      const job: StoredArtifactCommitJob = {
+        jobKey,
+        kind: input.kind,
+        runtimeIdentity: input.runtimeIdentity,
+        sealedArtifactSha256: input.sealedArtifactSha256,
+        fingerprint: input.fingerprint,
+        idempotencyStorageKey,
+        state: "active",
+        checkpoint: "initialized",
+        ownerId: input.ownerId,
+        attempt: 1,
+        leaseUntilMs,
+        abandonAtMs,
+        deadlineMs: input.nowMs + ARTIFACT_COMMIT_DEADLINE_MS,
+        updatedAtMs: input.nowMs,
+      };
+      await transaction.put(jobKey, job);
+      await transaction.put(idempotencyStorageKey, {
+        fingerprint: input.fingerprint,
+        state: "pending",
+        expiresAtMs: input.nowMs + IDEMPOTENCY_PENDING_TTL_MS,
+        ownerId: input.ownerId,
+        leaseUntilMs,
+        jobKey,
+      } satisfies StoredIdempotencyRecord);
+      return { state: "new", job } as const;
+    });
+    if (result.state === "new" || result.state === "adopted") {
+      await this.scheduleCleanup(this.ctx.storage, result.job.abandonAtMs!);
+    }
+    return result;
+  }
+
+  async renewArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<"renewed" | "not_owner" | "terminal"> {
+    const leaseUntilMs = nowMs + ARTIFACT_COMMIT_LEASE_MS;
+    const abandonAtMs = leaseUntilMs + ARTIFACT_COMMIT_ADOPTION_GRACE_MS;
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredArtifactCommitJob>(jobKey);
+      if (job === undefined || job.state !== "active") return "terminal" as const;
+      if (job.ownerId !== ownerId) return "not_owner" as const;
+      job.leaseUntilMs = leaseUntilMs;
+      job.abandonAtMs = abandonAtMs;
+      job.updatedAtMs = nowMs;
+      await transaction.put(jobKey, job);
+      const idempotency = await transaction.get<StoredIdempotencyRecord>(job.idempotencyStorageKey);
+      if (idempotency?.state === "pending") {
+        idempotency.ownerId = ownerId;
+        idempotency.leaseUntilMs = leaseUntilMs;
+        await transaction.put(job.idempotencyStorageKey, idempotency);
+      }
+      return "renewed" as const;
+    });
+    if (result === "renewed") await this.scheduleCleanup(this.ctx.storage, abandonAtMs);
+    return result;
+  }
+
+  async checkpointArtifactCommit(input: {
+    jobKey: string;
+    ownerId: string;
+    checkpoint: ArtifactCommitCheckpoint;
+    payloadContentSha256s?: string[];
+    nowMs: number;
+  }): Promise<StoredArtifactCommitJob> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredArtifactCommitJob>(input.jobKey);
+      if (job === undefined || job.state !== "active" || job.ownerId !== input.ownerId) {
+        throw new Error("Artifact commit checkpoint owner is no longer active");
+      }
+      const current = ARTIFACT_COMMIT_CHECKPOINTS.indexOf(job.checkpoint);
+      const next = ARTIFACT_COMMIT_CHECKPOINTS.indexOf(input.checkpoint);
+      if (next < current || next > current + 1) {
+        throw new Error("Artifact commit checkpoint transition is invalid");
+      }
+      if (next === current && input.checkpoint !== "payloads-transferred") return job;
+      job.checkpoint = input.checkpoint;
+      if (input.payloadContentSha256s !== undefined) {
+        if (input.checkpoint !== "payloads-transferred") {
+          throw new Error("Artifact payload hashes require the transfer checkpoint");
+        }
+        job.payloadContentSha256s = [...input.payloadContentSha256s];
+      }
+      job.updatedAtMs = input.nowMs;
+      await transaction.put(input.jobKey, job);
+      return job;
+    });
+  }
+
+  async completeArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<void> {
+    await this.finishArtifactCommit(jobKey, ownerId, "succeeded", response, nowMs);
+  }
+
+  async failArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<void> {
+    await this.finishArtifactCommit(jobKey, ownerId, "failed", response, nowMs);
+  }
+
+  private async finishArtifactCommit(
+    jobKey: string,
+    ownerId: string,
+    state: "succeeded" | "failed",
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<void> {
+    const expiresAtMs = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
+    await this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredArtifactCommitJob>(jobKey);
+      if (job === undefined || job.state !== "active" || job.ownerId !== ownerId) {
+        throw new Error("Artifact commit finalization owner is no longer active");
+      }
+      if (state === "succeeded" && job.checkpoint !== "finalized") {
+        throw new Error("Artifact commit cannot complete before finalization");
+      }
+      job.state = state;
+      job.ownerId = null;
+      job.leaseUntilMs = null;
+      job.abandonAtMs = null;
+      job.response = response;
+      job.updatedAtMs = nowMs;
+      await transaction.put(jobKey, job);
+      await transaction.put(job.idempotencyStorageKey, {
+        fingerprint: job.fingerprint,
+        state: "completed",
+        expiresAtMs,
+        response,
+        jobKey,
+      } satisfies StoredIdempotencyRecord);
+    });
+    await this.scheduleCleanup(this.ctx.storage, expiresAtMs);
   }
 
   async recordAudit(record: ControlAuditRecord): Promise<void> {
@@ -608,6 +881,57 @@ export class ControlDurableObject
 
   async alarm(): Promise<void> {
     const nowMs = Date.now();
+    const commitJobs = await this.ctx.storage.list<StoredArtifactCommitJob>({
+      prefix: "artifact-commit-job:",
+    });
+    let nextCommitJobAlarm: number | null = null;
+    for (const [key, snapshot] of commitJobs) {
+      if (snapshot.state !== "active") {
+        const deleteAt = snapshot.updatedAtMs + IDEMPOTENCY_COMPLETED_TTL_MS;
+        if (deleteAt <= nowMs) await this.ctx.storage.delete(key);
+        else
+          nextCommitJobAlarm =
+            nextCommitJobAlarm === null ? deleteAt : Math.min(nextCommitJobAlarm, deleteAt);
+        continue;
+      }
+      const terminalAt = Math.min(snapshot.abandonAtMs ?? snapshot.deadlineMs, snapshot.deadlineMs);
+      if (terminalAt > nowMs) {
+        nextCommitJobAlarm =
+          nextCommitJobAlarm === null ? terminalAt : Math.min(nextCommitJobAlarm, terminalAt);
+        continue;
+      }
+      await this.ctx.storage.transaction(async (transaction) => {
+        const job = await transaction.get<StoredArtifactCommitJob>(key);
+        if (
+          job === undefined ||
+          job.state !== "active" ||
+          Math.min(job.abandonAtMs ?? job.deadlineMs, job.deadlineMs) > nowMs
+        ) {
+          return;
+        }
+        const response = artifactCommitAbandonedResponse();
+        job.state = "failed";
+        job.ownerId = null;
+        job.leaseUntilMs = null;
+        job.abandonAtMs = null;
+        job.response = response;
+        job.updatedAtMs = nowMs;
+        await transaction.put(key, job);
+        await transaction.put(job.idempotencyStorageKey, {
+          fingerprint: job.fingerprint,
+          state: "completed",
+          expiresAtMs: nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+          response,
+          jobKey: key,
+        } satisfies StoredIdempotencyRecord);
+      });
+      const deleteAt = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
+      nextCommitJobAlarm =
+        nextCommitJobAlarm === null ? deleteAt : Math.min(nextCommitJobAlarm, deleteAt);
+    }
+    if (nextCommitJobAlarm !== null) {
+      await this.scheduleCleanup(this.ctx.storage, nextCommitJobAlarm);
+    }
     for (const prefix of ["nonce:", "idempotency:"] as const) {
       const records = await this.ctx.storage.list<number | StoredIdempotencyRecord>({ prefix });
       const expired: string[] = [];

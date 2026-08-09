@@ -3,23 +3,56 @@ import {
   canonicalPantryJson,
   pantryPackageIntentSchema,
   pantryPlatformSchema,
+  pantryRevisionIdSchema,
   pantryRevisionRecordSchema,
   pantryRevisionStateSchema,
   pantrySha256Schema,
+  pantrySignedDigestSchema,
 } from "./pantry";
-import { compareUtf8 } from "./runtime-artifact";
+import { compareUtf8, validateRuntimeArtifactPath } from "./runtime-artifact";
 import { sha256Hex } from "./request-signing";
 
 export const PANTRY_CATALOG_SCHEMA_VERSION = 1 as const;
 export const PANTRY_CATALOG_SHELF_FORMAT = "nabu-pantry-catalog-shelf/v1" as const;
 export const PANTRY_CATALOG_STAMP_FORMAT = "nabu-pantry-catalog-stamp/v1" as const;
 export const PANTRY_CATALOG_HASH_DOMAIN = "NABUFLOW_PANTRY_CATALOG_V1" as const;
+export const PANTRY_SHELF_CONTENT_HASHES_FORMAT = "nabu-pantry-shelf-content-hashes/v1" as const;
+export const MAX_PANTRY_SHELF_CONTENT_HASHES = 20_000;
 
 const ASCII_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/u;
 const ASSEMBLY_ID_PATTERN = /^passembly_[0-9a-f]{64}$/u;
 const REFERENCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u;
 
 export const pantryCatalogAssemblyIdSchema = z.string().regex(ASSEMBLY_ID_PATTERN);
+
+export const pantryNormalizedPackageManifestSchema = z
+  .object({
+    format: z.literal("nabu-pantry-normalized-package/v1"),
+    entries: z
+      .array(
+        z
+          .object({
+            path: z.string().refine((path) => validateRuntimeArtifactPath(path) !== null),
+            mode: z.number().int().min(0).max(0o777),
+            bytes: z.number().int().nonnegative().safe(),
+            sha256: pantrySha256Schema,
+          })
+          .strict(),
+      )
+      .max(10_000),
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    for (let index = 1; index < manifest.entries.length; index += 1) {
+      if (compareUtf8(manifest.entries[index - 1].path, manifest.entries[index].path) >= 0) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["entries", index, "path"],
+          message: "Normalized Pantry paths must be unique and sorted by UTF-8 bytes",
+        });
+      }
+    }
+  });
 
 export const pantryCatalogObjectKindSchema = z.enum([
   "registry-metadata",
@@ -31,7 +64,30 @@ export const pantryCatalogObjectKindSchema = z.enum([
   "lockfile",
   "sbom",
   "toolchain-attestation",
+  "captured-build-resource",
 ]);
+
+export const pantryCaptureBuildResourceRequestSchema = z
+  .object({
+    schemaVersion: z.literal(PANTRY_CATALOG_SCHEMA_VERSION),
+    parentRevisionRootSha256: pantrySha256Schema,
+    url: z
+      .string()
+      .url()
+      .max(2_000)
+      .refine((value) => {
+        const url = new URL(value);
+        return url.protocol === "https:" && url.username === "" && url.password === "";
+      }, "Captured build resources require credential-free HTTPS"),
+    expectedSha256: pantrySha256Schema.nullable(),
+    maxBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(32 * 1024 * 1024),
+    requestedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
 
 export const pantryCatalogObjectReferenceSchema = z
   .object({
@@ -118,6 +174,9 @@ function requiredShelfDigests(input: {
   for (const layer of input.revision.content.layers) {
     required.add(layer.contentSha256);
     required.add(layer.unpackedManifestSha256);
+  }
+  for (const resource of input.revision.content.capturedBuildResources ?? []) {
+    required.add(resource.contentSha256);
   }
   return required;
 }
@@ -309,6 +368,58 @@ export function pantryCatalogShelfMatchesStamp(
   );
 }
 
+export const pantryShelfContentHashesStatementSchema = z
+  .object({
+    format: z.literal(PANTRY_SHELF_CONTENT_HASHES_FORMAT),
+    schemaVersion: z.literal(PANTRY_CATALOG_SCHEMA_VERSION),
+    pantryRevisionId: pantryRevisionIdSchema,
+    pantryRevisionRootSha256: pantrySha256Schema,
+    shelfManifestSha256: pantrySha256Schema,
+    contentHashes: z.array(pantrySha256Schema).max(MAX_PANTRY_SHELF_CONTENT_HASHES),
+  })
+  .strict()
+  .superRefine((statement, context) => {
+    for (let index = 1; index < statement.contentHashes.length; index += 1) {
+      if (compareUtf8(statement.contentHashes[index - 1], statement.contentHashes[index]) >= 0) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contentHashes", index],
+          message: "Shelf content hashes must be unique and sorted",
+        });
+      }
+    }
+  });
+
+export async function pantryShelfContentHashesHash(
+  input: PantryShelfContentHashesStatement,
+): Promise<string> {
+  const statement = pantryShelfContentHashesStatementSchema.parse(input);
+  return sha256Hex(
+    `${PANTRY_CATALOG_HASH_DOMAIN}\nshelf-content-hashes\n${canonicalPantryJson(statement)}`,
+  );
+}
+
+export const pantryShelfContentHashesResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    statement: pantryShelfContentHashesStatementSchema,
+    statementSha256: pantrySha256Schema,
+    signature: pantrySignedDigestSchema,
+  })
+  .strict()
+  .superRefine((response, context) => {
+    if (
+      response.signature.kind !== "shelf-content-hashes" ||
+      response.signature.payloadSha256 !== response.statementSha256
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["signature"],
+        message: "Shelf content hashes require a matching attestation signature",
+      });
+    }
+  });
+
 export const pantryCatalogErrorResponseSchema = z
   .object({
     ok: z.literal(false),
@@ -340,5 +451,15 @@ export type PantryCatalogStateTransitionRequest = z.infer<
 >;
 export type PantryCatalogReferenceRequest = z.infer<typeof pantryCatalogReferenceRequestSchema>;
 export type PantryCatalogGcRequest = z.infer<typeof pantryCatalogGcRequestSchema>;
+export type PantryCaptureBuildResourceRequest = z.infer<
+  typeof pantryCaptureBuildResourceRequestSchema
+>;
 export type PantryCatalogShelfStamp = z.infer<typeof pantryCatalogShelfStampSchema>;
+export type PantryNormalizedPackageManifest = z.infer<typeof pantryNormalizedPackageManifestSchema>;
+export type PantryShelfContentHashesStatement = z.infer<
+  typeof pantryShelfContentHashesStatementSchema
+>;
+export type PantryShelfContentHashesResponse = z.infer<
+  typeof pantryShelfContentHashesResponseSchema
+>;
 export type PantryCatalogErrorResponse = z.infer<typeof pantryCatalogErrorResponseSchema>;
