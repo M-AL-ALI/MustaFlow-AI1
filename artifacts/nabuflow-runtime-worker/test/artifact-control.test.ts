@@ -12,12 +12,20 @@ import {
   type RuntimeArtifactEnvelope,
 } from "@workspace/tenant-runtime-contracts";
 import { handleControlRequest } from "../src/worker";
+import {
+  ARTIFACT_COMMIT_ABORT_CHECKPOINT_PREFIX,
+  RUNTIME_MANIFEST_RESTART_ABORT_CHECKPOINT_PREFIX,
+  RUNTIME_START_ABORT_CHECKPOINT_PREFIX,
+} from "../src/artifact-commit-recovery";
 import type { StoredRuntime } from "../src/model";
 import {
   MemoryCoordinator,
   MemoryR2Bucket,
   MockBackend,
   TEST_NOW_MS,
+  commitArtifactAndDrain,
+  drainArtifactCommitQueue,
+  mutationAndDrain,
   ensureBody,
   fakeEnv,
   signedRawRequest,
@@ -74,6 +82,546 @@ async function makeArtifact(input: {
 }
 
 describe("sealed runtime artifact control plane", () => {
+  it("exposes only the signed, identity-bound bounded commit event trail", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "preview",
+      slot: "primary",
+    });
+    const sha = "d".repeat(64);
+    const claim = await coordinator.registerArtifactCommit({
+      key: "diagnostic-commit-key",
+      fingerprint: "f".repeat(64),
+      kind: "v1",
+      runtimeIdentity: identity,
+      sealedArtifactSha256: sha,
+      expectedDeploymentVersion: "worker-version-test-1",
+      nowMs: TEST_NOW_MS,
+    });
+    expect(claim.state).toBe("new");
+    const path = `/_nabuflow/control/v1/runtimes/42/preview/primary/artifacts/${sha}/commit-diagnostics`;
+
+    const unsigned = await handleControlRequest(
+      new Request(`https://runtime.example${path}`),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(unsigned.status).toBe(401);
+
+    const missigned = await handleControlRequest(
+      await signedRequest({
+        path,
+        nonce: "artifact-diagnostics-missigned-0001",
+        secret: "wrong-control-secret-with-at-least-thirty-two-characters",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(missigned.status).toBe(401);
+
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "artifact-diagnostics-signed-0001" }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      ok: true,
+      job: {
+        kind: "v1",
+        runtimeIdentity: identity,
+        sealedArtifactSha256: sha,
+        state: "active",
+        checkpoint: "initialized",
+        terminal: null,
+        events: [expect.objectContaining({ event: "job-created" })],
+      },
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("diagnostic-commit-key");
+    expect(serialized).not.toContain(
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    );
+    expect(serialized).not.toContain("ownerId");
+
+    const foreign = await handleControlRequest(
+      await signedRequest({
+        path: `/_nabuflow/control/v1/runtimes/43/preview/primary/artifacts/${sha}/commit-diagnostics`,
+        nonce: "artifact-diagnostics-foreign-0001",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(foreign.status).toBe(404);
+    await expect(foreign.json()).resolves.toMatchObject({
+      code: "artifact_commit_not_found",
+      retryable: false,
+    });
+  });
+
+  it("exposes only the signed, identity-bound runtime-start event trail", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const locator = ensureBody().locator;
+    const identity = await deriveRuntimeIdentity({ namespace: "staging", ...locator });
+    const artifactSha256 = "e".repeat(64);
+    const claim = await coordinator.registerDurableOperation({
+      key: "runtime-start-diagnostic-key",
+      fingerprint: "d".repeat(64),
+      kind: "runtime-start",
+      runtimeIdentity: identity,
+      subjectKey: "start",
+      request: {
+        locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        artifactRevision: "runtime-start-diagnostic",
+        artifactSha256,
+      },
+      expectedDeploymentVersion: "worker-version-test-1",
+      nowMs: TEST_NOW_MS,
+    });
+    expect(claim.state).toBe("new");
+    const path = "/_nabuflow/control/v1/runtimes/42/preview/primary/start-diagnostics";
+    const unsigned = await handleControlRequest(
+      new Request(`https://runtime.example${path}`),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(unsigned.status).toBe(401);
+    const missigned = await handleControlRequest(
+      await signedRequest({
+        path,
+        nonce: "runtime-start-diagnostics-missigned",
+        secret: "wrong-control-secret-with-at-least-thirty-two-characters",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(missigned.status).toBe(401);
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "runtime-start-diagnostics-signed" }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      job: {
+        kind: "runtime-start",
+        runtimeIdentity: identity,
+        artifactSha256,
+        checkpoint: "initialized",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("runtime-start-diagnostic-key");
+    expect(JSON.stringify(body)).not.toContain("ownerId");
+    const foreign = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/43/preview/primary/start-diagnostics",
+        nonce: "runtime-start-diagnostics-foreign",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(foreign.status).toBe(404);
+    await expect(foreign.json()).resolves.toMatchObject({ code: "runtime_start_not_found" });
+  });
+
+  it("exposes only the signed, identity-bound manifest-restart event trail", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const locator = ensureBody().locator;
+    const identity = await deriveRuntimeIdentity({ namespace: "staging", ...locator });
+    const claim = await coordinator.registerDurableOperation({
+      key: "manifest-restart-diagnostic-key",
+      fingerprint: "c".repeat(64),
+      kind: "runtime-manifest-restart",
+      runtimeIdentity: identity,
+      subjectKey: "manifest-restart",
+      request: {
+        locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        expectedManifestRevision: "manifest-1",
+        manifest: { ...ensureBody().manifest, revision: "manifest-2" },
+        restart: "restart",
+        sealedArtifactSha256: "b".repeat(64),
+      },
+      expectedDeploymentVersion: "worker-version-test-1",
+      nowMs: TEST_NOW_MS,
+    });
+    expect(claim.state).toBe("new");
+    const path = "/_nabuflow/control/v1/runtimes/42/preview/primary/manifest-diagnostics";
+    expect(
+      (
+        await handleControlRequest(new Request(`https://runtime.example${path}`), env, {
+          coordinator,
+          backend,
+          nowMs: TEST_NOW_MS,
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await handleControlRequest(
+          await signedRequest({
+            path,
+            nonce: "manifest-diagnostics-missigned",
+            secret: "wrong-control-secret-with-at-least-thirty-two-characters",
+          }),
+          env,
+          { coordinator, backend, nowMs: TEST_NOW_MS },
+        )
+      ).status,
+    ).toBe(401);
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "manifest-diagnostics-signed" }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      job: {
+        kind: "runtime-manifest-restart",
+        runtimeIdentity: identity,
+        expectedManifestRevision: "manifest-1",
+        manifestRevision: "manifest-2",
+        checkpoint: "initialized",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("manifest-restart-diagnostic-key");
+    expect(JSON.stringify(body)).not.toContain("ownerId");
+    const foreign = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/43/preview/primary/manifest-diagnostics",
+        nonce: "manifest-diagnostics-foreign",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(foreign.status).toBe(404);
+    await expect(foreign.json()).resolves.toMatchObject({
+      code: "runtime_manifest_update_not_found",
+    });
+  });
+
+  it("resumes idempotently after the queue driver dies at every durable checkpoint", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    env.NABUFLOW_STAGING_ARTIFACT_COMMIT_RECOVERY_PROBE = "enabled";
+    const locator = ensureBody().locator;
+    const identity = await deriveRuntimeIdentity({ namespace: "staging", ...locator });
+    await coordinator.putRuntime(identity, runtimeFor(identity));
+    const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+    const checkpoints = [
+      "initialized",
+      "verification-complete",
+      "payloads-transferred",
+      "unpack-complete",
+      "finalized",
+    ] as const;
+
+    for (const [index, checkpoint] of checkpoints.entries()) {
+      const artifact = await makeArtifact({
+        identity,
+        manifestRevision: "manifest-1",
+        artifactRevision: `${ARTIFACT_COMMIT_ABORT_CHECKPOINT_PREFIX}${checkpoint}-${index}`,
+        bytes: new TextEncoder().encode(`console.log('${checkpoint}')\n`),
+      });
+      const sha = artifact.envelope.sealedArtifactSha256;
+      const artifactBase = `${base}/artifacts/${sha}`;
+      const dependencies = { coordinator, backend, nowMs: TEST_NOW_MS };
+      expect(
+        (
+          await handleControlRequest(
+            await signedRequest({
+              path: `${artifactBase}/begin`,
+              method: "POST",
+              nonce: `checkpoint-${checkpoint}-begin`,
+              idempotencyKey: `checkpoint-${checkpoint}-begin`,
+              body: {
+                locator,
+                expectedDeploymentVersion: "worker-version-test-1",
+                envelope: artifact.envelope,
+              },
+            }),
+            env,
+            dependencies,
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await handleControlRequest(
+            await signedRawRequest({
+              path: `${artifactBase}/chunks/0`,
+              method: "PUT",
+              nonce: `checkpoint-${checkpoint}-chunk`,
+              idempotencyKey: `checkpoint-${checkpoint}-chunk`,
+              body: artifact.chunks[0],
+            }),
+            env,
+            dependencies,
+          )
+        ).status,
+      ).toBe(200);
+      const commitBody = {
+        locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        sealedArtifactSha256: sha,
+      };
+      const idempotencyKey = `checkpoint-${checkpoint}-commit`;
+      const materializationsBeforeRequest = backend.materializations;
+      const accepted = await handleControlRequest(
+        await signedRequest({
+          path: `${artifactBase}/commit`,
+          method: "POST",
+          nonce: `checkpoint-${checkpoint}-commit-first`,
+          idempotencyKey,
+          body: commitBody,
+        }),
+        env,
+        dependencies,
+      );
+      expect(accepted.status).toBe(409);
+      expect(backend.materializations).toBe(materializationsBeforeRequest);
+      await expect(
+        drainArtifactCommitQueue({ env, coordinator, backend, nowMs: TEST_NOW_MS }),
+      ).rejects.toMatchObject({ name: "StagingArtifactCommitOwnerLossError" });
+
+      const adoptedAt = TEST_NOW_MS + 16_000;
+      const nudged = await handleControlRequest(
+        await signedRequest({
+          path: `${artifactBase}/commit`,
+          method: "POST",
+          nonce: `checkpoint-${checkpoint}-commit-adopt`,
+          idempotencyKey,
+          body: commitBody,
+        }),
+        env,
+        { coordinator, backend, nowMs: adoptedAt },
+      );
+      expect(nudged.status).toBe(409);
+      await expect(
+        drainArtifactCommitQueue({ env, coordinator, backend, nowMs: adoptedAt }),
+      ).resolves.toBe(1);
+      const replay = await handleControlRequest(
+        await signedRequest({
+          path: `${artifactBase}/commit`,
+          method: "POST",
+          nonce: `checkpoint-${checkpoint}-commit-terminal`,
+          idempotencyKey,
+          body: commitBody,
+        }),
+        env,
+        { coordinator, backend, nowMs: adoptedAt },
+      );
+      expect(replay.status, await replay.clone().text()).toBe(200);
+      const job = await coordinator.getLatestArtifactCommit(identity, sha);
+      expect(job).toMatchObject({ state: "succeeded", checkpoint: "finalized", attempt: 2 });
+      expect(job?.events).toEqual(
+        expect.arrayContaining([expect.objectContaining({ event: "driver-adopted" })]),
+      );
+    }
+  });
+
+  it("resumes runtime start through the shared durable job at every checkpoint", async () => {
+    const checkpoints = [
+      "initialized",
+      "artifact-verified",
+      "materialized",
+      "process-started",
+      "finalized",
+    ] as const;
+    for (const [index, checkpoint] of checkpoints.entries()) {
+      const coordinator = new MemoryCoordinator();
+      const backend = new MockBackend();
+      const env = fakeEnv();
+      env.NABUFLOW_STAGING_RUNTIME_LIFECYCLE_RECOVERY_PROBE = "enabled";
+      const locator = ensureBody().locator;
+      const identity = await deriveRuntimeIdentity({ namespace: "staging", ...locator });
+      await coordinator.putRuntime(identity, runtimeFor(identity));
+      const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+      const artifact = await makeArtifact({
+        identity,
+        manifestRevision: "manifest-1",
+        artifactRevision: `${RUNTIME_START_ABORT_CHECKPOINT_PREFIX}${checkpoint}-${index}`,
+      });
+      await deliverArtifact({ coordinator, backend, env, artifact, base });
+      const body = {
+        locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        artifactRevision: artifact.envelope.artifactRevision,
+        artifactSha256: artifact.envelope.sealedArtifactSha256,
+      };
+      const idempotencyKey = `runtime-start-checkpoint-${checkpoint}`;
+      const first = await handleControlRequest(
+        await signedRequest({
+          path: `${base}/start`,
+          method: "POST",
+          nonce: `${idempotencyKey}-first`,
+          idempotencyKey,
+          body,
+        }),
+        env,
+        { coordinator, backend, nowMs: TEST_NOW_MS },
+      );
+      expect(first.status).toBe(409);
+      await expect(
+        drainArtifactCommitQueue({ env, coordinator, backend, nowMs: TEST_NOW_MS }),
+      ).rejects.toMatchObject({ name: "StagingDurableOperationOwnerLossError" });
+
+      const adoptedAt = TEST_NOW_MS + 16_000;
+      const nudge = await handleControlRequest(
+        await signedRequest({
+          path: `${base}/start`,
+          method: "POST",
+          nonce: `${idempotencyKey}-adopt`,
+          idempotencyKey,
+          body,
+        }),
+        env,
+        { coordinator, backend, nowMs: adoptedAt },
+      );
+      expect(nudge.status).toBe(409);
+      await expect(
+        drainArtifactCommitQueue({ env, coordinator, backend, nowMs: adoptedAt }),
+      ).resolves.toBe(1);
+      const replay = await handleControlRequest(
+        await signedRequest({
+          path: `${base}/start`,
+          method: "POST",
+          nonce: `${idempotencyKey}-terminal`,
+          idempotencyKey,
+          body,
+        }),
+        env,
+        { coordinator, backend, nowMs: adoptedAt + 1 },
+      );
+      expect(replay.status, await replay.clone().text()).toBe(200);
+      const job = await coordinator.getLatestDurableOperation("runtime-start", identity, "start");
+      expect(job).toMatchObject({
+        state: "succeeded",
+        checkpoint: "finalized",
+        attempt: 2,
+      });
+      expect(job?.events).toEqual(
+        expect.arrayContaining([expect.objectContaining({ event: "driver-adopted" })]),
+      );
+    }
+  });
+
+  it("resumes an explicit manifest restart through the shared durable job at every checkpoint", async () => {
+    const checkpoints = [
+      "initialized",
+      "runtime-unbound",
+      "manifest-persisted",
+      "materialized",
+      "process-started",
+      "finalized",
+    ] as const;
+    for (const [index, checkpoint] of checkpoints.entries()) {
+      const coordinator = new MemoryCoordinator();
+      const backend = new MockBackend();
+      const env = fakeEnv();
+      env.NABUFLOW_STAGING_RUNTIME_LIFECYCLE_RECOVERY_PROBE = "enabled";
+      const locator = ensureBody().locator;
+      const identity = await deriveRuntimeIdentity({ namespace: "staging", ...locator });
+      const runtime = runtimeFor(identity);
+      runtime.descriptor.status = "running";
+      runtime.processId = "tenant-service";
+      await coordinator.putRuntime(identity, runtime);
+      await coordinator.bindContainer(`container:${identity}`, identity);
+      const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+      const manifest = {
+        ...ensureBody().manifest,
+        revision: `${RUNTIME_MANIFEST_RESTART_ABORT_CHECKPOINT_PREFIX}${checkpoint}-${index}`,
+        servicePort: 8081,
+        healthPath: "/healthz",
+      };
+      const artifact = await makeArtifact({
+        identity,
+        manifestRevision: manifest.revision,
+        artifactRevision: `manifest-restart-artifact-${checkpoint}`,
+      });
+      await deliverArtifact({ coordinator, backend, env, artifact, base });
+      const body = {
+        locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        expectedManifestRevision: "manifest-1",
+        manifest,
+        restart: "restart" as const,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+      };
+      const idempotencyKey = `manifest-restart-checkpoint-${checkpoint}`;
+      const first = await handleControlRequest(
+        await signedRequest({
+          path: `${base}/manifest`,
+          method: "PUT",
+          nonce: `${idempotencyKey}-first`,
+          idempotencyKey,
+          body,
+        }),
+        env,
+        { coordinator, backend, nowMs: TEST_NOW_MS },
+      );
+      expect(first.status).toBe(409);
+      await expect(
+        drainArtifactCommitQueue({ env, coordinator, backend, nowMs: TEST_NOW_MS }),
+      ).rejects.toMatchObject({ name: "StagingDurableOperationOwnerLossError" });
+
+      const adoptedAt = TEST_NOW_MS + 16_000;
+      const nudge = await handleControlRequest(
+        await signedRequest({
+          path: `${base}/manifest`,
+          method: "PUT",
+          nonce: `${idempotencyKey}-adopt`,
+          idempotencyKey,
+          body,
+        }),
+        env,
+        { coordinator, backend, nowMs: adoptedAt },
+      );
+      expect(nudge.status).toBe(409);
+      await expect(
+        drainArtifactCommitQueue({ env, coordinator, backend, nowMs: adoptedAt }),
+      ).resolves.toBe(1);
+      const replay = await handleControlRequest(
+        await signedRequest({
+          path: `${base}/manifest`,
+          method: "PUT",
+          nonce: `${idempotencyKey}-terminal`,
+          idempotencyKey,
+          body,
+        }),
+        env,
+        { coordinator, backend, nowMs: adoptedAt + 1 },
+      );
+      expect(replay.status, await replay.clone().text()).toBe(200);
+      const job = await coordinator.getLatestDurableOperation(
+        "runtime-manifest-restart",
+        identity,
+        "manifest-restart",
+      );
+      expect(job).toMatchObject({
+        state: "succeeded",
+        checkpoint: "finalized",
+        attempt: 2,
+      });
+      expect(job?.events).toEqual(
+        expect.arrayContaining([expect.objectContaining({ event: "driver-adopted" })]),
+      );
+    }
+  });
+
   it("fails closed when the private artifact bucket binding is missing", async () => {
     const env = fakeEnv();
     delete (env as Partial<typeof env>).NABUFLOW_RUNTIME_ARTIFACTS;
@@ -81,6 +629,25 @@ describe("sealed runtime artifact control plane", () => {
       await signedRequest({
         path: "/_nabuflow/control/v1/version",
         nonce: "missing-r2-version-0001",
+      }),
+      env,
+      { coordinator: new MemoryCoordinator(), backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "artifact_infrastructure_unavailable",
+      retryable: false,
+    });
+  });
+
+  it("fails closed when the durable artifact commit queue is missing", async () => {
+    const env = fakeEnv();
+    delete env.DURABLE_OPERATION_QUEUE;
+    delete env.ARTIFACT_COMMIT_QUEUE;
+    const response = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/version",
+        nonce: "missing-commit-queue-version-0001",
       }),
       env,
       { coordinator: new MemoryCoordinator(), backend: new MockBackend(), nowMs: TEST_NOW_MS },
@@ -108,26 +675,82 @@ describe("sealed runtime artifact control plane", () => {
       env,
       { coordinator, backend, nowMs: TEST_NOW_MS },
     );
-    const response = await handleControlRequest(
-      await signedRequest({
-        path: `${base}/start`,
-        method: "POST",
-        nonce: "uncommitted-start-0001",
-        idempotencyKey: "uncommitted-start",
-        body: {
-          locator: ensureBody().locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          artifactRevision: "uncommitted-artifact",
-          artifactSha256: "a".repeat(64),
-        },
-      }),
+    const response = await mutationAndDrain({
+      path: `${base}/start`,
+      nonce: "uncommitted-start-0001",
+      idempotencyKey: "uncommitted-start",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        artifactRevision: "uncommitted-artifact",
+        artifactSha256: "a".repeat(64),
+      },
       env,
-      { coordinator, backend, nowMs: TEST_NOW_MS },
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ code: "artifact_not_committed" });
     expect(backend.starts).toBe(0);
     expect(backend.materializations).toBe(0);
+  });
+
+  it("replays a terminal start failure without creating a second start operation", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "preview",
+      slot: "primary",
+    });
+    const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+    await coordinator.putRuntime(identity, runtimeFor(identity));
+    const artifact = await makeArtifact({ identity, manifestRevision: "manifest-1" });
+    await deliverArtifact({ coordinator, backend, env, artifact, base });
+    backend.start = async () => {
+      backend.starts += 1;
+      throw new Error("test-only terminal start failure");
+    };
+    const startBody = {
+      locator: ensureBody().locator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      artifactRevision: artifact.envelope.artifactRevision,
+      artifactSha256: artifact.envelope.sealedArtifactSha256,
+    };
+    const first = await mutationAndDrain({
+      path: `${base}/start`,
+      nonce: "terminal-start-first-0001",
+      idempotencyKey: "terminal-start-one-operation",
+      body: startBody,
+      env,
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
+    const replay = await handleControlRequest(
+      await signedRequest({
+        path: `${base}/start`,
+        method: "POST",
+        nonce: "terminal-start-replay-001",
+        idempotencyKey: "terminal-start-one-operation",
+        body: startBody,
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS + 1 },
+    );
+
+    expect(first.status).toBe(502);
+    expect(replay.status).toBe(502);
+    await expect(first.json()).resolves.toMatchObject({ code: "runtime_start_failed" });
+    await expect(replay.json()).resolves.toMatchObject({ code: "runtime_start_failed" });
+    expect(backend.starts).toBe(1);
+    expect(coordinator.idempotency.get("terminal-start-one-operation")).toMatchObject({
+      pending: false,
+      response: { status: 502 },
+    });
   });
 
   it("delivers, commits, starts, and rehydrates a target-bound artifact", async () => {
@@ -187,21 +810,20 @@ describe("sealed runtime artifact control plane", () => {
     );
     expect(chunk.status, await chunk.clone().text()).toBe(200);
 
-    const commit = await handleControlRequest(
-      await signedRequest({
-        path: `${artifactBase}/commit`,
-        method: "POST",
-        nonce: "artifact-commit-0001",
-        idempotencyKey: "artifact-commit",
-        body: {
-          locator: ensureBody().locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
-        },
-      }),
+    const commit = await commitArtifactAndDrain({
+      path: `${artifactBase}/commit`,
+      nonce: "artifact-commit-0001",
+      idempotencyKey: "artifact-commit",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+      },
       env,
-      dependencies,
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(commit.status).toBe(200);
     await expect(commit.json()).resolves.toMatchObject({ materialized: true, filesWritten: 1 });
 
@@ -211,17 +833,16 @@ describe("sealed runtime artifact control plane", () => {
       artifactRevision: artifact.envelope.artifactRevision,
       artifactSha256: artifact.envelope.sealedArtifactSha256,
     };
-    const start = await handleControlRequest(
-      await signedRequest({
-        path: `${base}/start`,
-        method: "POST",
-        nonce: "artifact-start-000001",
-        idempotencyKey: "artifact-start",
-        body: startBody,
-      }),
+    const start = await mutationAndDrain({
+      path: `${base}/start`,
+      nonce: "artifact-start-000001",
+      idempotencyKey: "artifact-start",
+      body: startBody,
       env,
-      dependencies,
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(start.status).toBe(200);
     expect(backend.materializations).toBe(2);
 
@@ -242,17 +863,16 @@ describe("sealed runtime artifact control plane", () => {
     ).toBe(200);
     expect(
       (
-        await handleControlRequest(
-          await signedRequest({
-            path: `${base}/start`,
-            method: "POST",
-            nonce: "artifact-restart-0001",
-            idempotencyKey: "artifact-restart",
-            body: startBody,
-          }),
+        await mutationAndDrain({
+          path: `${base}/start`,
+          nonce: "artifact-restart-0001",
+          idempotencyKey: "artifact-restart",
+          body: startBody,
           env,
-          dependencies,
-        )
+          coordinator,
+          backend,
+          nowMs: TEST_NOW_MS,
+        })
       ).status,
     ).toBe(200);
     expect(backend.materializations).toBe(3);
@@ -303,21 +923,20 @@ describe("sealed runtime artifact control plane", () => {
       env,
       dependencies,
     );
-    const response = await handleControlRequest(
-      await signedRequest({
-        path: `${artifactBase}/commit`,
-        method: "POST",
-        nonce: "incomplete-commit-001",
-        idempotencyKey: "incomplete-commit",
-        body: {
-          locator: ensureBody().locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
-        },
-      }),
+    const response = await commitArtifactAndDrain({
+      path: `${artifactBase}/commit`,
+      nonce: "incomplete-commit-001",
+      idempotencyKey: "incomplete-commit",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+      },
       env,
-      dependencies,
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ code: "artifact_incomplete" });
     expect(
@@ -533,24 +1152,24 @@ describe("sealed runtime artifact control plane", () => {
       artifactRevision: "artifact-manifest-3",
     });
     await deliverArtifact({ coordinator, backend, env, artifact: restartArtifact, base });
-    const restarted = await handleControlRequest(
-      await signedRequest({
-        path: `${base}/manifest`,
-        method: "PUT",
-        nonce: "manifest-restart-0001",
-        idempotencyKey: "manifest-restart",
-        body: {
-          locator: ensureBody().locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          expectedManifestRevision: "manifest-2",
-          manifest: { ...nextManifest, revision: "manifest-3", servicePort: 8082 },
-          restart: "restart",
-          sealedArtifactSha256: restartArtifact.envelope.sealedArtifactSha256,
-        },
-      }),
+    const restarted = await mutationAndDrain({
+      path: `${base}/manifest`,
+      method: "PUT",
+      nonce: "manifest-restart-0001",
+      idempotencyKey: "manifest-restart",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        expectedManifestRevision: "manifest-2",
+        manifest: { ...nextManifest, revision: "manifest-3", servicePort: 8082 },
+        restart: "restart",
+        sealedArtifactSha256: restartArtifact.envelope.sealedArtifactSha256,
+      },
       env,
-      { coordinator, backend, nowMs: TEST_NOW_MS },
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(restarted.status).toBe(200);
     await expect(restarted.json()).resolves.toMatchObject({
       runtime: { manifestRevision: "manifest-3", servicePort: 8082, status: "running" },
@@ -591,24 +1210,24 @@ describe("sealed runtime artifact control plane", () => {
       throw new Error("test-only materialization failure");
     };
 
-    const response = await handleControlRequest(
-      await signedRequest({
-        path: `${base}/manifest`,
-        method: "PUT",
-        nonce: "manifest-failed-restart-0001",
-        idempotencyKey: "manifest-failed-restart",
-        body: {
-          locator: ensureBody().locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          expectedManifestRevision: "manifest-1",
-          manifest: failedManifest,
-          restart: "restart",
-          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
-        },
-      }),
+    const response = await mutationAndDrain({
+      path: `${base}/manifest`,
+      method: "PUT",
+      nonce: "manifest-failed-restart-0001",
+      idempotencyKey: "manifest-failed-restart",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        expectedManifestRevision: "manifest-1",
+        manifest: failedManifest,
+        restart: "restart",
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+      },
       env,
-      { coordinator, backend, nowMs: TEST_NOW_MS },
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({ code: "runtime_restart_failed" });
     await expect(coordinator.getRuntime(identity)).resolves.toMatchObject({
@@ -618,7 +1237,7 @@ describe("sealed runtime artifact control plane", () => {
     expect(coordinator.containerBindings).toHaveLength(0);
   });
 
-  it("preserves a typed restart failure when Durable Object error finalization rejects", async () => {
+  it("preserves durable manifest responses when audit persistence rejects", async () => {
     const coordinator = new MemoryCoordinator();
     const backend = new MockBackend();
     const env = fakeEnv();
@@ -649,15 +1268,12 @@ describe("sealed runtime artifact control plane", () => {
     backend.materialize = async () => {
       throw new Error("test-only materialization failure");
     };
-    vi.spyOn(coordinator, "abandonIdempotency").mockRejectedValue(
-      new Error("test-only idempotency Durable Object rejection"),
-    );
-    vi.spyOn(coordinator, "recordAudit").mockRejectedValue(
-      new Error("test-only audit Durable Object rejection"),
-    );
+    const audit = vi
+      .spyOn(coordinator, "recordAudit")
+      .mockRejectedValue(new Error("test-only audit Durable Object rejection"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    const response = await handleControlRequest(
+    const accepted = await handleControlRequest(
       await signedRequest({
         path: `${base}/manifest`,
         method: "PUT",
@@ -676,19 +1292,37 @@ describe("sealed runtime artifact control plane", () => {
       { coordinator, backend, nowMs: TEST_NOW_MS },
     );
 
+    expect(accepted.status).toBe(409);
+    await expect(accepted.json()).resolves.toMatchObject({ code: "request_in_progress" });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"control_audit_write_failed"'),
+    );
+    audit.mockRestore();
+    await drainArtifactCommitQueue({ env, coordinator, backend, nowMs: TEST_NOW_MS });
+    const response = await handleControlRequest(
+      await signedRequest({
+        path: `${base}/manifest`,
+        method: "PUT",
+        nonce: "manifest-finalization-rejection-replay",
+        idempotencyKey: "manifest-finalization-rejection",
+        body: {
+          locator: ensureBody().locator,
+          expectedDeploymentVersion: "worker-version-test-1",
+          expectedManifestRevision: "manifest-1",
+          manifest: failedManifest,
+          restart: "restart",
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        },
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({
       code: "runtime_restart_failed",
       message: "Runtime failed after manifest update",
       retryable: true,
     });
-    expect(consoleError).toHaveBeenCalledTimes(2);
-    expect(consoleError.mock.calls.map(([message]) => String(message))).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('"operation":"idempotency"'),
-        expect.stringContaining('"operation":"audit"'),
-      ]),
-    );
     consoleError.mockRestore();
   });
 });
@@ -766,21 +1400,20 @@ async function deliverArtifact(input: {
   }
   expect(
     (
-      await handleControlRequest(
-        await signedRequest({
-          path: `${artifactBase}/commit`,
-          method: "POST",
-          nonce: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
-          idempotencyKey: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
-          body: {
-            locator,
-            expectedDeploymentVersion: "worker-version-test-1",
-            sealedArtifactSha256: input.artifact.envelope.sealedArtifactSha256,
-          },
-        }),
-        input.env,
-        { coordinator: input.coordinator, backend: input.backend, nowMs: TEST_NOW_MS },
-      )
+      await commitArtifactAndDrain({
+        path: `${artifactBase}/commit`,
+        nonce: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
+        idempotencyKey: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
+        body: {
+          locator,
+          expectedDeploymentVersion: "worker-version-test-1",
+          sealedArtifactSha256: input.artifact.envelope.sealedArtifactSha256,
+        },
+        env: input.env,
+        coordinator: input.coordinator,
+        backend: input.backend,
+        nowMs: TEST_NOW_MS,
+      })
     ).status,
   ).toBe(200);
 }
@@ -793,21 +1426,20 @@ async function startArtifact(input: {
   base: string;
   key: string;
 }) {
-  const response = await handleControlRequest(
-    await signedRequest({
-      path: `${input.base}/start`,
-      method: "POST",
-      nonce: `${input.key}-nonce-0001`,
-      idempotencyKey: input.key,
-      body: {
-        locator: ensureBody().locator,
-        expectedDeploymentVersion: "worker-version-test-1",
-        artifactRevision: input.artifact.envelope.artifactRevision,
-        artifactSha256: input.artifact.envelope.sealedArtifactSha256,
-      },
-    }),
-    input.env,
-    { coordinator: input.coordinator, backend: input.backend, nowMs: TEST_NOW_MS },
-  );
+  const response = await mutationAndDrain({
+    path: `${input.base}/start`,
+    nonce: `${input.key}-nonce-0001`,
+    idempotencyKey: input.key,
+    body: {
+      locator: ensureBody().locator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      artifactRevision: input.artifact.envelope.artifactRevision,
+      artifactSha256: input.artifact.envelope.sealedArtifactSha256,
+    },
+    env: input.env,
+    coordinator: input.coordinator,
+    backend: input.backend,
+    nowMs: TEST_NOW_MS,
+  });
   expect(response.status).toBe(200);
 }

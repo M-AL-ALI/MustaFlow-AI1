@@ -10,6 +10,17 @@ import {
 import { publishedHostnameSchema, routeRecordSchema } from "./route-capability";
 import { parseRuntimeIdentity } from "./runtime-identity";
 import { tenantServicePortSchema } from "./service-port";
+import { ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS } from "./artifact-commit";
+
+/**
+ * Product-level wall-clock bounds for following one durable control operation.
+ * They are deliberately shorter than the control idempotency reservation TTL
+ * so a stable idempotency key cannot expire and create a duplicate operation.
+ */
+export const RUNTIME_CONTROL_OPERATION_BOUND_MS = 5 * 60 * 1_000;
+export const RUNTIME_ARTIFACT_OPERATION_BOUND_MS = ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS;
+export const ZERO_GENERATION_CONTROL_OPERATION_BOUND_MS = 5 * 60 * 1_000;
+export const RUNTIME_START_OPERATION_BOUND_MS = RUNTIME_CONTROL_OPERATION_BOUND_MS;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const revisionSchema = z.string().min(1).max(200);

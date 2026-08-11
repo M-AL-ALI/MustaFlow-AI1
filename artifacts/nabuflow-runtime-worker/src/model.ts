@@ -11,6 +11,15 @@ import type {
   RuntimeArtifactLayerContent,
   RuntimeLayeredArtifactEnvelope,
   RuntimeManifestContract,
+  ArtifactCommitCheckpoint,
+  ArtifactCommitEvent,
+  ArtifactCommitKind,
+  DurableOperationCheckpoint,
+  DurableOperationKind,
+  RuntimeManifestRestartCheckpoint,
+  RuntimeStartCheckpoint,
+  StartRuntimeRequest,
+  UpdateRuntimeManifestRequest,
 } from "@workspace/tenant-runtime-contracts";
 
 export type RuntimeLogEntry = LogsRuntimeResponse["entries"][number];
@@ -68,38 +77,121 @@ export type IdempotencyLookup =
   | { state: "conflict" }
   | { state: "replay"; response: StoredHttpResponse };
 
-export type ArtifactCommitKind = "v1" | "layers-v1";
-export type ArtifactCommitCheckpoint =
-  | "initialized"
-  | "verification-complete"
-  | "payloads-transferred"
-  | "unpack-complete"
-  | "finalized";
+export type {
+  ArtifactCommitCheckpoint,
+  ArtifactCommitKind,
+  DurableOperationCheckpoint,
+  DurableOperationKind,
+  RuntimeManifestRestartCheckpoint,
+  RuntimeStartCheckpoint,
+};
 
-export interface StoredArtifactCommitJob {
+export interface DurableOperationQueueMessage {
+  schemaVersion: 1;
   jobKey: string;
-  kind: ArtifactCommitKind;
   runtimeIdentity: string;
-  sealedArtifactSha256: string;
+  subjectKey: string;
+  kind: DurableOperationKind;
+}
+
+export type ArtifactCommitQueueMessage = DurableOperationQueueMessage;
+
+interface StoredDurableOperationJobBase {
+  jobKey: string;
+  kind: DurableOperationKind;
+  runtimeIdentity: string;
+  subjectKey: string;
+  expectedDeploymentVersion: string;
   fingerprint: string;
   idempotencyStorageKey: string;
   state: "active" | "succeeded" | "failed";
-  checkpoint: ArtifactCommitCheckpoint;
+  checkpoint: DurableOperationCheckpoint;
   ownerId: string | null;
   attempt: number;
+  eventSequence: number;
+  events: Array<
+    Omit<ArtifactCommitEvent, "checkpoint"> & { checkpoint: DurableOperationCheckpoint }
+  >;
   leaseUntilMs: number | null;
   abandonAtMs: number | null;
   deadlineMs: number;
-  payloadContentSha256s?: string[];
   response?: StoredHttpResponse;
+  /** Added after the first durable-job rollout; legacy jobs derive this from their deadline. */
+  createdAtMs?: number;
   updatedAtMs: number;
 }
 
-export type ArtifactCommitClaim =
-  | { state: "new" | "adopted"; job: StoredArtifactCommitJob }
-  | { state: "pending" }
+export interface StoredArtifactCommitJob extends StoredDurableOperationJobBase {
+  kind: ArtifactCommitKind;
+  checkpoint: ArtifactCommitCheckpoint;
+  sealedArtifactSha256: string;
+  payloadContentSha256s?: string[];
+}
+
+export interface StoredRuntimeStartJob extends StoredDurableOperationJobBase {
+  kind: "runtime-start";
+  checkpoint: RuntimeStartCheckpoint;
+  request: StartRuntimeRequest;
+}
+
+export interface StoredRuntimeManifestRestartJob extends StoredDurableOperationJobBase {
+  kind: "runtime-manifest-restart";
+  checkpoint: RuntimeManifestRestartCheckpoint;
+  request: UpdateRuntimeManifestRequest;
+  runtimeWasRunning?: boolean;
+}
+
+export type StoredDurableOperationJob =
+  | StoredArtifactCommitJob
+  | StoredRuntimeStartJob
+  | StoredRuntimeManifestRestartJob;
+
+export type DurableOperationRegistration =
+  | {
+      key: string;
+      fingerprint: string;
+      kind: ArtifactCommitKind;
+      runtimeIdentity: string;
+      subjectKey: string;
+      sealedArtifactSha256: string;
+      expectedDeploymentVersion: string;
+      nowMs: number;
+    }
+  | {
+      key: string;
+      fingerprint: string;
+      kind: "runtime-start";
+      runtimeIdentity: string;
+      subjectKey: "start";
+      request: StartRuntimeRequest;
+      expectedDeploymentVersion: string;
+      nowMs: number;
+    }
+  | {
+      key: string;
+      fingerprint: string;
+      kind: "runtime-manifest-restart";
+      runtimeIdentity: string;
+      subjectKey: "manifest-restart";
+      request: UpdateRuntimeManifestRequest;
+      expectedDeploymentVersion: string;
+      nowMs: number;
+    };
+
+export type DurableOperationClaim =
+  | { state: "new"; job: StoredDurableOperationJob }
+  | { state: "pending"; job?: StoredDurableOperationJob }
   | { state: "conflict" }
   | { state: "replay"; response: StoredHttpResponse };
+
+export type DurableOperationDriverClaim =
+  | { state: "claimed" | "adopted"; job: StoredDurableOperationJob }
+  | { state: "busy"; job: StoredDurableOperationJob }
+  | { state: "terminal"; job: StoredDurableOperationJob }
+  | { state: "not_found" };
+
+export type ArtifactCommitClaim = DurableOperationClaim;
+export type ArtifactCommitDriverClaim = DurableOperationDriverClaim;
 
 export interface ControlAuditRecord {
   requestId: string;
@@ -126,39 +218,57 @@ export interface ControlCoordinator {
     nowMs: number,
   ): Promise<void>;
   abandonIdempotency(key: string, fingerprint: string): Promise<void>;
-  claimArtifactCommit(input: {
-    key: string;
-    fingerprint: string;
-    ownerId: string;
-    kind: ArtifactCommitKind;
-    runtimeIdentity: string;
-    sealedArtifactSha256: string;
-    nowMs: number;
-  }): Promise<ArtifactCommitClaim>;
-  renewArtifactCommit(
+  registerDurableOperation(input: DurableOperationRegistration): Promise<DurableOperationClaim>;
+  claimDurableOperationDriver(
     jobKey: string,
     ownerId: string,
+    nowMs: number,
+  ): Promise<DurableOperationDriverClaim>;
+  getDurableOperation(jobKey: string): Promise<StoredDurableOperationJob | null>;
+  getLatestDurableOperation(
+    kind: DurableOperationKind,
+    runtimeIdentity: string,
+    subjectKey: string,
+  ): Promise<StoredDurableOperationJob | null>;
+  listRecentDurableOperations(input: {
+    sinceMs: number;
+    untilMs: number;
+    limit: number;
+    kind?: DurableOperationKind;
+  }): Promise<StoredDurableOperationJob[]>;
+  recordDurableOperationNudge(
+    jobKey: string,
+    nowMs: number,
+  ): Promise<"recorded" | "not_found" | "terminal">;
+  renewDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
     nowMs: number,
   ): Promise<"renewed" | "not_owner" | "terminal">;
-  checkpointArtifactCommit(input: {
+  checkpointDurableOperation(input: {
     jobKey: string;
     ownerId: string;
-    checkpoint: ArtifactCommitCheckpoint;
+    ownerGeneration: number;
+    checkpoint: DurableOperationCheckpoint;
     payloadContentSha256s?: string[];
+    runtimeWasRunning?: boolean;
     nowMs: number;
-  }): Promise<StoredArtifactCommitJob>;
-  completeArtifactCommit(
+  }): Promise<StoredDurableOperationJob>;
+  completeDurableOperation(
     jobKey: string,
     ownerId: string,
+    ownerGeneration: number,
     response: StoredHttpResponse,
     nowMs: number,
-  ): Promise<void>;
-  failArtifactCommit(
+  ): Promise<"completed" | "already_terminal" | "not_owner">;
+  failDurableOperation(
     jobKey: string,
     ownerId: string,
+    ownerGeneration: number,
     response: StoredHttpResponse,
     nowMs: number,
-  ): Promise<void>;
+  ): Promise<"completed" | "already_terminal" | "not_owner">;
   recordAudit(record: ControlAuditRecord): Promise<void>;
   getRuntime(identity: string): Promise<StoredRuntime | null>;
   putRuntime(identity: string, runtime: StoredRuntime): Promise<void>;

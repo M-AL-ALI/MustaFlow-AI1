@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlDurableObject } from "../src/control-durable-object";
 import type { StoredArtifactCommitJob } from "../src/model";
-import { fakeEnv } from "./helpers";
+import { MemoryArtifactCommitQueue, fakeEnv } from "./helpers";
 
 class MemoryDurableStorage {
   private readonly values = new Map<string, unknown>();
@@ -45,8 +45,8 @@ class MemoryDurableStorage {
   }
 }
 
-function coordinator(storage = new MemoryDurableStorage()): ControlDurableObject {
-  return new ControlDurableObject({ storage } as unknown as DurableObjectState, fakeEnv());
+function coordinator(storage = new MemoryDurableStorage(), env = fakeEnv()): ControlDurableObject {
+  return new ControlDurableObject({ storage } as unknown as DurableObjectState, env);
 }
 
 const claim = {
@@ -55,6 +55,7 @@ const claim = {
   kind: "layers-v1" as const,
   runtimeIdentity: "nrf-e919a75364398a44-p42-preview-primary",
   sealedArtifactSha256: "a".repeat(64),
+  expectedDeploymentVersion: "worker-version-test-1",
 };
 
 afterEach(() => vi.useRealTimers());
@@ -62,9 +63,11 @@ afterEach(() => vi.useRealTimers());
 describe("artifact commit coordinator leases", () => {
   it("preserves live-owner in-progress semantics and adopts an expired lease at its checkpoint", async () => {
     const durable = coordinator();
-    const first = await durable.claimArtifactCommit({ ...claim, ownerId: "owner-1", nowMs: 1_000 });
+    const first = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
     expect(first.state).toBe("new");
     if (first.state !== "new") throw new Error("expected a new job");
+    const owner = await durable.claimArtifactCommitDriver(first.job.jobKey, "owner-1", 1_000);
+    expect(owner.state).toBe("claimed");
 
     await durable.checkpointArtifactCommit({
       jobKey: first.job.jobKey,
@@ -73,52 +76,70 @@ describe("artifact commit coordinator leases", () => {
       nowMs: 2_000,
     });
     await expect(
-      durable.claimArtifactCommit({ ...claim, ownerId: "owner-2", nowMs: 10_000 }),
-    ).resolves.toEqual({ state: "pending" });
+      durable.claimArtifactCommitDriver(first.job.jobKey, "owner-2", 10_000),
+    ).resolves.toMatchObject({ state: "busy", job: { ownerId: "owner-1" } });
 
-    const adopted = await durable.claimArtifactCommit({
-      ...claim,
-      ownerId: "owner-2",
-      nowMs: 17_000,
-    });
+    const adopted = await durable.claimArtifactCommitDriver(first.job.jobKey, "owner-2", 17_000);
     expect(adopted.state).toBe("adopted");
     if (adopted.state !== "adopted") throw new Error("expected adoption");
     expect(adopted.job).toMatchObject({
       checkpoint: "verification-complete",
       ownerId: "owner-2",
       attempt: 2,
+      events: expect.arrayContaining([
+        expect.objectContaining({ event: "lease-expired" }),
+        expect.objectContaining({ event: "driver-adopted" }),
+      ]),
     });
   });
 
   it("creates a fresh job when nothing durable exists and rejects a conflicting payload", async () => {
     const durable = coordinator();
+    await expect(durable.registerArtifactCommit({ ...claim, nowMs: 1_000 })).resolves.toMatchObject(
+      { state: "new", job: { checkpoint: "initialized", attempt: 0 } },
+    );
     await expect(
-      durable.claimArtifactCommit({ ...claim, ownerId: "owner-1", nowMs: 1_000 }),
-    ).resolves.toMatchObject({ state: "new", job: { checkpoint: "initialized", attempt: 1 } });
-    await expect(
-      durable.claimArtifactCommit({
+      durable.registerArtifactCommit({
         ...claim,
         fingerprint: "e".repeat(64),
-        ownerId: "owner-2",
         nowMs: 17_000,
       }),
     ).resolves.toEqual({ state: "conflict" });
+  });
+
+  it("keeps the persisted diagnostic trail bounded while retaining monotonic sequence numbers", async () => {
+    const durable = coordinator();
+    const registered = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
+    expect(registered.state).toBe("new");
+    if (registered.state !== "new") throw new Error("expected a new job");
+    for (let index = 0; index < 160; index += 1) {
+      await durable.recordArtifactCommitNudge(registered.job.jobKey, 2_000 + index);
+    }
+    const job = await durable.getArtifactCommit(registered.job.jobKey);
+    expect(job?.events).toHaveLength(128);
+    expect(job?.events[0].sequence).toBeGreaterThan(1);
+    expect(job?.events.at(-1)?.sequence).toBe(161);
   });
 
   it("alarms an abandoned job into a typed terminal response without a retry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     const storage = new MemoryDurableStorage();
-    const durable = coordinator(storage);
-    const first = await durable.claimArtifactCommit({ ...claim, ownerId: "owner-1", nowMs: 1_000 });
+    const env = fakeEnv();
+    const durable = coordinator(storage, env);
+    const first = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
     expect(first.state).toBe("new");
 
-    vi.setSystemTime(46_001);
+    vi.setSystemTime(6_001);
     await durable.alarm();
-    const replay = await durable.claimArtifactCommit({
+    const queue = env.ARTIFACT_COMMIT_QUEUE as unknown as MemoryArtifactCommitQueue;
+    expect(queue.messages).toHaveLength(1);
+
+    vi.setSystemTime(271_001);
+    await durable.alarm();
+    const replay = await durable.registerArtifactCommit({
       ...claim,
-      ownerId: "owner-2",
-      nowMs: 46_001,
+      nowMs: 271_001,
     });
     expect(replay).toEqual({
       state: "replay",
@@ -132,7 +153,133 @@ describe("artifact commit coordinator leases", () => {
         },
       },
     });
-    const jobs = await storage.list<StoredArtifactCommitJob>({ prefix: "artifact-commit-job:" });
+    const jobs = await storage.list<StoredArtifactCommitJob>({
+      prefix: "durable-operation-job:",
+    });
     expect([...jobs.values()][0]).toMatchObject({ state: "failed", ownerId: null });
+  });
+
+  it("terminalizes an abandoned runtime start before the provider observation boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const storage = new MemoryDurableStorage();
+    const env = fakeEnv();
+    const durable = coordinator(storage, env);
+    const registration = {
+      key: "runtime-start-idempotency-1",
+      fingerprint: "d".repeat(64),
+      kind: "runtime-start" as const,
+      runtimeIdentity: claim.runtimeIdentity,
+      subjectKey: "start" as const,
+      request: {
+        locator: { projectId: 42, role: "preview" as const, slot: "primary" as const },
+        expectedDeploymentVersion: "worker-version-test-1",
+        artifactRevision: "runtime-start-alarm-proof",
+        artifactSha256: "b".repeat(64),
+      },
+      expectedDeploymentVersion: "worker-version-test-1",
+    };
+    await expect(
+      durable.registerDurableOperation({ ...registration, nowMs: 1_000 }),
+    ).resolves.toMatchObject({ state: "new" });
+    vi.setSystemTime(6_001);
+    await durable.alarm();
+    const queue = env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
+    expect(queue.messages).toHaveLength(1);
+    vi.setSystemTime(271_001);
+    await durable.alarm();
+    await expect(
+      durable.registerDurableOperation({ ...registration, nowMs: 271_001 }),
+    ).resolves.toEqual({
+      state: "replay",
+      response: {
+        status: 504,
+        body: {
+          ok: false,
+          code: "runtime_start_timeout",
+          message: "Runtime start did not complete before the execution deadline",
+          retryable: false,
+        },
+      },
+    });
+    expect(271_001 - 1_000).toBeLessThan(300_000);
+  });
+
+  it("fences stale adoption generations without replacing the live owner or typed terminal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const durable = coordinator();
+    const registration = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
+    expect(registration.state).toBe("new");
+    if (registration.state !== "new") throw new Error("expected a new job");
+    const first = await durable.claimDurableOperationDriver(
+      registration.job.jobKey,
+      "owner-1",
+      1_000,
+    );
+    expect(first.state).toBe("claimed");
+    const second = await durable.claimDurableOperationDriver(
+      registration.job.jobKey,
+      "owner-2",
+      17_000,
+    );
+    expect(second.state).toBe("adopted");
+    if (second.state !== "adopted") throw new Error("expected adoption");
+
+    await expect(
+      durable.failDurableOperation(
+        registration.job.jobKey,
+        "owner-1",
+        1,
+        { status: 502, body: { ok: false, code: "stale" } },
+        18_000,
+      ),
+    ).resolves.toBe("not_owner");
+    await expect(durable.getDurableOperation(registration.job.jobKey)).resolves.toMatchObject({
+      state: "active",
+      ownerId: "owner-2",
+      attempt: 2,
+    });
+
+    vi.setSystemTime(271_001);
+    await durable.alarm();
+    await expect(
+      durable.failDurableOperation(
+        registration.job.jobKey,
+        "owner-2",
+        2,
+        { status: 502, body: { ok: false, code: "late" } },
+        271_001,
+      ),
+    ).resolves.toBe("already_terminal");
+    await expect(durable.getDurableOperation(registration.job.jobKey)).resolves.toMatchObject({
+      state: "failed",
+      response: { body: { code: "artifact_commit_abandoned" } },
+    });
+  });
+
+  it("does not adopt a live initialized driver whose renewable lease is current", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const durable = coordinator();
+    const registration = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
+    if (registration.state !== "new") throw new Error("expected a new job");
+    const driver = await durable.claimDurableOperationDriver(
+      registration.job.jobKey,
+      "live-owner",
+      1_000,
+    );
+    expect(driver.state).toBe("claimed");
+    await expect(
+      durable.renewDurableOperation(registration.job.jobKey, "live-owner", 1, 14_000),
+    ).resolves.toBe("renewed");
+    vi.setSystemTime(17_000);
+    await durable.alarm();
+    await expect(durable.getDurableOperation(registration.job.jobKey)).resolves.toMatchObject({
+      state: "active",
+      checkpoint: "initialized",
+      ownerId: "live-owner",
+      attempt: 1,
+    });
   });
 });

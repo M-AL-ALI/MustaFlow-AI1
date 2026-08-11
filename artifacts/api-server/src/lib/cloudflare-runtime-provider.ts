@@ -1,6 +1,10 @@
 import {
   CONTROL_API_PREFIX,
   CONTROL_FEATURES,
+  RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+  RUNTIME_CONTROL_OPERATION_BOUND_MS,
+  RUNTIME_START_OPERATION_BOUND_MS,
+  ZERO_GENERATION_CONTROL_OPERATION_BOUND_MS,
   canonicalJson,
   beginRuntimeArtifactResponseSchema,
   beginRuntimeLayeredArtifactResponseSchema,
@@ -43,11 +47,14 @@ import {
   type RuntimeInfo,
   type RuntimeInstallOptions,
   type RuntimeLogLevel,
+  type RuntimeOperationOptions,
   type RuntimeProductionOptions,
   type RuntimeServiceOptions,
+  type RuntimeStartOptions,
   type RuntimeStatus,
   type RuntimeSubsystemStatus,
   type TenantRuntimeProvider,
+  type ZeroGenerationTenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
 type CloudflareConfig = NonNullable<TenantRuntimeConfig["cloudflare"]>;
@@ -56,10 +63,33 @@ const CLOCK_SKEW_LIMIT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const CONTROL_RETRY_DELAYS_MS = [100, 250, 500] as const;
 const MAX_RETRY_AFTER_MS = 1_000;
+const OPERATION_FOLLOW_DELAY_MS = 1_000;
+export const CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS = 10;
+
+interface ControlOperationFollowOptions {
+  operation: string;
+  operationBoundMs: number;
+  operationTimeoutMs?: number;
+  signal?: AbortSignal;
+  timeoutCode: string;
+  terminalUnknownCode: string;
+  cancelledCode: string;
+}
 
 interface CloudflareRuntimeProviderDependencies {
   sleep?: (delayMs: number) => Promise<void>;
+  /** Test/acceptance clock; production defaults byte-for-byte to Date.now. */
+  now?: () => number;
+  /** Monotonic operation clock; independent from the control signing clock. */
+  monotonicNow?: () => number;
 }
+
+export type CloudflareRuntimeTransportCause =
+  | "client_abort"
+  | "request_timeout"
+  | "connection_reset"
+  | "fetch_exception"
+  | "unreachable";
 
 export class CloudflareRuntimeControlError extends Error {
   constructor(
@@ -67,9 +97,112 @@ export class CloudflareRuntimeControlError extends Error {
     readonly code: string,
     readonly retryable: boolean,
     message: string,
+    readonly transportCause: CloudflareRuntimeTransportCause | null = null,
   ) {
     super(message);
     this.name = "CloudflareRuntimeControlError";
+  }
+}
+
+export class CloudflareRuntimePreDispatchError extends CloudflareRuntimeControlError {
+  constructor(readonly errorClass: string) {
+    super(
+      500,
+      "control_pre_dispatch_error",
+      false,
+      `Cloudflare control request failed before dispatch: ${errorClass}`,
+    );
+    this.name = "CloudflareRuntimePreDispatchError";
+  }
+}
+
+function sanitizedErrorClass(error: unknown): string {
+  if (!(error instanceof Error)) return "UnknownError";
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(error.name) ? error.name : "Error";
+}
+
+function preDispatchError(error: unknown): CloudflareRuntimePreDispatchError {
+  return error instanceof CloudflareRuntimePreDispatchError
+    ? error
+    : new CloudflareRuntimePreDispatchError(sanitizedErrorClass(error));
+}
+
+function positiveIntegerTimerMs(value: number): number | null {
+  if (!Number.isFinite(value)) return null;
+  const floored = Math.floor(value);
+  return floored >= 1 ? floored : null;
+}
+
+function nestedErrorCode(error: unknown): string | null {
+  let candidate: unknown = error;
+  for (let depth = 0; depth < 3 && candidate instanceof Error; depth += 1) {
+    const code = (candidate as Error & { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    candidate = candidate.cause;
+  }
+  return null;
+}
+
+function classifyTransportFailure(error: unknown): {
+  cause: Exclude<CloudflareRuntimeTransportCause, "client_abort">;
+  code: string;
+} {
+  const code = nestedErrorCode(error);
+  if (
+    (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) ||
+    code === "UND_ERR_CONNECT_TIMEOUT" ||
+    code === "ETIMEDOUT"
+  ) {
+    return { cause: "request_timeout", code: "control_transport_timeout" };
+  }
+  if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") {
+    return { cause: "connection_reset", code: "control_transport_connection_reset" };
+  }
+  if (error instanceof TypeError) {
+    return { cause: "fetch_exception", code: "control_transport_fetch_exception" };
+  }
+  return { cause: "unreachable", code: "control_plane_unreachable" };
+}
+
+export class CloudflareRuntimeOperationTimeoutError extends CloudflareRuntimeControlError {
+  constructor(
+    readonly operation: string,
+    code: string,
+    readonly elapsedMs: number,
+    readonly attempts: number,
+    readonly lastObservedOperationState: string,
+    readonly operationTimeoutMs: number,
+    readonly namedProviderBoundMs: number,
+    readonly transportCauseCounts: Readonly<
+      Partial<Record<CloudflareRuntimeTransportCause, number>>
+    >,
+  ) {
+    super(504, code, true, `Cloudflare ${operation} exceeded its operation bound`);
+    this.name = "CloudflareRuntimeOperationTimeoutError";
+  }
+}
+
+export class CloudflareRuntimeOperationTerminalUnknownError extends CloudflareRuntimeControlError {
+  constructor(
+    readonly operation: string,
+    code: string,
+    readonly elapsedMs: number,
+    readonly attempts: number,
+    readonly lastObservedOperationState: string,
+    readonly operationTimeoutMs: number,
+    readonly namedProviderBoundMs: number,
+    readonly transportCauseCounts: Readonly<
+      Partial<Record<CloudflareRuntimeTransportCause, number>>
+    >,
+    readonly successfulObservationCount: number,
+  ) {
+    super(
+      503,
+      code,
+      true,
+      `Cloudflare ${operation} terminal state is unknown after a control observation blackout`,
+    );
+    this.name = "CloudflareRuntimeOperationTerminalUnknownError";
   }
 }
 
@@ -151,7 +284,8 @@ export class CloudflareRuntimeProvider
   implements
     TenantRuntimeProvider,
     ArtifactDeployingTenantRuntimeProvider,
-    LayeredArtifactDeployingTenantRuntimeProvider
+    LayeredArtifactDeployingTenantRuntimeProvider,
+    ZeroGenerationTenantRuntimeProvider
 {
   readonly providerId = "cloudflare";
   private subsystemStatus: RuntimeSubsystemStatus | null = null;
@@ -168,13 +302,28 @@ export class CloudflareRuntimeProvider
   >();
 
   private readonly sleep: (delayMs: number) => Promise<void>;
+  private readonly now: () => number;
+  private readonly monotonicNow: () => number;
 
   constructor(
     private readonly config: CloudflareConfig,
     dependencies: CloudflareRuntimeProviderDependencies = {},
   ) {
     this.sleep =
-      dependencies.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+      dependencies.sleep ??
+      ((delayMs) => {
+        const timerMs = positiveIntegerTimerMs(delayMs);
+        return timerMs === null
+          ? Promise.resolve()
+          : new Promise((resolve) => setTimeout(resolve, timerMs));
+      });
+    this.now = dependencies.now ?? Date.now;
+    this.monotonicNow = dependencies.monotonicNow ?? (() => performance.now());
+  }
+
+  private sleepFor(delayMs: number): Promise<void> {
+    const timerMs = positiveIntegerTimerMs(delayMs);
+    return timerMs === null ? Promise.resolve() : this.sleep(timerMs);
   }
 
   private unavailable(capability: string): never {
@@ -198,23 +347,33 @@ export class CloudflareRuntimeProvider
 
   private async refreshVersion(): Promise<string> {
     for (let attempt = 0; ; attempt += 1) {
+      let target: URL;
+      let signal: AbortSignal;
+      try {
+        target = new URL(`${this.config.controlUrl}${CONTROL_API_PREFIX}/version`);
+        const timeoutMs = positiveIntegerTimerMs(REQUEST_TIMEOUT_MS);
+        if (timeoutMs === null) throw new RangeError("Control version timeout is invalid");
+        signal = AbortSignal.timeout(timeoutMs);
+      } catch (error) {
+        throw preDispatchError(error);
+      }
       let response: Response;
       try {
-        response = await fetch(`${this.config.controlUrl}${CONTROL_API_PREFIX}/version`, {
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
+        response = await fetch(target, { signal });
       } catch (error) {
         if (attempt < CONTROL_RETRY_DELAYS_MS.length) {
-          await this.sleep(CONTROL_RETRY_DELAYS_MS[attempt]);
+          await this.sleepFor(CONTROL_RETRY_DELAYS_MS[attempt]);
           continue;
         }
+        const transport = classifyTransportFailure(error);
         throw new CloudflareRuntimeControlError(
           503,
-          "control_plane_unreachable",
+          transport.code,
           true,
           error instanceof Error
             ? `Cloudflare control clock probe failed: ${error.name}`
             : "Cloudflare control clock probe failed",
+          transport.cause,
         );
       }
       if (response.status >= 500) {
@@ -228,7 +387,7 @@ export class CloudflareRuntimeProvider
           "Cloudflare runtime control is temporarily unavailable",
         );
         if (attempt < CONTROL_RETRY_DELAYS_MS.length) {
-          await this.sleep(retryAfterMs(response, CONTROL_RETRY_DELAYS_MS[attempt]));
+          await this.sleepFor(retryAfterMs(response, CONTROL_RETRY_DELAYS_MS[attempt]));
           continue;
         }
         throw error;
@@ -237,7 +396,7 @@ export class CloudflareRuntimeProvider
       const workerDate = response.headers.get("date");
       const workerTime = workerDate === null ? Number.NaN : Date.parse(workerDate);
       if (!Number.isFinite(workerTime)) throw new Error("Cloudflare control response omitted Date");
-      const offset = workerTime - Date.now();
+      const offset = workerTime - this.now();
       if (Math.abs(offset) > CLOCK_SKEW_LIMIT_MS) {
         throw new Error(`Cloudflare control clock skew exceeds ${CLOCK_SKEW_LIMIT_MS}ms`);
       }
@@ -271,16 +430,35 @@ export class CloudflareRuntimeProvider
     path: string;
     body?: unknown;
     idempotencyKey?: string;
+    signal?: AbortSignal;
+    transportTimeoutMs?: number;
+    retryDelaysMs?: readonly number[];
+    operation?: ControlOperationFollowOptions;
     parse: { parse(value: unknown): T };
   }): Promise<T> {
     const method = input.method ?? "GET";
-    const body = input.body === undefined ? "" : JSON.stringify(input.body);
-    return this.requestEncoded({
+    let body: string;
+    try {
+      body = input.body === undefined ? "" : JSON.stringify(input.body);
+    } catch (error) {
+      throw preDispatchError(error);
+    }
+    const encoded = {
       ...input,
       method,
       body,
       contentType: body ? "application/json" : undefined,
-    });
+    };
+    if (input.idempotencyKey !== undefined) {
+      if (input.operation === undefined) {
+        throw new Error("Idempotent control mutations require an operation follower");
+      }
+      return this.followOperation(
+        { ...encoded, idempotencyKey: input.idempotencyKey },
+        input.operation,
+      );
+    }
+    return this.requestEncoded(encoded);
   }
 
   private async requestBytes<T>(input: {
@@ -288,9 +466,13 @@ export class CloudflareRuntimeProvider
     path: string;
     body: Uint8Array;
     idempotencyKey: string;
+    operation: ControlOperationFollowOptions;
     parse: { parse(value: unknown): T };
   }): Promise<T> {
-    return this.requestEncoded({ ...input, contentType: "application/octet-stream" });
+    return this.followOperation(
+      { ...input, contentType: "application/octet-stream" },
+      input.operation,
+    );
   }
 
   private async requestEncoded<T>(input: {
@@ -299,50 +481,92 @@ export class CloudflareRuntimeProvider
     body: string | Uint8Array;
     contentType?: string;
     idempotencyKey?: string;
+    signal?: AbortSignal;
+    transportTimeoutMs?: number;
+    retryDelaysMs?: readonly number[];
     parse: { parse(value: unknown): T };
   }): Promise<T> {
     const method = input.method;
     const body = input.body;
-    const bodySha256 = await sha256Hex(body);
+    let bodySha256: string;
+    try {
+      bodySha256 = await sha256Hex(body);
+    } catch (error) {
+      throw preDispatchError(error);
+    }
     const idempotencyKey = input.idempotencyKey ?? "";
+    const retryDelays = input.retryDelaysMs ?? CONTROL_RETRY_DELAYS_MS;
     for (let attempt = 0; ; attempt += 1) {
-      const timestamp = String(Date.now() + this.clockOffsetMs);
-      const nonce = crypto.randomUUID();
-      const signature = await signControlRequest(this.config.controlToken, {
-        method,
-        pathAndQuery: input.path,
-        timestamp,
-        nonce,
-        bodySha256,
-        idempotencyKey,
-      });
-      let response: Response;
+      let target: URL;
+      let requestInit: RequestInit;
       try {
-        response = await fetch(`${this.config.controlUrl}${input.path}`, {
+        const timestamp = String(this.now() + this.clockOffsetMs);
+        const nonce = crypto.randomUUID();
+        const signature = await signControlRequest(this.config.controlToken, {
+          method,
+          pathAndQuery: input.path,
+          timestamp,
+          nonce,
+          bodySha256,
+          idempotencyKey,
+        });
+        const transportTimeoutMs = positiveIntegerTimerMs(
+          Math.min(input.transportTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS),
+        );
+        if (
+          transportTimeoutMs === null ||
+          transportTimeoutMs < CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS
+        ) {
+          throw new RangeError("Cloudflare transport dispatch budget is below its minimum");
+        }
+        target = new URL(`${this.config.controlUrl}${input.path}`);
+        const transportSignal = AbortSignal.timeout(transportTimeoutMs);
+        const headers = new Headers({
+          ...(input.contentType ? { "content-type": input.contentType } : {}),
+          "x-nabuflow-timestamp": timestamp,
+          "x-nabuflow-nonce": nonce,
+          "x-nabuflow-body-sha256": bodySha256,
+          "x-nabuflow-signature": signature,
+          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+        });
+        requestInit = {
           method,
           body: typeof body === "string" ? body || undefined : (body.slice().buffer as ArrayBuffer),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-          headers: {
-            ...(input.contentType ? { "content-type": input.contentType } : {}),
-            "x-nabuflow-timestamp": timestamp,
-            "x-nabuflow-nonce": nonce,
-            "x-nabuflow-body-sha256": bodySha256,
-            "x-nabuflow-signature": signature,
-            ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
-          },
-        });
+          signal:
+            input.signal === undefined
+              ? transportSignal
+              : AbortSignal.any([input.signal, transportSignal]),
+          headers,
+        };
       } catch (error) {
-        if (attempt < CONTROL_RETRY_DELAYS_MS.length) {
-          await this.sleep(CONTROL_RETRY_DELAYS_MS[attempt]);
+        throw preDispatchError(error);
+      }
+      let response: Response;
+      try {
+        response = await fetch(target, requestInit);
+      } catch (error) {
+        if (input.signal?.aborted) {
+          throw new CloudflareRuntimeControlError(
+            499,
+            "control_operation_cancelled",
+            false,
+            "Cloudflare runtime control operation was cancelled",
+            "client_abort",
+          );
+        }
+        if (attempt < retryDelays.length) {
+          await this.sleepFor(retryDelays[attempt]);
           continue;
         }
+        const transport = classifyTransportFailure(error);
         throw new CloudflareRuntimeControlError(
           503,
-          "control_plane_unreachable",
+          transport.code,
           true,
           error instanceof Error
             ? `Cloudflare runtime control request failed: ${error.name}`
             : "Cloudflare runtime control request failed",
+          transport.cause,
         );
       }
 
@@ -369,11 +593,8 @@ export class CloudflareRuntimeProvider
             `Cloudflare runtime control returned HTTP ${response.status}`,
           );
       const transientInvalidSignature = error.status === 401 && error.code === "invalid_signature";
-      if (
-        attempt < CONTROL_RETRY_DELAYS_MS.length &&
-        (error.retryable || transientInvalidSignature)
-      ) {
-        await this.sleep(retryAfterMs(response, CONTROL_RETRY_DELAYS_MS[attempt]));
+      if (attempt < retryDelays.length && (error.retryable || transientInvalidSignature)) {
+        await this.sleepFor(retryAfterMs(response, retryDelays[attempt]));
         continue;
       }
       throw error;
@@ -385,18 +606,184 @@ export class CloudflareRuntimeProvider
     method: string,
     suffix: string,
     body?: unknown,
+    operation?: ControlOperationFollowOptions,
   ): Promise<RuntimeDescriptor> {
     const result = await this.request({
       method,
       path: this.path(locator, suffix),
       body,
       idempotencyKey: method === "GET" ? undefined : crypto.randomUUID(),
+      operation,
       parse: {
         parse: (value: unknown) =>
           runtimeDescriptorSchema.parse((value as { runtime: unknown }).runtime),
       },
     });
     return result;
+  }
+
+  private operationOptions(
+    operation: string,
+    operationBoundMs: number,
+    timeoutCode: string,
+    cancelledCode: string,
+    options?: RuntimeOperationOptions,
+  ): ControlOperationFollowOptions {
+    return {
+      operation,
+      operationBoundMs,
+      operationTimeoutMs: options?.operationTimeoutMs,
+      signal: options?.signal,
+      timeoutCode,
+      terminalUnknownCode: timeoutCode.endsWith("_timeout")
+        ? `${timeoutCode.slice(0, -"_timeout".length)}_terminal_unknown`
+        : `${timeoutCode}_terminal_unknown`,
+      cancelledCode,
+    };
+  }
+
+  private operationCancelled(
+    options: ControlOperationFollowOptions,
+  ): CloudflareRuntimeControlError {
+    return new CloudflareRuntimeControlError(
+      499,
+      options.cancelledCode,
+      false,
+      `Cloudflare ${options.operation} was cancelled`,
+    );
+  }
+
+  private operationDeadlineError(
+    options: ControlOperationFollowOptions,
+    input: {
+      elapsedMs: number;
+      attempts: number;
+      lastObservedOperationState: string;
+      operationBoundMs: number;
+      transportCauseCounts: Readonly<Partial<Record<CloudflareRuntimeTransportCause, number>>>;
+      successfulObservationCount: number;
+    },
+  ): CloudflareRuntimeOperationTimeoutError | CloudflareRuntimeOperationTerminalUnknownError {
+    if (
+      input.lastObservedOperationState.startsWith("transport_") &&
+      Object.keys(input.transportCauseCounts).length > 0
+    ) {
+      return new CloudflareRuntimeOperationTerminalUnknownError(
+        options.operation,
+        options.terminalUnknownCode,
+        input.elapsedMs,
+        input.attempts,
+        input.lastObservedOperationState,
+        input.operationBoundMs,
+        options.operationBoundMs,
+        input.transportCauseCounts,
+        input.successfulObservationCount,
+      );
+    }
+    return new CloudflareRuntimeOperationTimeoutError(
+      options.operation,
+      options.timeoutCode,
+      input.elapsedMs,
+      input.attempts,
+      input.lastObservedOperationState,
+      input.operationBoundMs,
+      options.operationBoundMs,
+      input.transportCauseCounts,
+    );
+  }
+
+  private async sleepWhileFollowingOperation(
+    delayMs: number,
+    options: ControlOperationFollowOptions,
+  ): Promise<void> {
+    if (options.signal?.aborted) throw this.operationCancelled(options);
+    if (options.signal === undefined) {
+      await this.sleepFor(delayMs);
+      return;
+    }
+    let onAbort: (() => void) | undefined;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = (): void => reject(this.operationCancelled(options));
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted) onAbort();
+    });
+    try {
+      await Promise.race([this.sleepFor(delayMs), cancelled]);
+    } finally {
+      if (onAbort !== undefined) options.signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private async followOperation<T>(
+    input: {
+      method: string;
+      path: string;
+      body: string | Uint8Array;
+      contentType?: string;
+      idempotencyKey: string;
+      parse: { parse(value: unknown): T };
+    },
+    options: ControlOperationFollowOptions,
+  ): Promise<T> {
+    const requestedBound = options.operationTimeoutMs ?? options.operationBoundMs;
+    const operationBoundMs = Number.isFinite(requestedBound)
+      ? Math.max(0, Math.min(requestedBound, options.operationBoundMs))
+      : 0;
+    const startedAt = this.monotonicNow();
+    let attempts = 0;
+    let lastObservedOperationState = "not_started";
+    let successfulObservationCount = 0;
+    const transportCauseCounts: Partial<Record<CloudflareRuntimeTransportCause, number>> = {};
+
+    for (;;) {
+      if (options.signal?.aborted) throw this.operationCancelled(options);
+      const elapsedMs = Math.max(0, this.monotonicNow() - startedAt);
+      const remainingMs = operationBoundMs - elapsedMs;
+      const dispatchBudgetMs = Math.floor(Math.min(REQUEST_TIMEOUT_MS, remainingMs));
+      if (remainingMs <= 0 || dispatchBudgetMs < CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS) {
+        throw this.operationDeadlineError(options, {
+          elapsedMs,
+          attempts,
+          lastObservedOperationState,
+          operationBoundMs,
+          transportCauseCounts,
+          successfulObservationCount,
+        });
+      }
+      attempts += 1;
+      try {
+        return await this.requestEncoded({
+          ...input,
+          signal: options.signal,
+          transportTimeoutMs: dispatchBudgetMs,
+          retryDelaysMs: [],
+        });
+      } catch (error) {
+        if (options.signal?.aborted) throw this.operationCancelled(options);
+        if (!(error instanceof CloudflareRuntimeControlError)) throw error;
+        if (error.code === "control_operation_cancelled") {
+          throw this.operationCancelled(options);
+        }
+        if (error.code === "request_in_progress") {
+          successfulObservationCount += 1;
+          lastObservedOperationState = "request_in_progress";
+        } else if (error.transportCause !== null) {
+          transportCauseCounts[error.transportCause] =
+            (transportCauseCounts[error.transportCause] ?? 0) + 1;
+          lastObservedOperationState = `transport_${error.transportCause}_after_dispatch`;
+        } else {
+          throw error;
+        }
+      }
+
+      const elapsedAfterAttemptMs = Math.max(0, this.monotonicNow() - startedAt);
+      const followDelayMs = Math.min(
+        OPERATION_FOLLOW_DELAY_MS,
+        operationBoundMs - elapsedAfterAttemptMs,
+      );
+      if (followDelayMs <= 0) continue;
+      await this.sleepWhileFollowingOperation(followDelayMs, options);
+    }
   }
 
   hasCredentials(): boolean {
@@ -445,24 +832,40 @@ export class CloudflareRuntimeProvider
       legacyProfile: "stack",
     }).servicePort;
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
-    const runtime = await this.descriptorRequest(locator, "PUT", "", {
+    const runtime = await this.descriptorRequest(
       locator,
-      expectedDeploymentVersion,
-      manifest: {
-        revision: `project-${projectId}-runtime-v1`,
-        runtime: stack ?? "node",
-        buildCommand: ["npm", "run", "build"],
-        startCommand: commandForStack(stack),
-        servicePort,
-        healthPath: "/",
-        resourceProfile: "dev",
-        public: false,
+      "PUT",
+      "",
+      {
+        locator,
+        expectedDeploymentVersion,
+        manifest: {
+          revision: `project-${projectId}-runtime-v1`,
+          runtime: stack ?? "node",
+          buildCommand: ["npm", "run", "build"],
+          startCommand: commandForStack(stack),
+          servicePort,
+          healthPath: "/",
+          resourceProfile: "dev",
+          public: false,
+        },
       },
-    });
+      this.operationOptions(
+        "runtime.ensure",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "runtime_ensure_timeout",
+        "runtime_ensure_cancelled",
+        options,
+      ),
+    );
     return toInfo(runtime);
   }
 
-  async start(runtimeId: string, projectId: number): Promise<boolean> {
+  async start(
+    runtimeId: string,
+    projectId: number,
+    options?: RuntimeStartOptions,
+  ): Promise<boolean> {
     const locator = await this.locator(runtimeId, projectId);
     const deployed = this.deployedArtifacts.get(runtimeId);
     if (deployed === undefined) {
@@ -474,28 +877,67 @@ export class CloudflareRuntimeProvider
       );
     }
     await this.requireControlFeature(deployed.feature);
-    await this.descriptorRequest(locator, "POST", "/start", {
+    await this.descriptorRequest(
       locator,
-      expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
-      artifactRevision: deployed.artifactRevision,
-      artifactSha256: deployed.sealedArtifactSha256,
-    });
+      "POST",
+      "/start",
+      {
+        locator,
+        expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
+        artifactRevision: deployed.artifactRevision,
+        artifactSha256: deployed.sealedArtifactSha256,
+      },
+      this.operationOptions(
+        "runtime-start",
+        RUNTIME_START_OPERATION_BOUND_MS,
+        "runtime_start_timeout",
+        "runtime_start_cancelled",
+        options,
+      ),
+    );
     return true;
   }
 
-  async stop(runtimeId: string, projectId: number): Promise<boolean> {
+  async stop(
+    runtimeId: string,
+    projectId: number,
+    options?: RuntimeOperationOptions,
+  ): Promise<boolean> {
     const locator = await this.locator(runtimeId, projectId);
-    await this.descriptorRequest(locator, "POST", "/stop", { locator });
+    await this.descriptorRequest(
+      locator,
+      "POST",
+      "/stop",
+      { locator },
+      this.operationOptions(
+        "runtime.stop",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "runtime_stop_timeout",
+        "runtime_stop_cancelled",
+        options,
+      ),
+    );
     return true;
   }
 
-  async destroy(runtimeId: string, projectId: number): Promise<boolean> {
+  async destroy(
+    runtimeId: string,
+    projectId: number,
+    options?: RuntimeOperationOptions,
+  ): Promise<boolean> {
     const locator = await this.locator(runtimeId, projectId);
     await this.request({
       method: "DELETE",
       path: this.path(locator),
       body: { locator },
       idempotencyKey: crypto.randomUUID(),
+      operation: this.operationOptions(
+        "runtime.destroy",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "runtime_destroy_timeout",
+        "runtime_destroy_cancelled",
+        options,
+      ),
       parse: { parse: () => true },
     });
     return true;
@@ -511,6 +953,7 @@ export class CloudflareRuntimeProvider
     command: string[],
     projectId: number,
     workdir?: string,
+    options?: RuntimeOperationOptions,
   ): Promise<RuntimeExecResult> {
     const locator = await this.locator(runtimeId, projectId);
     const result = await this.request({
@@ -518,6 +961,13 @@ export class CloudflareRuntimeProvider
       path: this.path(locator, "/exec"),
       body: { locator, argv: command, cwd: workdir, timeoutMs: 120_000 },
       idempotencyKey: crypto.randomUUID(),
+      operation: this.operationOptions(
+        "runtime.exec",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "runtime_exec_timeout",
+        "runtime_exec_cancelled",
+        options,
+      ),
       parse: execRuntimeResponseSchema,
     });
     return {
@@ -534,7 +984,10 @@ export class CloudflareRuntimeProvider
     options?: RuntimeInstallOptions,
   ): Promise<{ ok: boolean; output: string }> {
     if (options?.signal?.aborted) throw options.signal.reason;
-    const result = await this.exec(runtimeId, ["npm", "install"], projectId, "/workspace");
+    const result = await this.exec(runtimeId, ["npm", "install"], projectId, "/workspace", {
+      operationTimeoutMs: options?.wallClockCapMs,
+      signal: options?.signal,
+    });
     return { ok: result.ok, output: result.output };
   }
 
@@ -569,6 +1022,7 @@ export class CloudflareRuntimeProvider
     runtimeId: string,
     projectId: number,
     artifact: RuntimeArtifactDeployment,
+    options?: RuntimeOperationOptions,
   ): Promise<RuntimeArtifactDeploymentResult> {
     await this.requireControlFeature("artifact-v1");
     const locator = await this.locator(runtimeId, projectId);
@@ -610,6 +1064,13 @@ export class CloudflareRuntimeProvider
       path: this.path(locator, `${suffix}/begin`),
       body: { locator, expectedDeploymentVersion, envelope },
       idempotencyKey: `artifact:${envelope.sealedArtifactSha256}:begin`,
+      operation: this.operationOptions(
+        "artifact.begin",
+        RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+        "artifact_transfer_timeout",
+        "artifact_transfer_cancelled",
+        options,
+      ),
       parse: beginRuntimeArtifactResponseSchema,
     });
     for (let chunkIndex = 0; chunkIndex < artifact.chunks.length; chunkIndex += 1) {
@@ -618,6 +1079,13 @@ export class CloudflareRuntimeProvider
         path: this.path(locator, `${suffix}/chunks/${chunkIndex}`),
         body: artifact.chunks[chunkIndex],
         idempotencyKey: `artifact:${envelope.sealedArtifactSha256}:chunk:${chunkIndex}`,
+        operation: this.operationOptions(
+          "artifact.chunk",
+          RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+          "artifact_transfer_timeout",
+          "artifact_transfer_cancelled",
+          options,
+        ),
         parse: uploadRuntimeArtifactChunkResponseSchema,
       });
     }
@@ -630,6 +1098,13 @@ export class CloudflareRuntimeProvider
         sealedArtifactSha256: envelope.sealedArtifactSha256,
       },
       idempotencyKey: `artifact:${envelope.sealedArtifactSha256}:commit`,
+      operation: this.operationOptions(
+        "artifact.commit",
+        RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+        "artifact_commit_timeout",
+        "artifact_commit_cancelled",
+        options,
+      ),
       parse: commitRuntimeArtifactResponseSchema,
     });
     this.deployedArtifacts.set(runtimeId, {
@@ -644,6 +1119,7 @@ export class CloudflareRuntimeProvider
     runtimeId: string,
     projectId: number,
     artifact: RuntimeLayeredArtifactDeployment,
+    options?: RuntimeOperationOptions,
   ): Promise<RuntimeLayeredArtifactDeploymentResult> {
     await this.requireControlFeature("artifact-layers-v1");
     const locator = await this.locator(runtimeId, projectId);
@@ -693,6 +1169,13 @@ export class CloudflareRuntimeProvider
       path: this.path(locator, `${suffix}/begin`),
       body: { locator, expectedDeploymentVersion, envelope },
       idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:begin`,
+      operation: this.operationOptions(
+        "layered-artifact.begin",
+        RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+        "artifact_transfer_timeout",
+        "artifact_transfer_cancelled",
+        options,
+      ),
       parse: beginRuntimeLayeredArtifactResponseSchema,
     });
     for (let chunkIndex = 0; chunkIndex < artifact.appChunks.length; chunkIndex += 1) {
@@ -701,6 +1184,13 @@ export class CloudflareRuntimeProvider
         path: this.path(locator, `${suffix}/app/chunks/${chunkIndex}`),
         body: artifact.appChunks[chunkIndex],
         idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:app:${chunkIndex}`,
+        operation: this.operationOptions(
+          "layered-artifact.app-chunk",
+          RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+          "artifact_transfer_timeout",
+          "artifact_transfer_cancelled",
+          options,
+        ),
         parse: uploadRuntimeLayeredArtifactChunkResponseSchema,
       });
     }
@@ -713,6 +1203,13 @@ export class CloudflareRuntimeProvider
           path: this.path(locator, `${suffix}/layers/${contentSha256}/chunks/${chunkIndex}`),
           body: layer.chunks[chunkIndex],
           idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:layer:${contentSha256}:${chunkIndex}`,
+          operation: this.operationOptions(
+            "layered-artifact.layer-chunk",
+            RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+            "artifact_transfer_timeout",
+            "artifact_transfer_cancelled",
+            options,
+          ),
           parse: uploadRuntimeLayeredArtifactChunkResponseSchema,
         });
       }
@@ -726,6 +1223,13 @@ export class CloudflareRuntimeProvider
         sealedArtifactSha256: envelope.sealedArtifactSha256,
       },
       idempotencyKey: `layered-artifact:${envelope.sealedArtifactSha256}:commit`,
+      operation: this.operationOptions(
+        "layered-artifact.commit",
+        RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+        "artifact_commit_timeout",
+        "artifact_commit_cancelled",
+        options,
+      ),
       parse: commitRuntimeLayeredArtifactResponseSchema,
     });
     this.deployedArtifacts.set(runtimeId, {
@@ -744,18 +1248,32 @@ export class CloudflareRuntimeProvider
       manifest: RuntimeManifestContract;
       restart?: "reject-if-running" | "restart";
       sealedArtifactSha256?: string;
+      operationTimeoutMs?: number;
+      signal?: AbortSignal;
     },
   ): Promise<RuntimeInfo> {
     await this.requireControlFeature("manifest-update-v1");
     const locator = await this.locator(runtimeId, projectId);
-    const runtime = await this.descriptorRequest(locator, "PUT", "/manifest", {
+    const runtime = await this.descriptorRequest(
       locator,
-      expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
-      expectedManifestRevision: input.expectedManifestRevision,
-      manifest: input.manifest,
-      restart: input.restart ?? "reject-if-running",
-      ...(input.sealedArtifactSha256 ? { sealedArtifactSha256: input.sealedArtifactSha256 } : {}),
-    });
+      "PUT",
+      "/manifest",
+      {
+        locator,
+        expectedDeploymentVersion: this.deploymentVersion ?? (await this.refreshVersion()),
+        expectedManifestRevision: input.expectedManifestRevision,
+        manifest: input.manifest,
+        restart: input.restart ?? "reject-if-running",
+        ...(input.sealedArtifactSha256 ? { sealedArtifactSha256: input.sealedArtifactSha256 } : {}),
+      },
+      this.operationOptions(
+        "runtime.manifest-update",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "runtime_manifest_update_timeout",
+        "runtime_manifest_update_cancelled",
+        input,
+      ),
+    );
     if (input.sealedArtifactSha256 !== undefined) {
       const deployed = this.deployedArtifacts.get(runtimeId);
       if (deployed !== undefined)
@@ -765,6 +1283,56 @@ export class CloudflareRuntimeProvider
         });
     }
     return toInfo(runtime);
+  }
+
+  async zeroGenerationControlRequest(input: {
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+    idempotencyKey?: string;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<unknown> {
+    if (
+      !input.path.startsWith(`${CONTROL_API_PREFIX}/pantry/`) &&
+      !input.path.startsWith(`${CONTROL_API_PREFIX}/build-plane/`)
+    ) {
+      throw new CloudflareRuntimeControlError(
+        400,
+        "invalid_zero_generation_control_path",
+        false,
+        "Zero generation may address only Pantry and trusted-build control paths",
+      );
+    }
+    const pantry = input.path.startsWith(`${CONTROL_API_PREFIX}/pantry/`);
+    return this.request({
+      method: input.method,
+      path: input.path,
+      body: input.body,
+      idempotencyKey:
+        input.method === "GET" ? undefined : (input.idempotencyKey ?? crypto.randomUUID()),
+      operation:
+        input.method === "GET"
+          ? undefined
+          : this.operationOptions(
+              pantry ? "pantry.mutation" : "trusted-build.mutation",
+              ZERO_GENERATION_CONTROL_OPERATION_BOUND_MS,
+              pantry ? "pantry_operation_timeout" : "trusted_build_operation_timeout",
+              pantry ? "pantry_operation_cancelled" : "trusted_build_operation_cancelled",
+              input,
+            ),
+      parse: { parse: (value: unknown) => value },
+    });
+  }
+
+  async zeroGenerationRuntimeDescriptor(runtimeId: string, projectId: number) {
+    const locator = await this.locator(runtimeId, projectId);
+    const runtime = await this.descriptorRequest(locator, "GET", "");
+    return {
+      identity: runtime.identity,
+      manifestRevision: runtime.manifestRevision,
+      status: runtime.status,
+    };
   }
   async updateEnvironment(
     _runtimeId: string,
@@ -834,10 +1402,20 @@ export class CloudflareRuntimeProvider
     return () => undefined;
   }
   async health(endpoint: string, timeoutSeconds: number): Promise<boolean> {
+    let target: URL;
+    let signal: AbortSignal;
     try {
-      const response = await fetch(endpoint, {
-        signal: AbortSignal.timeout(timeoutSeconds * 1000),
-      });
+      const timeoutMs = positiveIntegerTimerMs(timeoutSeconds * 1_000);
+      if (timeoutMs === null || timeoutMs < CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS) {
+        return false;
+      }
+      target = new URL(endpoint);
+      signal = AbortSignal.timeout(timeoutMs);
+    } catch {
+      return false;
+    }
+    try {
+      const response = await fetch(target, { signal });
       return response.ok;
     } catch {
       return false;

@@ -849,6 +849,7 @@ export const PANTRY_ERROR_DEFAULTS = {
   dependency_conflict: { retryable: false, status: 422 },
   stocking_size_limit: { retryable: false, status: 413 },
   upstream_unavailable: { retryable: true, status: 503 },
+  catalog_execution_failed: { retryable: false, status: 500 },
   ingest_timeout: { retryable: true, status: 504 },
   revision_quarantined: { retryable: false, status: 409 },
   invalid_build_input: { retryable: false, status: 400 },

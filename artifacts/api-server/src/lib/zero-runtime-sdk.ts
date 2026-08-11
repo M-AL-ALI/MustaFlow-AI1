@@ -462,8 +462,8 @@ export * from "./db";
 `);
 
 const VENDORED_FILES: readonly VendoredRuntimeSdkFile[] = Object.freeze([
-  Object.freeze({ path: ".nabuflow/runtime/db.ts", content: DATABASE_SOURCE }),
-  Object.freeze({ path: ".nabuflow/runtime/index.ts", content: INDEX_SOURCE }),
+  Object.freeze({ path: "nabuflow/runtime/db.ts", content: DATABASE_SOURCE }),
+  Object.freeze({ path: "nabuflow/runtime/index.ts", content: INDEX_SOURCE }),
 ]);
 
 export function getVendoredRuntimeSdkFiles(): readonly VendoredRuntimeSdkFile[] {

@@ -26,6 +26,8 @@ import {
   MemoryR2Bucket,
   MockBackend,
   TEST_NOW_MS,
+  commitArtifactAndDrain,
+  mutationAndDrain,
   ensureBody,
   fakeEnv,
   signedRawRequest,
@@ -167,7 +169,13 @@ describe("additive layered artifact control plane", () => {
     );
     expect(version.status).toBe(200);
     await expect(version.json()).resolves.toMatchObject({
-      features: ["artifact-v1", "manifest-update-v1"],
+      features: [
+        "artifact-v1",
+        "manifest-update-v1",
+        "artifact-commit-diagnostics-v1",
+        "durable-operation-discovery-v1",
+        "runtime-lifecycle-jobs-v1",
+      ],
     });
     const identity = await deriveRuntimeIdentity({
       namespace: "staging",
@@ -377,21 +385,20 @@ describe("additive layered artifact control plane", () => {
       env,
       { coordinator, backend, nowMs: TEST_NOW_MS },
     );
-    const commit = await handleControlRequest(
-      await signedRequest({
-        path: `${base}/layered-artifacts/${sha}/commit`,
-        method: "POST",
-        nonce: "layers-incomplete-commit",
-        idempotencyKey: "layers-incomplete-commit",
-        body: {
-          locator: ensureBody().locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          sealedArtifactSha256: sha,
-        },
-      }),
+    const commit = await commitArtifactAndDrain({
+      path: `${base}/layered-artifacts/${sha}/commit`,
+      nonce: "layers-incomplete-commit",
+      idempotencyKey: "layers-incomplete-commit",
+      body: {
+        locator: ensureBody().locator,
+        expectedDeploymentVersion: "worker-version-test-1",
+        sealedArtifactSha256: sha,
+      },
       env,
-      { coordinator, backend, nowMs: TEST_NOW_MS },
-    );
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
     expect(commit.status).toBe(409);
     await expect(commit.json()).resolves.toMatchObject({ code: "artifact_incomplete" });
     expect(coordinator.layeredArtifacts.size).toBe(0);
@@ -477,21 +484,20 @@ async function deliver(input: {
     );
     expect(response.status, await response.clone().text()).toBe(200);
   }
-  const response = await handleControlRequest(
-    await signedRequest({
-      path: `${input.base}/layered-artifacts/${sha}/commit`,
-      method: "POST",
-      nonce: `layers-${input.key}-commit1`,
-      idempotencyKey: `layers-${input.key}-commit`,
-      body: {
-        locator: ensureBody().locator,
-        expectedDeploymentVersion: "worker-version-test-1",
-        sealedArtifactSha256: sha,
-      },
-    }),
-    input.env,
-    dependencies,
-  );
+  const response = await commitArtifactAndDrain({
+    path: `${input.base}/layered-artifacts/${sha}/commit`,
+    nonce: `layers-${input.key}-commit1`,
+    idempotencyKey: `layers-${input.key}-commit`,
+    body: {
+      locator: ensureBody().locator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      sealedArtifactSha256: sha,
+    },
+    env: input.env,
+    coordinator: input.coordinator,
+    backend: input.backend,
+    nowMs: TEST_NOW_MS,
+  });
   expect(response.status, await response.clone().text()).toBe(200);
   await expect(response.json()).resolves.toMatchObject({
     materialized: true,
@@ -508,22 +514,21 @@ async function start(input: {
   env: ReturnType<typeof fakeEnv>;
   key: string;
 }): Promise<void> {
-  const response = await handleControlRequest(
-    await signedRequest({
-      path: `${input.base}/start`,
-      method: "POST",
-      nonce: `layers-${input.key}-start01`,
-      idempotencyKey: `layers-${input.key}-start`,
-      body: {
-        locator: ensureBody().locator,
-        expectedDeploymentVersion: "worker-version-test-1",
-        artifactRevision: input.artifact.envelope.artifactRevision,
-        artifactSha256: input.artifact.envelope.sealedArtifactSha256,
-      },
-    }),
-    input.env,
-    { coordinator: input.coordinator, backend: input.backend, nowMs: TEST_NOW_MS },
-  );
+  const response = await mutationAndDrain({
+    path: `${input.base}/start`,
+    nonce: `layers-${input.key}-start01`,
+    idempotencyKey: `layers-${input.key}-start`,
+    body: {
+      locator: ensureBody().locator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      artifactRevision: input.artifact.envelope.artifactRevision,
+      artifactSha256: input.artifact.envelope.sealedArtifactSha256,
+    },
+    env: input.env,
+    coordinator: input.coordinator,
+    backend: input.backend,
+    nowMs: TEST_NOW_MS,
+  });
   expect(response.status, await response.clone().text()).toBe(200);
 }
 

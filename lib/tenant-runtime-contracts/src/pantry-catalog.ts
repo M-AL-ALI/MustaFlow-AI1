@@ -1,11 +1,13 @@
 import { z } from "zod";
 import {
+  PANTRY_ERROR_DEFAULTS,
   canonicalPantryJson,
   pantryPackageIntentSchema,
   pantryPlatformSchema,
   pantryRevisionIdSchema,
   pantryRevisionRecordSchema,
   pantryRevisionStateSchema,
+  pantryErrorCodeSchema,
   pantrySha256Schema,
   pantrySignedDigestSchema,
 } from "./pantry";
@@ -97,14 +99,60 @@ export const pantryCatalogObjectReferenceSchema = z
   })
   .strict();
 
-const pantryCatalogStockIdentitySchema = z
+const pantryCatalogStockIdentityCoreSchema = z
   .object({
     intents: z.array(pantryPackageIntentSchema).min(1).max(1_000),
     platform: pantryPlatformSchema,
   })
   .strict();
 
-export const pantryCatalogStockRequestSchema = pantryCatalogStockIdentitySchema
+function validatePantryCatalogStockIdentity(
+  identity: z.infer<typeof pantryCatalogStockIdentityCoreSchema>,
+  context: z.RefinementCtx,
+): void {
+  let previous: string | null = null;
+  for (let index = 0; index < identity.intents.length; index += 1) {
+    const intent = identity.intents[index];
+    const key = `${intent.ecosystem}:${intent.name}\0${intent.selector}`;
+    if (previous !== null && compareUtf8(previous, key) >= 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["intents", index],
+        message: "Pantry stock identity intents must be unique and canonically ordered",
+      });
+    }
+    previous = key;
+  }
+}
+
+export const pantryCatalogStockIdentitySchema = pantryCatalogStockIdentityCoreSchema.superRefine(
+  validatePantryCatalogStockIdentity,
+);
+
+export function canonicalPantryCatalogStockIdentity(
+  input: z.input<typeof pantryCatalogStockIdentitySchema>,
+): PantryCatalogStockIdentity {
+  return pantryCatalogStockIdentitySchema.parse({
+    intents: [...input.intents].sort((left, right) => {
+      const leftKey = `${left.ecosystem}:${left.name}\0${left.selector}`;
+      const rightKey = `${right.ecosystem}:${right.name}\0${right.selector}`;
+      return compareUtf8(leftKey, rightKey);
+    }),
+    platform: input.platform,
+  });
+}
+
+export function pantryCatalogStockIdentityEquals(
+  left: z.input<typeof pantryCatalogStockIdentitySchema>,
+  right: z.input<typeof pantryCatalogStockIdentitySchema>,
+): boolean {
+  return (
+    canonicalPantryJson(canonicalPantryCatalogStockIdentity(left)) ===
+    canonicalPantryJson(canonicalPantryCatalogStockIdentity(right))
+  );
+}
+
+export const pantryCatalogStockRequestSchema = pantryCatalogStockIdentityCoreSchema
   .extend({
     schemaVersion: z.literal(PANTRY_CATALOG_SCHEMA_VERSION),
     requestSha256: pantrySha256Schema,
@@ -113,19 +161,7 @@ export const pantryCatalogStockRequestSchema = pantryCatalogStockIdentitySchema
   })
   .strict()
   .superRefine((request, context) => {
-    let previous: string | null = null;
-    for (let index = 0; index < request.intents.length; index += 1) {
-      const intent = request.intents[index];
-      const key = `${intent.ecosystem}:${intent.name}\0${intent.selector}`;
-      if (previous !== null && compareUtf8(previous, key) >= 0) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["intents", index],
-          message: "Pantry stock intents must be unique and sorted by UTF-8 bytes",
-        });
-      }
-      previous = key;
-    }
+    validatePantryCatalogStockIdentity(request, context);
     if (Date.parse(request.expiresAt) <= Date.parse(request.requestedAt)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -135,15 +171,325 @@ export const pantryCatalogStockRequestSchema = pantryCatalogStockIdentitySchema
     }
   });
 
+export const pantryCatalogStockResponseSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      ok: z.literal(true),
+      state: z.enum(["created", "assembling"]),
+      assemblyId: pantryCatalogAssemblyIdSchema,
+      revisionRootSha256: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      state: z.literal("committed"),
+      assemblyId: pantryCatalogAssemblyIdSchema,
+      revisionRootSha256: pantrySha256Schema,
+    })
+    .strict(),
+]);
+
+export const pantryCatalogIngestFailureStageSchema = z.enum([
+  "registry-ingest",
+  "stage-object",
+  "commit-shelf",
+  "lease-renewal",
+  "assembly-deadline",
+]);
+
+export const pantryCatalogIngestFailureCauseSchema = z.enum([
+  "registry-upstream",
+  "catalog-storage-limit",
+  "catalog-storage-rate-limited",
+  "catalog-storage-quota",
+  "catalog-storage-unavailable",
+  "catalog-binding-missing",
+  "catalog-owner-fenced",
+  "catalog-rejected",
+  "catalog-internal",
+  "executor-internal",
+  "executor-subrequest-limit",
+  "deadline-exceeded",
+]);
+
+export const pantryCatalogIngestFailureOperationSchema = z.enum([
+  "registry-ingest",
+  "catalog-read-assembly",
+  "catalog-stage-object",
+  "catalog-record-object",
+  "catalog-build-shelf",
+  "catalog-read-existing-shelf",
+  "catalog-verify-existing-shelf",
+  "catalog-verify-quarantine",
+  "catalog-promote-cas",
+  "catalog-write-manifest",
+  "catalog-commit-ledger",
+  "catalog-delete-quarantine",
+  "lease-renewal",
+  "assembly-deadline",
+]);
+
+export const pantryCatalogSanitizedErrorClassSchema = z
+  .enum(["Error", "TypeError", "RangeError", "DOMException", "PantryHttpError", "UnknownError"])
+  .nullable();
+
+export const pantryCatalogIngestFailureSchema = z
+  .object({
+    code: pantryErrorCodeSchema,
+    message: z.string().min(1).max(500),
+    retryable: z.boolean(),
+    failedAt: z.string().datetime({ offset: true }),
+    negativeCacheUntil: z.string().datetime({ offset: true }),
+    stage: pantryCatalogIngestFailureStageSchema,
+    operation: pantryCatalogIngestFailureOperationSchema,
+    cause: pantryCatalogIngestFailureCauseSchema,
+    errorClass: pantryCatalogSanitizedErrorClassSchema,
+    errorCode: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z0-9_.-]+$/u)
+      .nullable(),
+    errorFingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{16}$/u)
+      .nullable(),
+  })
+  .strict()
+  .superRefine((failure, context) => {
+    if (failure.retryable !== PANTRY_ERROR_DEFAULTS[failure.code].retryable) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retryable"],
+        message: "Pantry ingest retryability is fixed by the typed error code",
+      });
+    }
+  });
+
+const pantryCatalogIngestProgressBaseSchema = z.object({
+  attempt: z.number().int().nonnegative().safe(),
+  updatedAt: z.string().datetime({ offset: true }),
+});
+
+export const pantryCatalogIngestProgressSchema = z.discriminatedUnion("state", [
+  pantryCatalogIngestProgressBaseSchema
+    .extend({
+      state: z.literal("queued"),
+      leaseUntil: z.null(),
+      failure: z.null(),
+    })
+    .strict(),
+  pantryCatalogIngestProgressBaseSchema
+    .extend({
+      state: z.literal("running"),
+      leaseUntil: z.string().datetime({ offset: true }),
+      failure: z.null(),
+    })
+    .strict(),
+  pantryCatalogIngestProgressBaseSchema
+    .extend({
+      state: z.literal("failed"),
+      leaseUntil: z.null(),
+      failure: pantryCatalogIngestFailureSchema,
+    })
+    .strict(),
+]);
+
+export const pantryCatalogAssemblyStatusResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    assemblyId: pantryCatalogAssemblyIdSchema,
+    ingest: pantryCatalogIngestProgressSchema,
+    stagedObjects: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+
+export const PANTRY_ASSEMBLY_EVENT_TRAIL_LIMIT = 256;
+export const PANTRY_ORPHAN_CAS_SAFETY_WINDOW_MS = 60 * 60_000;
+
+/**
+ * The staging exhibit spent 186,890 ms in object staging and crossed the former
+ * 180,000 ms lease.  A 2x safety factor, rounded up to the next 30-second
+ * boundary, leaves a deterministic 390-second lease while the 30-second
+ * heartbeat makes healthy execution independent of stage duration.
+ */
+export const PANTRY_ASSEMBLY_LONG_STAGE_EXHIBIT_MS = 186_890;
+export const PANTRY_ASSEMBLY_LEASE_SAFETY_FACTOR = 2;
+export const PANTRY_ASSEMBLY_LEASE_ROUNDING_MS = 30_000;
+export const PANTRY_ASSEMBLY_LEASE_MS =
+  Math.ceil(
+    (PANTRY_ASSEMBLY_LONG_STAGE_EXHIBIT_MS * PANTRY_ASSEMBLY_LEASE_SAFETY_FACTOR) /
+      PANTRY_ASSEMBLY_LEASE_ROUNDING_MS,
+  ) * PANTRY_ASSEMBLY_LEASE_ROUNDING_MS;
+export const PANTRY_ASSEMBLY_HEARTBEAT_MS = 30_000;
+export const PANTRY_ASSEMBLY_QUEUE_WATCHDOG_MS = 15_000;
+export const PANTRY_ASSEMBLY_PRODUCT_BOUND_MS = 20 * 60_000;
+export const PANTRY_ASSEMBLY_OBSERVATION_MARGIN_MS = 2 * 60_000;
+export const PANTRY_ASSEMBLY_SERVER_EXECUTION_DEADLINE_MS =
+  PANTRY_ASSEMBLY_PRODUCT_BOUND_MS - PANTRY_ASSEMBLY_OBSERVATION_MARGIN_MS;
+
+export const pantryCatalogAssemblyStageSchema = z.enum([
+  "queued",
+  "resolving-metadata",
+  "fetching-tarball",
+  "verifying-integrity",
+  "extracting-tarball",
+  "assembling-closure",
+  "staging-objects",
+  "committing-shelf",
+  "committed",
+  "failed",
+]);
+
+export const pantryCatalogAssemblyEventKindSchema = z.enum([
+  "assembly-created",
+  "stock-attached",
+  "stock-adopted",
+  "queue-enqueued",
+  "queue-delivered",
+  "generation-claimed",
+  "generation-busy",
+  "lease-renewed",
+  "lease-expired",
+  "alarm-reenqueued",
+  "deadline-terminal",
+  "ingest-claimed",
+  "ingest-busy",
+  "ingest-progress",
+  "object-staged",
+  "object-resume-verified",
+  "ingest-failed",
+  "objects-reclaimed",
+  "shelf-committed",
+]);
+
+export const pantryCatalogAssemblyProgressMetricsSchema = z
+  .object({
+    resolvedPackages: z.number().int().nonnegative().safe(),
+    fetchedTarballs: z.number().int().nonnegative().safe(),
+    verifiedTarballs: z.number().int().nonnegative().safe(),
+    extractedTarballs: z.number().int().nonnegative().safe(),
+    dependencyEdges: z.number().int().nonnegative().safe(),
+    tarballBytes: z.number().int().nonnegative().safe(),
+    unpackedBytes: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+
+export const pantryCatalogAssemblyEventSchema = z
+  .object({
+    sequence: z.number().int().positive().safe(),
+    at: z.string().datetime({ offset: true }),
+    kind: pantryCatalogAssemblyEventKindSchema,
+    stage: pantryCatalogAssemblyStageSchema,
+    generation: z.number().int().positive().safe(),
+    attempt: z.number().int().nonnegative().safe(),
+    queueDeliveries: z.number().int().nonnegative().safe(),
+    stagedObjects: z.number().int().nonnegative().safe(),
+    metrics: pantryCatalogAssemblyProgressMetricsSchema,
+    failureCode: pantryErrorCodeSchema.nullable(),
+    failureStage: pantryCatalogIngestFailureStageSchema.nullable(),
+    failureOperation: pantryCatalogIngestFailureOperationSchema.nullable(),
+    failureCause: pantryCatalogIngestFailureCauseSchema.nullable(),
+    failureErrorClass: pantryCatalogSanitizedErrorClassSchema,
+    failureErrorCode: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z0-9_.-]+$/u)
+      .nullable(),
+    failureErrorFingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{16}$/u)
+      .nullable(),
+    reclaimedObjects: z.number().int().nonnegative().safe(),
+    reclaimedBytes: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+
+export const pantryCatalogAssemblyStageTransitionSchema = z
+  .object({
+    stage: pantryCatalogAssemblyStageSchema,
+    firstAt: z.string().datetime({ offset: true }),
+    lastAt: z.string().datetime({ offset: true }),
+    transitions: z.number().int().positive().safe(),
+  })
+  .strict();
+
+export const pantryCatalogAssemblyDiagnosticsResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    assemblyId: pantryCatalogAssemblyIdSchema,
+    requestSha256: pantrySha256Schema,
+    currentStage: pantryCatalogAssemblyStageSchema,
+    lastTransitionAt: z.string().datetime({ offset: true }),
+    queueEnqueues: z.number().int().nonnegative().safe(),
+    queueDeliveries: z.number().int().nonnegative().safe(),
+    generation: z.number().int().positive().safe(),
+    leaseRenewals: z.number().int().nonnegative().safe(),
+    alarmReenqueues: z.number().int().nonnegative().safe(),
+    ingestAttempts: z.number().int().nonnegative().safe(),
+    stagedObjects: z.number().int().nonnegative().safe(),
+    metrics: pantryCatalogAssemblyProgressMetricsSchema,
+    stageTransitions: z.array(pantryCatalogAssemblyStageTransitionSchema).max(10),
+    events: z.array(pantryCatalogAssemblyEventSchema).max(PANTRY_ASSEMBLY_EVENT_TRAIL_LIMIT),
+    truncatedBeforeSequence: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+
+export const pantryCatalogObjectInventoryResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    objects: z
+      .array(
+        z
+          .object({
+            key: z.string().min(1).max(512),
+            size: z.number().int().nonnegative().safe(),
+            uploadedAt: z.string().datetime({ offset: true }),
+            sha256: pantrySha256Schema,
+          })
+          .strict(),
+      )
+      .max(5_000),
+    totalBytes: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+
 export async function pantryCatalogStockRequestHash(
   input: Pick<PantryCatalogStockRequest, "intents" | "platform">,
 ): Promise<string> {
-  const parsed = pantryCatalogStockIdentitySchema.parse({
+  const identity = canonicalPantryCatalogStockIdentity({
     intents: input.intents,
     platform: input.platform,
   });
-  return sha256Hex(`${PANTRY_CATALOG_HASH_DOMAIN}\nstock-request\n${canonicalPantryJson(parsed)}`);
+  return sha256Hex(
+    `${PANTRY_CATALOG_HASH_DOMAIN}\nstock-request\n${canonicalPantryJson(identity)}`,
+  );
 }
+
+export const pantryCatalogStockIdentityHash = pantryCatalogStockRequestHash;
+
+export const pantryCatalogStockIdentityStatusResponseSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      ok: z.literal(true),
+      state: z.literal("assembling"),
+      identitySha256: pantrySha256Schema,
+      assemblyId: pantryCatalogAssemblyIdSchema,
+      revisionRootSha256: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      state: z.literal("committed"),
+      identitySha256: pantrySha256Schema,
+      assemblyId: pantryCatalogAssemblyIdSchema,
+      revisionRootSha256: pantrySha256Schema,
+    })
+    .strict(),
+]);
 
 export const pantryCatalogRetentionSchema = z
   .object({
@@ -317,10 +663,16 @@ export const pantryCatalogReferenceRequestSchema = z
 
 export const pantryCatalogGcRequestSchema = z
   .object({
-    scope: z.enum(["expired-uncommitted", "retired-unreferenced"]),
+    scope: z.enum([
+      "expired-uncommitted",
+      "retired-unreferenced",
+      "orphan-cas-sweep",
+      "targeted-orphan-cas",
+    ]),
     now: z.string().datetime({ offset: true }),
     maxDeletes: z.number().int().positive().max(1_000),
     retentionNamespace: z.string().min(1).max(128).regex(ASCII_TOKEN_PATTERN).optional(),
+    objectSha256: z.array(pantrySha256Schema).max(1_000).optional(),
   })
   .strict()
   .superRefine((request, context) => {
@@ -329,6 +681,23 @@ export const pantryCatalogGcRequestSchema = z
         code: z.ZodIssueCode.custom,
         path: ["retentionNamespace"],
         message: "Committed-object GC requires an exact retention namespace",
+      });
+    }
+    if (
+      request.scope === "targeted-orphan-cas" &&
+      (request.objectSha256 === undefined || request.objectSha256.length === 0)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["objectSha256"],
+        message: "Targeted orphan reclamation requires exact content addresses",
+      });
+    }
+    if (request.scope !== "targeted-orphan-cas" && request.objectSha256 !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["objectSha256"],
+        message: "Exact content addresses are valid only for targeted orphan reclamation",
       });
     }
   });
@@ -444,6 +813,28 @@ export const pantryCatalogErrorResponseSchema = z
 export type PantryCatalogObjectKind = z.infer<typeof pantryCatalogObjectKindSchema>;
 export type PantryCatalogObjectReference = z.infer<typeof pantryCatalogObjectReferenceSchema>;
 export type PantryCatalogStockRequest = z.infer<typeof pantryCatalogStockRequestSchema>;
+export type PantryCatalogStockIdentity = z.infer<typeof pantryCatalogStockIdentitySchema>;
+export type PantryCatalogStockResponse = z.infer<typeof pantryCatalogStockResponseSchema>;
+export type PantryCatalogStockIdentityStatusResponse = z.infer<
+  typeof pantryCatalogStockIdentityStatusResponseSchema
+>;
+export type PantryCatalogIngestFailure = z.infer<typeof pantryCatalogIngestFailureSchema>;
+export type PantryCatalogIngestProgress = z.infer<typeof pantryCatalogIngestProgressSchema>;
+export type PantryCatalogAssemblyStatusResponse = z.infer<
+  typeof pantryCatalogAssemblyStatusResponseSchema
+>;
+export type PantryCatalogAssemblyStage = z.infer<typeof pantryCatalogAssemblyStageSchema>;
+export type PantryCatalogAssemblyEventKind = z.infer<typeof pantryCatalogAssemblyEventKindSchema>;
+export type PantryCatalogAssemblyProgressMetrics = z.infer<
+  typeof pantryCatalogAssemblyProgressMetricsSchema
+>;
+export type PantryCatalogAssemblyEvent = z.infer<typeof pantryCatalogAssemblyEventSchema>;
+export type PantryCatalogAssemblyDiagnosticsResponse = z.infer<
+  typeof pantryCatalogAssemblyDiagnosticsResponseSchema
+>;
+export type PantryCatalogObjectInventoryResponse = z.infer<
+  typeof pantryCatalogObjectInventoryResponseSchema
+>;
 export type PantryCatalogCommitRequest = z.infer<typeof pantryCatalogCommitRequestSchema>;
 export type PantryCatalogShelfRecord = z.infer<typeof pantryCatalogShelfRecordSchema>;
 export type PantryCatalogStateTransitionRequest = z.infer<

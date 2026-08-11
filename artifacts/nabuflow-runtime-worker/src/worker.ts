@@ -62,8 +62,20 @@ import {
   uploadRuntimeLayeredArtifactChunkResponseSchema,
   canonicalJson,
   pantryPlatformSchema,
+  pantryCatalogAssemblyDiagnosticsResponseSchema,
+  pantryCatalogAssemblyStatusResponseSchema,
+  pantryCatalogObjectInventoryResponseSchema,
   pantryCatalogErrorResponseSchema,
+  pantryCatalogStockResponseSchema,
+  pantryCatalogStockIdentityStatusResponseSchema,
   pantryShelfContentHashesResponseSchema,
+  artifactCommitDiagnosticsResponseSchema,
+  durableOperationDiscoveryRequestSchema,
+  durableOperationDiscoveryResponseSchema,
+  DURABLE_OPERATION_DISCOVERY_MAX_WINDOW_MS,
+  DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+  runtimeManifestRestartDiagnosticsResponseSchema,
+  runtimeStartDiagnosticsResponseSchema,
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
@@ -91,6 +103,7 @@ import type {
   UpdateRuntimeManifestRequest,
   PantryPlatform,
   RuntimeArtifactLayerContent,
+  DurableOperationDiscoveryRequest,
 } from "@workspace/tenant-runtime-contracts";
 import { createHash } from "node:crypto";
 import type { WorkerBindings } from "./bindings";
@@ -100,6 +113,11 @@ import type { ControlDurableObject } from "./control-durable-object";
 import type {
   CapabilityVault,
   StoredArtifactCommitJob,
+  StoredDurableOperationJob,
+  StoredRuntimeManifestRestartJob,
+  StoredRuntimeStartJob,
+  DurableOperationQueueMessage,
+  DurableOperationRegistration,
   ControlCoordinator,
   StoredHttpResponse,
   StoredRuntime,
@@ -120,8 +138,15 @@ import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
 import {
   ARTIFACT_COMMIT_ABORT_BEFORE_PREFIX,
+  ARTIFACT_COMMIT_ABORT_ALWAYS_PREFIX,
+  ARTIFACT_COMMIT_ABORT_CHECKPOINT_PREFIX,
   ARTIFACT_COMMIT_ABORT_MID_PREFIX,
   StagingArtifactCommitOwnerLossError,
+  StagingDurableOperationOwnerLossError,
+  RUNTIME_START_ABORT_ALWAYS_PREFIX,
+  RUNTIME_START_ABORT_CHECKPOINT_PREFIX,
+  RUNTIME_MANIFEST_RESTART_ABORT_ALWAYS_PREFIX,
+  RUNTIME_MANIFEST_RESTART_ABORT_CHECKPOINT_PREFIX,
 } from "./artifact-commit-recovery";
 
 const CONTROL_PREFIX = "/_nabuflow/control/v1";
@@ -153,7 +178,11 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "pantryMutation",
   "buildMutation",
 ]);
-const ARTIFACT_COMMIT_ENDPOINTS = new Set<Endpoint>(["artifactCommit", "layeredArtifactCommit"]);
+const DURABLE_OPERATION_ENDPOINTS = new Set<Endpoint>([
+  "artifactCommit",
+  "layeredArtifactCommit",
+  "start",
+]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 const AUTH_HEADERS = {
@@ -166,8 +195,11 @@ const AUTH_HEADERS = {
 
 type Endpoint =
   | "version"
+  | "durableOperationDiscovery"
   | "ensure"
   | "start"
+  | "startDiagnostics"
+  | "manifestUpdateDiagnostics"
   | "stop"
   | "destroy"
   | "status"
@@ -185,11 +217,13 @@ type Endpoint =
   | "artifactBegin"
   | "artifactChunk"
   | "artifactCommit"
+  | "artifactCommitDiagnostics"
   | "artifactRemove"
   | "layeredArtifactBegin"
   | "layeredArtifactAppChunk"
   | "layeredArtifactLayerChunk"
   | "layeredArtifactCommit"
+  | "layeredArtifactCommitDiagnostics"
   | "layeredArtifactRemove"
   | "manifestUpdate"
   | "pantryRead"
@@ -244,8 +278,8 @@ interface RequestExecutionContext {
   stage: ControlRequestStage;
 }
 
-interface ArtifactCommitExecution {
-  job: StoredArtifactCommitJob;
+interface DurableOperationExecution {
+  job: StoredDurableOperationJob;
   ownerId: string;
 }
 
@@ -461,9 +495,11 @@ export async function handleControlRequest(
 
   const idempotencyKey = request.headers.get(AUTH_HEADERS.idempotencyKey) ?? "";
   const needsIdempotency = MUTATION_ENDPOINTS.has(route.endpoint);
-  const needsArtifactCommitJob = ARTIFACT_COMMIT_ENDPOINTS.has(route.endpoint);
+  const needsDurableOperation =
+    DURABLE_OPERATION_ENDPOINTS.has(route.endpoint) ||
+    (route.endpoint === "manifestUpdate" &&
+      (input as UpdateRuntimeManifestRequest).restart === "restart");
   let idempotencyFingerprint: string | null = null;
-  let artifactCommitExecution: ArtifactCommitExecution | null = null;
   if (needsIdempotency) {
     context.stage = "idempotency";
     if (!idempotencyKey) {
@@ -486,17 +522,22 @@ export async function handleControlRequest(
     idempotencyFingerprint = await sha256Hex(
       `${request.method}\n${pathAndQuery}\n${signed.bodySha256}`,
     );
-    const lookup = needsArtifactCommitJob
-      ? await coordinator.claimArtifactCommit({
-          key: idempotencyKey,
-          fingerprint: idempotencyFingerprint,
-          ownerId: requestId,
-          kind: route.endpoint === "artifactCommit" ? "v1" : "layers-v1",
-          runtimeIdentity: await runtimeIdentityForRoute(route, env),
-          sealedArtifactSha256: (input as CommitRuntimeArtifactRequest).sealedArtifactSha256,
+    const durableRegistration = needsDurableOperation
+      ? await durableOperationRegistrationFor(
+          route,
+          input,
+          env,
+          idempotencyKey,
+          idempotencyFingerprint,
           nowMs,
-        })
-      : await coordinator.beginIdempotency(idempotencyKey, idempotencyFingerprint, nowMs);
+        )
+      : null;
+    const lookup =
+      durableRegistration !== null
+        ? await coordinator.registerDurableOperation(durableRegistration)
+        : await coordinator.beginIdempotency(idempotencyKey, idempotencyFingerprint, nowMs);
+    const durableJob =
+      "job" in lookup ? (lookup.job as StoredDurableOperationJob | undefined) : undefined;
     if (lookup.state === "replay") {
       await recordAudit(
         coordinator,
@@ -512,19 +553,47 @@ export async function handleControlRequest(
       );
       return jsonResponse(lookup.response.status, lookup.response.body);
     }
-    if (lookup.state === "conflict" || lookup.state === "pending") {
-      const code = lookup.state === "conflict" ? "idempotency_conflict" : "request_in_progress";
-      const status = 409;
-      if (needsArtifactCommitJob && lookup.state === "pending") {
-        // eslint-disable-next-line no-console -- metadata-only lease evidence
-        console.log(
+    if (
+      needsDurableOperation &&
+      (lookup.state === "new" || lookup.state === "pending") &&
+      durableJob !== undefined
+    ) {
+      await coordinator.recordDurableOperationNudge(durableJob.jobKey, nowMs);
+      try {
+        await env.DURABLE_OPERATION_QUEUE?.send(durableOperationQueueMessage(durableJob));
+      } catch {
+        // The coordinator watchdog retries this nudge independently of the request.
+        // eslint-disable-next-line no-console -- metadata-only queue availability evidence
+        console.error(
           JSON.stringify({
-            event: "artifact_commit_live_owner_preserved",
-            requestId,
-            endpoint: route.endpoint,
+            event: "durable_operation_queue_nudge_failed",
+            kind: durableJob.kind,
+            checkpoint: durableJob.checkpoint,
+            attempt: durableJob.attempt,
           }),
         );
       }
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        route.endpoint,
+        route.locator,
+        { status: 409, code: "request_in_progress" },
+        route.capability?.projectId,
+      );
+      return errorResponse(
+        409,
+        "request_in_progress",
+        "The durable operation is in progress",
+        true,
+        requestId,
+        { "retry-after": "1" },
+      );
+    }
+    if (lookup.state === "conflict" || lookup.state === "pending") {
+      const code = lookup.state === "conflict" ? "idempotency_conflict" : "request_in_progress";
+      const status = 409;
       await recordAudit(
         coordinator,
         requestId,
@@ -544,30 +613,9 @@ export async function handleControlRequest(
         requestId,
       );
     }
-    if (
-      needsArtifactCommitJob &&
-      (lookup.state === "new" || lookup.state === "adopted") &&
-      "job" in lookup
-    ) {
-      artifactCommitExecution = { job: lookup.job, ownerId: requestId };
-      // eslint-disable-next-line no-console -- metadata-only coordinator recovery evidence
-      console.log(
-        JSON.stringify({
-          event: lookup.state === "adopted" ? "artifact_commit_adopted" : "artifact_commit_started",
-          requestId,
-          kind: lookup.job.kind,
-          attempt: lookup.job.attempt,
-          checkpoint: lookup.job.checkpoint,
-        }),
-      );
-    }
   }
 
   context.stage = "execution";
-  const heartbeat =
-    artifactCommitExecution === null
-      ? null
-      : startArtifactCommitHeartbeat(coordinator, artifactCommitExecution, dependencies.nowMs);
   try {
     const result = await executeEndpoint(
       route.endpoint,
@@ -577,17 +625,11 @@ export async function handleControlRequest(
       backend,
       dependencies.vault,
       route,
-      artifactCommitExecution,
+      null,
+      nowMs,
     );
     validateResponse(route.endpoint, result.body);
-    if (artifactCommitExecution !== null) {
-      await coordinator.completeArtifactCommit(
-        artifactCommitExecution.job.jobKey,
-        artifactCommitExecution.ownerId,
-        result,
-        dependencies.nowMs ?? Date.now(),
-      );
-    } else if (needsIdempotency && idempotencyFingerprint !== null) {
+    if (needsIdempotency && idempotencyFingerprint !== null) {
       await coordinator.completeIdempotency(idempotencyKey, idempotencyFingerprint, result, nowMs);
     }
     await recordAudit(
@@ -601,28 +643,6 @@ export async function handleControlRequest(
     );
     return jsonResponse(result.status, result.body);
   } catch (error) {
-    if (error instanceof StagingArtifactCommitOwnerLossError && artifactCommitExecution !== null) {
-      // This staging-only fault leaves the durable job active. Its lease—not this request—owns
-      // adoption or terminal fallback, matching a request/consumer disappearing at this point.
-      // eslint-disable-next-line no-console -- metadata-only staging recovery evidence
-      console.error(
-        JSON.stringify({
-          event: "artifact_commit_staging_owner_terminated",
-          requestId,
-          kind: artifactCommitExecution.job.kind,
-          attempt: artifactCommitExecution.job.attempt,
-          checkpoint: artifactCommitExecution.job.checkpoint,
-          stage: error.stage,
-        }),
-      );
-      return errorResponse(
-        503,
-        "artifact_commit_owner_lost",
-        "The staging artifact commit owner was terminated",
-        true,
-        requestId,
-      );
-    }
     if (!(error instanceof ControlHttpError)) {
       // Keep unexpected control failures diagnosable without emitting request or artifact content.
       // eslint-disable-next-line no-console -- metadata-only trace for the top-level boundary
@@ -636,36 +656,19 @@ export async function handleControlRequest(
       );
     }
     const controlError = toControlError(error);
-    if (artifactCommitExecution !== null) {
+    if (needsIdempotency && idempotencyFingerprint !== null) {
       try {
+        // An operation follower may have lost the original transport response
+        // after the Worker accepted the mutation. Preserve every typed terminal
+        // response so the same idempotency key can observe it without executing
+        // the mutation twice. A deliberate new operation uses a new key.
         const body = errorBody(controlError, requestId);
-        await coordinator.failArtifactCommit(
-          artifactCommitExecution.job.jobKey,
-          artifactCommitExecution.ownerId,
+        await coordinator.completeIdempotency(
+          idempotencyKey,
+          idempotencyFingerprint,
           { status: controlError.status, body },
-          dependencies.nowMs ?? Date.now(),
+          nowMs,
         );
-      } catch (finalizationError) {
-        logControlErrorFinalizationFailure(
-          requestId,
-          route.endpoint,
-          "idempotency",
-          finalizationError,
-        );
-      }
-    } else if (needsIdempotency && idempotencyFingerprint !== null) {
-      try {
-        if (controlError.status >= 500) {
-          await coordinator.abandonIdempotency(idempotencyKey, idempotencyFingerprint);
-        } else {
-          const body = errorBody(controlError, requestId);
-          await coordinator.completeIdempotency(
-            idempotencyKey,
-            idempotencyFingerprint,
-            { status: controlError.status, body },
-            nowMs,
-          );
-        }
       } catch (finalizationError) {
         logControlErrorFinalizationFailure(
           requestId,
@@ -695,14 +698,197 @@ export async function handleControlRequest(
       controlError.retryable,
       requestId,
     );
-  } finally {
-    heartbeat?.stop();
+  }
+}
+
+export async function handleDurableOperationQueue(
+  batch: MessageBatch<DurableOperationQueueMessage>,
+  env: WorkerBindings,
+  dependencies: Pick<WorkerDependencies, "coordinator" | "backend" | "nowMs"> = {},
+): Promise<void> {
+  const coordinator = dependencies.coordinator ?? getCoordinator(env);
+  const backend = dependencies.backend ?? new CloudflareSandboxBackend(env);
+  for (const message of batch.messages) {
+    const body = message.body;
+    if (
+      body?.schemaVersion !== 1 ||
+      !body.jobKey.startsWith("durable-operation-job:") ||
+      !/^nrf-[a-z0-9-]+$/u.test(body.runtimeIdentity) ||
+      (body.kind !== "v1" &&
+        body.kind !== "layers-v1" &&
+        body.kind !== "runtime-start" &&
+        body.kind !== "runtime-manifest-restart") ||
+      (body.kind === "runtime-start"
+        ? body.subjectKey !== "start"
+        : body.kind === "runtime-manifest-restart"
+          ? body.subjectKey !== "manifest-restart"
+          : !/^[0-9a-f]{64}$/u.test(body.subjectKey))
+    ) {
+      message.ack();
+      continue;
+    }
+    const ownerId = crypto.randomUUID();
+    const nowMs = dependencies.nowMs ?? Date.now();
+    const claim = await coordinator.claimDurableOperationDriver(body.jobKey, ownerId, nowMs);
+    if (claim.state === "not_found" || claim.state === "terminal") {
+      message.ack();
+      continue;
+    }
+    if (claim.state === "busy") {
+      // The independently scheduled lease alarm owns redelivery if the live driver disappears.
+      message.ack();
+      continue;
+    }
+    const job = claim.job;
+    if (
+      job.runtimeIdentity !== body.runtimeIdentity ||
+      job.subjectKey !== body.subjectKey ||
+      job.kind !== body.kind
+    ) {
+      const response = errorBody(
+        new ControlHttpError(
+          503,
+          "durable_operation_queue_invalid",
+          "Durable operation queue metadata is invalid",
+        ),
+        ownerId,
+      );
+      await coordinator.failDurableOperation(
+        job.jobKey,
+        ownerId,
+        job.attempt,
+        { status: 503, body: response },
+        nowMs,
+      );
+      message.ack();
+      continue;
+    }
+    const parsedIdentity = await parseRuntimeIdentityForNamespace(
+      job.runtimeIdentity,
+      env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+    );
+    const locator: RuntimeLocator = {
+      projectId: parsedIdentity.projectId,
+      role: parsedIdentity.role,
+      slot: parsedIdentity.slot,
+    };
+    const endpoint: Endpoint =
+      job.kind === "v1"
+        ? "artifactCommit"
+        : job.kind === "layers-v1"
+          ? "layeredArtifactCommit"
+          : job.kind === "runtime-start"
+            ? "start"
+            : "manifestUpdate";
+    const route: MatchedRoute = {
+      endpoint,
+      locator,
+      ...(job.kind === "v1" || job.kind === "layers-v1"
+        ? { artifactSha256: job.sealedArtifactSha256 }
+        : {}),
+    };
+    const input:
+      | CommitRuntimeArtifactRequest
+      | CommitRuntimeLayeredArtifactRequest
+      | StartRuntimeRequest
+      | UpdateRuntimeManifestRequest =
+      job.kind === "runtime-start" || job.kind === "runtime-manifest-restart"
+        ? job.request
+        : {
+            locator,
+            expectedDeploymentVersion: job.expectedDeploymentVersion,
+            sealedArtifactSha256: job.sealedArtifactSha256,
+          };
+    const execution: DurableOperationExecution = { job, ownerId };
+    // eslint-disable-next-line no-console -- metadata-only durable driver evidence
+    console.log(
+      JSON.stringify({
+        event:
+          claim.state === "adopted"
+            ? "durable_operation_driver_adopted"
+            : "durable_operation_driver_claimed",
+        kind: job.kind,
+        attempt: job.attempt,
+        checkpoint: job.checkpoint,
+      }),
+    );
+    const heartbeat = startDurableOperationHeartbeat(coordinator, execution, dependencies.nowMs);
+    try {
+      let result: StoredHttpResponse;
+      try {
+        result = await executeEndpoint(
+          endpoint,
+          input,
+          env,
+          coordinator,
+          backend,
+          undefined,
+          route,
+          execution,
+          dependencies.nowMs ?? Date.now(),
+        );
+        validateResponse(endpoint, result.body);
+      } catch (error) {
+        if (error instanceof StagingDurableOperationOwnerLossError) {
+          // Deliberately leave this queue delivery unacknowledged. Queue redelivery and the
+          // coordinator alarm are independent recovery paths and both resume by checkpoint.
+          // eslint-disable-next-line no-console -- metadata-only staging recovery evidence
+          console.error(
+            JSON.stringify({
+              event: "durable_operation_staging_driver_terminated",
+              kind: job.kind,
+              attempt: job.attempt,
+              checkpoint: execution.job.checkpoint,
+              stage: error.stage,
+            }),
+          );
+          throw error;
+        }
+        const controlError = toControlError(error);
+        try {
+          await coordinator.failDurableOperation(
+            job.jobKey,
+            ownerId,
+            job.attempt,
+            { status: controlError.status, body: errorBody(controlError, ownerId) },
+            Date.now(),
+          );
+        } catch (finalizationError) {
+          logControlErrorFinalizationFailure(ownerId, endpoint, "idempotency", finalizationError);
+          throw finalizationError;
+        }
+        message.ack();
+        continue;
+      }
+      try {
+        const finalization = await coordinator.completeDurableOperation(
+          job.jobKey,
+          ownerId,
+          job.attempt,
+          result,
+          Date.now(),
+        );
+        if (finalization !== "completed") {
+          // A newer generation or the durable deadline already owns the terminal result. The
+          // stale delivery is acknowledged; it must never replace that result with an exception.
+          message.ack();
+          continue;
+        }
+      } catch (finalizationError) {
+        logControlErrorFinalizationFailure(ownerId, endpoint, "idempotency", finalizationError);
+        throw finalizationError;
+      }
+      message.ack();
+    } finally {
+      await heartbeat.stop();
+    }
   }
 }
 
 type ControlInput =
   | Record<string, never>
   | Uint8Array
+  | DurableOperationDiscoveryRequest
   | BeginRuntimeArtifactRequest
   | CommitRuntimeArtifactRequest
   | RemoveRuntimeArtifactRequest
@@ -727,9 +913,69 @@ function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableOb
   return env.CONTROL_COORDINATOR.get(env.CONTROL_COORDINATOR.idFromName("control-v1"));
 }
 
+function durableOperationQueueMessage(
+  job: StoredDurableOperationJob,
+): DurableOperationQueueMessage {
+  return {
+    schemaVersion: 1,
+    jobKey: job.jobKey,
+    runtimeIdentity: job.runtimeIdentity,
+    subjectKey: job.subjectKey,
+    kind: job.kind,
+  };
+}
+
+async function durableOperationRegistrationFor(
+  route: MatchedRoute,
+  input: ControlInput,
+  env: WorkerBindings,
+  key: string,
+  fingerprint: string,
+  nowMs: number,
+): Promise<DurableOperationRegistration> {
+  const runtimeIdentity = await runtimeIdentityForRoute(route, env);
+  if (route.endpoint === "start") {
+    const request = input as StartRuntimeRequest;
+    return {
+      key,
+      fingerprint,
+      kind: "runtime-start",
+      runtimeIdentity,
+      subjectKey: "start",
+      request,
+      expectedDeploymentVersion: request.expectedDeploymentVersion,
+      nowMs,
+    };
+  }
+  if (route.endpoint === "manifestUpdate") {
+    const request = input as UpdateRuntimeManifestRequest;
+    return {
+      key,
+      fingerprint,
+      kind: "runtime-manifest-restart",
+      runtimeIdentity,
+      subjectKey: "manifest-restart",
+      request,
+      expectedDeploymentVersion: request.expectedDeploymentVersion,
+      nowMs,
+    };
+  }
+  const request = input as CommitRuntimeArtifactRequest | CommitRuntimeLayeredArtifactRequest;
+  return {
+    key,
+    fingerprint,
+    kind: route.endpoint === "artifactCommit" ? "v1" : "layers-v1",
+    runtimeIdentity,
+    subjectKey: request.sealedArtifactSha256,
+    sealedArtifactSha256: request.sealedArtifactSha256,
+    expectedDeploymentVersion: request.expectedDeploymentVersion,
+    nowMs,
+  };
+}
+
 async function runtimeIdentityForRoute(route: MatchedRoute, env: WorkerBindings): Promise<string> {
-  if (route.locator === null || route.artifactSha256 === undefined) {
-    throw new ControlHttpError(400, "invalid_request", "Artifact commit route is incomplete");
+  if (route.locator === null) {
+    throw new ControlHttpError(400, "invalid_request", "Runtime operation route is incomplete");
   }
   return deriveRuntimeIdentity({
     namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
@@ -737,20 +983,45 @@ async function runtimeIdentityForRoute(route: MatchedRoute, env: WorkerBindings)
   });
 }
 
-function startArtifactCommitHeartbeat(
+function startDurableOperationHeartbeat(
   coordinator: ControlCoordinator,
-  execution: ArtifactCommitExecution,
+  execution: DurableOperationExecution,
   fixedNowMs: number | undefined,
-): { stop(): void } {
+): { stop(): Promise<void> } {
   const localStartedAt = Date.now();
+  let stopped = false;
+  let chain = Promise.resolve();
   const timer = setInterval(() => {
     const nowMs =
       fixedNowMs === undefined ? Date.now() : fixedNowMs + (Date.now() - localStartedAt);
-    void coordinator
-      .renewArtifactCommit(execution.job.jobKey, execution.ownerId, nowMs)
-      .catch(() => undefined);
+    chain = chain.then(async () => {
+      if (stopped) return;
+      // Keep the renewal RPC anchored to this queue delivery and retry transient RPC weather
+      // inside the lease window. A generation/owner mismatch is authoritative and is not retried.
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          const renewed = await coordinator.renewDurableOperation(
+            execution.job.jobKey,
+            execution.ownerId,
+            execution.job.attempt,
+            nowMs,
+          );
+          if (renewed !== "renewed") return;
+          return;
+        } catch {
+          if (attempt === 3) return;
+          await new Promise((resolve) => setTimeout(resolve, attempt * 100));
+        }
+      }
+    });
   }, 5_000);
-  return { stop: () => clearInterval(timer) };
+  return {
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      await chain;
+    },
+  };
 }
 
 function stagingCommitRecoveryEnabled(env: WorkerBindings): boolean {
@@ -771,6 +1042,24 @@ function maybeAbortStagingCommitBeforeMaterializer(
   }
 }
 
+function maybeAbortStagingCommitAtCheckpoint(
+  env: WorkerBindings,
+  artifactRevision: string,
+  job: StoredArtifactCommitJob,
+): void {
+  if (
+    stagingCommitRecoveryEnabled(env) &&
+    ((job.attempt === 1 &&
+      artifactRevision.startsWith(
+        `${ARTIFACT_COMMIT_ABORT_CHECKPOINT_PREFIX}${job.checkpoint}-`,
+      )) ||
+      (job.checkpoint === "initialized" &&
+        artifactRevision.startsWith(ARTIFACT_COMMIT_ABORT_ALWAYS_PREFIX)))
+  ) {
+    throw new StagingArtifactCommitOwnerLossError(`checkpoint-${job.checkpoint}`);
+  }
+}
+
 function stagingMaterializationOptions(
   env: WorkerBindings,
   artifactRevision: string,
@@ -781,6 +1070,52 @@ function stagingMaterializationOptions(
     artifactRevision.startsWith(ARTIFACT_COMMIT_ABORT_MID_PREFIX)
     ? { stagingAbortAfterFiles: 1 }
     : undefined;
+}
+
+function maybeAbortStagingRuntimeStartAtCheckpoint(
+  env: WorkerBindings,
+  job: StoredRuntimeStartJob,
+): void {
+  if (
+    env.NABUFLOW_STAGING_RUNTIME_LIFECYCLE_RECOVERY_PROBE === "enabled" &&
+    ((job.attempt === 1 &&
+      job.request.artifactRevision.startsWith(
+        `${RUNTIME_START_ABORT_CHECKPOINT_PREFIX}${job.checkpoint}-`,
+      )) ||
+      (job.checkpoint === "initialized" &&
+        job.request.artifactRevision.startsWith(RUNTIME_START_ABORT_ALWAYS_PREFIX)))
+  ) {
+    throw new StagingDurableOperationOwnerLossError(`checkpoint-${job.checkpoint}`);
+  }
+}
+
+function maybeAbortStagingRuntimeManifestRestartAtCheckpoint(
+  env: WorkerBindings,
+  job: StoredRuntimeManifestRestartJob,
+): void {
+  if (
+    env.NABUFLOW_STAGING_RUNTIME_LIFECYCLE_RECOVERY_PROBE === "enabled" &&
+    ((job.attempt === 1 &&
+      job.request.manifest.revision.startsWith(
+        `${RUNTIME_MANIFEST_RESTART_ABORT_CHECKPOINT_PREFIX}${job.checkpoint}-`,
+      )) ||
+      (job.checkpoint === "initialized" &&
+        job.request.manifest.revision.startsWith(RUNTIME_MANIFEST_RESTART_ABORT_ALWAYS_PREFIX)))
+  ) {
+    throw new StagingDurableOperationOwnerLossError(`checkpoint-${job.checkpoint}`);
+  }
+}
+
+function logDurableOperationCheckpoint(job: StoredDurableOperationJob): void {
+  // eslint-disable-next-line no-console -- metadata-only durable checkpoint evidence
+  console.log(
+    JSON.stringify({
+      event: "durable_operation_checkpoint",
+      kind: job.kind,
+      attempt: job.attempt,
+      checkpoint: job.checkpoint,
+    }),
+  );
 }
 
 function logArtifactCommitCheckpoint(job: StoredArtifactCommitJob): void {
@@ -809,12 +1144,17 @@ function matchPantryRoute(method: string, pathname: string): MatchedRoute {
   const readPatterns = [
     /^\/health$/u,
     /^\/diagnostics$/u,
+    /^\/diagnostics\/objects$/u,
+    /^\/stock-identities\/[0-9a-f]{64}$/u,
     /^\/assemblies\/passembly_[0-9a-f]{64}$/u,
+    /^\/assemblies\/passembly_[0-9a-f]{64}\/diagnostics$/u,
+    /^\/assemblies\/passembly_[0-9a-f]{64}\/resource-evidence$/u,
     /^\/revisions\/by-root\/[0-9a-f]{64}$/u,
     /^\/revisions\/by-root\/[0-9a-f]{64}\/content-hashes$/u,
     /^\/revisions\/pantry-\d{4}-\d{2}-\d{2}\.[1-9]\d*$/u,
   ];
   const mutationPatterns: ReadonlyArray<{ method: string; pattern: RegExp }> = [
+    { method: "POST", pattern: /^\/diagnostics\/r2-probe$/u },
     { method: "POST", pattern: /^\/stock-requests$/u },
     { method: "POST", pattern: /^\/build-resources$/u },
     {
@@ -839,7 +1179,12 @@ function matchPantryRoute(method: string, pathname: string): MatchedRoute {
       pantryPath,
       pantryMethod: method,
       pantryPrincipal:
-        suffix === "/diagnostics" || suffix === "/health" ? "catalog-admin" : "builder-readonly",
+        suffix === "/diagnostics" ||
+        suffix === "/diagnostics/objects" ||
+        suffix.endsWith("/resource-evidence") ||
+        suffix === "/health"
+          ? "catalog-admin"
+          : "builder-readonly",
     };
   }
   const mutation = mutationPatterns.find(
@@ -918,6 +1263,12 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
   if (method === "GET" && pathname === `${CONTROL_PREFIX}/version`) {
     return { endpoint: "version", locator: null };
   }
+  if (pathname === `${CONTROL_PREFIX}/durable-operations`) {
+    if (method !== "GET") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return { endpoint: "durableOperationDiscovery", locator: null };
+  }
   if (pathname.startsWith(`${CONTROL_PREFIX}/pantry/`)) {
     return matchPantryRoute(method, pathname);
   }
@@ -980,7 +1331,7 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const layeredArtifactMatch = new RegExp(
-    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/layered-artifacts/([0-9a-f]{64})(?:/(begin|commit|app/chunks/([0-9]+)|layers/([0-9a-f]{64})/chunks/([0-9]+)))?$`,
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/layered-artifacts/([0-9a-f]{64})(?:/(begin|commit|commit-diagnostics|app/chunks/([0-9]+)|layers/([0-9a-f]{64})/chunks/([0-9]+)))?$`,
   ).exec(pathname);
   if (layeredArtifactMatch) {
     const locator = {
@@ -995,6 +1346,9 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     }
     if (method === "POST" && suffix === "commit") {
       return { endpoint: "layeredArtifactCommit", locator, artifactSha256 };
+    }
+    if (method === "GET" && suffix === "commit-diagnostics") {
+      return { endpoint: "layeredArtifactCommitDiagnostics", locator, artifactSha256 };
     }
     if (method === "PUT" && suffix?.startsWith("app/chunks/") && layeredArtifactMatch[6]) {
       return {
@@ -1024,7 +1378,7 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const artifactMatch = new RegExp(
-    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/artifacts/([0-9a-f]{64})(?:/(begin|commit|chunks/([0-9]+)))?$`,
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/artifacts/([0-9a-f]{64})(?:/(begin|commit|commit-diagnostics|chunks/([0-9]+)))?$`,
   ).exec(pathname);
   if (artifactMatch) {
     const locator = {
@@ -1038,6 +1392,8 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
       return { endpoint: "artifactBegin", locator, artifactSha256 };
     if (method === "POST" && suffix === "commit")
       return { endpoint: "artifactCommit", locator, artifactSha256 };
+    if (method === "GET" && suffix === "commit-diagnostics")
+      return { endpoint: "artifactCommitDiagnostics", locator, artifactSha256 };
     if (method === "PUT" && suffix?.startsWith("chunks/") && artifactMatch[6] !== undefined)
       return {
         endpoint: "artifactChunk",
@@ -1050,22 +1406,24 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const manifestMatch = new RegExp(
-    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/manifest$`,
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/(manifest|manifest-diagnostics)$`,
   ).exec(pathname);
   if (manifestMatch) {
-    if (method !== "PUT")
-      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
-    return {
-      endpoint: "manifestUpdate",
-      locator: {
-        projectId: Number(manifestMatch[1]),
-        role: manifestMatch[2] as RuntimeLocator["role"],
-        slot: manifestMatch[3] as RuntimeLocator["slot"],
-      },
+    const locator = {
+      projectId: Number(manifestMatch[1]),
+      role: manifestMatch[2] as RuntimeLocator["role"],
+      slot: manifestMatch[3] as RuntimeLocator["slot"],
     };
+    if (method === "PUT" && manifestMatch[4] === "manifest") {
+      return { endpoint: "manifestUpdate", locator };
+    }
+    if (method === "GET" && manifestMatch[4] === "manifest-diagnostics") {
+      return { endpoint: "manifestUpdateDiagnostics", locator };
+    }
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const match = new RegExp(
-    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|stop|exec|logs|capability-binding))?$`,
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|start-diagnostics|stop|exec|logs|capability-binding))?$`,
   ).exec(pathname);
   if (!match) throw new ControlHttpError(404, "not_found", "Control endpoint not found");
 
@@ -1077,6 +1435,9 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
   const suffix = match[4];
   if (method === "PUT" && suffix === undefined) return { endpoint: "ensure", locator };
   if (method === "POST" && suffix === "start") return { endpoint: "start", locator };
+  if (method === "GET" && suffix === "start-diagnostics") {
+    return { endpoint: "startDiagnostics", locator };
+  }
   if (method === "POST" && suffix === "stop") return { endpoint: "stop", locator };
   if (method === "DELETE" && suffix === undefined) return { endpoint: "destroy", locator };
   if (method === "GET" && suffix === undefined) return { endpoint: "status", locator };
@@ -1166,7 +1527,64 @@ async function proxyPantryRequest(
       parsed.data.retryable,
     );
   }
-  if (route.pantryPath.endsWith("/content-hashes")) {
+  if (route.pantryPath === "/internal/v1/stock-requests") {
+    const parsed = pantryCatalogStockResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid stock response",
+        false,
+      );
+    }
+    responseBody = parsed.data;
+  } else if (/^\/internal\/v1\/stock-identities\/[0-9a-f]{64}$/u.test(route.pantryPath)) {
+    const parsed = pantryCatalogStockIdentityStatusResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid identity response",
+        false,
+      );
+    }
+    responseBody = parsed.data;
+  } else if (
+    /^\/internal\/v1\/assemblies\/passembly_[0-9a-f]{64}\/diagnostics$/u.test(route.pantryPath)
+  ) {
+    const parsed = pantryCatalogAssemblyDiagnosticsResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid diagnostic response",
+        false,
+      );
+    }
+    responseBody = parsed.data;
+  } else if (route.pantryPath === "/internal/v1/diagnostics/objects") {
+    const parsed = pantryCatalogObjectInventoryResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid object inventory",
+        false,
+      );
+    }
+    responseBody = parsed.data;
+  } else if (/^\/internal\/v1\/assemblies\/passembly_[0-9a-f]{64}$/u.test(route.pantryPath)) {
+    const parsed = pantryCatalogAssemblyStatusResponseSchema.safeParse(responseBody);
+    if (!parsed.success) {
+      throw new ControlHttpError(
+        503,
+        "pantry_infrastructure_unavailable",
+        "The Pantry catalog returned an invalid progress response",
+        false,
+      );
+    }
+    responseBody = parsed.data;
+  } else if (route.pantryPath.endsWith("/content-hashes")) {
     const parsed = pantryShelfContentHashesResponseSchema.safeParse(responseBody);
     if (!parsed.success) {
       throw new ControlHttpError(
@@ -1274,6 +1692,21 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     assertEmptyBody(rawBody);
     return {};
   }
+  if (route.endpoint === "durableOperationDiscovery") {
+    assertEmptyBody(rawBody);
+    let unknownQuery = false;
+    url.searchParams.forEach((_value, key) => {
+      if (!new Set(["since", "limit", "kind"]).has(key)) unknownQuery = true;
+    });
+    if (unknownQuery || !url.searchParams.has("since")) {
+      throw new ControlHttpError(400, "invalid_request", "Invalid discovery query");
+    }
+    return parseStrict(durableOperationDiscoveryRequestSchema, {
+      since: url.searchParams.get("since"),
+      ...(url.searchParams.has("limit") ? { limit: Number(url.searchParams.get("limit")) } : {}),
+      ...(url.searchParams.has("kind") ? { kind: url.searchParams.get("kind") } : {}),
+    });
+  }
   if (
     route.endpoint === "pantryRead" ||
     route.endpoint === "pantryMutation" ||
@@ -1302,6 +1735,16 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     assertNoQuery(url);
     assertEmptyBody(rawBody);
     return parseStrict(statusRuntimeRequestSchema, { locator: route.locator });
+  }
+  if (
+    route.endpoint === "artifactCommitDiagnostics" ||
+    route.endpoint === "layeredArtifactCommitDiagnostics" ||
+    route.endpoint === "startDiagnostics" ||
+    route.endpoint === "manifestUpdateDiagnostics"
+  ) {
+    assertNoQuery(url);
+    assertEmptyBody(rawBody);
+    return {};
   }
   if (route.endpoint === "logs") {
     assertEmptyBody(rawBody);
@@ -1337,7 +1780,6 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
       throw new ControlHttpError(400, "invalid_request", "Artifact chunk body is required");
     return rawBody;
   }
-
   assertNoQuery(url);
   const body = parseJsonBody(rawBody);
   if (
@@ -1530,7 +1972,8 @@ async function executeEndpoint(
   backend: RuntimeBackend,
   injectedVault?: CapabilityVault,
   matchedRoute?: MatchedRoute,
-  artifactCommitExecution?: ArtifactCommitExecution | null,
+  artifactCommitExecution?: DurableOperationExecution | null,
+  nowMs = Date.now(),
 ): Promise<StoredHttpResponse> {
   assertArtifactInfrastructure(env);
   if (endpoint.startsWith("layeredArtifact")) assertLayeredArtifactInfrastructure(env);
@@ -1545,6 +1988,15 @@ async function executeEndpoint(
         supportedRoles: [...RUNTIME_ROLES],
         features: CONTROL_FEATURES.filter((feature) => {
           if (feature === "artifact-layers-v1") return configuredLayerPlatform(env) !== null;
+          if (feature === "artifact-commit-diagnostics-v1") {
+            return env.DURABLE_OPERATION_QUEUE !== undefined;
+          }
+          if (feature === "durable-operation-discovery-v1") {
+            return env.DURABLE_OPERATION_QUEUE !== undefined;
+          }
+          if (feature === "runtime-lifecycle-jobs-v1") {
+            return env.DURABLE_OPERATION_QUEUE !== undefined;
+          }
           if (feature === "trusted-build-v1") {
             return env.TRUSTED_BUILD_PLANE !== undefined;
           }
@@ -1558,6 +2010,51 @@ async function executeEndpoint(
   }
   if (endpoint === "buildRead" || endpoint === "buildMutation") {
     return proxyBuildRequest(endpoint, input as Uint8Array, env, matchedRoute);
+  }
+  if (endpoint === "durableOperationDiscovery") {
+    const request = input as DurableOperationDiscoveryRequest;
+    const sinceMs = Date.parse(request.since);
+    if (
+      !Number.isFinite(sinceMs) ||
+      sinceMs > nowMs ||
+      nowMs - sinceMs > DURABLE_OPERATION_DISCOVERY_MAX_WINDOW_MS
+    ) {
+      throw new ControlHttpError(
+        400,
+        "invalid_discovery_window",
+        "Durable-operation discovery window is invalid",
+      );
+    }
+    const jobs = await coordinator.listRecentDurableOperations({
+      sinceMs,
+      untilMs: nowMs,
+      limit: request.limit,
+      ...(request.kind === undefined ? {} : { kind: request.kind }),
+    });
+    return {
+      status: 200,
+      body: durableOperationDiscoveryResponseSchema.parse({
+        ok: true,
+        window: {
+          since: new Date(sinceMs).toISOString(),
+          until: new Date(nowMs).toISOString(),
+          limit: request.limit,
+        },
+        jobs: jobs.map((job) => ({
+          jobKey: job.jobKey,
+          kind: job.kind,
+          runtimeIdentity: job.runtimeIdentity,
+          subjectKey: job.subjectKey,
+          createdAt: new Date(
+            job.createdAtMs ?? job.deadlineMs - DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+          ).toISOString(),
+          updatedAt: new Date(job.updatedAtMs).toISOString(),
+          state: job.state,
+          checkpoint: job.checkpoint,
+          attempt: job.attempt,
+        })),
+      }),
+    };
   }
   if (endpoint === "routeActivate") {
     return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator);
@@ -1703,6 +2200,140 @@ async function executeEndpoint(
     namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
     ...locator,
   });
+  if (endpoint === "artifactCommitDiagnostics" || endpoint === "layeredArtifactCommitDiagnostics") {
+    const sealedArtifactSha256 = matchedRoute?.artifactSha256;
+    if (sealedArtifactSha256 === undefined) {
+      throw new ControlHttpError(400, "invalid_request", "Artifact commit route is incomplete");
+    }
+    const job = await coordinator.getLatestDurableOperation(
+      endpoint === "artifactCommitDiagnostics" ? "v1" : "layers-v1",
+      identity,
+      sealedArtifactSha256,
+    );
+    const expectedKind = endpoint === "artifactCommitDiagnostics" ? "v1" : "layers-v1";
+    if (job === null || job.kind !== expectedKind || job.runtimeIdentity !== identity) {
+      throw new ControlHttpError(404, "artifact_commit_not_found", "Artifact commit was not found");
+    }
+    const terminalBody = job.response?.body as { code?: unknown } | undefined;
+    return {
+      status: 200,
+      body: artifactCommitDiagnosticsResponseSchema.parse({
+        ok: true,
+        job: {
+          kind: job.kind,
+          runtimeIdentity: job.runtimeIdentity,
+          sealedArtifactSha256: job.sealedArtifactSha256,
+          state: job.state,
+          checkpoint: job.checkpoint,
+          attempt: job.attempt,
+          leaseUntil: job.leaseUntilMs === null ? null : new Date(job.leaseUntilMs).toISOString(),
+          deadline: new Date(job.deadlineMs).toISOString(),
+          updatedAt: new Date(job.updatedAtMs).toISOString(),
+          terminal:
+            job.response === undefined
+              ? null
+              : {
+                  status: job.response.status,
+                  code:
+                    typeof terminalBody?.code === "string"
+                      ? terminalBody.code
+                      : job.state === "succeeded"
+                        ? "ok"
+                        : "artifact_commit_failed",
+                },
+          events: job.events,
+        },
+      }),
+    };
+  }
+  if (endpoint === "startDiagnostics") {
+    const job = await coordinator.getLatestDurableOperation("runtime-start", identity, "start");
+    if (job === null || job.kind !== "runtime-start" || job.runtimeIdentity !== identity) {
+      throw new ControlHttpError(404, "runtime_start_not_found", "Runtime start was not found");
+    }
+    const terminalBody = job.response?.body as { code?: unknown } | undefined;
+    return {
+      status: 200,
+      body: runtimeStartDiagnosticsResponseSchema.parse({
+        ok: true,
+        job: {
+          kind: job.kind,
+          runtimeIdentity: job.runtimeIdentity,
+          artifactRevision: job.request.artifactRevision,
+          artifactSha256: job.request.artifactSha256,
+          state: job.state,
+          checkpoint: job.checkpoint,
+          attempt: job.attempt,
+          leaseUntil: job.leaseUntilMs === null ? null : new Date(job.leaseUntilMs).toISOString(),
+          deadline: new Date(job.deadlineMs).toISOString(),
+          updatedAt: new Date(job.updatedAtMs).toISOString(),
+          terminal:
+            job.response === undefined
+              ? null
+              : {
+                  status: job.response.status,
+                  code:
+                    typeof terminalBody?.code === "string"
+                      ? terminalBody.code
+                      : job.state === "succeeded"
+                        ? "ok"
+                        : "runtime_start_failed",
+                },
+          events: job.events,
+        },
+      }),
+    };
+  }
+  if (endpoint === "manifestUpdateDiagnostics") {
+    const job = await coordinator.getLatestDurableOperation(
+      "runtime-manifest-restart",
+      identity,
+      "manifest-restart",
+    );
+    if (
+      job === null ||
+      job.kind !== "runtime-manifest-restart" ||
+      job.runtimeIdentity !== identity
+    ) {
+      throw new ControlHttpError(
+        404,
+        "runtime_manifest_update_not_found",
+        "Runtime manifest restart was not found",
+      );
+    }
+    const terminalBody = job.response?.body as { code?: unknown } | undefined;
+    return {
+      status: 200,
+      body: runtimeManifestRestartDiagnosticsResponseSchema.parse({
+        ok: true,
+        job: {
+          kind: job.kind,
+          runtimeIdentity: job.runtimeIdentity,
+          expectedManifestRevision: job.request.expectedManifestRevision,
+          manifestRevision: job.request.manifest.revision,
+          state: job.state,
+          checkpoint: job.checkpoint,
+          attempt: job.attempt,
+          leaseUntil: job.leaseUntilMs === null ? null : new Date(job.leaseUntilMs).toISOString(),
+          deadline: new Date(job.deadlineMs).toISOString(),
+          updatedAt: new Date(job.updatedAtMs).toISOString(),
+          terminal:
+            job.response === undefined
+              ? null
+              : {
+                  status: job.response.status,
+                  code:
+                    typeof terminalBody?.code === "string"
+                      ? terminalBody.code
+                      : job.state === "succeeded"
+                        ? "ok"
+                        : "runtime_manifest_update_failed",
+                },
+          events: job.events,
+        },
+      }),
+    };
+  }
   if (endpoint === "layeredArtifactBegin") {
     const request = input as BeginRuntimeLayeredArtifactRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
@@ -1847,7 +2478,12 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "layeredArtifactCommit") {
-    if (artifactCommitExecution === undefined || artifactCommitExecution === null) {
+    if (
+      artifactCommitExecution === undefined ||
+      artifactCommitExecution === null ||
+      (artifactCommitExecution.job.kind !== "v1" &&
+        artifactCommitExecution.job.kind !== "layers-v1")
+    ) {
       throw new Error("Layered artifact commit job is unavailable");
     }
     const request = input as CommitRuntimeLayeredArtifactRequest;
@@ -1857,18 +2493,29 @@ async function executeEndpoint(
     }
     const artifact = await coordinator.getLayeredArtifact(identity, request.sealedArtifactSha256);
     if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    maybeAbortStagingCommitAtCheckpoint(
+      env,
+      artifact.envelope.artifactRevision,
+      artifactCommitExecution.job,
+    );
     const checkpoint = async (
       next: StoredArtifactCommitJob["checkpoint"],
       payloadContentSha256s?: string[],
     ) => {
-      artifactCommitExecution.job = await coordinator.checkpointArtifactCommit({
+      const updated = await coordinator.checkpointDurableOperation({
         jobKey: artifactCommitExecution.job.jobKey,
         ownerId: artifactCommitExecution.ownerId,
+        ownerGeneration: artifactCommitExecution.job.attempt,
         checkpoint: next,
         ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
         nowMs: Date.now(),
       });
-      logArtifactCommitCheckpoint(artifactCommitExecution.job);
+      if (updated.kind !== "v1" && updated.kind !== "layers-v1") {
+        throw new Error("Artifact commit job changed kind");
+      }
+      artifactCommitExecution.job = updated;
+      logArtifactCommitCheckpoint(updated);
+      maybeAbortStagingCommitAtCheckpoint(env, artifact.envelope.artifactRevision, updated);
     };
     const commit = await coordinator.commitLayeredArtifact(identity, request.sealedArtifactSha256);
     if (commit === "incomplete") {
@@ -2110,7 +2757,12 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "artifactCommit") {
-    if (artifactCommitExecution === undefined || artifactCommitExecution === null) {
+    if (
+      artifactCommitExecution === undefined ||
+      artifactCommitExecution === null ||
+      (artifactCommitExecution.job.kind !== "v1" &&
+        artifactCommitExecution.job.kind !== "layers-v1")
+    ) {
       throw new Error("Artifact commit job is unavailable");
     }
     const request = input as CommitRuntimeArtifactRequest;
@@ -2119,18 +2771,29 @@ async function executeEndpoint(
       throw artifactRuntimeMismatch();
     const artifact = await coordinator.getArtifact(identity, request.sealedArtifactSha256);
     if (artifact === null || artifact.runtimeIdentity !== identity) throw artifactRuntimeMismatch();
+    maybeAbortStagingCommitAtCheckpoint(
+      env,
+      artifact.envelope.artifactRevision,
+      artifactCommitExecution.job,
+    );
     const checkpoint = async (
       next: StoredArtifactCommitJob["checkpoint"],
       payloadContentSha256s?: string[],
     ) => {
-      artifactCommitExecution.job = await coordinator.checkpointArtifactCommit({
+      const updated = await coordinator.checkpointDurableOperation({
         jobKey: artifactCommitExecution.job.jobKey,
         ownerId: artifactCommitExecution.ownerId,
+        ownerGeneration: artifactCommitExecution.job.attempt,
         checkpoint: next,
         ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
         nowMs: Date.now(),
       });
-      logArtifactCommitCheckpoint(artifactCommitExecution.job);
+      if (updated.kind !== "v1" && updated.kind !== "layers-v1") {
+        throw new Error("Artifact commit job changed kind");
+      }
+      artifactCommitExecution.job = updated;
+      logArtifactCommitCheckpoint(updated);
+      maybeAbortStagingCommitAtCheckpoint(env, artifact.envelope.artifactRevision, updated);
     };
     const commit = await coordinator.commitArtifact(identity, request.sealedArtifactSha256);
     if (commit === "incomplete") {
@@ -2246,6 +2909,201 @@ async function executeEndpoint(
   if (endpoint === "manifestUpdate") {
     const request = input as UpdateRuntimeManifestRequest;
     assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    if (
+      artifactCommitExecution !== undefined &&
+      artifactCommitExecution !== null &&
+      artifactCommitExecution.job.kind === "runtime-manifest-restart"
+    ) {
+      const execution = artifactCommitExecution as DurableOperationExecution & {
+        job: StoredRuntimeManifestRestartJob;
+      };
+      const checkpoint = async (
+        next: StoredRuntimeManifestRestartJob["checkpoint"],
+        runtimeWasRunning?: boolean,
+      ): Promise<void> => {
+        const updated = await coordinator.checkpointDurableOperation({
+          jobKey: execution.job.jobKey,
+          ownerId: execution.ownerId,
+          ownerGeneration: execution.job.attempt,
+          checkpoint: next,
+          ...(runtimeWasRunning === undefined ? {} : { runtimeWasRunning }),
+          nowMs: Date.now(),
+        });
+        if (updated.kind !== "runtime-manifest-restart") {
+          throw new Error("Runtime manifest restart durable job changed kind");
+        }
+        execution.job = updated;
+        logDurableOperationCheckpoint(execution.job);
+        maybeAbortStagingRuntimeManifestRestartAtCheckpoint(env, execution.job);
+      };
+      const committedRestartArtifact = async (): Promise<CommittedRuntimeArtifact> => {
+        if (request.sealedArtifactSha256 === undefined) {
+          throw new ControlHttpError(
+            409,
+            "artifact_not_committed",
+            "A committed artifact for the next manifest is required",
+          );
+        }
+        const artifact = await getCommittedRuntimeArtifact(
+          coordinator,
+          identity,
+          request.sealedArtifactSha256,
+        );
+        if (
+          artifact === null ||
+          artifact.artifact.envelope.manifestRevision !== request.manifest.revision
+        ) {
+          throw new ControlHttpError(
+            409,
+            "artifact_not_committed",
+            "A committed artifact for the next manifest is required",
+          );
+        }
+        return artifact;
+      };
+      maybeAbortStagingRuntimeManifestRestartAtCheckpoint(env, execution.job);
+      try {
+        if (execution.job.checkpoint === "initialized") {
+          const current = await requireRuntime(coordinator, identity);
+          if (current.descriptor.status === "starting") {
+            throw new ControlHttpError(
+              409,
+              "runtime_busy",
+              "Runtime manifest update is already in progress",
+              true,
+            );
+          }
+          if (current.manifest.revision !== request.expectedManifestRevision) {
+            throw new ControlHttpError(
+              409,
+              "manifest_revision_conflict",
+              "Runtime manifest revision changed before update",
+            );
+          }
+          if (
+            current.manifest.resourceProfile !== request.manifest.resourceProfile ||
+            current.manifest.public !== request.manifest.public
+          ) {
+            throw new ControlHttpError(
+              400,
+              "manifest_immutable_field",
+              "Manifest update attempted to change an immutable field",
+            );
+          }
+          const wasRunning = current.descriptor.status === "running";
+          if (wasRunning) {
+            await committedRestartArtifact();
+            const unbound = await coordinator.unbindContainer(
+              runtimeContainerId(env, identity),
+              identity,
+            );
+            if (!unbound) {
+              throw new ControlHttpError(
+                409,
+                "runtime_busy",
+                "Runtime binding changed before manifest update",
+                true,
+              );
+            }
+          }
+          await checkpoint("runtime-unbound", wasRunning);
+        }
+        if (execution.job.checkpoint === "runtime-unbound") {
+          const current = await requireRuntime(coordinator, identity);
+          const wasRunning = execution.job.runtimeWasRunning === true;
+          if (current.manifest.revision === request.expectedManifestRevision) {
+            let artifact: CommittedRuntimeArtifact | null = null;
+            if (wasRunning) artifact = await committedRestartArtifact();
+            current.manifest = request.manifest;
+            current.descriptor.servicePort = request.manifest.servicePort;
+            current.descriptor.manifestRevision = request.manifest.revision;
+            current.descriptor.status = wasRunning ? "starting" : "stopped";
+            current.descriptor.readyAt = null;
+            current.descriptor.lastError = null;
+            current.processId = null;
+            if (artifact !== null) {
+              current.artifactRevision = artifact.artifact.envelope.artifactRevision;
+              current.artifactSha256 = artifact.artifact.envelope.sealedArtifactSha256;
+              current.artifactKind = artifact.kind;
+            }
+            const persisted = await coordinator.putRuntimeIfManifestRevision(
+              identity,
+              request.expectedManifestRevision,
+              current,
+            );
+            if (persisted !== "updated") {
+              throw new ControlHttpError(
+                persisted === "not_found" ? 404 : 409,
+                persisted === "not_found" ? "runtime_not_found" : "manifest_revision_conflict",
+                persisted === "not_found"
+                  ? "Runtime not found"
+                  : "Runtime manifest revision changed before update",
+              );
+            }
+          } else if (current.manifest.revision !== request.manifest.revision) {
+            throw new ControlHttpError(
+              409,
+              "manifest_revision_conflict",
+              "Runtime manifest revision changed before update",
+            );
+          }
+          await checkpoint("manifest-persisted");
+        }
+        if (execution.job.checkpoint === "manifest-persisted") {
+          if (execution.job.runtimeWasRunning !== true) {
+            await checkpoint("finalized");
+          } else {
+            const current = await requireRuntime(coordinator, identity);
+            const artifact = await committedRestartArtifact();
+            await materializeCommittedRuntimeArtifact(backend, current, artifact);
+            await checkpoint("materialized");
+          }
+        }
+        if (execution.job.checkpoint === "materialized") {
+          const current = await requireRuntime(coordinator, identity);
+          const started = await backend.start(current);
+          current.processId = started.processId;
+          current.descriptor.status = "running";
+          current.descriptor.readyAt = started.readyAt;
+          current.descriptor.lastError = null;
+          await coordinator.putRuntime(identity, current);
+          await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+          await checkpoint("process-started");
+        }
+        if (execution.job.checkpoint === "process-started") {
+          await coordinator.appendSystemLog(
+            identity,
+            "Tenant service restarted after manifest update.",
+          );
+          await checkpoint("finalized");
+        }
+        return {
+          status: 200,
+          body: { runtime: (await requireRuntime(coordinator, identity)).descriptor },
+        };
+      } catch (error) {
+        if (error instanceof StagingDurableOperationOwnerLossError) throw error;
+        if (
+          execution.job.checkpoint === "initialized" ||
+          execution.job.checkpoint === "runtime-unbound"
+        ) {
+          throw error;
+        }
+        await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
+        const current = await requireRuntime(coordinator, identity);
+        await safelyStopFailedRuntime(backend, current);
+        current.descriptor.status = "error";
+        current.descriptor.lastError = "Runtime failed after manifest update";
+        current.processId = null;
+        await coordinator.putRuntime(identity, current);
+        throw new ControlHttpError(
+          502,
+          "runtime_restart_failed",
+          "Runtime failed after manifest update",
+          true,
+        );
+      }
+    }
     const runtime = await requireRuntime(coordinator, identity);
     if (runtime.descriptor.status === "starting") {
       throw new ControlHttpError(
@@ -2446,51 +3304,103 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "start") {
-    const request = input as StartRuntimeRequest;
-    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
-    const artifact = await getCommittedRuntimeArtifact(
-      coordinator,
-      identity,
-      request.artifactSha256,
-    );
     if (
-      artifact === null ||
-      artifact.artifact.runtimeIdentity !== identity ||
-      artifact.artifact.envelope.artifactRevision !== request.artifactRevision ||
-      artifact.artifact.envelope.manifestRevision !== runtime.manifest.revision
+      artifactCommitExecution === undefined ||
+      artifactCommitExecution === null ||
+      artifactCommitExecution.job.kind !== "runtime-start"
     ) {
-      throw new ControlHttpError(
-        409,
-        "artifact_not_committed",
-        "A committed artifact for this runtime manifest is required",
-      );
+      throw new Error("Runtime start durable job is unavailable");
     }
-    runtime.artifactRevision = request.artifactRevision;
-    runtime.artifactSha256 = request.artifactSha256;
-    runtime.artifactKind = artifact.kind;
-    runtime.descriptor.status = "starting";
-    runtime.descriptor.lastError = null;
-    runtime.descriptor.readyAt = null;
-    await coordinator.putRuntime(identity, runtime);
-    await coordinator.appendSystemLog(identity, "Starting the tenant service.");
+    const execution = artifactCommitExecution as DurableOperationExecution & {
+      job: StoredRuntimeStartJob;
+    };
+    const request = execution.job.request;
+    assertDeploymentVersion(request.expectedDeploymentVersion, deploymentVersion);
+    const checkpoint = async (next: StoredRuntimeStartJob["checkpoint"]): Promise<void> => {
+      const updated = await coordinator.checkpointDurableOperation({
+        jobKey: execution.job.jobKey,
+        ownerId: execution.ownerId,
+        ownerGeneration: execution.job.attempt,
+        checkpoint: next,
+        nowMs: Date.now(),
+      });
+      if (updated.kind !== "runtime-start") {
+        throw new Error("Runtime start durable job changed kind");
+      }
+      execution.job = updated;
+      logDurableOperationCheckpoint(execution.job);
+      maybeAbortStagingRuntimeStartAtCheckpoint(env, execution.job);
+    };
+    maybeAbortStagingRuntimeStartAtCheckpoint(env, execution.job);
     try {
-      await materializeCommittedRuntimeArtifact(backend, runtime, artifact);
-      const started = await backend.start(runtime);
-      const current = await requireRuntime(coordinator, identity);
-      current.processId = started.processId;
-      current.stdoutLength = 0;
-      current.stderrLength = 0;
-      current.descriptor.status = "running";
-      current.descriptor.readyAt = started.readyAt;
-      current.descriptor.lastError = null;
-      await coordinator.putRuntime(identity, current);
-      await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
-      await coordinator.appendSystemLog(identity, "Tenant service is ready.");
+      let artifact: CommittedRuntimeArtifact | null = null;
+      if (execution.job.checkpoint === "initialized") {
+        artifact = await getCommittedRuntimeArtifact(coordinator, identity, request.artifactSha256);
+        if (
+          artifact === null ||
+          artifact.artifact.runtimeIdentity !== identity ||
+          artifact.artifact.envelope.artifactRevision !== request.artifactRevision ||
+          artifact.artifact.envelope.manifestRevision !== runtime.manifest.revision
+        ) {
+          throw new ControlHttpError(
+            409,
+            "artifact_not_committed",
+            "A committed artifact for this runtime manifest is required",
+          );
+        }
+        runtime.artifactRevision = request.artifactRevision;
+        runtime.artifactSha256 = request.artifactSha256;
+        runtime.artifactKind = artifact.kind;
+        runtime.descriptor.status = "starting";
+        runtime.descriptor.lastError = null;
+        runtime.descriptor.readyAt = null;
+        await coordinator.putRuntime(identity, runtime);
+        await coordinator.appendSystemLog(identity, "Starting the tenant service.");
+        await checkpoint("artifact-verified");
+      }
+      if (execution.job.checkpoint === "artifact-verified") {
+        artifact ??= await getCommittedRuntimeArtifact(
+          coordinator,
+          identity,
+          request.artifactSha256,
+        );
+        if (artifact === null) {
+          throw new ControlHttpError(
+            409,
+            "artifact_not_committed",
+            "A committed artifact for this runtime manifest is required",
+          );
+        }
+        const current = await requireRuntime(coordinator, identity);
+        await materializeCommittedRuntimeArtifact(backend, current, artifact);
+        await checkpoint("materialized");
+      }
+      if (execution.job.checkpoint === "materialized") {
+        const current = await requireRuntime(coordinator, identity);
+        const started = await backend.start(current);
+        current.processId = started.processId;
+        current.stdoutLength = 0;
+        current.stderrLength = 0;
+        current.descriptor.status = "running";
+        current.descriptor.readyAt = started.readyAt;
+        current.descriptor.lastError = null;
+        await coordinator.putRuntime(identity, current);
+        await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+        await checkpoint("process-started");
+      }
+      if (execution.job.checkpoint === "process-started") {
+        await coordinator.appendSystemLog(identity, "Tenant service is ready.");
+        await checkpoint("finalized");
+      }
       return {
         status: 200,
         body: { runtime: (await requireRuntime(coordinator, identity)).descriptor },
       };
     } catch (error) {
+      if (error instanceof StagingDurableOperationOwnerLossError) throw error;
+      if (error instanceof ControlHttpError && error.code === "artifact_not_committed") {
+        throw error;
+      }
       await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
       await safelyStopFailedRuntime(backend, runtime);
       const current = await requireRuntime(coordinator, identity);
@@ -2692,8 +3602,10 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
   }
   const schema = {
     version: versionResponseSchema,
+    durableOperationDiscovery: durableOperationDiscoveryResponseSchema,
     ensure: ensureRuntimeResponseSchema,
     start: startRuntimeResponseSchema,
+    startDiagnostics: runtimeStartDiagnosticsResponseSchema,
     stop: stopRuntimeResponseSchema,
     destroy: destroyRuntimeResponseSchema,
     status: statusRuntimeResponseSchema,
@@ -2711,13 +3623,16 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     artifactBegin: beginRuntimeArtifactResponseSchema,
     artifactChunk: uploadRuntimeArtifactChunkResponseSchema,
     artifactCommit: commitRuntimeArtifactResponseSchema,
+    artifactCommitDiagnostics: artifactCommitDiagnosticsResponseSchema,
     artifactRemove: removeRuntimeArtifactResponseSchema,
     layeredArtifactBegin: beginRuntimeLayeredArtifactResponseSchema,
     layeredArtifactAppChunk: uploadRuntimeLayeredArtifactChunkResponseSchema,
     layeredArtifactLayerChunk: uploadRuntimeLayeredArtifactChunkResponseSchema,
     layeredArtifactCommit: commitRuntimeLayeredArtifactResponseSchema,
+    layeredArtifactCommitDiagnostics: artifactCommitDiagnosticsResponseSchema,
     layeredArtifactRemove: removeRuntimeLayeredArtifactResponseSchema,
     manifestUpdate: ensureRuntimeResponseSchema,
+    manifestUpdateDiagnostics: runtimeManifestRestartDiagnosticsResponseSchema,
   }[endpoint];
   const result = schema.safeParse(body);
   if (!result.success)
@@ -2951,6 +3866,8 @@ function assertArtifactInfrastructure(env: WorkerBindings): void {
     env.CF_VERSION_METADATA.id.length === 0 ||
     typeof env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE !== "string" ||
     env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE.length === 0 ||
+    !env.DURABLE_OPERATION_QUEUE ||
+    typeof env.DURABLE_OPERATION_QUEUE.send !== "function" ||
     !env.NABUFLOW_RUNTIME_ARTIFACTS ||
     typeof env.NABUFLOW_RUNTIME_ARTIFACTS.get !== "function" ||
     typeof env.NABUFLOW_RUNTIME_ARTIFACTS.put !== "function" ||
@@ -3172,16 +4089,30 @@ async function recordAudit(
   outcome: { status: number; code: string },
   projectIdOverride?: number,
 ): Promise<void> {
-  await coordinator.recordAudit({
-    requestId,
-    timestamp: new Date().toISOString(),
-    method,
-    endpoint,
-    stage: null,
-    outcome: outcome.code,
-    projectId: locator?.projectId ?? projectIdOverride ?? null,
-    role: locator?.role ?? null,
-    slot: locator?.slot ?? null,
-    status: outcome.status,
-  });
+  try {
+    await coordinator.recordAudit({
+      requestId,
+      timestamp: new Date().toISOString(),
+      method,
+      endpoint,
+      stage: null,
+      outcome: outcome.code,
+      projectId: locator?.projectId ?? projectIdOverride ?? null,
+      role: locator?.role ?? null,
+      slot: locator?.slot ?? null,
+      status: outcome.status,
+    });
+  } catch {
+    // Audit persistence is best-effort at the response boundary. A transient DO rejection must
+    // never replace a response the control plane has already classified and constructed.
+    // eslint-disable-next-line no-console -- metadata-only audit availability evidence
+    console.error(
+      JSON.stringify({
+        event: "control_audit_write_failed",
+        requestId,
+        endpoint,
+        status: outcome.status,
+      }),
+    );
+  }
 }

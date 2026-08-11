@@ -1,18 +1,26 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 import {
   PANTRY_BUILD_INPUT_FORMAT,
+  ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
   PANTRY_SCHEMA_VERSION,
   TRUSTED_BUILD_REQUEST_FORMAT,
   TRUSTED_BUILD_SCHEMA_VERSION,
   TRUSTED_BUILD_SOURCE_FORMAT,
+  ZERO_SEALED_BUILD_PLATFORM,
   canonicalPantryJson,
   deriveRuntimeIdentity,
   pantryBuildAttestationHash,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
   pantryShelfContentHashesResponseSchema,
+  artifactCommitDiagnosticsResponseSchema,
+  durableOperationDiscoveryResponseSchema,
+  parseRuntimeIdentity,
+  runtimeManifestRestartDiagnosticsResponseSchema,
+  runtimeStartDiagnosticsResponseSchema,
   sha256Hex,
   signControlRequest,
   signPreviewGrant,
@@ -40,11 +48,33 @@ import {
   type SealedLayeredRuntimeArtifact,
 } from "../../api-server/src/lib/runtime-artifact-layers";
 import { sealRuntimeArtifact } from "../../api-server/src/lib/runtime-artifact";
+import {
+  CloudflareRuntimeOperationTerminalUnknownError,
+  CloudflareRuntimeProvider,
+} from "../../api-server/src/lib/cloudflare-runtime-provider";
+import {
+  ZeroGenerationKitchenError,
+  runZeroGenerationKitchen,
+} from "../../api-server/src/lib/zero-generation-kitchen";
+import { prepareZeroSealedNodeSource } from "../../api-server/src/lib/zero-sealed-generation";
 import { PANTRY_TEST_KEY } from "./pantry-catalog-fixture";
 import { createStagingEvidenceRunId, writeImmutableStagingEvidence } from "./staging-evidence";
 import {
+  evaluateAcceptanceTail,
+  isKnownVendorAlarmTailEvent,
+  knownVendorAlarmOccurrenceKey,
+  parseConcatenatedWranglerTailJson,
+  type VendorAlarmConsequenceProof,
+} from "./staging-tail-evaluation";
+import {
   ARTIFACT_COMMIT_ABORT_BEFORE_PREFIX,
+  ARTIFACT_COMMIT_ABORT_ALWAYS_PREFIX,
+  ARTIFACT_COMMIT_ABORT_CHECKPOINT_PREFIX,
   ARTIFACT_COMMIT_ABORT_MID_PREFIX,
+  RUNTIME_START_ABORT_ALWAYS_PREFIX,
+  RUNTIME_START_ABORT_CHECKPOINT_PREFIX,
+  RUNTIME_MANIFEST_RESTART_ABORT_ALWAYS_PREFIX,
+  RUNTIME_MANIFEST_RESTART_ABORT_CHECKPOINT_PREFIX,
 } from "../src/artifact-commit-recovery";
 
 const CONTROL_URL = "https://nabuflow-runtime-staging.mustafa-alali74.workers.dev";
@@ -57,7 +87,6 @@ const GATE_MAX_REQUESTS = 600;
 const GATE_MAX_MS = 5 * 60_000;
 const SIGNED_CONTROL_MAX_ATTEMPTS = 12;
 const SIGNED_CONTROL_TIMEOUT_MS = 5 * 60_000;
-const ARTIFACT_COMMIT_LEASE_EXPIRY_WAIT_MS = 17_000;
 const DEFAULT_BUILD_TERMINAL_WAIT_MS = 20 * 60_000;
 const diagnosticWait = process.env.NABUFLOW_DIAGNOSTIC_BUILD_WAIT_MS;
 const BUILD_TERMINAL_WAIT_MS =
@@ -102,6 +131,17 @@ const INTENTS: PantryPackageIntent[] = [
     `${right.ecosystem}:${right.name}\0${right.selector}`,
   ),
 );
+const ZERO_GENERATOR_INTENTS: PantryPackageIntent[] = [
+  { ecosystem: "npm", name: "@types/express", selector: "^5.0.3" },
+  { ecosystem: "npm", name: "@types/node", selector: "^22.18.0" },
+  { ecosystem: "npm", name: "express", selector: "^5.1.0" },
+  { ecosystem: "npm", name: "typescript", selector: "^5.9.2" },
+  { ecosystem: "npm", name: "zod", selector: "^4.1.5" },
+].sort((left, right) =>
+  `${left.ecosystem}:${left.name}\0${left.selector}`.localeCompare(
+    `${right.ecosystem}:${right.name}\0${right.selector}`,
+  ),
+);
 
 interface TranscriptEntry {
   step: string;
@@ -128,6 +168,7 @@ const evidenceRunId = createStagingEvidenceRunId(new Date(), crypto.randomUUID()
 const readinessRevisions = new Map<number, string>();
 const createdBuildIds = new Set<string>();
 const createdShelfRoots: string[] = [];
+const observedPantryAssemblyIds = new Set<string>();
 const persistedCollectionProgress = new Set<string>();
 const persistedVerificationProgress = new Set<string>();
 const persistedSecretScanSummaries = new Set<string>();
@@ -142,6 +183,9 @@ let runtimeIdentity = "";
 let runtimePath = "";
 let locator: { projectId: number; role: "preview"; slot: "primary" } | null = null;
 let layeredArtifact: SealedLayeredRuntimeArtifact | null = null;
+let preCleanupEvidenceWritten = false;
+
+const ACCEPTANCE_TAIL_SETTLE_MS = 45_000;
 
 const echoCapabilityDefinition: CapabilityDefinition = {
   name: "echo",
@@ -162,6 +206,68 @@ function record(step: string, status: number | string, detail: unknown = null): 
   transcript.push({ step, status, detail });
 }
 
+async function startAcceptanceErrorTail() {
+  const startedAt = new Date().toISOString();
+  let stdout = "";
+  let stderr = "";
+  const child = spawn(
+    process.execPath,
+    [
+      "node_modules/wrangler/bin/wrangler.js",
+      "tail",
+      "nabuflow-runtime-staging",
+      "--format=json",
+      "--status=error",
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
+  assertCondition(child.exitCode === null, "Acceptance tail exited before the lifecycle began");
+  record("tail.acceptance-window.started", 200, {
+    startedAt,
+    afterRotationAndFourSurfaceGate: true,
+    deploymentResetEventsBelongTo: "propagation-evidence",
+  });
+
+  return {
+    startedAt,
+    async stop() {
+      if (child.exitCode === null) child.kill("SIGINT");
+      const exited = await Promise.race([
+        new Promise<boolean>((resolvePromise) => child.once("exit", () => resolvePromise(true))),
+        new Promise<boolean>((resolvePromise) =>
+          setTimeout(() => resolvePromise(child.exitCode !== null), 5_000),
+        ),
+      ]);
+      if (!exited && child.pid !== undefined && process.platform === "win32") {
+        const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
+        await new Promise<void>((resolvePromise) => killer.once("exit", () => resolvePromise()));
+      }
+      assertCondition(
+        !/error|failed|unauthorized/u.test(stderr.replace(/wrangler/giu, "")),
+        "Wrangler tail reported an operator error",
+      );
+      return parseConcatenatedWranglerTailJson(stdout);
+    },
+  };
+}
+
 function writeEvidence(phase: "pre-cleanup" | "final"): string {
   const evidenceDirectory = resolve(process.cwd(), "../../tmp/gateway-trusted-build-plane");
   return writeImmutableStagingEvidence({
@@ -170,6 +276,65 @@ function writeEvidence(phase: "pre-cleanup" | "final"): string {
     phase,
     transcript,
   });
+}
+
+function persistPreCleanupEvidence(): string {
+  assertCondition(!preCleanupEvidenceWritten, "Pre-cleanup evidence was already persisted");
+  const path = writeEvidence("pre-cleanup");
+  preCleanupEvidenceWritten = true;
+  record("evidence.pre-cleanup.persisted", 200, { path });
+  return path;
+}
+
+function sanitizedFailureEvidence(error: unknown): Record<string, unknown> {
+  const candidate = error as {
+    name?: unknown;
+    message?: unknown;
+    status?: unknown;
+    code?: unknown;
+    retryable?: unknown;
+    operation?: unknown;
+    elapsedMs?: unknown;
+    attempts?: unknown;
+    lastObservedOperationState?: unknown;
+    operationTimeoutMs?: unknown;
+    namedProviderBoundMs?: unknown;
+    transportCause?: unknown;
+    transportCauseCounts?: unknown;
+    successfulObservationCount?: unknown;
+  };
+  return {
+    name: error instanceof Error ? error.name : "UnknownError",
+    message: error instanceof Error ? error.message : "unknown",
+    ...(typeof candidate.status === "number" ? { status: candidate.status } : {}),
+    ...(typeof candidate.code === "string" ? { code: candidate.code } : {}),
+    ...(typeof candidate.retryable === "boolean" ? { retryable: candidate.retryable } : {}),
+    ...(typeof candidate.operation === "string" ? { operation: candidate.operation } : {}),
+    ...(typeof candidate.elapsedMs === "number" ? { elapsedMs: candidate.elapsedMs } : {}),
+    ...(typeof candidate.attempts === "number" ? { attempts: candidate.attempts } : {}),
+    ...(typeof candidate.lastObservedOperationState === "string"
+      ? { lastObservedOperationState: candidate.lastObservedOperationState }
+      : {}),
+    ...(typeof candidate.operationTimeoutMs === "number"
+      ? { operationTimeoutMs: candidate.operationTimeoutMs }
+      : {}),
+    ...(typeof candidate.namedProviderBoundMs === "number"
+      ? { namedProviderBoundMs: candidate.namedProviderBoundMs }
+      : {}),
+    ...(typeof candidate.transportCause === "string"
+      ? { transportCause: candidate.transportCause }
+      : {}),
+    ...(typeof candidate.transportCauseCounts === "object" &&
+    candidate.transportCauseCounts !== null
+      ? { transportCauseCounts: candidate.transportCauseCounts }
+      : {}),
+    ...(typeof candidate.successfulObservationCount === "number"
+      ? { successfulObservationCount: candidate.successfulObservationCount }
+      : {}),
+    ...(error instanceof ZeroGenerationKitchenError
+      ? { code: error.code, evidence: error.evidence }
+      : {}),
+  };
 }
 
 function assertCondition(condition: unknown, message: string): asserts condition {
@@ -353,23 +518,18 @@ async function proveCommitLeaseAdoption(
   expectedStage: "before-materializer" | "mid-materialization",
 ): Promise<{ result: ControlResult; elapsedMs: number }> {
   const startedAt = performance.now();
-  const terminated = await signedFetch(input);
-  assertStatus(`${label}.owner-terminated`, terminated, 503);
+  const accepted = await signedFetch(input);
+  assertStatus(`${label}.accepted`, accepted, 409);
   assertCondition(
-    safeCode(terminated.body) === "artifact_commit_owner_lost",
-    `${label}: staging owner-loss probe did not terminate the first owner`,
+    safeCode(accepted.body) === "request_in_progress",
+    `${label}: queue-backed commit was not durably accepted`,
   );
-  const liveOwner = await signedFetch({
-    ...input,
-    nonce: `${label}-live-owner-${crypto.randomUUID()}`,
-  });
-  assertStatus(`${label}.live-owner`, liveOwner, 409);
+  const terminal = await waitForCommitTerminal(`${input.path}-diagnostics`, label, 90_000);
   assertCondition(
-    safeCode(liveOwner.body) === "request_in_progress",
-    `${label}: live reservation did not preserve in-progress semantics`,
-  );
-  await new Promise((resolvePromise) =>
-    setTimeout(resolvePromise, ARTIFACT_COMMIT_LEASE_EXPIRY_WAIT_MS),
+    terminal.diagnostics.job.state === "succeeded" &&
+      terminal.diagnostics.job.attempt >= 2 &&
+      terminal.diagnostics.job.events.some((event) => event.event === "driver-adopted"),
+    `${label}: queue redelivery did not adopt the killed driver`,
   );
   const adopted = await signedControlFetch(
     {
@@ -383,12 +543,1341 @@ async function proveCommitLeaseAdoption(
   record(`${label}.proof`, 200, {
     expectedStage,
     sameIdempotencyKey: true,
-    liveOwnerStatus: 409,
+    acceptedStatus: 409,
     adoptionStatus: 200,
-    leaseExpiryWaitMs: ARTIFACT_COMMIT_LEASE_EXPIRY_WAIT_MS,
+    attempts: terminal.diagnostics.job.attempt,
     elapsedMs,
   });
   return { result: adopted, elapsedMs };
+}
+
+type CommitDiagnostics = ReturnType<typeof artifactCommitDiagnosticsResponseSchema.parse>;
+
+async function readCommitDiagnostics(path: string, label: string): Promise<CommitDiagnostics> {
+  const result = await signedControlFetch(
+    { path, nonce: `${label}-${crypto.randomUUID()}` },
+    label,
+  );
+  assertStatus(label, result, 200);
+  return artifactCommitDiagnosticsResponseSchema.parse(result.body);
+}
+
+async function waitForCommitTerminal(
+  path: string,
+  label: string,
+  timeoutMs: number,
+): Promise<{ diagnostics: CommitDiagnostics; elapsedMs: number }> {
+  const startedAt = performance.now();
+  for (;;) {
+    const diagnostics = await readCommitDiagnostics(path, `${label}.diagnostics`);
+    if (diagnostics.job.state !== "active") {
+      return { diagnostics, elapsedMs: Math.round(performance.now() - startedAt) };
+    }
+    if (performance.now() - startedAt >= timeoutMs) {
+      throw new Error(`${label}: artifact commit did not reach a terminal state`);
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+}
+
+async function readRuntimeStartDiagnostics(label: string) {
+  const result = await signedControlFetch(
+    {
+      path: `${runtimePath}/start-diagnostics`,
+      method: "GET",
+      nonce: `${label}-diagnostics-${crypto.randomUUID()}`,
+    },
+    `${label}.diagnostics`,
+  );
+  assertStatus(`${label}.diagnostics`, result, 200);
+  return runtimeStartDiagnosticsResponseSchema.parse(result.body);
+}
+
+async function waitForRuntimeStartTerminal(label: string, timeoutMs: number) {
+  const startedAt = performance.now();
+  for (;;) {
+    const diagnostics = await readRuntimeStartDiagnostics(label);
+    if (diagnostics.job.state !== "active") {
+      return { diagnostics, elapsedMs: Math.round(performance.now() - startedAt) };
+    }
+    if (performance.now() - startedAt >= timeoutMs) {
+      throw new Error(`${label}: runtime start did not reach a terminal state`);
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+}
+
+async function readRuntimeManifestRestartDiagnostics(label: string) {
+  const result = await signedControlFetch(
+    {
+      path: `${runtimePath}/manifest-diagnostics`,
+      method: "GET",
+      nonce: `${label}-diagnostics-${crypto.randomUUID()}`,
+    },
+    `${label}.diagnostics`,
+  );
+  assertStatus(`${label}.diagnostics`, result, 200);
+  return runtimeManifestRestartDiagnosticsResponseSchema.parse(result.body);
+}
+
+async function waitForRuntimeManifestRestartTerminal(label: string, timeoutMs: number) {
+  const startedAt = performance.now();
+  for (;;) {
+    const diagnostics = await readRuntimeManifestRestartDiagnostics(label);
+    if (diagnostics.job.state !== "active") {
+      return { diagnostics, elapsedMs: Math.round(performance.now() - startedAt) };
+    }
+    if (performance.now() - startedAt >= timeoutMs) {
+      throw new Error(`${label}: runtime manifest restart did not reach a terminal state`);
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+}
+
+async function captureRecentDurableOperationEvidence(label: string): Promise<void> {
+  const nowMs = Date.now() + workerClockOffsetMs;
+  const since = new Date(nowMs - (24 * 60 * 60_000 - 60_000)).toISOString();
+  const discoveryPath = `${CONTROL_PREFIX}/durable-operations?since=${encodeURIComponent(since)}&limit=100`;
+  const result = await signedControlFetch(
+    {
+      path: discoveryPath,
+      method: "GET",
+      nonce: `${label}-discovery-${crypto.randomUUID()}`,
+    },
+    `${label}.discovery`,
+  );
+  assertStatus(`${label}.discovery`, result, 200);
+  const discovery = durableOperationDiscoveryResponseSchema.parse(result.body);
+  const relevantJobs =
+    runtimeIdentity === ""
+      ? discovery.jobs
+      : discovery.jobs.filter((job) => job.runtimeIdentity === runtimeIdentity);
+  record(`${label}.identifiers`, 200, {
+    window: discovery.window,
+    jobs: relevantJobs,
+  });
+  for (const job of relevantJobs) {
+    const parsed = parseRuntimeIdentity(job.runtimeIdentity);
+    const runtimeBase = `${CONTROL_PREFIX}/runtimes/${parsed.projectId}/${parsed.role}/${parsed.slot}`;
+    const diagnosticsPath =
+      job.kind === "v1"
+        ? `${runtimeBase}/artifacts/${job.subjectKey}/commit-diagnostics`
+        : job.kind === "layers-v1"
+          ? `${runtimeBase}/layered-artifacts/${job.subjectKey}/commit-diagnostics`
+          : job.kind === "runtime-start"
+            ? `${runtimeBase}/start-diagnostics`
+            : `${runtimeBase}/manifest-diagnostics`;
+    const diagnostics = await signedControlFetch(
+      {
+        path: diagnosticsPath,
+        method: "GET",
+        nonce: `${label}-trail-${crypto.randomUUID()}`,
+      },
+      `${label}.trail`,
+    );
+    record(`${label}.trail`, diagnostics.response.status, {
+      jobKey: job.jobKey,
+      kind: job.kind,
+      runtimeIdentity: job.runtimeIdentity,
+      subjectKey: job.subjectKey,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      state: job.state,
+      checkpoint: job.checkpoint,
+      attempt: job.attempt,
+      diagnosticsPath,
+      diagnostics: diagnostics.body,
+    });
+  }
+}
+
+async function commitStagedV1Artifact(input: {
+  artifact: Awaited<ReturnType<typeof sealRuntimeArtifact>>;
+  staged: { artifactPath: string; commitPath: string };
+  label: string;
+}): Promise<void> {
+  assertCondition(locator !== null, "Runtime locator is unavailable");
+  const sha = input.artifact.envelope.sealedArtifactSha256;
+  const key = `${input.label}-commit-${sha}`;
+  const accepted = await signedFetch({
+    path: input.staged.commitPath,
+    method: "POST",
+    body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256: sha },
+    nonce: `${input.label}-commit-accept-${crypto.randomUUID()}`,
+    idempotencyKey: key,
+  });
+  assertStatus(`${input.label}.commit.accepted`, accepted, 409);
+  const terminal = await waitForCommitTerminal(
+    `${input.staged.commitPath}-diagnostics`,
+    `${input.label}.commit`,
+    ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+  );
+  assertCondition(
+    terminal.diagnostics.job.state === "succeeded",
+    `${input.label}: artifact commit did not succeed`,
+  );
+  const replay = await signedControlFetch(
+    {
+      path: input.staged.commitPath,
+      method: "POST",
+      body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256: sha },
+      nonce: `${input.label}-commit-terminal-${crypto.randomUUID()}`,
+      idempotencyKey: key,
+    },
+    `${input.label}.commit.terminal`,
+  );
+  assertStatus(`${input.label}.commit.terminal`, replay, 200);
+}
+
+async function stageV1Artifact(input: {
+  artifact: Awaited<ReturnType<typeof sealRuntimeArtifact>>;
+  label: string;
+}): Promise<{ artifactPath: string; commitPath: string }> {
+  assertCondition(locator !== null && runtimePath !== "", "Commit proof runtime is unavailable");
+  const sha = input.artifact.envelope.sealedArtifactSha256;
+  const artifactPath = `${runtimePath}/artifacts/${sha}`;
+  const begin = await signedControlFetch(
+    {
+      path: `${artifactPath}/begin`,
+      method: "POST",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        envelope: input.artifact.envelope,
+      },
+      nonce: `${input.label}-begin-${crypto.randomUUID()}`,
+      idempotencyKey: `${input.label}-begin-${sha}`,
+    },
+    `${input.label}.begin`,
+  );
+  assertStatus(`${input.label}.begin`, begin, 200);
+  for (let index = 0; index < input.artifact.chunks.length; index += 1) {
+    const chunk = await signedControlFetch(
+      {
+        path: `${artifactPath}/chunks/${index}`,
+        method: "PUT",
+        body: input.artifact.chunks[index],
+        nonce: `${input.label}-chunk-${index}-${crypto.randomUUID()}`,
+        idempotencyKey: `${input.label}-chunk-${sha}-${index}`,
+      },
+      `${input.label}.chunk.${index}`,
+    );
+    assertStatus(`${input.label}.chunk.${index}`, chunk, 200);
+  }
+  return { artifactPath, commitPath: `${artifactPath}/commit` };
+}
+
+async function removeV1Artifact(artifactPath: string, sha: string, label: string): Promise<void> {
+  assertCondition(locator !== null, "Commit proof runtime locator is unavailable");
+  const removed = await signedControlFetch(
+    {
+      path: artifactPath,
+      method: "DELETE",
+      body: { locator, sealedArtifactSha256: sha },
+      nonce: `${label}-remove-${crypto.randomUUID()}`,
+      idempotencyKey: `${label}-remove-${sha}`,
+    },
+    `${label}.remove`,
+  );
+  assertStatus(`${label}.remove`, removed, 200);
+}
+
+async function proveQueueRecoveryAtEveryCheckpoint(manifestRevision: string): Promise<void> {
+  assertCondition(locator !== null, "Commit proof runtime locator is unavailable");
+  const checkpoints = [
+    "initialized",
+    "verification-complete",
+    "payloads-transferred",
+    "unpack-complete",
+    "finalized",
+  ] as const;
+  for (const checkpoint of checkpoints) {
+    const artifact = await sealRuntimeArtifact({
+      targetRuntimeIdentity: runtimeIdentity,
+      manifestRevision,
+      artifactRevision: `${ARTIFACT_COMMIT_ABORT_CHECKPOINT_PREFIX}${checkpoint}-${crypto.randomUUID()}`,
+      sourceRevision: `queue-recovery-${checkpoint}`,
+      files: [
+        {
+          path: "server.mjs",
+          content: `console.log(${JSON.stringify(`queue-recovery-${checkpoint}`)})\n`,
+        },
+      ],
+    });
+    const sha = artifact.envelope.sealedArtifactSha256;
+    const staged = await stageV1Artifact({ artifact, label: `queue.${checkpoint}` });
+    const idempotencyKey = `queue-${checkpoint}-commit-${sha}`;
+    const accepted = await signedFetch({
+      path: staged.commitPath,
+      method: "POST",
+      body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256: sha },
+      nonce: `queue-${checkpoint}-accept-${crypto.randomUUID()}`,
+      idempotencyKey,
+    });
+    assertStatus(`queue.${checkpoint}.accepted`, accepted, 409);
+    assertCondition(
+      safeCode(accepted.body) === "request_in_progress",
+      `queue.${checkpoint}: commit was not durably accepted`,
+    );
+    const terminal = await waitForCommitTerminal(
+      `${staged.commitPath}-diagnostics`,
+      `queue.${checkpoint}`,
+      90_000,
+    );
+    assertCondition(
+      terminal.diagnostics.job.state === "succeeded" &&
+        terminal.diagnostics.job.checkpoint === "finalized" &&
+        terminal.diagnostics.job.attempt >= 2,
+      `queue.${checkpoint}: killed driver was not adopted to completion`,
+    );
+    const events = terminal.diagnostics.job.events;
+    assertCondition(
+      events.filter((event) => event.event === "job-created").length === 1 &&
+        events.some((event) => event.event === "driver-adopted"),
+      `queue.${checkpoint}: durable event trail did not prove one adopted operation`,
+    );
+    const replay = await signedControlFetch(
+      {
+        path: staged.commitPath,
+        method: "POST",
+        body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256: sha },
+        nonce: `queue-${checkpoint}-terminal-${crypto.randomUUID()}`,
+        idempotencyKey,
+      },
+      `queue.${checkpoint}.terminal`,
+    );
+    assertStatus(`queue.${checkpoint}.terminal`, replay, 200);
+    record(`queue.${checkpoint}.proof`, 200, {
+      elapsedMs: terminal.elapsedMs,
+      attempts: terminal.diagnostics.job.attempt,
+      checkpoint: terminal.diagnostics.job.checkpoint,
+      jobCreatedEvents: events.filter((event) => event.event === "job-created").length,
+    });
+    await removeV1Artifact(staged.artifactPath, sha, `queue.${checkpoint}`);
+  }
+}
+
+async function withAmbiguousCommitProxy<T>(
+  failures: number,
+  operation: (controlUrl: string) => Promise<T>,
+): Promise<{ result: T; dropped: number; commitKeys: string[] }> {
+  let remaining = failures;
+  let dropped = 0;
+  const commitKeys: string[] = [];
+  const server = createServer(async (request, response) => {
+    try {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of request) {
+        chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk);
+      }
+      const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (value === undefined || name.toLowerCase() === "host") continue;
+        if (Array.isArray(value)) for (const item of value) headers.append(name, item);
+        else headers.set(name, value);
+      }
+      const targetPath = request.url ?? "/";
+      const upstream = await fetch(`${CONTROL_URL}${targetPath}`, {
+        method: request.method,
+        headers,
+        body: body.byteLength === 0 ? undefined : body,
+      });
+      const upstreamBody = new Uint8Array(await upstream.arrayBuffer());
+      if (targetPath.endsWith("/commit")) {
+        commitKeys.push(headers.get("idempotency-key") ?? "");
+        if (remaining > 0) {
+          remaining -= 1;
+          dropped += 1;
+          response.destroy();
+          return;
+        }
+      }
+      response.statusCode = upstream.status;
+      upstream.headers.forEach((value, name) => {
+        if (
+          name === "content-encoding" ||
+          name === "content-length" ||
+          name === "transfer-encoding"
+        ) {
+          return;
+        }
+        response.setHeader(name, value);
+      });
+      response.setHeader("content-length", upstreamBody.byteLength);
+      response.end(upstreamBody);
+    } catch {
+      response.destroy();
+    }
+  });
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolvePromise);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("Commit proxy did not bind");
+  try {
+    const result = await operation(`http://127.0.0.1:${address.port}`);
+    return { result, dropped, commitKeys };
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+  }
+}
+
+async function proveAbortedAndAmbiguousTransport(manifestRevision: string): Promise<void> {
+  assertCondition(locator !== null, "Commit proof runtime locator is unavailable");
+  const artifact = await sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision,
+    artifactRevision: `queue-transport-${crypto.randomUUID()}`,
+    sourceRevision: "queue-transport-live-proof",
+    files: [{ path: "server.mjs", content: "console.log('queue-transport-live-proof')\n" }],
+  });
+  const proof = await withAmbiguousCommitProxy(3, async (controlUrl) => {
+    const provider = new CloudflareRuntimeProvider(
+      { controlUrl, controlToken, deploymentNamespace: DEPLOYMENT_NAMESPACE },
+      { now: () => Date.now() + workerClockOffsetMs },
+    );
+    return provider.deployArtifact(runtimeIdentity, locator!.projectId, artifact);
+  });
+  assertCondition(
+    proof.result.materialized === true && proof.dropped === 3,
+    "Repeated post-dispatch transport failures did not converge to the durable result",
+  );
+  assertCondition(
+    proof.commitKeys.length >= 4 &&
+      proof.commitKeys[0] !== "" &&
+      new Set(proof.commitKeys).size === 1,
+    "Ambiguous transport retry did not preserve one commit idempotency key",
+  );
+  const sha = artifact.envelope.sealedArtifactSha256;
+  const artifactPath = `${runtimePath}/artifacts/${sha}`;
+  const diagnostics = await readCommitDiagnostics(
+    `${artifactPath}/commit-diagnostics`,
+    "queue.transport.diagnostics",
+  );
+  assertCondition(
+    diagnostics.job.state === "succeeded" &&
+      diagnostics.job.events.filter((event) => event.event === "job-created").length === 1,
+    "Ambiguous transport failures created more than one durable commit operation",
+  );
+  record("queue.transport.proof", 200, {
+    initiatingRequestAbortedAfterDispatch: true,
+    repeatedAmbiguousFailures: proof.dropped,
+    stableIdempotencyKey: true,
+    durableOperations: 1,
+  });
+  await removeV1Artifact(artifactPath, sha, "queue.transport");
+}
+
+async function proveCommitObservationBlackoutRecovery(manifestRevision: string): Promise<void> {
+  assertCondition(locator !== null, "Commit blackout runtime locator is unavailable");
+  const artifact = await sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision,
+    artifactRevision: `queue-blackout-${crypto.randomUUID()}`,
+    sourceRevision: "queue-blackout-live-proof",
+    files: [{ path: "server.mjs", content: "console.log('queue-blackout-live-proof')\n" }],
+  });
+  const sha = artifact.envelope.sealedArtifactSha256;
+  const artifactPath = `${runtimePath}/artifacts/${sha}`;
+  const commitPath = `${artifactPath}/commit`;
+  let blackout = true;
+  let dropped = 0;
+  let commitInitiationResponsesPassed = 0;
+  let preCommitRequests = 0;
+  let preCommitResponsesPassed = 0;
+  const preCommitStatuses: number[] = [];
+  const observedRoutes = new Set<string>();
+  const commitKeys: string[] = [];
+  const directFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const targetUrl =
+      input instanceof Request ? input.url : input instanceof URL ? input.href : String(input);
+    const targetPath = new URL(targetUrl).pathname;
+    if (observedRoutes.size < 12) observedRoutes.add(targetPath);
+    const isThisArtifactTransfer =
+      targetPath === `${artifactPath}/begin` || targetPath.includes(`${artifactPath}/chunks/`);
+    if (isThisArtifactTransfer) preCommitRequests += 1;
+    if (targetPath !== commitPath) {
+      const response = await directFetch(input, init);
+      if (isThisArtifactTransfer) {
+        preCommitResponsesPassed += 1;
+        preCommitStatuses.push(response.status);
+      }
+      return response;
+    }
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
+    new Headers(init?.headers).forEach((value, name) => headers.set(name, value));
+    commitKeys.push(headers.get("idempotency-key") ?? "");
+    const upstream = await directFetch(input, init);
+    if (commitInitiationResponsesPassed === 0) {
+      commitInitiationResponsesPassed = 1;
+      return upstream;
+    }
+    if (!blackout) return upstream;
+    await upstream.arrayBuffer();
+    dropped += 1;
+    throw new TypeError("Simulated post-dispatch commit observation blackout");
+  };
+  const provider = new CloudflareRuntimeProvider(
+    {
+      controlUrl: CONTROL_URL,
+      controlToken,
+      deploymentNamespace: DEPLOYMENT_NAMESPACE,
+    },
+    { now: () => Date.now() + workerClockOffsetMs },
+  );
+  try {
+    let providerSettled = false;
+    const providerOutcome = provider
+      .deployArtifact(runtimeIdentity, locator.projectId, artifact, {
+        operationTimeoutMs: 30_000,
+      })
+      .then(
+        (value) => ({ value, error: null }),
+        (error: unknown) => ({ value: null, error }),
+      )
+      .then((outcome) => {
+        providerSettled = true;
+        return outcome;
+      });
+    const initiationDeadline = performance.now() + 65_000;
+    while (
+      commitInitiationResponsesPassed === 0 &&
+      !providerSettled &&
+      performance.now() < initiationDeadline
+    ) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    }
+    record("queue.blackout.scope-progress", 200, {
+      preCommitRequests,
+      preCommitResponsesPassed,
+      preCommitStatuses: [...preCommitStatuses],
+      observedRoutes: [...observedRoutes],
+      expectedArtifactPath: artifactPath,
+      commitInitiationResponsesPassed,
+      providerSettledBeforeCommit: providerSettled,
+    });
+    if (providerSettled && commitInitiationResponsesPassed === 0) {
+      const earlyOutcome = await providerOutcome;
+      if (earlyOutcome.error !== null) throw earlyOutcome.error;
+      throw new Error("Commit blackout provider completed before commit initiation");
+    }
+    assertCondition(
+      commitInitiationResponsesPassed === 1,
+      "Commit blackout did not reach one passed initiation response",
+    );
+    let workerTruth: CommitDiagnostics | null = null;
+    const truthDeadline = performance.now() + 25_000;
+    for (let observation = 1; performance.now() < truthDeadline; observation += 1) {
+      if (commitInitiationResponsesPassed === 0) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+        continue;
+      }
+      const result = await signedControlFetch(
+        {
+          path: `${artifactPath}/commit-diagnostics`,
+          nonce: `queue-blackout-worker-truth-${observation}-${crypto.randomUUID()}`,
+        },
+        `queue.blackout.worker-truth.${observation}`,
+      );
+      record(`queue.blackout.worker-truth.${observation}.status`, result.response.status, {
+        code: safeCode(result.body),
+      });
+      if (result.response.status === 200) {
+        workerTruth = artifactCommitDiagnosticsResponseSchema.parse(result.body);
+        if (workerTruth.job.state === "succeeded") break;
+      } else {
+        assertCondition(
+          result.response.status === 404,
+          "Commit blackout diagnostics returned unexpectedly",
+        );
+      }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    }
+    assertCondition(workerTruth !== null, "Commit blackout durable job was not discoverable");
+    assertCondition(
+      workerTruth.job.state === "succeeded" &&
+        workerTruth.job.events.some((event) => event.event === "driver-succeeded"),
+      "Commit blackout durable job did not succeed while observations were blacked out",
+    );
+    const discoverySince = new Date(
+      Date.now() + workerClockOffsetMs - (24 * 60 * 60_000 - 60_000),
+    ).toISOString();
+    const discovery = await signedControlFetch(
+      {
+        path: `${CONTROL_PREFIX}/durable-operations?since=${encodeURIComponent(discoverySince)}&limit=100`,
+        method: "GET",
+        nonce: `queue-blackout-discovery-${crypto.randomUUID()}`,
+      },
+      "queue.blackout.discovery",
+    );
+    assertStatus("queue.blackout.discovery", discovery, 200);
+    const discovered = durableOperationDiscoveryResponseSchema
+      .parse(discovery.body)
+      .jobs.find(
+        (job) =>
+          job.runtimeIdentity === runtimeIdentity && job.kind === "v1" && job.subjectKey === sha,
+      );
+    assertCondition(
+      discovered?.state === "succeeded",
+      "Commit blackout discovery did not expose the durable success",
+    );
+    record("queue.blackout.discovery-proof", 200, {
+      jobKey: discovered.jobKey,
+      state: discovered.state,
+      checkpoint: discovered.checkpoint,
+      attempt: discovered.attempt,
+    });
+    const outcome = await providerOutcome;
+    const terminalUnknown = (() => {
+      if (outcome.error instanceof CloudflareRuntimeOperationTerminalUnknownError) {
+        return outcome.error;
+      }
+      if (outcome.error !== null) throw outcome.error;
+      throw new Error("Commit blackout unexpectedly returned a provider success");
+    })();
+    record("queue.blackout.terminal-unknown", terminalUnknown.status, {
+      code: terminalUnknown.code,
+      operation: terminalUnknown.operation,
+      retryable: terminalUnknown.retryable,
+      attempts: terminalUnknown.attempts,
+      successfulObservationCount: terminalUnknown.successfulObservationCount,
+      transportCauseCounts: terminalUnknown.transportCauseCounts,
+      operationTimeoutMs: terminalUnknown.operationTimeoutMs,
+      namedProviderBoundMs: terminalUnknown.namedProviderBoundMs,
+      lastObservedOperationState: terminalUnknown.lastObservedOperationState,
+      dropped,
+      commitRequestsObserved: commitKeys.length,
+      commitInitiationResponsesPassed,
+      preCommitRequests,
+      preCommitResponsesPassed,
+      workerStateDuringBlackout: workerTruth.job.state,
+    });
+    const classifiedTransportAttempts = Object.values(terminalUnknown.transportCauseCounts).reduce(
+      (total, count) => total + (count ?? 0),
+      0,
+    );
+    assertCondition(
+      terminalUnknown.code === "artifact_commit_terminal_unknown" &&
+        terminalUnknown.retryable &&
+        terminalUnknown.attempts > 0 &&
+        terminalUnknown.lastObservedOperationState.startsWith("transport_") &&
+        terminalUnknown.operationTimeoutMs === 30_000 &&
+        terminalUnknown.namedProviderBoundMs === ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS &&
+        classifiedTransportAttempts > 0 &&
+        classifiedTransportAttempts + terminalUnknown.successfulObservationCount ===
+          terminalUnknown.attempts,
+      "Commit blackout typed evidence was incomplete",
+    );
+    assertCondition(
+      preCommitRequests === preCommitResponsesPassed &&
+        preCommitRequests === artifact.chunks.length + 1 &&
+        commitInitiationResponsesPassed === 1 &&
+        dropped > 0,
+      "Commit blackout scope included a pre-commit operation or the initiation response",
+    );
+    blackout = false;
+    const recovered = await provider.deployArtifact(runtimeIdentity, locator.projectId, artifact);
+    assertCondition(recovered.materialized, "Late re-observation did not recover durable success");
+    assertCondition(
+      commitKeys.length > terminalUnknown.attempts &&
+        commitKeys[0] !== "" &&
+        new Set(commitKeys).size === 1,
+      "Commit blackout did not retain one idempotency identity",
+    );
+    const diagnostics = await readCommitDiagnostics(
+      `${artifactPath}/commit-diagnostics`,
+      "queue.blackout.diagnostics",
+    );
+    assertCondition(
+      diagnostics.job.state === "succeeded" &&
+        diagnostics.job.events.filter((event) => event.event === "job-created").length === 1,
+      "Commit blackout created more than one durable operation",
+    );
+    record("queue.blackout.proof", 200, {
+      code: terminalUnknown.code,
+      retryable: terminalUnknown.retryable,
+      attempts: terminalUnknown.attempts,
+      transportCauseCounts: terminalUnknown.transportCauseCounts,
+      operationTimeoutMs: terminalUnknown.operationTimeoutMs,
+      namedProviderBoundMs: terminalUnknown.namedProviderBoundMs,
+      lateReobservationRecovered: true,
+      durableOperations: 1,
+      dropped,
+      commitInitiationResponsesPassed,
+      preCommitRequests,
+      preCommitResponsesPassed,
+      workerSucceededDuringBlackout: true,
+    });
+    await removeV1Artifact(artifactPath, sha, "queue.blackout");
+  } finally {
+    globalThis.fetch = directFetch;
+  }
+}
+
+async function proveAlarmOnlyTerminal(manifestRevision: string): Promise<void> {
+  assertCondition(locator !== null, "Commit proof runtime locator is unavailable");
+  const artifact = await sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision,
+    artifactRevision: `${ARTIFACT_COMMIT_ABORT_ALWAYS_PREFIX}${crypto.randomUUID()}`,
+    sourceRevision: "queue-alarm-terminal-live-proof",
+    files: [{ path: "server.mjs", content: "console.log('queue-alarm-terminal')\n" }],
+  });
+  const sha = artifact.envelope.sealedArtifactSha256;
+  const staged = await stageV1Artifact({ artifact, label: "queue.alarm" });
+  const idempotencyKey = `queue-alarm-commit-${sha}`;
+  const startedAt = performance.now();
+  const accepted = await signedFetch({
+    path: staged.commitPath,
+    method: "POST",
+    body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256: sha },
+    nonce: `queue-alarm-accept-${crypto.randomUUID()}`,
+    idempotencyKey,
+  });
+  assertStatus("queue.alarm.accepted", accepted, 409);
+  const terminal = await waitForCommitTerminal(
+    `${staged.commitPath}-diagnostics`,
+    "queue.alarm",
+    ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+  );
+  assertCondition(
+    terminal.diagnostics.job.state === "failed" &&
+      terminal.diagnostics.job.terminal?.code === "artifact_commit_abandoned" &&
+      terminal.diagnostics.job.events.some((event) => event.event === "deadline-terminal"),
+    "Alarm-only abandonment did not persist the typed durable terminal",
+  );
+  const observedAtMs = Math.round(performance.now() - startedAt);
+  assertCondition(
+    observedAtMs < ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+    "Provider observation bound raced the server terminal",
+  );
+  const replay = await signedFetch({
+    path: staged.commitPath,
+    method: "POST",
+    body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256: sha },
+    nonce: `queue-alarm-terminal-${crypto.randomUUID()}`,
+    idempotencyKey,
+  });
+  assertStatus("queue.alarm.terminal", replay, 503);
+  assertCondition(
+    safeCode(replay.body) === "artifact_commit_abandoned",
+    "Provider did not observe the durable typed terminal",
+  );
+  record("queue.alarm.proof", 200, {
+    noCommitRetryBeforeTerminal: true,
+    terminalCode: "artifact_commit_abandoned",
+    observedAtMs,
+    providerBoundMs: ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+    observationMarginMs: ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS - observedAtMs,
+    attempts: terminal.diagnostics.job.attempt,
+  });
+  await removeV1Artifact(staged.artifactPath, sha, "queue.alarm");
+}
+
+function runtimeStartProbeSource(marker: string): string {
+  return [
+    'import { createServer } from "node:http";',
+    `const marker = ${JSON.stringify(marker)};`,
+    "const port = Number(process.env.PORT || 8080);",
+    "createServer((request, response) => {",
+    "  response.statusCode = request.url === '/healthz' ? 200 : 200;",
+    "  response.setHeader('content-type', 'application/json');",
+    "  response.end(JSON.stringify({ ok: true, marker }));",
+    "}).listen(port, '0.0.0.0');",
+    "",
+  ].join("\n");
+}
+
+async function sealRuntimeStartArtifact(
+  manifestRevision: string,
+  artifactRevision: string,
+  label: string,
+) {
+  return sealRuntimeArtifact({
+    targetRuntimeIdentity: runtimeIdentity,
+    manifestRevision,
+    artifactRevision,
+    sourceRevision: label,
+    files: [{ path: "server.mjs", content: runtimeStartProbeSource(label) }],
+  });
+}
+
+async function prepareRuntimeStartArtifact(
+  manifestRevision: string,
+  artifactRevision: string,
+  label: string,
+) {
+  const artifact = await sealRuntimeStartArtifact(manifestRevision, artifactRevision, label);
+  const staged = await stageV1Artifact({ artifact, label });
+  await commitStagedV1Artifact({ artifact, staged, label });
+  return { artifact, staged };
+}
+
+function runtimeStartBody(artifact: Awaited<ReturnType<typeof sealRuntimeArtifact>>) {
+  assertCondition(locator !== null, "Runtime start locator is unavailable");
+  return {
+    locator,
+    expectedDeploymentVersion: deploymentVersion,
+    artifactRevision: artifact.envelope.artifactRevision,
+    artifactSha256: artifact.envelope.sealedArtifactSha256,
+  };
+}
+
+async function proveRuntimeStartRecoveryAtEveryCheckpoint(manifestRevision: string): Promise<void> {
+  const checkpoints = [
+    "initialized",
+    "artifact-verified",
+    "materialized",
+    "process-started",
+    "finalized",
+  ] as const;
+  for (const checkpoint of checkpoints) {
+    const label = `runtime-start.${checkpoint}`;
+    const prepared = await prepareRuntimeStartArtifact(
+      manifestRevision,
+      `${RUNTIME_START_ABORT_CHECKPOINT_PREFIX}${checkpoint}-${crypto.randomUUID()}`,
+      label,
+    );
+    const idempotencyKey = `${label}-${prepared.artifact.envelope.sealedArtifactSha256}`;
+    const accepted = await signedFetch({
+      path: `${runtimePath}/start`,
+      method: "POST",
+      body: runtimeStartBody(prepared.artifact),
+      nonce: `${label}-accepted-${crypto.randomUUID()}`,
+      idempotencyKey,
+    });
+    assertStatus(`${label}.accepted`, accepted, 409);
+    const terminal = await waitForRuntimeStartTerminal(label, 90_000);
+    assertCondition(
+      terminal.diagnostics.job.state === "succeeded" &&
+        terminal.diagnostics.job.checkpoint === "finalized" &&
+        terminal.diagnostics.job.attempt >= 2,
+      `${label}: killed start driver was not adopted to completion`,
+    );
+    const events = terminal.diagnostics.job.events;
+    assertCondition(
+      events.filter((event) => event.event === "job-created").length === 1 &&
+        events.some((event) => event.event === "driver-adopted"),
+      `${label}: event trail did not prove one adopted operation`,
+    );
+    const replay = await signedControlFetch(
+      {
+        path: `${runtimePath}/start`,
+        method: "POST",
+        body: runtimeStartBody(prepared.artifact),
+        nonce: `${label}-terminal-${crypto.randomUUID()}`,
+        idempotencyKey,
+      },
+      `${label}.terminal`,
+    );
+    assertStatus(`${label}.terminal`, replay, 200);
+    record(`${label}.proof`, 200, {
+      elapsedMs: terminal.elapsedMs,
+      attempts: terminal.diagnostics.job.attempt,
+      checkpoint: terminal.diagnostics.job.checkpoint,
+      durableOperations: 1,
+    });
+  }
+}
+
+async function withAmbiguousRuntimeStartProxy<T>(
+  operation: (controlUrl: string) => Promise<T>,
+): Promise<{ result: T; dropped: number; startKeys: string[]; firstDropDelayMs: number }> {
+  let remainingDrops = 3;
+  let dropped = 0;
+  let firstDrop = true;
+  const startKeys: string[] = [];
+  const firstDropDelayMs = 30_500;
+  const server = createServer(async (request, response) => {
+    try {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of request) {
+        chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk);
+      }
+      const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (value === undefined || name.toLowerCase() === "host") continue;
+        if (Array.isArray(value)) for (const item of value) headers.append(name, item);
+        else headers.set(name, value);
+      }
+      const targetPath = request.url ?? "/";
+      const upstream = await fetch(`${CONTROL_URL}${targetPath}`, {
+        method: request.method,
+        headers,
+        body: body.byteLength === 0 ? undefined : body,
+      });
+      const upstreamBody = new Uint8Array(await upstream.arrayBuffer());
+      if (targetPath.endsWith("/start")) {
+        startKeys.push(headers.get("idempotency-key") ?? "");
+        if (remainingDrops > 0) {
+          remainingDrops -= 1;
+          dropped += 1;
+          if (firstDrop) {
+            firstDrop = false;
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, firstDropDelayMs));
+          }
+          response.destroy();
+          return;
+        }
+      }
+      response.statusCode = upstream.status;
+      upstream.headers.forEach((value, name) => {
+        if (
+          name === "content-encoding" ||
+          name === "content-length" ||
+          name === "transfer-encoding"
+        ) {
+          return;
+        }
+        response.setHeader(name, value);
+      });
+      response.setHeader("content-length", upstreamBody.byteLength);
+      response.end(upstreamBody);
+    } catch {
+      response.destroy();
+    }
+  });
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolvePromise);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Runtime start proxy did not bind");
+  }
+  try {
+    const result = await operation(`http://127.0.0.1:${address.port}`);
+    return { result, dropped, startKeys, firstDropDelayMs };
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+  }
+}
+
+async function proveRuntimeStartAbortedAndAmbiguousTransport(
+  manifestRevision: string,
+): Promise<void> {
+  const label = "runtime-start.transport";
+  const artifact = await sealRuntimeStartArtifact(
+    manifestRevision,
+    `runtime-start-transport-${crypto.randomUUID()}`,
+    label,
+  );
+  const proof = await withAmbiguousRuntimeStartProxy(async (controlUrl) => {
+    const provider = new CloudflareRuntimeProvider(
+      { controlUrl, controlToken, deploymentNamespace: DEPLOYMENT_NAMESPACE },
+      { now: () => Date.now() + workerClockOffsetMs },
+    );
+    await provider.deployArtifact(runtimeIdentity, locator!.projectId, artifact);
+    return provider.start(runtimeIdentity, locator!.projectId);
+  });
+  assertCondition(proof.result === true && proof.dropped === 3, "Runtime start did not converge");
+  assertCondition(
+    proof.startKeys.length >= 4 && proof.startKeys[0] !== "" && new Set(proof.startKeys).size === 1,
+    "Runtime start did not retain one idempotency key across ambiguous transports",
+  );
+  const diagnostics = await readRuntimeStartDiagnostics(label);
+  assertCondition(
+    diagnostics.job.state === "succeeded" &&
+      diagnostics.job.events.filter((event) => event.event === "job-created").length === 1,
+    "Ambiguous runtime start transport created more than one durable operation",
+  );
+  record(`${label}.proof`, 200, {
+    initiatingRequestAbortedAtTransportWindow: true,
+    firstDropDelayMs: proof.firstDropDelayMs,
+    repeatedAmbiguousFailures: proof.dropped,
+    stableIdempotencyKey: true,
+    durableOperations: 1,
+  });
+}
+
+async function proveRuntimeStartAlarmOnlyTerminal(manifestRevision: string): Promise<void> {
+  const label = "runtime-start.alarm";
+  const prepared = await prepareRuntimeStartArtifact(
+    manifestRevision,
+    `${RUNTIME_START_ABORT_ALWAYS_PREFIX}${crypto.randomUUID()}`,
+    label,
+  );
+  const idempotencyKey = `${label}-${prepared.artifact.envelope.sealedArtifactSha256}`;
+  const startedAt = performance.now();
+  const accepted = await signedFetch({
+    path: `${runtimePath}/start`,
+    method: "POST",
+    body: runtimeStartBody(prepared.artifact),
+    nonce: `${label}-accepted-${crypto.randomUUID()}`,
+    idempotencyKey,
+  });
+  assertStatus(`${label}.accepted`, accepted, 409);
+  const terminal = await waitForRuntimeStartTerminal(
+    label,
+    ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+  );
+  const observedAtMs = Math.round(performance.now() - startedAt);
+  assertCondition(
+    terminal.diagnostics.job.state === "failed" &&
+      terminal.diagnostics.job.terminal?.code === "runtime_start_timeout" &&
+      terminal.diagnostics.job.events.some((event) => event.event === "deadline-terminal"),
+    "Alarm-only runtime start did not persist the typed terminal",
+  );
+  assertCondition(
+    observedAtMs < ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+    "Runtime start terminal raced the provider observation boundary",
+  );
+  const replay = await signedFetch({
+    path: `${runtimePath}/start`,
+    method: "POST",
+    body: runtimeStartBody(prepared.artifact),
+    nonce: `${label}-terminal-${crypto.randomUUID()}`,
+    idempotencyKey,
+  });
+  assertStatus(`${label}.terminal`, replay, 504);
+  assertCondition(
+    safeCode(replay.body) === "runtime_start_timeout",
+    "Typed start terminal missing",
+  );
+  record(`${label}.proof`, 200, {
+    noRetryBeforeTerminal: true,
+    terminalCode: "runtime_start_timeout",
+    observedAtMs,
+    providerBoundMs: ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+    observationMarginMs: ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS - observedAtMs,
+    attempts: terminal.diagnostics.job.attempt,
+  });
+}
+
+function runtimeManifestRestartBody(
+  expectedManifestRevision: string,
+  manifestRevision: string,
+  artifact: Awaited<ReturnType<typeof sealRuntimeArtifact>>,
+) {
+  assertCondition(locator !== null, "Runtime manifest restart locator is unavailable");
+  return {
+    locator,
+    expectedDeploymentVersion: deploymentVersion,
+    expectedManifestRevision,
+    manifest: {
+      revision: manifestRevision,
+      runtime: "node-api",
+      buildCommand: ["node", "build.mjs"],
+      startCommand: ["node", "server.mjs"],
+      servicePort: 8080,
+      healthPath: "/healthz",
+      resourceProfile: "dev" as const,
+      public: false,
+    },
+    restart: "restart" as const,
+    sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+  };
+}
+
+async function proveRuntimeManifestRestartRecoveryAtEveryCheckpoint(
+  initialManifestRevision: string,
+): Promise<string> {
+  const checkpoints = [
+    "initialized",
+    "runtime-unbound",
+    "manifest-persisted",
+    "materialized",
+    "process-started",
+    "finalized",
+  ] as const;
+  let currentManifestRevision = initialManifestRevision;
+  for (const checkpoint of checkpoints) {
+    const label = `runtime-manifest-restart.${checkpoint}`;
+    const nextManifestRevision = `${RUNTIME_MANIFEST_RESTART_ABORT_CHECKPOINT_PREFIX}${checkpoint}-${crypto.randomUUID()}`;
+    const artifact = await sealRuntimeStartArtifact(
+      nextManifestRevision,
+      `runtime-manifest-restart-artifact-${crypto.randomUUID()}`,
+      label,
+    );
+    const staged = await stageV1Artifact({ artifact, label });
+    await commitStagedV1Artifact({ artifact, staged, label });
+    const body = runtimeManifestRestartBody(
+      currentManifestRevision,
+      nextManifestRevision,
+      artifact,
+    );
+    const idempotencyKey = `${label}-${artifact.envelope.sealedArtifactSha256}`;
+    const accepted = await signedFetch({
+      path: `${runtimePath}/manifest`,
+      method: "PUT",
+      body,
+      nonce: `${label}-accepted-${crypto.randomUUID()}`,
+      idempotencyKey,
+    });
+    assertStatus(`${label}.accepted`, accepted, 409);
+    const terminal = await waitForRuntimeManifestRestartTerminal(label, 90_000);
+    assertCondition(
+      terminal.diagnostics.job.state === "succeeded" &&
+        terminal.diagnostics.job.checkpoint === "finalized" &&
+        terminal.diagnostics.job.attempt >= 2,
+      `${label}: killed manifest restart driver was not adopted to completion`,
+    );
+    assertCondition(
+      terminal.diagnostics.job.events.filter((event) => event.event === "job-created").length ===
+        1 && terminal.diagnostics.job.events.some((event) => event.event === "driver-adopted"),
+      `${label}: event trail did not prove one adopted operation`,
+    );
+    const replay = await signedControlFetch(
+      {
+        path: `${runtimePath}/manifest`,
+        method: "PUT",
+        body,
+        nonce: `${label}-terminal-${crypto.randomUUID()}`,
+        idempotencyKey,
+      },
+      `${label}.terminal`,
+    );
+    assertStatus(`${label}.terminal`, replay, 200);
+    record(`${label}.proof`, 200, {
+      elapsedMs: terminal.elapsedMs,
+      attempts: terminal.diagnostics.job.attempt,
+      checkpoint: terminal.diagnostics.job.checkpoint,
+      durableOperations: 1,
+    });
+    currentManifestRevision = nextManifestRevision;
+  }
+  return currentManifestRevision;
+}
+
+async function withAmbiguousRuntimeManifestProxy<T>(
+  operation: (controlUrl: string) => Promise<T>,
+): Promise<{ result: T; dropped: number; manifestKeys: string[]; firstDropDelayMs: number }> {
+  let remainingDrops = 3;
+  let dropped = 0;
+  let firstDrop = true;
+  const manifestKeys: string[] = [];
+  const firstDropDelayMs = 30_500;
+  const server = createServer(async (request, response) => {
+    try {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of request) {
+        chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk);
+      }
+      const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (value === undefined || name.toLowerCase() === "host") continue;
+        if (Array.isArray(value)) for (const item of value) headers.append(name, item);
+        else headers.set(name, value);
+      }
+      const targetPath = request.url ?? "/";
+      const upstream = await fetch(`${CONTROL_URL}${targetPath}`, {
+        method: request.method,
+        headers,
+        body: body.byteLength === 0 ? undefined : body,
+      });
+      const upstreamBody = new Uint8Array(await upstream.arrayBuffer());
+      if (targetPath.endsWith("/manifest")) {
+        manifestKeys.push(headers.get("idempotency-key") ?? "");
+        if (remainingDrops > 0) {
+          remainingDrops -= 1;
+          dropped += 1;
+          if (firstDrop) {
+            firstDrop = false;
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, firstDropDelayMs));
+          }
+          response.destroy();
+          return;
+        }
+      }
+      response.statusCode = upstream.status;
+      upstream.headers.forEach((value, name) => {
+        if (
+          name === "content-encoding" ||
+          name === "content-length" ||
+          name === "transfer-encoding"
+        )
+          return;
+        response.setHeader(name, value);
+      });
+      response.setHeader("content-length", upstreamBody.byteLength);
+      response.end(upstreamBody);
+    } catch {
+      response.destroy();
+    }
+  });
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolvePromise);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Runtime manifest proxy did not bind");
+  }
+  try {
+    const result = await operation(`http://127.0.0.1:${address.port}`);
+    return { result, dropped, manifestKeys, firstDropDelayMs };
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+  }
+}
+
+async function proveRuntimeManifestRestartAbortedAndAmbiguousTransport(
+  currentManifestRevision: string,
+): Promise<string> {
+  const label = "runtime-manifest-restart.transport";
+  const nextManifestRevision = `runtime-manifest-transport-${crypto.randomUUID()}`;
+  const artifact = await sealRuntimeStartArtifact(
+    nextManifestRevision,
+    `runtime-manifest-transport-artifact-${crypto.randomUUID()}`,
+    label,
+  );
+  const proof = await withAmbiguousRuntimeManifestProxy(async (controlUrl) => {
+    const provider = new CloudflareRuntimeProvider(
+      { controlUrl, controlToken, deploymentNamespace: DEPLOYMENT_NAMESPACE },
+      { now: () => Date.now() + workerClockOffsetMs },
+    );
+    await provider.deployArtifact(runtimeIdentity, locator!.projectId, artifact);
+    return provider.updateRuntimeManifest(runtimeIdentity, locator!.projectId, {
+      expectedManifestRevision: currentManifestRevision,
+      manifest: runtimeManifestRestartBody(currentManifestRevision, nextManifestRevision, artifact)
+        .manifest,
+      restart: "restart",
+      sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+    });
+  });
+  assertCondition(proof.dropped === 3, "Runtime manifest restart did not converge");
+  assertCondition(
+    proof.manifestKeys.length >= 4 &&
+      proof.manifestKeys[0] !== "" &&
+      new Set(proof.manifestKeys).size === 1,
+    "Runtime manifest restart did not retain one idempotency key across transports",
+  );
+  const diagnostics = await readRuntimeManifestRestartDiagnostics(label);
+  assertCondition(
+    diagnostics.job.state === "succeeded" &&
+      diagnostics.job.events.filter((event) => event.event === "job-created").length === 1,
+    "Ambiguous manifest restart transport created more than one durable operation",
+  );
+  record(`${label}.proof`, 200, {
+    initiatingRequestAbortedAtTransportWindow: true,
+    firstDropDelayMs: proof.firstDropDelayMs,
+    repeatedAmbiguousFailures: proof.dropped,
+    stableIdempotencyKey: true,
+    durableOperations: 1,
+  });
+  return nextManifestRevision;
+}
+
+async function proveRuntimeManifestRestartAlarmOnlyTerminal(
+  currentManifestRevision: string,
+): Promise<void> {
+  const label = "runtime-manifest-restart.alarm";
+  const nextManifestRevision = `${RUNTIME_MANIFEST_RESTART_ABORT_ALWAYS_PREFIX}${crypto.randomUUID()}`;
+  const artifact = await sealRuntimeStartArtifact(
+    nextManifestRevision,
+    `runtime-manifest-alarm-artifact-${crypto.randomUUID()}`,
+    label,
+  );
+  const staged = await stageV1Artifact({ artifact, label });
+  await commitStagedV1Artifact({ artifact, staged, label });
+  const body = runtimeManifestRestartBody(currentManifestRevision, nextManifestRevision, artifact);
+  const idempotencyKey = `${label}-${artifact.envelope.sealedArtifactSha256}`;
+  const startedAt = performance.now();
+  const accepted = await signedFetch({
+    path: `${runtimePath}/manifest`,
+    method: "PUT",
+    body,
+    nonce: `${label}-accepted-${crypto.randomUUID()}`,
+    idempotencyKey,
+  });
+  assertStatus(`${label}.accepted`, accepted, 409);
+  const terminal = await waitForRuntimeManifestRestartTerminal(
+    label,
+    ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+  );
+  const observedAtMs = Math.round(performance.now() - startedAt);
+  assertCondition(
+    terminal.diagnostics.job.state === "failed" &&
+      terminal.diagnostics.job.terminal?.code === "runtime_manifest_update_timeout" &&
+      terminal.diagnostics.job.events.some((event) => event.event === "deadline-terminal"),
+    "Alarm-only runtime manifest restart did not persist the typed terminal",
+  );
+  assertCondition(
+    observedAtMs < ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+    "Manifest restart provider observation bound raced the server terminal",
+  );
+  const replay = await signedControlFetch(
+    {
+      path: `${runtimePath}/manifest`,
+      method: "PUT",
+      body,
+      nonce: `${label}-terminal-${crypto.randomUUID()}`,
+      idempotencyKey,
+    },
+    `${label}.terminal`,
+  );
+  assertStatus(`${label}.terminal`, replay, 504);
+  assertCondition(
+    safeCode(replay.body) === "runtime_manifest_update_timeout",
+    "Provider did not observe the durable manifest restart terminal",
+  );
+  record(`${label}.proof`, 200, {
+    noRetryBeforeTerminal: true,
+    terminalCode: "runtime_manifest_update_timeout",
+    observedAtMs,
+    providerBoundMs: ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
+    observationMarginMs: ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS - observedAtMs,
+    attempts: terminal.diagnostics.job.attempt,
+  });
+}
+
+async function runArtifactCommitLivenessAcceptance(): Promise<void> {
+  locator = {
+    projectId: 850_000_000 + randomBytes(3).readUIntBE(0, 3),
+    role: "preview",
+    slot: "primary",
+  };
+  runtimeIdentity = await deriveRuntimeIdentity({ namespace: DEPLOYMENT_NAMESPACE, ...locator });
+  runtimePath = `${CONTROL_PREFIX}/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
+  const manifestRevision = `commit-liveness-${crypto.randomUUID()}`;
+  const ensured = await signedControlFetch(
+    {
+      path: runtimePath,
+      method: "PUT",
+      body: {
+        locator,
+        expectedDeploymentVersion: deploymentVersion,
+        manifest: {
+          revision: manifestRevision,
+          runtime: "node-api",
+          buildCommand: ["node", "build.mjs"],
+          startCommand: ["node", "server.mjs"],
+          servicePort: 8080,
+          healthPath: "/healthz",
+          resourceProfile: "dev",
+          public: false,
+        },
+      },
+      nonce: `queue-runtime-ensure-${crypto.randomUUID()}`,
+      idempotencyKey: `queue-runtime-ensure-${runtimeIdentity}`,
+    },
+    "queue.runtime.ensure",
+  );
+  assertStatus("queue.runtime.ensure", ensured, 200);
+  if (process.env.NABUFLOW_COMMIT_BLACKOUT_ONLY === "1") {
+    await proveCommitObservationBlackoutRecovery(manifestRevision);
+    return;
+  }
+  await proveQueueRecoveryAtEveryCheckpoint(manifestRevision);
+  await proveAbortedAndAmbiguousTransport(manifestRevision);
+  await proveCommitObservationBlackoutRecovery(manifestRevision);
+  await proveAlarmOnlyTerminal(manifestRevision);
+  await proveRuntimeStartRecoveryAtEveryCheckpoint(manifestRevision);
+  await proveRuntimeStartAbortedAndAmbiguousTransport(manifestRevision);
+  await proveRuntimeStartAlarmOnlyTerminal(manifestRevision);
+  let currentManifestRevision =
+    await proveRuntimeManifestRestartRecoveryAtEveryCheckpoint(manifestRevision);
+  currentManifestRevision =
+    await proveRuntimeManifestRestartAbortedAndAmbiguousTransport(currentManifestRevision);
+  await proveRuntimeManifestRestartAlarmOnlyTerminal(currentManifestRevision);
 }
 
 function capabilityPath(projectId: number): string {
@@ -476,6 +1965,7 @@ async function sustainedGreen(): Promise<void> {
   };
   const started = performance.now();
   let totalRequests = 0;
+  let totalSurfaceProbes = 0;
   const complete = () =>
     Object.values(surfaces).every((surface) => surface.consecutive >= GATE_REQUIRED);
   const update = (name: keyof typeof surfaces, green: boolean, status: number, body: unknown) => {
@@ -495,7 +1985,7 @@ async function sustainedGreen(): Promise<void> {
   };
   while (
     !complete() &&
-    totalRequests < GATE_MAX_REQUESTS &&
+    totalSurfaceProbes < GATE_MAX_REQUESTS &&
     performance.now() - started < GATE_MAX_MS
   ) {
     if (surfaces.controlHmac.consecutive < GATE_REQUIRED) {
@@ -504,6 +1994,7 @@ async function sustainedGreen(): Promise<void> {
         nonce: `gate-${crypto.randomUUID()}`,
       });
       totalRequests += 1;
+      totalSurfaceProbes += 1;
       update("controlHmac", result.response.status === 200, result.response.status, result.body);
       if (result.response.status === 200) {
         deploymentVersion = (result.body as { deploymentVersion?: string }).deploymentVersion ?? "";
@@ -512,23 +2003,31 @@ async function sustainedGreen(): Promise<void> {
     if (surfaces.previewGrant.consecutive < GATE_REQUIRED) {
       const result = await probePreviewGrant(false, surfaces.previewGrant.probes + 1);
       totalRequests += result.requests;
+      totalSurfaceProbes += 1;
       update("previewGrant", result.green, result.status, result.body);
     }
     if (surfaces.vaultKek.consecutive < GATE_REQUIRED) {
       const result = await probeVault(surfaces.vaultKek.probes + 1);
       totalRequests += 2;
+      totalSurfaceProbes += 1;
       update("vaultKek", result.response.status === 200, result.response.status, result.body);
     }
     if (surfaces.previewReplayPair.consecutive < GATE_REQUIRED) {
       const result = await probePreviewGrant(true, surfaces.previewReplayPair.probes + 1);
       totalRequests += result.requests;
+      totalSurfaceProbes += 1;
       update("previewReplayPair", result.green, result.status, result.body);
     }
     if (!complete()) await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
   }
   assertCondition(complete(), `Four-surface gate did not converge: ${JSON.stringify(surfaces)}`);
   assertCondition(deploymentVersion.length > 0, "Active runtime version was not observed");
-  record("gate.complete", 200, { elapsedMs: performance.now() - started, totalRequests, surfaces });
+  record("gate.complete", 200, {
+    elapsedMs: performance.now() - started,
+    totalSurfaceProbes,
+    totalRequests,
+    surfaces,
+  });
 }
 
 async function pantryCall(
@@ -547,6 +2046,217 @@ async function pantryCall(
     },
     label,
   );
+}
+
+async function trackPantryAssembly(intents: readonly PantryPackageIntent[]): Promise<string> {
+  const requestSha256 = await pantryCatalogStockRequestHash({
+    intents: [...intents],
+    platform: ZERO_SEALED_BUILD_PLATFORM,
+  });
+  const assemblyId = `passembly_${requestSha256}`;
+  observedPantryAssemblyIds.add(assemblyId);
+  return assemblyId;
+}
+
+async function captureObservedPantryAssemblyTrails(): Promise<void> {
+  for (const assemblyId of [...observedPantryAssemblyIds].sort()) {
+    try {
+      const result = await pantryCall(
+        `/assemblies/${assemblyId}/diagnostics`,
+        "GET",
+        undefined,
+        `evidence.pantry-assembly.${assemblyId.slice(-12)}`,
+      );
+      record("evidence.pantry-assembly-diagnostics", result.response.status, {
+        assemblyId,
+        diagnostics: result.body,
+      });
+      const resources = await pantryCall(
+        `/assemblies/${assemblyId}/resource-evidence`,
+        "GET",
+        undefined,
+        `evidence.pantry-resources.${assemblyId.slice(-12)}`,
+      );
+      record("evidence.pantry-generation-resources", resources.response.status, {
+        assemblyId,
+        resources: resources.body,
+      });
+    } catch (error) {
+      record("evidence.pantry-assembly-diagnostics", "capture-error", {
+        assemblyId,
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : "unknown",
+      });
+    }
+  }
+}
+
+async function runPantryR2FocusedProbe(): Promise<void> {
+  const cleanupProbeIds = (process.env.NABUFLOW_PANTRY_R2_PROBE_CLEANUP_IDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^r2probe_[A-Za-z0-9_-]{8,64}$/u.test(value));
+  if (cleanupProbeIds.length > 0) {
+    for (let pass = 1; pass <= 3; pass += 1) {
+      for (const probeId of cleanupProbeIds) {
+        const cleanup = await pantryCall(
+          "/diagnostics/r2-probe",
+          "POST",
+          { profile: "heavy-stage-object", mode: "cleanup", probeId },
+          `probe.pantry-r2-realistic.targeted-cleanup.${pass}`,
+        );
+        assertStatus("probe.pantry-r2-realistic.targeted-cleanup", cleanup, 200);
+        record("probe.pantry-r2-realistic.targeted-cleanup", 200, {
+          pass,
+          probeId,
+          result: cleanup.body,
+        });
+      }
+      if (pass < 3) await new Promise((resolvePromise) => setTimeout(resolvePromise, 30_000));
+    }
+    return;
+  }
+  const cases = [
+    ...[50, 100, 200, 400, 600, 800, 900].map((operations) => ({
+      operations,
+      concurrency: 1,
+    })),
+    ...[2, 4, 8, 16].map((concurrency) => ({ operations: 400, concurrency })),
+  ];
+  if (process.env.NABUFLOW_PANTRY_R2_REALISTIC_ONLY !== "1") {
+    for (const probe of cases) {
+      for (let repetition = 1; repetition <= 3; repetition += 1) {
+        const result = await pantryCall(
+          "/diagnostics/r2-probe",
+          "POST",
+          probe,
+          `probe.pantry-r2.${probe.operations}.${probe.concurrency}.${repetition}`,
+        );
+        assertStatus("probe.pantry-r2", result, 200);
+        record("probe.pantry-r2", 200, {
+          repetition,
+          ...probe,
+          result: result.body,
+        });
+      }
+    }
+  }
+
+  const realisticProfiles = [
+    { label: "serial", concurrency: 1, idleBetweenBatchesMs: 250, cpuHashRounds: 2 },
+    { label: "parallel-4", concurrency: 4, idleBetweenBatchesMs: 1_000, cpuHashRounds: 2 },
+  ] as const;
+  for (const profile of realisticProfiles) {
+    const probeId = `r2probe_${evidenceRunId.replaceAll("-", "").slice(0, 24)}_${profile.label.replaceAll("-", "")}`;
+    try {
+      for (let window = 1; window <= 3; window += 1) {
+        const result = await pantryCall(
+          "/diagnostics/r2-probe",
+          "POST",
+          {
+            profile: "heavy-stage-object",
+            mode: "run",
+            probeId,
+            window,
+            concurrency: profile.concurrency,
+            idleBetweenBatchesMs: profile.idleBetweenBatchesMs,
+            cpuHashRounds: profile.cpuHashRounds,
+          },
+          `probe.pantry-r2-realistic.${profile.label}.${window}`,
+        );
+        assertStatus("probe.pantry-r2-realistic", result, 200);
+        record("probe.pantry-r2-realistic", 200, {
+          profile: profile.label,
+          window,
+          result: result.body,
+        });
+        if (window < 3) {
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 60_000));
+        }
+      }
+    } finally {
+      const cleanup = await pantryCall(
+        "/diagnostics/r2-probe",
+        "POST",
+        { profile: "heavy-stage-object", mode: "cleanup", probeId },
+        `probe.pantry-r2-realistic.${profile.label}.cleanup`,
+      );
+      assertStatus("probe.pantry-r2-realistic.cleanup", cleanup, 200);
+      record("probe.pantry-r2-realistic.cleanup", 200, {
+        profile: profile.label,
+        result: cleanup.body,
+      });
+    }
+  }
+}
+
+async function capturePantryObjectInventory(label: string): Promise<unknown | null> {
+  try {
+    const result = await pantryCall(
+      "/diagnostics/objects",
+      "GET",
+      undefined,
+      `evidence.pantry-object-inventory.${label}`,
+    );
+    record("evidence.pantry-object-inventory", result.response.status, {
+      label,
+      inventory: result.body,
+    });
+    return result.body;
+  } catch (error) {
+    record("evidence.pantry-object-inventory", "capture-error", {
+      label,
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : "unknown",
+    });
+    return null;
+  }
+}
+
+async function reclaimCapturedPantryOrphans(inventory: unknown): Promise<void> {
+  const objects =
+    typeof inventory === "object" && inventory !== null && "objects" in inventory
+      ? (inventory as { objects?: unknown }).objects
+      : null;
+  assertCondition(Array.isArray(objects), "Captured Pantry inventory is invalid");
+  const objectSha256 = objects
+    .map((object) =>
+      typeof object === "object" &&
+      object !== null &&
+      typeof (object as { key?: unknown }).key === "string"
+        ? /^cas\/sha256\/([0-9a-f]{64})$/u.exec((object as { key: string }).key)?.[1]
+        : undefined,
+    )
+    .filter((sha256): sha256 is string => sha256 !== undefined)
+    .sort();
+  if (objectSha256.length === 0) return;
+  const result = await pantryCall(
+    "/gc",
+    "POST",
+    {
+      scope: "targeted-orphan-cas",
+      now: new Date(Date.now() + workerClockOffsetMs).toISOString(),
+      maxDeletes: 1_000,
+      objectSha256,
+    },
+    "cleanup.pantry-targeted-orphan-cas",
+  );
+  assertStatus("cleanup.pantry-targeted-orphan-cas", result, 200);
+  const deleted = (result.body as { deletedObjectSha256?: unknown }).deletedObjectSha256;
+  assertCondition(
+    Array.isArray(deleted) && deleted.length === objectSha256.length,
+    "Targeted Pantry orphan reclamation did not delete the captured CAS set",
+  );
+  record("cleanup.pantry-targeted-orphan-cas", 200, {
+    candidates: objectSha256.length,
+    deleted: deleted.length,
+  });
+  const after = await capturePantryObjectInventory("post-targeted-reclamation");
+  const remaining =
+    typeof after === "object" && after !== null && "objects" in after
+      ? (after as { objects?: unknown[] }).objects?.length
+      : undefined;
+  assertCondition(remaining === 0, "Pantry R2 did not reach zero after targeted reclamation");
 }
 
 async function buildCall(suffix: string, method: string, body: unknown | undefined, label: string) {
@@ -1561,6 +3271,195 @@ async function deliverAndStart(
   });
 }
 
+async function runTailSensitiveVendorLifecycle(): Promise<void> {
+  locator = {
+    projectId: 870_000_000 + randomBytes(3).readUIntBE(0, 3),
+    role: "preview",
+    slot: "primary",
+  };
+  runtimeIdentity = await deriveRuntimeIdentity({ namespace: DEPLOYMENT_NAMESPACE, ...locator });
+  runtimePath = `${CONTROL_PREFIX}/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
+  const manifestRevision = `tail-sensitive-${crypto.randomUUID()}`;
+  const tail = await startAcceptanceErrorTail();
+  let stoppedState: VendorAlarmConsequenceProof["stoppedState"] | null = null;
+  let destroyStatus: number | null = null;
+  let postDestroyStatus: number | null = null;
+  let buildState: { r2?: { objects?: number; bytes?: number }; activeCells?: number } | undefined;
+  let pantryState:
+    | { r2?: { objects?: number; bytes?: number; quarantineObjects?: number } }
+    | undefined;
+  let events: ReturnType<typeof parseConcatenatedWranglerTailJson>;
+  try {
+    const ensured = await signedControlFetch(
+      {
+        path: runtimePath,
+        method: "PUT",
+        body: {
+          locator,
+          expectedDeploymentVersion: deploymentVersion,
+          manifest: {
+            revision: manifestRevision,
+            runtime: "node-api",
+            buildCommand: ["node", "build.mjs"],
+            startCommand: ["node", "server.mjs"],
+            servicePort: 8080,
+            healthPath: "/healthz",
+            resourceProfile: "dev",
+            public: false,
+          },
+        },
+        nonce: `tail-sensitive-ensure-${crypto.randomUUID()}`,
+        idempotencyKey: `tail-sensitive-ensure-${runtimeIdentity}`,
+      },
+      "tail-sensitive.runtime.ensure",
+    );
+    assertStatus("tail-sensitive.runtime.ensure", ensured, 200);
+    const prepared = await prepareRuntimeStartArtifact(
+      manifestRevision,
+      `tail-sensitive-artifact-${crypto.randomUUID()}`,
+      "tail-sensitive",
+    );
+
+    for (let cycle = 1; cycle <= 2; cycle += 1) {
+      const started = await signedControlFetch(
+        {
+          path: `${runtimePath}/start`,
+          method: "POST",
+          body: runtimeStartBody(prepared.artifact),
+          nonce: `tail-sensitive-start-${cycle}-${crypto.randomUUID()}`,
+          idempotencyKey: `tail-sensitive-start-${cycle}-${prepared.artifact.envelope.sealedArtifactSha256}`,
+        },
+        `tail-sensitive.runtime.start.${cycle}`,
+      );
+      assertStatus(`tail-sensitive.runtime.start.${cycle}`, started, 200);
+      const running = await signedControlFetch(
+        { path: runtimePath, nonce: `tail-sensitive-running-${cycle}-${crypto.randomUUID()}` },
+        `tail-sensitive.runtime.running.${cycle}`,
+      );
+      assertStatus(`tail-sensitive.runtime.running.${cycle}`, running, 200);
+      assertCondition(
+        (running.body as { runtime?: { status?: string } }).runtime?.status === "running",
+        "Tail-sensitive runtime was not running",
+      );
+      const stopped = await signedControlFetch(
+        {
+          path: `${runtimePath}/stop`,
+          method: "POST",
+          body: { locator, reason: `tail-sensitive-cycle-${cycle}` },
+          nonce: `tail-sensitive-stop-${cycle}-${crypto.randomUUID()}`,
+          idempotencyKey: `tail-sensitive-stop-${cycle}-${crypto.randomUUID()}`,
+        },
+        `tail-sensitive.runtime.stop.${cycle}`,
+      );
+      assertStatus(`tail-sensitive.runtime.stop.${cycle}`, stopped, 200);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, ACCEPTANCE_TAIL_SETTLE_MS));
+      const status = await signedControlFetch(
+        { path: runtimePath, nonce: `tail-sensitive-stopped-${cycle}-${crypto.randomUUID()}` },
+        `tail-sensitive.runtime.stopped.${cycle}`,
+      );
+      assertStatus(`tail-sensitive.runtime.stopped.${cycle}`, status, 200);
+      const runtime = (status.body as { runtime?: VendorAlarmConsequenceProof["stoppedState"] })
+        .runtime;
+      assertCondition(runtime !== undefined, "Tail-sensitive stopped descriptor is missing");
+      stoppedState = runtime;
+      assertCondition(
+        stoppedState.status === "stopped" &&
+          stoppedState.endpoint === null &&
+          stoppedState.readyAt === null &&
+          stoppedState.lastError === null,
+        "Tail-sensitive stopped state is inconsistent",
+      );
+      record(`tail-sensitive.runtime.stopped-state.${cycle}`, 200, stoppedState);
+    }
+
+    const destroyed = await signedControlFetch(
+      {
+        path: runtimePath,
+        method: "DELETE",
+        body: { locator, reason: "tail-sensitive-consequence-proof" },
+        nonce: `tail-sensitive-destroy-${crypto.randomUUID()}`,
+        idempotencyKey: `tail-sensitive-destroy-${crypto.randomUUID()}`,
+      },
+      "tail-sensitive.runtime.destroy",
+    );
+    destroyStatus = destroyed.response.status;
+    assertStatus("tail-sensitive.runtime.destroy", destroyed, 200);
+    const absent = await signedControlFetch(
+      { path: runtimePath, nonce: `tail-sensitive-absent-${crypto.randomUUID()}` },
+      "tail-sensitive.runtime.absent",
+    );
+    postDestroyStatus = absent.response.status;
+    assertStatus("tail-sensitive.runtime.absent", absent, 404);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10_000));
+
+    const buildDiagnostics = await buildCall(
+      "/diagnostics",
+      "GET",
+      undefined,
+      "tail-sensitive.build-diagnostics",
+    );
+    assertStatus("tail-sensitive.build-diagnostics", buildDiagnostics, 200);
+    buildState = buildDiagnostics.body as typeof buildState;
+    const pantryDiagnostics = await pantryCall(
+      "/diagnostics",
+      "GET",
+      undefined,
+      "tail-sensitive.pantry-diagnostics",
+    );
+    assertStatus("tail-sensitive.pantry-diagnostics", pantryDiagnostics, 200);
+    pantryState = pantryDiagnostics.body as typeof pantryState;
+    assertCondition(
+      buildState?.activeCells === 0 &&
+        buildState.r2?.objects === 0 &&
+        buildState.r2.bytes === 0 &&
+        pantryState?.r2?.objects === 0 &&
+        pantryState.r2.bytes === 0,
+      "Tail-sensitive lifecycle did not reach zero active/storage state",
+    );
+  } finally {
+    events = await tail.stop();
+  }
+
+  assertCondition(
+    stoppedState !== null && destroyStatus !== null && postDestroyStatus !== null,
+    "Tail-sensitive consequence proof is incomplete",
+  );
+  const consequenceProofs = events.filter(isKnownVendorAlarmTailEvent).map((event) => ({
+    occurrenceKey: knownVendorAlarmOccurrenceKey(event),
+    stoppedState,
+    destroyStatus,
+    postDestroyStatus,
+    activeRuntimeCount: 0,
+    storage: {
+      buildObjects: buildState?.r2?.objects,
+      buildBytes: buildState?.r2?.bytes,
+      pantryObjects: pantryState?.r2?.objects,
+      pantryBytes: pantryState?.r2?.bytes,
+    },
+    cost: { accruing: false },
+  }));
+  const evaluation = evaluateAcceptanceTail({ events, consequenceProofs });
+  record("tail.acceptance-window.evaluated", 200, {
+    startedAt: tail.startedAt,
+    inspectedExceptionEvents: evaluation.inspectedExceptionEvents,
+    unclassifiedExceptions: 0,
+    occurrenceBudget: 2,
+    knownVendorAlarmOccurrences: evaluation.knownVendorAlarmEvents.map((event) => ({
+      type: event.type,
+      occurrenceKey: event.occurrenceKey,
+      durableObjectId: event.durableObjectId,
+      eventTimestamp: event.eventTimestamp,
+      scheduledTime: event.scheduledTime,
+      reference: event.reference,
+      consequenceChecklist: event.consequence,
+    })),
+    propagationEvents: evaluation.deploymentResetEvents,
+  });
+  runtimeIdentity = "";
+  runtimePath = "";
+  locator = null;
+}
+
 async function cleanup(): Promise<void> {
   for (const [projectId, revision] of readinessRevisions) {
     await signedControlFetch(
@@ -1620,6 +3519,56 @@ async function cleanup(): Promise<void> {
     "cleanup.build-gc",
   );
   record("cleanup.build-gc", buildGc.response.status, buildGc.body);
+  if (
+    process.env.NABUFLOW_ZERO_CLEANUP === "1" ||
+    process.env.NABUFLOW_ZERO_GENERATOR_ONLY === "1"
+  ) {
+    const identity = { intents: ZERO_GENERATOR_INTENTS, platform: PLATFORM };
+    const identitySha256 = await pantryCatalogStockRequestHash(identity);
+    const beforeLookup = await pantryCall(
+      "/diagnostics",
+      "GET",
+      undefined,
+      "cleanup.zero-readonly-before",
+    );
+    assertStatus("cleanup.zero-readonly-before", beforeLookup, 200);
+    const lookup = await pantryCall(
+      `/stock-identities/${identitySha256}`,
+      "GET",
+      undefined,
+      "cleanup.zero-stock-readonly",
+    );
+    assertCondition(
+      lookup.response.status === 200 || lookup.response.status === 404,
+      `cleanup.zero-stock-readonly: expected 200/404, got ${lookup.response.status}`,
+    );
+    record("cleanup.zero-stock-readonly", lookup.response.status, {
+      code: safeCode(lookup.body),
+    });
+    const root = (lookup.body as { revisionRootSha256?: string | null }).revisionRootSha256;
+    if (typeof root === "string" && !createdShelfRoots.includes(root)) {
+      createdShelfRoots.push(root);
+    }
+    const afterLookup = await pantryCall(
+      "/diagnostics",
+      "GET",
+      undefined,
+      "cleanup.zero-readonly-after",
+    );
+    assertStatus("cleanup.zero-readonly-after", afterLookup, 200);
+    const beforeLedger = (beforeLookup.body as { ledger?: Record<string, number> }).ledger;
+    const afterLedger = (afterLookup.body as { ledger?: Record<string, number> }).ledger;
+    assertCondition(
+      canonicalPantryJson(beforeLedger) === canonicalPantryJson(afterLedger),
+      "Read-only cleanup discovery changed Pantry operation counts",
+    );
+    record("cleanup.zero-readonly-side-effect-free", 200, {
+      unchanged: true,
+      assemblies: afterLedger?.assemblies ?? null,
+      shelves: afterLedger?.shelves ?? null,
+      queueDeliveries: afterLedger?.queueDeliveries ?? null,
+    });
+  }
   for (const root of [...createdShelfRoots].reverse()) {
     const read = await pantryCall(
       `/revisions/by-root/${root}`,
@@ -1673,6 +3622,24 @@ async function cleanup(): Promise<void> {
     );
     assertStatus(`cleanup.shelf.absent.${root.slice(0, 8)}`, absent, 404);
   }
+  // A stock request can fail before a shelf root is assigned. Advance the
+  // staging-only test clock and collect those incomplete assemblies as well.
+  for (let pass = 0; pass < 10; pass += 1) {
+    const gc = await pantryCall(
+      "/gc",
+      "POST",
+      {
+        scope: "expired-uncommitted",
+        now: new Date(Date.now() + workerClockOffsetMs + 366 * 24 * 60 * 60_000).toISOString(),
+        maxDeletes: 1_000,
+        retentionNamespace: "pantry-ingest",
+      },
+      `cleanup.pantry-uncommitted-gc.${pass}`,
+    );
+    assertStatus(`cleanup.pantry-uncommitted-gc.${pass}`, gc, 200);
+    const deleted = (gc.body as { deletedAssemblyIds?: string[] }).deletedAssemblyIds ?? [];
+    if (deleted.length === 0) break;
+  }
   const buildDiagnostics = await buildCall(
     "/diagnostics",
     "GET",
@@ -1710,6 +3677,21 @@ async function cleanup(): Promise<void> {
     "cleanup.pantry-diagnostics",
   );
   record("cleanup.pantry-diagnostics", pantryDiagnostics.response.status, pantryDiagnostics.body);
+  if (process.env.NABUFLOW_ZERO_CLEANUP === "1") {
+    const state = pantryDiagnostics.body as {
+      ledger?: { assemblies?: number; shelves?: number; committedObjects?: number };
+      r2?: { objects?: number; bytes?: number; quarantineObjects?: number };
+    };
+    assertCondition(
+      state.ledger?.assemblies === 0 &&
+        state.ledger.shelves === 0 &&
+        state.ledger.committedObjects === 0 &&
+        state.r2?.objects === 0 &&
+        state.r2.bytes === 0 &&
+        state.r2.quarantineObjects === 0,
+      "Pantry cleanup did not reach zero",
+    );
+  }
 }
 
 async function waitForBuildsToSettleForCleanup(): Promise<void> {
@@ -1731,6 +3713,284 @@ async function waitForBuildsToSettleForCleanup(): Promise<void> {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10_000));
   }
   throw new Error("Trusted builds did not settle within the cleanup window");
+}
+
+async function runZeroGeneratorAcceptance(): Promise<void> {
+  // The actual product builder module requires its AI integration at import
+  // time. These values are deliberately non-credentials: the deterministic
+  // adapter makes no model or network call.
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "http://127.0.0.1:1/not-used";
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "not-a-credential";
+  const { runNodeApiBuildPipeline } = await import("../../api-server/src/lib/builder");
+  delete process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  delete process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+
+  const generated = await runNodeApiBuildPipeline({
+    projectName: "zero-live-pantry-app",
+    projectKind: "node-api",
+    userPrompt: "Generate a records API that uses the NabuFlow database runtime",
+    agentMode: "power",
+    zeroGenerationTarget: "cloudflare-sealed-staging-v1",
+    sealedManifestRevision: "zero-live-manifest-v1",
+    modelAdapter: {
+      async complete() {
+        return {
+          blueprint: {
+            projectName: "zero-live-pantry-app",
+            projectType: "node-api",
+            targetPlatforms: ["api"],
+            pages: [{ name: "Health", route: "/healthz" }],
+            components: [],
+            data: ["records"],
+            integrationsNeeded: [],
+            theme: "none",
+          },
+          files: [
+            {
+              path: "package.json",
+              mimeType: "application/json",
+              content: JSON.stringify({
+                name: "zero-live-pantry-app",
+                private: true,
+                scripts: { build: "tsc", start: "node dist/src/index.js" },
+                dependencies: { express: "^5.1.0", zod: "^4.1.5" },
+                devDependencies: {
+                  "@types/express": "^5.0.3",
+                  "@types/node": "^22.18.0",
+                  typescript: "^5.9.2",
+                },
+              }),
+            },
+            {
+              path: "tsconfig.json",
+              mimeType: "application/json",
+              content: JSON.stringify({
+                compilerOptions: {
+                  target: "ES2022",
+                  module: "CommonJS",
+                  moduleResolution: "Node",
+                  rootDir: ".",
+                  outDir: "dist",
+                  strict: true,
+                  esModuleInterop: true,
+                  skipLibCheck: true,
+                },
+                include: ["src/**/*.ts", "nabuflow/runtime/**/*.ts"],
+              }),
+            },
+            {
+              path: "src/index.ts",
+              mimeType: "application/typescript",
+              content: `import express from "express";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+const app = express();
+const database = createNabuFlowDatabase();
+app.get("/healthz", (_request, response) => response.json({ ok: true, generated: true }));
+app.get("/records", async (_request, response) => response.json(await database.query("select 1")));
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+            },
+          ],
+          summary: "Generated a fresh records API through the product Node builder.",
+          warnings: [],
+          nextRecommendation: "Open the staging preview.",
+        };
+      },
+    },
+  });
+  const firstPrepared = generated.sealedGeneration;
+  assertCondition(firstPrepared !== undefined, "Product generator did not emit sealed metadata");
+  assertCondition(
+    generated.files.some((file) => file.path === "nabuflow/runtime/db.ts"),
+    "Product generator did not vendor the dual-mode SDK",
+  );
+  assertCondition(
+    generated.files.every(
+      (file) =>
+        !/process\.env\.(?:DATABASE_URL|STRIPE_[A-Z0-9_]*)|registry\.npmjs\.org|npm install|\bnpx\b/u.test(
+          file.content,
+        ),
+    ),
+    "Generated sealed source contains a credential or tenant dependency-fetch assumption",
+  );
+
+  locator = {
+    projectId: 840_000_000 + randomBytes(3).readUIntBE(0, 3),
+    role: "preview",
+    slot: "primary",
+  };
+  runtimeIdentity = await deriveRuntimeIdentity({ namespace: DEPLOYMENT_NAMESPACE, ...locator });
+  runtimePath = `${CONTROL_PREFIX}/runtimes/${locator.projectId}/${locator.role}/${locator.slot}`;
+  const provider = new CloudflareRuntimeProvider(
+    {
+      controlUrl: CONTROL_URL,
+      controlToken,
+      deploymentNamespace: DEPLOYMENT_NAMESPACE,
+    },
+    {
+      now: () => Date.now() + workerClockOffsetMs,
+    },
+  );
+  const onKitchenEvidence = (detail: Readonly<Record<string, unknown>>): void => {
+    record("zero.generator.durable-operation-identifiers", 200, detail);
+  };
+  const created = await provider.create(locator.projectId, "react-vite", undefined, {
+    servicePort: 5173,
+  });
+  assertCondition(
+    created !== null && !("error" in created),
+    "Fresh staging runtime was not created",
+  );
+  assertCondition(created.runtimeId === runtimeIdentity, "Fresh runtime identity changed");
+  const initial = await provider.zeroGenerationRuntimeDescriptor(
+    runtimeIdentity,
+    locator.projectId,
+  );
+  assertCondition(
+    initial.status === "stopped" &&
+      initial.manifestRevision === `project-${locator.projectId}-runtime-v1`,
+    "Fresh runtime did not begin stopped on the pre-detection manifest",
+  );
+  record("zero.generator.fresh-product-path", 200, {
+    files: generated.files.length,
+    dependencyIntents: firstPrepared.dependencyPlan.intents.length,
+    initialStack: "react-vite",
+    initialPort: 5173,
+    credentialAssumptions: 0,
+    modelAdapter: "deterministic-no-network",
+  });
+
+  await trackPantryAssembly(firstPrepared.dependencyPlan.intents);
+  const first = await runZeroGenerationKitchen(provider, {
+    projectId: locator.projectId,
+    runtimeId: runtimeIdentity,
+    files: generated.files,
+    dependencyPlan: firstPrepared.dependencyPlan,
+    manifest: firstPrepared.manifest,
+    pantryPublicKeys: new Map([[PANTRY_TEST_KEY.kid, PANTRY_TEST_KEY.publicKeyPem]]),
+    now: () => new Date(Date.now() + workerClockOffsetMs),
+    onEvidence: onKitchenEvidence,
+  });
+  createdBuildIds.add(first.buildId);
+  createdShelfRoots.push(first.shelfRootSha256);
+  const health = await provider.exec(
+    runtimeIdentity,
+    [
+      "node",
+      "-e",
+      'fetch("http://127.0.0.1:8080/healthz").then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})',
+    ],
+    locator.projectId,
+    "/workspace",
+  );
+  assertCondition(
+    health.ok && health.stdout.includes('"generated":true'),
+    "Generated app is unhealthy",
+  );
+  record("zero.generator.live-kitchen-start", 200, {
+    runtimeIdentity,
+    port: 8080,
+    healthPath: "/healthz",
+    buildId: first.buildId,
+    artifactSha256: first.artifactSha256,
+    coldBuild: first.coldBuild,
+  });
+
+  const egress = await provider.exec(
+    runtimeIdentity,
+    [
+      "node",
+      "-e",
+      'fetch("https://registry.npmjs.org/").then(async(response)=>{if(response.status===520){console.log("blocked:520");return;}console.log(`reachable:${response.status}`);process.exit(2)}).catch(()=>console.log("blocked:network"))',
+    ],
+    locator.projectId,
+    "/workspace",
+  );
+  assertCondition(
+    egress.ok && /(?:^|\n)blocked:(?:520|network)(?:\n|$)/u.test(egress.stdout),
+    `Tenant registry egress was not blocked (${egress.stdout.trim() || `exit ${egress.exitCode}`})`,
+  );
+  record("zero.generator.tenant-egress", 200, { registryAccess: "blocked" });
+
+  await provider.stop(runtimeIdentity, locator.projectId);
+  const sourceChangedFiles = generated.files.map((file) =>
+    file.path === "src/index.ts"
+      ? {
+          ...file,
+          content: file.content.replace(
+            "generated: true",
+            'generated: true, revision: "source-v2"',
+          ),
+        }
+      : file,
+  );
+  const sourceChanged = prepareZeroSealedNodeSource({
+    files: sourceChangedFiles,
+    manifestRevision: "zero-live-manifest-v2",
+  });
+  assertCondition(
+    canonicalPantryJson(sourceChanged.dependencyPlan) ===
+      canonicalPantryJson(firstPrepared.dependencyPlan),
+    "Source-only edit changed the Pantry dependency intent",
+  );
+  await trackPantryAssembly(sourceChanged.dependencyPlan.intents);
+  const second = await runZeroGenerationKitchen(provider, {
+    projectId: locator.projectId,
+    runtimeId: runtimeIdentity,
+    files: sourceChanged.files,
+    dependencyPlan: sourceChanged.dependencyPlan,
+    manifest: sourceChanged.manifest,
+    pantryPublicKeys: new Map([[PANTRY_TEST_KEY.kid, PANTRY_TEST_KEY.publicKeyPem]]),
+    now: () => new Date(Date.now() + workerClockOffsetMs),
+    onEvidence: onKitchenEvidence,
+  });
+  createdBuildIds.add(second.buildId);
+  createdShelfRoots.push(second.shelfRootSha256);
+  assertCondition(
+    second.dependencyClosureSha256 === first.dependencyClosureSha256 &&
+      second.artifactSha256 !== first.artifactSha256,
+    "Source-only edit did not reuse the closure while producing a new artifact",
+  );
+  record("zero.generator.source-only-cache", 200, {
+    closureReused: true,
+    artifactChanged: true,
+    coldBuild: second.coldBuild,
+  });
+
+  await provider.stop(runtimeIdentity, locator.projectId);
+  const dependencyChangedFiles = sourceChanged.files.map((file) => {
+    if (file.path !== "package.json") return file;
+    const parsed = JSON.parse(file.content) as { dependencies: Record<string, string> };
+    parsed.dependencies.nanoid = "^5.1.5";
+    return { ...file, content: JSON.stringify(parsed) };
+  });
+  const dependencyChanged = prepareZeroSealedNodeSource({
+    files: dependencyChangedFiles,
+    manifestRevision: "zero-live-manifest-v3",
+  });
+  await trackPantryAssembly(dependencyChanged.dependencyPlan.intents);
+  const third = await runZeroGenerationKitchen(provider, {
+    projectId: locator.projectId,
+    runtimeId: runtimeIdentity,
+    files: dependencyChanged.files,
+    dependencyPlan: dependencyChanged.dependencyPlan,
+    manifest: dependencyChanged.manifest,
+    pantryPublicKeys: new Map([[PANTRY_TEST_KEY.kid, PANTRY_TEST_KEY.publicKeyPem]]),
+    now: () => new Date(Date.now() + workerClockOffsetMs),
+    onEvidence: onKitchenEvidence,
+  });
+  createdBuildIds.add(third.buildId);
+  createdShelfRoots.push(third.shelfRootSha256);
+  assertCondition(
+    third.dependencyClosureSha256 !== second.dependencyClosureSha256 &&
+      third.artifactSha256 !== second.artifactSha256,
+    "Dependency edit did not produce a new closure and artifact",
+  );
+  record("zero.generator.dependency-change", 200, {
+    closureChanged: true,
+    artifactChanged: true,
+    dependencyIntents: dependencyChanged.dependencyPlan.intents.length,
+    coldBuild: third.coldBuild,
+  });
 }
 
 async function cancelExplicitCleanupBuilds(): Promise<void> {
@@ -1756,6 +4016,12 @@ async function cancelExplicitCleanupBuilds(): Promise<void> {
 async function main(): Promise<void> {
   let failure: unknown = null;
   try {
+    for (const assemblyId of (process.env.NABUFLOW_CAPTURE_PANTRY_ASSEMBLY_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => /^passembly_[0-9a-f]{64}$/u.test(value))) {
+      observedPantryAssemblyIds.add(assemblyId);
+    }
     record("run.configuration", 200, {
       evidenceRunId,
       buildTerminalWaitMs: BUILD_TERMINAL_WAIT_MS,
@@ -1764,7 +4030,30 @@ async function main(): Promise<void> {
     });
     await rotateWorkerSecrets();
     await sustainedGreen();
-    if (process.env.NABUFLOW_CLEANUP_ONLY === "1") {
+    if (process.env.NABUFLOW_TAIL_SENSITIVE_ONLY === "1") {
+      await runTailSensitiveVendorLifecycle();
+      persistPreCleanupEvidence();
+      return;
+    }
+    if (process.env.NABUFLOW_DURABLE_DISCOVERY_ONLY === "1") {
+      await captureRecentDurableOperationEvidence("evidence.durable-operations");
+      persistPreCleanupEvidence();
+      return;
+    }
+
+    const preRunPantryInventory = await capturePantryObjectInventory("pre-run");
+    if ((process.env.NABUFLOW_CAPTURE_PANTRY_ASSEMBLY_IDS ?? "").trim() !== "") {
+      await captureObservedPantryAssemblyTrails();
+    }
+    if (
+      process.env.NABUFLOW_RECLAIM_CAPTURED_PANTRY_ORPHANS === "1" &&
+      preRunPantryInventory !== null
+    ) {
+      await reclaimCapturedPantryOrphans(preRunPantryInventory);
+    }
+    if (process.env.NABUFLOW_PANTRY_R2_PROBE_ONLY === "1") {
+      await runPantryR2FocusedProbe();
+    } else if (process.env.NABUFLOW_CLEANUP_ONLY === "1") {
       await cancelExplicitCleanupBuilds();
       await waitForBuildsToSettleForCleanup();
     } else {
@@ -1776,26 +4065,39 @@ async function main(): Promise<void> {
           (health.body as { directRegistryAccess?: boolean }).directRegistryAccess === false,
         "Build service isolation advertisement changed",
       );
-      const nowMs = Date.now() + workerClockOffsetMs;
-      const baseShelf = await stockHeavyShelf(nowMs);
-      if (process.env.NABUFLOW_INSPECT_CLOSURE_ONLY !== "1") {
-        const buildShelf = await captureBuildResource(baseShelf, nowMs);
-        await proveLiveConsumerDeathRecovery(buildShelf);
-        const built = await runBuild(buildShelf);
-        if (process.env.NABUFLOW_HEAVY_ONLY !== "1") {
-          await proveNegativeBuilds(buildShelf);
-          await deliverAndStart(built.output, buildShelf);
+      if (process.env.NABUFLOW_ZERO_GENERATOR_ONLY === "1") {
+        await runZeroGeneratorAcceptance();
+      } else if (process.env.NABUFLOW_COMMIT_LIVENESS_ONLY === "1") {
+        await runArtifactCommitLivenessAcceptance();
+      } else {
+        const nowMs = Date.now() + workerClockOffsetMs;
+        const baseShelf = await stockHeavyShelf(nowMs);
+        if (process.env.NABUFLOW_INSPECT_CLOSURE_ONLY !== "1") {
+          const buildShelf = await captureBuildResource(baseShelf, nowMs);
+          await proveLiveConsumerDeathRecovery(buildShelf);
+          const built = await runBuild(buildShelf);
+          if (process.env.NABUFLOW_HEAVY_ONLY !== "1") {
+            await proveNegativeBuilds(buildShelf);
+            await deliverAndStart(built.output, buildShelf);
+          }
         }
       }
     }
+    await captureRecentDurableOperationEvidence("evidence.durable-operations");
+    await captureObservedPantryAssemblyTrails();
+    await capturePantryObjectInventory("pre-cleanup");
+    persistPreCleanupEvidence();
   } catch (error) {
     failure = error;
-    record("run.failure", "error", {
-      name: error instanceof Error ? error.name : "UnknownError",
-      message: error instanceof Error ? error.message : "unknown",
-    });
-    const preCleanupEvidencePath = writeEvidence("pre-cleanup");
-    record("evidence.pre-cleanup.persisted", 200, { path: preCleanupEvidencePath });
+    record("run.failure", "error", sanitizedFailureEvidence(error));
+    try {
+      await captureRecentDurableOperationEvidence("evidence.durable-operations");
+    } catch (diagnosticError) {
+      record("evidence.durable-operations", "error", sanitizedFailureEvidence(diagnosticError));
+    }
+    await captureObservedPantryAssemblyTrails();
+    await capturePantryObjectInventory("pre-cleanup");
+    persistPreCleanupEvidence();
   } finally {
     try {
       if (controlToken !== "") await cleanup();

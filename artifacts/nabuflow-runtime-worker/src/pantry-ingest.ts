@@ -5,6 +5,8 @@ import {
   sha256Hex,
   type PantryCatalogObjectKind,
   type PantryCatalogStockRequest,
+  type PantryCatalogAssemblyProgressMetrics,
+  type PantryCatalogAssemblyStage,
   type PantryDependencyClosure,
   type PantryErrorCode,
   type PantryResolvedIngredient,
@@ -25,6 +27,7 @@ const MAX_EDGES = 10_000;
 const MAX_TOTAL_TARBALL_BYTES = 256 * 1024 * 1024;
 const MAX_TOTAL_UNPACKED_BYTES = 1024 * 1024 * 1024;
 const INGEST_TIMEOUT_MS = 120_000;
+const PROGRESS_HEARTBEAT_MS = 2_000;
 
 const SCANNER_POLICY = {
   policyVersion: "nabu-pantry-ingest-scan/v1",
@@ -38,6 +41,18 @@ export interface PantryIngestObject {
   kind: PantryCatalogObjectKind;
   bytes: Uint8Array;
   sha256: string;
+}
+
+export interface PantryIngestProgressUpdate {
+  stage: Extract<
+    PantryCatalogAssemblyStage,
+    | "resolving-metadata"
+    | "fetching-tarball"
+    | "verifying-integrity"
+    | "extracting-tarball"
+    | "assembling-closure"
+  >;
+  metrics: PantryCatalogAssemblyProgressMetrics;
 }
 
 export interface PantryIngestBuild {
@@ -217,6 +232,7 @@ export async function ingestPantryStockRequest(
   request: PantryCatalogStockRequest,
   client = new NpmRegistryClient(),
   now = (): number => Date.now(),
+  onProgress: (progress: PantryIngestProgressUpdate) => Promise<void> = async () => undefined,
 ): Promise<PantryIngestBuild> {
   const startedAt = now();
   const packuments = new Map<string, Promise<{ packument: NpmPackument; bytes: Uint8Array }>>();
@@ -230,6 +246,29 @@ export async function ingestPantryStockRequest(
   let edgeCount = 0;
   let totalTarballBytes = 0;
   let totalUnpackedBytes = 0;
+  let resolvedPackages = 0;
+  let fetchedTarballs = 0;
+  let verifiedTarballs = 0;
+  let extractedTarballs = 0;
+  let lastProgressAtMs = Number.NEGATIVE_INFINITY;
+  const observedStages = new Set<PantryIngestProgressUpdate["stage"]>();
+
+  const progressMetrics = (): PantryCatalogAssemblyProgressMetrics => ({
+    resolvedPackages,
+    fetchedTarballs,
+    verifiedTarballs,
+    extractedTarballs,
+    dependencyEdges: edgeCount,
+    tarballBytes: totalTarballBytes,
+    unpackedBytes: totalUnpackedBytes,
+  });
+  const progress = async (stage: PantryIngestProgressUpdate["stage"]): Promise<void> => {
+    const currentMs = now();
+    if (observedStages.has(stage) && currentMs - lastProgressAtMs < PROGRESS_HEARTBEAT_MS) return;
+    observedStages.add(stage);
+    lastProgressAtMs = currentMs;
+    await onProgress({ stage, metrics: progressMetrics() });
+  };
 
   const addObject = async (kind: PantryCatalogObjectKind, bytes: Uint8Array): Promise<string> => {
     const object = await objectFor(kind, bytes);
@@ -270,6 +309,7 @@ export async function ingestPantryStockRequest(
       );
     let packumentResult: Awaited<ReturnType<typeof getPackument>>;
     try {
+      await progress("resolving-metadata");
       packumentResult = await getPackument(name);
     } catch (error) {
       if (optional && error instanceof PantryIngestError && !error.retryable) return null;
@@ -320,13 +360,16 @@ export async function ingestPantryStockRequest(
         );
       }
       const tarballUrl = new URL(document.dist.tarball).href;
+      await progress("fetching-tarball");
       const tarballBytes = await client.fetchTarball(tarballUrl);
+      fetchedTarballs += 1;
       totalTarballBytes += tarballBytes.byteLength;
       if (totalTarballBytes > MAX_TOTAL_TARBALL_BYTES)
         throw new PantryIngestError(
           "stocking_size_limit",
           "Dependency closure exceeded its compressed size limit",
         );
+      await progress("verifying-integrity");
       const sri = await verifyNpmSri(tarballBytes, integrity);
       if (!sri.ok)
         throw new PantryIngestError(
@@ -345,7 +388,10 @@ export async function ingestPantryStockRequest(
           "integrity_mismatch",
           "Package registry signature verification failed",
         );
+      verifiedTarballs += 1;
+      await progress("extracting-tarball");
       const verifiedTar = await inspectNpmTarball(tarballBytes);
+      extractedTarballs += 1;
       totalUnpackedBytes += verifiedTar.unpackedBytes;
       if (totalUnpackedBytes > MAX_TOTAL_UNPACKED_BYTES)
         throw new PantryIngestError(
@@ -485,6 +531,8 @@ export async function ingestPantryStockRequest(
         const b = `${right.name}@${right.version}\0${right.kind}`;
         return a < b ? -1 : a > b ? 1 : 0;
       });
+      resolvedPackages += 1;
+      await progress("resolving-metadata");
       return {
         package: { ecosystem: "npm", name, version },
         registryMetadataSha256,
@@ -525,6 +573,7 @@ export async function ingestPantryStockRequest(
       throw new PantryIngestError("version_not_found", "Root package did not resolve");
     roots.push(ingredient.package);
   }
+  await progress("assembling-closure");
   const resolvedIngredients = await Promise.all(ingredients.values());
   roots.sort((left, right) =>
     coordinateKey(left.name, left.version).localeCompare(coordinateKey(right.name, right.version)),

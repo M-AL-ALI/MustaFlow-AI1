@@ -11,6 +11,15 @@ import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
 import type { TestPlan } from "./checks/playwright-runner";
 import { runPlanningBrain } from "./planning-brain";
+import type {
+  RuntimeManifestContract,
+  ZeroGeneratedDependencyPlan,
+  ZeroGenerationTarget,
+} from "@workspace/tenant-runtime-contracts";
+import {
+  prepareZeroSealedNodeSource,
+  ZERO_SEALED_NODE_PROMPT_EXTENSION,
+} from "./zero-sealed-generation";
 
 /**
  * Sanitises an AI-generated summary so the chat always shows human-readable
@@ -94,7 +103,20 @@ export type BuilderResult = {
   correctionPasses: number;
   correctionFailed: boolean;
   primaryErrorCategory: string | null;
+  /** Present only for the deployment-locked Cloudflare staging generator path. */
+  sealedGeneration?: {
+    dependencyPlan: ZeroGeneratedDependencyPlan;
+    manifest: RuntimeManifestContract;
+  };
 };
+
+export interface BuilderModelAdapter {
+  complete(input: {
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    label: string;
+    signal?: AbortSignal;
+  }): Promise<Record<string, unknown>>;
+}
 
 export type ConversationTurn = {
   role: "user" | "assistant";
@@ -5307,6 +5329,11 @@ type StackBuildArgs = {
   taskMode?: string;
   /** Explicit project runtime service port; omitted preserves legacy prompt defaults. */
   runtimePort?: number | null;
+  /** Deployment-owned generation target. Omitted is exactly the legacy path. */
+  zeroGenerationTarget?: ZeroGenerationTarget;
+  /** Deterministic acceptance adapter; production jobs never supply one. */
+  modelAdapter?: BuilderModelAdapter;
+  sealedManifestRevision?: string;
 };
 
 type StackRefineArgs = {
@@ -5363,6 +5390,10 @@ async function runStackBuildPipeline(
     { role: "system", content: stackPromptForRuntimePort(systemPrompt, args.runtimePort) },
     { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
   ];
+
+  if (args.zeroGenerationTarget === "cloudflare-sealed-staging-v1") {
+    messages.push({ role: "system", content: ZERO_SEALED_NODE_PROMPT_EXTENSION });
+  }
 
   if (knowledgeContext) {
     messages.push({
@@ -5422,17 +5453,19 @@ async function runStackBuildPipeline(
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", `Generating ${stackLabel} project with AI…`);
-  const parsed = await callWithRetry(
-    messages,
-    modelFor(agentMode),
-    32000,
-    `${stackLabel}-build`,
-    signal,
-    "build",
-    agentMode,
-    taskId,
-    taskMode,
-  );
+  const parsed = args.modelAdapter
+    ? await args.modelAdapter.complete({ messages, label: `${stackLabel}-build`, signal })
+    : await callWithRetry(
+        messages,
+        modelFor(agentMode),
+        32000,
+        `${stackLabel}-build`,
+        signal,
+        "build",
+        agentMode,
+        taskId,
+        taskMode,
+      );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -5473,11 +5506,21 @@ async function runStackBuildPipeline(
   );
 
   const { files: sanitisedFiles } = scanForSecrets(files);
+  const sealed =
+    args.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
+      ? prepareZeroSealedNodeSource({
+          files: sanitisedFiles,
+          manifestRevision:
+            args.sealedManifestRevision ??
+            `zero-node-${String(taskId ?? projectName).replace(/[^A-Za-z0-9._-]/gu, "-")}-v1`,
+        })
+      : null;
+  const outputFiles = sealed?.files ?? sanitisedFiles;
 
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: blueprint as unknown as Record<string, unknown>,
-    filesCreated: sanitisedFiles.map((f) => f.path),
+    filesCreated: outputFiles.map((f) => f.path),
     filesChanged: [],
     filesRemoved: [],
     previewUpdated: false,
@@ -5488,12 +5531,20 @@ async function runStackBuildPipeline(
 
   return {
     blueprint,
-    files: sanitisedFiles,
+    files: outputFiles,
     report,
     assistantSummary: summary,
     correctionPasses: 0,
     correctionFailed: false,
     primaryErrorCategory: null,
+    ...(sealed
+      ? {
+          sealedGeneration: {
+            dependencyPlan: sealed.dependencyPlan,
+            manifest: sealed.manifest,
+          },
+        }
+      : {}),
   };
 }
 

@@ -264,4 +264,43 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
     expect(containerMocks.provisionContainer).not.toHaveBeenCalled();
     expect(containerMocks.execInContainer).toHaveBeenCalled();
   });
+
+  it("records a Pantry intent without provisioning or installing in sealed mode", async () => {
+    const ctx = makeToolCtx("pkg_install", {
+      manager: "npm",
+      pkg: "express",
+      version: "^4.21.0",
+    });
+    ctx.stack = "node-api";
+    ctx.input.stack = "node-api";
+    ctx.input.zeroGenerationTarget = "cloudflare-sealed-staging-v1";
+
+    const result = await executeTool(ctx);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(JSON.parse(result.observation)).toEqual({
+      ok: true,
+      disposition: "pantry-dependency-intent-recorded",
+      ecosystem: "npm",
+      name: "express",
+      selector: "^4.21.0",
+      tenantInstallStarted: false,
+    });
+    expect(containerMocks.isContainerLayerConfigured).not.toHaveBeenCalled();
+    expect(containerMocks.provisionContainer).not.toHaveBeenCalled();
+    expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+  });
+
+  it("blocks executable commands before the sandbox in sealed mode", async () => {
+    const ctx = makeToolCtx("run_command", { argv: ["npm", "install"] });
+    ctx.stack = "node-api";
+    ctx.input.stack = "node-api";
+    ctx.input.zeroGenerationTarget = "cloudflare-sealed-staging-v1";
+
+    const result = await executeTool(ctx);
+
+    expect(result).toMatchObject({ ok: false, exitCode: 126 });
+    expect(result.observation).toContain("Pantry owns dependencies");
+    expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+  });
 });

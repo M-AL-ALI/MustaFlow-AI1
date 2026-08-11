@@ -3,12 +3,17 @@ import {
   PANTRY_CATALOG_SCHEMA_VERSION,
   PANTRY_CATALOG_SHELF_FORMAT,
   PANTRY_CATALOG_STAMP_FORMAT,
+  canonicalPantryCatalogStockIdentity,
+  pantryCatalogAssemblyDiagnosticsResponseSchema,
   pantryCatalogCommitRequestSchema,
+  pantryCatalogAssemblyStatusResponseSchema,
+  pantryCatalogGcRequestSchema,
   pantryCatalogShelfManifestHash,
   pantryCatalogShelfMatchesStamp,
   pantryCatalogShelfRecordSchema,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
+  pantryCatalogStockResponseSchema,
   pantryDependencyClosureHash,
   pantryIngredientMerkleRoot,
   pantryRevisionRoot,
@@ -106,6 +111,130 @@ describe("Pantry catalog contracts", () => {
     expect(request.intents[0].name).toBe("@future/maps-realtime-image-db");
   });
 
+  it("defines stock identity once from canonical semantic fields and excludes timestamps", async () => {
+    const unsorted = {
+      intents: [
+        { ecosystem: "npm" as const, name: "zod", selector: "^4.1.5" },
+        { ecosystem: "npm" as const, name: "express", selector: "^5.1.0" },
+      ],
+      platform: PANTRY_COMPATIBILITY_PLATFORM,
+    };
+    const canonical = canonicalPantryCatalogStockIdentity(unsorted);
+    expect(canonical.intents.map((intent) => intent.name)).toEqual(["express", "zod"]);
+    const firstEnvelope = {
+      ...canonical,
+      requestedAt: "2026-08-09T16:00:00.000Z",
+      expiresAt: "2026-08-09T17:00:00.000Z",
+    };
+    const resumedEnvelope = {
+      ...canonical,
+      requestedAt: "2026-08-09T16:20:00.000Z",
+      expiresAt: "2026-08-09T17:20:00.000Z",
+    };
+    const first = await pantryCatalogStockRequestHash(firstEnvelope);
+    const resumed = await pantryCatalogStockRequestHash(resumedEnvelope);
+    expect(resumed).toBe(first);
+    expect(await pantryCatalogStockRequestHash(unsorted)).toBe(first);
+  });
+
+  it("contracts the explicit stock and assembly-progress lifecycle", () => {
+    const assemblyId = `passembly_${"e".repeat(64)}`;
+    expect(
+      pantryCatalogStockResponseSchema.parse({
+        ok: true,
+        state: "assembling",
+        assemblyId,
+        revisionRootSha256: null,
+      }).state,
+    ).toBe("assembling");
+    expect(
+      pantryCatalogAssemblyStatusResponseSchema.parse({
+        ok: true,
+        assemblyId,
+        ingest: {
+          state: "running",
+          attempt: 2,
+          updatedAt: "2026-08-09T16:00:00.000Z",
+          leaseUntil: "2026-08-09T16:03:00.000Z",
+          failure: null,
+        },
+        stagedObjects: 17,
+      }).ingest.state,
+    ).toBe("running");
+    expect(
+      pantryCatalogAssemblyStatusResponseSchema.safeParse({
+        ok: true,
+        assemblyId,
+        ingest: { state: "failed", attempt: 2, failure: null },
+        stagedObjects: 17,
+      }).success,
+    ).toBe(false);
+    expect(
+      pantryCatalogAssemblyDiagnosticsResponseSchema.parse({
+        ok: true,
+        assemblyId,
+        requestSha256: "f".repeat(64),
+        currentStage: "fetching-tarball",
+        lastTransitionAt: "2026-08-09T16:01:00.000Z",
+        queueEnqueues: 2,
+        queueDeliveries: 3,
+        generation: 2,
+        leaseRenewals: 4,
+        alarmReenqueues: 1,
+        ingestAttempts: 2,
+        stagedObjects: 0,
+        metrics: {
+          resolvedPackages: 4,
+          fetchedTarballs: 3,
+          verifiedTarballs: 2,
+          extractedTarballs: 2,
+          dependencyEdges: 8,
+          tarballBytes: 1_024,
+          unpackedBytes: 4_096,
+        },
+        stageTransitions: [
+          {
+            stage: "fetching-tarball",
+            firstAt: "2026-08-09T16:00:30.000Z",
+            lastAt: "2026-08-09T16:01:00.000Z",
+            transitions: 3,
+          },
+        ],
+        events: [
+          {
+            sequence: 7,
+            at: "2026-08-09T16:01:00.000Z",
+            kind: "ingest-progress",
+            stage: "fetching-tarball",
+            generation: 2,
+            attempt: 2,
+            queueDeliveries: 3,
+            stagedObjects: 0,
+            metrics: {
+              resolvedPackages: 4,
+              fetchedTarballs: 3,
+              verifiedTarballs: 2,
+              extractedTarballs: 2,
+              dependencyEdges: 8,
+              tarballBytes: 1_024,
+              unpackedBytes: 4_096,
+            },
+            failureCode: null,
+            failureStage: null,
+            failureOperation: null,
+            failureCause: null,
+            failureErrorClass: null,
+            failureErrorCode: null,
+            failureErrorFingerprint: null,
+            reclaimedObjects: 0,
+            reclaimedBytes: 0,
+          },
+        ],
+        truncatedBeforeSequence: 0,
+      }).currentStage,
+    ).toBe("fetching-tarball");
+  });
+
   it("requires every exact shelf object before a commit can be accepted", async () => {
     const commit = await fixtureCommit();
     expect(pantryCatalogCommitRequestSchema.safeParse(commit).success).toBe(true);
@@ -119,6 +248,30 @@ describe("Pantry catalog contracts", () => {
       pantryCatalogCommitRequestSchema.safeParse({
         ...commit,
         objectReferences: [...commit.objectReferences].reverse(),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires exact hashes for targeted orphan reclamation and forbids them on broad sweeps", () => {
+    const base = {
+      now: "2026-08-10T02:00:00.000Z",
+      maxDeletes: 100,
+    };
+    expect(
+      pantryCatalogGcRequestSchema.safeParse({ ...base, scope: "targeted-orphan-cas" }).success,
+    ).toBe(false);
+    expect(
+      pantryCatalogGcRequestSchema.safeParse({
+        ...base,
+        scope: "targeted-orphan-cas",
+        objectSha256: ["a".repeat(64)],
+      }).success,
+    ).toBe(true);
+    expect(
+      pantryCatalogGcRequestSchema.safeParse({
+        ...base,
+        scope: "orphan-cas-sweep",
+        objectSha256: ["a".repeat(64)],
       }).success,
     ).toBe(false);
   });
