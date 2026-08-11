@@ -102,21 +102,21 @@ All other entries fail closed for sealed mode. AI, auth, storage, messaging, dep
 
 ### Automated verification
 
-| Gate                                   | Result                                                                                                                                 |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Slice-focused API suite                | PASS — 6 files, 64 tests                                                                                                               |
-| Tenant runtime contracts               | PASS — 17 files, 175 tests                                                                                                             |
-| Runtime Worker package                 | PASS — 24 files, 194 tests                                                                                                             |
-| Contracts lint/typecheck               | PASS                                                                                                                                   |
-| Worker lint/typecheck                  | PASS                                                                                                                                   |
-| Repository typecheck                   | PASS                                                                                                                                   |
-| Repository lint                        | PASS                                                                                                                                   |
-| Repository format check                | PASS                                                                                                                                   |
-| Changed API files ESLint               | PASS                                                                                                                                   |
-| `git diff --check`                     | PASS                                                                                                                                   |
-| Ora fast stability profile             | PASS — 14 passed, 0 failed; the pre-commit run had only the expected dirty-tree warning                                                |
-| Release profile on slice               | EXPECTED ENVIRONMENTAL RED — 17 passed / 3 failed before commit; all failures originate at unavailable local Postgres `127.0.0.1:5432` |
-| Release profile at pristine exact base | EXACT PARITY — 18 passed / 3 failed; the same three stages and assertions fail for the same `ECONNREFUSED` root cause                  |
+| Gate                                   | Result                                                                                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Slice-focused API suite                | PASS — 6 files, 64 tests                                                                                                                  |
+| Tenant runtime contracts               | PASS — 17 files, 175 tests                                                                                                                |
+| Runtime Worker package                 | PASS — 24 files, 194 tests                                                                                                                |
+| Contracts lint/typecheck               | PASS                                                                                                                                      |
+| Worker lint/typecheck                  | PASS                                                                                                                                      |
+| Repository typecheck                   | PASS                                                                                                                                      |
+| Repository lint                        | PASS                                                                                                                                      |
+| Repository format check                | PASS                                                                                                                                      |
+| Changed API files ESLint               | PASS                                                                                                                                      |
+| `git diff --check`                     | PASS                                                                                                                                      |
+| Ora fast stability profile             | PASS — clean-tree post-commit run: 15 passed / 0 warned / 0 failed (pre-commit was also green apart from its expected dirty-tree warning) |
+| Release profile on slice               | EXPECTED ENVIRONMENTAL RED — 17 passed / 3 failed before commit; all failures originate at unavailable local Postgres `127.0.0.1:5432`    |
+| Release profile at pristine exact base | EXACT PARITY — 18 passed / 3 failed; the same three stages and assertions fail for the same `ECONNREFUSED` root cause                     |
 
 An unconstrained API-wide Vitest invocation was also attempted. It is not a hermetic suite on this lab: unrelated files require database state, Ora provider secrets, and integration URLs. The slice does not claim that invocation as a gate. The repository's focused suites plus the release-profile exact-base comparison are the authoritative local evidence.
 
@@ -169,4 +169,4 @@ The release profile was run independently in a clean detached worktree at exact 
 
 Every other release-profile stage passes on both trees. The base completed with 18 pass / 0 warn / 3 fail; the pre-commit branch completed with 17 pass / 1 expected dirty-tree warning / 3 fail. The trailing `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL` / `tsx not found` text is the repository wrapper's first-failure artifact after the real gate failure, not an independent missing dependency; both clean and branch worktrees had `tsx` and used it throughout the profile.
 
-The final committed and pushed SHA plus permanent-doc copy hash are recorded in the delivery handoff.
+Implementation commit `43d6ac3ba85f4292c6dd8e535a493daa8557dfea` was followed by the clean-tree fast profile above. The final pushed tip and permanent-doc copy hash are recorded in the delivery handoff.
