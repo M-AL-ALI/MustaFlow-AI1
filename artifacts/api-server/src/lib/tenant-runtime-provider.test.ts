@@ -61,6 +61,7 @@ import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import {
   supportsArtifactDeployment,
   supportsLayeredArtifactDeployment,
+  supportsZeroGeneration,
   type TenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
@@ -154,6 +155,7 @@ describe("TenantRuntimeProvider Fly adapter", () => {
   it("advertises layered deployment only through the optional Cloudflare extension", () => {
     expect(supportsArtifactDeployment(provider)).toBe(false);
     expect(supportsLayeredArtifactDeployment(provider)).toBe(false);
+    expect(supportsZeroGeneration(provider)).toBe(false);
     const cloudflare = new CloudflareRuntimeProvider({
       controlUrl: "https://runtime.example.test",
       controlToken: "control-token-with-at-least-thirty-two-characters",
@@ -161,6 +163,7 @@ describe("TenantRuntimeProvider Fly adapter", () => {
     });
     expect(supportsArtifactDeployment(cloudflare)).toBe(true);
     expect(supportsLayeredArtifactDeployment(cloudflare)).toBe(true);
+    expect(supportsZeroGeneration(cloudflare)).toBe(true);
   });
 
   it("keeps the unset provider path constructed as the existing Fly adapter", async () => {

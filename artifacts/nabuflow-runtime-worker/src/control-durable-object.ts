@@ -1,12 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
-import { sha256Hex } from "@workspace/tenant-runtime-contracts";
+import {
+  ARTIFACT_COMMIT_EVENT_LIMIT,
+  DURABLE_OPERATION_LEASE_MS,
+  DURABLE_OPERATION_QUEUE_WATCHDOG_MS,
+  DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+  sha256Hex,
+} from "@workspace/tenant-runtime-contracts";
 import type { RouteRecord } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type {
   ControlAuditRecord,
   ControlCoordinator,
-  ArtifactCommitClaim,
-  ArtifactCommitCheckpoint,
+  DurableOperationClaim,
+  DurableOperationCheckpoint,
+  DurableOperationDriverClaim,
+  DurableOperationQueueMessage,
+  DurableOperationRegistration,
   IdempotencyLookup,
   RuntimeLogEntry,
   StoredHttpResponse,
@@ -14,7 +23,11 @@ import type {
   StoredRuntimeArtifact,
   StoredRuntimeLayer,
   StoredRuntimeLayeredArtifact,
+  StoredDurableOperationJob,
   StoredArtifactCommitJob,
+  ArtifactCommitClaim,
+  ArtifactCommitDriverClaim,
+  ArtifactCommitCheckpoint,
   RemovedRuntimeLayeredArtifact,
 } from "./model";
 import { deleteArtifactObjects } from "./artifact-storage";
@@ -25,9 +38,6 @@ import {
 
 const IDEMPOTENCY_PENDING_TTL_MS = 10 * 60 * 1_000;
 const IDEMPOTENCY_COMPLETED_TTL_MS = 24 * 60 * 60 * 1_000;
-const ARTIFACT_COMMIT_LEASE_MS = 15_000;
-const ARTIFACT_COMMIT_ADOPTION_GRACE_MS = 30_000;
-const ARTIFACT_COMMIT_DEADLINE_MS = 5 * 60_000;
 const MAX_AUDIT_RECORDS = 1_000;
 const MAX_RUNTIME_LOGS = 1_000;
 const MAX_LOG_MESSAGE_LENGTH = 100_000;
@@ -66,15 +76,83 @@ function layeredArtifactReference(identity: string, sealedArtifactSha256: string
   return `${identity}:${sealedArtifactSha256}`;
 }
 
-function artifactCommitJobKey(
+function durableOperationJobKey(
+  kind: StoredDurableOperationJob["kind"],
   identity: string,
-  sealedArtifactSha256: string,
+  subjectKey: string,
   idempotencyStorageKey: string,
 ): string {
-  return `artifact-commit-job:${identity}:${sealedArtifactSha256}:${idempotencyStorageKey.slice("idempotency:".length)}`;
+  return `durable-operation-job:${kind}:${identity}:${subjectKey}:${idempotencyStorageKey.slice("idempotency:".length)}`;
 }
 
-function artifactCommitAbandonedResponse(): StoredHttpResponse {
+function durableOperationLatestKey(
+  kind: StoredDurableOperationJob["kind"],
+  identity: string,
+  subjectKey: string,
+): string {
+  return `durable-operation-latest:${kind}:${identity}:${subjectKey}`;
+}
+
+function durableOperationQueueMessage(
+  job: StoredDurableOperationJob,
+): DurableOperationQueueMessage {
+  return {
+    schemaVersion: 1,
+    jobKey: job.jobKey,
+    runtimeIdentity: job.runtimeIdentity,
+    subjectKey: job.subjectKey,
+    kind: job.kind,
+  };
+}
+
+function appendDurableOperationEvent(
+  job: StoredDurableOperationJob,
+  event: StoredDurableOperationJob["events"][number]["event"],
+  nowMs: number,
+): void {
+  // Jobs created by the request-owned predecessor may survive a Worker deployment.
+  // Normalize their observability fields before any append so rollout cannot strand them.
+  job.eventSequence ??= 0;
+  job.events ??= [];
+  job.eventSequence += 1;
+  job.events.push({
+    sequence: job.eventSequence,
+    at: new Date(nowMs).toISOString(),
+    event,
+    attempt: job.attempt,
+    checkpoint: job.checkpoint,
+  });
+  if (job.events.length > ARTIFACT_COMMIT_EVENT_LIMIT) {
+    job.events.splice(0, job.events.length - ARTIFACT_COMMIT_EVENT_LIMIT);
+  }
+  job.updatedAtMs = nowMs;
+}
+
+function durableOperationAbandonedResponse(
+  kind: StoredDurableOperationJob["kind"],
+): StoredHttpResponse {
+  if (kind === "runtime-start") {
+    return {
+      status: 504,
+      body: {
+        ok: false,
+        code: "runtime_start_timeout",
+        message: "Runtime start did not complete before the execution deadline",
+        retryable: false,
+      },
+    };
+  }
+  if (kind === "runtime-manifest-restart") {
+    return {
+      status: 504,
+      body: {
+        ok: false,
+        code: "runtime_manifest_update_timeout",
+        message: "Runtime manifest restart did not complete before the execution deadline",
+        retryable: false,
+      },
+    };
+  }
   return {
     status: 503,
     body: {
@@ -86,13 +164,68 @@ function artifactCommitAbandonedResponse(): StoredHttpResponse {
   };
 }
 
-const ARTIFACT_COMMIT_CHECKPOINTS: ArtifactCommitCheckpoint[] = [
-  "initialized",
-  "verification-complete",
-  "payloads-transferred",
-  "unpack-complete",
-  "finalized",
-];
+const DURABLE_OPERATION_CHECKPOINTS = {
+  v1: [
+    "initialized",
+    "verification-complete",
+    "payloads-transferred",
+    "unpack-complete",
+    "finalized",
+  ],
+  "layers-v1": [
+    "initialized",
+    "verification-complete",
+    "payloads-transferred",
+    "unpack-complete",
+    "finalized",
+  ],
+  "runtime-start": [
+    "initialized",
+    "artifact-verified",
+    "materialized",
+    "process-started",
+    "finalized",
+  ],
+  "runtime-manifest-restart": [
+    "initialized",
+    "runtime-unbound",
+    "manifest-persisted",
+    "materialized",
+    "process-started",
+    "finalized",
+  ],
+} as const satisfies Record<
+  StoredDurableOperationJob["kind"],
+  readonly DurableOperationCheckpoint[]
+>;
+
+function durableOperationSubjectMatches(
+  job: StoredDurableOperationJob,
+  input: DurableOperationRegistration,
+): boolean {
+  if (
+    job.fingerprint !== input.fingerprint ||
+    job.kind !== input.kind ||
+    job.runtimeIdentity !== input.runtimeIdentity ||
+    job.subjectKey !== input.subjectKey ||
+    job.expectedDeploymentVersion !== input.expectedDeploymentVersion
+  ) {
+    return false;
+  }
+  if (
+    (job.kind === "runtime-start" && input.kind === "runtime-start") ||
+    (job.kind === "runtime-manifest-restart" && input.kind === "runtime-manifest-restart")
+  ) {
+    return JSON.stringify(job.request) === JSON.stringify(input.request);
+  }
+  return (
+    job.kind !== "runtime-start" &&
+    job.kind !== "runtime-manifest-restart" &&
+    input.kind !== "runtime-start" &&
+    input.kind !== "runtime-manifest-restart" &&
+    job.sealedArtifactSha256 === input.sealedArtifactSha256
+  );
+}
 
 async function containerBindingKey(containerId: string): Promise<string> {
   return `container-binding:${await sha256Hex(containerId)}`;
@@ -204,23 +337,16 @@ export class ControlDurableObject
     });
   }
 
-  async claimArtifactCommit(input: {
-    key: string;
-    fingerprint: string;
-    ownerId: string;
-    kind: "v1" | "layers-v1";
-    runtimeIdentity: string;
-    sealedArtifactSha256: string;
-    nowMs: number;
-  }): Promise<ArtifactCommitClaim> {
+  async registerDurableOperation(
+    input: DurableOperationRegistration,
+  ): Promise<DurableOperationClaim> {
     const idempotencyStorageKey = `idempotency:${await sha256Hex(input.key)}`;
-    const jobKey = artifactCommitJobKey(
+    const jobKey = durableOperationJobKey(
+      input.kind,
       input.runtimeIdentity,
-      input.sealedArtifactSha256,
+      input.subjectKey,
       idempotencyStorageKey,
     );
-    const leaseUntilMs = input.nowMs + ARTIFACT_COMMIT_LEASE_MS;
-    const abandonAtMs = leaseUntilMs + ARTIFACT_COMMIT_ADOPTION_GRACE_MS;
     const result = await this.ctx.storage.transaction(async (transaction) => {
       const idempotency = await transaction.get<StoredIdempotencyRecord>(idempotencyStorageKey);
       if (idempotency !== undefined && idempotency.expiresAtMs > input.nowMs) {
@@ -229,7 +355,12 @@ export class ControlDurableObject
           return { state: "replay", response: idempotency.response } as const;
         }
       }
-      const existing = await transaction.get<StoredArtifactCommitJob>(jobKey);
+      const existing = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (existing !== undefined) {
+        existing.eventSequence ??= 0;
+        existing.events ??= [];
+        existing.expectedDeploymentVersion ??= input.expectedDeploymentVersion;
+      }
       if (existing?.response !== undefined && existing.state !== "active") {
         await transaction.put(idempotencyStorageKey, {
           fingerprint: input.fingerprint,
@@ -241,25 +372,17 @@ export class ControlDurableObject
         return { state: "replay", response: existing.response } as const;
       }
       if (existing !== undefined) {
-        if (
-          existing.fingerprint !== input.fingerprint ||
-          existing.kind !== input.kind ||
-          existing.runtimeIdentity !== input.runtimeIdentity ||
-          existing.sealedArtifactSha256 !== input.sealedArtifactSha256
-        ) {
+        if (!durableOperationSubjectMatches(existing, input)) {
           return { state: "conflict" } as const;
         }
-        if (
-          existing.deadlineMs <= input.nowMs ||
-          (existing.abandonAtMs !== null && existing.abandonAtMs <= input.nowMs)
-        ) {
-          const response = artifactCommitAbandonedResponse();
+        if (existing.deadlineMs <= input.nowMs) {
+          const response = durableOperationAbandonedResponse(existing.kind);
           existing.state = "failed";
           existing.ownerId = null;
           existing.leaseUntilMs = null;
           existing.abandonAtMs = null;
           existing.response = response;
-          existing.updatedAtMs = input.nowMs;
+          appendDurableOperationEvent(existing, "deadline-terminal", input.nowMs);
           await transaction.put(jobKey, existing);
           await transaction.put(idempotencyStorageKey, {
             fingerprint: input.fingerprint,
@@ -270,25 +393,9 @@ export class ControlDurableObject
           } satisfies StoredIdempotencyRecord);
           return { state: "replay", response } as const;
         }
-        if (existing.leaseUntilMs !== null && existing.leaseUntilMs > input.nowMs) {
-          return { state: "pending" } as const;
-        }
-        existing.ownerId = input.ownerId;
-        existing.attempt += 1;
-        existing.leaseUntilMs = leaseUntilMs;
-        existing.abandonAtMs = abandonAtMs;
-        existing.updatedAtMs = input.nowMs;
-        existing.idempotencyStorageKey = idempotencyStorageKey;
+        appendDurableOperationEvent(existing, "request-observed", input.nowMs);
         await transaction.put(jobKey, existing);
-        await transaction.put(idempotencyStorageKey, {
-          fingerprint: input.fingerprint,
-          state: "pending",
-          expiresAtMs: input.nowMs + IDEMPOTENCY_PENDING_TTL_MS,
-          ownerId: input.ownerId,
-          leaseUntilMs,
-          jobKey,
-        } satisfies StoredIdempotencyRecord);
-        return { state: "adopted", job: existing } as const;
+        return { state: "pending", job: existing } as const;
       }
       if (
         idempotency?.state === "pending" &&
@@ -297,95 +404,353 @@ export class ControlDurableObject
       ) {
         return { state: "pending" } as const;
       }
-      const job: StoredArtifactCommitJob = {
+      const common = {
         jobKey,
         kind: input.kind,
         runtimeIdentity: input.runtimeIdentity,
-        sealedArtifactSha256: input.sealedArtifactSha256,
+        subjectKey: input.subjectKey,
+        expectedDeploymentVersion: input.expectedDeploymentVersion,
         fingerprint: input.fingerprint,
         idempotencyStorageKey,
-        state: "active",
-        checkpoint: "initialized",
-        ownerId: input.ownerId,
-        attempt: 1,
-        leaseUntilMs,
-        abandonAtMs,
-        deadlineMs: input.nowMs + ARTIFACT_COMMIT_DEADLINE_MS,
+        state: "active" as const,
+        checkpoint: "initialized" as const,
+        ownerId: null,
+        attempt: 0,
+        eventSequence: 0,
+        events: [] as StoredDurableOperationJob["events"],
+        leaseUntilMs: null,
+        abandonAtMs: null,
+        deadlineMs: input.nowMs + DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+        createdAtMs: input.nowMs,
         updatedAtMs: input.nowMs,
       };
+      const job: StoredDurableOperationJob =
+        input.kind === "runtime-start"
+          ? { ...common, kind: "runtime-start", request: structuredClone(input.request) }
+          : input.kind === "runtime-manifest-restart"
+            ? {
+                ...common,
+                kind: "runtime-manifest-restart",
+                request: structuredClone(input.request),
+              }
+            : {
+                ...common,
+                kind: input.kind,
+                sealedArtifactSha256: input.sealedArtifactSha256,
+              };
+      appendDurableOperationEvent(job, "job-created", input.nowMs);
       await transaction.put(jobKey, job);
+      await transaction.put(
+        durableOperationLatestKey(input.kind, input.runtimeIdentity, input.subjectKey),
+        jobKey,
+      );
       await transaction.put(idempotencyStorageKey, {
         fingerprint: input.fingerprint,
         state: "pending",
         expiresAtMs: input.nowMs + IDEMPOTENCY_PENDING_TTL_MS,
-        ownerId: input.ownerId,
-        leaseUntilMs,
         jobKey,
       } satisfies StoredIdempotencyRecord);
       return { state: "new", job } as const;
     });
-    if (result.state === "new" || result.state === "adopted") {
-      await this.scheduleCleanup(this.ctx.storage, result.job.abandonAtMs!);
+    if (result.state === "new") {
+      await this.scheduleCleanup(
+        this.ctx.storage,
+        Math.min(result.job.deadlineMs, input.nowMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS),
+      );
     }
     return result;
   }
 
-  async renewArtifactCommit(
+  // Compatibility wrappers retain the pre-generalization test and RPC surface while delegating
+  // every state transition to the single durable-operation implementation above.
+  async registerArtifactCommit(input: {
+    key: string;
+    fingerprint: string;
+    kind: "v1" | "layers-v1";
+    runtimeIdentity: string;
+    sealedArtifactSha256: string;
+    expectedDeploymentVersion: string;
+    nowMs: number;
+  }): Promise<ArtifactCommitClaim> {
+    return this.registerDurableOperation({
+      ...input,
+      subjectKey: input.sealedArtifactSha256,
+    });
+  }
+
+  async claimDurableOperationDriver(
     jobKey: string,
     ownerId: string,
     nowMs: number,
-  ): Promise<"renewed" | "not_owner" | "terminal"> {
-    const leaseUntilMs = nowMs + ARTIFACT_COMMIT_LEASE_MS;
-    const abandonAtMs = leaseUntilMs + ARTIFACT_COMMIT_ADOPTION_GRACE_MS;
+  ): Promise<DurableOperationDriverClaim> {
+    const leaseUntilMs = nowMs + DURABLE_OPERATION_LEASE_MS;
     const result = await this.ctx.storage.transaction(async (transaction) => {
-      const job = await transaction.get<StoredArtifactCommitJob>(jobKey);
-      if (job === undefined || job.state !== "active") return "terminal" as const;
-      if (job.ownerId !== ownerId) return "not_owner" as const;
-      job.leaseUntilMs = leaseUntilMs;
-      job.abandonAtMs = abandonAtMs;
-      job.updatedAtMs = nowMs;
+      const job = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (job === undefined) return { state: "not_found" } as const;
+      if (job.state !== "active") return { state: "terminal", job } as const;
+      if (job.deadlineMs <= nowMs) {
+        const response = durableOperationAbandonedResponse(job.kind);
+        job.state = "failed";
+        job.ownerId = null;
+        job.leaseUntilMs = null;
+        job.abandonAtMs = null;
+        job.response = response;
+        appendDurableOperationEvent(job, "deadline-terminal", nowMs);
+        await transaction.put(jobKey, job);
+        await transaction.put(job.idempotencyStorageKey, {
+          fingerprint: job.fingerprint,
+          state: "completed",
+          expiresAtMs: nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+          response,
+          jobKey,
+        } satisfies StoredIdempotencyRecord);
+        return { state: "terminal", job } as const;
+      }
+      if (job.leaseUntilMs !== null && job.leaseUntilMs > nowMs) {
+        appendDurableOperationEvent(job, "driver-busy", nowMs);
+        await transaction.put(jobKey, job);
+        return { state: "busy", job } as const;
+      }
+      const adopted = job.attempt > 0;
+      if (job.ownerId !== null || job.leaseUntilMs !== null) {
+        appendDurableOperationEvent(job, "lease-expired", nowMs);
+      }
+      job.ownerId = ownerId;
+      job.attempt += 1;
+      job.leaseUntilMs = Math.min(leaseUntilMs, job.deadlineMs);
+      job.abandonAtMs = null;
+      appendDurableOperationEvent(job, adopted ? "driver-adopted" : "driver-claimed", nowMs);
       await transaction.put(jobKey, job);
       const idempotency = await transaction.get<StoredIdempotencyRecord>(job.idempotencyStorageKey);
       if (idempotency?.state === "pending") {
         idempotency.ownerId = ownerId;
-        idempotency.leaseUntilMs = leaseUntilMs;
+        idempotency.leaseUntilMs = job.leaseUntilMs;
+        await transaction.put(job.idempotencyStorageKey, idempotency);
+      }
+      return { state: adopted ? "adopted" : "claimed", job } as const;
+    });
+    if (result.state === "claimed" || result.state === "adopted") {
+      await this.scheduleCleanup(this.ctx.storage, result.job.leaseUntilMs!);
+    }
+    return result;
+  }
+
+  async claimArtifactCommitDriver(
+    jobKey: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<ArtifactCommitDriverClaim> {
+    return this.claimDurableOperationDriver(jobKey, ownerId, nowMs);
+  }
+
+  async getDurableOperation(jobKey: string): Promise<StoredDurableOperationJob | null> {
+    const job = await this.ctx.storage.get<StoredDurableOperationJob>(jobKey);
+    if (job === undefined) return null;
+    job.eventSequence ??= 0;
+    job.events ??= [];
+    return job;
+  }
+
+  async getArtifactCommit(jobKey: string): Promise<StoredArtifactCommitJob | null> {
+    const job = await this.getDurableOperation(jobKey);
+    return job === null || job.kind === "runtime-start" || job.kind === "runtime-manifest-restart"
+      ? null
+      : job;
+  }
+
+  async getLatestDurableOperation(
+    kind: StoredDurableOperationJob["kind"],
+    runtimeIdentity: string,
+    subjectKey: string,
+  ): Promise<StoredDurableOperationJob | null> {
+    const jobKey = await this.ctx.storage.get<string>(
+      durableOperationLatestKey(kind, runtimeIdentity, subjectKey),
+    );
+    return jobKey === undefined ? null : await this.getDurableOperation(jobKey);
+  }
+
+  async listRecentDurableOperations(input: {
+    sinceMs: number;
+    untilMs: number;
+    limit: number;
+    kind?: StoredDurableOperationJob["kind"];
+  }): Promise<StoredDurableOperationJob[]> {
+    const records = await this.ctx.storage.list<StoredDurableOperationJob>({
+      prefix: "durable-operation-job:",
+    });
+    return [...records.values()]
+      .filter((job) => {
+        const createdAtMs =
+          job.createdAtMs ?? job.deadlineMs - DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS;
+        return (
+          createdAtMs >= input.sinceMs &&
+          createdAtMs <= input.untilMs &&
+          (input.kind === undefined || job.kind === input.kind)
+        );
+      })
+      .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
+      .slice(0, input.limit)
+      .map((job) => structuredClone(job));
+  }
+
+  async getLatestArtifactCommit(
+    runtimeIdentity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredArtifactCommitJob | null> {
+    const job = await this.getLatestDurableOperation("v1", runtimeIdentity, sealedArtifactSha256);
+    if (job !== null && job.kind !== "runtime-start" && job.kind !== "runtime-manifest-restart")
+      return job;
+    const layeredJob = await this.getLatestDurableOperation(
+      "layers-v1",
+      runtimeIdentity,
+      sealedArtifactSha256,
+    );
+    return layeredJob !== null &&
+      layeredJob.kind !== "runtime-start" &&
+      layeredJob.kind !== "runtime-manifest-restart"
+      ? layeredJob
+      : null;
+  }
+
+  async recordDurableOperationNudge(
+    jobKey: string,
+    nowMs: number,
+  ): Promise<"recorded" | "not_found" | "terminal"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (job === undefined) return "not_found" as const;
+      if (job.state !== "active") return "terminal" as const;
+      appendDurableOperationEvent(job, "queue-nudged", nowMs);
+      await transaction.put(jobKey, job);
+      return "recorded" as const;
+    });
+  }
+
+  async recordArtifactCommitNudge(jobKey: string, nowMs: number) {
+    return this.recordDurableOperationNudge(jobKey, nowMs);
+  }
+
+  async renewDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    nowMs: number,
+  ): Promise<"renewed" | "not_owner" | "terminal"> {
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (job === undefined || job.state !== "active") return "terminal" as const;
+      if (job.ownerId !== ownerId || job.attempt !== ownerGeneration) {
+        return "not_owner" as const;
+      }
+      job.leaseUntilMs = Math.min(nowMs + DURABLE_OPERATION_LEASE_MS, job.deadlineMs);
+      appendDurableOperationEvent(job, "lease-renewed", nowMs);
+      await transaction.put(jobKey, job);
+      const idempotency = await transaction.get<StoredIdempotencyRecord>(job.idempotencyStorageKey);
+      if (idempotency?.state === "pending") {
+        idempotency.ownerId = ownerId;
+        idempotency.leaseUntilMs = job.leaseUntilMs;
         await transaction.put(job.idempotencyStorageKey, idempotency);
       }
       return "renewed" as const;
     });
-    if (result === "renewed") await this.scheduleCleanup(this.ctx.storage, abandonAtMs);
+    if (result === "renewed") {
+      const job = await this.getDurableOperation(jobKey);
+      if (job?.leaseUntilMs !== null && job?.leaseUntilMs !== undefined) {
+        await this.scheduleCleanup(this.ctx.storage, job.leaseUntilMs);
+      }
+    }
     return result;
+  }
+
+  async renewArtifactCommit(jobKey: string, ownerId: string, nowMs: number) {
+    const job = await this.getDurableOperation(jobKey);
+    return this.renewDurableOperation(jobKey, ownerId, job?.attempt ?? -1, nowMs);
+  }
+
+  async checkpointDurableOperation(input: {
+    jobKey: string;
+    ownerId: string;
+    ownerGeneration: number;
+    checkpoint: DurableOperationCheckpoint;
+    payloadContentSha256s?: string[];
+    runtimeWasRunning?: boolean;
+    nowMs: number;
+  }): Promise<StoredDurableOperationJob> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredDurableOperationJob>(input.jobKey);
+      if (
+        job === undefined ||
+        job.state !== "active" ||
+        job.ownerId !== input.ownerId ||
+        job.attempt !== input.ownerGeneration
+      ) {
+        throw new Error("Artifact commit checkpoint owner is no longer active");
+      }
+      const checkpoints = DURABLE_OPERATION_CHECKPOINTS[
+        job.kind
+      ] as readonly DurableOperationCheckpoint[];
+      const current = checkpoints.indexOf(job.checkpoint);
+      const next = checkpoints.indexOf(input.checkpoint);
+      if (next < current || next > current + 1) {
+        throw new Error("Artifact commit checkpoint transition is invalid");
+      }
+      if (next === current && input.checkpoint !== "payloads-transferred") return job;
+      job.checkpoint = input.checkpoint as never;
+      if (input.payloadContentSha256s !== undefined) {
+        if (input.checkpoint !== "payloads-transferred") {
+          throw new Error("Artifact payload hashes require the transfer checkpoint");
+        }
+        if (job.kind === "runtime-start" || job.kind === "runtime-manifest-restart") {
+          throw new Error("Runtime lifecycle checkpoints cannot carry artifact payload hashes");
+        }
+        job.payloadContentSha256s = [...input.payloadContentSha256s];
+      }
+      if (input.runtimeWasRunning !== undefined) {
+        if (job.kind !== "runtime-manifest-restart" || input.checkpoint !== "runtime-unbound") {
+          throw new Error("Runtime running state requires the manifest restart unbound checkpoint");
+        }
+        job.runtimeWasRunning = input.runtimeWasRunning;
+      }
+      appendDurableOperationEvent(job, "checkpoint-advanced", input.nowMs);
+      await transaction.put(input.jobKey, job);
+      return job;
+    });
   }
 
   async checkpointArtifactCommit(input: {
     jobKey: string;
     ownerId: string;
+    ownerGeneration?: number;
     checkpoint: ArtifactCommitCheckpoint;
     payloadContentSha256s?: string[];
     nowMs: number;
   }): Promise<StoredArtifactCommitJob> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      const job = await transaction.get<StoredArtifactCommitJob>(input.jobKey);
-      if (job === undefined || job.state !== "active" || job.ownerId !== input.ownerId) {
-        throw new Error("Artifact commit checkpoint owner is no longer active");
-      }
-      const current = ARTIFACT_COMMIT_CHECKPOINTS.indexOf(job.checkpoint);
-      const next = ARTIFACT_COMMIT_CHECKPOINTS.indexOf(input.checkpoint);
-      if (next < current || next > current + 1) {
-        throw new Error("Artifact commit checkpoint transition is invalid");
-      }
-      if (next === current && input.checkpoint !== "payloads-transferred") return job;
-      job.checkpoint = input.checkpoint;
-      if (input.payloadContentSha256s !== undefined) {
-        if (input.checkpoint !== "payloads-transferred") {
-          throw new Error("Artifact payload hashes require the transfer checkpoint");
-        }
-        job.payloadContentSha256s = [...input.payloadContentSha256s];
-      }
-      job.updatedAtMs = input.nowMs;
-      await transaction.put(input.jobKey, job);
-      return job;
+    const current = await this.getDurableOperation(input.jobKey);
+    const job = await this.checkpointDurableOperation({
+      ...input,
+      ownerGeneration: input.ownerGeneration ?? current?.attempt ?? -1,
     });
+    if (job.kind === "runtime-start" || job.kind === "runtime-manifest-restart") {
+      throw new Error("Artifact commit job changed kind");
+    }
+    return job;
+  }
+
+  async completeDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<"completed" | "already_terminal" | "not_owner"> {
+    return this.finishDurableOperation(
+      jobKey,
+      ownerId,
+      ownerGeneration,
+      "succeeded",
+      response,
+      nowMs,
+    );
   }
 
   async completeArtifactCommit(
@@ -394,7 +759,18 @@ export class ControlDurableObject
     response: StoredHttpResponse,
     nowMs: number,
   ): Promise<void> {
-    await this.finishArtifactCommit(jobKey, ownerId, "succeeded", response, nowMs);
+    const job = await this.getDurableOperation(jobKey);
+    await this.completeDurableOperation(jobKey, ownerId, job?.attempt ?? -1, response, nowMs);
+  }
+
+  async failDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    response: StoredHttpResponse,
+    nowMs: number,
+  ): Promise<"completed" | "already_terminal" | "not_owner"> {
+    return this.finishDurableOperation(jobKey, ownerId, ownerGeneration, "failed", response, nowMs);
   }
 
   async failArtifactCommit(
@@ -403,21 +779,25 @@ export class ControlDurableObject
     response: StoredHttpResponse,
     nowMs: number,
   ): Promise<void> {
-    await this.finishArtifactCommit(jobKey, ownerId, "failed", response, nowMs);
+    const job = await this.getDurableOperation(jobKey);
+    await this.failDurableOperation(jobKey, ownerId, job?.attempt ?? -1, response, nowMs);
   }
 
-  private async finishArtifactCommit(
+  private async finishDurableOperation(
     jobKey: string,
     ownerId: string,
+    ownerGeneration: number,
     state: "succeeded" | "failed",
     response: StoredHttpResponse,
     nowMs: number,
-  ): Promise<void> {
+  ): Promise<"completed" | "already_terminal" | "not_owner"> {
     const expiresAtMs = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
-    await this.ctx.storage.transaction(async (transaction) => {
-      const job = await transaction.get<StoredArtifactCommitJob>(jobKey);
-      if (job === undefined || job.state !== "active" || job.ownerId !== ownerId) {
-        throw new Error("Artifact commit finalization owner is no longer active");
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (job === undefined) return "not_owner" as const;
+      if (job.state !== "active") return "already_terminal" as const;
+      if (job.ownerId !== ownerId || job.attempt !== ownerGeneration) {
+        return "not_owner" as const;
       }
       if (state === "succeeded" && job.checkpoint !== "finalized") {
         throw new Error("Artifact commit cannot complete before finalization");
@@ -427,7 +807,11 @@ export class ControlDurableObject
       job.leaseUntilMs = null;
       job.abandonAtMs = null;
       job.response = response;
-      job.updatedAtMs = nowMs;
+      appendDurableOperationEvent(
+        job,
+        state === "succeeded" ? "driver-succeeded" : "driver-failed",
+        nowMs,
+      );
       await transaction.put(jobKey, job);
       await transaction.put(job.idempotencyStorageKey, {
         fingerprint: job.fingerprint,
@@ -436,8 +820,10 @@ export class ControlDurableObject
         response,
         jobKey,
       } satisfies StoredIdempotencyRecord);
+      return "completed" as const;
     });
-    await this.scheduleCleanup(this.ctx.storage, expiresAtMs);
+    if (result === "completed") await this.scheduleCleanup(this.ctx.storage, expiresAtMs);
+    return result;
   }
 
   async recordAudit(record: ControlAuditRecord): Promise<void> {
@@ -881,56 +1267,100 @@ export class ControlDurableObject
 
   async alarm(): Promise<void> {
     const nowMs = Date.now();
-    const commitJobs = await this.ctx.storage.list<StoredArtifactCommitJob>({
-      prefix: "artifact-commit-job:",
+    const durableJobs = await this.ctx.storage.list<StoredDurableOperationJob>({
+      prefix: "durable-operation-job:",
     });
-    let nextCommitJobAlarm: number | null = null;
-    for (const [key, snapshot] of commitJobs) {
+    let nextDurableJobAlarm: number | null = null;
+    for (const [key, snapshot] of durableJobs) {
       if (snapshot.state !== "active") {
         const deleteAt = snapshot.updatedAtMs + IDEMPOTENCY_COMPLETED_TTL_MS;
-        if (deleteAt <= nowMs) await this.ctx.storage.delete(key);
-        else
-          nextCommitJobAlarm =
-            nextCommitJobAlarm === null ? deleteAt : Math.min(nextCommitJobAlarm, deleteAt);
+        if (deleteAt <= nowMs) {
+          await this.ctx.storage.delete([
+            key,
+            durableOperationLatestKey(snapshot.kind, snapshot.runtimeIdentity, snapshot.subjectKey),
+          ]);
+        } else
+          nextDurableJobAlarm =
+            nextDurableJobAlarm === null ? deleteAt : Math.min(nextDurableJobAlarm, deleteAt);
         continue;
       }
-      const terminalAt = Math.min(snapshot.abandonAtMs ?? snapshot.deadlineMs, snapshot.deadlineMs);
-      if (terminalAt > nowMs) {
-        nextCommitJobAlarm =
-          nextCommitJobAlarm === null ? terminalAt : Math.min(nextCommitJobAlarm, terminalAt);
+      const driveAt = Math.min(
+        snapshot.leaseUntilMs ?? snapshot.updatedAtMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS,
+        snapshot.deadlineMs,
+      );
+      if (driveAt > nowMs) {
+        nextDurableJobAlarm =
+          nextDurableJobAlarm === null ? driveAt : Math.min(nextDurableJobAlarm, driveAt);
         continue;
       }
-      await this.ctx.storage.transaction(async (transaction) => {
-        const job = await transaction.get<StoredArtifactCommitJob>(key);
-        if (
-          job === undefined ||
-          job.state !== "active" ||
-          Math.min(job.abandonAtMs ?? job.deadlineMs, job.deadlineMs) > nowMs
-        ) {
-          return;
+      const recovery = await this.ctx.storage.transaction(async (transaction) => {
+        const job = await transaction.get<StoredDurableOperationJob>(key);
+        if (job === undefined || job.state !== "active") return null;
+        if (job.deadlineMs <= nowMs) {
+          const response = durableOperationAbandonedResponse(job.kind);
+          job.state = "failed";
+          job.ownerId = null;
+          job.leaseUntilMs = null;
+          job.abandonAtMs = null;
+          job.response = response;
+          appendDurableOperationEvent(job, "deadline-terminal", nowMs);
+          await transaction.put(key, job);
+          await transaction.put(job.idempotencyStorageKey, {
+            fingerprint: job.fingerprint,
+            state: "completed",
+            expiresAtMs: nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+            response,
+            jobKey: key,
+          } satisfies StoredIdempotencyRecord);
+          return { action: "terminal" as const, job };
         }
-        const response = artifactCommitAbandonedResponse();
-        job.state = "failed";
+        if (job.leaseUntilMs !== null && job.leaseUntilMs > nowMs) {
+          return { action: "wait" as const, job };
+        }
+        if (job.ownerId !== null || job.leaseUntilMs !== null) {
+          appendDurableOperationEvent(job, "lease-expired", nowMs);
+        }
         job.ownerId = null;
         job.leaseUntilMs = null;
         job.abandonAtMs = null;
-        job.response = response;
-        job.updatedAtMs = nowMs;
+        appendDurableOperationEvent(job, "alarm-redelivery", nowMs);
         await transaction.put(key, job);
-        await transaction.put(job.idempotencyStorageKey, {
-          fingerprint: job.fingerprint,
-          state: "completed",
-          expiresAtMs: nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
-          response,
-          jobKey: key,
-        } satisfies StoredIdempotencyRecord);
+        return { action: "requeue" as const, job };
       });
-      const deleteAt = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
-      nextCommitJobAlarm =
-        nextCommitJobAlarm === null ? deleteAt : Math.min(nextCommitJobAlarm, deleteAt);
+      if (recovery === null) continue;
+      if (recovery.action === "terminal") {
+        const deleteAt = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
+        nextDurableJobAlarm =
+          nextDurableJobAlarm === null ? deleteAt : Math.min(nextDurableJobAlarm, deleteAt);
+        continue;
+      }
+      if (recovery.action === "wait") {
+        const next = Math.min(recovery.job.leaseUntilMs!, recovery.job.deadlineMs);
+        nextDurableJobAlarm =
+          nextDurableJobAlarm === null ? next : Math.min(nextDurableJobAlarm, next);
+        continue;
+      }
+      let enqueued = false;
+      try {
+        await this.env.DURABLE_OPERATION_QUEUE?.send(durableOperationQueueMessage(recovery.job));
+        enqueued = this.env.DURABLE_OPERATION_QUEUE !== undefined;
+      } catch {
+        // The next watchdog alarm retries; the inner deadline remains authoritative.
+      }
+      if (!enqueued) {
+        await this.ctx.storage.transaction(async (transaction) => {
+          const job = await transaction.get<StoredDurableOperationJob>(key);
+          if (job === undefined || job.state !== "active") return;
+          appendDurableOperationEvent(job, "queue-unavailable", nowMs);
+          await transaction.put(key, job);
+        });
+      }
+      const next = Math.min(recovery.job.deadlineMs, nowMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS);
+      nextDurableJobAlarm =
+        nextDurableJobAlarm === null ? next : Math.min(nextDurableJobAlarm, next);
     }
-    if (nextCommitJobAlarm !== null) {
-      await this.scheduleCleanup(this.ctx.storage, nextCommitJobAlarm);
+    if (nextDurableJobAlarm !== null) {
+      await this.scheduleCleanup(this.ctx.storage, nextDurableJobAlarm);
     }
     for (const prefix of ["nonce:", "idempotency:"] as const) {
       const records = await this.ctx.storage.list<number | StoredIdempotencyRecord>({ prefix });

@@ -62,7 +62,17 @@ export interface RuntimeProductionOptions {
 
 export interface RuntimeServiceOptions {
   servicePort?: number | null;
+  operationTimeoutMs?: number;
+  signal?: AbortSignal;
 }
+
+export interface RuntimeOperationOptions {
+  /** Remaining product-level wall-clock budget for this control operation. */
+  operationTimeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export type RuntimeStartOptions = RuntimeOperationOptions;
 
 export interface RuntimeArtifactDeployment {
   envelope: RuntimeArtifactEnvelope;
@@ -91,6 +101,7 @@ export interface ArtifactDeployingTenantRuntimeProvider extends TenantRuntimePro
     runtimeId: string,
     projectId: number,
     artifact: RuntimeArtifactDeployment,
+    options?: RuntimeOperationOptions,
   ): Promise<RuntimeArtifactDeploymentResult>;
   updateRuntimeManifest(
     runtimeId: string,
@@ -100,6 +111,8 @@ export interface ArtifactDeployingTenantRuntimeProvider extends TenantRuntimePro
       manifest: RuntimeManifestContract;
       restart?: "reject-if-running" | "restart";
       sealedArtifactSha256?: string;
+      operationTimeoutMs?: number;
+      signal?: AbortSignal;
     },
   ): Promise<RuntimeInfo>;
 }
@@ -119,6 +132,7 @@ export interface LayeredArtifactDeployingTenantRuntimeProvider extends ArtifactD
     runtimeId: string,
     projectId: number,
     artifact: RuntimeLayeredArtifactDeployment,
+    options?: RuntimeOperationOptions,
   ): Promise<RuntimeLayeredArtifactDeploymentResult>;
 }
 
@@ -128,6 +142,40 @@ export function supportsLayeredArtifactDeployment(
   const candidate = provider as Partial<LayeredArtifactDeployingTenantRuntimeProvider>;
   return (
     supportsArtifactDeployment(provider) && typeof candidate.deployLayeredArtifact === "function"
+  );
+}
+
+/**
+ * Cloudflare-only trusted control transport used by the inert sealed generator.
+ * It is intentionally absent from Fly and accepts no tenant-supplied URL.
+ */
+export interface ZeroGenerationTenantRuntimeProvider extends LayeredArtifactDeployingTenantRuntimeProvider {
+  zeroGenerationControlRequest(input: {
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+    idempotencyKey?: string;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<unknown>;
+  zeroGenerationRuntimeDescriptor(
+    runtimeId: string,
+    projectId: number,
+  ): Promise<{
+    identity: string;
+    manifestRevision: string;
+    status: RuntimeStatus;
+  }>;
+}
+
+export function supportsZeroGeneration(
+  provider: TenantRuntimeProvider,
+): provider is ZeroGenerationTenantRuntimeProvider {
+  const candidate = provider as Partial<ZeroGenerationTenantRuntimeProvider>;
+  return (
+    supportsLayeredArtifactDeployment(provider) &&
+    typeof candidate.zeroGenerationControlRequest === "function" &&
+    typeof candidate.zeroGenerationRuntimeDescriptor === "function"
   );
 }
 
@@ -162,15 +210,20 @@ export interface TenantRuntimeProvider {
     environment?: Record<string, string>,
     options?: RuntimeServiceOptions,
   ): Promise<RuntimeCreateResult>;
-  start(runtimeId: string, projectId: number): Promise<boolean>;
-  stop(runtimeId: string, projectId: number): Promise<boolean>;
-  destroy(runtimeId: string, projectId: number): Promise<boolean>;
+  start(runtimeId: string, projectId: number, options?: RuntimeStartOptions): Promise<boolean>;
+  stop(runtimeId: string, projectId: number, options?: RuntimeOperationOptions): Promise<boolean>;
+  destroy(
+    runtimeId: string,
+    projectId: number,
+    options?: RuntimeOperationOptions,
+  ): Promise<boolean>;
   status(runtimeId: string): Promise<RuntimeStatus>;
   exec(
     runtimeId: string,
     command: string[],
     projectId: number,
     workdir?: string,
+    options?: RuntimeOperationOptions,
   ): Promise<RuntimeExecResult>;
 
   installDependencies(

@@ -2,6 +2,7 @@ import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@c
 import { createHash } from "node:crypto";
 import {
   CAPABILITY_DOORMAN_HOST,
+  TENANT_RUNTIME_MODE_ENV,
   argvToCommandString,
   compareUtf8,
   sha256Hex,
@@ -272,6 +273,9 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
         HOST: "0.0.0.0",
         PORT: String(runtime.manifest.servicePort),
         NABUFLOW_RUNTIME_ID: runtime.descriptor.identity,
+        // Platform-owned and injected after artifact sealing. Tenant source,
+        // requests, and environment APIs cannot select direct credential mode.
+        [TENANT_RUNTIME_MODE_ENV]: "cloudflare-capability-v1",
       },
       processId: TENANT_PROCESS_ID,
       autoCleanup: false,

@@ -92,6 +92,8 @@ import {
   type SandboxShellSession,
 } from "./sandbox-shell";
 import { creativeChargeFields } from "./creative-charge-honesty";
+import type { ZeroGenerationTarget } from "@workspace/tenant-runtime-contracts";
+import { ZERO_SEALED_NODE_PROMPT_EXTENSION } from "./zero-sealed-generation";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -185,6 +187,8 @@ export interface AgentLoopInput {
    * non-fatal and must not propagate.
    */
   onBeforeRiskyOp?: (reason: string) => Promise<void>;
+  /** Deployment-owned target. Omitted preserves the existing agent loop exactly. */
+  zeroGenerationTarget?: ZeroGenerationTarget;
 }
 
 export type ToolCallRecord = {
@@ -1642,6 +1646,7 @@ function buildSystemPrompt(
     input.liveServerAvailable === false
       ? "Live cloud-server infrastructure is unavailable for this run. Generate the requested architecture, but do not attempt container commands and do not treat server startup or /healthz as a finalization requirement. Continue every available file, syntax, structure, and other non-runtime validation."
       : "";
+  const sealedGeneration = input.zeroGenerationTarget === "cloudflare-sealed-staging-v1";
 
   // In Developer Mode every project is a real server process inside a Linux
   // container — static-html is never a valid target.  If the stack still reads
@@ -1649,12 +1654,16 @@ function buildSystemPrompt(
   // agent explicitly.
   const effectivelyStatic = isStatic && !isDeveloperMode;
 
-  const platformNote = effectivelyStatic
-    ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). `run_command` can inspect files or execute a local Node script in a disposable workspace copy; no production secrets are available."
-    : isMobile
-      ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` uses the same disposable, argv-only workspace copy."
-      : isDeveloperMode
-        ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}).
+  const platformNote = sealedGeneration
+    ? `${ZERO_SEALED_NODE_PROMPT_EXTENSION}
+
+The build cell, not the tenant runtime, performs dependency installation and validation. pkg_install records a dependency intent for Pantry. Do not use run_command for npm, npx, pnpm, yarn, registry access, or application delivery.`
+    : effectivelyStatic
+      ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). `run_command` can inspect files or execute a local Node script in a disposable workspace copy; no production secrets are available."
+      : isMobile
+        ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` uses the same disposable, argv-only workspace copy."
+        : isDeveloperMode
+          ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}).
 
 ## How the live preview works
 write_files, write_file, and apply_patch write directly to the container's filesystem — the same filesystem your dev server is watching. The full chain is automatic:
@@ -1708,8 +1717,8 @@ app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
 \`\`\`
 
 The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add dependencies, use pkg_install.`
-        : ["node-api", "nextjs"].includes(stack)
-          ? `This is a ${stack} project. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add new dependencies, prefer pkg_install over raw \`npm install\`.
+          : ["node-api", "nextjs"].includes(stack)
+            ? `This is a ${stack} project. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add new dependencies, prefer pkg_install over raw \`npm install\`.
 
 ## Critical: server must start even without DATABASE_URL
 The preview container injects DATABASE_URL at runtime — but it may not be set during early preview checks before a database is provisioned. Your server MUST start and respond to HTTP requests even when DATABASE_URL is absent.
@@ -1784,7 +1793,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
 - If the server responds → proceed to finalize immediately.
 - Use npx to run binaries that aren't in node_modules (e.g. \`npx tsx src/server/index.ts\`).
 - Never fail a task solely because npm install cannot complete — the server may already be running.`
-          : `This is a ${stack} project. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
+            : `This is a ${stack} project. run_command is argv-only and limited to Node/npm/npx plus read-only file utilities in a disposable workspace copy. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
   return [
     isDeveloperMode
       ? `You are NabuFlow's Developer Mode AI. Your job is to ${input.mode === "build" ? "build" : "update"} a production-quality ${isStatic ? "Node.js/Express" : stack} server application that runs as a live process in a Linux container. The project is always containerized — never produce a raw static HTML bundle without a server.`
@@ -2033,7 +2042,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     legacyProfile: "fixed-node",
   }).servicePort;
   const baseProfile = checkProfileForServicePort(CHECK_PROFILES[stack], servicePort);
-  const liveServerAvailable = input.liveServerAvailable !== false;
+  const liveServerAvailable =
+    input.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
+      ? false
+      : input.liveServerAvailable !== false;
   const profile = {
     ...baseProfile,
     checks: checksForLiveServerCapability(baseProfile.checks, liveServerAvailable),
@@ -5527,6 +5539,22 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
         };
       }
+      if (input.zeroGenerationTarget === "cloudflare-sealed-staging-v1") {
+        const reason = "sealed generation permits only in-process checks; Pantry owns dependencies";
+        commandsRun.push({
+          step,
+          argv,
+          exitCode: 126,
+          durationMs: 0,
+          stdoutPreview: "",
+          stderrPreview: `BLOCKED: ${reason}`,
+        });
+        return {
+          ok: false,
+          exitCode: 126,
+          observation: JSON.stringify({ blocked: true, reason, argv }),
+        };
+      }
       const strictness = ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
       const check = evaluateRunCommand(argv, strictness, {
         allowedExactArgvs: ctx.profile.checks.map((c) => c.argv),
@@ -6219,6 +6247,29 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
             manager: decision.manager,
             pkg: decision.pkg,
             version: decision.version,
+          }),
+        };
+      }
+      if (input.zeroGenerationTarget === "cloudflare-sealed-staging-v1") {
+        if (decision.manager !== "npm") {
+          return {
+            ok: false,
+            observation: JSON.stringify({
+              blocked: true,
+              reason: "sealed Node generation accepts npm dependency intents only",
+              manager: decision.manager,
+            }),
+          };
+        }
+        return {
+          ok: true,
+          observation: JSON.stringify({
+            ok: true,
+            disposition: "pantry-dependency-intent-recorded",
+            ecosystem: "npm",
+            name: decision.pkg,
+            selector: decision.version || "latest",
+            tenantInstallStarted: false,
           }),
         };
       }

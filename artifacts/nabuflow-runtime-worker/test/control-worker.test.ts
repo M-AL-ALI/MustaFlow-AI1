@@ -13,6 +13,7 @@ import {
   TEST_SECRET,
   ensureBody,
   fakeEnv,
+  mutationAndDrain,
   signedRequest,
 } from "./helpers";
 
@@ -30,6 +31,67 @@ const FIXED_VECTOR = {
 } as const;
 
 describe("authenticated staging control plane", () => {
+  it("discovers recent durable jobs through signed bounded metadata only", async () => {
+    const coordinator = new MemoryCoordinator();
+    const runtimeIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "preview",
+      slot: "primary",
+    });
+    const subjectKey = "a".repeat(64);
+    await coordinator.registerDurableOperation({
+      key: "discovery-commit-1",
+      fingerprint: "fingerprint-discovery-1",
+      kind: "layers-v1",
+      runtimeIdentity,
+      subjectKey,
+      sealedArtifactSha256: subjectKey,
+      expectedDeploymentVersion: "worker-version-test-1",
+      nowMs: TEST_NOW_MS - 5_000,
+    });
+    const since = new Date(TEST_NOW_MS - 60_000).toISOString();
+    const path = `/_nabuflow/control/v1/durable-operations?since=${encodeURIComponent(since)}&limit=10&kind=layers-v1`;
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "nonce-durable-discovery-0001" }),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { jobs: Array<Record<string, unknown>> };
+    expect(body.jobs).toHaveLength(1);
+    expect(body.jobs[0]).toMatchObject({
+      kind: "layers-v1",
+      runtimeIdentity,
+      subjectKey,
+      state: "active",
+      checkpoint: "initialized",
+      attempt: 0,
+    });
+    expect(body.jobs[0]).not.toHaveProperty("fingerprint");
+    expect(body.jobs[0]).not.toHaveProperty("ownerId");
+    expect(body.jobs[0]).not.toHaveProperty("response");
+
+    const unsigned = await handleControlRequest(
+      new Request(`https://runtime.example${path}`),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(unsigned.status).toBe(401);
+
+    const tooOld = new Date(TEST_NOW_MS - 24 * 60 * 60_000 - 1).toISOString();
+    const invalid = await handleControlRequest(
+      await signedRequest({
+        path: `/_nabuflow/control/v1/durable-operations?since=${encodeURIComponent(tooOld)}`,
+        nonce: "nonce-durable-discovery-old-1",
+      }),
+      fakeEnv(),
+      { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS },
+    );
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({ code: "invalid_discovery_window" });
+  });
+
   it("is byte-compatible with the slice 2b-i fixed HMAC vector", async () => {
     expect(await sha256Hex(FIXED_VECTOR.body)).toBe(FIXED_VECTOR.fields.bodySha256);
     expect(await signControlRequest(TEST_SECRET, FIXED_VECTOR.fields)).toBe(FIXED_VECTOR.signature);
@@ -526,16 +588,20 @@ describe("authenticated staging control plane", () => {
       },
     } satisfies StoredRuntimeArtifact);
 
-    const start = await send({
+    const start = await mutationAndDrain({
       path: `${base}/start`,
-      method: "POST",
       idempotencyKey: "lifecycle-start",
+      nonce: `nonce-lifecycle-${String(++nonce).padStart(4, "0")}`,
       body: {
         locator: ensureBody().locator,
         expectedDeploymentVersion: "worker-version-test-1",
         artifactRevision: "artifact-1",
         artifactSha256,
       },
+      env,
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
     });
     expect(start.status).toBe(200);
     await expect(start.json()).resolves.toMatchObject({ runtime: { status: "running" } });

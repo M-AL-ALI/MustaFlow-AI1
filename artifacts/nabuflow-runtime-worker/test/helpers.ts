@@ -1,4 +1,8 @@
 import {
+  ARTIFACT_COMMIT_LEASE_MS,
+  ARTIFACT_COMMIT_SERVER_EXECUTION_DEADLINE_MS,
+  DURABLE_OPERATION_LEASE_MS,
+  DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
   sha256Hex,
   signControlRequest,
   type CapabilityDefinition,
@@ -8,11 +12,19 @@ import {
   type StripeCapabilityPolicy,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "../src/bindings";
+import { handleDurableOperationQueue, handleControlRequest } from "../src/worker";
 import type {
   CapabilityVault,
   CapabilityVaultInvocationResult,
   ArtifactCommitClaim,
   ArtifactCommitCheckpoint,
+  ArtifactCommitDriverClaim,
+  ArtifactCommitQueueMessage,
+  DurableOperationClaim,
+  DurableOperationCheckpoint,
+  DurableOperationDriverClaim,
+  DurableOperationQueueMessage,
+  DurableOperationRegistration,
   ControlAuditRecord,
   ControlCoordinator,
   IdempotencyLookup,
@@ -23,6 +35,9 @@ import type {
   StoredRuntimeLayer,
   StoredRuntimeLayeredArtifact,
   StoredArtifactCommitJob,
+  StoredDurableOperationJob,
+  StoredRuntimeManifestRestartJob,
+  StoredRuntimeStartJob,
   RemovedRuntimeLayeredArtifact,
 } from "../src/model";
 import type {
@@ -35,6 +50,109 @@ import type {
 
 export const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 export const TEST_NOW_MS = 1_785_859_200_000;
+
+export class MemoryArtifactCommitQueue {
+  readonly messages: DurableOperationQueueMessage[] = [];
+
+  async send(body: DurableOperationQueueMessage): Promise<void> {
+    this.messages.push(structuredClone(body));
+  }
+
+  async sendBatch(batch: MessageSendRequest<DurableOperationQueueMessage>[]): Promise<void> {
+    for (const message of batch) this.messages.push(structuredClone(message.body));
+  }
+}
+
+export async function drainArtifactCommitQueue(input: {
+  env: WorkerBindings;
+  coordinator: ControlCoordinator;
+  backend: RuntimeBackend;
+  nowMs?: number;
+}): Promise<number> {
+  const queue = input.env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
+  const messages = queue.messages.splice(0);
+  if (messages.length === 0) return 0;
+  await handleDurableOperationQueue(
+    {
+      queue: "test-artifact-commit",
+      messages: messages.map((body, index) => ({
+        id: `test-artifact-commit-${index}`,
+        timestamp: new Date(input.nowMs ?? TEST_NOW_MS),
+        body,
+        attempts: 1,
+        ack() {},
+        retry() {},
+      })),
+      ackAll() {},
+      retryAll() {},
+      metadata: { metrics: {} },
+    } as unknown as MessageBatch<DurableOperationQueueMessage>,
+    input.env,
+    {
+      coordinator: input.coordinator,
+      backend: input.backend,
+      nowMs: input.nowMs ?? TEST_NOW_MS,
+    },
+  );
+  return messages.length;
+}
+
+export async function commitArtifactAndDrain(input: {
+  path: string;
+  body: unknown;
+  nonce: string;
+  idempotencyKey: string;
+  env: WorkerBindings;
+  coordinator: ControlCoordinator;
+  backend: RuntimeBackend;
+  nowMs?: number;
+}): Promise<Response> {
+  return mutationAndDrain(input);
+}
+
+export async function mutationAndDrain(input: {
+  path: string;
+  body: unknown;
+  nonce: string;
+  idempotencyKey: string;
+  env: WorkerBindings;
+  coordinator: ControlCoordinator;
+  backend: RuntimeBackend;
+  nowMs?: number;
+  method?: string;
+}): Promise<Response> {
+  const dependencies = {
+    coordinator: input.coordinator,
+    backend: input.backend,
+    nowMs: input.nowMs ?? TEST_NOW_MS,
+  };
+  const accepted = await handleControlRequest(
+    await signedRequest({
+      path: input.path,
+      method: input.method ?? "POST",
+      nonce: input.nonce,
+      idempotencyKey: input.idempotencyKey,
+      body: input.body,
+    }),
+    input.env,
+    dependencies,
+  );
+  if (accepted.status !== 409) return accepted;
+  const acceptedBody = (await accepted.clone().json()) as { code?: string };
+  if (acceptedBody.code !== "request_in_progress") return accepted;
+  await drainArtifactCommitQueue({ ...dependencies, env: input.env });
+  return handleControlRequest(
+    await signedRequest({
+      path: input.path,
+      method: input.method ?? "POST",
+      nonce: `${input.nonce}-replay`,
+      idempotencyKey: input.idempotencyKey,
+      body: input.body,
+    }),
+    input.env,
+    dependencies,
+  );
+}
 
 export class MemoryCoordinator implements ControlCoordinator {
   readonly nonces = new Map<string, number>();
@@ -50,6 +168,12 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly layeredArtifacts = new Map<string, StoredRuntimeLayeredArtifact>();
   readonly runtimeLayers = new Map<string, StoredRuntimeLayer>();
   readonly artifactCommitJobs = new Map<string, StoredArtifactCommitJob>();
+  readonly latestArtifactCommitJobs = new Map<string, string>();
+  readonly runtimeLifecycleJobs = new Map<
+    string,
+    StoredRuntimeStartJob | StoredRuntimeManifestRestartJob
+  >();
+  readonly latestRuntimeLifecycleJobs = new Map<string, string>();
   layerChunkWrites = 0;
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
@@ -94,13 +218,292 @@ export class MemoryCoordinator implements ControlCoordinator {
     if (this.idempotency.get(key)?.fingerprint === fingerprint) this.idempotency.delete(key);
   }
 
-  async claimArtifactCommit(input: {
+  async registerDurableOperation(
+    input: DurableOperationRegistration,
+  ): Promise<DurableOperationClaim> {
+    if (input.kind === "v1" || input.kind === "layers-v1") {
+      return this.registerArtifactCommit(input);
+    }
+    const lifecycleInput = input as Extract<
+      DurableOperationRegistration,
+      { kind: "runtime-start" | "runtime-manifest-restart" }
+    >;
+    const idempotency = this.idempotency.get(lifecycleInput.key);
+    if (idempotency !== undefined && idempotency.fingerprint !== lifecycleInput.fingerprint) {
+      return { state: "conflict" };
+    }
+    if (idempotency !== undefined && !idempotency.pending && idempotency.response !== undefined) {
+      return { state: "replay", response: structuredClone(idempotency.response) };
+    }
+    const jobKey = `durable-operation-job:${lifecycleInput.kind}:${lifecycleInput.runtimeIdentity}:${lifecycleInput.subjectKey}:${lifecycleInput.key}`;
+    const existing = this.runtimeLifecycleJobs.get(jobKey);
+    if (existing?.response !== undefined && existing.state !== "active") {
+      return { state: "replay", response: structuredClone(existing.response) };
+    }
+    if (existing !== undefined) {
+      this.appendDurableOperationEvent(existing, "request-observed", input.nowMs);
+      return { state: "pending", job: structuredClone(existing) };
+    }
+    const common = {
+      jobKey,
+      runtimeIdentity: lifecycleInput.runtimeIdentity,
+      subjectKey: lifecycleInput.subjectKey,
+      expectedDeploymentVersion: lifecycleInput.expectedDeploymentVersion,
+      fingerprint: lifecycleInput.fingerprint,
+      idempotencyStorageKey: lifecycleInput.key,
+      state: "active" as const,
+      checkpoint: "initialized" as const,
+      ownerId: null,
+      attempt: 0,
+      eventSequence: 0,
+      events: [],
+      leaseUntilMs: null,
+      abandonAtMs: null,
+      deadlineMs: lifecycleInput.nowMs + DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+      createdAtMs: lifecycleInput.nowMs,
+      updatedAtMs: lifecycleInput.nowMs,
+    };
+    const job: StoredRuntimeStartJob | StoredRuntimeManifestRestartJob =
+      lifecycleInput.kind === "runtime-start"
+        ? {
+            ...common,
+            kind: "runtime-start",
+            subjectKey: "start",
+            request: structuredClone(lifecycleInput.request),
+          }
+        : {
+            ...common,
+            kind: "runtime-manifest-restart",
+            subjectKey: "manifest-restart",
+            request: structuredClone(lifecycleInput.request),
+          };
+    this.appendDurableOperationEvent(job, "job-created", lifecycleInput.nowMs);
+    this.runtimeLifecycleJobs.set(jobKey, job);
+    this.latestRuntimeLifecycleJobs.set(
+      `${lifecycleInput.kind}:${lifecycleInput.runtimeIdentity}:${lifecycleInput.subjectKey}`,
+      jobKey,
+    );
+    this.idempotency.set(lifecycleInput.key, {
+      fingerprint: lifecycleInput.fingerprint,
+      pending: true,
+    });
+    return { state: "new", job: structuredClone(job) };
+  }
+
+  async claimDurableOperationDriver(
+    jobKey: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<DurableOperationDriverClaim> {
+    if (this.artifactCommitJobs.has(jobKey)) {
+      return this.claimArtifactCommitDriver(jobKey, ownerId, nowMs);
+    }
+    const job = this.runtimeLifecycleJobs.get(jobKey);
+    if (job === undefined) return { state: "not_found" };
+    if (job.state !== "active") return { state: "terminal", job: structuredClone(job) };
+    if (job.leaseUntilMs !== null && job.leaseUntilMs > nowMs) {
+      this.appendDurableOperationEvent(job, "driver-busy", nowMs);
+      return { state: "busy", job: structuredClone(job) };
+    }
+    const adopted = job.attempt > 0;
+    if (job.ownerId !== null || job.leaseUntilMs !== null) {
+      this.appendDurableOperationEvent(job, "lease-expired", nowMs);
+    }
+    job.ownerId = ownerId;
+    job.attempt += 1;
+    job.leaseUntilMs = Math.min(nowMs + DURABLE_OPERATION_LEASE_MS, job.deadlineMs);
+    this.appendDurableOperationEvent(job, adopted ? "driver-adopted" : "driver-claimed", nowMs);
+    return { state: adopted ? "adopted" : "claimed", job: structuredClone(job) };
+  }
+
+  async getDurableOperation(jobKey: string): Promise<StoredDurableOperationJob | null> {
+    return structuredClone(
+      this.artifactCommitJobs.get(jobKey) ?? this.runtimeLifecycleJobs.get(jobKey) ?? null,
+    );
+  }
+
+  async getLatestDurableOperation(
+    kind: StoredDurableOperationJob["kind"],
+    runtimeIdentity: string,
+    subjectKey: string,
+  ): Promise<StoredDurableOperationJob | null> {
+    if (kind === "runtime-start" || kind === "runtime-manifest-restart") {
+      const jobKey = this.latestRuntimeLifecycleJobs.get(
+        `${kind}:${runtimeIdentity}:${subjectKey}`,
+      );
+      return jobKey === undefined ? null : this.getDurableOperation(jobKey);
+    }
+    const jobKey = this.latestArtifactCommitJobs.get(`${runtimeIdentity}:${subjectKey}`);
+    const job = jobKey === undefined ? null : await this.getDurableOperation(jobKey);
+    return job?.kind === kind ? job : null;
+  }
+
+  async listRecentDurableOperations(input: {
+    sinceMs: number;
+    untilMs: number;
+    limit: number;
+    kind?: StoredDurableOperationJob["kind"];
+  }): Promise<StoredDurableOperationJob[]> {
+    return [...this.artifactCommitJobs.values(), ...this.runtimeLifecycleJobs.values()]
+      .filter((job) => {
+        const createdAtMs =
+          job.createdAtMs ?? job.deadlineMs - DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS;
+        return (
+          createdAtMs >= input.sinceMs &&
+          createdAtMs <= input.untilMs &&
+          (input.kind === undefined || job.kind === input.kind)
+        );
+      })
+      .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
+      .slice(0, input.limit)
+      .map((job) => structuredClone(job));
+  }
+
+  async recordDurableOperationNudge(jobKey: string, nowMs: number) {
+    if (this.artifactCommitJobs.has(jobKey)) return this.recordArtifactCommitNudge(jobKey, nowMs);
+    const job = this.runtimeLifecycleJobs.get(jobKey);
+    if (job === undefined) return "not_found" as const;
+    if (job.state !== "active") return "terminal" as const;
+    this.appendDurableOperationEvent(job, "queue-nudged", nowMs);
+    return "recorded" as const;
+  }
+
+  async renewDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    nowMs: number,
+  ) {
+    if (this.artifactCommitJobs.has(jobKey)) {
+      const job = this.artifactCommitJobs.get(jobKey);
+      if (job?.attempt !== ownerGeneration) return "not_owner" as const;
+      return this.renewArtifactCommit(jobKey, ownerId, nowMs);
+    }
+    const job = this.runtimeLifecycleJobs.get(jobKey);
+    if (job === undefined || job.state !== "active") return "terminal" as const;
+    if (job.ownerId !== ownerId || job.attempt !== ownerGeneration) return "not_owner" as const;
+    job.leaseUntilMs = Math.min(nowMs + DURABLE_OPERATION_LEASE_MS, job.deadlineMs);
+    this.appendDurableOperationEvent(job, "lease-renewed", nowMs);
+    return "renewed" as const;
+  }
+
+  async checkpointDurableOperation(input: {
+    jobKey: string;
+    ownerId: string;
+    ownerGeneration: number;
+    checkpoint: DurableOperationCheckpoint;
+    payloadContentSha256s?: string[];
+    runtimeWasRunning?: boolean;
+    nowMs: number;
+  }): Promise<StoredDurableOperationJob> {
+    if (this.artifactCommitJobs.has(input.jobKey)) {
+      return this.checkpointArtifactCommit({
+        ...input,
+        checkpoint: input.checkpoint as ArtifactCommitCheckpoint,
+      });
+    }
+    const job = this.runtimeLifecycleJobs.get(input.jobKey);
+    if (
+      job === undefined ||
+      job.ownerId !== input.ownerId ||
+      job.attempt !== input.ownerGeneration ||
+      job.state !== "active"
+    ) {
+      throw new Error("Runtime lifecycle checkpoint owner is no longer active");
+    }
+    job.checkpoint = input.checkpoint as never;
+    if (job.kind === "runtime-manifest-restart" && input.runtimeWasRunning !== undefined) {
+      job.runtimeWasRunning = input.runtimeWasRunning;
+    }
+    this.appendDurableOperationEvent(job, "checkpoint-advanced", input.nowMs);
+    return structuredClone(job);
+  }
+
+  async completeDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    response: StoredHttpResponse,
+  ): Promise<"completed" | "already_terminal" | "not_owner"> {
+    if (this.artifactCommitJobs.has(jobKey)) {
+      const job = this.artifactCommitJobs.get(jobKey);
+      if (job === undefined) return "not_owner";
+      if (job.state !== "active") return "already_terminal";
+      if (job.attempt !== ownerGeneration || job.ownerId !== ownerId) return "not_owner";
+      await this.completeArtifactCommit(jobKey, ownerId, response);
+      return "completed";
+    }
+    return this.finishRuntimeLifecycle(jobKey, ownerId, ownerGeneration, "succeeded", response);
+  }
+
+  async failDurableOperation(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    response: StoredHttpResponse,
+  ): Promise<"completed" | "already_terminal" | "not_owner"> {
+    if (this.artifactCommitJobs.has(jobKey)) {
+      const job = this.artifactCommitJobs.get(jobKey);
+      if (job === undefined) return "not_owner";
+      if (job.state !== "active") return "already_terminal";
+      if (job.attempt !== ownerGeneration || job.ownerId !== ownerId) return "not_owner";
+      await this.failArtifactCommit(jobKey, ownerId, response);
+      return "completed";
+    }
+    return this.finishRuntimeLifecycle(jobKey, ownerId, ownerGeneration, "failed", response);
+  }
+
+  private async finishRuntimeLifecycle(
+    jobKey: string,
+    ownerId: string,
+    ownerGeneration: number,
+    state: "succeeded" | "failed",
+    response: StoredHttpResponse,
+  ): Promise<"completed" | "already_terminal" | "not_owner"> {
+    const job = this.runtimeLifecycleJobs.get(jobKey);
+    if (job === undefined) return "not_owner";
+    if (job.state !== "active") return "already_terminal";
+    if (job.ownerId !== ownerId || job.attempt !== ownerGeneration) return "not_owner";
+    job.state = state;
+    job.ownerId = null;
+    job.leaseUntilMs = null;
+    job.response = structuredClone(response);
+    this.appendDurableOperationEvent(
+      job,
+      state === "succeeded" ? "driver-succeeded" : "driver-failed",
+      TEST_NOW_MS,
+    );
+    this.idempotency.set(job.idempotencyStorageKey, {
+      fingerprint: job.fingerprint,
+      pending: false,
+      response: structuredClone(response),
+    });
+    return "completed";
+  }
+
+  private appendDurableOperationEvent(
+    job: StoredDurableOperationJob,
+    event: StoredDurableOperationJob["events"][number]["event"],
+    nowMs: number,
+  ): void {
+    job.eventSequence += 1;
+    job.events.push({
+      sequence: job.eventSequence,
+      at: new Date(nowMs).toISOString(),
+      event,
+      attempt: job.attempt,
+      checkpoint: job.checkpoint,
+    });
+    job.updatedAtMs = nowMs;
+  }
+
+  async registerArtifactCommit(input: {
     key: string;
     fingerprint: string;
-    ownerId: string;
     kind: "v1" | "layers-v1";
     runtimeIdentity: string;
     sealedArtifactSha256: string;
+    expectedDeploymentVersion: string;
     nowMs: number;
   }): Promise<ArtifactCommitClaim> {
     const idempotency = this.idempotency.get(input.key);
@@ -110,50 +513,116 @@ export class MemoryCoordinator implements ControlCoordinator {
     if (idempotency !== undefined && !idempotency.pending && idempotency.response !== undefined) {
       return { state: "replay", response: structuredClone(idempotency.response) };
     }
-    const jobKey = `artifact-commit-job:${input.runtimeIdentity}:${input.sealedArtifactSha256}:${input.key}`;
+    const jobKey = `durable-operation-job:${input.kind}:${input.runtimeIdentity}:${input.sealedArtifactSha256}:${input.key}`;
     const existing = this.artifactCommitJobs.get(jobKey);
     if (existing?.response !== undefined && existing.state !== "active") {
       return { state: "replay", response: structuredClone(existing.response) };
     }
     if (existing !== undefined) {
-      if (existing.leaseUntilMs !== null && existing.leaseUntilMs > input.nowMs) {
-        return { state: "pending" };
-      }
-      existing.ownerId = input.ownerId;
-      existing.attempt += 1;
-      existing.leaseUntilMs = input.nowMs + 15_000;
-      existing.abandonAtMs = input.nowMs + 45_000;
-      existing.updatedAtMs = input.nowMs;
-      this.idempotency.set(input.key, { fingerprint: input.fingerprint, pending: true });
-      return { state: "adopted", job: structuredClone(existing) };
+      this.appendArtifactCommitEvent(existing, "request-observed", input.nowMs);
+      return { state: "pending", job: structuredClone(existing) };
     }
     const job: StoredArtifactCommitJob = {
       jobKey,
       kind: input.kind,
       runtimeIdentity: input.runtimeIdentity,
+      subjectKey: input.sealedArtifactSha256,
       sealedArtifactSha256: input.sealedArtifactSha256,
+      expectedDeploymentVersion: input.expectedDeploymentVersion,
       fingerprint: input.fingerprint,
       idempotencyStorageKey: input.key,
       state: "active",
       checkpoint: "initialized",
-      ownerId: input.ownerId,
-      attempt: 1,
-      leaseUntilMs: input.nowMs + 15_000,
-      abandonAtMs: input.nowMs + 45_000,
-      deadlineMs: input.nowMs + 5 * 60_000,
+      ownerId: null,
+      attempt: 0,
+      eventSequence: 0,
+      events: [],
+      leaseUntilMs: null,
+      abandonAtMs: null,
+      deadlineMs: input.nowMs + ARTIFACT_COMMIT_SERVER_EXECUTION_DEADLINE_MS,
+      createdAtMs: input.nowMs,
       updatedAtMs: input.nowMs,
     };
+    this.appendArtifactCommitEvent(job, "job-created", input.nowMs);
     this.artifactCommitJobs.set(jobKey, job);
+    this.latestArtifactCommitJobs.set(
+      `${input.runtimeIdentity}:${input.sealedArtifactSha256}`,
+      jobKey,
+    );
     this.idempotency.set(input.key, { fingerprint: input.fingerprint, pending: true });
     return { state: "new", job: structuredClone(job) };
+  }
+
+  async claimArtifactCommitDriver(
+    jobKey: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<ArtifactCommitDriverClaim> {
+    const job = this.artifactCommitJobs.get(jobKey);
+    if (job === undefined) return { state: "not_found" };
+    if (job.state !== "active") return { state: "terminal", job: structuredClone(job) };
+    if (job.leaseUntilMs !== null && job.leaseUntilMs > nowMs) {
+      this.appendArtifactCommitEvent(job, "driver-busy", nowMs);
+      return { state: "busy", job: structuredClone(job) };
+    }
+    const adopted = job.attempt > 0;
+    if (job.ownerId !== null || job.leaseUntilMs !== null) {
+      this.appendArtifactCommitEvent(job, "lease-expired", nowMs);
+    }
+    job.ownerId = ownerId;
+    job.attempt += 1;
+    job.leaseUntilMs = Math.min(nowMs + ARTIFACT_COMMIT_LEASE_MS, job.deadlineMs);
+    job.updatedAtMs = nowMs;
+    this.appendArtifactCommitEvent(job, adopted ? "driver-adopted" : "driver-claimed", nowMs);
+    return { state: adopted ? "adopted" : "claimed", job: structuredClone(job) };
+  }
+
+  async getArtifactCommit(jobKey: string): Promise<StoredArtifactCommitJob | null> {
+    const job = this.artifactCommitJobs.get(jobKey);
+    return job === undefined ? null : structuredClone(job);
+  }
+
+  async getLatestArtifactCommit(
+    runtimeIdentity: string,
+    sealedArtifactSha256: string,
+  ): Promise<StoredArtifactCommitJob | null> {
+    const jobKey = this.latestArtifactCommitJobs.get(`${runtimeIdentity}:${sealedArtifactSha256}`);
+    return jobKey === undefined ? null : this.getArtifactCommit(jobKey);
+  }
+
+  async recordArtifactCommitNudge(
+    jobKey: string,
+    nowMs: number,
+  ): Promise<"recorded" | "not_found" | "terminal"> {
+    const job = this.artifactCommitJobs.get(jobKey);
+    if (job === undefined) return "not_found";
+    if (job.state !== "active") return "terminal";
+    this.appendArtifactCommitEvent(job, "queue-nudged", nowMs);
+    return "recorded";
+  }
+
+  private appendArtifactCommitEvent(
+    job: StoredArtifactCommitJob,
+    event: StoredArtifactCommitJob["events"][number]["event"],
+    nowMs: number,
+  ): void {
+    job.eventSequence += 1;
+    job.events.push({
+      sequence: job.eventSequence,
+      at: new Date(nowMs).toISOString(),
+      event,
+      attempt: job.attempt,
+      checkpoint: job.checkpoint,
+    });
+    job.updatedAtMs = nowMs;
   }
 
   async renewArtifactCommit(jobKey: string, ownerId: string, nowMs: number) {
     const job = this.artifactCommitJobs.get(jobKey);
     if (job === undefined || job.state !== "active") return "terminal" as const;
     if (job.ownerId !== ownerId) return "not_owner" as const;
-    job.leaseUntilMs = nowMs + 15_000;
-    job.abandonAtMs = nowMs + 45_000;
+    job.leaseUntilMs = Math.min(nowMs + ARTIFACT_COMMIT_LEASE_MS, job.deadlineMs);
+    this.appendArtifactCommitEvent(job, "lease-renewed", nowMs);
     return "renewed" as const;
   }
 
@@ -173,6 +642,7 @@ export class MemoryCoordinator implements ControlCoordinator {
     if (input.payloadContentSha256s !== undefined) {
       job.payloadContentSha256s = [...input.payloadContentSha256s];
     }
+    this.appendArtifactCommitEvent(job, "checkpoint-advanced", input.nowMs);
     return structuredClone(job);
   }
 
@@ -207,6 +677,11 @@ export class MemoryCoordinator implements ControlCoordinator {
     job.leaseUntilMs = null;
     job.abandonAtMs = null;
     job.response = structuredClone(response);
+    this.appendArtifactCommitEvent(
+      job,
+      state === "succeeded" ? "driver-succeeded" : "driver-failed",
+      job.updatedAtMs,
+    );
     const idempotencyKey = job.idempotencyStorageKey;
     this.idempotency.set(idempotencyKey, {
       fingerprint: job.fingerprint,
@@ -721,13 +1196,15 @@ export class MemoryR2Bucket {
     for (const key of typeof keys === "string" ? [keys] : keys) this.objects.delete(key);
   }
 
-  async head(key: string): Promise<{ key: string; size: number } | null> {
+  async head(key: string): Promise<{ key: string; size: number; uploaded: Date } | null> {
     const stored = this.objects.get(key);
-    return stored === undefined ? null : { key, size: stored.byteLength };
+    return stored === undefined
+      ? null
+      : { key, size: stored.byteLength, uploaded: new Date("2026-08-10T00:00:00.000Z") };
   }
 
   async list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
-    objects: Array<{ key: string; size: number }>;
+    objects: Array<{ key: string; size: number; uploaded: Date }>;
     truncated: boolean;
     cursor?: string;
   }> {
@@ -740,7 +1217,11 @@ export class MemoryR2Bucket {
     const page = matches.slice(offset, offset + limit);
     const next = offset + page.length;
     return {
-      objects: page.map(([key, bytes]) => ({ key, size: bytes.byteLength })),
+      objects: page.map(([key, bytes]) => ({
+        key,
+        size: bytes.byteLength,
+        uploaded: new Date("2026-08-10T00:00:00.000Z"),
+      })),
       truncated: next < matches.length,
       ...(next < matches.length ? { cursor: String(next) } : {}),
     };
@@ -975,6 +1456,7 @@ export class MemoryCapabilityVault implements CapabilityVault {
 
 export function fakeEnv(): WorkerBindings {
   const artifactBucket = new MemoryR2Bucket();
+  const artifactCommitQueue = new MemoryArtifactCommitQueue();
   return {
     CF_VERSION_METADATA: {
       id: "worker-version-test-1",
@@ -990,6 +1472,8 @@ export function fakeEnv(): WorkerBindings {
       '{"runtime":"node","runtimeVersion":"22.18.0","nodeAbi":"127","os":"linux","cpu":"x64","libc":"glibc","toolchainImageDigest":"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738"}',
     NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID: "v1",
     NABUFLOW_RUNTIME_ARTIFACTS: artifactBucket as unknown as R2Bucket,
+    DURABLE_OPERATION_QUEUE: artifactCommitQueue as unknown as Queue<DurableOperationQueueMessage>,
+    ARTIFACT_COMMIT_QUEUE: artifactCommitQueue as unknown as Queue<ArtifactCommitQueueMessage>,
     NABUFLOW_SANDBOX: {
       idFromName(identity: string) {
         return { toString: () => `container:${identity}` };

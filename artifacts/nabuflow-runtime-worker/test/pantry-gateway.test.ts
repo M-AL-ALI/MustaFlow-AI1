@@ -156,7 +156,13 @@ describe("signed Pantry service-binding gateway", () => {
         return Response.json({
           ok: true,
           assemblyId,
-          ingest: { state: "running", attempt: 1 },
+          ingest: {
+            state: "running",
+            attempt: 1,
+            updatedAt: "2026-08-08T16:00:00.000Z",
+            leaseUntil: "2026-08-08T16:03:00.000Z",
+            failure: null,
+          },
           stagedObjects: 3,
         });
       },
@@ -180,6 +186,159 @@ describe("signed Pantry service-binding gateway", () => {
         backend: new MockBackend(),
         nowMs: TEST_NOW_MS,
         requestId: "pantry-progress-signed",
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toBe(1);
+  });
+
+  it("exposes the sanitized Pantry object inventory only to a signed catalog operator", async () => {
+    const env = fakeEnv();
+    let calls = 0;
+    env.PANTRY_CATALOG = {
+      async fetch(request: Request) {
+        calls += 1;
+        expect(request.method).toBe("GET");
+        expect(new URL(request.url).pathname).toBe("/internal/v1/diagnostics/objects");
+        expect(request.headers.get("x-nabuflow-pantry-principal")).toBe("catalog-admin");
+        return Response.json({
+          ok: true,
+          objects: [
+            {
+              key: `quarantine/passembly_${"a".repeat(64)}/objects/${"b".repeat(64)}`,
+              size: 17,
+              uploadedAt: "2026-08-10T00:00:00.000Z",
+              sha256: "b".repeat(64),
+            },
+          ],
+          totalBytes: 17,
+        });
+      },
+    } as unknown as Fetcher;
+    const path = "/_nabuflow/control/v1/pantry/diagnostics/objects";
+    expect(
+      (
+        await handleControlRequest(new Request(`https://runtime.example${path}`), env, {
+          coordinator: new MemoryCoordinator(),
+          backend: new MockBackend(),
+          nowMs: TEST_NOW_MS,
+          requestId: "pantry-object-inventory-unsigned",
+        })
+      ).status,
+    ).toBe(401);
+    expect(calls).toBe(0);
+
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "pantry-object-inventory-signed-0001" }),
+      env,
+      {
+        coordinator: new MemoryCoordinator(),
+        backend: new MockBackend(),
+        nowMs: TEST_NOW_MS,
+        requestId: "pantry-object-inventory-signed",
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toBe(1);
+    await expect(response.json()).resolves.toMatchObject({ totalBytes: 17 });
+  });
+
+  it("exposes the sanitized assembly event trail only through the signed read proxy", async () => {
+    const env = fakeEnv();
+    const assemblyId = `passembly_${"d".repeat(64)}`;
+    env.PANTRY_CATALOG = {
+      async fetch(request: Request) {
+        expect(new URL(request.url).pathname).toBe(
+          `/internal/v1/assemblies/${assemblyId}/diagnostics`,
+        );
+        expect(request.headers.get("x-nabuflow-pantry-principal")).toBe("builder-readonly");
+        return Response.json({
+          ok: true,
+          assemblyId,
+          requestSha256: "d".repeat(64),
+          currentStage: "resolving-metadata",
+          lastTransitionAt: "2026-08-09T16:00:00.000Z",
+          queueEnqueues: 1,
+          queueDeliveries: 2,
+          generation: 1,
+          leaseRenewals: 0,
+          alarmReenqueues: 0,
+          ingestAttempts: 1,
+          stagedObjects: 0,
+          metrics: {
+            resolvedPackages: 1,
+            fetchedTarballs: 0,
+            verifiedTarballs: 0,
+            extractedTarballs: 0,
+            dependencyEdges: 0,
+            tarballBytes: 0,
+            unpackedBytes: 0,
+          },
+          stageTransitions: [],
+          events: [],
+          truncatedBeforeSequence: 0,
+        });
+      },
+    } as unknown as Fetcher;
+    const path = `/_nabuflow/control/v1/pantry/assemblies/${assemblyId}/diagnostics`;
+    expect(
+      (
+        await handleControlRequest(new Request(`https://runtime.example${path}`), env, {
+          coordinator: new MemoryCoordinator(),
+          backend: new MockBackend(),
+          nowMs: TEST_NOW_MS,
+          requestId: "pantry-diagnostics-unsigned",
+        })
+      ).status,
+    ).toBe(401);
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "pantry-diagnostics-signed-0001" }),
+      env,
+      {
+        coordinator: new MemoryCoordinator(),
+        backend: new MockBackend(),
+        nowMs: TEST_NOW_MS,
+        requestId: "pantry-diagnostics-signed",
+      },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      currentStage: "resolving-metadata",
+      queueDeliveries: 2,
+    });
+  });
+
+  it("exposes stock identity state through a signed read-only proxy", async () => {
+    const env = fakeEnv();
+    const identitySha256 = "c".repeat(64);
+    const assemblyId = `passembly_${identitySha256}`;
+    let calls = 0;
+    env.PANTRY_CATALOG = {
+      async fetch(request: Request) {
+        calls += 1;
+        expect(request.method).toBe("GET");
+        expect(new URL(request.url).pathname).toBe(
+          `/internal/v1/stock-identities/${identitySha256}`,
+        );
+        expect(request.headers.get("x-nabuflow-pantry-principal")).toBe("builder-readonly");
+        return Response.json({
+          ok: true,
+          state: "assembling",
+          identitySha256,
+          assemblyId,
+          revisionRootSha256: null,
+        });
+      },
+    } as unknown as Fetcher;
+    const path = `/_nabuflow/control/v1/pantry/stock-identities/${identitySha256}`;
+    const response = await handleControlRequest(
+      await signedRequest({ path, nonce: "pantry-identity-signed-0001" }),
+      env,
+      {
+        coordinator: new MemoryCoordinator(),
+        backend: new MockBackend(),
+        nowMs: TEST_NOW_MS,
+        requestId: "pantry-identity-signed",
       },
     );
     expect(response.status).toBe(200);

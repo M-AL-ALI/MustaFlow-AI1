@@ -34,7 +34,7 @@ const originalDatabaseUrl = process.env.DATABASE_URL;
 
 async function loadVendoredSdk(): Promise<LoadedSdk> {
   const source = getVendoredRuntimeSdkFiles().find(
-    (file) => file.path === ".nabuflow/runtime/db.ts",
+    (file) => file.path === "nabuflow/runtime/db.ts",
   )?.content;
   if (source === undefined) throw new Error("Vendored database SDK source is missing");
   const transformed = await transform(source, {
@@ -78,8 +78,8 @@ describe("vendored dual-mode runtime SDK", () => {
     const second = getVendoredRuntimeSdkFiles();
     expect(second).toEqual(first);
     expect(first.map((file) => file.path)).toEqual([
-      ".nabuflow/runtime/db.ts",
-      ".nabuflow/runtime/index.ts",
+      "nabuflow/runtime/db.ts",
+      "nabuflow/runtime/index.ts",
     ]);
     expect(first.every((file) => file.content.endsWith("\n") && !file.content.includes("\r"))).toBe(
       true,
@@ -87,7 +87,7 @@ describe("vendored dual-mode runtime SDK", () => {
     const joined = first.map((file) => `${file.path}\0${file.content}`).join("\0");
     expect(joined).not.toMatch(/postgres(?:ql)?:\/\/|sk_(?:live|test)_|nrf-[a-z0-9]/iu);
     expect(createHash("sha256").update(joined).digest("hex")).toBe(
-      "b6d08e22a3edf637d4cb240eec7e2f0b126027ad30c52b6a554f39fc671947b7",
+      "e09d8301911e794fa7e6e409fc8c95a9416dd2a7993ec2bb9dcf7f93c55b459c",
     );
   });
 

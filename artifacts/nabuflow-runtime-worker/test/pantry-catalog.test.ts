@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  PANTRY_ASSEMBLY_LEASE_MS,
   PANTRY_CATALOG_STAMP_FORMAT,
   pantryShelfContentHashesHash,
   pantryShelfContentHashesResponseSchema,
@@ -8,7 +9,11 @@ import {
   type PantryCatalogShelfRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { PantryCatalogDurableObject } from "../src/pantry-catalog-durable-object";
-import type { PantryStockQueueMessage, PantryWorkerBindings } from "../src/pantry-catalog-model";
+import type {
+  PantryIngestFailureRecord,
+  PantryStockQueueMessage,
+  PantryWorkerBindings,
+} from "../src/pantry-catalog-model";
 import { handlePantryQueue, handlePantryWorkerRequest } from "../src/pantry-worker";
 import { PantryIngestError } from "../src/pantry-registry-client";
 import { MemoryR2Bucket } from "./helpers";
@@ -240,6 +245,592 @@ describe("private Pantry catalog Worker", () => {
     expect(invalidRange.status).toBe(400);
   });
 
+  it("returns a sanitized content-hash inventory only to the catalog operator", async () => {
+    const test = context();
+    const bytes = new TextEncoder().encode("public fixture bytes");
+    const digest = await sha256Hex(bytes);
+    await test.bucket.put(`quarantine/passembly_${"a".repeat(64)}/objects/${digest}`, bytes);
+    expect((await call(test, "/internal/v1/diagnostics/objects")).status).toBe(403);
+    expect(
+      (
+        await call(test, "/internal/v1/diagnostics/objects", {
+          principal: "builder-readonly",
+        })
+      ).status,
+    ).toBe(403);
+    const response = await call(test, "/internal/v1/diagnostics/objects", {
+      principal: "catalog-admin",
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      objects: [
+        {
+          key: `quarantine/passembly_${"a".repeat(64)}/objects/${digest}`,
+          size: bytes.byteLength,
+          uploadedAt: "2026-08-10T00:00:00.000Z",
+          sha256: digest,
+        },
+      ],
+      totalBytes: bytes.byteLength,
+    });
+  });
+
+  it("replays the realistic heavy R2 operation shape and removes all diagnostic state", async () => {
+    const test = context();
+    const bodyBearingPut = vi.spyOn(test.bucket, "put");
+    const probeId = "r2probe_unit_heavy_shape";
+    const invoke = (window: number) =>
+      call(test, "/internal/v1/diagnostics/r2-probe", {
+        method: "POST",
+        principal: "catalog-admin",
+        body: {
+          profile: "heavy-stage-object",
+          mode: "run",
+          probeId,
+          window,
+          concurrency: 1,
+          idleBetweenBatchesMs: 0,
+          cpuHashRounds: 1,
+        },
+      });
+    const cold = await invoke(1);
+    expect(cold.status).toBe(200);
+    await expect(cold.json()).resolves.toMatchObject({
+      ok: true,
+      probeSucceeded: true,
+      requested: 14,
+      completed: 14,
+      results: [
+        { operation: 1, bytes: 460_701, state: "created" },
+        ...Array.from({ length: 12 }, (_, index) => ({ operation: index + 2 })),
+        { operation: 14, bytes: 4_377_468, state: "created" },
+      ],
+    });
+    expect(bodyBearingPut).toHaveBeenCalledTimes(14);
+    const warm = await invoke(2);
+    expect(warm.status).toBe(200);
+    const warmBody = (await warm.json()) as {
+      ok: boolean;
+      probeSucceeded: boolean;
+      results: Array<{ operation: number; state: string }>;
+    };
+    expect(warmBody.ok).toBe(true);
+    expect(warmBody.probeSucceeded).toBe(true);
+    expect(warmBody.results).toHaveLength(14);
+    expect(warmBody.results.every((entry) => entry.state === "exists")).toBe(true);
+    expect(bodyBearingPut).toHaveBeenCalledTimes(14);
+
+    const cleanup = await call(test, "/internal/v1/diagnostics/r2-probe", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: { profile: "heavy-stage-object", mode: "cleanup", probeId },
+    });
+    expect(cleanup.status).toBe(200);
+    await expect(cleanup.json()).resolves.toMatchObject({
+      ok: true,
+      cleaned: { objects: 14, checkpoints: 28 },
+    });
+    expect(
+      [...test.bucket.objects.keys()].filter((key) =>
+        key.startsWith(`diagnostics/r2-realistic/${probeId}/`),
+      ),
+    ).toEqual([]);
+    expect((await test.storage.list({ prefix: `diagnostic-r2-probe:${probeId}:` })).size).toBe(0);
+  });
+
+  it("persists a typed sanitized terminal when shelf commit storage rejects the queue consumer", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    const begin = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: fixture.request,
+    });
+    expect(begin.status).toBe(201);
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(1);
+    vi.spyOn(test.coordinator, "commitShelf").mockRejectedValueOnce(
+      new Error("Transaction exceeded the maximum number of modified keys"),
+    );
+
+    await handlePantryQueue(
+      {
+        queue: "pantry-test",
+        messages: test.queueMessages.map((body) => ({ body, ack: () => undefined })),
+      } as unknown as MessageBatch<PantryStockQueueMessage>,
+      test.env,
+      test.coordinator,
+      async () => ({
+        closure: fixture.commit.revision.content.closure,
+        objects: [...fixture.objects.entries()].map(([sha256, object]) => ({
+          kind: object.kind,
+          bytes: object.bytes,
+          sha256,
+        })),
+        lockfileSha256: fixture.commit.lockfileSha256,
+        sbomSha256: fixture.commit.sbomSha256,
+        toolchainAttestationSha256: fixture.commit.toolchainAttestationSha256,
+        provenanceStatus: "unavailable" as const,
+      }),
+    );
+
+    const status = await call(test, `/internal/v1/assemblies/${fixture.commit.assemblyId}`, {
+      principal: "builder-readonly",
+    });
+    expect(status.status).toBe(200);
+    const statusText = await status.text();
+    expect(statusText).not.toContain("maximum number");
+    expect(JSON.parse(statusText)).toMatchObject({
+      ingest: {
+        state: "failed",
+        failure: {
+          code: "catalog_execution_failed",
+          retryable: false,
+          stage: "commit-shelf",
+          operation: "catalog-commit-ledger",
+          cause: "catalog-storage-limit",
+          errorClass: "Error",
+        },
+      },
+    });
+    const diagnostics = await call(
+      test,
+      `/internal/v1/assemblies/${fixture.commit.assemblyId}/diagnostics`,
+      { principal: "builder-readonly" },
+    );
+    expect(diagnostics.status).toBe(200);
+    await expect(diagnostics.json()).resolves.toMatchObject({
+      currentStage: "failed",
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "ingest-failed",
+          failureCode: "catalog_execution_failed",
+          failureStage: "commit-shelf",
+          failureOperation: "catalog-commit-ledger",
+          failureCause: "catalog-storage-limit",
+          failureErrorClass: "Error",
+        }),
+      ]),
+    });
+  });
+
+  it("retries transient catalog connection loss with bounded backoff before a typed terminal", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    await test.coordinator.alarm();
+    const ingest = async () => ({
+      closure: fixture.commit.revision.content.closure,
+      objects: [...fixture.objects.entries()].map(([sha256, object]) => ({
+        kind: object.kind,
+        bytes: object.bytes,
+        sha256,
+      })),
+      lockfileSha256: fixture.commit.lockfileSha256,
+      sbomSha256: fixture.commit.sbomSha256,
+      toolchainAttestationSha256: fixture.commit.toolchainAttestationSha256,
+      provenanceStatus: "unavailable" as const,
+    });
+    vi.spyOn(test.coordinator, "commitShelf").mockRejectedValue(
+      new Error("Network connection lost."),
+    );
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      expect(test.queueMessages).toHaveLength(attempt);
+      await handlePantryQueue(
+        {
+          queue: "pantry-test",
+          messages: [{ body: test.queueMessages[attempt - 1], ack: () => undefined }],
+        } as unknown as MessageBatch<PantryStockQueueMessage>,
+        test.env,
+        test.coordinator,
+        ingest,
+      );
+      const status = await call(test, `/internal/v1/assemblies/${fixture.commit.assemblyId}`, {
+        principal: "builder-readonly",
+      });
+      const body = (await status.json()) as {
+        ingest: { failure: PantryIngestFailureRecord };
+      };
+      expect(body.ingest.failure).toMatchObject({
+        code: attempt < 5 ? "upstream_unavailable" : "catalog_execution_failed",
+        retryable: attempt < 5,
+        stage: "commit-shelf",
+        operation: "catalog-commit-ledger",
+        cause: "catalog-storage-unavailable",
+        errorClass: "Error",
+        errorCode: null,
+        errorFingerprint: "53ae6aaa06472a15",
+      });
+      if (attempt < 5) {
+        vi.spyOn(Date, "now").mockReturnValue(
+          Date.parse(body.ingest.failure.negativeCacheUntil) + 1,
+        );
+        await test.coordinator.alarm();
+      }
+    }
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10 * 60_000);
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(5);
+    expect(test.bucket.objects.size).toBe(0);
+  });
+
+  it("rolls back a staged R2 object when durable recording fails and reaches a typed terminal", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    await test.coordinator.alarm();
+    vi.spyOn(test.coordinator, "recordStagedObject").mockRejectedValueOnce(
+      new Error("Transaction exceeded the maximum number of modified keys"),
+    );
+    await handlePantryQueue(
+      {
+        queue: "pantry-test",
+        messages: [{ body: test.queueMessages[0], ack: () => undefined }],
+      } as unknown as MessageBatch<PantryStockQueueMessage>,
+      test.env,
+      test.coordinator,
+      async () => ({
+        closure: fixture.commit.revision.content.closure,
+        objects: [...fixture.objects.entries()].map(([sha256, object]) => ({
+          kind: object.kind,
+          bytes: object.bytes,
+          sha256,
+        })),
+        lockfileSha256: fixture.commit.lockfileSha256,
+        sbomSha256: fixture.commit.sbomSha256,
+        toolchainAttestationSha256: fixture.commit.toolchainAttestationSha256,
+        provenanceStatus: "unavailable" as const,
+      }),
+    );
+    const status = await call(test, `/internal/v1/assemblies/${fixture.commit.assemblyId}`, {
+      principal: "builder-readonly",
+    });
+    await expect(status.json()).resolves.toMatchObject({
+      ingest: {
+        state: "failed",
+        failure: {
+          code: "catalog_execution_failed",
+          stage: "stage-object",
+          operation: "catalog-record-object",
+          cause: "catalog-storage-limit",
+        },
+      },
+    });
+    expect(test.bucket.objects.size).toBe(0);
+  });
+
+  it("retries a transient R2 binding disconnect at the exact object operation", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    const originalPut = test.bucket.put.bind(test.bucket);
+    const put = vi
+      .spyOn(test.bucket, "put")
+      .mockRejectedValueOnce(new Error("Network connection lost."))
+      .mockImplementation(originalPut);
+    const [sha256, object] = fixture.objects.entries().next().value as [
+      string,
+      { kind: string; bytes: Uint8Array },
+    ];
+    const response = await call(
+      test,
+      `/internal/v1/assemblies/${fixture.commit.assemblyId}/objects/${sha256}/${object.kind}`,
+      { method: "PUT", principal: "catalog-admin", body: object.bytes },
+    );
+    expect(response.status).toBe(201);
+    expect(put).toHaveBeenCalledTimes(2);
+  });
+
+  it("converges concurrent immutable misses and verifies the winning bytes", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    const [sha256, object] = fixture.objects.entries().next().value as [
+      string,
+      { kind: string; bytes: Uint8Array },
+    ];
+    const path = `/internal/v1/assemblies/${fixture.commit.assemblyId}/objects/${sha256}/${object.kind}`;
+    const responses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        call(test, path, { method: "PUT", principal: "catalog-admin", body: object.bytes }),
+      ),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 201]);
+    expect(
+      test.bucket.objects.get(`quarantine/${fixture.commit.assemblyId}/objects/${sha256}`),
+    ).toEqual(object.bytes);
+  });
+
+  it("fails closed when immutable content-addressed bytes are corrupt", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    const [sha256, object] = fixture.objects.entries().next().value as [
+      string,
+      { kind: string; bytes: Uint8Array },
+    ];
+    const key = `quarantine/${fixture.commit.assemblyId}/objects/${sha256}`;
+    const corrupt = object.bytes.slice();
+    corrupt[0] ^= 1;
+    test.bucket.objects.set(key, corrupt);
+    const bodyBearingPut = vi.spyOn(test.bucket, "put");
+    const response = await call(
+      test,
+      `/internal/v1/assemblies/${fixture.commit.assemblyId}/objects/${sha256}/${object.kind}`,
+      { method: "PUT", principal: "catalog-admin", body: object.bytes },
+    );
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "catalog_integrity_mismatch",
+      retryable: false,
+    });
+    expect(response.headers.get("x-nabuflow-pantry-error-code")).toMatch(
+      /^hash-mismatch-[0-9a-f]{8}-[0-9a-f]{8}$/u,
+    );
+    expect(response.headers.get("x-nabuflow-pantry-error-fingerprint")).toMatch(/^[0-9a-f]{16}$/u);
+    expect(bodyBearingPut).not.toHaveBeenCalled();
+    expect(test.bucket.objects.get(key)).toEqual(corrupt);
+  });
+
+  it("hash-verifies a completed object prefix and resumes at the first incomplete object", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    await test.coordinator.alarm();
+    const orderedObjects = [...fixture.objects.entries()].map(([sha256, object]) => ({
+      sha256,
+      ...object,
+    }));
+    expect(orderedObjects.length).toBeGreaterThan(2);
+    const firstIncomplete = orderedObjects[2];
+    const originalRecord = test.coordinator.recordStagedObject.bind(test.coordinator);
+    let rejectFirstIncomplete = true;
+    vi.spyOn(test.coordinator, "recordStagedObject").mockImplementation(
+      async (assemblyId, reference) => {
+        if (rejectFirstIncomplete && reference.sha256 === firstIncomplete.sha256) {
+          rejectFirstIncomplete = false;
+          throw new Error("Network connection lost.");
+        }
+        return originalRecord(assemblyId, reference);
+      },
+    );
+    const ingest = async () => ({
+      closure: fixture.commit.revision.content.closure,
+      objects: orderedObjects,
+      lockfileSha256: fixture.commit.lockfileSha256,
+      sbomSha256: fixture.commit.sbomSha256,
+      toolchainAttestationSha256: fixture.commit.toolchainAttestationSha256,
+      provenanceStatus: "unavailable" as const,
+    });
+    await handlePantryQueue(
+      {
+        queue: "pantry-test",
+        messages: [{ body: test.queueMessages[0], ack: () => undefined }],
+      } as unknown as MessageBatch<PantryStockQueueMessage>,
+      test.env,
+      test.coordinator,
+      ingest,
+    );
+    const failed = await call(test, `/internal/v1/assemblies/${fixture.commit.assemblyId}`, {
+      principal: "builder-readonly",
+    });
+    const failedBody = (await failed.json()) as {
+      ingest: { failure: PantryIngestFailureRecord };
+    };
+    expect(failedBody.ingest.failure).toMatchObject({
+      code: "upstream_unavailable",
+      retryable: true,
+      stage: "stage-object",
+      operation: "catalog-record-object",
+    });
+    const stagedAfterFailure = await test.coordinator.getAssembly(fixture.commit.assemblyId);
+    expect(stagedAfterFailure?.objects.map((reference) => reference.sha256)).toEqual(
+      orderedObjects.slice(0, 2).map((object) => object.sha256),
+    );
+
+    const quarantinePuts: string[] = [];
+    const originalPut = test.bucket.put.bind(test.bucket);
+    vi.spyOn(test.bucket, "put").mockImplementation(async (key, value, options) => {
+      if (key.startsWith(`quarantine/${fixture.commit.assemblyId}/objects/`)) {
+        quarantinePuts.push(key);
+      }
+      return originalPut(key, value, options);
+    });
+    vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse(failedBody.ingest.failure.negativeCacheUntil) + 1,
+    );
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(2);
+    await handlePantryQueue(
+      {
+        queue: "pantry-test",
+        messages: [{ body: test.queueMessages[1], ack: () => undefined }],
+      } as unknown as MessageBatch<PantryStockQueueMessage>,
+      test.env,
+      test.coordinator,
+      ingest,
+    );
+    expect(quarantinePuts).toEqual(
+      orderedObjects
+        .slice(2)
+        .map((object) => `quarantine/${fixture.commit.assemblyId}/objects/${object.sha256}`),
+    );
+    const evidence = await test.coordinator.getGenerationResourceEvidence(
+      fixture.commit.assemblyId,
+    );
+    expect(evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          generation: 2,
+          outcome: "succeeded",
+          verifiedResumedObjects: 2,
+        }),
+      ]),
+    );
+    expect(
+      (await test.coordinator.getAssemblyDiagnostics(fixture.commit.assemblyId))?.events,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "object-resume-verified", generation: 2 }),
+      ]),
+    );
+  });
+
+  it("sweeps only old unreferenced CAS candidates and preserves committed shelf bytes", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const committedSha256 = fixture.commit.objectReferences[0].sha256;
+    const orphanBytes = new TextEncoder().encode("unreferenced public fixture");
+    const orphanSha256 = await sha256Hex(orphanBytes);
+    await test.bucket.put(`cas/sha256/${orphanSha256}`, orphanBytes);
+
+    const response = await call(test, "/internal/v1/gc", {
+      method: "POST",
+      principal: "catalog-gc",
+      body: {
+        scope: "targeted-orphan-cas",
+        now: "2026-08-10T02:00:00.000Z",
+        maxDeletes: 10,
+        objectSha256: [committedSha256, orphanSha256],
+      },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      deletedObjectSha256: [orphanSha256],
+      deletedBytes: orphanBytes.byteLength,
+    });
+    expect(test.bucket.objects.has(`cas/sha256/${committedSha256}`)).toBe(true);
+    expect(test.bucket.objects.has(`cas/sha256/${orphanSha256}`)).toBe(false);
+  });
+
+  it("sweeps crash-gap bytes but preserves every assembly and committed-shelf reference", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const committedSha256 = fixture.commit.objectReferences[0].sha256;
+    const committedRevisionKey = `revisions/${fixture.commit.revision.content.revisionId}/${fixture.commit.revision.rootSha256}.json`;
+
+    const liveFixture = await makePantryFixture({
+      nowMs: Date.now() + 1_000,
+      sequence: 2,
+      selector: "@fixture/heavy-app@1.0.1",
+    });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: liveFixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    const liveReference = liveFixture.commit.objectReferences[0];
+    await test.bucket.put(
+      `cas/sha256/${liveReference.sha256}`,
+      liveFixture.objects.get(liveReference.sha256)!.bytes,
+    );
+    await test.coordinator.recordStagedObject(liveFixture.commit.assemblyId, liveReference);
+
+    const missingAssemblyId = `passembly_${"f".repeat(64)}`;
+    const orphanQuarantineKey = `quarantine/${missingAssemblyId}/objects/${"e".repeat(64)}`;
+    const orphanRevisionKey = `revisions/pantry-2026-08-10.999/${"d".repeat(64)}.json`;
+    await test.bucket.put(orphanQuarantineKey, new TextEncoder().encode("orphan quarantine"));
+    await test.bucket.put(orphanRevisionKey, new TextEncoder().encode("orphan revision"));
+
+    const response = await call(test, "/internal/v1/gc", {
+      method: "POST",
+      principal: "catalog-gc",
+      body: {
+        scope: "orphan-cas-sweep",
+        now: "2026-08-10T02:00:00.000Z",
+        maxDeletes: 100,
+      },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      deletedQuarantineKeys: [orphanQuarantineKey],
+      deletedRevisionKeys: [orphanRevisionKey],
+    });
+    expect(test.bucket.objects.has(`cas/sha256/${committedSha256}`)).toBe(true);
+    expect(test.bucket.objects.has(`cas/sha256/${liveReference.sha256}`)).toBe(true);
+    expect(test.bucket.objects.has(committedRevisionKey)).toBe(true);
+    expect(test.bucket.objects.has(orphanQuarantineKey)).toBe(false);
+    expect(test.bucket.objects.has(orphanRevisionKey)).toBe(false);
+  });
+
   it("serves only an attested shelf-content hash set to the builder identity", async () => {
     const test = context();
     const fixture = await makePantryFixture({ nowMs: Date.now() });
@@ -323,6 +914,7 @@ describe("private Pantry catalog Worker", () => {
     expect(results.every((response) => response.status === 200 || response.status === 201)).toBe(
       true,
     );
+    await test.coordinator.alarm();
     expect(test.queueMessages).toHaveLength(1);
     await handlePantryQueue(
       {
@@ -368,6 +960,267 @@ describe("private Pantry catalog Worker", () => {
     });
   });
 
+  it("attaches or adopts resumed semantic identities with fresh timestamps", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    const first = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: fixture.request,
+    });
+    expect(first.status).toBe(201);
+    const resumedRequest = {
+      ...fixture.request,
+      requestedAt: new Date(Date.parse(fixture.request.requestedAt) + 30_000).toISOString(),
+      expiresAt: new Date(Date.parse(fixture.request.expiresAt) + 30_000).toISOString(),
+    };
+    const attached = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: resumedRequest,
+    });
+    expect(attached.status).toBe(200);
+    await expect(attached.json()).resolves.toMatchObject({ state: "assembling" });
+    expect(test.queueMessages).toHaveLength(0);
+
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(1);
+
+    const nowMs = Date.now();
+    const initial = test.queueMessages[0];
+    await test.coordinator.claimIngest(
+      fixture.commit.assemblyId,
+      initial.generation,
+      "expired-test-owner",
+      nowMs - 400_000,
+    );
+    await test.coordinator.alarm();
+    const adopted = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: resumedRequest,
+    });
+    expect(adopted.status).toBe(200);
+    await expect(adopted.json()).resolves.toMatchObject({ state: "assembling" });
+    expect(test.queueMessages).toHaveLength(2);
+  });
+
+  it("lets only the alarm adopt an expired generation while concurrent polls remain read-only", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-10T16:00:00.000Z");
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(1);
+    const first = test.queueMessages[0];
+    await test.coordinator.markQueueDelivery(fixture.commit.assemblyId);
+    await expect(
+      test.coordinator.claimIngest(
+        fixture.commit.assemblyId,
+        first.generation,
+        "generation-one-owner",
+        Date.now(),
+      ),
+    ).resolves.toMatchObject({ state: "claimed" });
+
+    vi.advanceTimersByTime(PANTRY_ASSEMBLY_LEASE_MS + 1);
+    await Promise.all(
+      Array.from({ length: 100 }, () =>
+        call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        }),
+      ),
+    );
+    expect(test.queueMessages).toHaveLength(1);
+
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(2);
+    const adopted = test.queueMessages[1];
+    expect(adopted.generation).toBe(first.generation + 1);
+    await test.coordinator.markQueueDelivery(fixture.commit.assemblyId);
+    await expect(test.coordinator.diagnostics()).resolves.toMatchObject({ queueDeliveries: 2 });
+    await expect(
+      test.coordinator.getAssemblyDiagnostics(fixture.commit.assemblyId),
+    ).resolves.toMatchObject({ generation: 2, alarmReenqueues: 1, queueEnqueues: 2 });
+  });
+
+  it("renews a long assembly lease and records the renewals without alarm re-enqueue", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-10T17:00:00.000Z");
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: fixture.request,
+    });
+    await test.coordinator.alarm();
+    const queued = test.queueMessages[0];
+    await test.coordinator.claimIngest(
+      fixture.commit.assemblyId,
+      queued.generation,
+      "long-stage-owner",
+      Date.now(),
+    );
+    vi.advanceTimersByTime(30_000);
+    await expect(
+      test.coordinator.renewIngest(
+        fixture.commit.assemblyId,
+        queued.generation,
+        "long-stage-owner",
+        Date.now(),
+      ),
+    ).resolves.toBe("renewed");
+    vi.advanceTimersByTime(30_000);
+    await expect(
+      test.coordinator.renewIngest(
+        fixture.commit.assemblyId,
+        queued.generation,
+        "long-stage-owner",
+        Date.now(),
+      ),
+    ).resolves.toBe("renewed");
+    await test.coordinator.alarm();
+    expect(test.queueMessages).toHaveLength(1);
+    await expect(
+      test.coordinator.getAssemblyDiagnostics(fixture.commit.assemblyId),
+    ).resolves.toMatchObject({ leaseRenewals: 2, alarmReenqueues: 0, generation: 1 });
+  });
+
+  it("persists a bounded sanitized assembly trail through terminal commit", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect(
+      (
+        await call(test, "/internal/v1/stock-requests", {
+          method: "POST",
+          principal: "catalog-admin",
+          body: fixture.request,
+        })
+      ).status,
+    ).toBe(201);
+    const claimedAt = new Date().toISOString();
+    await test.coordinator.alarm();
+    await test.coordinator.markQueueDelivery(fixture.commit.assemblyId);
+    const queued = test.queueMessages[0];
+    await test.coordinator.claimIngest(
+      fixture.commit.assemblyId,
+      queued.generation,
+      "diagnostic-test-owner",
+      Date.parse(claimedAt),
+    );
+    await test.coordinator.recordAssemblyEvent(fixture.commit.assemblyId, {
+      kind: "ingest-progress",
+      stage: "fetching-tarball",
+      at: new Date(Date.parse(claimedAt) + 1_000).toISOString(),
+      attempt: 1,
+      metrics: {
+        resolvedPackages: 2,
+        fetchedTarballs: 1,
+        verifiedTarballs: 0,
+        extractedTarballs: 0,
+        dependencyEdges: 3,
+        tarballBytes: 512,
+        unpackedBytes: 0,
+      },
+    });
+    const live = await call(
+      test,
+      `/internal/v1/assemblies/${fixture.commit.assemblyId}/diagnostics`,
+      { principal: "builder-readonly" },
+    );
+    expect(live.status).toBe(200);
+    await expect(live.json()).resolves.toMatchObject({
+      currentStage: "fetching-tarball",
+      queueEnqueues: 1,
+      queueDeliveries: 1,
+      ingestAttempts: 1,
+      metrics: { resolvedPackages: 2, fetchedTarballs: 1 },
+    });
+
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const terminal = await call(
+      test,
+      `/internal/v1/assemblies/${fixture.commit.assemblyId}/diagnostics`,
+      { principal: "builder-readonly" },
+    );
+    expect(terminal.status).toBe(200);
+    await expect(terminal.json()).resolves.toMatchObject({
+      currentStage: "committed",
+      queueDeliveries: 1,
+      events: expect.arrayContaining([
+        expect.objectContaining({ kind: "shelf-committed", stage: "committed" }),
+      ]),
+    });
+  });
+
+  it("returns a typed identity conflict instead of throwing an internal error", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    expect((await test.coordinator.beginStock(fixture.request)).state).toBe("created");
+    const colliding = {
+      ...fixture.request,
+      intents: [{ ecosystem: "npm" as const, name: "semantically-distinct", selector: "1.0.0" }],
+    };
+    await expect(test.coordinator.beginStock(colliding)).resolves.toEqual({
+      state: "conflict",
+      assemblyId: fixture.commit.assemblyId,
+    });
+
+    const conflictCoordinator = new Proxy(test.coordinator, {
+      get(target, property, receiver) {
+        if (property === "beginStock") {
+          return async () => ({ state: "conflict", assemblyId: fixture.commit.assemblyId });
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const response = await handlePantryWorkerRequest(
+      request("/internal/v1/stock-requests", {
+        method: "POST",
+        principal: "catalog-admin",
+        body: fixture.request,
+      }),
+      test.env,
+      conflictCoordinator,
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "catalog_conflict" });
+  });
+
+  it("discovers pending stock state without creating or mutating an operation", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await test.coordinator.beginStock(fixture.request);
+    const before = await test.coordinator.diagnostics();
+    const response = await call(
+      test,
+      `/internal/v1/stock-identities/${fixture.request.requestSha256}`,
+      { principal: "builder-readonly" },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      state: "assembling",
+      identitySha256: fixture.request.requestSha256,
+      revisionRootSha256: null,
+    });
+    expect(await test.coordinator.diagnostics()).toEqual(before);
+    expect(test.queueMessages).toHaveLength(0);
+  });
+
   it("runs one successful ingest and immutable commit for 100 concurrent cold misses", async () => {
     const test = context();
     const fixture = await makePantryFixture({ nowMs: Date.now() });
@@ -380,6 +1233,7 @@ describe("private Pantry catalog Worker", () => {
         }),
       ),
     );
+    await test.coordinator.alarm();
     expect(test.queueMessages).toHaveLength(1);
     let ingestCalls = 0;
     let acknowledgements = 0;

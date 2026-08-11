@@ -32,6 +32,56 @@ function json(
   });
 }
 
+function markArtifactCommittedForStart(
+  provider: CloudflareRuntimeProvider,
+  identity: string,
+): void {
+  const state = provider as unknown as {
+    deploymentVersion: string | null;
+    controlFeatures: Set<string>;
+    deployedArtifacts: Map<
+      string,
+      { artifactRevision: string; sealedArtifactSha256: string; feature: "artifact-v1" }
+    >;
+  };
+  state.deploymentVersion = "staging-v1";
+  state.controlFeatures.add("artifact-v1");
+  state.controlFeatures.add("manifest-update-v1");
+  state.deployedArtifacts.set(identity, {
+    artifactRevision: "artifact-start-follow-1",
+    sealedArtifactSha256: "a".repeat(64),
+    feature: "artifact-v1",
+  });
+}
+
+function runningRuntime(identity: string, projectId: number): Record<string, unknown> {
+  return {
+    runtime: {
+      identity,
+      projectId,
+      role: "preview",
+      slot: "primary",
+      status: "running",
+      servicePort: 8080,
+      manifestRevision: "manifest-1",
+      deploymentVersion: "staging-v1",
+      endpoint: null,
+      readyAt: "2026-08-09T23:00:00.000Z",
+      lastError: null,
+    },
+  };
+}
+
+async function v1Artifact(identity: string) {
+  return sealRuntimeArtifact({
+    targetRuntimeIdentity: identity,
+    manifestRevision: "manifest-1",
+    artifactRevision: "artifact-operation-follow-1",
+    sourceRevision: "source-operation-follow-1",
+    files: [{ path: "server.mjs", content: "console.log('follow')\n" }],
+  });
+}
+
 describe("CloudflareRuntimeProvider", () => {
   beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
@@ -98,6 +148,28 @@ describe("CloudflareRuntimeProvider", () => {
         { consumeOnce: async () => true },
       ),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("accepts an offset-corrected acceptance clock without changing the production default", async () => {
+    const labNow = Date.parse("2026-08-09T23:00:00.000Z");
+    const workerNow = labNow - 3 * 60 * 60_000;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(json({ code: "unauthorized" }, 401, new Date(workerNow).toUTCString()))
+      .mockResolvedValueOnce(
+        json(
+          {
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
+            deploymentVersion: "staging-v1",
+            provider: "cloudflare",
+            supportedRoles: ["preview", "production"],
+            features: ["artifact-v1", "manifest-update-v1"],
+          },
+          200,
+          new Date(workerNow).toUTCString(),
+        ),
+      );
+    const provider = new CloudflareRuntimeProvider(config, { now: () => workerNow });
+    await expect(provider.ensureInfrastructure()).resolves.toBeUndefined();
   });
 
   it("routes syncFiles through sealed begin, raw chunk, commit, and committed start", async () => {
@@ -236,6 +308,7 @@ describe("CloudflareRuntimeProvider", () => {
       artifactRevision: "layered-1",
     });
     const calls: string[] = [];
+    const commitIdempotencyKeys: string[] = [];
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const path = new URL(String(input)).pathname;
       const method = init?.method ?? "GET";
@@ -273,6 +346,19 @@ describe("CloudflareRuntimeProvider", () => {
         });
       }
       if (path.endsWith("/commit")) {
+        commitIdempotencyKeys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+        if (commitIdempotencyKeys.length === 1) {
+          return json(
+            {
+              ok: false,
+              code: "request_in_progress",
+              message: "The idempotent request is still in progress",
+              retryable: true,
+              requestId: "layered-commit-pending",
+            },
+            409,
+          );
+        }
         return json({
           ok: true,
           sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
@@ -315,8 +401,11 @@ describe("CloudflareRuntimeProvider", () => {
         /^PUT .*\/layered-artifacts\/[0-9a-f]{64}\/layers\/[0-9a-f]{64}\/chunks\/0$/u,
       ),
       expect.stringMatching(/^POST .*\/layered-artifacts\/[0-9a-f]{64}\/commit$/u),
+      expect.stringMatching(/^POST .*\/layered-artifacts\/[0-9a-f]{64}\/commit$/u),
       "POST /_nabuflow/control/v1/runtimes/42/preview/primary/start",
     ]);
+    expect(new Set(commitIdempotencyKeys).size).toBe(1);
+    expect(commitIdempotencyKeys[0]).not.toBe("");
   });
 
   it("refuses a fake credential before any artifact upload begins", async () => {
@@ -352,6 +441,525 @@ describe("CloudflareRuntimeProvider", () => {
     ).rejects.toMatchObject({ code: "artifact_secret_detected" });
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(fetch).mock.calls[0][0])).not.toContain("/artifacts/");
+  });
+
+  it("follows a v1 commit beyond one transport window with exactly one operation key", async () => {
+    const projectId = 55;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    let monotonicMs = 0;
+    const commitKeys: string[] = [];
+    const acceptedOperations = new Set<string>();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/begin")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunksExpected: artifact.chunks.length,
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunkIndex: 0,
+        });
+      }
+      const key = new Headers(init?.headers).get("idempotency-key") ?? "";
+      commitKeys.push(key);
+      acceptedOperations.add(key);
+      if (commitKeys.length === 1) {
+        monotonicMs += 30_001;
+        throw new DOMException("transport deadline", "TimeoutError");
+      }
+      if (commitKeys.length === 2) {
+        return json(
+          {
+            ok: false,
+            code: "request_in_progress",
+            message: "The idempotent request is still in progress",
+            retryable: true,
+            requestId: "v1-commit-pending",
+          },
+          409,
+        );
+      }
+      return json({
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        contentSha256: artifact.envelope.contentSha256,
+        filesWritten: 1,
+        materialized: true,
+      });
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 60_000 }),
+    ).resolves.toMatchObject({ materialized: true, filesWritten: 1 });
+    expect(commitKeys).toHaveLength(3);
+    expect(new Set(commitKeys).size).toBe(1);
+    expect(acceptedOperations.size).toBe(1);
+  });
+
+  it("records distinguishable sanitized transport causes and leaves only unknown failures as unreachable", async () => {
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 57,
+      role: "preview",
+      slot: "primary",
+    });
+    const cases = [
+      {
+        error: new DOMException("deadline", "TimeoutError"),
+        code: "control_transport_timeout",
+        transportCause: "request_timeout",
+      },
+      {
+        error: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }),
+        code: "control_transport_connection_reset",
+        transportCause: "connection_reset",
+      },
+      {
+        error: new TypeError("fetch failed"),
+        code: "control_transport_fetch_exception",
+        transportCause: "fetch_exception",
+      },
+      {
+        error: new Error("opaque transport failure"),
+        code: "control_plane_unreachable",
+        transportCause: "unreachable",
+      },
+    ] as const;
+    for (const entry of cases) {
+      vi.mocked(fetch).mockReset();
+      vi.mocked(fetch).mockRejectedValue(entry.error);
+      const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+      await expect(provider.status(identity)).rejects.toMatchObject({
+        status: 503,
+        code: entry.code,
+        retryable: true,
+        transportCause: entry.transportCause,
+      });
+      expect(fetch).toHaveBeenCalledTimes(4);
+    }
+  });
+
+  it("keeps repeated ambiguous post-dispatch failures in one followed operation", async () => {
+    const projectId = 58;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    let monotonicMs = 0;
+    const keys: string[] = [];
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+      throw new TypeError("fetch failed");
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+    await expect(
+      provider.start(identity, projectId, { operationTimeoutMs: 2_500 }),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "runtime_start_terminal_unknown",
+      attempts: 3,
+      lastObservedOperationState: "transport_fetch_exception_after_dispatch",
+      successfulObservationCount: 0,
+      transportCauseCounts: { fetch_exception: 3 },
+    });
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("reports commit observation blackout separately and late re-observation recovers one durable result", async () => {
+    const projectId = 60;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    let monotonicMs = 0;
+    let transportBlackout = true;
+    let preCommitRequests = 0;
+    let commitInitiations = 0;
+    let droppedObservations = 0;
+    const commitKeys: string[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/begin")) {
+        preCommitRequests += 1;
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunksExpected: artifact.chunks.length,
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        preCommitRequests += 1;
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunkIndex: 0,
+        });
+      }
+      commitKeys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+      if (commitInitiations === 0) {
+        commitInitiations += 1;
+        return json(
+          {
+            ok: false,
+            code: "request_in_progress",
+            message: "The durable artifact commit is in progress",
+            retryable: true,
+            requestId: "commit-blackout-initiation",
+          },
+          409,
+        );
+      }
+      if (transportBlackout) {
+        droppedObservations += 1;
+        throw new TypeError("fetch failed");
+      }
+      return json({
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        contentSha256: artifact.envelope.contentSha256,
+        filesWritten: 1,
+        materialized: true,
+      });
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 2_500 }),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "artifact_commit_terminal_unknown",
+      retryable: true,
+      attempts: 3,
+      successfulObservationCount: 1,
+      transportCauseCounts: { fetch_exception: 2 },
+    });
+    expect(preCommitRequests).toBe(2);
+    expect(commitInitiations).toBe(1);
+    expect(droppedObservations).toBe(2);
+    transportBlackout = false;
+    await expect(
+      provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 2_500 }),
+    ).resolves.toMatchObject({ materialized: true, filesWritten: 1 });
+    expect(new Set(commitKeys).size).toBe(1);
+    expect(commitKeys[0]).not.toBe("");
+  });
+
+  it("floors a fractional monotonic remainder and reaches fetch", async () => {
+    const projectId = 61;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/begin")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunksExpected: artifact.chunks.length,
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunkIndex: 0,
+        });
+      }
+      return json({
+        ok: true,
+        sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+        contentSha256: artifact.envelope.contentSha256,
+        filesWritten: 1,
+        materialized: true,
+      });
+    });
+    let monotonicMs = 100.125;
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => {
+        monotonicMs += 0.375;
+        return monotonicMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 2_500 }),
+    ).resolves.toMatchObject({ materialized: true });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails fast with typed pre-dispatch evidence and no transport retry storm", async () => {
+    const projectId = 62;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      throw new RangeError("fixture pre-dispatch failure");
+    });
+    const provider = new CloudflareRuntimeProvider(config);
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(provider.deployArtifact(identity, projectId, artifact)).rejects.toMatchObject({
+      status: 500,
+      code: "control_pre_dispatch_error",
+      retryable: false,
+      errorClass: "RangeError",
+      transportCause: null,
+    });
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+    timeout.mockRestore();
+  });
+
+  it("does not dispatch when the remaining operation budget is below the named minimum", async () => {
+    const projectId = 63;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => 100.25,
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 9.75 }),
+    ).rejects.toMatchObject({
+      status: 504,
+      code: "artifact_transfer_timeout",
+      attempts: 0,
+      lastObservedOperationState: "not_started",
+      operationTimeoutMs: 9.75,
+    });
+    expect(timeout).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    timeout.mockRestore();
+  });
+
+  it("propagates a typed terminal v1 commit failure immediately", async () => {
+    const projectId = 56;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    let commitAttempts = 0;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/begin")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunksExpected: artifact.chunks.length,
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunkIndex: 0,
+        });
+      }
+      commitAttempts += 1;
+      return json(
+        {
+          ok: false,
+          code: "artifact_integrity_mismatch",
+          message: "Runtime artifact failed integrity verification",
+          retryable: false,
+          requestId: "v1-commit-terminal",
+        },
+        422,
+      );
+    });
+    const provider = new CloudflareRuntimeProvider(config);
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(provider.deployArtifact(identity, projectId, artifact)).rejects.toMatchObject({
+      status: 422,
+      code: "artifact_integrity_mismatch",
+      retryable: false,
+    });
+    expect(commitAttempts).toBe(1);
+  });
+
+  it("observes the server commit deadline terminal inside the named provider margin", async () => {
+    const projectId = 59;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    let monotonicMs = 0;
+    let commitAttempts = 0;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/begin")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunksExpected: 1,
+        });
+      }
+      if (path.endsWith("/chunks/0")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunkIndex: 0,
+        });
+      }
+      commitAttempts += 1;
+      if (commitAttempts === 1) {
+        monotonicMs = 269_000;
+        return json(
+          {
+            ok: false,
+            code: "request_in_progress",
+            message: "The durable artifact commit is in progress",
+            retryable: true,
+            requestId: "commit-boundary-pending",
+          },
+          409,
+        );
+      }
+      return json(
+        {
+          ok: false,
+          code: "artifact_commit_abandoned",
+          message: "The artifact commit reached its server deadline",
+          retryable: false,
+          requestId: "commit-boundary-terminal",
+        },
+        503,
+      );
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+    await expect(provider.deployArtifact(identity, projectId, artifact)).rejects.toMatchObject({
+      status: 503,
+      code: "artifact_commit_abandoned",
+      retryable: false,
+    });
+    expect(monotonicMs).toBe(270_000);
+    expect(commitAttempts).toBe(2);
+  });
+
+  it("reports the last commit state when the artifact operation bound expires", async () => {
+    const projectId = 57;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const artifact = await v1Artifact(identity);
+    let monotonicMs = 0;
+    let commitAttempts = 0;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/begin")) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunksExpected: artifact.chunks.length,
+        });
+      }
+      if (/\/chunks\/0$/u.test(path)) {
+        return json({
+          ok: true,
+          sealedArtifactSha256: artifact.envelope.sealedArtifactSha256,
+          chunkIndex: 0,
+        });
+      }
+      commitAttempts += 1;
+      monotonicMs += 100;
+      return json(
+        {
+          ok: false,
+          code: "request_in_progress",
+          message: "The idempotent request is still in progress",
+          retryable: true,
+          requestId: `v1-commit-pending-${commitAttempts}`,
+        },
+        409,
+      );
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 2_500 }),
+    ).rejects.toMatchObject({
+      status: 504,
+      code: "artifact_commit_timeout",
+      operation: "artifact.commit",
+      elapsedMs: 2_500,
+      attempts: 3,
+      lastObservedOperationState: "request_in_progress",
+    });
+    expect(commitAttempts).toBe(3);
   });
 
   it("fails the self-check when the Worker clock is outside the signing window", async () => {
@@ -522,6 +1130,329 @@ describe("CloudflareRuntimeProvider", () => {
     });
     expect(delays).toEqual([100, 250, 500]);
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("follows a start beyond one 30-second transport window using one idempotency key", async () => {
+    const projectId = 51;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    let monotonicMs = 0;
+    const idempotencyKeys: string[] = [];
+    let acceptedOperations = 0;
+    const seenOperations = new Set<string>();
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      const key = new Headers(init?.headers).get("idempotency-key") ?? "";
+      idempotencyKeys.push(key);
+      if (!seenOperations.has(key)) {
+        seenOperations.add(key);
+        acceptedOperations += 1;
+      }
+      if (idempotencyKeys.length === 1) {
+        monotonicMs += 30_001;
+        throw new DOMException("transport deadline", "TimeoutError");
+      }
+      if (idempotencyKeys.length === 2) {
+        return json(
+          {
+            ok: false,
+            code: "request_in_progress",
+            message: "The idempotent request is still in progress",
+            retryable: true,
+            requestId: "start-follow-pending",
+          },
+          409,
+        );
+      }
+      return json(runningRuntime(identity, projectId));
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(provider.start(identity, projectId, { operationTimeoutMs: 60_000 })).resolves.toBe(
+      true,
+    );
+    expect(idempotencyKeys).toHaveLength(3);
+    expect(new Set(idempotencyKeys).size).toBe(1);
+    expect(idempotencyKeys[0]).not.toBe("");
+    expect(acceptedOperations).toBe(1);
+  });
+
+  it("propagates a typed terminal start failure immediately", async () => {
+    const projectId = 52;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      json(
+        {
+          ok: false,
+          code: "runtime_start_failed",
+          message: "Tenant service failed to start",
+          retryable: true,
+          requestId: "start-follow-terminal",
+        },
+        502,
+      ),
+    );
+    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(provider.start(identity, projectId)).rejects.toMatchObject({
+      status: 502,
+      code: "runtime_start_failed",
+      retryable: true,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes the durable runtime-start terminal inside the named margin", async () => {
+    const projectId = 520;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    let monotonicMs = 0;
+    let attempts = 0;
+    vi.mocked(fetch).mockImplementation(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        monotonicMs = 269_000;
+        return json(
+          {
+            ok: false,
+            code: "request_in_progress",
+            message: "The durable operation is in progress",
+            retryable: true,
+            requestId: "runtime-start-boundary-pending",
+          },
+          409,
+        );
+      }
+      return json(
+        {
+          ok: false,
+          code: "runtime_start_timeout",
+          message: "Runtime start did not complete before the execution deadline",
+          retryable: false,
+          requestId: "runtime-start-boundary-terminal",
+        },
+        504,
+      );
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+    await expect(provider.start(identity, projectId)).rejects.toMatchObject({
+      status: 504,
+      code: "runtime_start_timeout",
+      retryable: false,
+    });
+    expect(monotonicMs).toBe(270_000);
+    expect(attempts).toBe(2);
+  });
+
+  it("reports an evidence-rich typed timeout when start remains in progress", async () => {
+    const projectId = 53;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    let monotonicMs = 0;
+    vi.mocked(fetch).mockImplementation(async () => {
+      monotonicMs += 100;
+      return json(
+        {
+          ok: false,
+          code: "request_in_progress",
+          message: "The idempotent request is still in progress",
+          retryable: true,
+          requestId: `start-follow-pending-${monotonicMs}`,
+        },
+        409,
+      );
+    });
+    const provider = new CloudflareRuntimeProvider(config, {
+      monotonicNow: () => monotonicMs,
+      sleep: async (delayMs) => {
+        monotonicMs += delayMs;
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.start(identity, projectId, { operationTimeoutMs: 2_500 }),
+    ).rejects.toMatchObject({
+      status: 504,
+      code: "runtime_start_timeout",
+      retryable: true,
+      operation: "runtime-start",
+      elapsedMs: 2_500,
+      attempts: 3,
+      lastObservedOperationState: "request_in_progress",
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("cancels a followed start without issuing another operation request", async () => {
+    const projectId = 54;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const controller = new AbortController();
+    vi.mocked(fetch).mockResolvedValue(
+      json(
+        {
+          ok: false,
+          code: "request_in_progress",
+          message: "The idempotent request is still in progress",
+          retryable: true,
+          requestId: "start-follow-cancel",
+        },
+        409,
+      ),
+    );
+    const provider = new CloudflareRuntimeProvider(config, {
+      sleep: async () => {
+        controller.abort();
+      },
+    });
+    markArtifactCommittedForStart(provider, identity);
+
+    await expect(
+      provider.start(identity, projectId, { signal: controller.signal }),
+    ).rejects.toMatchObject({
+      status: 499,
+      code: "runtime_start_cancelled",
+      retryable: false,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows every audited lifecycle and kitchen mutation with a stable operation key", async () => {
+    const projectId = 58;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const cases: Array<{
+      name: string;
+      run(provider: CloudflareRuntimeProvider): Promise<unknown>;
+    }> = [
+      {
+        name: "runtime.ensure",
+        run: (provider) => provider.create(projectId, "node-api"),
+      },
+      {
+        name: "runtime.stop",
+        run: (provider) => provider.stop(identity, projectId),
+      },
+      {
+        name: "runtime.destroy",
+        run: (provider) => provider.destroy(identity, projectId),
+      },
+      {
+        name: "runtime.exec",
+        run: (provider) => provider.exec(identity, ["node", "--version"], projectId),
+      },
+      {
+        name: "runtime.manifest-update",
+        run: (provider) =>
+          provider.updateRuntimeManifest(identity, projectId, {
+            expectedManifestRevision: "manifest-1",
+            manifest: {
+              revision: "manifest-2",
+              runtime: "node-api",
+              buildCommand: ["npm", "run", "build"],
+              startCommand: ["node", "server.mjs"],
+              servicePort: 8080,
+              healthPath: "/healthz",
+              resourceProfile: "dev",
+              public: false,
+            },
+          }),
+      },
+      {
+        name: "pantry.mutation",
+        run: (provider) =>
+          provider.zeroGenerationControlRequest({
+            method: "POST",
+            path: "/_nabuflow/control/v1/pantry/stock-requests",
+            body: { fixture: true },
+            idempotencyKey: "pantry-follow-fixture",
+          }),
+      },
+      {
+        name: "trusted-build.mutation",
+        run: (provider) =>
+          provider.zeroGenerationControlRequest({
+            method: "POST",
+            path: "/_nabuflow/control/v1/build-plane/builds",
+            body: { fixture: true },
+            idempotencyKey: "build-follow-fixture",
+          }),
+      },
+    ];
+
+    for (const fixture of cases) {
+      vi.mocked(fetch).mockReset();
+      const keys: string[] = [];
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+        if (keys.length === 1) {
+          return json(
+            {
+              ok: false,
+              code: "request_in_progress",
+              message: "The idempotent request is still in progress",
+              retryable: true,
+              requestId: `${fixture.name}-pending`,
+            },
+            409,
+          );
+        }
+        const path = new URL(String(input)).pathname;
+        if (path.endsWith("/exec")) {
+          return json({ ok: true, stdout: "v22\n", stderr: "", exitCode: 0, timedOut: false });
+        }
+        if (path.includes("/pantry/") || path.includes("/build-plane/")) {
+          return json({ ok: true, fixture: fixture.name });
+        }
+        if (init?.method === "DELETE") return json({ ok: true });
+        return json(runningRuntime(identity, projectId));
+      });
+      const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+      markArtifactCommittedForStart(provider, identity);
+
+      await expect(fixture.run(provider), fixture.name).resolves.toBeDefined();
+      expect(keys, fixture.name).toHaveLength(2);
+      expect(new Set(keys).size, fixture.name).toBe(1);
+      expect(keys[0], fixture.name).not.toBe("");
+    }
   });
 
   it("maps every unsupported capability to an explicit unavailable error", async () => {

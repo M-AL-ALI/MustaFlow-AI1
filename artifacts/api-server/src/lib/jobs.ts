@@ -53,6 +53,7 @@ import {
   validateCrossFileConsistency,
   runCvePatchPipeline,
   type BuilderFile,
+  type BuilderModelAdapter,
   type ConversationTurn,
 } from "./builder";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -131,6 +132,19 @@ import {
   shouldAutoMergeBackgroundPlanStep,
 } from "./background-plan-step";
 import type { AgentLoopReport } from "./agent-loop";
+import {
+  isZeroSealedGenerationTarget,
+  prepareZeroSealedNodeSource,
+  readZeroPantryPublicKeys,
+  resolveZeroGenerationTarget,
+  type PreparedZeroSealedNodeSource,
+} from "./zero-sealed-generation";
+import { runZeroGenerationKitchen } from "./zero-generation-kitchen";
+import { supportsZeroGeneration } from "./tenant-runtime-provider";
+import {
+  ZERO_SEALED_RUNTIME_PORT,
+  type ZeroGenerationTarget,
+} from "@workspace/tenant-runtime-contracts";
 
 /**
  * Pre-build gate for agentic projects.
@@ -801,6 +815,8 @@ export interface JobInput {
   runMode?: "foreground" | "background";
   /** Wall-clock cap (ms) to pass into the agent loop. */
   wallClockCapMs?: number;
+  /** Deterministic test adapter. Product routes never accept or populate this field. */
+  modelAdapter?: BuilderModelAdapter;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2247,6 +2263,9 @@ export async function runJob(input: JobInput): Promise<void> {
         .where(eq(agentTasksTable.id, taskId));
       return;
     }
+    // Deployment-owned and resolved once. No request, project row, generated
+    // file, or model output can select the sealed target.
+    const zeroGenerationTarget: ZeroGenerationTarget = resolveZeroGenerationTarget(process.env);
     if (autoMergeBackgroundPlanStep) {
       const startedStatus = backgroundPlanStepStatus(taskId, "started");
       await emitEvent(taskId, "narration", startedStatus);
@@ -2503,6 +2522,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       let nextVersionLabel: string;
       let diffSummary: DiffSummary | undefined;
       let filesToSmellScan: BuilderFile[] = [];
+      let zeroSealedGeneration: PreparedZeroSealedNodeSource | null = null;
       // Legacy staged-review path: collect files before writing to project_files.
       let stagingData: Array<{ path: string; content: string; mimeType: string }> = [];
       // Staged-review refine: keep existing files for building the full merged snapshot.
@@ -2703,6 +2723,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
       }
 
+      if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
+        if (kind !== "build" || resolvedIsMobile || resolvedProjectStack !== "node-api") {
+          throw new Error("Sealed Zero generation currently accepts fresh Node API builds only");
+        }
+        if (project.runtimePort !== ZERO_SEALED_RUNTIME_PORT) {
+          await db
+            .update(projectsTable)
+            .set({ runtimePort: ZERO_SEALED_RUNTIME_PORT })
+            .where(eq(projectsTable.id, projectId));
+          project.runtimePort = ZERO_SEALED_RUNTIME_PORT;
+        }
+      }
+
       const isSlidesProject = !resolvedIsMobile && resolvedProjectStack === "slides";
       const isAnimationProject = !resolvedIsMobile && resolvedProjectStack === "animation";
       const isAutomationProject = !resolvedIsMobile && resolvedProjectStack === "automation";
@@ -2833,13 +2866,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           taskId: taskId as number,
           taskMode: agentMode,
           runtimePort: project.runtimePort,
+          zeroGenerationTarget,
+          modelAdapter: input.modelAdapter,
+          sealedManifestRevision: `zero-task-${taskId}-node-v1`,
         };
 
         // ── Agentic pre-flight gate ────────────────────────────────────────────
         // Ensures the container is awake, proves real exec works end-to-end,
         // and confirms the database is reachable before the agent loop starts.
         // Hard-fails for agentic projects that have no containerId (unprovisioned).
-        if (project.containerId || project.builderMode === "agentic") {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          (project.containerId || project.builderMode === "agentic")
+        ) {
           const preflightResult = await runAgenticPreflightGate(
             projectId,
             taskId,
@@ -2867,7 +2906,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // Disable Fly autostop on the build machine so it cannot idle-stop during
         // long-running inline execs (npm install, tsc, vite build).  The keepalive
         // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
-        if (project.containerId && project.containerUrl) {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          project.containerId &&
+          project.containerUrl
+        ) {
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
             await import("./tenant-runtime");
           keepaliveMachineId = project.containerId;
@@ -2880,7 +2923,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           stopContainerKeepalive = startContainerKeepalive(project.containerUrl, projectId);
         }
 
-        const USE_AGENT_LOOP_BUILD = process.env.AGENTIC_BUILDER_ENABLED !== "false";
+        const USE_AGENT_LOOP_BUILD =
+          input.modelAdapter === undefined && process.env.AGENTIC_BUILDER_ENABLED !== "false";
         logger.info(
           { taskId, projectId, pipeline: USE_AGENT_LOOP_BUILD ? "agentic" : "legacy" },
           "Builder pipeline selected",
@@ -2908,8 +2952,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: effectivePlanContext,
                   existingFiles: [],
-                  containerId: projectHasLiveServer() ? project.containerId : null,
-                  liveServerAvailable: projectHasLiveServer(),
+                  containerId:
+                    isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                      ? null
+                      : project.containerId,
+                  liveServerAvailable:
+                    !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+                  zeroGenerationTarget,
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -2933,7 +2982,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   },
                   taskId,
                   wallClockMs: input.wallClockCapMs,
-                  previewUrl: project.containerUrl ?? null,
+                  previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                    ? null
+                    : (project.containerUrl ?? null),
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
                   signal,
@@ -3008,6 +3059,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                     taskId: taskId as number,
                                     taskMode: agentMode,
                                   });
+
+        if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
+          zeroSealedGeneration = prepareZeroSealedNodeSource({
+            files: result.files,
+            manifestRevision: `zero-task-${taskId}-node-v1`,
+          });
+          result = {
+            ...result,
+            files: zeroSealedGeneration.files,
+            sealedGeneration: {
+              dependencyPlan: zeroSealedGeneration.dependencyPlan,
+              manifest: zeroSealedGeneration.manifest,
+            },
+          };
+        }
 
         analyticsCorrectionPasses = result.correctionPasses;
         analyticsErrorCategory = result.primaryErrorCategory;
@@ -3197,7 +3263,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           // Inject health endpoint for server-stack projects before writing to project_files.
           // This ensures the immutable test candidate snapshot always contains a health endpoint.
           const { injectHealthEndpoint } = await import("./health-inject");
-          const filesWithHealth = injectHealthEndpoint(result.files, project.stack ?? null);
+          const filesWithHealth = isZeroSealedGenerationTarget(zeroGenerationTarget)
+            ? result.files
+            : injectHealthEndpoint(result.files, project.stack ?? null);
           await writeFiles(projectId, filesWithHealth, true);
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
@@ -4707,7 +4775,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       {
         const _isJsTsStack = ["node-api", "nextjs", "react-vite"].includes(project.stack ?? "");
         const _isServerStack = ["node-api", "nextjs"].includes(project.stack ?? "");
-        if (project.containerId && _isJsTsStack && filesToSmellScan.length > 0) {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          project.containerId &&
+          _isJsTsStack &&
+          filesToSmellScan.length > 0
+        ) {
           try {
             await emitEvent(taskId, "narration", "Running quality checks (TypeScript, ESLint)…");
             const { runQualityGate, runSmokeTest } = await import("./quality-gate");
@@ -4904,7 +4977,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // /app and restart the runtime; only mark previewUpdated after health passes.
       // Static projects serve from the DB and are always reachable.
       const previewBootStartedAt = new Date();
-      if (project.containerId || project.containerUrl) {
+      if (
+        isZeroSealedGenerationTarget(zeroGenerationTarget) ||
+        project.containerId ||
+        project.containerUrl
+      ) {
         const allRuntimeFileRows = await db
           .select({ path: projectFilesTable.path, content: projectFilesTable.content })
           .from(projectFilesTable)
@@ -4929,6 +5006,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           })),
           removedPaths: diffSummary?.filesRemoved ?? [],
           packageManifestChanged,
+          zeroSealedGeneration:
+            zeroSealedGeneration === null
+              ? undefined
+              : {
+                  dependencyPlan: zeroSealedGeneration.dependencyPlan,
+                  manifest: zeroSealedGeneration.manifest,
+                  pantryPublicKeys: readZeroPantryPublicKeys(process.env),
+                },
         });
 
         report.previewUpdated = runtimePreviewResult.previewUpdated;
@@ -6945,6 +7030,11 @@ async function syncAgenticPreviewRuntime(opts: {
   files: Array<{ path: string; content: string }>;
   removedPaths: string[];
   packageManifestChanged: boolean;
+  zeroSealedGeneration?: {
+    dependencyPlan: PreparedZeroSealedNodeSource["dependencyPlan"];
+    manifest: PreparedZeroSealedNodeSource["manifest"];
+    pantryPublicKeys: ReadonlyMap<string, string>;
+  };
 }): Promise<AgenticPreviewRuntimeResult> {
   const base: AgenticPreviewRuntimeResult = {
     previewUpdated: false,
@@ -6956,6 +7046,10 @@ async function syncAgenticPreviewRuntime(opts: {
     if (opts.publishLifecycleEvents === false || !opts.revision) return;
     publishPreviewSyncFailed(opts.projectId, opts.revision, warning);
   };
+
+  if (opts.zeroSealedGeneration !== undefined && (!opts.containerId || !opts.containerUrl)) {
+    throw new Error("Sealed Zero generation requires a provisioned Cloudflare runtime");
+  }
 
   if (!opts.containerUrl) {
     if (opts.containerId) {
@@ -6974,6 +7068,42 @@ async function syncAgenticPreviewRuntime(opts: {
         "Preview sync skipped: this agentic project has a container URL but no container id.",
       ],
     };
+  }
+
+  if (opts.zeroSealedGeneration !== undefined) {
+    const { tenantRuntimeProvider } = await import("./tenant-runtime");
+    if (!supportsZeroGeneration(tenantRuntimeProvider)) {
+      throw new Error("Cloudflare Pantry and dock capabilities are unavailable");
+    }
+    await emitEvent(opts.taskId, "narration", "Building through the trusted Pantry kitchen…");
+    const result = await runZeroGenerationKitchen(tenantRuntimeProvider, {
+      projectId: opts.projectId,
+      runtimeId: opts.containerId,
+      files: opts.files.map((file) => ({
+        path: file.path,
+        content: file.content,
+        mimeType: "application/octet-stream",
+      })),
+      dependencyPlan: opts.zeroSealedGeneration.dependencyPlan,
+      manifest: opts.zeroSealedGeneration.manifest,
+      pantryPublicKeys: opts.zeroSealedGeneration.pantryPublicKeys,
+      signal: opts.signal,
+    });
+    logger.info(
+      {
+        taskId: opts.taskId,
+        projectId: opts.projectId,
+        runtimeId: result.runtimeId,
+        buildId: result.buildId,
+        artifactSha256: result.artifactSha256,
+        coldBuild: result.coldBuild,
+      },
+      "Sealed Zero generation completed through Pantry and the artifact dock",
+    );
+    if (opts.publishLifecycleEvents !== false && opts.revision) {
+      publishPreviewReady(opts.projectId, opts.revision);
+    }
+    return { ...base, previewUpdated: true };
   }
 
   const {

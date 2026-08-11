@@ -18,6 +18,7 @@
     // Staging-only, signed-control fault injection used by the live dock lease-adoption proof.
     // Production configuration must omit this flag.
     "NABUFLOW_STAGING_ARTIFACT_COMMIT_RECOVERY_PROBE": "enabled",
+    "NABUFLOW_STAGING_RUNTIME_LIFECYCLE_RECOVERY_PROBE": "enabled",
     "NABUFLOW_RUNTIME_LAYER_PLATFORM": "{\"runtime\":\"node\",\"runtimeVersion\":\"22.18.0\",\"nodeAbi\":\"127\",\"os\":\"linux\",\"cpu\":\"x64\",\"libc\":\"glibc\",\"toolchainImageDigest\":\"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738\"}",
   },
   "containers": [
@@ -43,6 +44,23 @@
       "service": "nabuflow-build-staging",
     },
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "DURABLE_OPERATION_QUEUE",
+        "queue": "nabuflow-artifact-commit-staging",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "nabuflow-artifact-commit-staging",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "nabuflow-artifact-commit-dead-letter-staging",
+      },
+    ],
+  },
   "durable_objects": {
     "bindings": [
       {

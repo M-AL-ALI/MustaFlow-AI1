@@ -12,6 +12,7 @@ import {
   trustedBuildRequestHash,
   trustedBuildRequestSchema,
   trustedBuildSourceManifestHash,
+  validateRuntimeArtifactPath,
   verifyTrustedBuildRequest,
   type TrustedBuildRequest,
 } from "../src";
@@ -182,6 +183,11 @@ describe("trusted build contracts", () => {
         },
       }).success,
     ).toBe(false);
+  });
+
+  it("preserves the hidden platform-root path rejection posture", () => {
+    expect(validateRuntimeArtifactPath(".nabuflow/runtime/db.ts")).toBeNull();
+    expect(validateRuntimeArtifactPath("nabuflow/runtime/db.ts")).toBe("nabuflow/runtime/db.ts");
   });
 
   it("keeps the package closure vocabulary separate from the source transport", () => {
