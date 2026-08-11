@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   capabilityDatabaseResponseSchema,
   capabilityIntentSchema,
+  capabilityStripeResponseSchema,
   databaseCapabilityInputSchema,
+  stripeCapabilityInputSchema,
 } from "./capability-request";
 import { controlErrorResponseSchema } from "./control-schemas";
 export {
@@ -31,6 +33,9 @@ export const CAPABILITY_INTENT_URL =
 export const DATABASE_CAPABILITY_PROVIDER = "neon-postgres" as const;
 export const DATABASE_CAPABILITY_NAME = "database" as const;
 export const DATABASE_CAPABILITY_ACTION = "query" as const;
+export const STRIPE_CAPABILITY_PROVIDER = "stripe" as const;
+export const STRIPE_CAPABILITY_NAME = "payments" as const;
+export const STRIPE_CAPABILITY_ACTION = "invoke" as const;
 
 const runtimeSdkRequestIdSchema = z
   .string()
@@ -55,6 +60,89 @@ export const runtimeDatabaseCapabilityIntentSchema = z
 
 export const runtimeDatabaseCapabilityResponseSchema = capabilityDatabaseResponseSchema;
 export const runtimeDatabaseCapabilityErrorResponseSchema = controlErrorResponseSchema;
+
+export const runtimeStripeCapabilityIntentSchema = z
+  .object({
+    v: z.literal(1),
+    capability: z
+      .object({
+        provider: z.literal(STRIPE_CAPABILITY_PROVIDER),
+        name: z.literal(STRIPE_CAPABILITY_NAME),
+      })
+      .strict(),
+    action: z.literal(STRIPE_CAPABILITY_ACTION),
+    requestId: runtimeSdkRequestIdSchema,
+    input: stripeCapabilityInputSchema,
+  })
+  .strict();
+
+export const runtimeStripeCapabilityResponseSchema = capabilityStripeResponseSchema;
+export const runtimeStripeCapabilityErrorResponseSchema = controlErrorResponseSchema;
+
+export const RUNTIME_STRIPE_ERROR_CODES = [
+  "configuration",
+  "invalid_request",
+  "conflict",
+  "timeout",
+  "cancelled",
+  "unavailable",
+  "policy_rejected",
+  "internal",
+] as const;
+export const runtimeStripeErrorCodeSchema = z.enum(RUNTIME_STRIPE_ERROR_CODES);
+export type RuntimeStripeErrorCode = z.infer<typeof runtimeStripeErrorCodeSchema>;
+
+export const STRIPE_CAPABILITY_ERROR_MAP: Readonly<Record<string, RuntimeStripeErrorCode>> =
+  Object.freeze({
+    invalid_capability_intent: "invalid_request",
+    invalid_capability_request: "invalid_request",
+    stripe_invalid_request: "invalid_request",
+    capability_idempotency_conflict: "conflict",
+    capability_request_in_progress: "conflict",
+    stripe_timeout: "timeout",
+    capability_policy_rejected: "policy_rejected",
+    stripe_policy_rejected: "policy_rejected",
+    capability_not_available: "unavailable",
+    capability_runtime_unbound: "unavailable",
+    capability_tenant_mismatch: "unavailable",
+    capability_service_unavailable: "unavailable",
+    stripe_unavailable: "unavailable",
+  });
+
+export function mapCapabilityStripeError(
+  providerCode: string,
+  status: number,
+): RuntimeStripeErrorCode {
+  const mapped = STRIPE_CAPABILITY_ERROR_MAP[providerCode];
+  if (mapped !== undefined) return mapped;
+  if (status === 408 || status === 504) return "timeout";
+  if (status === 409) return "conflict";
+  if (status === 413 || status === 422) return "policy_rejected";
+  if (status === 429 || status === 502 || status === 503) return "unavailable";
+  return "internal";
+}
+
+export function makeRuntimeStripeCapabilityIntent(input: {
+  requestId: string;
+  operation: z.input<typeof stripeCapabilityInputSchema>;
+}): z.infer<typeof runtimeStripeCapabilityIntentSchema> {
+  const intent = runtimeStripeCapabilityIntentSchema.parse({
+    v: 1,
+    capability: { provider: STRIPE_CAPABILITY_PROVIDER, name: STRIPE_CAPABILITY_NAME },
+    action: STRIPE_CAPABILITY_ACTION,
+    requestId: input.requestId,
+    input: input.operation,
+  });
+  capabilityIntentSchema.parse(intent);
+  return intent;
+}
+
+export function serializeRuntimeStripeCapabilityIntent(input: {
+  requestId: string;
+  operation: z.input<typeof stripeCapabilityInputSchema>;
+}): string {
+  return JSON.stringify(makeRuntimeStripeCapabilityIntent(input));
+}
 
 export const RUNTIME_DATABASE_ERROR_CODES = [
   "configuration",

@@ -1,0 +1,25 @@
+{
+  "format": "nabu-zero-capability-eligibility/v1",
+  "schemaVersion": 1,
+  "kind": "blueprint",
+  "id": "db-firebase",
+  "legacy": {
+    "mode": "direct",
+    "behavior": "preserve"
+  },
+  "cloudflare": {
+    "status": "ineligible",
+    "resolution": "refuse",
+    "capabilities": [],
+    "reasons": [
+      {
+        "code": "raw_database_client"
+      }
+    ]
+  },
+  "build": {
+    "toolchains": [],
+    "pantryPolicy": "dynamic-demand-driven",
+    "attestationRequired": true
+  }
+}

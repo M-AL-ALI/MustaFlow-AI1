@@ -112,6 +112,10 @@ import {
 } from "./check-profiles";
 import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./tenant-runtime";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
+import {
+  assertZeroGeneratedEligibility,
+  inferZeroDeclaredCapabilities,
+} from "./zero-capability-eligibility";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
 import {
   buildAgentTaskTerminalUpdate,
@@ -2320,7 +2324,7 @@ export async function runJob(input: JobInput): Promise<void> {
           return undefined;
         }
       })(),
-      getInstalledBlueprintKnowledge(projectId),
+      getInstalledBlueprintKnowledge(projectId, zeroGenerationTarget),
     ]);
 
     // ── Domain context — inject primary domain so the builder uses real absolute URLs ──
@@ -2378,7 +2382,18 @@ Do NOT use window.location.origin, localhost, or placeholder domains in these co
 
     // Build database context when the project has a provisioned DB
     let databaseContext: string | undefined;
-    if (project.dbProvider && project.dbProvider !== "none" && project.dbStatus === "connected") {
+    if (
+      isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+      project.dbProvider &&
+      project.dbProvider !== "none" &&
+      project.dbStatus === "connected"
+    ) {
+      databaseContext = `DATABASE CONTEXT — This sealed-runtime project has a database capability. Import createNabuFlowDatabase from "../nabuflow/runtime/index" and use parameterized queries through that client. Do not read a connection environment variable, initialize a provider driver, emit migrations, install packages in the tenant runtime, or request database configuration from the user.`;
+    } else if (
+      project.dbProvider &&
+      project.dbProvider !== "none" &&
+      project.dbStatus === "connected"
+    ) {
       const dbSecretRow = await db
         .select({ name: secretsTable.name })
         .from(secretsTable)
@@ -3064,6 +3079,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           zeroSealedGeneration = prepareZeroSealedNodeSource({
             files: result.files,
             manifestRevision: `zero-task-${taskId}-node-v1`,
+            skipEligibilityPrecheck: true,
+          });
+          await assertZeroGeneratedEligibility({
+            files: zeroSealedGeneration.files,
+            dependencyPlan: zeroSealedGeneration.dependencyPlan,
+            runtimeManifest: zeroSealedGeneration.manifest,
+            declaredCapabilities: inferZeroDeclaredCapabilities(zeroSealedGeneration.files),
+            pantryClosureVerified: false,
+            dependencyOutputAttested: false,
+            stage: "source",
           });
           result = {
             ...result,

@@ -1,0 +1,22 @@
+{
+  "format": "nabu-zero-capability-eligibility/v1",
+  "schemaVersion": 1,
+  "kind": "skill",
+  "id": "stripe-payments",
+  "legacy": {
+    "mode": "direct",
+    "behavior": "preserve"
+  },
+  "cloudflare": {
+    "status": "eligible",
+    "resolution": "capability",
+    "capabilities": ["stripe-payments"],
+    "reasons": [],
+    "sealedGuidance": "In Cloudflare sealed mode, import createNabuFlowPayments from nabuflow/runtime and use the stripe-payments capability. PaymentIntent creation and retrieval are the only supported server operations."
+  },
+  "build": {
+    "toolchains": ["node-api"],
+    "pantryPolicy": "dynamic-demand-driven",
+    "attestationRequired": true
+  }
+}

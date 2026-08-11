@@ -57,8 +57,10 @@ vi.mock("drizzle-orm", () => ({
 import {
   invalidateSkillCache,
   listEnabledSkills,
+  listEnabledSkillsForTarget,
   listAllSkillsForAdmin,
   loadSkillContent,
+  loadSkillContentForTarget,
   formatSkillIndex,
   getSkillManifest,
   __setManifestsForTesting,
@@ -215,6 +217,49 @@ describe("loadSkillContent — load-count behaviour", () => {
     expect(values.name).toBe("on");
     expect(values.loadCount).toBe(1);
     expect(insert.set).toMatchObject({ loadCount: expect.any(Object) });
+  });
+});
+
+describe("sealed skill capability eligibility", () => {
+  it("replaces eligible direct guidance and preserves the legacy body byte-for-byte", async () => {
+    await writeSkill(
+      "postgres-drizzle",
+      `---\nname: postgres-drizzle\ndescription: database\n---\nlegacy DATABASE_URL driver guidance\n`,
+    );
+    const sealed = await loadSkillContentForTarget(
+      "postgres-drizzle",
+      "cloudflare-sealed-staging-v1",
+    );
+    expect(sealed).toMatchObject({ ok: true });
+    if (!sealed?.ok) throw new Error("Expected sealed database guidance");
+    expect(sealed.manifest.body).toContain("createNabuFlowDatabase");
+    expect(sealed.manifest.body).not.toContain("DATABASE_URL");
+
+    const legacy = await loadSkillContentForTarget("postgres-drizzle", "legacy-v1");
+    expect(legacy).toMatchObject({ ok: true });
+    if (!legacy?.ok) throw new Error("Expected legacy guidance");
+    expect(legacy.manifest.body).toBe("legacy DATABASE_URL driver guidance");
+  });
+
+  it("returns a content-addressed typed gap and hides ineligible skills from the sealed index", async () => {
+    await writeSkill(
+      "firebase",
+      `---\nname: firebase\ndescription: firebase\n---\nlegacy direct provider guidance\n`,
+    );
+    await writeSkill(
+      "postgres-drizzle",
+      `---\nname: postgres-drizzle\ndescription: database\n---\nlegacy database guidance\n`,
+    );
+    const gap = await loadSkillContentForTarget("firebase", "cloudflare-sealed-staging-v1");
+    expect(gap).toMatchObject({
+      ok: false,
+      code: "zero_capability_gap",
+      identitySha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    const sealedIndex = await listEnabledSkillsForTarget("cloudflare-sealed-staging-v1");
+    expect(sealedIndex.map((skill) => skill.name)).toEqual(["postgres-drizzle"]);
+    const legacyIndex = await listEnabledSkillsForTarget("legacy-v1");
+    expect(legacyIndex.map((skill) => skill.name)).toEqual(["firebase", "postgres-drizzle"]);
   });
 });
 

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   runtimeDatabaseCapabilityIntentSchema,
   runtimeDatabaseCapabilityResponseSchema,
+  runtimeStripeCapabilityIntentSchema,
+  runtimeStripeCapabilityResponseSchema,
 } from "@workspace/tenant-runtime-contracts";
 import { getVendoredRuntimeSdkFiles } from "./zero-runtime-sdk";
 
@@ -29,6 +31,18 @@ interface LoadedSdk {
   };
 }
 
+interface LoadedPaymentsSdk {
+  createNabuFlowPayments(options?: Record<string, unknown>): {
+    mode: string;
+    createPaymentIntent(input: {
+      idempotencyKey: string;
+      amount: number;
+      currency: string;
+    }): Promise<Record<string, unknown>>;
+    retrievePaymentIntent(paymentIntentId: string): Promise<Record<string, unknown>>;
+  };
+}
+
 const originalMode = process.env.NABUFLOW_RUNTIME_MODE;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 
@@ -49,6 +63,21 @@ async function loadVendoredSdk(): Promise<LoadedSdk> {
   ) => void;
   evaluate(module, module.exports);
   return module.exports as unknown as LoadedSdk;
+}
+
+async function loadVendoredPaymentsSdk(): Promise<LoadedPaymentsSdk> {
+  const source = getVendoredRuntimeSdkFiles().find(
+    (file) => file.path === "nabuflow/runtime/payments.ts",
+  )?.content;
+  if (source === undefined) throw new Error("Vendored payments SDK source is missing");
+  const transformed = await transform(source, { format: "cjs", loader: "ts", target: "node22" });
+  const module = { exports: {} as Record<string, unknown> };
+  const evaluate = new Function("module", "exports", transformed.code) as (
+    module: { exports: Record<string, unknown> },
+    exports: Record<string, unknown>,
+  ) => void;
+  evaluate(module, module.exports);
+  return module.exports as unknown as LoadedPaymentsSdk;
 }
 
 function statementResult(rows: Array<Record<string, unknown>>, command = "SELECT") {
@@ -79,6 +108,7 @@ describe("vendored dual-mode runtime SDK", () => {
     expect(second).toEqual(first);
     expect(first.map((file) => file.path)).toEqual([
       "nabuflow/runtime/db.ts",
+      "nabuflow/runtime/payments.ts",
       "nabuflow/runtime/index.ts",
     ]);
     expect(first.every((file) => file.content.endsWith("\n") && !file.content.includes("\r"))).toBe(
@@ -87,8 +117,76 @@ describe("vendored dual-mode runtime SDK", () => {
     const joined = first.map((file) => `${file.path}\0${file.content}`).join("\0");
     expect(joined).not.toMatch(/postgres(?:ql)?:\/\/|sk_(?:live|test)_|nrf-[a-z0-9]/iu);
     expect(createHash("sha256").update(joined).digest("hex")).toBe(
-      "e09d8301911e794fa7e6e409fc8c95a9416dd2a7993ec2bb9dcf7f93c55b459c",
+      "b4d340682b4eedef210d579d7b87f112e86cfa62e9eb0a131b555e46c2e1f4d7",
     );
+  });
+
+  it("uses the Stripe capability in sealed mode and an injected direct adapter in Fly mode", async () => {
+    const paymentIntent = {
+      id: "pi_test123",
+      status: "requires_payment_method",
+      amount: 2500,
+      amountReceived: 0,
+      currency: "usd",
+      created: 1_786_000_000,
+      livemode: false as const,
+    };
+
+    process.env.NABUFLOW_RUNTIME_MODE = "cloudflare-capability-v1";
+    const capabilitySdk = await loadVendoredPaymentsSdk();
+    let intentBody: unknown;
+    const capabilityClient = capabilitySdk.createNabuFlowPayments({
+      directDriver: {
+        createPaymentIntent: vi.fn(() => Promise.reject(new Error("direct path used"))),
+        retrievePaymentIntent: vi.fn(() => Promise.reject(new Error("direct path used"))),
+      },
+      fetch: async (_input: string, init: RequestInit) => {
+        const intent = runtimeStripeCapabilityIntentSchema.parse(JSON.parse(String(init.body)));
+        intentBody = intent;
+        return Response.json(
+          runtimeStripeCapabilityResponseSchema.parse({
+            ok: true,
+            capability: intent.capability,
+            requestId: intent.requestId,
+            runtimeIdentity: "nrf-aaaaaaaaaaaaaaaa-p42-preview-primary",
+            actedBy: "stripe-broker",
+            operation: "create-payment-intent",
+            idempotentReplay: false,
+            paymentIntent,
+          }),
+        );
+      },
+    });
+    expect(
+      await capabilityClient.createPaymentIntent({
+        idempotencyKey: "zero-payment-idempotency-1",
+        amount: 2500,
+        currency: "usd",
+      }),
+    ).toEqual(paymentIntent);
+    expect(intentBody).toMatchObject({
+      capability: { provider: "stripe", name: "payments" },
+      action: "invoke",
+      input: { kind: "create-payment-intent" },
+    });
+    expect(JSON.stringify(intentBody)).not.toMatch(/credential|secret|apiKey|runtimeIdentity/iu);
+
+    process.env.NABUFLOW_RUNTIME_MODE = "fly-direct-v1";
+    const directSdk = await loadVendoredPaymentsSdk();
+    const createPaymentIntent = vi.fn(async () => paymentIntent);
+    const retrievePaymentIntent = vi.fn(async () => paymentIntent);
+    const directClient = directSdk.createNabuFlowPayments({
+      directDriver: { createPaymentIntent, retrievePaymentIntent },
+      fetch: vi.fn(() => Promise.reject(new Error("capability path used"))),
+    });
+    expect(
+      await directClient.createPaymentIntent({
+        idempotencyKey: "zero-payment-idempotency-1",
+        amount: 2500,
+        currency: "usd",
+      }),
+    ).toEqual(paymentIntent);
+    expect(createPaymentIntent).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed at module initialization for a missing or unknown mode", async () => {

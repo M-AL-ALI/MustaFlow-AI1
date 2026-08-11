@@ -1,0 +1,22 @@
+{
+  "format": "nabu-zero-capability-eligibility/v1",
+  "schemaVersion": 1,
+  "kind": "skill",
+  "id": "postgres-drizzle",
+  "legacy": {
+    "mode": "direct",
+    "behavior": "preserve"
+  },
+  "cloudflare": {
+    "status": "eligible",
+    "resolution": "capability",
+    "capabilities": ["database"],
+    "reasons": [],
+    "sealedGuidance": "In Cloudflare sealed mode, import createNabuFlowDatabase from nabuflow/runtime and use the database capability. Do not initialize a provider driver or run migrations in the tenant runtime."
+  },
+  "build": {
+    "toolchains": ["node-api"],
+    "pantryPolicy": "dynamic-demand-driven",
+    "attestationRequired": true
+  }
+}

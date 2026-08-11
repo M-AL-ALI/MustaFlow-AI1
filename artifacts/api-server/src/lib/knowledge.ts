@@ -4,11 +4,22 @@
 // All writes are best-effort: a failure never blocks the main operation.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { db, knowledgeEntriesTable, projectsTable, type DiffSummary } from "@workspace/db";
+import {
+  db,
+  knowledgeEntriesTable,
+  projectBlueprintsTable,
+  projectsTable,
+  type DiffSummary,
+} from "@workspace/db";
 import { and, desc, eq, inArray, isNotNull, isNull, like, ne, or } from "drizzle-orm";
 import { logger } from "./logger";
 import { buildEmbeddingInput, cosineSimilarity, generateEmbedding } from "./embeddings";
 import { anonymiseContent } from "./knowledge-promotion";
+import type { ZeroGenerationTarget } from "@workspace/tenant-runtime-contracts";
+import {
+  resolveZeroIntegrationEligibility,
+  resolveZeroIntegrationEligibilityOutcome,
+} from "./zero-capability-eligibility";
 
 export interface KnowledgeWriteOpts {
   title: string;
@@ -38,8 +49,51 @@ export interface KnowledgeWriteOpts {
  *
  * Returns null when there are no installed blueprints (or on error).
  */
-export async function getInstalledBlueprintKnowledge(projectId: number): Promise<string | null> {
+export async function getInstalledBlueprintKnowledge(
+  projectId: number,
+  target: ZeroGenerationTarget = "legacy-v1",
+): Promise<string | null> {
   try {
+    if (target === "cloudflare-sealed-staging-v1") {
+      const installed = await db
+        .select({ blueprintId: projectBlueprintsTable.blueprintId })
+        .from(projectBlueprintsTable)
+        .where(eq(projectBlueprintsTable.projectId, projectId))
+        .orderBy(projectBlueprintsTable.blueprintId);
+      if (installed.length === 0) return null;
+      const lines: string[] = [];
+      for (const entry of installed) {
+        const metadata = await resolveZeroIntegrationEligibility("blueprint", entry.blueprintId);
+        if (metadata.cloudflare.status === "eligible") {
+          lines.push(`- ${entry.blueprintId}: ${metadata.cloudflare.sealedGuidance}`);
+        } else {
+          const outcome = await resolveZeroIntegrationEligibilityOutcome(
+            "blueprint",
+            entry.blueprintId,
+          );
+          if (outcome.ok)
+            throw new Error("Zero blueprint metadata outcome disagrees with contract");
+          lines.push(
+            `- ${JSON.stringify({
+              ok: false,
+              code: "zero_capability_gap",
+              retryable: false,
+              identitySha256: outcome.identitySha256,
+              integration: { kind: "blueprint", id: entry.blueprintId },
+              reasons: outcome.reasons,
+              resolution: "select-supported-implementation",
+            })}`,
+          );
+        }
+      }
+      return [
+        `=== SEALED BLUEPRINT CAPABILITY GUIDANCE (${installed.length} installed) ===`,
+        `Use only capability-backed guidance below. A capability gap requires an automatic supported implementation; never request credentials, egress, or Pantry configuration.`,
+        "",
+        ...lines,
+        `=== END SEALED BLUEPRINT CAPABILITY GUIDANCE ===`,
+      ].join("\n");
+    }
     const entries = await db
       .select({
         id: knowledgeEntriesTable.id,
@@ -69,6 +123,7 @@ export async function getInstalledBlueprintKnowledge(projectId: number): Promise
       `=== END INSTALLED BLUEPRINTS ===`,
     ].join("\n");
   } catch (err) {
+    if (target === "cloudflare-sealed-staging-v1") throw err;
     logger.warn({ err, projectId }, "getInstalledBlueprintKnowledge failed — non-fatal");
     return null;
   }

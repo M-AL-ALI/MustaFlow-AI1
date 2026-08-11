@@ -38,6 +38,10 @@ import {
   type ZeroGeneratedDependencyPlan,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
+import {
+  assertZeroGeneratedEligibility,
+  inferZeroDeclaredCapabilities,
+} from "./zero-capability-eligibility";
 import type { ZeroGenerationTenantRuntimeProvider } from "./tenant-runtime-provider";
 import { sealRuntimeArtifact } from "./runtime-artifact";
 import {
@@ -661,6 +665,16 @@ export async function runZeroGenerationKitchen(
       },
     );
   }
+
+  await assertZeroGeneratedEligibility({
+    files: input.files,
+    dependencyPlan: input.dependencyPlan,
+    runtimeManifest: input.manifest,
+    declaredCapabilities: inferZeroDeclaredCapabilities(input.files),
+    pantryClosureVerified: true,
+    dependencyOutputAttested: true,
+    stage: "attested-output",
+  });
 
   throwIfCancelled(input.signal, "build-output-read");
   const appPayload = await readOutputPayload(provider, output, "app");

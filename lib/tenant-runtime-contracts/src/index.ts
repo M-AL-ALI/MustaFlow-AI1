@@ -17,3 +17,4 @@ export * from "./shell-escape";
 export * from "./staging-host-override";
 export * from "./trusted-build";
 export * from "./zero-generation";
+export * from "./zero-eligibility";
