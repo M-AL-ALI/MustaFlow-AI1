@@ -148,7 +148,7 @@ export const provisionStripeCapabilityRequestSchema = z
           .string()
           .min(16)
           .max(4_096)
-          .regex(/^sk_test_[A-Za-z0-9]+$/u),
+          .regex(/^(?:sk|rk)_test_[A-Za-z0-9]+$/u),
       })
       .strict(),
   })

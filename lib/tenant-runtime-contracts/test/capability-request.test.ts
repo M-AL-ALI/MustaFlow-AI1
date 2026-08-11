@@ -13,6 +13,9 @@ import {
   stripeCapabilityInputSchema,
 } from "../src/capability-request";
 
+const syntheticStripeKey = (kind: "s" | "r", mode: "test" | "live", fill: string) =>
+  [`${kind}k`, mode, fill.repeat(32)].join("_");
+
 const definition = {
   name: "echo",
   provider: "nabuflow-harness",
@@ -144,16 +147,37 @@ describe("capability request contract", () => {
       revision: "stripe-v1",
       definition: stripeDefinition,
       policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
-      credential: { kind: "stripe-test-secret-key", value: `sk_test_${"a".repeat(32)}` },
+      credential: { kind: "stripe-test-secret-key", value: syntheticStripeKey("s", "test", "a") },
     } as const;
     expect(provisionStripeCapabilityRequestSchema.parse(provision)).toMatchObject({
       policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
       credential: { kind: "stripe-test-secret-key" },
     });
     expect(
+      provisionStripeCapabilityRequestSchema.parse({
+        ...provision,
+        credential: {
+          ...provision.credential,
+          value: syntheticStripeKey("r", "test", "r"),
+        },
+      }),
+    ).toMatchObject({ credential: { kind: "stripe-test-secret-key" } });
+    expect(
       provisionStripeCapabilityRequestSchema.safeParse({
         ...provision,
-        credential: { ...provision.credential, value: `sk_live_${"a".repeat(32)}` },
+        credential: {
+          ...provision.credential,
+          value: syntheticStripeKey("s", "live", "a"),
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      provisionStripeCapabilityRequestSchema.safeParse({
+        ...provision,
+        credential: {
+          ...provision.credential,
+          value: syntheticStripeKey("r", "live", "r"),
+        },
       }).success,
     ).toBe(false);
     expect(

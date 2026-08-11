@@ -11,6 +11,8 @@ import {
 import { fakeEnv } from "./helpers";
 
 const TEST_KEK = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY";
+const syntheticStripeKey = (kind: "s" | "r", mode: "test" | "live", fill: string) =>
+  [`${kind}k`, mode, fill.repeat(32)].join("_");
 const context = {
   projectId: 42,
   provider: "nabuflow-harness",
@@ -216,7 +218,7 @@ describe("capability vault envelope", () => {
       { storage } as unknown as DurableObjectState,
       fakeEnv(),
     );
-    const testKey = `sk_test_${"a".repeat(32)}`;
+    const testKey = syntheticStripeKey("s", "test", "a");
     await expect(
       vault.provisionStripe({
         projectId: 42,
@@ -229,6 +231,18 @@ describe("capability vault envelope", () => {
     expect(storage.serialized()).not.toContain(testKey);
     expect(storage.serialized()).toContain('"algorithm":"AES-256-GCM"');
 
+    const restrictedTestKey = syntheticStripeKey("r", "test", "r");
+    await expect(
+      vault.provisionStripe({
+        projectId: 42,
+        revision: "stripe-restricted-v1",
+        definition: stripeDefinition,
+        policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+        credential: { kind: "stripe-test-secret-key", value: restrictedTestKey },
+      }),
+    ).resolves.toEqual({ state: "provisioned", keyId: "v1" });
+    expect(storage.serialized()).not.toContain(restrictedTestKey);
+
     const before = storage.serialized();
     await expect(
       vault.provisionStripe({
@@ -238,7 +252,19 @@ describe("capability vault envelope", () => {
         policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
         credential: {
           kind: "stripe-test-secret-key",
-          value: `sk_live_${"b".repeat(32)}`,
+          value: syntheticStripeKey("s", "live", "b"),
+        },
+      }),
+    ).rejects.toThrow("credential type");
+    await expect(
+      vault.provisionStripe({
+        projectId: 42,
+        revision: "stripe-restricted-live-rejected",
+        definition: stripeDefinition,
+        policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+        credential: {
+          kind: "stripe-test-secret-key",
+          value: syntheticStripeKey("r", "live", "b"),
         },
       }),
     ).rejects.toThrow("credential type");
@@ -251,7 +277,7 @@ describe("capability vault envelope", () => {
       { storage } as unknown as DurableObjectState,
       fakeEnv(),
     );
-    const testKey = `sk_test_${"a".repeat(32)}`;
+    const testKey = syntheticStripeKey("s", "test", "a");
     await vault.provisionStripe({
       projectId: 42,
       revision: "stripe-v1",

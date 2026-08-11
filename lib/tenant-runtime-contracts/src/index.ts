@@ -1,5 +1,6 @@
 export * from "./config";
 export * from "./artifact-commit";
+export * from "./acceptance-provisioner";
 export * from "./capability-request";
 export * from "./constants";
 export * from "./control-schemas";

@@ -281,7 +281,7 @@ function configuredPublicKeys(env: TrustedBuildWorkerBindings): Map<string, stri
 function assertSourceSecretless(request: TrustedBuildRequest, sourcePayload: Uint8Array): void {
   const patterns = [
     /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/u,
-    /\bsk_(?:test|live)_[A-Za-z0-9]{16,}\b/u,
+    /\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{16,}\b/u,
     /\b(?:postgres|postgresql):\/\/[^\s:@/]+:[^\s@/]+@/u,
     /\bAKIA[0-9A-Z]{16}\b/u,
   ];

@@ -14,6 +14,8 @@ import type {
   ArtifactCommitCheckpoint,
   ArtifactCommitEvent,
   ArtifactCommitKind,
+  AcceptanceLeaseDurableCheckpoint,
+  AcceptanceLeaseJobRequest,
   DurableOperationCheckpoint,
   DurableOperationKind,
   RuntimeManifestRestartCheckpoint,
@@ -78,6 +80,7 @@ export type IdempotencyLookup =
   | { state: "replay"; response: StoredHttpResponse };
 
 export type {
+  AcceptanceLeaseDurableCheckpoint,
   ArtifactCommitCheckpoint,
   ArtifactCommitKind,
   DurableOperationCheckpoint,
@@ -141,10 +144,17 @@ export interface StoredRuntimeManifestRestartJob extends StoredDurableOperationJ
   runtimeWasRunning?: boolean;
 }
 
+export interface StoredAcceptanceLeaseJob extends StoredDurableOperationJobBase {
+  kind: "acceptance-lease";
+  checkpoint: AcceptanceLeaseDurableCheckpoint;
+  request: AcceptanceLeaseJobRequest;
+}
+
 export type StoredDurableOperationJob =
   | StoredArtifactCommitJob
   | StoredRuntimeStartJob
-  | StoredRuntimeManifestRestartJob;
+  | StoredRuntimeManifestRestartJob
+  | StoredAcceptanceLeaseJob;
 
 export type DurableOperationRegistration =
   | {
@@ -174,6 +184,16 @@ export type DurableOperationRegistration =
       runtimeIdentity: string;
       subjectKey: "manifest-restart";
       request: UpdateRuntimeManifestRequest;
+      expectedDeploymentVersion: string;
+      nowMs: number;
+    }
+  | {
+      key: string;
+      fingerprint: string;
+      kind: "acceptance-lease";
+      runtimeIdentity: string;
+      subjectKey: string;
+      request: AcceptanceLeaseJobRequest;
       expectedDeploymentVersion: string;
       nowMs: number;
     };

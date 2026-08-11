@@ -36,6 +36,10 @@ const platform = {
   toolchainImageDigest: `sha256:${"1".repeat(64)}`,
 };
 
+function syntheticStripeKey(kind: "s" | "r", mode: "test" | "live"): string {
+  return [`${kind}k`, mode, "1234567890abcdefghijklmnop"].join("_");
+}
+
 async function app(withCollision = false) {
   const identity = await deriveRuntimeIdentity({
     namespace: "staging",
@@ -93,15 +97,28 @@ describe("layered artifact sealing", () => {
       sealRuntimeArtifactLayer({
         mountPath: "node_modules",
         platform,
-        files: [{ path: "demo/config.txt", content: "sk_test_1234567890abcdefghijklmnop" }],
+        files: [{ path: "demo/config.txt", content: syntheticStripeKey("s", "test") }],
       }),
     ).rejects.toMatchObject({
       code: "artifact_secret_detected",
     } satisfies Partial<RuntimeArtifactLayerSealError>);
   });
 
+  it.each([syntheticStripeKey("r", "test"), syntheticStripeKey("r", "live")])(
+    "refuses restricted Stripe key shapes before producing a dependency layer (%s)",
+    async (value) => {
+      await expect(
+        sealRuntimeArtifactLayer({
+          mountPath: "node_modules",
+          platform,
+          files: [{ path: "demo/config.txt", content: value }],
+        }),
+      ).rejects.toMatchObject({ code: "artifact_secret_detected" });
+    },
+  );
+
   it("exempts only exact proven-public shelf bytes from the unchanged secret scan", async () => {
-    const publicBytes = new TextEncoder().encode("sk_test_1234567890abcdefghijklmnop");
+    const publicBytes = new TextEncoder().encode(syntheticStripeKey("s", "test"));
     const fixture = await trustedProvenanceFixture(publicBytes);
     const layer = await sealRuntimeArtifactLayer({
       mountPath: "node_modules",
@@ -123,7 +140,7 @@ describe("layered artifact sealing", () => {
           {
             path: "public-sample/index.js",
             content: new TextEncoder().encode(
-              "sk_test_1234567890abcdefghijklmnop\n// modified after shelving",
+              `${syntheticStripeKey("s", "test")}\n// modified after shelving`,
             ),
           },
         ],

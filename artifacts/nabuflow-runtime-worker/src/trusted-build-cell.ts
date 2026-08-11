@@ -531,7 +531,7 @@ export function sanitizeBuildDiagnosticText(
       /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----/gu,
       "[REDACTED_PRIVATE_KEY]",
     )
-    .replace(/\bsk_(?:test|live)_[A-Za-z0-9]{8,}\b/gu, "[REDACTED_STRIPE_KEY]")
+    .replace(/\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{8,}\b/gu, "[REDACTED_STRIPE_KEY]")
     .replace(/\b(?:postgres|postgresql):\/\/[^\s:@/]+:[^\s@/]+@/gu, "postgresql://[REDACTED]@")
     .replace(/\bAKIA[0-9A-Z]{16}\b/gu, "[REDACTED_AWS_KEY]");
   return scrubbed.length <= maxBytes ? scrubbed : scrubbed.slice(-maxBytes);
@@ -1049,7 +1049,10 @@ const STREAM_SCAN_WINDOW_BYTES = 2_048;
 const STREAM_SCAN_BLOCK_BYTES = 64 * 1_024;
 const STREAM_SECRET_PATTERNS = [
   { ruleId: "private-key", pattern: /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/u },
-  { ruleId: "stripe-secret-key", pattern: /\bsk_(?:test|live)_[A-Za-z0-9]{16,256}\b/u },
+  {
+    ruleId: "stripe-secret-key",
+    pattern: /\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{16,256}\b/u,
+  },
   {
     ruleId: "postgres-credential-url",
     pattern: /\b(?:postgres|postgresql):\/\/[^\s:@/]{1,512}:[^\s@/]{1,512}@/u,
