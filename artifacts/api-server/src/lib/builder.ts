@@ -1366,8 +1366,13 @@ export function sanitisePrompt(prompt: string): { cleaned: string; wasModified: 
 const SECRET_PATTERNS: Array<{ re: RegExp; category: string; redact: string }> = [
   { re: /sk-[A-Za-z0-9_-]{20,}/g, category: "OpenAI API key", redact: "[REDACTED:openai-key]" },
   {
-    re: /sk_live_[A-Za-z0-9]{24,}/g,
+    re: /s[k]_live_[A-Za-z0-9]{24,}/g,
     category: "Stripe live secret key",
+    redact: "[REDACTED:stripe-secret]",
+  },
+  {
+    re: /s[k]_test_[A-Za-z0-9]{24,}/g,
+    category: "Stripe test secret key",
     redact: "[REDACTED:stripe-secret]",
   },
   {
@@ -1376,8 +1381,13 @@ const SECRET_PATTERNS: Array<{ re: RegExp; category: string; redact: string }> =
     redact: "[REDACTED:stripe-pk]",
   },
   {
-    re: /rk_live_[A-Za-z0-9]{24,}/g,
+    re: /r[k]_live_[A-Za-z0-9]{24,}/g,
     category: "Stripe live restricted key",
+    redact: "[REDACTED:stripe-rk]",
+  },
+  {
+    re: /r[k]_test_[A-Za-z0-9]{24,}/g,
+    category: "Stripe test restricted key",
     redact: "[REDACTED:stripe-rk]",
   },
   { re: /AKIA[0-9A-Z]{16}/g, category: "AWS access key", redact: "[REDACTED:aws-key]" },

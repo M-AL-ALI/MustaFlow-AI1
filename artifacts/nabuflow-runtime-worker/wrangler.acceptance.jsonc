@@ -1,0 +1,67 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nabuflow-acceptance-provisioner-staging",
+  "main": "src/acceptance-provisioner-index.ts",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "ACCEPTANCE_STAGING_ENABLED": "false",
+    "ACCEPTANCE_WORKLOAD_PUBLIC_KEYS": "{}",
+    "ACCEPTANCE_WORKLOAD_ISSUER": "https://staging-identity.invalid",
+    "ACCEPTANCE_WORKLOAD_AUDIENCE": "nabuflow-acceptance-provisioner-staging",
+    "ACCEPTANCE_WORKLOAD_SUBJECTS": "[]",
+    "ACCEPTANCE_NEON_ORGANIZATION_ID": "UNCONFIGURED_DEDICATED_NEON_ORG",
+    "ACCEPTANCE_STRIPE_SANDBOX_ID": "UNCONFIGURED_NABUFLOW_TESTING_SANDBOX",
+    "ACCEPTANCE_FLY_ORGANIZATION_SLUG": "unconfigured-disposable-fly-org",
+    "ACCEPTANCE_FLY_IMAGE_REF": "UNCONFIGURED_PINNED_IMAGE",
+    "ACCEPTANCE_PROVIDER_MAX_COST_MINOR_UNITS": "0",
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "ACCEPTANCE_OPERATION_QUEUE",
+        "queue": "nabuflow-acceptance-operations-staging",
+      },
+      {
+        "binding": "DURABLE_OPERATION_QUEUE",
+        "queue": "nabuflow-acceptance-operations-staging",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "nabuflow-acceptance-operations-staging",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+    ],
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ACCEPTANCE_VAULT",
+        "class_name": "AcceptanceVaultDurableObject",
+      },
+      {
+        "name": "ACCEPTANCE_COORDINATOR",
+        "class_name": "ControlDurableObject",
+      },
+      {
+        "name": "CAPABILITY_VAULT",
+        "class_name": "CapabilityVaultDurableObject",
+        "script_name": "nabuflow-runtime-staging",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AcceptanceVaultDurableObject", "ControlDurableObject"],
+    },
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+}

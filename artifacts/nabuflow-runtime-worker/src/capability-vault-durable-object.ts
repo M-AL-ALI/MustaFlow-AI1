@@ -367,7 +367,7 @@ export class CapabilityVaultDurableObject
     const policy = stripeCapabilityPolicySchema.parse(input.policy);
     if (
       input.credential.kind !== "stripe-test-secret-key" ||
-      !/^sk_test_[A-Za-z0-9]+$/u.test(input.credential.value)
+      !/^(?:sk|rk)_test_[A-Za-z0-9]+$/u.test(input.credential.value)
     ) {
       throw new Error("Stripe credential type is invalid");
     }

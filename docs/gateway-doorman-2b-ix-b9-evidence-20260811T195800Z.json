@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "slice": "2b-ix-b9",
+  "branch": "codex/staging-acceptance-provisioner",
+  "baseSha": "242d445308492a51b2a7d8cf7e7e6d6a61bdd901",
+  "capturedAt": "2026-08-11T19:58:00Z",
+  "credentialUse": {
+    "requested": false,
+    "installed": false,
+    "liveProviderCalls": false,
+    "deploymentPerformed": false
+  },
+  "authority": {
+    "buildPlanSha256": "3b60669b59fb8bed7d9e7049e13390ad7d347210a8f57d130f59daa03f19324c",
+    "designSha256": "06ecbd3fcae798af61899047ddad10358e91dd52e25507844e0e41b690315f14"
+  },
+  "syntheticSecretReconstruction": {
+    "changedBlobsScanned": 35,
+    "stripePrefixAtRestMatches": 0,
+    "broaderProviderPatternMatches": 0,
+    "productionScannerSemanticsChanged": false,
+    "runtimeScannerTestsPassed": 21
+  },
+  "tests": {
+    "contracts": { "filesPassed": 18, "testsPassed": 179, "failed": 0 },
+    "worker": { "filesPassed": 27, "testsPassed": 211, "failed": 0 },
+    "provisionerFocused": { "filesPassed": 3, "testsPassed": 15, "failed": 0 },
+    "apiScannerFocused": { "filesPassed": 3, "testsPassed": 21, "failed": 0 },
+    "repoTypecheck": "passed",
+    "repoLint": "passed",
+    "formatCheck": "passed",
+    "wranglerDryRun": "passed"
+  },
+  "releaseProfile": {
+    "base": { "passed": 18, "warnings": 0, "failed": 3 },
+    "branchPreCommit": { "passed": 17, "warnings": 1, "failed": 3 },
+    "branchClean": { "passed": 18, "warnings": 0, "failed": 3 },
+    "baseReportSha256": "a0be09dbeea50c5bb1e41b5bcf476d30c5d0b9ce477fa1525d2f2bdcc6ea76f5",
+    "branchReportSha256": "e05812853794e9c15b2c3d3ab3578df816600725aefbafc4eee70e93426fbaa2",
+    "matchingFailureIds": ["api-release-extended", "api-account-billing-history", "web-build"],
+    "environmentCause": "ECONNREFUSED 127.0.0.1:5432"
+  },
+  "manifests": {
+    "packageJsonChanged": false,
+    "pnpmLockChanged": false,
+    "stagingWranglerConfigAdded": true
+  },
+  "bootstrap": {
+    "crossed": false,
+    "deferredSecretBindingNames": [
+      "ACCEPTANCE_NEON_MANAGEMENT_KEY",
+      "ACCEPTANCE_STRIPE_TEST_RESTRICTED_KEY",
+      "ACCEPTANCE_FLY_ORG_TOKEN",
+      "ACCEPTANCE_VAULT_KEK"
+    ]
+  }
+}

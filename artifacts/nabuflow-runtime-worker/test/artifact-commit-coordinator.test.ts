@@ -205,6 +205,68 @@ describe("artifact commit coordinator leases", () => {
     expect(271_001 - 1_000).toBeLessThan(300_000);
   });
 
+  it("uses the shared leased job chassis for acceptance cleanup and adopts a killed consumer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const durable = coordinator();
+    const registration = await durable.registerDurableOperation({
+      key: "acceptance-destroy-idempotency-1",
+      fingerprint: "c".repeat(64),
+      kind: "acceptance-lease",
+      runtimeIdentity: `acceptance:nal_${"a".repeat(40)}`,
+      subjectKey: "destroy",
+      request: {
+        leaseId: `nal_${"a".repeat(40)}`,
+        operation: "destroy",
+        ownerSubjectHash: "b".repeat(64),
+      },
+      expectedDeploymentVersion: "acceptance-test-v1",
+      nowMs: 1_000,
+    });
+    expect(registration.state).toBe("new");
+    if (registration.state !== "new") throw new Error("expected a new acceptance job");
+    const killed = await durable.claimDurableOperationDriver(
+      registration.job.jobKey,
+      "killed-consumer",
+      1_000,
+    );
+    expect(killed.state).toBe("claimed");
+    const adopted = await durable.claimDurableOperationDriver(
+      registration.job.jobKey,
+      "janitor-consumer",
+      17_000,
+    );
+    expect(adopted).toMatchObject({
+      state: "adopted",
+      job: { kind: "acceptance-lease", attempt: 2, checkpoint: "initialized" },
+    });
+    if (adopted.state !== "adopted") throw new Error("expected acceptance adoption");
+    for (const checkpoint of [
+      "scope-verified",
+      "provider-complete",
+      "vault-complete",
+      "verified-gone",
+      "finalized",
+    ] as const) {
+      await durable.checkpointDurableOperation({
+        jobKey: registration.job.jobKey,
+        ownerId: "janitor-consumer",
+        ownerGeneration: adopted.job.attempt,
+        checkpoint,
+        nowMs: 17_001,
+      });
+    }
+    await expect(
+      durable.completeDurableOperation(
+        registration.job.jobKey,
+        "janitor-consumer",
+        adopted.job.attempt,
+        { status: 200, body: { ok: true, state: "destroyed" } },
+        17_002,
+      ),
+    ).resolves.toBe("completed");
+  });
+
   it("fences stale adoption generations without replacing the live owner or typed terminal", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

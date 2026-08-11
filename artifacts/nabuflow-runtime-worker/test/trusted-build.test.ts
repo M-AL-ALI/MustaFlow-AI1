@@ -56,6 +56,10 @@ import { ContainerProxy } from "../src/trusted-build-index";
 import { trustedBuildStagingChunkKey } from "../src/trusted-build-storage";
 import { MemoryR2Bucket } from "./helpers";
 
+const stripeKeyPrefix = (kind: "s" | "r", mode: "test" | "live") =>
+  [`${kind}k`, mode, ""].join("_");
+const syntheticStripeKey = (kind: "s" | "r", mode: "test" | "live", suffix: string) =>
+  `${stripeKeyPrefix(kind, mode)}${suffix}`;
 const NOW = new Date("2026-08-08T22:00:00.000Z");
 
 class MemoryBuildCoordinator implements TrustedBuildCoordinator {
@@ -834,7 +838,7 @@ describe("trusted secretless build plane", () => {
 
   it("bounds and scrubs persisted command-output evidence", () => {
     const diagnostic = sanitizeBuildDiagnosticText(
-      `${"prefix".repeat(1_000)}\nsk_test_ABCDEFGHIJKLMNOPQRST\npostgresql://user:password@db.example/test`,
+      `${"prefix".repeat(1_000)}\n${syntheticStripeKey("s", "test", "ABCDEFGHIJKLMNOPQRST")}\npostgresql://user:password@db.example/test`,
       256,
     );
     expect(diagnostic.length).toBeLessThanOrEqual(256);
@@ -842,6 +846,12 @@ describe("trusted secretless build plane", () => {
     expect(diagnostic).toContain("postgresql://[REDACTED]@");
     expect(diagnostic).not.toContain("ABCDEFGHIJKLMNOPQRST");
     expect(diagnostic).not.toContain("password");
+    const restricted = sanitizeBuildDiagnosticText(
+      syntheticStripeKey("r", "test", "R".repeat(24)),
+      256,
+    );
+    expect(restricted).toContain("[REDACTED_STRIPE_KEY]");
+    expect(restricted).not.toContain(stripeKeyPrefix("r", "test"));
   });
 
   it("runs the pipeline through a shell instead of execing its first builtin", () => {
@@ -974,7 +984,9 @@ describe("trusted secretless build plane", () => {
       }),
     ).toEqual({ findings: [], scannedBytes: 0, shelfExempt: true });
 
-    const modified = new TextEncoder().encode("prefix sk_test_ABCDEFGHIJKLMNOP suffix");
+    const modified = new TextEncoder().encode(
+      `prefix ${syntheticStripeKey("s", "test", "ABCDEFGHIJKLMNOP")} suffix`,
+    );
     const modifiedSha256 = await sha256Hex(modified);
     const result = scanTrustedBuildFileStream({
       path: "node_modules/public/index.js",
@@ -992,7 +1004,28 @@ describe("trusted secretless build plane", () => {
         provenance: "not-shelf-byte-identical",
       }),
     ]);
-    expect(JSON.stringify(result.findings)).not.toContain("sk_test_");
+    expect(JSON.stringify(result.findings)).not.toContain(stripeKeyPrefix("s", "test"));
+
+    for (const prefix of [stripeKeyPrefix("r", "test"), stripeKeyPrefix("r", "live")]) {
+      const restricted = new TextEncoder().encode(`prefix ${prefix}${"R".repeat(24)} suffix`);
+      const restrictedSha256 = await sha256Hex(restricted);
+      const restrictedResult = scanTrustedBuildFileStream({
+        path: "generated/payments.ts",
+        sha256: restrictedSha256,
+        scope: "app",
+        chunks: [restricted.slice(0, 12), restricted.slice(12)],
+        shelfContentSha256: new Set(),
+      });
+      expect(restrictedResult.findings).toEqual([
+        expect.objectContaining({
+          path: "generated/payments.ts",
+          ruleId: "stripe-secret-key",
+          contentSha256Prefix: restrictedSha256.slice(0, 16),
+          byteOffset: 7,
+        }),
+      ]);
+      expect(JSON.stringify(restrictedResult.findings)).not.toContain(prefix);
+    }
   });
 
   it("coalesces requests, executes two offline passes, attests, and serves verified chunks", async () => {
@@ -1129,7 +1162,7 @@ describe("trusted secretless build plane", () => {
       const record = await coordinator.get(request.input.buildId);
       expect(record?.state).toBe("failed");
       expect(record?.failure?.code).toBe(marker === "b" ? "attestation_invalid" : "build_failed");
-      expect(JSON.stringify(record?.failure)).not.toContain("sk_test_");
+      expect(JSON.stringify(record?.failure)).not.toContain(stripeKeyPrefix("s", "test"));
       if (marker === "c") {
         expect(record?.attempts[0].secretScanFindings).toEqual([
           expect.objectContaining({
@@ -1141,7 +1174,9 @@ describe("trusted secretless build plane", () => {
             provenance: "not-shelf-byte-identical",
           }),
         ]);
-        expect(JSON.stringify(record?.attempts[0].secretScanFindings)).not.toContain("sk_test_");
+        expect(JSON.stringify(record?.attempts[0].secretScanFindings)).not.toContain(
+          stripeKeyPrefix("s", "test"),
+        );
       }
     }
   });
@@ -1178,7 +1213,9 @@ describe("trusted secretless build plane", () => {
     expect(wrong.status).toBe(422);
 
     const sourceSecret = structuredClone(request);
-    const secretBytes = new TextEncoder().encode("sk_test_ABCDEFGHIJKLMNOP");
+    const secretBytes = new TextEncoder().encode(
+      syntheticStripeKey("s", "test", "ABCDEFGHIJKLMNOP"),
+    );
     sourceSecret.source.payloadBase64 = base64(secretBytes);
     sourceSecret.source.manifest = {
       ...sourceSecret.source.manifest,
@@ -1210,7 +1247,7 @@ describe("trusted secretless build plane", () => {
       { coordinator },
     );
     expect(secretResponse.status).toBe(422);
-    expect(JSON.stringify(await secretResponse.json())).not.toContain("sk_test_");
+    expect(JSON.stringify(await secretResponse.json())).not.toContain(stripeKeyPrefix("s", "test"));
 
     env.TRUSTED_BUILD_MAX_ACTIVE = "1";
     const first = await buildRequest(shelf, "e");

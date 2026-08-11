@@ -35,7 +35,7 @@ const defaultFetchAdapter: StripeFetchAdapter = {
 };
 
 function validateTestSecretKey(secretKey: string): void {
-  if (!/^sk_test_[A-Za-z0-9]+$/u.test(secretKey)) {
+  if (!/^(?:sk|rk)_test_[A-Za-z0-9]+$/u.test(secretKey)) {
     throw new StripeBrokerError(503, "stripe_unavailable", false);
   }
 }

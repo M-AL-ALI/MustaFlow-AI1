@@ -3811,9 +3811,8 @@ const SECRET_PATTERNS: RegExp[] = [
   // GitHub PAT
   /ghp_[A-Za-z0-9]{20,}/g,
   /github_pat_[A-Za-z0-9_]{20,}/g,
-  // Stripe live keys
-  /sk_live_[A-Za-z0-9]{16,}/g,
-  /rk_live_[A-Za-z0-9]{16,}/g,
+  // Stripe standard and restricted keys, in both test and live modes.
+  /(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{16,}/g,
   // OpenAI
   /sk-[A-Za-z0-9_-]{20,}/g,
   // Slack

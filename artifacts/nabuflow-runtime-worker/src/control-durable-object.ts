@@ -153,6 +153,17 @@ function durableOperationAbandonedResponse(
       },
     };
   }
+  if (kind === "acceptance-lease") {
+    return {
+      status: 504,
+      body: {
+        ok: false,
+        code: "acceptance_operation_timeout",
+        message: "The acceptance lease operation did not complete before the execution deadline",
+        retryable: false,
+      },
+    };
+  }
   return {
     status: 503,
     body: {
@@ -194,6 +205,14 @@ const DURABLE_OPERATION_CHECKPOINTS = {
     "process-started",
     "finalized",
   ],
+  "acceptance-lease": [
+    "initialized",
+    "scope-verified",
+    "provider-complete",
+    "vault-complete",
+    "verified-gone",
+    "finalized",
+  ],
 } as const satisfies Record<
   StoredDurableOperationJob["kind"],
   readonly DurableOperationCheckpoint[]
@@ -214,15 +233,18 @@ function durableOperationSubjectMatches(
   }
   if (
     (job.kind === "runtime-start" && input.kind === "runtime-start") ||
-    (job.kind === "runtime-manifest-restart" && input.kind === "runtime-manifest-restart")
+    (job.kind === "runtime-manifest-restart" && input.kind === "runtime-manifest-restart") ||
+    (job.kind === "acceptance-lease" && input.kind === "acceptance-lease")
   ) {
     return JSON.stringify(job.request) === JSON.stringify(input.request);
   }
   return (
     job.kind !== "runtime-start" &&
     job.kind !== "runtime-manifest-restart" &&
+    job.kind !== "acceptance-lease" &&
     input.kind !== "runtime-start" &&
     input.kind !== "runtime-manifest-restart" &&
+    input.kind !== "acceptance-lease" &&
     job.sealedArtifactSha256 === input.sealedArtifactSha256
   );
 }
@@ -433,11 +455,17 @@ export class ControlDurableObject
                 kind: "runtime-manifest-restart",
                 request: structuredClone(input.request),
               }
-            : {
-                ...common,
-                kind: input.kind,
-                sealedArtifactSha256: input.sealedArtifactSha256,
-              };
+            : input.kind === "acceptance-lease"
+              ? {
+                  ...common,
+                  kind: "acceptance-lease",
+                  request: structuredClone(input.request),
+                }
+              : {
+                  ...common,
+                  kind: input.kind,
+                  sealedArtifactSha256: input.sealedArtifactSha256,
+                };
       appendDurableOperationEvent(job, "job-created", input.nowMs);
       await transaction.put(jobKey, job);
       await transaction.put(
@@ -553,7 +581,10 @@ export class ControlDurableObject
 
   async getArtifactCommit(jobKey: string): Promise<StoredArtifactCommitJob | null> {
     const job = await this.getDurableOperation(jobKey);
-    return job === null || job.kind === "runtime-start" || job.kind === "runtime-manifest-restart"
+    return job === null ||
+      job.kind === "runtime-start" ||
+      job.kind === "runtime-manifest-restart" ||
+      job.kind === "acceptance-lease"
       ? null
       : job;
   }
@@ -598,7 +629,12 @@ export class ControlDurableObject
     sealedArtifactSha256: string,
   ): Promise<StoredArtifactCommitJob | null> {
     const job = await this.getLatestDurableOperation("v1", runtimeIdentity, sealedArtifactSha256);
-    if (job !== null && job.kind !== "runtime-start" && job.kind !== "runtime-manifest-restart")
+    if (
+      job !== null &&
+      job.kind !== "runtime-start" &&
+      job.kind !== "runtime-manifest-restart" &&
+      job.kind !== "acceptance-lease"
+    )
       return job;
     const layeredJob = await this.getLatestDurableOperation(
       "layers-v1",
@@ -607,7 +643,8 @@ export class ControlDurableObject
     );
     return layeredJob !== null &&
       layeredJob.kind !== "runtime-start" &&
-      layeredJob.kind !== "runtime-manifest-restart"
+      layeredJob.kind !== "runtime-manifest-restart" &&
+      layeredJob.kind !== "acceptance-lease"
       ? layeredJob
       : null;
   }
@@ -700,7 +737,11 @@ export class ControlDurableObject
         if (input.checkpoint !== "payloads-transferred") {
           throw new Error("Artifact payload hashes require the transfer checkpoint");
         }
-        if (job.kind === "runtime-start" || job.kind === "runtime-manifest-restart") {
+        if (
+          job.kind === "runtime-start" ||
+          job.kind === "runtime-manifest-restart" ||
+          job.kind === "acceptance-lease"
+        ) {
           throw new Error("Runtime lifecycle checkpoints cannot carry artifact payload hashes");
         }
         job.payloadContentSha256s = [...input.payloadContentSha256s];
@@ -730,7 +771,11 @@ export class ControlDurableObject
       ...input,
       ownerGeneration: input.ownerGeneration ?? current?.attempt ?? -1,
     });
-    if (job.kind === "runtime-start" || job.kind === "runtime-manifest-restart") {
+    if (
+      job.kind === "runtime-start" ||
+      job.kind === "runtime-manifest-restart" ||
+      job.kind === "acceptance-lease"
+    ) {
       throw new Error("Artifact commit job changed kind");
     }
     return job;

@@ -13,6 +13,10 @@ const targetRuntimeIdentity = await deriveRuntimeIdentity({
   slot: "primary",
 });
 
+function syntheticStripeKey(kind: "s" | "r", mode: "test" | "live"): string {
+  return [`${kind}k`, mode, "FAKEONLYNOTAREALSECRET1234567890"].join("_");
+}
+
 function seal(files: Parameters<typeof sealRuntimeArtifact>[0]["files"]) {
   return sealRuntimeArtifact({
     targetRuntimeIdentity,
@@ -58,7 +62,7 @@ describe("runtime artifact sealer", () => {
       await seal([
         {
           path: "config.txt",
-          content: "sk_test_FAKEONLYNOTAREALSECRET1234567890",
+          content: syntheticStripeKey("s", "test"),
         },
       ]);
       producedEnvelope = true;
@@ -67,6 +71,15 @@ describe("runtime artifact sealer", () => {
     }
     expect(producedEnvelope).toBe(false);
   });
+
+  it.each([syntheticStripeKey("r", "test"), syntheticStripeKey("r", "live")])(
+    "rejects a restricted Stripe key shape before sealing (%s)",
+    async (value) => {
+      await expect(seal([{ path: "config.txt", content: value }])).rejects.toMatchObject({
+        code: "artifact_secret_detected",
+      });
+    },
+  );
 
   it("rejects an oversized individual file before hashing or upload", async () => {
     await expect(

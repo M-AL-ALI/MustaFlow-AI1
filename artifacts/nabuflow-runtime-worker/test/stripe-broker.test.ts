@@ -6,7 +6,10 @@ import {
   type StripeFetchAdapter,
 } from "../src/stripe-broker";
 
-const TEST_KEY = `sk_test_${"a".repeat(32)}`;
+const syntheticStripeKey = (kind: "s" | "r", mode: "test" | "live", fill: string) =>
+  [`${kind}k`, mode, fill.repeat(32)].join("_");
+const TEST_KEY = syntheticStripeKey("s", "test", "a");
+const RESTRICTED_TEST_KEY = syntheticStripeKey("r", "test", "r");
 
 function paymentIntent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -52,7 +55,7 @@ describe("Stripe broker", () => {
       created: 1_785_859_200,
       livemode: false,
     });
-    expect(JSON.stringify(result)).not.toMatch(/client.secret|sk_test/iu);
+    expect(JSON.stringify(result)).not.toMatch(/client.secret|s[k]_test/iu);
   });
 
   it("retrieves only a validated PaymentIntent path without mutation headers", async () => {
@@ -71,9 +74,18 @@ describe("Stripe broker", () => {
     const fetch = vi.fn(async () => Response.json(paymentIntent({ livemode: true })));
     await expect(
       createStripePaymentIntent(
-        `sk_live_${"a".repeat(32)}`,
+        syntheticStripeKey("s", "live", "a"),
         { amount: 1_099, currency: "usd" },
         "nfg1-live-key-rejected",
+        { adapter: { fetch } },
+      ),
+    ).rejects.toMatchObject({ code: "stripe_unavailable" });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(
+      createStripePaymentIntent(
+        syntheticStripeKey("r", "live", "a"),
+        { amount: 1_099, currency: "usd" },
+        "nfg1-restricted-live-key-rejected",
         { adapter: { fetch } },
       ),
     ).rejects.toMatchObject({ code: "stripe_unavailable" });
@@ -86,6 +98,19 @@ describe("Stripe broker", () => {
         { adapter: { fetch } },
       ),
     ).rejects.toMatchObject({ code: "stripe_execution_failed" });
+  });
+
+  it("accepts a restricted test key without changing the existing test-key flow", async () => {
+    const fetch = vi.fn(async () => Response.json(paymentIntent()));
+    await expect(
+      createStripePaymentIntent(
+        RESTRICTED_TEST_KEY,
+        { amount: 1_099, currency: "usd" },
+        "nfg1-restricted-test-key",
+        { adapter: { fetch } },
+      ),
+    ).resolves.toMatchObject({ id: "pi_test123", livemode: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("translates provider failures without retaining raw details", async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { acceptanceLeaseCheckpointSchema } from "./acceptance-provisioner";
 
 /**
  * The durable executor must reach a terminal state before the provider stops
@@ -31,6 +32,7 @@ export const durableOperationKindSchema = z.enum([
   "layers-v1",
   "runtime-start",
   "runtime-manifest-restart",
+  "acceptance-lease",
 ]);
 export const artifactCommitCheckpointSchema = z.enum([
   "initialized",
@@ -54,10 +56,12 @@ export const runtimeManifestRestartCheckpointSchema = z.enum([
   "process-started",
   "finalized",
 ]);
+export const acceptanceLeaseDurableCheckpointSchema = acceptanceLeaseCheckpointSchema;
 export const durableOperationCheckpointSchema = z.union([
   artifactCommitCheckpointSchema,
   runtimeStartCheckpointSchema,
   runtimeManifestRestartCheckpointSchema,
+  acceptanceLeaseDurableCheckpointSchema,
 ]);
 export const artifactCommitEventKindSchema = z.enum([
   "job-created",
@@ -226,6 +230,9 @@ export type DurableOperationCheckpoint = z.infer<typeof durableOperationCheckpoi
 export type RuntimeStartCheckpoint = z.infer<typeof runtimeStartCheckpointSchema>;
 export type RuntimeManifestRestartCheckpoint = z.infer<
   typeof runtimeManifestRestartCheckpointSchema
+>;
+export type AcceptanceLeaseDurableCheckpoint = z.infer<
+  typeof acceptanceLeaseDurableCheckpointSchema
 >;
 export type ArtifactCommitEventKind = z.infer<typeof artifactCommitEventKindSchema>;
 export type ArtifactCommitEvent = z.infer<typeof artifactCommitEventSchema>;
