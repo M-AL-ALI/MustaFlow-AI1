@@ -80,7 +80,9 @@ import {
 import { ContainerUnavailableError } from "./errors";
 import {
   listEnabledSkills,
+  listEnabledSkillsForTarget,
   loadSkillContent,
+  loadSkillContentForTarget,
   formatSkillIndex,
   authorSkillDraft,
   type SkillManifest,
@@ -2139,7 +2141,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Per-task skill registry: load index for the system prompt, then cache
   // already-loaded skills in this Map so a repeated load_skill is a free
   // cache hit (no double-count, no second LLM trip into the body).
-  const enabledSkills = await listEnabledSkills();
+  const enabledSkills = input.zeroGenerationTarget
+    ? await listEnabledSkillsForTarget(input.zeroGenerationTarget)
+    : await listEnabledSkills();
   const skillsIndex = formatSkillIndex(enabledSkills, input.userPrompt);
   const loadedSkills = new Map<string, SkillManifest>();
 
@@ -6533,7 +6537,24 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           observation: `Skill "${skillName}" was already loaded earlier this run (${cached.body.length} bytes). The full body is already in your conversation context — scroll back to the earlier load_skill observation instead of reloading.`,
         };
       }
-      const manifest = await loadSkillContent(skillName);
+      const targetResult = input.zeroGenerationTarget
+        ? await loadSkillContentForTarget(skillName, input.zeroGenerationTarget)
+        : null;
+      if (targetResult && !targetResult.ok) {
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            ok: false,
+            code: targetResult.code,
+            retryable: false,
+            identitySha256: targetResult.identitySha256,
+            integration: { kind: "skill", id: skillName },
+            reasons: targetResult.reasons,
+            resolution: "select-supported-implementation",
+          }),
+        };
+      }
+      const manifest = targetResult?.ok ? targetResult.manifest : await loadSkillContent(skillName);
       if (!manifest) {
         return {
           ok: false,

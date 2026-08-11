@@ -1,0 +1,25 @@
+{
+  "format": "nabu-zero-capability-eligibility/v1",
+  "schemaVersion": 1,
+  "kind": "skill",
+  "id": "chartjs",
+  "legacy": {
+    "mode": "direct",
+    "behavior": "preserve"
+  },
+  "cloudflare": {
+    "status": "ineligible",
+    "resolution": "refuse",
+    "capabilities": [],
+    "reasons": [
+      {
+        "code": "unsupported_toolchain"
+      }
+    ]
+  },
+  "build": {
+    "toolchains": [],
+    "pantryPolicy": "dynamic-demand-driven",
+    "attestationRequired": true
+  }
+}

@@ -20,6 +20,11 @@ import {
   prepareZeroSealedNodeSource,
   ZERO_SEALED_NODE_PROMPT_EXTENSION,
 } from "./zero-sealed-generation";
+import {
+  assertZeroGeneratedEligibility,
+  inferZeroDeclaredCapabilities,
+  ZeroCapabilityGapError,
+} from "./zero-capability-eligibility";
 
 /**
  * Sanitises an AI-generated summary so the chat always shows human-readable
@@ -5368,6 +5373,7 @@ async function runStackBuildPipeline(
   args: StackBuildArgs,
   systemPrompt: string,
   stackLabel: string,
+  capabilityCorrectionAttempt = 0,
 ): Promise<BuilderResult> {
   const {
     projectName,
@@ -5506,15 +5512,53 @@ async function runStackBuildPipeline(
   );
 
   const { files: sanitisedFiles } = scanForSecrets(files);
-  const sealed =
-    args.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
-      ? prepareZeroSealedNodeSource({
-          files: sanitisedFiles,
-          manifestRevision:
-            args.sealedManifestRevision ??
-            `zero-node-${String(taskId ?? projectName).replace(/[^A-Za-z0-9._-]/gu, "-")}-v1`,
-        })
-      : null;
+  let sealed: ReturnType<typeof prepareZeroSealedNodeSource> | null;
+  try {
+    sealed =
+      args.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
+        ? prepareZeroSealedNodeSource({
+            files: sanitisedFiles,
+            skipEligibilityPrecheck: true,
+            manifestRevision:
+              args.sealedManifestRevision ??
+              `zero-node-${String(taskId ?? projectName).replace(/[^A-Za-z0-9._-]/gu, "-")}-v1`,
+          })
+        : null;
+    if (sealed !== null) {
+      await assertZeroGeneratedEligibility({
+        files: sealed.files,
+        dependencyPlan: sealed.dependencyPlan,
+        runtimeManifest: sealed.manifest,
+        declaredCapabilities: inferZeroDeclaredCapabilities(sealed.files),
+        pantryClosureVerified: false,
+        dependencyOutputAttested: false,
+        stage: "source",
+      });
+    }
+  } catch (error) {
+    if (
+      error instanceof ZeroCapabilityGapError &&
+      args.zeroGenerationTarget === "cloudflare-sealed-staging-v1" &&
+      capabilityCorrectionAttempt === 0
+    ) {
+      const reasonCodes = [...new Set(error.result.reasons.map((reason) => reason.code))].sort();
+      return runStackBuildPipeline(
+        {
+          ...args,
+          integrationContext: [
+            args.integrationContext,
+            `SEALED CAPABILITY CORRECTION (automatic): the prior candidate was rejected with zero_capability_gap (${reasonCodes.join(", ")}). Regenerate using only the vendored database/payments capabilities or a local-compute implementation. Do not request credentials, egress, package stocking, or Pantry/doorman configuration from the user.`,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+        systemPrompt,
+        stackLabel,
+        1,
+      );
+    }
+    throw error;
+  }
   const outputFiles = sealed?.files ?? sanitisedFiles;
 
   const report: TaskReport = {

@@ -1,0 +1,31 @@
+{
+  "format": "nabu-zero-capability-eligibility/v1",
+  "schemaVersion": 1,
+  "kind": "blueprint",
+  "id": "payments-paddle",
+  "legacy": {
+    "mode": "direct",
+    "behavior": "preserve"
+  },
+  "cloudflare": {
+    "status": "ineligible",
+    "resolution": "refuse",
+    "capabilities": [],
+    "reasons": [
+      {
+        "code": "raw_payment_client"
+      },
+      {
+        "code": "credential_assumption"
+      },
+      {
+        "code": "arbitrary_runtime_fetch"
+      }
+    ]
+  },
+  "build": {
+    "toolchains": [],
+    "pantryPolicy": "dynamic-demand-driven",
+    "attestationRequired": true
+  }
+}

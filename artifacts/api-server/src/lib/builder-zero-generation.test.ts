@@ -99,4 +99,63 @@ describe("actual Node product generator target", () => {
     expect(result.files.map((file) => file.path)).not.toContain("nabuflow/runtime/db.ts");
     expect(result.files).toHaveLength(3);
   });
+
+  it("automatically replaces a typed unsupported integration once without exposing platform config", async () => {
+    const captured: string[] = [];
+    let calls = 0;
+    const adapter: BuilderModelAdapter = {
+      async complete(input) {
+        calls += 1;
+        captured.push(...input.messages.map((message) => message.content));
+        const unsupported = calls === 1;
+        return {
+          blueprint: {
+            projectName: "automatic-alternative",
+            projectType: "node-api",
+            targetPlatforms: ["api"],
+            pages: [],
+            components: [],
+            integrationsNeeded: [],
+          },
+          files: [
+            {
+              path: "package.json",
+              content: JSON.stringify({
+                scripts: { build: "tsc", start: "node dist/src/index.js" },
+                dependencies: { express: "5.1.0" },
+              }),
+            },
+            {
+              path: "src/index.ts",
+              content: `import express from "express";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+const app = express(); const db = createNabuFlowDatabase(); void db;
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+${unsupported ? 'void fetch("https://unsupported.example");' : ""}
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+            },
+            {
+              path: "tsconfig.json",
+              content: JSON.stringify({ compilerOptions: { rootDir: ".", outDir: "dist" } }),
+            },
+          ],
+        };
+      },
+    };
+    const result = await runNodeApiBuildPipeline({
+      projectName: "automatic-alternative",
+      projectKind: "node-api",
+      userPrompt: "Use an unsupported server integration if possible",
+      agentMode: "power",
+      zeroGenerationTarget: "cloudflare-sealed-staging-v1",
+      modelAdapter: adapter,
+      sealedManifestRevision: "alternative-v1",
+    });
+    expect(calls).toBe(2);
+    expect(captured.join("\n")).toContain("zero_capability_gap (arbitrary_runtime_fetch)");
+    expect(result.files.find((file) => file.path === "src/index.ts")?.content).not.toContain(
+      "unsupported.example",
+    );
+    expect(captured.join("\n")).not.toMatch(/Pantry token|doorman token|human stocking/iu);
+  });
 });

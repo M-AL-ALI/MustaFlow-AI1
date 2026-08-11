@@ -19,7 +19,8 @@ import type { BuilderFile } from "./builder";
 import { getVendoredRuntimeSdkFiles } from "./zero-runtime-sdk";
 
 export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET (staging-only):
-- Keep the source provider-neutral by importing createNabuFlowDatabase from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK.
+- Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK.
+- Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
 - Bind the HTTP server to 0.0.0.0 and Number(process.env.PORT ?? "8080").
 - GET /healthz must return 200 without touching a database or any external service.
@@ -109,16 +110,10 @@ type TypeScriptConfig = {
   compilerOptions?: Record<string, unknown>;
 };
 
-const DIRECT_CREDENTIAL_PACKAGES = new Set([
-  "@neondatabase/serverless",
-  "pg",
-  "postgres",
-  "stripe",
-  "dotenv",
-]);
 const SECRET_ENV_PATTERN =
-  /process\.env\.(?:DATABASE_URL|STRIPE_[A-Z0-9_]*|PGPASSWORD|NEON_[A-Z0-9_]*)/u;
-const INSTALL_OR_REGISTRY_PATTERN = /(?:\bnpx\b|\bnpm\s+(?:i|install|add)\b|registry\.npmjs\.org)/u;
+  /process\.env\.(?:DATABASE_URL|STRIPE_[A-Z0-9_]*|PGPASSWORD|NEON_[A-Z0-9_]*|[A-Z0-9_]*(?:TOKEN|SECRET|KEY))/u;
+const INSTALL_OR_REGISTRY_PATTERN =
+  /(?:\bnpx\b|\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|dlx)\b|registry\.npmjs\.org)/u;
 
 function dependencyPlan(pkg: PackageJson): ZeroGeneratedDependencyPlan {
   const intents = new Map<string, { ecosystem: "npm"; name: string; selector: string }>();
@@ -126,9 +121,6 @@ function dependencyPlan(pkg: PackageJson): ZeroGeneratedDependencyPlan {
     for (const [name, selector] of Object.entries(group)) {
       if (typeof selector !== "string" || selector.length === 0) {
         throw new Error(`Dependency ${name} has no Pantry selector`);
-      }
-      if (DIRECT_CREDENTIAL_PACKAGES.has(name)) {
-        throw new Error(`Direct credential package ${name} is unavailable in sealed mode`);
       }
       const prior = intents.get(name);
       if (prior !== undefined && prior.selector !== selector) {
@@ -158,6 +150,8 @@ export interface PreparedZeroSealedNodeSource {
 export function prepareZeroSealedNodeSource(input: {
   files: readonly BuilderFile[];
   manifestRevision: string;
+  /** Product generator paths run the canonical async eligibility scanner next. */
+  skipEligibilityPrecheck?: boolean;
 }): PreparedZeroSealedNodeSource {
   const byPath = new Map(input.files.map((file) => [file.path, { ...file }]));
   const packageFile = byPath.get("package.json");
@@ -198,11 +192,13 @@ export function prepareZeroSealedNodeSource(input: {
   ) {
     throw new Error("Sealed Node entrypoint is missing SDK, bind, port, or health requirements");
   }
-  for (const file of byPath.values()) {
-    if (SECRET_ENV_PATTERN.test(file.content) || INSTALL_OR_REGISTRY_PATTERN.test(file.content)) {
-      throw new Error(
-        `Sealed Node source failed credential or dependency-egress scan: ${file.path}`,
-      );
+  if (input.skipEligibilityPrecheck !== true) {
+    for (const file of byPath.values()) {
+      if (SECRET_ENV_PATTERN.test(file.content) || INSTALL_OR_REGISTRY_PATTERN.test(file.content)) {
+        throw new Error(
+          `Sealed Node source failed credential or dependency-egress scan: ${file.path}`,
+        );
+      }
     }
   }
   for (const sdkFile of getVendoredRuntimeSdkFiles()) {

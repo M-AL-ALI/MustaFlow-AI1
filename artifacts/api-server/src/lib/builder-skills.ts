@@ -34,6 +34,14 @@ import { fileURLToPath } from "node:url";
 import { sql, inArray, eq, and } from "drizzle-orm";
 import { db, builderSkillsTable, type BuilderSkillRow } from "@workspace/db";
 import { logger } from "./logger";
+import type {
+  ZeroEligibilityReason,
+  ZeroGenerationTarget,
+} from "@workspace/tenant-runtime-contracts";
+import {
+  resolveZeroIntegrationEligibility,
+  resolveZeroIntegrationEligibilityOutcome,
+} from "./zero-capability-eligibility";
 
 export interface SkillManifest {
   name: string;
@@ -240,6 +248,22 @@ export async function listEnabledSkills(): Promise<SkillManifest[]> {
   return out;
 }
 
+/** Existing target returns the exact legacy objects. Sealed mode exposes only
+ * skills whose sidecar has an approved capability/native resolution. */
+export async function listEnabledSkillsForTarget(
+  target: ZeroGenerationTarget,
+): Promise<SkillManifest[]> {
+  const enabled = await listEnabledSkills();
+  if (target === "legacy-v1") return enabled;
+  const eligible: SkillManifest[] = [];
+  for (const skill of enabled) {
+    const metadata = await resolveZeroIntegrationEligibility("skill", skill.name);
+    if (metadata.cloudflare.status !== "eligible") continue;
+    eligible.push({ ...skill, body: metadata.cloudflare.sealedGuidance });
+  }
+  return eligible;
+}
+
 /** Admin view: all approved skills (enabled + disabled) with settings + telemetry. */
 export async function listAllSkillsForAdmin(): Promise<SkillSummary[]> {
   const manifests = await readManifests();
@@ -325,6 +349,39 @@ export async function loadSkillContent(name: string): Promise<SkillManifest | nu
     logger.warn({ err, name }, "builder-skills: load-count update failed");
   }
   return m;
+}
+
+export type TargetSkillLoadResult =
+  | { ok: true; manifest: SkillManifest }
+  | {
+      ok: false;
+      code: "zero_capability_gap";
+      identitySha256: string;
+      reasons: ZeroEligibilityReason[];
+    };
+
+export async function loadSkillContentForTarget(
+  name: string,
+  target: ZeroGenerationTarget,
+): Promise<TargetSkillLoadResult | null> {
+  if (target === "legacy-v1") {
+    const manifest = await loadSkillContent(name);
+    return manifest === null ? null : { ok: true, manifest };
+  }
+  const metadata = await resolveZeroIntegrationEligibility("skill", name);
+  if (metadata.cloudflare.status !== "eligible") {
+    const outcome = await resolveZeroIntegrationEligibilityOutcome("skill", name);
+    if (outcome.ok) throw new Error("Zero skill metadata outcome disagrees with its contract");
+    return {
+      ok: false,
+      code: outcome.code,
+      identitySha256: outcome.identitySha256,
+      reasons: [...outcome.reasons],
+    };
+  }
+  const manifest = await loadSkillContent(name);
+  if (manifest === null) return null;
+  return { ok: true, manifest: { ...manifest, body: metadata.cloudflare.sealedGuidance } };
 }
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,80}$/;
