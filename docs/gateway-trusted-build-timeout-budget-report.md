@@ -40,3 +40,8 @@ a/test/line 740:
 - Diff is exactly one file and one timeout argument line.
 - No additional behavior changes.
 - No surprises.
+
+## Finalized fields
+
+- Branch tip SHA (post-commit): `7249648b7a062b9f017057ad342373864b91ca0e`
+- SHA-256 (this report file): `E26C4E3C8415F1677956B3A82680F71877A153FFD0095EDC5CA4621CE00A89BB`
