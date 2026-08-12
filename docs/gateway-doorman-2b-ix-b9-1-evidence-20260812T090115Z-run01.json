@@ -1,0 +1,64 @@
+{
+  "runId": "2b-ix-b9.1-20260812T090115Z-run01",
+  "capturedAtUtc": "2026-08-12T09:01:15Z",
+  "branch": "codex/acceptance-provisioner-readyz",
+  "base": {
+    "verification": "git ls-remote origin refs/heads/main",
+    "expected": "689183d198849cad56656832b4a1a4d450cdbbb6",
+    "observed": "689183d198849cad56656832b4a1a4d450cdbbb6",
+    "matched": true
+  },
+  "implementationCommit": "1a299f1befef29fd44f39ac424168bdf5a0628a6",
+  "route": {
+    "method": "GET",
+    "path": "/_nabuflow/acceptance/v1/readyz",
+    "status": 200,
+    "responseFields": ["ready", "gate", "kek"],
+    "gateIndependent": true,
+    "authenticationRequired": false,
+    "kekValidator": "shared acceptance-vault exact-32-byte Base64URL-no-padding validator"
+  },
+  "focusedAcceptance": {
+    "matrixCases": 6,
+    "routeTests": 8,
+    "passed": 8,
+    "bindingNameOrValueLeakMatches": 0,
+    "disabledLeaseResult": "404 acceptance_lease_not_found",
+    "enabledUnauthenticatedLeaseResult": "401 acceptance_unauthorized"
+  },
+  "verification": {
+    "frozenInstall": {
+      "command": "pnpm install --frozen-lockfile --prefer-offline --reporter append-only",
+      "elapsedSeconds": 765.2,
+      "downloadedPackages": 0,
+      "lockfileChanged": false
+    },
+    "workerTests": { "filesPassed": 28, "testsPassed": 219, "failed": 0 },
+    "workerTypecheck": "pass",
+    "workerLint": "pass",
+    "rootTypecheck": "pass",
+    "rootLint": "pass",
+    "formatCheck": "pass",
+    "gitDiffCheck": "pass",
+    "fastStabilityGate": { "pass": 15, "warn": 0, "fail": 0 },
+    "releaseProfile": { "pass": 18, "warn": 0, "fail": 3 },
+    "exactBaseParity": {
+      "base": "689183d198849cad56656832b4a1a4d450cdbbb6",
+      "matchedRows": ["api-release-extended", "api-account-billing-history", "web-build"],
+      "commonCause": "local PostgreSQL unavailable at 127.0.0.1:5432",
+      "newFailureRows": []
+    }
+  },
+  "changeControl": {
+    "manifestFilesChanged": [],
+    "lockfilesChanged": [],
+    "deploymentsPerformed": 0,
+    "productionBehaviorActivated": false,
+    "leaseRouteContractChanged": false
+  },
+  "cleanup": {
+    "exactBaseParityWorktreeRemoved": true,
+    "credentialsCreatedOrUsed": 0,
+    "liveProviderCalls": 0
+  }
+}
