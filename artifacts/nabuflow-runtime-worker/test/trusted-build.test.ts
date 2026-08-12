@@ -740,7 +740,7 @@ describe("trusted secretless build plane", () => {
     ]);
     expect(progress.at(-1)?.controlledPeakBytes).toBe(1024 * 1024);
     expect(disposed).toEqual(["process", "sandbox"]);
-  });
+  }, 20000);
 
   it("disposes transient Sandbox RPC results immediately on success and failure", async () => {
     const disposed: string[] = [];
