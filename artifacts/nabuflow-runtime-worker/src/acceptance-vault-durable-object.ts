@@ -35,7 +35,7 @@ function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-function readKek(value: string): Uint8Array<ArrayBuffer> {
+export function readAcceptanceVaultKek(value: string): Uint8Array<ArrayBuffer> {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) {
     throw new Error("Acceptance vault KEK must be 32-byte Base64URL without padding");
   }
@@ -59,7 +59,7 @@ function materialAad(lease: StoredAcceptanceLease): Uint8Array<ArrayBuffer> {
 }
 
 async function importKek(value: string, usages: KeyUsage[]): Promise<CryptoKey> {
-  const bytes = readKek(value);
+  const bytes = readAcceptanceVaultKek(value);
   const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength));
   try {
     copy.set(bytes);
