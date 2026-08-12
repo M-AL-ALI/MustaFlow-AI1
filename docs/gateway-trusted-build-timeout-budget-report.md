@@ -43,5 +43,5 @@ a/test/line 740:
 
 ## Finalized fields
 
-- Branch tip SHA (post-commit): `3bb43aee5f8d1ea6e8f67ff0f4fc4f7e5d0f2ed0f`
-- SHA-256 (this report file): `61FDA277C368BEB62ED0348885F11248341B3F151E45EFBC68A8C56C83D30FE9`
+- Branch tip SHA (post-commit): `3ff9643a`
+- SHA-256 (this report file): `55F9B55A047AFE9B4155FCDD48ADCFC884C32C14888732313ABCDEEC9485C811`
