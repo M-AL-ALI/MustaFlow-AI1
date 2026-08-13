@@ -32,6 +32,7 @@ import {
 import { isContainerLayerConfigured } from "../lib/tenant-runtime";
 import { resolveInitialStackSelection } from "../lib/stack-selection";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
+import { requiresDirectProjectDatabaseProvisioning } from "../lib/zero-sealed-generation";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -231,6 +232,7 @@ router.post("/projects", async (req, res): Promise<void> => {
   });
   const containerLayerOperational =
     (requestedBuilderMode ?? "agentic") === "agentic" ? await isContainerLayerConfigured() : false;
+  const requiresDirectDatabase = requiresDirectProjectDatabaseProvisioning(process.env);
 
   const [project] = await db
     .insert(projectsTable)
@@ -255,7 +257,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       provisioningStatus:
         (requestedBuilderMode ?? "agentic") === "agentic" &&
         containerLayerOperational &&
-        Boolean(process.env.NEON_API_KEY)
+        (!requiresDirectDatabase || Boolean(process.env.NEON_API_KEY))
           ? "provisioning"
           : "idle",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
@@ -1286,7 +1288,11 @@ export default function HomeScreen() {
   // polls `provisioningStatus` to surface progress.
   // Only enqueue provisioning when the Fly layer is operational and Neon is configured; otherwise
   // project was already stamped 'idle' above and no job is needed.
-  if (project.builderMode === "agentic" && containerLayerOperational && process.env.NEON_API_KEY) {
+  if (
+    project.builderMode === "agentic" &&
+    containerLayerOperational &&
+    (!requiresDirectDatabase || process.env.NEON_API_KEY)
+  ) {
     enqueueProvisionProjectJob(project.id);
   }
 

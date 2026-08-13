@@ -55,6 +55,17 @@ export function resolveZeroGenerationTarget(
   return "cloudflare-sealed-staging-v1";
 }
 
+/**
+ * Legacy/Fly projects retain their existing direct database provisioning.
+ * Sealed Cloudflare projects receive database material only through the
+ * Acceptance Provisioner -> Capability Vault handoff, never a project secret.
+ */
+export function requiresDirectProjectDatabaseProvisioning(
+  environment: Record<string, string | undefined>,
+): boolean {
+  return resolveZeroGenerationTarget(environment) === "legacy-v1";
+}
+
 export function readZeroPantryPublicKeys(
   environment: Record<string, string | undefined>,
 ): ReadonlyMap<string, string> {

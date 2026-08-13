@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  cancelStripePaymentIntent,
   createStripePaymentIntent,
   retrieveStripePaymentIntent,
   StripeBrokerError,
@@ -68,6 +69,18 @@ describe("Stripe broker", () => {
     await expect(
       retrieveStripePaymentIntent(TEST_KEY, "pi_test123", { adapter: { fetch } }),
     ).resolves.toMatchObject({ id: "pi_test123", status: "processing", livemode: false });
+  });
+
+  it("cancels a validated test PaymentIntent through the fixed API surface", async () => {
+    const fetch = vi.fn(async (request: Request) => {
+      expect(request.url).toBe("https://api.stripe.com/v1/payment_intents/pi_test123/cancel");
+      expect(request.method).toBe("POST");
+      expect(request.headers.has("idempotency-key")).toBe(false);
+      return Response.json(paymentIntent({ status: "canceled" }));
+    });
+    await expect(
+      cancelStripePaymentIntent(TEST_KEY, "pi_test123", { adapter: { fetch } }),
+    ).resolves.toMatchObject({ id: "pi_test123", status: "canceled", livemode: false });
   });
 
   it("rejects live keys and live-mode objects", async () => {

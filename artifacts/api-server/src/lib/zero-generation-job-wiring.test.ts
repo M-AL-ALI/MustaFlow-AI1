@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 const here = dirname(fileURLToPath(import.meta.url));
 const jobs = readFileSync(resolve(here, "jobs.ts"), "utf8");
 const messages = readFileSync(resolve(here, "../routes/messages.ts"), "utf8");
+const provisioning = readFileSync(resolve(here, "provisioning.ts"), "utf8");
+const projects = readFileSync(resolve(here, "../routes/projects.ts"), "utf8");
 const backend = readFileSync(
   resolve(here, "../../../nabuflow-runtime-worker/src/runtime-backend.ts"),
   "utf8",
@@ -32,5 +34,13 @@ describe("Zero sealed generation product wiring", () => {
     expect(backend).toContain('[TENANT_RUNTIME_MODE_ENV]: "cloudflare-capability-v1"');
     expect(backend).not.toContain("DATABASE_URL:");
     expect(backend).not.toContain("STRIPE_SECRET_KEY:");
+  });
+
+  it("keeps sealed runtime provisioning credential-free and closes the runtime race", () => {
+    expect(provisioning).toContain("requiresDirectProjectDatabaseProvisioning(process.env)");
+    expect(provisioning).toContain("if (!requiresDirectDatabase)");
+    expect(projects).toContain("!requiresDirectDatabase || process.env.NEON_API_KEY");
+    expect(jobs).toContain("Sealed Zero runtime provisioning did not reach a durable descriptor");
+    expect(jobs).toContain("runtimeId = created.runtimeId");
   });
 });

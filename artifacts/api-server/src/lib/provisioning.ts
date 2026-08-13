@@ -37,6 +37,7 @@ import {
 } from "./tenant-runtime";
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
+import { requiresDirectProjectDatabaseProvisioning } from "./zero-sealed-generation";
 
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
 
@@ -407,12 +408,15 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       })
       .where(eq(projectsTable.id, projectId));
 
-    // Pre-flight: both providers must be operational/configured for full agentic provisioning.
+    const requiresDirectDatabase = requiresDirectProjectDatabaseProvisioning(process.env);
+
+    // Legacy mode still requires both providers. Sealed mode provisions only
+    // the credential-free runtime; its database arrives vault-to-vault later.
     const containerLayerOperational = await isContainerLayerConfigured();
-    if (!containerLayerOperational || !process.env.NEON_API_KEY) {
+    if (!containerLayerOperational || (requiresDirectDatabase && !process.env.NEON_API_KEY)) {
       const missing: string[] = [];
-      if (!containerLayerOperational) missing.push("Fly container layer");
-      if (!process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
+      if (!containerLayerOperational) missing.push("tenant runtime layer");
+      if (requiresDirectDatabase && !process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
       logger.info(
         { projectId, missing },
         "Agentic provisioning skipped — credentials not configured (dev mode). Add secrets and retry.",
@@ -484,6 +488,20 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     // Start tailing this machine's stdout/stderr
     if (containerId) {
       ensureContainerLogTailer(projectId, containerId);
+    }
+
+    if (!requiresDirectDatabase) {
+      const durationMs = Date.now() - startedAt.getTime();
+      recordCompletionDurationMs(durationMs);
+      await db
+        .update(projectsTable)
+        .set({ provisioningStatus: "ready", provisioningError: null, provisioningStep: null })
+        .where(eq(projectsTable.id, projectId));
+      logger.info(
+        { projectId, durationMs },
+        "Sealed runtime provisioning complete; database capability remains vault-owned",
+      );
+      return;
     }
 
     // Step 2 — Neon Postgres

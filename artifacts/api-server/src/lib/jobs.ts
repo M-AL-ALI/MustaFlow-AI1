@@ -7072,11 +7072,7 @@ async function syncAgenticPreviewRuntime(opts: {
     publishPreviewSyncFailed(opts.projectId, opts.revision, warning);
   };
 
-  if (opts.zeroSealedGeneration !== undefined && (!opts.containerId || !opts.containerUrl)) {
-    throw new Error("Sealed Zero generation requires a provisioned Cloudflare runtime");
-  }
-
-  if (!opts.containerUrl) {
+  if (!opts.containerUrl && opts.zeroSealedGeneration === undefined) {
     if (opts.containerId) {
       const warning = "Preview sync failed: this container-backed project has no preview URL.";
       publishFailure(warning);
@@ -7085,7 +7081,7 @@ async function syncAgenticPreviewRuntime(opts: {
     return { ...base, previewUpdated: true, previewSyncQueued: true };
   }
 
-  if (!opts.containerId) {
+  if (!opts.containerId && opts.zeroSealedGeneration === undefined) {
     return {
       ...base,
       previewSyncFailed: true,
@@ -7100,10 +7096,32 @@ async function syncAgenticPreviewRuntime(opts: {
     if (!supportsZeroGeneration(tenantRuntimeProvider)) {
       throw new Error("Cloudflare Pantry and dock capabilities are unavailable");
     }
+    let runtimeId = opts.containerId;
+    if (!runtimeId || !opts.containerUrl) {
+      const created = await tenantRuntimeProvider.create(opts.projectId, opts.stack, undefined, {
+        servicePort: opts.runtimePort,
+        signal: opts.signal,
+      });
+      if (created === null || "error" in created || !created.endpoint) {
+        throw new Error("Sealed Zero runtime provisioning did not reach a durable descriptor");
+      }
+      runtimeId = created.runtimeId;
+      await db
+        .update(projectsTable)
+        .set({
+          containerId: runtimeId,
+          containerUrl: created.endpoint,
+          containerStatus: created.status,
+          provisioningStatus: "ready",
+          provisioningError: null,
+          provisioningStep: null,
+        })
+        .where(eq(projectsTable.id, opts.projectId));
+    }
     await emitEvent(opts.taskId, "narration", "Building through the trusted Pantry kitchen…");
     const result = await runZeroGenerationKitchen(tenantRuntimeProvider, {
       projectId: opts.projectId,
-      runtimeId: opts.containerId,
+      runtimeId,
       files: opts.files.map((file) => ({
         path: file.path,
         content: file.content,
@@ -7138,32 +7156,37 @@ async function syncAgenticPreviewRuntime(opts: {
     execInContainer,
     npmInstallInBackground,
   } = await import("./tenant-runtime");
+  const legacyRuntimeId = opts.containerId;
+  const legacyRuntimeUrl = opts.containerUrl;
+  if (!legacyRuntimeId || !legacyRuntimeUrl) {
+    throw new Error("Legacy runtime descriptor is incomplete");
+  }
 
   try {
     if (opts.containerStatus !== "running") {
       await emitEvent(opts.taskId, "narration", "Waking preview container…");
-      await startContainer(opts.containerId, opts.projectId);
+      await startContainer(legacyRuntimeId, opts.projectId);
       const deadline = Date.now() + 45_000;
       while (Date.now() < deadline) {
-        const status = await getContainerStatus(opts.containerId);
+        const status = await getContainerStatus(legacyRuntimeId);
         if (status === "running") break;
         await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
       }
     }
 
     await emitEvent(opts.taskId, "narration", "Syncing project files to preview container…");
-    await syncFilesToContainer(opts.containerId, opts.projectId, opts.files, true);
+    await syncFilesToContainer(legacyRuntimeId, opts.projectId, opts.files, true);
 
     if (opts.removedPaths.length > 0) {
       const rmArgs = opts.removedPaths.map((path) => shellQuote(`/app/${path}`)).join(" ");
-      await execInContainer(opts.containerId, ["sh", "-c", `rm -rf -- ${rmArgs}`], opts.projectId);
+      await execInContainer(legacyRuntimeId, ["sh", "-c", `rm -rf -- ${rmArgs}`], opts.projectId);
     }
 
     const hasPackageJson = opts.files.some((f) => f.path === "package.json");
     let nodeModulesMissing = false;
     if (hasPackageJson) {
       const nodeModulesCheck = await execInContainer(
-        opts.containerId,
+        legacyRuntimeId,
         ["sh", "-c", "test -d /app/node_modules && echo __PRESENT__ || echo __MISSING__"],
         opts.projectId,
       );
@@ -7172,10 +7195,10 @@ async function syncAgenticPreviewRuntime(opts: {
 
     if (hasPackageJson && (opts.packageManifestChanged || nodeModulesMissing)) {
       await emitEvent(opts.taskId, "narration", "Installing container dependencies…");
-      const installResult = await npmInstallInBackground(opts.containerId, opts.projectId, {
+      const installResult = await npmInstallInBackground(legacyRuntimeId, opts.projectId, {
         wallClockCapMs: 6 * 60 * 1000,
         onMachineRestarted: async () => {
-          await syncFilesToContainer(opts.containerId!, opts.projectId, opts.files, true);
+          await syncFilesToContainer(legacyRuntimeId, opts.projectId, opts.files, true);
         },
       });
       if (!installResult.ok) {
@@ -7189,7 +7212,7 @@ async function syncAgenticPreviewRuntime(opts: {
     if (hasRequirements) {
       await emitEvent(opts.taskId, "narration", "Installing Python dependencies…");
       const pipResult = await execInContainer(
-        opts.containerId,
+        legacyRuntimeId,
         ["sh", "-c", "cd /app && pip install -r requirements.txt"],
         opts.projectId,
       );
@@ -7209,7 +7232,7 @@ async function syncAgenticPreviewRuntime(opts: {
     if (startCommand) {
       await emitEvent(opts.taskId, "narration", "Restarting container app server…");
       await execInContainer(
-        opts.containerId,
+        legacyRuntimeId,
         [
           "sh",
           "-c",
@@ -7227,7 +7250,7 @@ async function syncAgenticPreviewRuntime(opts: {
       );
     }
 
-    const previewCheck = await pollPreviewReachability(opts.taskId, opts.containerUrl, {
+    const previewCheck = await pollPreviewReachability(opts.taskId, legacyRuntimeUrl, {
       healthPath: healthCheckPathForStack(opts.stack),
       signal: opts.signal,
       maxWaitMs: 75_000,

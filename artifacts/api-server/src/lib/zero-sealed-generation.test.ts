@@ -12,6 +12,7 @@ import {
   ZeroSealedGenerationConfigurationError,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
+  requiresDirectProjectDatabaseProvisioning,
   resolveZeroGenerationTarget,
 } from "./zero-sealed-generation";
 
@@ -77,6 +78,14 @@ describe("Zero sealed generator integration", () => {
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
       }),
     ).toBe("cloudflare-sealed-staging-v1");
+    expect(requiresDirectProjectDatabaseProvisioning({})).toBe(true);
+    expect(
+      requiresDirectProjectDatabaseProvisioning({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toBe(false);
   });
 
   it("injects the vendored SDK and emits a canonical Pantry plan", () => {

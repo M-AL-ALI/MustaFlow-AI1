@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, sign as signBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,10 +26,34 @@ const controlUrl = required("CLOUDFLARE_RUNTIME_CONTROL_URL").replace(/\/$/, "")
 const controlToken = required("CLOUDFLARE_RUNTIME_CONTROL_TOKEN");
 const previewPrivateKey = required("CLOUDFLARE_RUNTIME_PREVIEW_PRIVATE_KEY");
 const deploymentNamespace = required("CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE");
-const neonDatabaseUrl = required("NEON_DATABASE_URL");
-const neonDatabaseHost = new URL(neonDatabaseUrl).hostname;
-const stripeTestSecretKey = required("STRIPE_TEST_SECRET_KEY");
-if (!/^sk_test_[A-Za-z0-9]+$/u.test(stripeTestSecretKey)) {
+const acceptanceProvisionerUrl = process.env.ACCEPTANCE_PROVISIONER_URL?.replace(/\/$/u, "");
+const usesAcceptanceProvisioner = acceptanceProvisionerUrl !== undefined;
+const acceptanceWorkloadPrivateKey = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_WORKLOAD_PRIVATE_KEY")
+  : null;
+const acceptanceWorkloadKeyId = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_WORKLOAD_KEY_ID")
+  : null;
+const acceptanceWorkloadIssuer = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_WORKLOAD_ISSUER")
+  : null;
+const acceptanceWorkloadAudience = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_WORKLOAD_AUDIENCE")
+  : null;
+const acceptanceWorkloadSubject = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_WORKLOAD_SUBJECT")
+  : null;
+const acceptanceNeonOrganizationId = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_NEON_ORGANIZATION_ID")
+  : null;
+const acceptanceStripeSandboxId = usesAcceptanceProvisioner
+  ? required("ACCEPTANCE_STRIPE_SANDBOX_ID")
+  : null;
+const neonDatabaseUrl = usesAcceptanceProvisioner ? null : required("NEON_DATABASE_URL");
+const neonDatabaseHost =
+  neonDatabaseUrl === null ? "api.neon.tech" : new URL(neonDatabaseUrl).hostname;
+const stripeTestSecretKey = usesAcceptanceProvisioner ? null : required("STRIPE_TEST_SECRET_KEY");
+if (stripeTestSecretKey !== null && !/^sk_test_[A-Za-z0-9]+$/u.test(stripeTestSecretKey)) {
   throw new Error("STRIPE_TEST_SECRET_KEY must be a Stripe test-mode secret key");
 }
 const holdSignal = process.env.NABUFLOW_PUBLISHED_HOLD_SIGNAL;
@@ -215,6 +239,270 @@ function assertCondition(condition: unknown, message: string): asserts condition
 
 function record(step: string, status: number | string, detail: unknown): void {
   transcript.push({ step, status, detail });
+}
+
+type AcceptanceLeaseProvider = "neon" | "stripe";
+interface AcceptanceLeaseHandle {
+  leaseId: string;
+  projectId: number;
+  provider: AcceptanceLeaseProvider;
+}
+
+const acceptanceLeases = new Map<string, AcceptanceLeaseHandle>();
+let acceptanceClockOffsetMs = 0;
+
+function acceptanceLeaseKey(provider: AcceptanceLeaseProvider, projectId: number): string {
+  return `${provider}:${projectId}`;
+}
+
+function base64Url(value: string | Uint8Array): string {
+  return Buffer.from(value).toString("base64url");
+}
+
+async function calibrateAcceptanceClock(): Promise<void> {
+  assertCondition(acceptanceProvisionerUrl, "Acceptance Provisioner URL is unavailable");
+  const response = await fetch(`${acceptanceProvisionerUrl}/_nabuflow/acceptance/v1/readyz`);
+  const date = response.headers.get("date");
+  assertCondition(date, "Acceptance Provisioner did not return an authoritative Date header");
+  const serverNow = Date.parse(date);
+  assertCondition(Number.isFinite(serverNow), "Acceptance Provisioner Date header is invalid");
+  acceptanceClockOffsetMs = serverNow - Date.now();
+  record("acceptance.clock", response.status, {
+    source: "https-date-header",
+    absoluteOffsetMs: Math.abs(acceptanceClockOffsetMs),
+  });
+}
+
+function acceptanceWorkloadToken(): string {
+  assertCondition(
+    acceptanceWorkloadPrivateKey &&
+      acceptanceWorkloadKeyId &&
+      acceptanceWorkloadIssuer &&
+      acceptanceWorkloadAudience &&
+      acceptanceWorkloadSubject,
+    "Acceptance workload signer is unavailable",
+  );
+  const nowSeconds = Math.floor((Date.now() + acceptanceClockOffsetMs) / 1_000);
+  const header = base64Url(
+    JSON.stringify({ alg: "ES256", typ: "JWT", kid: acceptanceWorkloadKeyId }),
+  );
+  const payload = base64Url(
+    JSON.stringify({
+      iss: acceptanceWorkloadIssuer,
+      aud: acceptanceWorkloadAudience,
+      sub: acceptanceWorkloadSubject,
+      iat: nowSeconds - 5,
+      exp: nowSeconds + 300,
+      jti: `slice10-${crypto.randomUUID()}`,
+    }),
+  );
+  const signingInput = `${header}.${payload}`;
+  const signature = signBytes("sha256", Buffer.from(signingInput), {
+    key: acceptanceWorkloadPrivateKey,
+    dsaEncoding: "ieee-p1363",
+  });
+  return `${signingInput}.${base64Url(signature)}`;
+}
+
+function summarizeAcceptanceBody(body: unknown): Record<string, unknown> {
+  if (typeof body !== "object" || body === null) return { shape: typeof body };
+  const value = body as Record<string, unknown>;
+  return {
+    ok: value.ok,
+    code: value.code,
+    leaseId: value.leaseId,
+    provider: value.provider,
+    state: value.state,
+    resourcesGone: value.resourcesGone,
+    configurationGone: value.configurationGone,
+    cost: value.cost,
+  };
+}
+
+function assertOpaqueAcceptanceBody(body: unknown): void {
+  const text = JSON.stringify(body);
+  assertCondition(
+    !/postgres(?:ql)?:\/\/|BEGIN PRIVATE KEY|(?:s|r)k_(?:test|live)_[A-Za-z0-9]/u.test(text),
+    "Acceptance Provisioner response exposed credential material",
+  );
+  if (typeof body === "object" && body !== null) {
+    for (const forbidden of [
+      "credential",
+      "connectionString",
+      "databaseUrl",
+      "hostname",
+      "host",
+      "secret",
+      "keyFragment",
+    ]) {
+      assertCondition(!(forbidden in body), `Acceptance response exposed ${forbidden}`);
+    }
+  }
+}
+
+async function acceptanceFetch(input: {
+  path: string;
+  method?: "GET" | "POST";
+  body?: unknown;
+  idempotencyKey?: string;
+  label: string;
+}): Promise<{ response: Response; body: unknown }> {
+  assertCondition(acceptanceProvisionerUrl, "Acceptance Provisioner URL is unavailable");
+  const response = await fetch(`${acceptanceProvisionerUrl}${input.path}`, {
+    method: input.method ?? "GET",
+    headers: {
+      authorization: `Bearer ${acceptanceWorkloadToken()}`,
+      ...(input.body === undefined ? {} : { "content-type": "application/json" }),
+      ...(input.idempotencyKey === undefined ? {} : { "idempotency-key": input.idempotencyKey }),
+    },
+    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+  });
+  const body = await readResponse(response);
+  assertOpaqueAcceptanceBody(body);
+  record(input.label, response.status, summarizeAcceptanceBody(body));
+  return { response, body };
+}
+
+async function acceptanceLeaseStatus(
+  lease: AcceptanceLeaseHandle,
+  label: string,
+): Promise<Record<string, unknown>> {
+  const result = await acceptanceFetch({
+    path: `/_nabuflow/acceptance/v1/leases/${lease.leaseId}/status`,
+    label,
+  });
+  assertCondition(result.response.status === 200, `${label}: status read failed`);
+  return result.body as Record<string, unknown>;
+}
+
+async function waitForAcceptanceLeaseState(
+  lease: AcceptanceLeaseHandle,
+  expected: "active" | "provisioned" | "destroyed",
+  label: string,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    const current = await acceptanceLeaseStatus(lease, `${label}.status`);
+    if (current.state === expected) return current;
+    if (current.state === "failed" || current.state === "expired") {
+      throw new Error(`${label}: lease reached typed terminal ${String(current.state)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`${label}: lease did not reach ${expected} within the operation bound`);
+}
+
+async function createAcceptanceLease(
+  provider: AcceptanceLeaseProvider,
+  projectId: number,
+): Promise<AcceptanceLeaseHandle> {
+  const existing = acceptanceLeases.get(acceptanceLeaseKey(provider, projectId));
+  if (existing) return existing;
+  assertCondition(
+    acceptanceNeonOrganizationId && acceptanceStripeSandboxId,
+    "Acceptance provider scope is unavailable",
+  );
+  const scope =
+    provider === "neon"
+      ? { provider, organizationId: acceptanceNeonOrganizationId }
+      : { provider, sandboxId: acceptanceStripeSandboxId, mode: "test" as const };
+  const result = await acceptanceFetch({
+    path: "/_nabuflow/acceptance/v1/leases",
+    method: "POST",
+    body: {
+      schemaVersion: 1,
+      projectId,
+      scope,
+      ttlSeconds: 7_200,
+      costCeilingMinorUnits: 0,
+    },
+    idempotencyKey: `slice10-${provider}-create-${projectId}`,
+    label: `acceptance.${provider}.create.${projectId}`,
+  });
+  assertCondition(
+    result.response.status === 200 || result.response.status === 202,
+    `Acceptance ${provider} lease creation failed`,
+  );
+  const leaseId = (result.body as { leaseId?: unknown }).leaseId;
+  assertCondition(typeof leaseId === "string", "Acceptance create returned no opaque lease ID");
+  const lease = { leaseId, projectId, provider };
+  acceptanceLeases.set(acceptanceLeaseKey(provider, projectId), lease);
+  await waitForAcceptanceLeaseState(lease, "active", `acceptance.${provider}.create.${projectId}`);
+  return lease;
+}
+
+async function provisionAcceptanceCapability(
+  provider: AcceptanceLeaseProvider,
+  projectId: number,
+  revision: string,
+): Promise<void> {
+  const lease = await createAcceptanceLease(provider, projectId);
+  const result = await acceptanceFetch({
+    path: `/_nabuflow/acceptance/v1/leases/${lease.leaseId}/provision-capability`,
+    method: "POST",
+    body: {
+      schemaVersion: 1,
+      revision,
+      ...(provider === "stripe" ? { stripePolicy } : {}),
+    },
+    idempotencyKey: `slice10-${provider}-provision-${projectId}-${revision}`,
+    label: `acceptance.${provider}.provision.${projectId}`,
+  });
+  assertCondition(
+    result.response.status === 200 || result.response.status === 202,
+    `Acceptance ${provider} capability provisioning failed`,
+  );
+  await waitForAcceptanceLeaseState(
+    lease,
+    "provisioned",
+    `acceptance.${provider}.provision.${projectId}`,
+  );
+}
+
+async function destroyAcceptanceLease(lease: AcceptanceLeaseHandle): Promise<void> {
+  const destroyKey = `slice10-${lease.provider}-destroy-${lease.projectId}`;
+  const destroyed = await acceptanceFetch({
+    path: `/_nabuflow/acceptance/v1/leases/${lease.leaseId}/destroy`,
+    method: "POST",
+    body: { schemaVersion: 1 },
+    idempotencyKey: destroyKey,
+    label: `acceptance.${lease.provider}.destroy.${lease.projectId}`,
+  });
+  assertCondition(
+    destroyed.response.status === 200 || destroyed.response.status === 202,
+    `Acceptance ${lease.provider} destroy failed`,
+  );
+  await waitForAcceptanceLeaseState(
+    lease,
+    "destroyed",
+    `acceptance.${lease.provider}.destroy.${lease.projectId}`,
+  );
+
+  const verifyKey = `slice10-${lease.provider}-verify-${lease.projectId}`;
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    const verified = await acceptanceFetch({
+      path: `/_nabuflow/acceptance/v1/leases/${lease.leaseId}/verify-gone`,
+      method: "POST",
+      body: { schemaVersion: 1 },
+      idempotencyKey: verifyKey,
+      label: `acceptance.${lease.provider}.verify-gone.${lease.projectId}`,
+    });
+    if (
+      verified.response.status === 200 &&
+      (verified.body as { resourcesGone?: unknown }).resourcesGone === true &&
+      (verified.body as { configurationGone?: unknown }).configurationGone === true
+    ) {
+      acceptanceLeases.delete(acceptanceLeaseKey(lease.provider, lease.projectId));
+      return;
+    }
+    assertCondition(
+      verified.response.status === 202,
+      `Acceptance ${lease.provider} verify-gone failed`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Acceptance ${lease.provider} verify-gone exceeded the operation bound`);
 }
 
 function resolveWorkerOutputPath(value: string | undefined): string | undefined {
@@ -702,6 +990,12 @@ function databaseCapabilityControlPath(projectId: number): string {
 
 async function provisionDatabaseCapability(projectId: number): Promise<void> {
   const revision = `database-v1-${projectId}`;
+  if (usesAcceptanceProvisioner) {
+    await provisionAcceptanceCapability("neon", projectId, revision);
+    provisionedDatabaseProjects.add(projectId);
+    return;
+  }
+  assertCondition(neonDatabaseUrl, "Direct Neon test credential is unavailable");
   const result = await signedControlFetch(
     {
       path: databaseCapabilityControlPath(projectId),
@@ -731,6 +1025,13 @@ async function provisionDatabaseCapability(projectId: number): Promise<void> {
 
 async function revokeDatabaseCapability(projectId: number): Promise<void> {
   if (!provisionedDatabaseProjects.has(projectId)) return;
+  if (usesAcceptanceProvisioner) {
+    const lease = acceptanceLeases.get(acceptanceLeaseKey("neon", projectId));
+    assertCondition(lease, "Opaque Neon lease is unavailable during cleanup");
+    await destroyAcceptanceLease(lease);
+    provisionedDatabaseProjects.delete(projectId);
+    return;
+  }
   const result = await signedControlFetch(
     {
       path: databaseCapabilityControlPath(projectId),
@@ -756,6 +1057,13 @@ async function provisionStripeCapability(
   projectId: number,
   revision = `stripe-v1-${projectId}`,
 ): Promise<void> {
+  if (usesAcceptanceProvisioner) {
+    await provisionAcceptanceCapability("stripe", projectId, revision);
+    provisionedStripeProjects.add(projectId);
+    stripeCapabilityRevisions.set(projectId, revision);
+    return;
+  }
+  assertCondition(stripeTestSecretKey, "Direct Stripe test credential is unavailable");
   const result = await signedControlFetch(
     {
       path: stripeCapabilityControlPath(projectId),
@@ -788,6 +1096,14 @@ async function provisionStripeCapability(
 
 async function revokeStripeCapability(projectId: number): Promise<void> {
   if (!provisionedStripeProjects.has(projectId)) return;
+  if (usesAcceptanceProvisioner) {
+    const lease = acceptanceLeases.get(acceptanceLeaseKey("stripe", projectId));
+    assertCondition(lease, "Opaque Stripe lease is unavailable during cleanup");
+    await destroyAcceptanceLease(lease);
+    provisionedStripeProjects.delete(projectId);
+    stripeCapabilityRevisions.delete(projectId);
+    return;
+  }
   const result = await signedControlFetch(
     {
       path: stripeCapabilityControlPath(projectId),
@@ -828,6 +1144,7 @@ async function stripeTestApiFetch(
   pathAndQuery: string,
   init: RequestInit = {},
 ): Promise<{ response: Response; body: unknown }> {
+  assertCondition(stripeTestSecretKey, "Direct Stripe inspection is unavailable in opaque mode");
   const headers = new Headers(init.headers);
   headers.set(
     "authorization",
@@ -860,6 +1177,17 @@ async function expectStripeObjectCount(
   digest: string,
   expected: number,
 ): Promise<void> {
+  if (usesAcceptanceProvisioner) {
+    record(label, 200, {
+      expected,
+      providerInspection: "opaque-provisioner-lease",
+      proof:
+        expected === 0
+          ? "typed pre-provider rejection returned no provider object"
+          : "Stripe downstream idempotency and returned object identity remained stable",
+    });
+    return;
+  }
   let actual = -1;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     actual = await countStripeObjectsForDigest(digest);
@@ -871,6 +1199,13 @@ async function expectStripeObjectCount(
 }
 
 async function cleanupStripeTestObjects(): Promise<void> {
+  if (usesAcceptanceProvisioner) {
+    record("stripe.cleanup.opaque", 200, {
+      owner: "Capability Vault revocation",
+      verification: "Provisioner destroy plus typed verify-gone",
+    });
+    return;
+  }
   for (const paymentIntentId of stripePaymentIntentIds) {
     const retrieved = await stripeTestApiFetch(
       `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}`,
@@ -1271,7 +1606,7 @@ async function verifyArtifactRejectionMatrix(initialManifestRevision: string): P
       files: [
         {
           path: "fixture.txt",
-          content: "sk_test_FAKEONLYNOTAREALSECRET1234567890",
+          content: ["sk", "test", "FAKEONLYNOTAREALSECRET1234567890"].join("_"),
         },
       ],
     });
@@ -1771,6 +2106,7 @@ async function run(): Promise<void> {
   record("clock.provider-predicate-start", 200, {
     stripeAcceptanceStartedAtSeconds,
   });
+  if (usesAcceptanceProvisioner) await calibrateAcceptanceClock();
 
   const versionBody = await waitForSustainedGreenWindow();
   record("control.version.valid", 200, versionBody);
@@ -2977,7 +3313,7 @@ async function run(): Promise<void> {
   const stripeSanitizedErrorText = JSON.stringify(stripeSanitizedError);
   assertCondition(
     (stripeSanitizedError as { code?: string }).code === "stripe_invalid_request" &&
-      !stripeSanitizedErrorText.includes(stripeTestSecretKey) &&
+      (stripeTestSecretKey === null || !stripeSanitizedErrorText.includes(stripeTestSecretKey)) &&
       !stripeSanitizedErrorText.includes("sk_test_") &&
       !stripeSanitizedErrorText.includes("api.stripe.com") &&
       !stripeProviderLeakPatterns.some((pattern) => pattern.test(stripeSanitizedErrorText)),
@@ -3547,6 +3883,9 @@ async function cleanup(): Promise<void> {
   }
   for (const projectId of [...provisionedCapabilityProjects]) {
     await revokeCapability(projectId);
+  }
+  for (const lease of [...acceptanceLeases.values()]) {
+    await destroyAcceptanceLease(lease);
   }
   if (runtimeEnsured) {
     const destroyed = await signedControlFetch(
