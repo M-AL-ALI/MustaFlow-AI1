@@ -36,6 +36,31 @@ export class ZeroSealedGenerationConfigurationError extends Error {
   }
 }
 
+export type ZeroSealedSourceContractReason =
+  | "required_files"
+  | "package_json"
+  | "runtime_scripts"
+  | "typescript_config"
+  | "typescript_output_layout"
+  | "sdk_import"
+  | "network_bind"
+  | "runtime_port"
+  | "health_route"
+  | "credential_or_dependency_egress";
+
+export class ZeroSealedSourceContractError extends Error {
+  readonly code = "zero_sealed_source_contract_error";
+  readonly retryable = false;
+
+  constructor(
+    readonly reasons: readonly ZeroSealedSourceContractReason[],
+    readonly path?: string,
+  ) {
+    super(`Sealed Node source contract failed: ${reasons.join(", ")}${path ? ` (${path})` : ""}`);
+    this.name = "ZeroSealedSourceContractError";
+  }
+}
+
 /**
  * Resolve once from deployment-owned process configuration. A user request,
  * project row, or generated file cannot select the sealed path.
@@ -169,46 +194,42 @@ export function prepareZeroSealedNodeSource(input: {
   const entry = byPath.get("src/index.ts");
   const typeScriptConfigFile = byPath.get("tsconfig.json");
   if (packageFile === undefined || entry === undefined || typeScriptConfigFile === undefined) {
-    throw new Error(
-      "Sealed Node generation requires package.json, tsconfig.json, and src/index.ts",
-    );
+    throw new ZeroSealedSourceContractError(["required_files"]);
   }
   let pkg: PackageJson;
   try {
     pkg = JSON.parse(packageFile.content) as PackageJson;
   } catch {
-    throw new Error("Sealed Node package.json is invalid");
+    throw new ZeroSealedSourceContractError(["package_json"], "package.json");
   }
   if (pkg.scripts?.build !== "tsc" || pkg.scripts?.start !== "node dist/src/index.js") {
-    throw new Error("Sealed Node scripts do not match the runtime manifest argv");
+    throw new ZeroSealedSourceContractError(["runtime_scripts"], "package.json");
   }
   let typeScriptConfig: TypeScriptConfig;
   try {
     typeScriptConfig = JSON.parse(typeScriptConfigFile.content) as TypeScriptConfig;
   } catch {
-    throw new Error("Sealed Node tsconfig.json is invalid");
+    throw new ZeroSealedSourceContractError(["typescript_config"], "tsconfig.json");
   }
   if (
     typeScriptConfig.compilerOptions?.rootDir !== "." ||
     typeScriptConfig.compilerOptions?.outDir !== "dist"
   ) {
-    throw new Error("Sealed Node TypeScript output must use rootDir=. and outDir=dist");
+    throw new ZeroSealedSourceContractError(["typescript_output_layout"], "tsconfig.json");
   }
-  if (
-    !entry.content.includes('"0.0.0.0"') ||
-    !entry.content.includes("process.env.PORT") ||
-    !entry.content.includes(ZERO_SEALED_HEALTH_PATH) ||
-    !entry.content.includes("nabuflow/runtime") ||
-    entry.content.includes(".nabuflow/runtime")
-  ) {
-    throw new Error("Sealed Node entrypoint is missing SDK, bind, port, or health requirements");
+  const entryReasons: ZeroSealedSourceContractReason[] = [];
+  if (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
+    entryReasons.push("sdk_import");
+  if (!entry.content.includes('"0.0.0.0"')) entryReasons.push("network_bind");
+  if (!entry.content.includes("process.env.PORT")) entryReasons.push("runtime_port");
+  if (!entry.content.includes(ZERO_SEALED_HEALTH_PATH)) entryReasons.push("health_route");
+  if (entryReasons.length > 0) {
+    throw new ZeroSealedSourceContractError(entryReasons, "src/index.ts");
   }
   if (input.skipEligibilityPrecheck !== true) {
     for (const file of byPath.values()) {
       if (SECRET_ENV_PATTERN.test(file.content) || INSTALL_OR_REGISTRY_PATTERN.test(file.content)) {
-        throw new Error(
-          `Sealed Node source failed credential or dependency-egress scan: ${file.path}`,
-        );
+        throw new ZeroSealedSourceContractError(["credential_or_dependency_egress"], file.path);
       }
     }
   }

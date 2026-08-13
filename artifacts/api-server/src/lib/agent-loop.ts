@@ -96,6 +96,7 @@ import {
 import { creativeChargeFields } from "./creative-charge-honesty";
 import type { ZeroGenerationTarget } from "@workspace/tenant-runtime-contracts";
 import { ZERO_SEALED_NODE_PROMPT_EXTENSION } from "./zero-sealed-generation";
+import { checkZeroSealedFinalizeContract } from "./zero-sealed-finalize-check";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -3137,7 +3138,27 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         const verifyFailed = profile.checks.filter(
           (c) => c.required && !verifyRun.find((r) => r.id === c.id)?.passed,
         );
-        if (verifyFailed.length === 0) {
+        const sealedFinalizeCheck =
+          input.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
+            ? await checkZeroSealedFinalizeContract({
+                files: workspace.all(),
+                manifestRevision: `zero-task-${input.taskId ?? input.projectId}-node-v1`,
+              })
+            : null;
+        if (sealedFinalizeCheck !== null) {
+          await safeEvent(
+            input.onEvent,
+            "check_result",
+            JSON.stringify({
+              id: "zero-sealed-source-contract",
+              label: "Sealed source contract",
+              passed: sealedFinalizeCheck.passed,
+              code: sealedFinalizeCheck.code,
+              reasonCodes: sealedFinalizeCheck.reasonCodes,
+            }),
+          );
+        }
+        if (verifyFailed.length === 0 && sealedFinalizeCheck?.passed !== false) {
           finalized = true;
           stepFinalized = true;
           finalSummary = String(parsed.summary ?? "").slice(0, 800);
@@ -3153,6 +3174,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           break;
         }
         // Required checks failed → feed back and continue looping
+        const sealedFailure =
+          sealedFinalizeCheck?.passed === false
+            ? `\n- zero-sealed-source-contract: ${sealedFinalizeCheck.message}`
+            : "";
         const failMsg =
           `BLOCKED: cannot finalize — these required checks failed:\n` +
           verifyFailed
@@ -3161,6 +3186,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               return `- ${c.id}: ${r?.message ?? "failed"}`;
             })
             .join("\n") +
+          sealedFailure +
           `\nFix the failures and call finalize again.`;
         messages[messages.length - 1] = {
           role: "tool",

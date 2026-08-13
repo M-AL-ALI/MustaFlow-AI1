@@ -9,6 +9,7 @@ import {
   validateRuntimeArtifactPath,
 } from "@workspace/tenant-runtime-contracts";
 import {
+  ZeroSealedSourceContractError,
   ZeroSealedGenerationConfigurationError,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
@@ -166,9 +167,17 @@ describe("Zero sealed generator integration", () => {
   ])("fails closed on %s", (_label, planted) => {
     const files = generatedFiles();
     files.push({ path: "src/unsafe.ts", mimeType: "application/typescript", content: planted });
-    expect(() => prepareZeroSealedNodeSource({ files, manifestRevision: "manifest-v1" })).toThrow(
-      /credential or dependency-egress scan/u,
-    );
+    try {
+      prepareZeroSealedNodeSource({ files, manifestRevision: "manifest-v1" });
+      throw new Error("expected sealed source contract rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ZeroSealedSourceContractError);
+      expect(error).toMatchObject({
+        code: "zero_sealed_source_contract_error",
+        reasons: ["credential_or_dependency_egress"],
+        path: "src/unsafe.ts",
+      });
+    }
   });
 
   it("memorializes the pre-slice legacy Node prompt bytes", async () => {
