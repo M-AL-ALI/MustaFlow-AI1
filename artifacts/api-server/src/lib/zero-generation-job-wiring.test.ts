@@ -30,6 +30,13 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).toContain("npmInstallInBackground");
   });
 
+  it("lets an incomplete sealed build continue through the same guarded kitchen path", () => {
+    expect(jobs).not.toContain('kind !== "build" || resolvedIsMobile');
+    expect(jobs).toContain("prepareZeroSealedNodeRefinement");
+    expect(jobs).toContain("zeroSealedGeneration = preparedRefinement");
+    expect(jobs).toContain("zeroGenerationTarget,");
+  });
+
   it("injects only the platform-owned non-secret runtime mode after sealing", () => {
     expect(backend).toContain('[TENANT_RUNTIME_MODE_ENV]: "cloudflare-capability-v1"');
     expect(backend).not.toContain("DATABASE_URL:");

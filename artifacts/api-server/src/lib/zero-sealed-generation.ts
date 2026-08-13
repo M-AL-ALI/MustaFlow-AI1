@@ -196,6 +196,12 @@ export interface PreparedZeroSealedNodeSource {
   manifest: RuntimeManifestContract;
 }
 
+export interface PreparedZeroSealedNodeRefinement extends PreparedZeroSealedNodeSource {
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedPaths: string[];
+}
+
 export function prepareZeroSealedNodeSource(input: {
   files: readonly BuilderFile[];
   manifestRevision: string;
@@ -257,6 +263,53 @@ export function prepareZeroSealedNodeSource(input: {
     files: [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)),
     dependencyPlan: dependencyPlan(pkg),
     manifest: makeZeroSealedNodeManifest(input.manifestRevision),
+  };
+}
+
+/**
+ * Apply a refinement diff to the durable source tree before re-running the
+ * sealed-source contract. The vendored SDK is platform-owned, so an upgrade or
+ * first successful continuation can add/update those files without asking the
+ * model to reproduce them.
+ */
+export function prepareZeroSealedNodeRefinement(input: {
+  existingFiles: readonly BuilderFile[];
+  changedFiles: readonly BuilderFile[];
+  removedPaths: readonly string[];
+  manifestRevision: string;
+}): PreparedZeroSealedNodeRefinement {
+  const removed = new Set(input.removedPaths);
+  const merged = new Map(
+    input.existingFiles
+      .filter((file) => !removed.has(file.path))
+      .map((file) => [file.path, { ...file }]),
+  );
+  for (const file of input.changedFiles) merged.set(file.path, { ...file });
+
+  const prepared = prepareZeroSealedNodeSource({
+    files: [...merged.values()],
+    manifestRevision: input.manifestRevision,
+    skipEligibilityPrecheck: true,
+  });
+  const existingByPath = new Map(input.existingFiles.map((file) => [file.path, file]));
+  const preparedPaths = new Set(prepared.files.map((file) => file.path));
+  const isUnchanged = (file: BuilderFile): boolean => {
+    const existing = existingByPath.get(file.path);
+    return (
+      existing !== undefined &&
+      existing.content === file.content &&
+      existing.mimeType === file.mimeType
+    );
+  };
+
+  return {
+    ...prepared,
+    changedFiles: prepared.files.filter((file) => !isUnchanged(file)),
+    removedPaths: input.existingFiles
+      .filter((file) => !preparedPaths.has(file.path))
+      .map((file) => file.path)
+      .sort(),
+    unchangedPaths: prepared.files.filter(isUnchanged).map((file) => file.path),
   };
 }
 

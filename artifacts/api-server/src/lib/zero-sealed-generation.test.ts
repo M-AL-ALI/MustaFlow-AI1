@@ -11,6 +11,7 @@ import {
 import {
   ZeroSealedSourceContractError,
   ZeroSealedGenerationConfigurationError,
+  prepareZeroSealedNodeRefinement,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
   requiresDirectProjectDatabaseProvisioning,
@@ -166,6 +167,45 @@ describe("Zero sealed generator integration", () => {
     expect(changed.dependencyPlan).toEqual(first.dependencyPlan);
     expect(changed.files.find((file) => file.path === "src/index.ts")?.content).not.toBe(
       first.files.find((file) => file.path === "src/index.ts")?.content,
+    );
+  });
+
+  it("continues a partial sealed build through the same source contract", () => {
+    const existing = generatedFiles();
+    existing.push({
+      path: "src/obsolete.ts",
+      mimeType: "application/typescript",
+      content: "export const obsolete = true;",
+    });
+    const changedEntry = {
+      ...existing.find((file) => file.path === "src/index.ts")!,
+      content: existing
+        .find((file) => file.path === "src/index.ts")!
+        .content.replace('response.send("fresh")', 'response.send("continued")'),
+    };
+
+    const prepared = prepareZeroSealedNodeRefinement({
+      existingFiles: existing,
+      changedFiles: [changedEntry],
+      removedPaths: ["src/obsolete.ts"],
+      manifestRevision: "zero-task-continued-node-v1",
+    });
+
+    expect(prepared.changedFiles.map((file) => file.path)).toEqual(
+      expect.arrayContaining([
+        "nabuflow/runtime/db.ts",
+        "nabuflow/runtime/index.ts",
+        "nabuflow/runtime/payments.ts",
+        "src/index.ts",
+      ]),
+    );
+    expect(prepared.removedPaths).toEqual(["src/obsolete.ts"]);
+    expect(prepared.unchangedPaths).toEqual(
+      expect.arrayContaining(["package.json", "tsconfig.json"]),
+    );
+    expect(prepared.files.some((file) => file.path === "src/obsolete.ts")).toBe(false);
+    expect(prepared.files.find((file) => file.path === "src/index.ts")?.content).toContain(
+      "continued",
     );
   });
 

@@ -138,6 +138,7 @@ import {
 import type { AgentLoopReport } from "./agent-loop";
 import {
   isZeroSealedGenerationTarget,
+  prepareZeroSealedNodeRefinement,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
   resolveZeroGenerationTarget,
@@ -2739,8 +2740,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
-        if (kind !== "build" || resolvedIsMobile || resolvedProjectStack !== "node-api") {
-          throw new Error("Sealed Zero generation currently accepts fresh Node API builds only");
+        if (resolvedIsMobile || resolvedProjectStack !== "node-api") {
+          throw new Error("Sealed Zero generation accepts Node API projects only");
         }
         if (project.runtimePort !== ZERO_SEALED_RUNTIME_PORT) {
           await db
@@ -3450,7 +3451,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         };
 
         // ── Agentic pre-flight gate (refine path) ────────────────────────────
-        if (project.containerId || project.builderMode === "agentic") {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          (project.containerId || project.builderMode === "agentic")
+        ) {
           const preflightResult = await runAgenticPreflightGate(
             projectId,
             taskId,
@@ -3478,7 +3482,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // Disable Fly autostop on the build machine so it cannot idle-stop during
         // long-running inline execs (npm install, tsc, vite build).  The keepalive
         // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
-        if (project.containerId && project.containerUrl) {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          project.containerId &&
+          project.containerUrl
+        ) {
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
             await import("./tenant-runtime");
           keepaliveMachineId = project.containerId;
@@ -3516,8 +3524,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: effectiveRefinePlanContext,
                   existingFiles,
-                  containerId: projectHasLiveServer() ? project.containerId : null,
-                  liveServerAvailable: projectHasLiveServer(),
+                  containerId:
+                    isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                      ? null
+                      : project.containerId,
+                  liveServerAvailable:
+                    !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+                  zeroGenerationTarget,
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -3541,7 +3554,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   },
                   taskId,
                   wallClockMs: input.wallClockCapMs,
-                  previewUrl: project.containerUrl ?? null,
+                  previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                    ? null
+                    : (project.containerUrl ?? null),
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
                   signal,
@@ -3625,6 +3640,31 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                     taskId: taskId as number,
                                     taskMode: agentMode,
                                   });
+
+        if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
+          const preparedRefinement = prepareZeroSealedNodeRefinement({
+            existingFiles,
+            changedFiles: refineResult.changedFiles,
+            removedPaths: refineResult.removedPaths,
+            manifestRevision: `zero-task-${taskId}-node-v1`,
+          });
+          await assertZeroGeneratedEligibility({
+            files: preparedRefinement.files,
+            dependencyPlan: preparedRefinement.dependencyPlan,
+            runtimeManifest: preparedRefinement.manifest,
+            declaredCapabilities: inferZeroDeclaredCapabilities(preparedRefinement.files),
+            pantryClosureVerified: false,
+            dependencyOutputAttested: false,
+            stage: "source",
+          });
+          zeroSealedGeneration = preparedRefinement;
+          refineResult = {
+            ...refineResult,
+            changedFiles: preparedRefinement.changedFiles,
+            removedPaths: preparedRefinement.removedPaths,
+            unchangedFiles: preparedRefinement.unchangedPaths,
+          };
+        }
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
@@ -3803,8 +3843,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 knowledgeContext: knowledgeContext || undefined,
                 planContext: effectiveRefinePlanContext,
                 existingFiles,
-                containerId: projectHasLiveServer() ? project.containerId : null,
-                liveServerAvailable: projectHasLiveServer(),
+                containerId:
+                  isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                    ? null
+                    : project.containerId,
+                liveServerAvailable:
+                  !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+                zeroGenerationTarget,
                 policyStrictness:
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
@@ -3828,7 +3873,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 },
                 taskId,
                 wallClockMs: input.wallClockCapMs,
-                previewUrl: project.containerUrl ?? null,
+                previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                  ? null
+                  : (project.containerUrl ?? null),
                 e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
@@ -4146,8 +4193,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               knowledgeContext: undefined,
               planContext: null,
               existingFiles: filesForRepair,
-              containerId: projectHasLiveServer() ? project.containerId : null,
-              liveServerAvailable: projectHasLiveServer(),
+              containerId:
+                isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                  ? null
+                  : project.containerId,
+              liveServerAvailable:
+                !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+              zeroGenerationTarget,
               policyStrictness:
                 (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                 null,
@@ -4155,7 +4207,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               onBeforeRiskyOp: async () => {},
               taskId,
               wallClockMs: 3 * 60_000,
-              previewUrl: project.containerUrl ?? null,
+              previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                ? null
+                : (project.containerUrl ?? null),
               e2eEnabled: false,
               onEvent: async (t: string, m: string) => emitEvent(taskId, t, m),
               signal,
