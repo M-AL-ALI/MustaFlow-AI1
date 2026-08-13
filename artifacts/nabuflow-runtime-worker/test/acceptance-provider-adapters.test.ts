@@ -135,6 +135,31 @@ describe("acceptance provider adapters", () => {
     expect(fetch.mock.calls.every(([request]) => request.method === "GET")).toBe(true);
   });
 
+  it("creates an explicitly managed Fly Machine that remains updateable for Option B custody", async () => {
+    const fetch = vi
+      .fn<(request: Request) => Promise<Response>>()
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({}, { status: 201 }))
+      .mockImplementationOnce(async (request) => {
+        const body = (await request.json()) as {
+          skip_launch: boolean;
+          config: Record<string, unknown>;
+        };
+        expect(body.skip_launch).toBe(true);
+        expect(body.config).not.toHaveProperty("auto_destroy");
+        return Response.json({ id: "machine-created" }, { status: 201 });
+      });
+    const adapter = new NativeAcceptanceProviderAdapters(env(), { fetch });
+    await expect(
+      adapter.create(
+        lease({ provider: "fly", organizationSlug: "fly-disposable", disposable: true }),
+      ),
+    ).resolves.toMatchObject({
+      resource: { provider: "fly", ids: [expect.any(String), "machine-created"] },
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("discovers and removes a Neon orphan whose provider locator was never persisted", async () => {
     const adapterLease = lease({ provider: "neon", organizationId: "neon-dedicated" });
     const digest = await crypto.subtle.digest(
@@ -175,7 +200,11 @@ describe("acceptance provider adapters", () => {
       })
       .mockImplementationOnce(async (request) => {
         expect(request.method).toBe("POST");
-        const body = (await request.json()) as { config: { env: Record<string, string> } };
+        const body = (await request.json()) as {
+          skip_launch: boolean;
+          config: { env: Record<string, string> };
+        };
+        expect(body.skip_launch).toBe(true);
         expect(body.config.env.DATABASE_URL).toBe(databaseUrl);
         return Response.json({ ok: true });
       });
