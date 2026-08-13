@@ -3,9 +3,10 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "module": "CommonJS",
+    "module": "Node16",
     "target": "ES2022",
-    "moduleResolution": "Node",
+    "moduleResolution": "Node16",
+    "types": ["node"],
     "noEmit": false
   },
   "include": ["src"]
