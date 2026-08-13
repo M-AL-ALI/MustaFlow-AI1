@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -66,13 +66,44 @@ export class ZeroCapabilityGapError extends Error {
   }
 }
 
-function repositoryRoot(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, "..", "..", "..", "..");
+export function resolveZeroEligibilityRepositoryRoot(
+  moduleUrl = import.meta.url,
+  workingDirectory = process.cwd(),
+): string {
+  const candidates: string[] = [];
+  for (const start of [path.dirname(fileURLToPath(moduleUrl)), workingDirectory]) {
+    let candidate = path.resolve(start);
+    for (let depth = 0; depth <= 8; depth += 1) {
+      if (!candidates.includes(candidate)) candidates.push(candidate);
+      const parent = path.dirname(candidate);
+      if (parent === candidate) break;
+      candidate = parent;
+    }
+  }
+  return (
+    candidates.find(
+      (candidate) =>
+        existsSync(path.join(candidate, "blueprints")) &&
+        existsSync(path.join(candidate, "skills")),
+    ) ?? path.resolve(workingDirectory)
+  );
 }
 
-async function entriesWithMarker(root: string, marker: string): Promise<string[]> {
-  const entries = await fs.readdir(root, { withFileTypes: true });
+function repositoryRoot(): string {
+  return resolveZeroEligibilityRepositoryRoot();
+}
+
+async function entriesWithMarker(
+  root: string,
+  marker: string,
+  kind: "blueprint" | "skill",
+): Promise<string[]> {
+  let entries;
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    throw new ZeroEligibilityInventoryError([`${kind}:inventory_unavailable`]);
+  }
   const present: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === "_drafts") continue;
@@ -126,8 +157,8 @@ export async function loadZeroEligibilityInventory(
   const blueprintsRoot = path.join(root, "blueprints");
   const skillsRoot = path.join(root, "skills");
   const [blueprintIds, skillIds] = await Promise.all([
-    entriesWithMarker(blueprintsRoot, "blueprint.json"),
-    entriesWithMarker(skillsRoot, "SKILL.md"),
+    entriesWithMarker(blueprintsRoot, "blueprint.json", "blueprint"),
+    entriesWithMarker(skillsRoot, "SKILL.md", "skill"),
   ]);
   const missing: string[] = [];
   const blueprints = new Map<string, ZeroCapabilityEligibilityMetadata>();
