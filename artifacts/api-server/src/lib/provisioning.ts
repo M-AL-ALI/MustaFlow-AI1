@@ -39,6 +39,7 @@ import {
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
 import { requiresDirectProjectDatabaseProvisioning } from "./zero-sealed-generation";
+import { supportsExternalRuntimeLogTail } from "./tenant-runtime-provider";
 
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
 
@@ -496,8 +497,9 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       await completeStep(projectId, "create_container");
     }
 
-    // Start tailing this machine's stdout/stderr
-    if (containerId) {
+    // The historical Fly tailer is not a universal runtime capability.
+    // Cloudflare diagnostics flow through signed control surfaces instead.
+    if (containerId && supportsExternalRuntimeLogTail(tenantRuntimeProvider)) {
       ensureContainerLogTailer(projectId, containerId);
     }
 

@@ -194,6 +194,15 @@ export class RuntimeProviderUnavailableError extends Error {
   }
 }
 
+/**
+ * Fly exposes the historical app-level streaming tailer. Cloudflare runtime
+ * diagnostics are read through its signed control surfaces instead, so the
+ * legacy provisioning tailer must not be started for that provider.
+ */
+export function supportsExternalRuntimeLogTail(provider: TenantRuntimeProvider): boolean {
+  return provider.providerId === "fly";
+}
+
 export interface TenantRuntimeProvider {
   /** Stable provider identifier for diagnostics only. */
   readonly providerId: string;
