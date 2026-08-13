@@ -461,7 +461,6 @@ async function flyCreate(
         skip_launch: true,
         config: {
           image: env.ACCEPTANCE_FLY_IMAGE_REF,
-          auto_destroy: true,
           env: { NABUFLOW_ACCEPTANCE_LEASE: lease.leaseId },
           metadata: { nabuflow_acceptance_lease: lease.leaseId },
         },
@@ -551,6 +550,7 @@ export class NativeAcceptanceProviderAdapters implements AcceptanceProviderAdapt
         method: "POST",
         headers: bearer(token),
         body: JSON.stringify({
+          skip_launch: true,
           config: { ...config, env: { ...existingEnv, DATABASE_URL: databaseUrl } },
         }),
       },
