@@ -138,6 +138,41 @@ export async function isBuilderAllowlistExempt(userId: string): Promise<boolean>
   return exempt;
 }
 
+/**
+ * Identity-scoped billing exemption for the real sealed-runtime dress rehearsal.
+ * Every lock is required: this can never activate on the main product, a Fly
+ * runtime, a non-staging namespace, a local process, or an unlisted account.
+ */
+export async function isSealedStagingAcceptanceExempt(userId: string): Promise<boolean> {
+  if (
+    process.env.REPLIT_DEPLOYMENT !== "1" ||
+    process.env.TENANT_RUNTIME_PROVIDER !== "cloudflare" ||
+    process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE !== "staging" ||
+    process.env.NABUFLOW_ZERO_GENERATION_TARGET !== "cloudflare-sealed-staging-v1"
+  ) {
+    return false;
+  }
+
+  const raw = process.env.NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST;
+  if (!raw?.trim()) return false;
+  const entries = raw.split(",").map((email) => email.trim().toLowerCase());
+  const validEmail = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/u;
+  if (entries.some((email) => !validEmail.test(email))) {
+    logger.error(
+      { source: "NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST" },
+      "Invalid staging acceptance billing allowlist; exemption disabled",
+    );
+    return false;
+  }
+
+  try {
+    const email = (await getClerkUserById(userId))?.email;
+    return !!email && new Set(entries).has(email.trim().toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /** Superuser OR explicit billing exemption allowlist — full billing bypass. */
 export async function isNabuflowBillingExempt(userId: string): Promise<boolean> {
   if (await isSuperuser(userId)) return true;
@@ -375,7 +410,12 @@ export interface NabuflowGateError {
   upgradeTarget?: string | null;
 }
 
-export type NabuflowGateBypass = "superuser" | "allowlist" | "enforcement_disabled" | "test";
+export type NabuflowGateBypass =
+  | "superuser"
+  | "allowlist"
+  | "enforcement_disabled"
+  | "test"
+  | "staging_acceptance";
 
 export type NabuflowGateDecision =
   | { allowed: true; bypass: NabuflowGateBypass | null }
@@ -678,6 +718,9 @@ export async function resolveNabuflowBuildGate(
   if (nabuflowTestBypassActive()) return { allowed: true, bypass: "test" };
   if (await isSuperuser(userId)) return { allowed: true, bypass: "superuser" };
   if (await isBuilderAllowlistExempt(userId)) return { allowed: true, bypass: "allowlist" };
+  if (await isSealedStagingAcceptanceExempt(userId)) {
+    return { allowed: true, bypass: "staging_acceptance" };
+  }
 
   // Enterprise seats bill to their org's shared pool — the org lane replaces
   // the personal-plan rules entirely (deterministic: one org per account).
