@@ -16,6 +16,29 @@ export interface ZeroSealedFinalizeCheckResult {
   message: string;
 }
 
+const SEALED_SOURCE_REPAIR_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
+  required_files: "create package.json, tsconfig.json, and src/index.ts before finalizing",
+  package_json: "make package.json valid JSON",
+  runtime_scripts:
+    'set package.json scripts.build to "tsc" and scripts.start to "node dist/src/index.js"',
+  typescript_config: "make tsconfig.json valid JSON",
+  typescript_output_layout:
+    'set tsconfig.json compilerOptions.rootDir to "." and compilerOptions.outDir to "dist"',
+  sdk_import:
+    'import and use createNabuFlowDatabase/createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/index.ts; do not use provider clients',
+  network_bind: 'bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',
+  runtime_port: 'derive the port with Number(process.env.PORT ?? "8080")',
+  health_route: "serve GET /healthz with HTTP 200 without touching a database or external service",
+  credential_or_dependency_egress:
+    "remove credential environment reads, tenant install commands, registry URLs, and arbitrary server-side fetches",
+});
+
+export function describeZeroSealedSourceRepairs(reasonCodes: readonly string[]): string {
+  return reasonCodes
+    .map((reason) => SEALED_SOURCE_REPAIR_GUIDANCE[reason] ?? `resolve ${reason}`)
+    .join("; ");
+}
+
 /** Run the job wrapper's sealed-source contract while Zero can still repair it. */
 export async function checkZeroSealedFinalizeContract(input: {
   files: readonly BuilderFile[];
@@ -44,11 +67,12 @@ export async function checkZeroSealedFinalizeContract(input: {
     };
   } catch (error) {
     if (error instanceof ZeroSealedSourceContractError) {
+      const repairs = describeZeroSealedSourceRepairs(error.reasons);
       return {
         passed: false,
         code: error.code,
         reasonCodes: error.reasons,
-        message: `${error.code}: ${error.reasons.join(", ")}${error.path ? ` (${error.path})` : ""}`,
+        message: `${error.code}: ${error.reasons.join(", ")}${error.path ? ` (${error.path})` : ""}. Required repairs: ${repairs}`,
       };
     }
     if (error instanceof ZeroCapabilityGapError) {
