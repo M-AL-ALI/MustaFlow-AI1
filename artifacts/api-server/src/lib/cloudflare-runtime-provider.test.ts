@@ -132,6 +132,12 @@ describe("CloudflareRuntimeProvider", () => {
     const init = request[1];
     const headers = new Headers(init.headers);
     const body = String(init.body);
+    expect(JSON.parse(body)).toMatchObject({
+      manifest: {
+        runtime: "node-api",
+        servicePort: 8080,
+      },
+    });
     await expect(
       verifyControlRequestSignature(
         token,

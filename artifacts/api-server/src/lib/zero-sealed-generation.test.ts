@@ -14,6 +14,7 @@ import {
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
   requiresDirectProjectDatabaseProvisioning,
+  resolveZeroProjectRuntimePort,
   resolveZeroGenerationTarget,
 } from "./zero-sealed-generation";
 
@@ -80,6 +81,7 @@ describe("Zero sealed generator integration", () => {
       }),
     ).toBe("cloudflare-sealed-staging-v1");
     expect(requiresDirectProjectDatabaseProvisioning({})).toBe(true);
+    expect(resolveZeroProjectRuntimePort({})).toBeNull();
     expect(
       requiresDirectProjectDatabaseProvisioning({
         [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
@@ -87,6 +89,13 @@ describe("Zero sealed generator integration", () => {
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
       }),
     ).toBe(false);
+    expect(
+      resolveZeroProjectRuntimePort({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toBe(ZERO_SEALED_RUNTIME_PORT);
   });
 
   it("injects the vendored SDK and emits a canonical Pantry plan", () => {

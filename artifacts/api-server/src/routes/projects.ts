@@ -32,7 +32,10 @@ import {
 import { isContainerLayerConfigured } from "../lib/tenant-runtime";
 import { resolveInitialStackSelection } from "../lib/stack-selection";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
-import { requiresDirectProjectDatabaseProvisioning } from "../lib/zero-sealed-generation";
+import {
+  requiresDirectProjectDatabaseProvisioning,
+  resolveZeroProjectRuntimePort,
+} from "../lib/zero-sealed-generation";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -233,6 +236,7 @@ router.post("/projects", async (req, res): Promise<void> => {
   const containerLayerOperational =
     (requestedBuilderMode ?? "agentic") === "agentic" ? await isContainerLayerConfigured() : false;
   const requiresDirectDatabase = requiresDirectProjectDatabaseProvisioning(process.env);
+  const sealedRuntimePort = resolveZeroProjectRuntimePort(process.env);
 
   const [project] = await db
     .insert(projectsTable)
@@ -246,6 +250,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       projectFormat,
       stack: resolvedStack,
       stackLocked,
+      runtimePort: sealedRuntimePort,
       // Task #738 — agentic projects get a real Fly container + Neon Postgres.
       // The frontend mode selector explicitly sets builderMode; default to
       // "agentic" when not provided (preserves backwards compatibility).

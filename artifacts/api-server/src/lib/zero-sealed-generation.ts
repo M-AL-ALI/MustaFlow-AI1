@@ -91,6 +91,19 @@ export function requiresDirectProjectDatabaseProvisioning(
   return resolveZeroGenerationTarget(environment) === "legacy-v1";
 }
 
+/**
+ * New sealed projects are stamped with the same fixed port carried by their
+ * generated runtime manifest. Legacy/Fly rows retain the historical nullable
+ * runtime-port behavior byte-for-byte.
+ */
+export function resolveZeroProjectRuntimePort(
+  environment: Record<string, string | undefined>,
+): number | null {
+  return resolveZeroGenerationTarget(environment) === "cloudflare-sealed-staging-v1"
+    ? ZERO_SEALED_RUNTIME_PORT
+    : null;
+}
+
 export function readZeroPantryPublicKeys(
   environment: Record<string, string | undefined>,
 ): ReadonlyMap<string, string> {

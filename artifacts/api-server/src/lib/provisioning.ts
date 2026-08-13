@@ -34,6 +34,7 @@ import {
   ensureContainerLogTailer,
   hasContainerLayerCredentials,
   isContainerLayerConfigured,
+  tenantRuntimeProvider,
 } from "./tenant-runtime";
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
@@ -121,6 +122,13 @@ function humanizeError(raw: string | undefined, provider: "fly" | "neon"): strin
   // Fall back to a sanitized excerpt of the raw error
   const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
   return provider === "fly" ? `Fly.io error: ${excerpt}` : `Neon error: ${excerpt}`;
+}
+
+function humanizeTenantRuntimeError(raw: string | undefined): string {
+  if (tenantRuntimeProvider.providerId === "fly") return humanizeError(raw, "fly");
+  if (!raw) return "Could not reach the Cloudflare runtime. Please try again.";
+  const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
+  return `Cloudflare runtime error: ${excerpt}`;
 }
 
 /** Stable, deterministic Neon project name for a given MustaFlow project. */
@@ -460,9 +468,12 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
           servicePort: project.runtimePort,
         });
         if (!info) {
-          containerError = "Failed to create Fly.io machine for this project.";
+          containerError =
+            tenantRuntimeProvider.providerId === "fly"
+              ? "Failed to create Fly.io machine for this project."
+              : "Failed to create Cloudflare runtime for this project.";
         } else if ("error" in info) {
-          containerError = humanizeError(info.error, "fly");
+          containerError = humanizeTenantRuntimeError(info.error);
         } else {
           containerId = info.containerId;
           await db
@@ -476,7 +487,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
         }
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
-        containerError = humanizeError(raw, "fly");
+        containerError = humanizeTenantRuntimeError(raw);
       }
       if (containerError) {
         await markError(projectId, containerError, "create_container");
