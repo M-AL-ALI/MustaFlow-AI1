@@ -18,6 +18,7 @@ import {
 import type { BuilderFile } from "./builder";
 
 export const ZERO_ELIGIBILITY_METADATA_FILENAME = "eligibility.json" as const;
+export const ZERO_ELIGIBILITY_ASSET_DIRECTORY = "zero-eligibility-assets" as const;
 
 const RAW_DATABASE_PACKAGES = new Set([
   "@libsql/client",
@@ -80,13 +81,14 @@ export function resolveZeroEligibilityRepositoryRoot(
       candidate = parent;
     }
   }
-  return (
-    candidates.find(
-      (candidate) =>
-        existsSync(path.join(candidate, "blueprints")) &&
-        existsSync(path.join(candidate, "skills")),
-    ) ?? path.resolve(workingDirectory)
-  );
+  for (const candidate of candidates) {
+    for (const root of [candidate, path.join(candidate, ZERO_ELIGIBILITY_ASSET_DIRECTORY)]) {
+      if (existsSync(path.join(root, "blueprints")) && existsSync(path.join(root, "skills"))) {
+        return root;
+      }
+    }
+  }
+  return path.resolve(workingDirectory);
 }
 
 function repositoryRoot(): string {

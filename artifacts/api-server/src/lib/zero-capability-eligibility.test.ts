@@ -10,6 +10,7 @@ import type {
 import { makeZeroSealedNodeManifest, prepareZeroSealedNodeSource } from "./zero-sealed-generation";
 import {
   ZeroCapabilityGapError,
+  ZERO_ELIGIBILITY_ASSET_DIRECTORY,
   assertZeroGeneratedEligibility,
   evaluateZeroGeneratedEligibility,
   inferZeroDeclaredCapabilities,
@@ -82,13 +83,22 @@ describe("Zero blueprint and skill capability eligibility", () => {
   it("finds the repository inventory from the bundled deployment layout", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "zero-eligibility-bundle-"));
     temporaryRoots.push(root);
-    await mkdir(path.join(root, "blueprints"), { recursive: true });
-    await mkdir(path.join(root, "skills"), { recursive: true });
+    const assetRoot = path.join(
+      root,
+      "artifacts",
+      "api-server",
+      "dist",
+      ZERO_ELIGIBILITY_ASSET_DIRECTORY,
+    );
+    await mkdir(path.join(assetRoot, "blueprints"), { recursive: true });
+    await mkdir(path.join(assetRoot, "skills"), { recursive: true });
     const bundledModuleUrl = pathToFileURL(
       path.join(root, "artifacts", "api-server", "dist", "index.mjs"),
     ).href;
 
-    expect(resolveZeroEligibilityRepositoryRoot(bundledModuleUrl, root)).toBe(root);
+    expect(resolveZeroEligibilityRepositoryRoot(bundledModuleUrl, path.join(root, "runner"))).toBe(
+      assetRoot,
+    );
   });
 
   it("returns a typed inventory error when deployment assets are unavailable", async () => {

@@ -3,12 +3,37 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+const repositoryDir = path.resolve(artifactDir, "..", "..");
+const eligibilityAssetDirectory = "zero-eligibility-assets";
+
+async function copyEligibilityAssets(distDir) {
+  const assetRoot = path.join(distDir, eligibilityAssetDirectory);
+  for (const [kind, marker] of [
+    ["blueprints", "blueprint.json"],
+    ["skills", "SKILL.md"],
+  ]) {
+    const sourceRoot = path.join(repositoryDir, kind);
+    const entries = (await readdir(sourceRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && entry.name !== "_drafts")
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const sourceDirectory = path.join(sourceRoot, entry.name);
+      const destinationDirectory = path.join(assetRoot, kind, entry.name);
+      await mkdir(destinationDirectory, { recursive: true });
+      await copyFile(path.join(sourceDirectory, marker), path.join(destinationDirectory, marker));
+      await copyFile(
+        path.join(sourceDirectory, "eligibility.json"),
+        path.join(destinationDirectory, "eligibility.json"),
+      );
+    }
+  }
+}
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
@@ -139,6 +164,7 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  await copyEligibilityAssets(distDir);
 }
 
 buildAll().catch((err) => {
