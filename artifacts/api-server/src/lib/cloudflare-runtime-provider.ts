@@ -1338,6 +1338,7 @@ export class CloudflareRuntimeProvider
       identity: runtime.identity,
       manifestRevision: runtime.manifestRevision,
       status: runtime.status,
+      endpoint: runtime.endpoint,
     };
   }
   async updateEnvironment(

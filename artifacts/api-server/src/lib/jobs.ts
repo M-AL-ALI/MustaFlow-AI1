@@ -7185,8 +7185,10 @@ async function syncAgenticPreviewRuntime(opts: {
         servicePort: opts.runtimePort,
         signal: opts.signal,
       });
-      if (created === null || "error" in created || !created.endpoint) {
-        throw new Error("Sealed Zero runtime provisioning did not reach a durable descriptor");
+      if (created === null || "error" in created) {
+        throw new Error(
+          "zero_runtime_descriptor_incomplete: runtime.ensure did not return a durable identity",
+        );
       }
       runtimeId = created.runtimeId;
       await db
@@ -7195,9 +7197,9 @@ async function syncAgenticPreviewRuntime(opts: {
           containerId: runtimeId,
           containerUrl: created.endpoint,
           containerStatus: created.status,
-          provisioningStatus: "ready",
+          provisioningStatus: created.endpoint ? "ready" : "provisioning",
           provisioningError: null,
-          provisioningStep: null,
+          provisioningStep: created.endpoint ? null : "runtime-start",
         })
         .where(eq(projectsTable.id, opts.projectId));
     }
@@ -7215,6 +7217,26 @@ async function syncAgenticPreviewRuntime(opts: {
       pantryPublicKeys: opts.zeroSealedGeneration.pantryPublicKeys,
       signal: opts.signal,
     });
+    const startedRuntime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(
+      result.runtimeId,
+      opts.projectId,
+    );
+    if (!startedRuntime.endpoint) {
+      throw new Error(
+        "zero_runtime_descriptor_incomplete: runtime.start completed without a durable endpoint",
+      );
+    }
+    await db
+      .update(projectsTable)
+      .set({
+        containerId: result.runtimeId,
+        containerUrl: startedRuntime.endpoint,
+        containerStatus: startedRuntime.status,
+        provisioningStatus: "ready",
+        provisioningError: null,
+        provisioningStep: null,
+      })
+      .where(eq(projectsTable.id, opts.projectId));
     logger.info(
       {
         taskId: opts.taskId,

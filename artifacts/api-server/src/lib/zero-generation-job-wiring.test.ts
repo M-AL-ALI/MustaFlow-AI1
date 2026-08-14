@@ -47,7 +47,11 @@ describe("Zero sealed generation product wiring", () => {
     expect(provisioning).toContain("requiresDirectProjectDatabaseProvisioning(process.env)");
     expect(provisioning).toContain("if (!requiresDirectDatabase)");
     expect(projects).toContain("!requiresDirectDatabase || process.env.NEON_API_KEY");
-    expect(jobs).toContain("Sealed Zero runtime provisioning did not reach a durable descriptor");
+    expect(jobs).not.toContain('created === null || "error" in created || !created.endpoint');
+    expect(jobs).toContain('provisioningStatus: created.endpoint ? "ready" : "provisioning"');
     expect(jobs).toContain("runtimeId = created.runtimeId");
+    expect(jobs).toContain("tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(");
+    expect(jobs).toContain("runtime.start completed without a durable endpoint");
+    expect(jobs).toContain("containerUrl: startedRuntime.endpoint");
   });
 });

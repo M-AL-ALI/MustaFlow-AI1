@@ -165,6 +165,7 @@ export interface ZeroGenerationTenantRuntimeProvider extends LayeredArtifactDepl
     identity: string;
     manifestRevision: string;
     status: RuntimeStatus;
+    endpoint: string | null;
   }>;
 }
 
