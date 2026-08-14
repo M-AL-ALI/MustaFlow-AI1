@@ -17,10 +17,14 @@ import {
   type ZeroGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
-import { getVendoredRuntimeSdkFiles } from "./zero-runtime-sdk";
+import {
+  VENDORED_FLY_POSTGRES_TYPES_VERSION,
+  VENDORED_FLY_POSTGRES_VERSION,
+  getVendoredRuntimeSdkFiles,
+} from "./zero-runtime-sdk";
 
 export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET (staging-only):
-- Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK.
+- Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
 - Do not create .env files in sealed-native projects, including .env.example. Sealed apps receive no tenant credentials or secret configuration.
@@ -152,6 +156,7 @@ export function makeZeroSealedNodeManifest(revision: string): RuntimeManifestCon
 }
 
 type PackageJson = {
+  [key: string]: unknown;
   scripts?: Record<string, unknown>;
   dependencies?: Record<string, unknown>;
   devDependencies?: Record<string, unknown>;
@@ -190,6 +195,20 @@ function dependencyPlan(pkg: PackageJson): ZeroGeneratedDependencyPlan {
       return a < b ? -1 : a > b ? 1 : 0;
     }),
   });
+}
+
+function withVendoredRuntimeDependencies(pkg: PackageJson): PackageJson {
+  return {
+    ...pkg,
+    dependencies: {
+      ...(pkg.dependencies ?? {}),
+      pg: VENDORED_FLY_POSTGRES_VERSION,
+    },
+    devDependencies: {
+      ...(pkg.devDependencies ?? {}),
+      "@types/pg": VENDORED_FLY_POSTGRES_TYPES_VERSION,
+    },
+  };
 }
 
 export interface PreparedZeroSealedNodeSource {
@@ -251,6 +270,11 @@ export function prepareZeroSealedNodeSource(input: {
   if (pkg.scripts?.build !== "tsc" || pkg.scripts?.start !== "node dist/src/index.js") {
     throw new ZeroSealedSourceContractError(["runtime_scripts"], "package.json");
   }
+  pkg = withVendoredRuntimeDependencies(pkg);
+  byPath.set("package.json", {
+    ...packageFile,
+    content: `${JSON.stringify(pkg, null, 2)}\n`,
+  });
   let typeScriptConfig: TypeScriptConfig;
   try {
     typeScriptConfig = JSON.parse(typeScriptConfigFile.content) as TypeScriptConfig;

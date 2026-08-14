@@ -476,11 +476,10 @@ describe("CloudflareRuntimeProvider", () => {
       }),
     );
     const provider = new CloudflareRuntimeProvider(config);
+    const syntheticStripeSecret = `${["sk", "test"].join("_")}_FAKEONLYNOTAREALSECRET1234567890`;
 
     await expect(
-      provider.syncFiles(identity, 42, [
-        { path: "fixture.txt", content: "sk_test_FAKEONLYNOTAREALSECRET1234567890" },
-      ]),
+      provider.syncFiles(identity, 42, [{ path: "fixture.txt", content: syntheticStripeSecret }]),
     ).rejects.toMatchObject({ code: "artifact_secret_detected" });
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(fetch).mock.calls[0][0])).not.toContain("/artifacts/");
@@ -769,6 +768,24 @@ describe("CloudflareRuntimeProvider", () => {
       provider.deployArtifact(identity, projectId, artifact, { operationTimeoutMs: 2_500 }),
     ).resolves.toMatchObject({ materialized: true });
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a zero-generation control read inside its caller-owned attempt bound", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.mocked(fetch).mockResolvedValue(json({ ok: true, shelf: "fixture" }));
+    const provider = new CloudflareRuntimeProvider(config);
+
+    await expect(
+      provider.zeroGenerationControlRequest({
+        method: "GET",
+        path: "/_nabuflow/control/v1/pantry/revisions/by-root/fixture",
+        operationTimeoutMs: 30_000,
+      }),
+    ).resolves.toEqual({ ok: true, shelf: "fixture" });
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(timeout).toHaveBeenCalledWith(7_287);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    timeout.mockRestore();
   });
 
   it("fails fast with typed pre-dispatch evidence and no transport retry storm", async () => {

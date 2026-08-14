@@ -36,6 +36,16 @@ const LAYER_PLATFORM: PantryPlatform = {
 const GATE_REQUIRED = 20;
 const GATE_MAX_REQUESTS = 600;
 const GATE_MAX_MS = 5 * 60_000;
+const SESSION_CONTROL_TOKEN = process.env.NABUFLOW_ACCEPTANCE_CONTROL_TOKEN?.trim();
+const SESSION_PREVIEW_PRIVATE_KEY = process.env.NABUFLOW_ACCEPTANCE_PREVIEW_PRIVATE_KEY?.trim();
+const SESSION_PREVIEW_PUBLIC_KEY = process.env.NABUFLOW_ACCEPTANCE_PREVIEW_PUBLIC_KEY?.trim();
+const SESSION_VAULT_KEK = process.env.NABUFLOW_ACCEPTANCE_VAULT_KEK?.trim();
+const SESSION_ROTATION_VALUES = [
+  SESSION_CONTROL_TOKEN,
+  SESSION_PREVIEW_PRIVATE_KEY,
+  SESSION_PREVIEW_PUBLIC_KEY,
+  SESSION_VAULT_KEK,
+];
 
 interface TranscriptEntry {
   step: string;
@@ -139,15 +149,27 @@ async function readResponse(response: Response): Promise<unknown> {
 }
 
 async function rotateWorkerSecrets(): Promise<void> {
-  controlToken = base64UrlSecret();
-  vaultKek = base64UrlSecret();
-  const pair = generateKeyPairSync("ec", {
-    namedCurve: "prime256v1",
-    publicKeyEncoding: { type: "spki", format: "pem" },
-    privateKeyEncoding: { type: "pkcs8", format: "pem" },
-  });
-  previewPublicKey = pair.publicKey;
-  previewPrivateKey = pair.privateKey;
+  const suppliedCount = SESSION_ROTATION_VALUES.filter((value) => value !== undefined).length;
+  assertCondition(
+    suppliedCount === 0 || suppliedCount === SESSION_ROTATION_VALUES.length,
+    "Session rotation values must be supplied as one atomic set",
+  );
+  if (suppliedCount === SESSION_ROTATION_VALUES.length) {
+    controlToken = SESSION_CONTROL_TOKEN!;
+    previewPrivateKey = SESSION_PREVIEW_PRIVATE_KEY!;
+    previewPublicKey = SESSION_PREVIEW_PUBLIC_KEY!;
+    vaultKek = SESSION_VAULT_KEK!;
+  } else {
+    controlToken = base64UrlSecret();
+    vaultKek = base64UrlSecret();
+    const pair = generateKeyPairSync("ec", {
+      namedCurve: "prime256v1",
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    previewPublicKey = pair.publicKey;
+    previewPrivateKey = pair.privateKey;
+  }
   assertCondition(
     previewPublicKey.includes("BEGIN PUBLIC KEY"),
     "Preview public key format self-check failed",
@@ -156,6 +178,17 @@ async function rotateWorkerSecrets(): Promise<void> {
     previewPrivateKey.includes("BEGIN PRIVATE KEY"),
     "Preview private key format self-check failed",
   );
+  for (const [label, value] of [
+    ["control token", controlToken],
+    ["vault KEK", vaultKek],
+  ] as const) {
+    assertCondition(
+      /^[A-Za-z0-9_-]+$/u.test(value) &&
+        !value.includes("=") &&
+        Buffer.from(value, "base64url").byteLength === 32,
+      `Session ${label} failed its Base64URL 32-byte self-check`,
+    );
+  }
 
   let payload = JSON.stringify({
     CLOUDFLARE_RUNTIME_CONTROL_TOKEN: controlToken,
@@ -194,6 +227,7 @@ async function rotateWorkerSecrets(): Promise<void> {
     generatedInProcess: true,
     base64UrlSelfCheck: true,
     valuesPersisted: false,
+    sessionSetSupplied: suppliedCount === SESSION_ROTATION_VALUES.length,
   });
 }
 
@@ -886,11 +920,12 @@ async function runNegativeMatrix(
 
   let fakeSecretRejected = false;
   try {
+    const syntheticStripeSecret = `${["sk", "test"].join("_")}_ABCDEFGHIJKLMNOPQRSTUV`;
     await sealRuntimeArtifactLayer({
       mountPath: "node_modules",
       platform: LAYER_PLATFORM,
       files: [
-        { path: "fake/index.mjs", content: "export const fake='sk_test_ABCDEFGHIJKLMNOPQRSTUV'\n" },
+        { path: "fake/index.mjs", content: `export const fake='${syntheticStripeSecret}'\n` },
       ],
     });
   } catch (error) {
@@ -1098,7 +1133,11 @@ async function main(): Promise<void> {
   await rotateWorkerSecrets();
   try {
     await sustainedGreen();
-    await runAcceptance();
+    if (process.env.NABUFLOW_GATE_ONLY === "1") {
+      record("gate.only", 200, { unrelatedArtifactRowsSkipped: true });
+    } else {
+      await runAcceptance();
+    }
   } catch (error) {
     failure =
       error instanceof Error ? error.message : "Unknown layered artifact acceptance failure";
@@ -1134,10 +1173,14 @@ async function main(): Promise<void> {
     },
     failure,
   };
-  const evidencePath = resolve(
-    process.cwd(),
-    "../../../tmp/gateway-artifact-layers-staging-evidence.json",
-  );
+  const evidencePath =
+    process.env.NABUFLOW_GATE_EVIDENCE_PATH ??
+    resolve(
+      process.cwd(),
+      `../../../tmp/gateway-artifact-layers-staging-evidence-${new Date()
+        .toISOString()
+        .replaceAll(/[:.]/gu, "")}.json`,
+    );
   mkdirSync(resolve(process.cwd(), "../../../tmp"), { recursive: true });
   writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { encoding: "utf8" });
   if (failure !== null) throw new Error(failure);

@@ -245,6 +245,24 @@ describe("private Pantry catalog Worker", () => {
     expect(invalidRange.status).toBe(400);
   });
 
+  it("serves shelf metadata with one manifest verification instead of an unbounded closure walk", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const get = vi.spyOn(test.bucket, "get");
+
+    const read = await call(
+      test,
+      `/internal/v1/revisions/by-root/${fixture.commit.revision.rootSha256}`,
+      { principal: "builder-readonly" },
+    );
+
+    expect(read.status).toBe(200);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(String(get.mock.calls[0]?.[0])).toMatch(/^revisions\//u);
+  });
+
   it("returns a sanitized content-hash inventory only to the catalog operator", async () => {
     const test = context();
     const bytes = new TextEncoder().encode("public fixture bytes");

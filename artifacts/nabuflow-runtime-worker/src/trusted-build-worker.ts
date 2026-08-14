@@ -52,6 +52,7 @@ import type {
 } from "./trusted-build-model";
 import { prepareTrustedBuildOutput, TrustedBuildOutputError } from "./trusted-build-output";
 import {
+  deleteAgedTrustedBuildQuarantine,
   deleteTrustedBuildPrefix,
   listTrustedBuildObjects,
   putTrustedBuildObject,
@@ -1218,7 +1219,24 @@ async function handleGc(
       }
     }
   }
-  return jsonResponse(200, { ok: true, deletedBuildIds: removed.map((build) => build.buildId) });
+  const diagnostics = await coordinator.diagnostics();
+  const remainingDeletes = Math.max(0, input.maxDeletes - removed.length);
+  // Quarantine bytes can precede the atomic coordinator registration. Sweep them only while
+  // the plane is quiescent, so no live request can lose its sealed input, and retain the GC's
+  // existing bounded-invocation budget.
+  const deletedOrphanObjects =
+    remainingDeletes > 0 && diagnostics.queued === 0 && diagnostics.running === 0
+      ? await deleteAgedTrustedBuildQuarantine(
+          env.TRUSTED_BUILD_OBJECTS,
+          Date.parse(input.olderThan),
+          remainingDeletes,
+        )
+      : 0;
+  return jsonResponse(200, {
+    ok: true,
+    deletedBuildIds: removed.map((build) => build.buildId),
+    deletedOrphanObjects,
+  });
 }
 
 export async function handleTrustedBuildWorkerRequest(

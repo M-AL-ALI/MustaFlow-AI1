@@ -260,6 +260,29 @@ export class AcceptanceVaultDurableObject
     });
   }
 
+  async markFlySecretProvisioned(input: {
+    leaseId: string;
+    ownerSubjectHash: string;
+    nowMs: number;
+  }): Promise<StoredAcceptanceLease | null> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const lease = await transaction.get<StoredAcceptanceLease>(leaseKey(input.leaseId));
+      if (
+        lease === undefined ||
+        lease.ownerSubjectHash !== input.ownerSubjectHash ||
+        lease.scope.provider !== "fly" ||
+        lease.resource?.provider !== "fly" ||
+        lease.resource.configurationWritten !== true
+      ) {
+        return null;
+      }
+      lease.state = "provisioned";
+      lease.updatedAtMs = input.nowMs;
+      await transaction.put(leaseKey(input.leaseId), lease);
+      return structuredClone(lease);
+    });
+  }
+
   async markDestroying(input: {
     leaseId: string;
     ownerSubjectHash: string | null;

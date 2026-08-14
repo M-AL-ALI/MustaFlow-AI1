@@ -109,10 +109,18 @@ describe("Zero sealed generator integration", () => {
     expect(prepared.dependencyPlan.intents.map((intent) => intent.name)).toEqual([
       "@types/express",
       "@types/node",
+      "@types/pg",
       "express",
+      "pg",
       "typescript",
       "zod",
     ]);
+    expect(prepared.dependencyPlan.intents.find((intent) => intent.name === "pg")?.selector).toBe(
+      "8.20.0",
+    );
+    expect(
+      prepared.dependencyPlan.intents.find((intent) => intent.name === "@types/pg")?.selector,
+    ).toBe("8.20.0");
     expect(prepared.manifest.servicePort).toBe(ZERO_SEALED_RUNTIME_PORT);
     expect(prepared.manifest.healthPath).toBe("/healthz");
   });
@@ -222,9 +230,8 @@ describe("Zero sealed generator integration", () => {
       ]),
     );
     expect(prepared.removedPaths).toEqual(["src/obsolete.ts"]);
-    expect(prepared.unchangedPaths).toEqual(
-      expect.arrayContaining(["package.json", "tsconfig.json"]),
-    );
+    expect(prepared.changedFiles.map((file) => file.path)).toContain("package.json");
+    expect(prepared.unchangedPaths).toContain("tsconfig.json");
     expect(prepared.files.some((file) => file.path === "src/obsolete.ts")).toBe(false);
     expect(prepared.files.find((file) => file.path === "src/index.ts")?.content).toContain(
       "continued",

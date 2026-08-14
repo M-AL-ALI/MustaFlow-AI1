@@ -99,6 +99,32 @@ export async function deleteTrustedBuildPrefix(bucket: R2Bucket, prefix: string)
   return deleted;
 }
 
+export async function deleteAgedTrustedBuildQuarantine(
+  bucket: R2Bucket,
+  olderThanMs: number,
+  maxDeletes: number,
+): Promise<number> {
+  let cursor: string | undefined;
+  let deleted = 0;
+  do {
+    const page = await bucket.list({
+      prefix: "quarantine/requests/",
+      cursor,
+      limit: Math.min(1_000, maxDeletes - deleted),
+    });
+    const keys = page.objects
+      .filter((object) => object.uploaded.getTime() < olderThanMs)
+      .map((object) => object.key)
+      .slice(0, maxDeletes - deleted);
+    if (keys.length > 0) {
+      await bucket.delete(keys);
+      deleted += keys.length;
+    }
+    cursor = deleted < maxDeletes && page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined && deleted < maxDeletes);
+  return deleted;
+}
+
 export async function listTrustedBuildObjects(bucket: R2Bucket): Promise<{
   objects: number;
   bytes: number;

@@ -1471,7 +1471,10 @@ async function handleCaptureBuildResource(
   });
 }
 
-async function verifyStoredShelf(bucket: R2Bucket, shelf: PantryCatalogShelfRecord): Promise<void> {
+async function verifyStoredShelfManifest(
+  bucket: R2Bucket,
+  shelf: PantryCatalogShelfRecord,
+): Promise<void> {
   const manifest = await readAndVerifyObject(
     bucket,
     revisionManifestKey(shelf),
@@ -1488,6 +1491,10 @@ async function verifyStoredShelf(bucket: R2Bucket, shelf: PantryCatalogShelfReco
       "Pantry shelf manifest does not match the catalog ledger",
     );
   }
+}
+
+async function verifyStoredShelf(bucket: R2Bucket, shelf: PantryCatalogShelfRecord): Promise<void> {
+  await verifyStoredShelfManifest(bucket, shelf);
   for (const reference of shelf.objectReferences) {
     await readAndVerifyObject(
       bucket,
@@ -1505,7 +1512,10 @@ async function shelfLookupResponse(
   if (lookup === null) {
     throw new PantryHttpError(404, "catalog_not_found", "Pantry revision was not found");
   }
-  await verifyStoredShelf(env.PANTRY_CATALOG_OBJECTS, lookup.shelf);
+  // The immutable shelf manifest is the catalog read authority. Package/object bytes are
+  // independently hash-verified at every consuming boundary (provenance and build transfer),
+  // so a metadata lookup must not serially re-read the full closure on every request.
+  await verifyStoredShelfManifest(env.PANTRY_CATALOG_OBJECTS, lookup.shelf);
   return jsonResponse(200, { ok: true, ...lookup });
 }
 
@@ -1517,7 +1527,7 @@ async function shelfContentHashesResponse(
     throw new PantryHttpError(404, "catalog_not_found", "Pantry revision was not found");
   }
   const shelf = lookup.shelf;
-  await verifyStoredShelf(env.PANTRY_CATALOG_OBJECTS, shelf);
+  await verifyStoredShelfManifest(env.PANTRY_CATALOG_OBJECTS, shelf);
   const revisionVerification = await verifyPantryRevisionRecord(
     shelf.revision,
     configuredPublicKeys(env),

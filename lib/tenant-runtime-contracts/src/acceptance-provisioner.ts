@@ -112,6 +112,24 @@ export const acceptanceSanitizedCostSchema = z
   })
   .strict();
 
+export const ACCEPTANCE_ERROR_CODES = [
+  "acceptance_unauthorized",
+  "acceptance_invalid_request",
+  "acceptance_scope_mismatch",
+  "acceptance_lease_not_found",
+  "acceptance_idempotency_conflict",
+  "acceptance_cost_ceiling_exceeded",
+  "acceptance_live_target_forbidden",
+  "acceptance_operation_pending",
+  "acceptance_operation_timeout",
+  "acceptance_provider_unavailable",
+  "acceptance_provider_rejected",
+  "acceptance_cleanup_incomplete",
+  "acceptance_internal_error",
+] as const;
+
+export const acceptanceErrorCodeSchema = z.enum(ACCEPTANCE_ERROR_CODES);
+
 export const acceptanceLeaseResponseSchema = z
   .object({
     ok: z.literal(true),
@@ -120,6 +138,7 @@ export const acceptanceLeaseResponseSchema = z
     provider: acceptanceProviderSchema,
     resourceIds: z.array(z.string().min(1).max(200)).max(8),
     state: acceptanceLeaseStateSchema,
+    terminalCode: acceptanceErrorCodeSchema.nullable(),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
     expiresAt: z.string().datetime({ offset: true }),
@@ -140,23 +159,6 @@ export const acceptanceVerifyGoneResponseSchema = z
   })
   .strict();
 
-export const ACCEPTANCE_ERROR_CODES = [
-  "acceptance_unauthorized",
-  "acceptance_invalid_request",
-  "acceptance_scope_mismatch",
-  "acceptance_lease_not_found",
-  "acceptance_idempotency_conflict",
-  "acceptance_cost_ceiling_exceeded",
-  "acceptance_live_target_forbidden",
-  "acceptance_operation_pending",
-  "acceptance_operation_timeout",
-  "acceptance_provider_unavailable",
-  "acceptance_provider_rejected",
-  "acceptance_cleanup_incomplete",
-  "acceptance_internal_error",
-] as const;
-
-export const acceptanceErrorCodeSchema = z.enum(ACCEPTANCE_ERROR_CODES);
 export const acceptanceErrorResponseSchema = z
   .object({
     ok: z.literal(false),

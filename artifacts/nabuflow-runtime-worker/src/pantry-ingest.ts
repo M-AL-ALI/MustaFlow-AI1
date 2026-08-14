@@ -76,7 +76,10 @@ function orderedRecord(input: Record<string, string>): Record<string, string> {
 
 export type PantryRuntimeDependencyDeclarations = ReadonlyMap<
   string,
-  Pick<NpmVersionDocument, "dependencies" | "optionalDependencies">
+  Pick<
+    NpmVersionDocument,
+    "dependencies" | "optionalDependencies" | "peerDependencies" | "peerDependenciesMeta"
+  >
 >;
 
 export function assertPantryClosureComplete(
@@ -126,6 +129,37 @@ export function assertPantryClosureComplete(
         throw new PantryIngestError(
           "dependency_conflict",
           "Pantry closure is missing a declared runtime dependency",
+        );
+      }
+    }
+    const requiredPeerDeclarations = Object.entries(declared.peerDependencies).filter(
+      ([name]) => declared.peerDependenciesMeta[name]?.optional !== true,
+    );
+    const peerEdges = ingredient.dependencies.filter((edge) => edge.kind === "peer");
+    if (peerEdges.length !== requiredPeerDeclarations.length) {
+      throw new PantryIngestError(
+        "dependency_conflict",
+        "Pantry closure is missing a declared required peer dependency",
+      );
+    }
+    for (const [name, selector] of requiredPeerDeclarations) {
+      const edge = peerEdges.find((candidate) => candidate.name === name);
+      const selectorMatches = (() => {
+        try {
+          const range = validRange(selector);
+          return edge !== undefined && (range === null || satisfies(edge.version, range));
+        } catch {
+          return false;
+        }
+      })();
+      if (
+        edge === undefined ||
+        !selectorMatches ||
+        !ingredientCoordinates.has(coordinateKey(edge.name, edge.version))
+      ) {
+        throw new PantryIngestError(
+          "dependency_conflict",
+          "Pantry closure is missing a declared required peer dependency",
         );
       }
     }
@@ -239,7 +273,10 @@ export async function ingestPantryStockRequest(
   const ingredients = new Map<string, Promise<PantryResolvedIngredient>>();
   const dependencyDeclarations = new Map<
     string,
-    Pick<NpmVersionDocument, "dependencies" | "optionalDependencies">
+    Pick<
+      NpmVersionDocument,
+      "dependencies" | "optionalDependencies" | "peerDependencies" | "peerDependenciesMeta"
+    >
   >();
   const objects = new Map<string, PantryIngestObject>();
   const keysPromise = client.fetchRegistryKeys();
@@ -341,6 +378,8 @@ export async function ingestPantryStockRequest(
       dependencyDeclarations.set(key, {
         dependencies: document.dependencies,
         optionalDependencies: document.optionalDependencies,
+        peerDependencies: document.peerDependencies,
+        peerDependenciesMeta: document.peerDependenciesMeta,
       });
       try {
         assertPlatform(document, request);
@@ -487,11 +526,14 @@ export async function ingestPantryStockRequest(
       for (const [dependencyName, dependencySelector] of Object.entries(
         document.peerDependencies,
       )) {
+        // npm optional peers are compatible extension points, not selected dependencies.
+        // Stock them only when another runtime edge or an explicit root intent selects them.
+        if (document.peerDependenciesMeta[dependencyName]?.optional === true) continue;
         dependencyInputs.push({
           name: dependencyName,
           selector: dependencySelector,
           kind: "peer",
-          optional: document.peerDependenciesMeta[dependencyName]?.optional === true,
+          optional: false,
         });
       }
       dependencyInputs.sort((left, right) => {

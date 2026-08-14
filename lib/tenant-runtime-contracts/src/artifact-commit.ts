@@ -67,6 +67,7 @@ export const artifactCommitEventKindSchema = z.enum([
   "job-created",
   "request-observed",
   "queue-nudged",
+  "deployment-version-deferred",
   "driver-claimed",
   "driver-adopted",
   "driver-busy",
@@ -87,6 +88,7 @@ export const artifactCommitEventSchema = z
     event: artifactCommitEventKindSchema,
     attempt: z.number().int().nonnegative(),
     checkpoint: artifactCommitCheckpointSchema,
+    deploymentVersion: z.string().min(1).max(100).optional(),
   })
   .strict();
 
