@@ -2920,7 +2920,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           runtimePort: project.runtimePort,
           zeroGenerationTarget,
           modelAdapter: input.modelAdapter,
-          sealedManifestRevision: `zero-task-${taskId}-node-v1`,
         };
 
         // ── Agentic pre-flight gate ────────────────────────────────────────────
@@ -3115,7 +3114,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
           zeroSealedGeneration = prepareZeroSealedNodeSource({
             files: result.files,
-            manifestRevision: `zero-task-${taskId}-node-v1`,
             skipEligibilityPrecheck: true,
           });
           await assertZeroGeneratedEligibility({
@@ -3682,7 +3680,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             existingFiles,
             changedFiles: refineResult.changedFiles,
             removedPaths: refineResult.removedPaths,
-            manifestRevision: `zero-task-${taskId}-node-v1`,
           });
           await assertZeroGeneratedEligibility({
             files: preparedRefinement.files,
@@ -7180,7 +7177,49 @@ async function syncAgenticPreviewRuntime(opts: {
       throw new Error("Cloudflare Pantry and dock capabilities are unavailable");
     }
     let runtimeId = opts.containerId;
-    if (!runtimeId || !opts.containerUrl) {
+    if (runtimeId) {
+      const existingRuntime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(
+        runtimeId,
+        opts.projectId,
+      );
+      if (existingRuntime.identity !== runtimeId) {
+        throw new Error(
+          "zero_runtime_descriptor_incomplete: runtime identity changed during sealed continuation",
+        );
+      }
+      if (
+        existingRuntime.status === "running" &&
+        existingRuntime.manifestRevision === opts.zeroSealedGeneration.manifest.revision
+      ) {
+        await db
+          .update(projectsTable)
+          .set({
+            containerId: runtimeId,
+            containerUrl: existingRuntime.endpoint,
+            containerStatus: existingRuntime.status,
+            provisioningStatus: "ready",
+            provisioningError: null,
+            provisioningStep: null,
+          })
+          .where(eq(projectsTable.id, opts.projectId));
+        logger.info(
+          { taskId: opts.taskId, projectId: opts.projectId, runtimeId },
+          "Sealed Zero generation reused the matching healthy runtime",
+        );
+        if (opts.publishLifecycleEvents !== false && opts.revision) {
+          publishPreviewReady(opts.projectId, opts.revision);
+        }
+        return { ...base, previewUpdated: true };
+      }
+      if (existingRuntime.status !== "stopped") {
+        await emitEvent(
+          opts.taskId,
+          "narration",
+          "Stopping the current sealed runtime for its manifest transitionâ€¦",
+        );
+        await tenantRuntimeProvider.stop(runtimeId, opts.projectId, { signal: opts.signal });
+      }
+    } else {
       const created = await tenantRuntimeProvider.create(opts.projectId, opts.stack, undefined, {
         servicePort: opts.runtimePort,
         signal: opts.signal,

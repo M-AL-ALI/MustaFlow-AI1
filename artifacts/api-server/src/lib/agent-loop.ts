@@ -3142,7 +3142,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           input.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
             ? await checkZeroSealedFinalizeContract({
                 files: workspace.all(),
-                manifestRevision: `zero-task-${input.taskId ?? input.projectId}-node-v1`,
               })
             : null;
         if (sealedFinalizeCheck !== null) {

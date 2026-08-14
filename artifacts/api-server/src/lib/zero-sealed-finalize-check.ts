@@ -42,12 +42,12 @@ export function describeZeroSealedSourceRepairs(reasonCodes: readonly string[]):
 /** Run the job wrapper's sealed-source contract while Zero can still repair it. */
 export async function checkZeroSealedFinalizeContract(input: {
   files: readonly BuilderFile[];
-  manifestRevision: string;
+  manifestRevision?: string;
 }): Promise<ZeroSealedFinalizeCheckResult> {
   try {
     const prepared = prepareZeroSealedNodeSource({
       files: input.files,
-      manifestRevision: input.manifestRevision,
+      ...(input.manifestRevision === undefined ? {} : { manifestRevision: input.manifestRevision }),
       skipEligibilityPrecheck: true,
     });
     await assertZeroGeneratedEligibility({

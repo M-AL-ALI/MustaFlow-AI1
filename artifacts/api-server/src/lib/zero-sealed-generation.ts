@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ZERO_GENERATION_FORMAT,
   ZERO_GENERATION_SCHEMA_VERSION,
@@ -203,9 +204,29 @@ export interface PreparedZeroSealedNodeRefinement extends PreparedZeroSealedNode
   unchangedPaths: string[];
 }
 
+export function zeroSealedNodeManifestRevision(files: readonly BuilderFile[]): string {
+  const identity = [...files]
+    .map((file) => ({ path: file.path, mimeType: file.mimeType, content: file.content }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const sha256 = createHash("sha256")
+    .update(
+      JSON.stringify({
+        format: ZERO_GENERATION_FORMAT,
+        schemaVersion: ZERO_GENERATION_SCHEMA_VERSION,
+        runtimePort: ZERO_SEALED_RUNTIME_PORT,
+        healthPath: ZERO_SEALED_HEALTH_PATH,
+        buildCommand: ZERO_SEALED_BUILD_COMMAND,
+        startCommand: ZERO_SEALED_START_COMMAND,
+        files: identity,
+      }),
+    )
+    .digest("hex");
+  return `zero-node-v1-${sha256}`;
+}
+
 export function prepareZeroSealedNodeSource(input: {
   files: readonly BuilderFile[];
-  manifestRevision: string;
+  manifestRevision?: string;
   /** Product generator paths run the canonical async eligibility scanner next. */
   skipEligibilityPrecheck?: boolean;
 }): PreparedZeroSealedNodeSource {
@@ -265,10 +286,13 @@ export function prepareZeroSealedNodeSource(input: {
       mimeType: "application/typescript",
     });
   }
+  const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
   return {
-    files: [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)),
+    files,
     dependencyPlan: dependencyPlan(pkg),
-    manifest: makeZeroSealedNodeManifest(input.manifestRevision),
+    manifest: makeZeroSealedNodeManifest(
+      input.manifestRevision ?? zeroSealedNodeManifestRevision(files),
+    ),
   };
 }
 
@@ -282,7 +306,7 @@ export function prepareZeroSealedNodeRefinement(input: {
   existingFiles: readonly BuilderFile[];
   changedFiles: readonly BuilderFile[];
   removedPaths: readonly string[];
-  manifestRevision: string;
+  manifestRevision?: string;
 }): PreparedZeroSealedNodeRefinement {
   const removed = new Set(input.removedPaths);
   const merged = new Map(

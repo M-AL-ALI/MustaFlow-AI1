@@ -48,9 +48,16 @@ describe("Zero sealed generation product wiring", () => {
     expect(provisioning).toContain("if (!requiresDirectDatabase)");
     expect(projects).toContain("!requiresDirectDatabase || process.env.NEON_API_KEY");
     expect(jobs).not.toContain('created === null || "error" in created || !created.endpoint');
+    expect(jobs).not.toContain("if (!runtimeId || !opts.containerUrl)");
+    expect(jobs).not.toContain("zero-task-${taskId}-node-v1");
     expect(jobs).toContain('provisioningStatus: created.endpoint ? "ready" : "provisioning"');
     expect(jobs).toContain("runtimeId = created.runtimeId");
     expect(jobs).toContain("tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(");
+    expect(jobs).toContain(
+      "existingRuntime.manifestRevision === opts.zeroSealedGeneration.manifest.revision",
+    );
+    expect(jobs).toContain("tenantRuntimeProvider.stop(runtimeId");
+    expect(jobs).toContain("reused the matching healthy runtime");
     expect(jobs).not.toContain("runtime.start completed without a durable endpoint");
     expect(jobs).toContain('startedRuntime.status !== "running"');
     expect(jobs).toContain("startedRuntime.identity !== result.runtimeId");

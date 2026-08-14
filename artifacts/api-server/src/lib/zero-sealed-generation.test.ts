@@ -170,6 +170,28 @@ describe("Zero sealed generator integration", () => {
     );
   });
 
+  it("derives one content identity across retries and changes it only with source semantics", () => {
+    const first = prepareZeroSealedNodeSource({ files: generatedFiles() });
+    const identicalRetry = prepareZeroSealedNodeSource({ files: generatedFiles() });
+    const sourceChange = prepareZeroSealedNodeSource({ files: generatedFiles(true) });
+
+    expect(first.manifest.revision).toMatch(/^zero-node-v1-[0-9a-f]{64}$/u);
+    expect(identicalRetry.manifest.revision).toBe(first.manifest.revision);
+    expect(sourceChange.manifest.revision).not.toBe(first.manifest.revision);
+  });
+
+  it("keeps refinement identity equal to the equivalent complete source tree", () => {
+    const complete = prepareZeroSealedNodeSource({ files: generatedFiles(true) });
+    const entry = generatedFiles(true).find((file) => file.path === "src/index.ts")!;
+    const refinement = prepareZeroSealedNodeRefinement({
+      existingFiles: generatedFiles(),
+      changedFiles: [entry],
+      removedPaths: [],
+    });
+
+    expect(refinement.manifest.revision).toBe(complete.manifest.revision);
+  });
+
   it("continues a partial sealed build through the same source contract", () => {
     const existing = generatedFiles();
     existing.push({
