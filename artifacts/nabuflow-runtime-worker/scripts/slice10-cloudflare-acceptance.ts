@@ -33,6 +33,8 @@ const runtimeBuildDiagnosticEvidencePath = resolve(
   `gateway-doorman-2b-ix-b10-${RUN_ID}-zero-build-precleanup.json`,
 );
 const REAL_ZERO_BUILD_ID = process.env.SLICE10_REAL_ZERO_BUILD_ID;
+const SESSION_CONTROL_TOKEN = process.env.SLICE10_RUNTIME_CONTROL_TOKEN?.trim();
+const SESSION_PREVIEW_PRIVATE_KEY = process.env.SLICE10_PREVIEW_PRIVATE_KEY?.trim();
 const wranglerCli = resolve(workerRoot, "node_modules", "wrangler", "bin", "wrangler.js");
 const tsxCli = resolve(workerRoot, "node_modules", "tsx", "dist", "cli.mjs");
 
@@ -347,22 +349,44 @@ async function captureRealZeroBuildDiagnostic(): Promise<void> {
 
 assertCondition(existsSync(wranglerCli), "Pinned Wrangler CLI is unavailable");
 assertCondition(existsSync(tsxCli), "Pinned tsx CLI is unavailable");
+assertCondition(
+  (SESSION_CONTROL_TOKEN === undefined) === (SESSION_PREVIEW_PRIVATE_KEY === undefined),
+  "Session control token and preview private key must be supplied together",
+);
 mkdirSync(outputRoot, { recursive: true });
 
-let controlToken = secret();
-let vaultKek = secret();
+const reuseSessionRotation =
+  SESSION_CONTROL_TOKEN !== undefined && SESSION_PREVIEW_PRIVATE_KEY !== undefined;
+let controlToken = SESSION_CONTROL_TOKEN ?? secret();
+let vaultKek = reuseSessionRotation ? "" : secret();
 let previewPrivateKey: string;
 let workloadPrivateKey: string;
 let failure: string | null = null;
 let surfaceOpened = false;
 
 try {
-  const previewPair = generateKeyPairSync("ec", {
-    namedCurve: "prime256v1",
-    publicKeyEncoding: { type: "spki", format: "pem" },
-    privateKeyEncoding: { type: "pkcs8", format: "pem" },
-  });
-  previewPrivateKey = previewPair.privateKey;
+  let previewPublicKey = "";
+  if (reuseSessionRotation) {
+    previewPrivateKey = SESSION_PREVIEW_PRIVATE_KEY!;
+    record("runtime.rotation.session-reused", 200, {
+      bindingNames: [
+        "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
+        "CLOUFLOW_RUNTIME_CONTROL_TOKEN",
+        "CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY",
+        "CLOUDFLARE_CAPABILITY_VAULT_KEK_V1",
+      ],
+      signerAlreadySynchronized: true,
+      valuesPersisted: false,
+    });
+  } else {
+    const previewPair = generateKeyPairSync("ec", {
+      namedCurve: "prime256v1",
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    previewPrivateKey = previewPair.privateKey;
+    previewPublicKey = previewPair.publicKey;
+  }
   const workloadPair = generateKeyPairSync("ec", {
     namedCurve: "prime256v1",
     publicKeyEncoding: { type: "spki", format: "pem" },
@@ -370,31 +394,36 @@ try {
   });
   workloadPrivateKey = workloadPair.privateKey;
 
-  let rotationPayload = JSON.stringify({
-    CLOUDFLARE_RUNTIME_CONTROL_TOKEN: controlToken,
-    CLOUFLOW_RUNTIME_CONTROL_TOKEN: controlToken,
-    CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: previewPair.publicKey,
-    CLOUDFLARE_CAPABILITY_VAULT_KEK_V1: vaultKek,
-  });
-  const rotation = await runProcess(
-    process.execPath,
-    [wranglerCli, "secret", "bulk", "--name", "nabuflow-runtime-staging"],
-    { input: rotationPayload, timeoutMs: 180_000 },
-  );
-  rotationPayload = "";
-  assertCondition(rotation.code === 0, `Runtime atomic rotation failed (${String(rotation.code)})`);
-  record("runtime.rotation.atomic", 200, {
-    bindingNames: [
-      "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
-      "CLOUFLOW_RUNTIME_CONTROL_TOKEN",
-      "CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY",
-      "CLOUDFLARE_CAPABILITY_VAULT_KEK_V1",
-    ],
-    valuesPersisted: false,
-  });
-  // Wrangler's Windows process tree can linger briefly after secret bulk and native-abort a
-  // back-to-back deploy. The bounded settle belongs to launcher mechanics, not product timing.
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 12_000));
+  if (!reuseSessionRotation) {
+    let rotationPayload = JSON.stringify({
+      CLOUDFLARE_RUNTIME_CONTROL_TOKEN: controlToken,
+      CLOUFLOW_RUNTIME_CONTROL_TOKEN: controlToken,
+      CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: previewPublicKey,
+      CLOUDFLARE_CAPABILITY_VAULT_KEK_V1: vaultKek,
+    });
+    const rotation = await runProcess(
+      process.execPath,
+      [wranglerCli, "secret", "bulk", "--name", "nabuflow-runtime-staging"],
+      { input: rotationPayload, timeoutMs: 180_000 },
+    );
+    rotationPayload = "";
+    assertCondition(
+      rotation.code === 0,
+      `Runtime atomic rotation failed (${String(rotation.code)})`,
+    );
+    record("runtime.rotation.atomic", 200, {
+      bindingNames: [
+        "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
+        "CLOUFLOW_RUNTIME_CONTROL_TOKEN",
+        "CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY",
+        "CLOUDFLARE_CAPABILITY_VAULT_KEK_V1",
+      ],
+      valuesPersisted: false,
+    });
+    // Wrangler's Windows process tree can linger briefly after secret bulk and native-abort a
+    // back-to-back deploy. The bounded settle belongs to launcher mechanics, not product timing.
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 12_000));
+  }
   await captureRealZeroBuildDiagnostic();
 
   writeFileSync(openConfigPath, buildProvisionerConfig(workloadPair.publicKey, true), {
