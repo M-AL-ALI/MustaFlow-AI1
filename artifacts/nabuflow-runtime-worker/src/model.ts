@@ -443,7 +443,7 @@ export interface CapabilityVault {
   revokeStripe(input: {
     projectId: number;
     expectedRevision: string;
-  }): Promise<"revoked" | "not_found" | "conflict">;
+  }): Promise<"revoked" | "not_found" | "conflict" | "cleanup_unavailable">;
   invokeStripe(input: {
     projectId: number;
     invocation: CapabilityInvocation;

@@ -294,9 +294,10 @@ describe("capability vault envelope", () => {
     const providerFetch = vi.fn(async (request: Request) => {
       const url = new URL(request.url);
       expect(url.origin).toBe("https://api.stripe.com");
+      const isCancel = url.pathname.endsWith("/cancel");
       return Response.json({
         id: "pi_test123",
-        status: "requires_payment_method",
+        status: isCancel ? "canceled" : "requires_payment_method",
         amount: 1_099,
         amount_received: 0,
         currency: "usd",
@@ -439,7 +440,82 @@ describe("capability vault envelope", () => {
       await expect(
         vault.revokeStripe({ projectId: 42, expectedRevision: "stripe-v2" }),
       ).resolves.toBe("revoked");
+      expect(providerFetch).toHaveBeenCalledTimes(4);
+      expect((providerFetch.mock.calls[3]?.[0] as Request).url).toBe(
+        "https://api.stripe.com/v1/payment_intents/pi_test123/cancel",
+      );
       expect(storage.serialized()).not.toMatch(/stripe-idempotency|stripe-object|sk_test/iu);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails Stripe revocation closed until every owned test object is canceled", async () => {
+    const storage = new MemoryVaultStorage();
+    const vault = new CapabilityVaultDurableObject(
+      { storage } as unknown as DurableObjectState,
+      fakeEnv(),
+    );
+    const testKey = syntheticStripeKey("s", "test", "c");
+    await vault.provisionStripe({
+      projectId: 42,
+      revision: "stripe-cleanup-v1",
+      definition: stripeDefinition,
+      policy: { allowedCurrencies: ["usd"], maxAmount: 50_000 },
+      credential: { kind: "stripe-test-secret-key", value: testKey },
+    });
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 42,
+      role: "production",
+      slot: "blue",
+    });
+    let cancellationAvailable = false;
+    const providerFetch = vi.fn(async (request: Request) => {
+      if (request.url.endsWith("/cancel") && !cancellationAvailable) {
+        return Response.json({ error: { type: "api_error" } }, { status: 503 });
+      }
+      return Response.json({
+        id: "pi_cleanup123",
+        status: request.url.endsWith("/cancel") ? "canceled" : "requires_payment_method",
+        amount: 1_099,
+        amount_received: 0,
+        currency: "usd",
+        created: 1_785_859_200,
+        livemode: false,
+      });
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    try {
+      await expect(
+        vault.invokeStripe({
+          projectId: 42,
+          invocation: {
+            v: 1,
+            capability: { provider: "stripe", name: "payments" },
+            action: "execute",
+            requestId: "stripe-cleanup-create-0001",
+            input: {
+              kind: "create-payment-intent",
+              idempotencyKey: "cleanup-order-00000001",
+              amount: 1_099,
+              currency: "usd",
+            },
+            caller: { containerId: "container-cleanup-0001", runtimeIdentity: identity },
+          },
+        }),
+      ).resolves.toMatchObject({ state: "success" });
+
+      await expect(
+        vault.revokeStripe({ projectId: 42, expectedRevision: "stripe-cleanup-v1" }),
+      ).resolves.toBe("cleanup_unavailable");
+      expect(storage.serialized()).toMatch(/capability:stripe:payments|stripe-object:/u);
+
+      cancellationAvailable = true;
+      await expect(
+        vault.revokeStripe({ projectId: 42, expectedRevision: "stripe-cleanup-v1" }),
+      ).resolves.toBe("revoked");
+      expect(storage.serialized()).not.toMatch(/capability:stripe:payments|stripe-object:/u);
     } finally {
       vi.unstubAllGlobals();
     }

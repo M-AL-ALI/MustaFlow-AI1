@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ZERO_GENERATION_FORMAT,
   ZERO_GENERATION_SCHEMA_VERSION,
@@ -22,6 +23,7 @@ export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARG
 - Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
+- Do not create .env files in sealed-native projects, including .env.example. Sealed apps receive no tenant credentials or secret configuration.
 - Bind the HTTP server to 0.0.0.0 and Number(process.env.PORT ?? "8080").
 - GET /healthz must return 200 without touching a database or any external service.
 - package.json scripts are exactly build="tsc" and start="node dist/src/index.js". Set TypeScript rootDir to "." so the source-owned nabuflow module and src/ compile together. Declare every dependency normally; the trusted Pantry resolves and provisions them. Never emit npm install, npx, registry URLs, or lockfile bootstrap commands.
@@ -33,6 +35,31 @@ export class ZeroSealedGenerationConfigurationError extends Error {
   constructor(message = "Sealed Zero generation is not enabled for this deployment") {
     super(message);
     this.name = "ZeroSealedGenerationConfigurationError";
+  }
+}
+
+export type ZeroSealedSourceContractReason =
+  | "required_files"
+  | "package_json"
+  | "runtime_scripts"
+  | "typescript_config"
+  | "typescript_output_layout"
+  | "sdk_import"
+  | "network_bind"
+  | "runtime_port"
+  | "health_route"
+  | "credential_or_dependency_egress";
+
+export class ZeroSealedSourceContractError extends Error {
+  readonly code = "zero_sealed_source_contract_error";
+  readonly retryable = false;
+
+  constructor(
+    readonly reasons: readonly ZeroSealedSourceContractReason[],
+    readonly path?: string,
+  ) {
+    super(`Sealed Node source contract failed: ${reasons.join(", ")}${path ? ` (${path})` : ""}`);
+    this.name = "ZeroSealedSourceContractError";
   }
 }
 
@@ -53,6 +80,30 @@ export function resolveZeroGenerationTarget(
     throw new ZeroSealedGenerationConfigurationError();
   }
   return "cloudflare-sealed-staging-v1";
+}
+
+/**
+ * Legacy/Fly projects retain their existing direct database provisioning.
+ * Sealed Cloudflare projects receive database material only through the
+ * Acceptance Provisioner -> Capability Vault handoff, never a project secret.
+ */
+export function requiresDirectProjectDatabaseProvisioning(
+  environment: Record<string, string | undefined>,
+): boolean {
+  return resolveZeroGenerationTarget(environment) === "legacy-v1";
+}
+
+/**
+ * New sealed projects are stamped with the same fixed port carried by their
+ * generated runtime manifest. Legacy/Fly rows retain the historical nullable
+ * runtime-port behavior byte-for-byte.
+ */
+export function resolveZeroProjectRuntimePort(
+  environment: Record<string, string | undefined>,
+): number | null {
+  return resolveZeroGenerationTarget(environment) === "cloudflare-sealed-staging-v1"
+    ? ZERO_SEALED_RUNTIME_PORT
+    : null;
 }
 
 export function readZeroPantryPublicKeys(
@@ -147,57 +198,84 @@ export interface PreparedZeroSealedNodeSource {
   manifest: RuntimeManifestContract;
 }
 
+export interface PreparedZeroSealedNodeRefinement extends PreparedZeroSealedNodeSource {
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedPaths: string[];
+}
+
+export function zeroSealedNodeManifestRevision(files: readonly BuilderFile[]): string {
+  const identity = [...files]
+    .map((file) => ({ path: file.path, mimeType: file.mimeType, content: file.content }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const sha256 = createHash("sha256")
+    .update(
+      JSON.stringify({
+        format: ZERO_GENERATION_FORMAT,
+        schemaVersion: ZERO_GENERATION_SCHEMA_VERSION,
+        runtimePort: ZERO_SEALED_RUNTIME_PORT,
+        healthPath: ZERO_SEALED_HEALTH_PATH,
+        buildCommand: ZERO_SEALED_BUILD_COMMAND,
+        startCommand: ZERO_SEALED_START_COMMAND,
+        files: identity,
+      }),
+    )
+    .digest("hex");
+  return `zero-node-v1-${sha256}`;
+}
+
 export function prepareZeroSealedNodeSource(input: {
   files: readonly BuilderFile[];
-  manifestRevision: string;
+  manifestRevision?: string;
   /** Product generator paths run the canonical async eligibility scanner next. */
   skipEligibilityPrecheck?: boolean;
 }): PreparedZeroSealedNodeSource {
   const byPath = new Map(input.files.map((file) => [file.path, { ...file }]));
+  for (const file of byPath.values()) {
+    if (/(?:^|\/)\.env(?:\.|$)/u.test(file.path)) {
+      throw new ZeroSealedSourceContractError(["credential_or_dependency_egress"], file.path);
+    }
+  }
   const packageFile = byPath.get("package.json");
   const entry = byPath.get("src/index.ts");
   const typeScriptConfigFile = byPath.get("tsconfig.json");
   if (packageFile === undefined || entry === undefined || typeScriptConfigFile === undefined) {
-    throw new Error(
-      "Sealed Node generation requires package.json, tsconfig.json, and src/index.ts",
-    );
+    throw new ZeroSealedSourceContractError(["required_files"]);
   }
   let pkg: PackageJson;
   try {
     pkg = JSON.parse(packageFile.content) as PackageJson;
   } catch {
-    throw new Error("Sealed Node package.json is invalid");
+    throw new ZeroSealedSourceContractError(["package_json"], "package.json");
   }
   if (pkg.scripts?.build !== "tsc" || pkg.scripts?.start !== "node dist/src/index.js") {
-    throw new Error("Sealed Node scripts do not match the runtime manifest argv");
+    throw new ZeroSealedSourceContractError(["runtime_scripts"], "package.json");
   }
   let typeScriptConfig: TypeScriptConfig;
   try {
     typeScriptConfig = JSON.parse(typeScriptConfigFile.content) as TypeScriptConfig;
   } catch {
-    throw new Error("Sealed Node tsconfig.json is invalid");
+    throw new ZeroSealedSourceContractError(["typescript_config"], "tsconfig.json");
   }
   if (
     typeScriptConfig.compilerOptions?.rootDir !== "." ||
     typeScriptConfig.compilerOptions?.outDir !== "dist"
   ) {
-    throw new Error("Sealed Node TypeScript output must use rootDir=. and outDir=dist");
+    throw new ZeroSealedSourceContractError(["typescript_output_layout"], "tsconfig.json");
   }
-  if (
-    !entry.content.includes('"0.0.0.0"') ||
-    !entry.content.includes("process.env.PORT") ||
-    !entry.content.includes(ZERO_SEALED_HEALTH_PATH) ||
-    !entry.content.includes("nabuflow/runtime") ||
-    entry.content.includes(".nabuflow/runtime")
-  ) {
-    throw new Error("Sealed Node entrypoint is missing SDK, bind, port, or health requirements");
+  const entryReasons: ZeroSealedSourceContractReason[] = [];
+  if (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
+    entryReasons.push("sdk_import");
+  if (!entry.content.includes('"0.0.0.0"')) entryReasons.push("network_bind");
+  if (!entry.content.includes("process.env.PORT")) entryReasons.push("runtime_port");
+  if (!entry.content.includes(ZERO_SEALED_HEALTH_PATH)) entryReasons.push("health_route");
+  if (entryReasons.length > 0) {
+    throw new ZeroSealedSourceContractError(entryReasons, "src/index.ts");
   }
   if (input.skipEligibilityPrecheck !== true) {
     for (const file of byPath.values()) {
       if (SECRET_ENV_PATTERN.test(file.content) || INSTALL_OR_REGISTRY_PATTERN.test(file.content)) {
-        throw new Error(
-          `Sealed Node source failed credential or dependency-egress scan: ${file.path}`,
-        );
+        throw new ZeroSealedSourceContractError(["credential_or_dependency_egress"], file.path);
       }
     }
   }
@@ -208,10 +286,60 @@ export function prepareZeroSealedNodeSource(input: {
       mimeType: "application/typescript",
     });
   }
+  const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
   return {
-    files: [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)),
+    files,
     dependencyPlan: dependencyPlan(pkg),
-    manifest: makeZeroSealedNodeManifest(input.manifestRevision),
+    manifest: makeZeroSealedNodeManifest(
+      input.manifestRevision ?? zeroSealedNodeManifestRevision(files),
+    ),
+  };
+}
+
+/**
+ * Apply a refinement diff to the durable source tree before re-running the
+ * sealed-source contract. The vendored SDK is platform-owned, so an upgrade or
+ * first successful continuation can add/update those files without asking the
+ * model to reproduce them.
+ */
+export function prepareZeroSealedNodeRefinement(input: {
+  existingFiles: readonly BuilderFile[];
+  changedFiles: readonly BuilderFile[];
+  removedPaths: readonly string[];
+  manifestRevision?: string;
+}): PreparedZeroSealedNodeRefinement {
+  const removed = new Set(input.removedPaths);
+  const merged = new Map(
+    input.existingFiles
+      .filter((file) => !removed.has(file.path))
+      .map((file) => [file.path, { ...file }]),
+  );
+  for (const file of input.changedFiles) merged.set(file.path, { ...file });
+
+  const prepared = prepareZeroSealedNodeSource({
+    files: [...merged.values()],
+    manifestRevision: input.manifestRevision,
+    skipEligibilityPrecheck: true,
+  });
+  const existingByPath = new Map(input.existingFiles.map((file) => [file.path, file]));
+  const preparedPaths = new Set(prepared.files.map((file) => file.path));
+  const isUnchanged = (file: BuilderFile): boolean => {
+    const existing = existingByPath.get(file.path);
+    return (
+      existing !== undefined &&
+      existing.content === file.content &&
+      existing.mimeType === file.mimeType
+    );
+  };
+
+  return {
+    ...prepared,
+    changedFiles: prepared.files.filter((file) => !isUnchanged(file)),
+    removedPaths: input.existingFiles
+      .filter((file) => !preparedPaths.has(file.path))
+      .map((file) => file.path)
+      .sort(),
+    unchangedPaths: prepared.files.filter(isUnchanged).map((file) => file.path),
   };
 }
 

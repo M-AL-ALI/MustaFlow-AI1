@@ -62,6 +62,7 @@ import {
   supportsArtifactDeployment,
   supportsLayeredArtifactDeployment,
   supportsZeroGeneration,
+  supportsExternalRuntimeLogTail,
   type TenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
@@ -161,9 +162,12 @@ describe("TenantRuntimeProvider Fly adapter", () => {
       controlToken: "control-token-with-at-least-thirty-two-characters",
       deploymentNamespace: "staging",
     });
+    expect(supportsExternalRuntimeLogTail(provider)).toBe(true);
+    expect(supportsExternalRuntimeLogTail(cloudflare)).toBe(false);
     expect(supportsArtifactDeployment(cloudflare)).toBe(true);
     expect(supportsLayeredArtifactDeployment(cloudflare)).toBe(true);
     expect(supportsZeroGeneration(cloudflare)).toBe(true);
+    expect(typeof cloudflare.zeroGenerationRuntimeDescriptorForProject).toBe("function");
   });
 
   it("keeps the unset provider path constructed as the existing Fly adapter", async () => {

@@ -628,6 +628,7 @@ export function createNabuFlowPayments(
 `);
 
 const INDEX_SOURCE = canonicalSource(String.raw`
+export { NABUFLOW_RUNTIME_SDK_VERSION } from "./db";
 export * from "./db";
 export * from "./payments";
 `);

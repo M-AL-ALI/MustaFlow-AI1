@@ -138,6 +138,7 @@ import {
 import type { AgentLoopReport } from "./agent-loop";
 import {
   isZeroSealedGenerationTarget,
+  prepareZeroSealedNodeRefinement,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
   resolveZeroGenerationTarget,
@@ -2102,6 +2103,61 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
   }
 }
 
+// Two-int advisory-lock namespace for the short project-job claim transaction.
+// The prior one-int, session-scoped lock used raw project IDs. On a transaction-
+// pooled Neon connection it could be acquired and released on different backend
+// sessions, leaking the lock; raw IDs also shared a global namespace with queue
+// infrastructure. A transaction-scoped, namespaced lock is released by Postgres
+// at COMMIT/ROLLBACK and cannot outlive or escape its claim transaction.
+export const PROJECT_JOB_LOCK_NAMESPACE = 0x4e424a42; // "NBJB"
+
+export async function claimProjectJobExecution(
+  taskId: number,
+  projectId: number,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${PROJECT_JOB_LOCK_NAMESPACE}, ${projectId})`,
+    );
+
+    // Only an executing or staged-review task blocks this claim. Two concurrent
+    // planning claimants serialize on the xact lock: the first becomes building;
+    // the second then observes it and remains durably queued.
+    const [blocker] = await tx
+      .select({ id: agentTasksTable.id })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.projectId, projectId),
+          ne(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["building", "needs_review", "needs_fix"]),
+        ),
+      )
+      .limit(1);
+
+    if (blocker) {
+      await tx
+        .update(agentTasksTable)
+        .set({ status: "queued" })
+        .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.status, "planning")));
+      return false;
+    }
+
+    const transitioned = await tx
+      .update(agentTasksTable)
+      .set({ status: "building", startedAt: sql`now()` })
+      .where(
+        and(
+          eq(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["queued", "planning"]),
+        ),
+      )
+      .returning({ id: agentTasksTable.id });
+
+    return transitioned.length === 1;
+  });
+}
+
 export async function runJob(input: JobInput): Promise<void> {
   const {
     taskId,
@@ -2197,39 +2253,20 @@ export async function runJob(input: JobInput): Promise<void> {
   const { signal } = abortController;
   activeJobControllers.set(taskId, abortController);
 
-  // Acquire a Postgres session-level advisory lock keyed by projectId.
-  // pg_advisory_lock blocks until the lock is free, serializing same-project jobs
-  // across all Node processes / replicas. Released in the finally block.
-  const lockClient = await pool.connect();
-  let lockAcquired = false;
-
+  // Atomically claim execution across replicas. The short xact-scoped lock is
+  // safe through transaction poolers and cannot survive a dead request/consumer.
   try {
-    await lockClient.query("SELECT pg_advisory_lock($1::bigint)", [projectId]);
-    lockAcquired = true;
+    const claimed = await claimProjectJobExecution(taskId, projectId);
 
-    await emitEvent(taskId, "queued", "Task received, starting pipeline…");
-
-    // Atomically transition queued/planning → building.
-    // Tasks are created with status "queued" (background) or "planning" (immediate foreground).
-    // Using WHERE status IN ('queued','planning') makes the check+update a single round-trip,
-    // eliminating the TOCTOU window. If the user dismissed (canceled) the task while we were
-    // waiting for the advisory lock, status = 'canceled' so 0 rows are updated → abort cleanly.
-    // Both build and refine tasks transition to "building" so the frontend never shows a refine
-    // task stuck on "planning" while the pipeline is actively running.
-    const transitioned = await db
-      .update(agentTasksTable)
-      .set({ status: "building", startedAt: sql`now()` })
-      .where(
-        and(
-          eq(agentTasksTable.id, taskId),
-          inArray(agentTasksTable.status, ["queued", "planning"]),
-        ),
-      )
-      .returning({ id: agentTasksTable.id });
-    if (transitioned.length === 0) {
-      logger.info({ taskId, projectId }, "Task was canceled before pipeline started — skipping");
+    if (!claimed) {
+      logger.info(
+        { taskId, projectId },
+        "Task was canceled, already claimed, or queued behind another project job - skipping",
+      );
       return;
     }
+
+    await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
     // Start the job-level heartbeat now that we're committed to running.
     // Fire immediately (in case the pre-build setup is slow) and every 30 s.
@@ -2739,8 +2776,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
-        if (kind !== "build" || resolvedIsMobile || resolvedProjectStack !== "node-api") {
-          throw new Error("Sealed Zero generation currently accepts fresh Node API builds only");
+        if (resolvedIsMobile || resolvedProjectStack !== "node-api") {
+          throw new Error("Sealed Zero generation accepts Node API projects only");
         }
         if (project.runtimePort !== ZERO_SEALED_RUNTIME_PORT) {
           await db
@@ -2883,7 +2920,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           runtimePort: project.runtimePort,
           zeroGenerationTarget,
           modelAdapter: input.modelAdapter,
-          sealedManifestRevision: `zero-task-${taskId}-node-v1`,
         };
 
         // ── Agentic pre-flight gate ────────────────────────────────────────────
@@ -3078,7 +3114,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
           zeroSealedGeneration = prepareZeroSealedNodeSource({
             files: result.files,
-            manifestRevision: `zero-task-${taskId}-node-v1`,
             skipEligibilityPrecheck: true,
           });
           await assertZeroGeneratedEligibility({
@@ -3450,7 +3485,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         };
 
         // ── Agentic pre-flight gate (refine path) ────────────────────────────
-        if (project.containerId || project.builderMode === "agentic") {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          (project.containerId || project.builderMode === "agentic")
+        ) {
           const preflightResult = await runAgenticPreflightGate(
             projectId,
             taskId,
@@ -3478,7 +3516,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // Disable Fly autostop on the build machine so it cannot idle-stop during
         // long-running inline execs (npm install, tsc, vite build).  The keepalive
         // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
-        if (project.containerId && project.containerUrl) {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+          project.containerId &&
+          project.containerUrl
+        ) {
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
             await import("./tenant-runtime");
           keepaliveMachineId = project.containerId;
@@ -3516,8 +3558,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: effectiveRefinePlanContext,
                   existingFiles,
-                  containerId: projectHasLiveServer() ? project.containerId : null,
-                  liveServerAvailable: projectHasLiveServer(),
+                  containerId:
+                    isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                      ? null
+                      : project.containerId,
+                  liveServerAvailable:
+                    !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+                  zeroGenerationTarget,
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
@@ -3541,7 +3588,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   },
                   taskId,
                   wallClockMs: input.wallClockCapMs,
-                  previewUrl: project.containerUrl ?? null,
+                  previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                    ? null
+                    : (project.containerUrl ?? null),
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
                   signal,
@@ -3625,6 +3674,30 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                     taskId: taskId as number,
                                     taskMode: agentMode,
                                   });
+
+        if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
+          const preparedRefinement = prepareZeroSealedNodeRefinement({
+            existingFiles,
+            changedFiles: refineResult.changedFiles,
+            removedPaths: refineResult.removedPaths,
+          });
+          await assertZeroGeneratedEligibility({
+            files: preparedRefinement.files,
+            dependencyPlan: preparedRefinement.dependencyPlan,
+            runtimeManifest: preparedRefinement.manifest,
+            declaredCapabilities: inferZeroDeclaredCapabilities(preparedRefinement.files),
+            pantryClosureVerified: false,
+            dependencyOutputAttested: false,
+            stage: "source",
+          });
+          zeroSealedGeneration = preparedRefinement;
+          refineResult = {
+            ...refineResult,
+            changedFiles: preparedRefinement.changedFiles,
+            removedPaths: preparedRefinement.removedPaths,
+            unchangedFiles: preparedRefinement.unchangedPaths,
+          };
+        }
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
@@ -3803,8 +3876,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 knowledgeContext: knowledgeContext || undefined,
                 planContext: effectiveRefinePlanContext,
                 existingFiles,
-                containerId: projectHasLiveServer() ? project.containerId : null,
-                liveServerAvailable: projectHasLiveServer(),
+                containerId:
+                  isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                    ? null
+                    : project.containerId,
+                liveServerAvailable:
+                  !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+                zeroGenerationTarget,
                 policyStrictness:
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
@@ -3828,7 +3906,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 },
                 taskId,
                 wallClockMs: input.wallClockCapMs,
-                previewUrl: project.containerUrl ?? null,
+                previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                  ? null
+                  : (project.containerUrl ?? null),
                 e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
@@ -4146,8 +4226,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               knowledgeContext: undefined,
               planContext: null,
               existingFiles: filesForRepair,
-              containerId: projectHasLiveServer() ? project.containerId : null,
-              liveServerAvailable: projectHasLiveServer(),
+              containerId:
+                isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+                  ? null
+                  : project.containerId,
+              liveServerAvailable:
+                !isZeroSealedGenerationTarget(zeroGenerationTarget) && projectHasLiveServer(),
+              zeroGenerationTarget,
               policyStrictness:
                 (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                 null,
@@ -4155,7 +4240,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               onBeforeRiskyOp: async () => {},
               taskId,
               wallClockMs: 3 * 60_000,
-              previewUrl: project.containerUrl ?? null,
+              previewUrl: isZeroSealedGenerationTarget(zeroGenerationTarget)
+                ? null
+                : (project.containerUrl ?? null),
               e2eEnabled: false,
               onEvent: async (t: string, m: string) => emitEvent(taskId, t, m),
               signal,
@@ -6832,15 +6919,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
 
-    // Always release the advisory lock and pool client, and clear the in-memory guard.
-    if (lockAcquired) {
-      try {
-        await lockClient.query("SELECT pg_advisory_unlock($1::bigint)", [projectId]);
-      } catch (unlockErr) {
-        logger.warn({ unlockErr, projectId }, "Failed to release advisory lock (non-fatal)");
-      }
-    }
-    lockClient.release();
+    // The cross-replica claim uses a short transaction-scoped advisory lock, so
+    // no session resource survives the claim or needs releasing here.
     activeProjectJobs.delete(projectId);
     activeJobControllers.delete(taskId);
   }
@@ -7072,11 +7152,7 @@ async function syncAgenticPreviewRuntime(opts: {
     publishPreviewSyncFailed(opts.projectId, opts.revision, warning);
   };
 
-  if (opts.zeroSealedGeneration !== undefined && (!opts.containerId || !opts.containerUrl)) {
-    throw new Error("Sealed Zero generation requires a provisioned Cloudflare runtime");
-  }
-
-  if (!opts.containerUrl) {
+  if (!opts.containerUrl && opts.zeroSealedGeneration === undefined) {
     if (opts.containerId) {
       const warning = "Preview sync failed: this container-backed project has no preview URL.";
       publishFailure(warning);
@@ -7085,7 +7161,7 @@ async function syncAgenticPreviewRuntime(opts: {
     return { ...base, previewUpdated: true, previewSyncQueued: true };
   }
 
-  if (!opts.containerId) {
+  if (!opts.containerId && opts.zeroSealedGeneration === undefined) {
     return {
       ...base,
       previewSyncFailed: true,
@@ -7100,10 +7176,86 @@ async function syncAgenticPreviewRuntime(opts: {
     if (!supportsZeroGeneration(tenantRuntimeProvider)) {
       throw new Error("Cloudflare Pantry and dock capabilities are unavailable");
     }
+    let runtimeId = opts.containerId;
+    const existingRuntime = runtimeId
+      ? await tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(runtimeId, opts.projectId)
+      : await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(opts.projectId);
+    if (existingRuntime) {
+      if (runtimeId && existingRuntime.identity !== runtimeId) {
+        throw new Error(
+          "zero_runtime_descriptor_incomplete: runtime identity changed during sealed continuation",
+        );
+      }
+      runtimeId = existingRuntime.identity;
+      if (!opts.containerId) {
+        await db
+          .update(projectsTable)
+          .set({
+            containerId: runtimeId,
+            containerUrl: existingRuntime.endpoint,
+            containerStatus: existingRuntime.status,
+          })
+          .where(eq(projectsTable.id, opts.projectId));
+      }
+      if (
+        existingRuntime.status === "running" &&
+        existingRuntime.manifestRevision === opts.zeroSealedGeneration.manifest.revision
+      ) {
+        await db
+          .update(projectsTable)
+          .set({
+            containerId: runtimeId,
+            containerUrl: existingRuntime.endpoint,
+            containerStatus: existingRuntime.status,
+            provisioningStatus: "ready",
+            provisioningError: null,
+            provisioningStep: null,
+          })
+          .where(eq(projectsTable.id, opts.projectId));
+        logger.info(
+          { taskId: opts.taskId, projectId: opts.projectId, runtimeId },
+          "Sealed Zero generation reused the matching healthy runtime",
+        );
+        if (opts.publishLifecycleEvents !== false && opts.revision) {
+          publishPreviewReady(opts.projectId, opts.revision);
+        }
+        return { ...base, previewUpdated: true };
+      }
+      if (existingRuntime.status !== "stopped") {
+        await emitEvent(
+          opts.taskId,
+          "narration",
+          "Stopping the current sealed runtime for its manifest transitionâ€¦",
+        );
+        await tenantRuntimeProvider.stop(runtimeId, opts.projectId, { signal: opts.signal });
+      }
+    } else {
+      const created = await tenantRuntimeProvider.create(opts.projectId, opts.stack, undefined, {
+        servicePort: opts.runtimePort,
+        signal: opts.signal,
+      });
+      if (created === null || "error" in created) {
+        throw new Error(
+          "zero_runtime_descriptor_incomplete: runtime.ensure did not return a durable identity",
+        );
+      }
+      runtimeId = created.runtimeId;
+      await db
+        .update(projectsTable)
+        .set({
+          containerId: runtimeId,
+          containerUrl: created.endpoint,
+          containerStatus: created.status,
+          provisioningStatus: created.endpoint ? "ready" : "provisioning",
+          provisioningError: null,
+          provisioningStep: created.endpoint ? null : "runtime-start",
+        })
+        .where(eq(projectsTable.id, opts.projectId));
+    }
     await emitEvent(opts.taskId, "narration", "Building through the trusted Pantry kitchen…");
     const result = await runZeroGenerationKitchen(tenantRuntimeProvider, {
       projectId: opts.projectId,
-      runtimeId: opts.containerId,
+      runtimeId,
       files: opts.files.map((file) => ({
         path: file.path,
         content: file.content,
@@ -7114,6 +7266,29 @@ async function syncAgenticPreviewRuntime(opts: {
       pantryPublicKeys: opts.zeroSealedGeneration.pantryPublicKeys,
       signal: opts.signal,
     });
+    const startedRuntime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(
+      result.runtimeId,
+      opts.projectId,
+    );
+    if (startedRuntime.identity !== result.runtimeId || startedRuntime.status !== "running") {
+      throw new Error(
+        "zero_runtime_descriptor_incomplete: runtime.start did not reach the running descriptor",
+      );
+    }
+    await db
+      .update(projectsTable)
+      .set({
+        containerId: result.runtimeId,
+        // Sealed Cloudflare previews are private data-plane routes. Unlike Fly,
+        // their durable descriptor intentionally carries no directly reachable
+        // endpoint; browser access is issued separately through a signed grant.
+        containerUrl: startedRuntime.endpoint,
+        containerStatus: startedRuntime.status,
+        provisioningStatus: "ready",
+        provisioningError: null,
+        provisioningStep: null,
+      })
+      .where(eq(projectsTable.id, opts.projectId));
     logger.info(
       {
         taskId: opts.taskId,
@@ -7138,32 +7313,37 @@ async function syncAgenticPreviewRuntime(opts: {
     execInContainer,
     npmInstallInBackground,
   } = await import("./tenant-runtime");
+  const legacyRuntimeId = opts.containerId;
+  const legacyRuntimeUrl = opts.containerUrl;
+  if (!legacyRuntimeId || !legacyRuntimeUrl) {
+    throw new Error("Legacy runtime descriptor is incomplete");
+  }
 
   try {
     if (opts.containerStatus !== "running") {
       await emitEvent(opts.taskId, "narration", "Waking preview container…");
-      await startContainer(opts.containerId, opts.projectId);
+      await startContainer(legacyRuntimeId, opts.projectId);
       const deadline = Date.now() + 45_000;
       while (Date.now() < deadline) {
-        const status = await getContainerStatus(opts.containerId);
+        const status = await getContainerStatus(legacyRuntimeId);
         if (status === "running") break;
         await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
       }
     }
 
     await emitEvent(opts.taskId, "narration", "Syncing project files to preview container…");
-    await syncFilesToContainer(opts.containerId, opts.projectId, opts.files, true);
+    await syncFilesToContainer(legacyRuntimeId, opts.projectId, opts.files, true);
 
     if (opts.removedPaths.length > 0) {
       const rmArgs = opts.removedPaths.map((path) => shellQuote(`/app/${path}`)).join(" ");
-      await execInContainer(opts.containerId, ["sh", "-c", `rm -rf -- ${rmArgs}`], opts.projectId);
+      await execInContainer(legacyRuntimeId, ["sh", "-c", `rm -rf -- ${rmArgs}`], opts.projectId);
     }
 
     const hasPackageJson = opts.files.some((f) => f.path === "package.json");
     let nodeModulesMissing = false;
     if (hasPackageJson) {
       const nodeModulesCheck = await execInContainer(
-        opts.containerId,
+        legacyRuntimeId,
         ["sh", "-c", "test -d /app/node_modules && echo __PRESENT__ || echo __MISSING__"],
         opts.projectId,
       );
@@ -7172,10 +7352,10 @@ async function syncAgenticPreviewRuntime(opts: {
 
     if (hasPackageJson && (opts.packageManifestChanged || nodeModulesMissing)) {
       await emitEvent(opts.taskId, "narration", "Installing container dependencies…");
-      const installResult = await npmInstallInBackground(opts.containerId, opts.projectId, {
+      const installResult = await npmInstallInBackground(legacyRuntimeId, opts.projectId, {
         wallClockCapMs: 6 * 60 * 1000,
         onMachineRestarted: async () => {
-          await syncFilesToContainer(opts.containerId!, opts.projectId, opts.files, true);
+          await syncFilesToContainer(legacyRuntimeId, opts.projectId, opts.files, true);
         },
       });
       if (!installResult.ok) {
@@ -7189,7 +7369,7 @@ async function syncAgenticPreviewRuntime(opts: {
     if (hasRequirements) {
       await emitEvent(opts.taskId, "narration", "Installing Python dependencies…");
       const pipResult = await execInContainer(
-        opts.containerId,
+        legacyRuntimeId,
         ["sh", "-c", "cd /app && pip install -r requirements.txt"],
         opts.projectId,
       );
@@ -7209,7 +7389,7 @@ async function syncAgenticPreviewRuntime(opts: {
     if (startCommand) {
       await emitEvent(opts.taskId, "narration", "Restarting container app server…");
       await execInContainer(
-        opts.containerId,
+        legacyRuntimeId,
         [
           "sh",
           "-c",
@@ -7227,7 +7407,7 @@ async function syncAgenticPreviewRuntime(opts: {
       );
     }
 
-    const previewCheck = await pollPreviewReachability(opts.taskId, opts.containerUrl, {
+    const previewCheck = await pollPreviewReachability(opts.taskId, legacyRuntimeUrl, {
       healthPath: healthCheckPathForStack(opts.stack),
       signal: opts.signal,
       maxWaitMs: 75_000,

@@ -5,6 +5,7 @@ import {
   RUNTIME_CONTROL_OPERATION_BOUND_MS,
   RUNTIME_START_OPERATION_BOUND_MS,
   ZERO_GENERATION_CONTROL_OPERATION_BOUND_MS,
+  ZERO_SEALED_RUNTIME_PORT,
   canonicalJson,
   beginRuntimeArtifactResponseSchema,
   beginRuntimeLayeredArtifactResponseSchema,
@@ -826,11 +827,16 @@ export class CloudflareRuntimeProvider
     if (_environment && Object.keys(_environment).length > 0)
       this.unavailable("secret-environment-at-create");
     const locator: RuntimeLocator = { projectId, role: "preview", slot: "primary" };
-    const servicePort = resolveProjectRuntimeManifest({
+    const resolvedServicePort = resolveProjectRuntimeManifest({
       stack,
       runtimePort: options?.servicePort,
       legacyProfile: "stack",
     }).servicePort;
+    // Cloudflare reserves port 3000 for its Sandbox control service. The
+    // legacy Node fallback is therefore not a valid control-plane manifest;
+    // sealed Node projects use their fixed 8080 contract instead.
+    const servicePort =
+      resolvedServicePort === 3000 ? ZERO_SEALED_RUNTIME_PORT : resolvedServicePort;
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
     const runtime = await this.descriptorRequest(
       locator,
@@ -1332,7 +1338,29 @@ export class CloudflareRuntimeProvider
       identity: runtime.identity,
       manifestRevision: runtime.manifestRevision,
       status: runtime.status,
+      endpoint: runtime.endpoint,
     };
+  }
+
+  async zeroGenerationRuntimeDescriptorForProject(projectId: number) {
+    const runtimeId = await deriveRuntimeIdentity({
+      namespace: this.config.deploymentNamespace,
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    try {
+      return await this.zeroGenerationRuntimeDescriptor(runtimeId, projectId);
+    } catch (error) {
+      if (
+        error instanceof CloudflareRuntimeControlError &&
+        error.status === 404 &&
+        error.code === "runtime_not_found"
+      ) {
+        return null;
+      }
+      throw error;
+    }
   }
   async updateEnvironment(
     _runtimeId: string,

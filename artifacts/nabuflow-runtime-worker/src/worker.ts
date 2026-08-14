@@ -2182,6 +2182,13 @@ async function executeEndpoint(
         "Capability revision changed before revocation",
       );
     }
+    if (result === "cleanup_unavailable") {
+      throw new ControlHttpError(
+        503,
+        "stripe_cleanup_unavailable",
+        "Stripe test resources could not be verified gone",
+      );
+    }
     return {
       status: 200,
       body: {

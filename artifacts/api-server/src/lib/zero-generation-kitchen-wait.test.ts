@@ -5,6 +5,8 @@ import {
   ZERO_GENERATION_KITCHEN_PRODUCT_BOUND_MS,
   ZERO_GENERATION_OBSERVATION_RESERVE_MS,
   ZERO_GENERATION_START_RESERVE_MS,
+  RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+  RUNTIME_START_OPERATION_BOUND_MS,
   ZERO_SEALED_BUILD_PLATFORM,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
@@ -59,6 +61,13 @@ function progress(state: "queued" | "running", attempt: number) {
 
 describe("Zero generator Pantry lifecycle waiting", () => {
   it("never hands commit or start less than its named reserve", () => {
+    expect(ZERO_GENERATION_KITCHEN_PRODUCT_BOUND_MS).toBe(1_800_000);
+    expect(ZERO_GENERATION_ASSEMBLY_RESERVE_MS).toBe(1_140_000);
+    expect(ZERO_GENERATION_COMMIT_RESERVE_MS).toBe(300_000);
+    expect(ZERO_GENERATION_START_RESERVE_MS).toBe(300_000);
+    expect(ZERO_GENERATION_OBSERVATION_RESERVE_MS).toBe(60_000);
+    expect(RUNTIME_ARTIFACT_OPERATION_BOUND_MS).toBe(300_000);
+    expect(RUNTIME_START_OPERATION_BOUND_MS).toBe(300_000);
     const productStartedAtMs = 10_000;
     const productDeadlineMs = productStartedAtMs + ZERO_GENERATION_KITCHEN_PRODUCT_BOUND_MS;
     const afterAssemblyMs = productStartedAtMs + ZERO_GENERATION_ASSEMBLY_RESERVE_MS;

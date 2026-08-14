@@ -211,9 +211,14 @@ const {
   function makeDb() {
     const transactionMock = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
       const tx = {
-        select: (_shape?: unknown) => ({
+        execute: vi.fn().mockResolvedValue([]),
+        select: (shape?: unknown) => ({
           from: (_table: { __id?: string }) =>
-            makeSelectChain([{ id: TASK_ID, creditsReserved: null }]),
+            makeSelectChain(
+              shape && typeof shape === "object" && Object.keys(shape).join(",") === "id"
+                ? []
+                : [{ id: TASK_ID, creditsReserved: null }],
+            ),
         }),
         update: (_table: unknown) => ({
           set: (_vals: unknown) => ({
@@ -295,6 +300,7 @@ const {
 
 vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
+  ne: () => ({}),
   and: () => ({}),
   or: () => ({}),
   inArray: () => ({}),

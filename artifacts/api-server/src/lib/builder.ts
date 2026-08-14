@@ -5529,9 +5529,9 @@ async function runStackBuildPipeline(
         ? prepareZeroSealedNodeSource({
             files: sanitisedFiles,
             skipEligibilityPrecheck: true,
-            manifestRevision:
-              args.sealedManifestRevision ??
-              `zero-node-${String(taskId ?? projectName).replace(/[^A-Za-z0-9._-]/gu, "-")}-v1`,
+            ...(args.sealedManifestRevision === undefined
+              ? {}
+              : { manifestRevision: args.sealedManifestRevision }),
           })
         : null;
     if (sealed !== null) {

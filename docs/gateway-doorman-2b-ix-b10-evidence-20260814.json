@@ -1,0 +1,65 @@
+{
+  "evidenceKind": "gateway-doorman-2b-ix-b10-final-ledger",
+  "recordedAt": "2026-08-14T08:06:41.185Z",
+  "branch": "codex/zero-cloudflare-runtime-acceptance",
+  "baseSha": "80170e938dab8022ddbf94d9e12d6551f9ce44d9",
+  "implementationSha": "80a4986fcc88f216d3140575789f0159d33db40d",
+  "result": {
+    "phaseB": "passed",
+    "gatewayChecks": 1103,
+    "cleanupChecks": 122,
+    "manifestFailureTyped502": 10,
+    "manifestFailureUntyped": 0,
+    "providerLeasesDestroyed": 4,
+    "costCurrency": "USD",
+    "costMinorUnits": 0
+  },
+  "realApplication": {
+    "projectId": 12,
+    "taskId": 32,
+    "runtimeIdentity": "nrf-e919a75364398a44-p12-preview-primary",
+    "buildId": "pbuild_zero_a8a8f2da0c0f33a9f6901a33baaeea85cb7b185b57ab4762ee7bae25bde1f1b7",
+    "status": "started_healthy",
+    "servicePort": 8080,
+    "pantryRevisionId": "pantry-2026-08-14.1",
+    "pantryRevisionRootSha256": "c4bc4fd2bfe0cd6154940bd55c7d76b235434c239091ae5f070d9c0a4156d420",
+    "outputSha256": "ee89ee6e2da2736492b4217dc4e11faca58ce3b7622dd14dbb60a2be392db977",
+    "secretMaterial": "none"
+  },
+  "gate": {
+    "requiredConsecutive": 20,
+    "totalRequests": 120,
+    "elapsedMs": 32291.6893,
+    "controlCompletedMs": 31804.9885,
+    "previewRedeemCompletedMs": 31869.1783,
+    "previewReplayPairCompletedMs": 32291.658,
+    "vaultKekCompletedMs": 32129.2987
+  },
+  "provisionerSurface": {
+    "passingOpenVersionId": "bf7f160a-4f1c-4aa1-91d3-6532724bda01",
+    "closedVersionId": "fc9aa8f3-cdba-47fb-9439-af93027e5109",
+    "closedProbeHttpStatus": 404,
+    "temporaryConfigRemoved": true,
+    "committedDefault": "closed_inert"
+  },
+  "cleanup": {
+    "runtimeR2": { "objects": 0, "bytes": 0 },
+    "trustedBuildR2": { "objects": 0, "bytes": 0 },
+    "pantryR2": { "objects": 0, "bytes": 0 },
+    "runtime": "absent_404",
+    "providerResources": "verified_gone",
+    "sessionValues": "erased"
+  },
+  "evidenceSha256": {
+    "deliveryReport": "492d04532f81101ff8ade08820752c6631921d4b573f5e6bca6f46e010a14410",
+    "gatewayEnvelope": "6b79fa1c2323fa68f286d4dc6fb22b1d19781b13dc1ed1420c10fa3c2a8a6d83",
+    "gatewayPayload": "be9e46e13e7e62e11e870bf60276db5108c4cdcefd4b2eaf7359e11202703738",
+    "task32Runtime": "733dfed31a3d8b84a14565a729ecb8854adbe9ad15767cb3f6344032f7888db3",
+    "buildPantryCleanup": "8b7fab1c9fae1f7d845f8c849449d4698b5132537b61b438cfe6c56dd48751aa",
+    "runtimeR2Deletion": "d504a31145df2994f429ebffafc09170bc9011c369de549ed5f045b215668b07",
+    "finalR2List": "f2484960d780dadcc06a8e92d6cab4cb3f9642e9f925c3e73efe8b4f7d717ae2",
+    "branchRelease": "3a3dc404afd1a6edb88379c734ce5ac415bc6e473d3118b4d47dcc1abdbab47c",
+    "baseRelease": "3c29ce5d17dc30aeab24709bc48cb244a4ff96b244ad1167ccbb93b9e816d38c",
+    "workerUnit": "3de4564f1267b44c902dbbb66de3c92011d2b873f5f1dcabfed3ef95ab985c2c"
+  }
+}

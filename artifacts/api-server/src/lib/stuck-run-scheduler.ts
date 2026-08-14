@@ -13,15 +13,51 @@
 import { db, agentTasksTable, taskEventsTable } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
+import { drainNextProjectTask } from "./jobs";
 
 const SWEEP_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
 // 8 minutes: Fly.io machine cold-wake can take 3–4 min; add ≥3 min safety
 // margin so transient slow-wake doesn't trigger a false stuck-run kill.
 const HEARTBEAT_TIMEOUT_MS = 8 * 60 * 1000; // 8 minutes
+// A foreground task normally leaves planning in the same request turn. A row
+// still there after two minutes has survived its dispatcher (request/process
+// loss or pre-dispatch failure) and must be adopted from durable state.
+export const PLANNING_DISPATCH_TIMEOUT_MS = 2 * 60 * 1000;
 
-async function sweepStuckRuns(): Promise<void> {
+export async function sweepStuckRuns(): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - HEARTBEAT_TIMEOUT_MS);
+    const planningCutoff = new Date(Date.now() - PLANNING_DISPATCH_TIMEOUT_MS);
+
+    // Atomically claim stale, never-started planning rows for recovery. Across
+    // replicas only the updater that actually changed the row receives it in
+    // RETURNING and is therefore allowed to nudge the durable queue.
+    const recoveredPlanning = await db
+      .update(agentTasksTable)
+      .set({ status: "queued" })
+      .where(
+        and(
+          eq(agentTasksTable.status, "planning"),
+          sql`${agentTasksTable.startedAt} IS NULL`,
+          sql`${agentTasksTable.createdAt} < ${planningCutoff}`,
+        ),
+      )
+      .returning({ id: agentTasksTable.id, projectId: agentTasksTable.projectId });
+
+    for (const task of recoveredPlanning) {
+      await db.insert(taskEventsTable).values({
+        taskId: task.id,
+        eventType: "dispatch_recovered",
+        message: "Recovered a task whose original dispatcher did not survive.",
+        filePath: null,
+      });
+      void drainNextProjectTask(task.projectId, task.id).catch((err) =>
+        logger.warn(
+          { err, taskId: task.id, projectId: task.projectId },
+          "stuck-run-scheduler: failed to nudge recovered planning task",
+        ),
+      );
+    }
 
     const message =
       "Task timed out because Agent Zero stopped sending progress heartbeats. Please retry or inspect the last task events.";
@@ -46,7 +82,7 @@ async function sweepStuckRuns(): Promise<void> {
           )`,
         ),
       )
-      .returning({ id: agentTasksTable.id });
+      .returning({ id: agentTasksTable.id, projectId: agentTasksTable.projectId });
 
     if (result.length > 0) {
       await db.insert(taskEventsTable).values(
@@ -60,6 +96,24 @@ async function sweepStuckRuns(): Promise<void> {
       logger.warn(
         { count: result.length, taskIds: result.map((r) => r.id) },
         "stuck-run-scheduler: marked stuck builds as failed",
+      );
+      for (const task of result) {
+        void drainNextProjectTask(task.projectId).catch((err) =>
+          logger.warn(
+            { err, taskId: task.id, projectId: task.projectId },
+            "stuck-run-scheduler: failed to drain after terminalizing stuck build",
+          ),
+        );
+      }
+    }
+
+    if (recoveredPlanning.length > 0) {
+      logger.warn(
+        {
+          count: recoveredPlanning.length,
+          taskIds: recoveredPlanning.map((task) => task.id),
+        },
+        "stuck-run-scheduler: adopted stale planning tasks",
       );
     }
   } catch (err) {

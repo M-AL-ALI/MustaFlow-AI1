@@ -165,7 +165,20 @@ export interface ZeroGenerationTenantRuntimeProvider extends LayeredArtifactDepl
     identity: string;
     manifestRevision: string;
     status: RuntimeStatus;
+    endpoint: string | null;
   }>;
+  /**
+   * Recover the deterministic preview runtime when the application database no
+   * longer carries its derived identity. A missing Worker-side runtime is the
+   * only condition represented by null; control and transport failures remain
+   * typed failures.
+   */
+  zeroGenerationRuntimeDescriptorForProject(projectId: number): Promise<{
+    identity: string;
+    manifestRevision: string;
+    status: RuntimeStatus;
+    endpoint: string | null;
+  } | null>;
 }
 
 export function supportsZeroGeneration(
@@ -175,7 +188,8 @@ export function supportsZeroGeneration(
   return (
     supportsLayeredArtifactDeployment(provider) &&
     typeof candidate.zeroGenerationControlRequest === "function" &&
-    typeof candidate.zeroGenerationRuntimeDescriptor === "function"
+    typeof candidate.zeroGenerationRuntimeDescriptor === "function" &&
+    typeof candidate.zeroGenerationRuntimeDescriptorForProject === "function"
   );
 }
 
@@ -192,6 +206,15 @@ export class RuntimeProviderUnavailableError extends Error {
     super(message);
     this.name = "RuntimeProviderUnavailableError";
   }
+}
+
+/**
+ * Fly exposes the historical app-level streaming tailer. Cloudflare runtime
+ * diagnostics are read through its signed control surfaces instead, so the
+ * legacy provisioning tailer must not be started for that provider.
+ */
+export function supportsExternalRuntimeLogTail(provider: TenantRuntimeProvider): boolean {
+  return provider.providerId === "fly";
 }
 
 export interface TenantRuntimeProvider {

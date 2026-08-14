@@ -34,9 +34,12 @@ import {
   ensureContainerLogTailer,
   hasContainerLayerCredentials,
   isContainerLayerConfigured,
+  tenantRuntimeProvider,
 } from "./tenant-runtime";
 import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
+import { requiresDirectProjectDatabaseProvisioning } from "./zero-sealed-generation";
+import { supportsExternalRuntimeLogTail } from "./tenant-runtime-provider";
 
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
 
@@ -120,6 +123,13 @@ function humanizeError(raw: string | undefined, provider: "fly" | "neon"): strin
   // Fall back to a sanitized excerpt of the raw error
   const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
   return provider === "fly" ? `Fly.io error: ${excerpt}` : `Neon error: ${excerpt}`;
+}
+
+function humanizeTenantRuntimeError(raw: string | undefined): string {
+  if (tenantRuntimeProvider.providerId === "fly") return humanizeError(raw, "fly");
+  if (!raw) return "Could not reach the Cloudflare runtime. Please try again.";
+  const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
+  return `Cloudflare runtime error: ${excerpt}`;
 }
 
 /** Stable, deterministic Neon project name for a given MustaFlow project. */
@@ -407,12 +417,15 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       })
       .where(eq(projectsTable.id, projectId));
 
-    // Pre-flight: both providers must be operational/configured for full agentic provisioning.
+    const requiresDirectDatabase = requiresDirectProjectDatabaseProvisioning(process.env);
+
+    // Legacy mode still requires both providers. Sealed mode provisions only
+    // the credential-free runtime; its database arrives vault-to-vault later.
     const containerLayerOperational = await isContainerLayerConfigured();
-    if (!containerLayerOperational || !process.env.NEON_API_KEY) {
+    if (!containerLayerOperational || (requiresDirectDatabase && !process.env.NEON_API_KEY)) {
       const missing: string[] = [];
-      if (!containerLayerOperational) missing.push("Fly container layer");
-      if (!process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
+      if (!containerLayerOperational) missing.push("tenant runtime layer");
+      if (requiresDirectDatabase && !process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
       logger.info(
         { projectId, missing },
         "Agentic provisioning skipped — credentials not configured (dev mode). Add secrets and retry.",
@@ -456,9 +469,12 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
           servicePort: project.runtimePort,
         });
         if (!info) {
-          containerError = "Failed to create Fly.io machine for this project.";
+          containerError =
+            tenantRuntimeProvider.providerId === "fly"
+              ? "Failed to create Fly.io machine for this project."
+              : "Failed to create Cloudflare runtime for this project.";
         } else if ("error" in info) {
-          containerError = humanizeError(info.error, "fly");
+          containerError = humanizeTenantRuntimeError(info.error);
         } else {
           containerId = info.containerId;
           await db
@@ -472,7 +488,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
         }
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
-        containerError = humanizeError(raw, "fly");
+        containerError = humanizeTenantRuntimeError(raw);
       }
       if (containerError) {
         await markError(projectId, containerError, "create_container");
@@ -481,9 +497,24 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       await completeStep(projectId, "create_container");
     }
 
-    // Start tailing this machine's stdout/stderr
-    if (containerId) {
+    // The historical Fly tailer is not a universal runtime capability.
+    // Cloudflare diagnostics flow through signed control surfaces instead.
+    if (containerId && supportsExternalRuntimeLogTail(tenantRuntimeProvider)) {
       ensureContainerLogTailer(projectId, containerId);
+    }
+
+    if (!requiresDirectDatabase) {
+      const durationMs = Date.now() - startedAt.getTime();
+      recordCompletionDurationMs(durationMs);
+      await db
+        .update(projectsTable)
+        .set({ provisioningStatus: "ready", provisioningError: null, provisioningStep: null })
+        .where(eq(projectsTable.id, projectId));
+      logger.info(
+        { projectId, durationMs },
+        "Sealed runtime provisioning complete; database capability remains vault-owned",
+      );
+      return;
     }
 
     // Step 2 — Neon Postgres

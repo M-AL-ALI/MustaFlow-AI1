@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   RuntimeManifestContract,
@@ -9,10 +10,12 @@ import type {
 import { makeZeroSealedNodeManifest, prepareZeroSealedNodeSource } from "./zero-sealed-generation";
 import {
   ZeroCapabilityGapError,
+  ZERO_ELIGIBILITY_ASSET_DIRECTORY,
   assertZeroGeneratedEligibility,
   evaluateZeroGeneratedEligibility,
   inferZeroDeclaredCapabilities,
   loadZeroEligibilityInventory,
+  resolveZeroEligibilityRepositoryRoot,
   resolveZeroIntegrationEligibility,
 } from "./zero-capability-eligibility";
 
@@ -77,6 +80,38 @@ async function evaluate(
 }
 
 describe("Zero blueprint and skill capability eligibility", () => {
+  it("finds the repository inventory from the bundled deployment layout", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "zero-eligibility-bundle-"));
+    temporaryRoots.push(root);
+    const assetRoot = path.join(
+      root,
+      "artifacts",
+      "api-server",
+      "dist",
+      ZERO_ELIGIBILITY_ASSET_DIRECTORY,
+    );
+    await mkdir(path.join(assetRoot, "blueprints"), { recursive: true });
+    await mkdir(path.join(assetRoot, "skills"), { recursive: true });
+    const bundledModuleUrl = pathToFileURL(
+      path.join(root, "artifacts", "api-server", "dist", "index.mjs"),
+    ).href;
+
+    expect(resolveZeroEligibilityRepositoryRoot(bundledModuleUrl, path.join(root, "runner"))).toBe(
+      assetRoot,
+    );
+  });
+
+  it("returns a typed inventory error when deployment assets are unavailable", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "zero-eligibility-missing-"));
+    temporaryRoots.push(root);
+
+    await expect(loadZeroEligibilityInventory(root)).rejects.toMatchObject({
+      name: "ZeroEligibilityInventoryError",
+      code: "zero_eligibility_unclassified",
+      entries: ["blueprint:inventory_unavailable"],
+    });
+  });
+
   it("classifies the exhaustive 40-blueprint/31-skill inventory", async () => {
     const inventory = await loadZeroEligibilityInventory();
     expect(inventory.blueprints.size).toBe(40);

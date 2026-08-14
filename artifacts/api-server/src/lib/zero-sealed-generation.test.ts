@@ -9,9 +9,13 @@ import {
   validateRuntimeArtifactPath,
 } from "@workspace/tenant-runtime-contracts";
 import {
+  ZeroSealedSourceContractError,
   ZeroSealedGenerationConfigurationError,
+  prepareZeroSealedNodeRefinement,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
+  requiresDirectProjectDatabaseProvisioning,
+  resolveZeroProjectRuntimePort,
   resolveZeroGenerationTarget,
 } from "./zero-sealed-generation";
 
@@ -77,6 +81,22 @@ describe("Zero sealed generator integration", () => {
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
       }),
     ).toBe("cloudflare-sealed-staging-v1");
+    expect(requiresDirectProjectDatabaseProvisioning({})).toBe(true);
+    expect(resolveZeroProjectRuntimePort({})).toBeNull();
+    expect(
+      requiresDirectProjectDatabaseProvisioning({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toBe(false);
+    expect(
+      resolveZeroProjectRuntimePort({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toBe(ZERO_SEALED_RUNTIME_PORT);
   });
 
   it("injects the vendored SDK and emits a canonical Pantry plan", () => {
@@ -150,6 +170,67 @@ describe("Zero sealed generator integration", () => {
     );
   });
 
+  it("derives one content identity across retries and changes it only with source semantics", () => {
+    const first = prepareZeroSealedNodeSource({ files: generatedFiles() });
+    const identicalRetry = prepareZeroSealedNodeSource({ files: generatedFiles() });
+    const sourceChange = prepareZeroSealedNodeSource({ files: generatedFiles(true) });
+
+    expect(first.manifest.revision).toMatch(/^zero-node-v1-[0-9a-f]{64}$/u);
+    expect(identicalRetry.manifest.revision).toBe(first.manifest.revision);
+    expect(sourceChange.manifest.revision).not.toBe(first.manifest.revision);
+  });
+
+  it("keeps refinement identity equal to the equivalent complete source tree", () => {
+    const complete = prepareZeroSealedNodeSource({ files: generatedFiles(true) });
+    const entry = generatedFiles(true).find((file) => file.path === "src/index.ts")!;
+    const refinement = prepareZeroSealedNodeRefinement({
+      existingFiles: generatedFiles(),
+      changedFiles: [entry],
+      removedPaths: [],
+    });
+
+    expect(refinement.manifest.revision).toBe(complete.manifest.revision);
+  });
+
+  it("continues a partial sealed build through the same source contract", () => {
+    const existing = generatedFiles();
+    existing.push({
+      path: "src/obsolete.ts",
+      mimeType: "application/typescript",
+      content: "export const obsolete = true;",
+    });
+    const changedEntry = {
+      ...existing.find((file) => file.path === "src/index.ts")!,
+      content: existing
+        .find((file) => file.path === "src/index.ts")!
+        .content.replace('response.send("fresh")', 'response.send("continued")'),
+    };
+
+    const prepared = prepareZeroSealedNodeRefinement({
+      existingFiles: existing,
+      changedFiles: [changedEntry],
+      removedPaths: ["src/obsolete.ts"],
+      manifestRevision: "zero-task-continued-node-v1",
+    });
+
+    expect(prepared.changedFiles.map((file) => file.path)).toEqual(
+      expect.arrayContaining([
+        "nabuflow/runtime/db.ts",
+        "nabuflow/runtime/index.ts",
+        "nabuflow/runtime/payments.ts",
+        "src/index.ts",
+      ]),
+    );
+    expect(prepared.removedPaths).toEqual(["src/obsolete.ts"]);
+    expect(prepared.unchangedPaths).toEqual(
+      expect.arrayContaining(["package.json", "tsconfig.json"]),
+    );
+    expect(prepared.files.some((file) => file.path === "src/obsolete.ts")).toBe(false);
+    expect(prepared.files.find((file) => file.path === "src/index.ts")?.content).toContain(
+      "continued",
+    );
+  });
+
   it.each([
     ["credential env", "process.env.DATABASE_URL"],
     ["tenant install", "npm install express"],
@@ -157,9 +238,17 @@ describe("Zero sealed generator integration", () => {
   ])("fails closed on %s", (_label, planted) => {
     const files = generatedFiles();
     files.push({ path: "src/unsafe.ts", mimeType: "application/typescript", content: planted });
-    expect(() => prepareZeroSealedNodeSource({ files, manifestRevision: "manifest-v1" })).toThrow(
-      /credential or dependency-egress scan/u,
-    );
+    try {
+      prepareZeroSealedNodeSource({ files, manifestRevision: "manifest-v1" });
+      throw new Error("expected sealed source contract rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ZeroSealedSourceContractError);
+      expect(error).toMatchObject({
+        code: "zero_sealed_source_contract_error",
+        reasons: ["credential_or_dependency_egress"],
+        path: "src/unsafe.ts",
+      });
+    }
   });
 
   it("memorializes the pre-slice legacy Node prompt bytes", async () => {

@@ -10,7 +10,6 @@ import {
 import { publishedHostnameSchema, routeRecordSchema } from "./route-capability";
 import { parseRuntimeIdentity } from "./runtime-identity";
 import { tenantServicePortSchema } from "./service-port";
-import { ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS } from "./artifact-commit";
 
 /**
  * Product-level wall-clock bounds for following one durable control operation.
@@ -18,7 +17,9 @@ import { ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS } from "./artifact-commit";
  * so a stable idempotency key cannot expire and create a duplicate operation.
  */
 export const RUNTIME_CONTROL_OPERATION_BOUND_MS = 5 * 60 * 1_000;
-export const RUNTIME_ARTIFACT_OPERATION_BOUND_MS = ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS;
+// Keep this public control-plane bound self-contained. Importing its equal artifact-commit alias
+// here creates an initialization-order dependency when consumers load the contracts barrel.
+export const RUNTIME_ARTIFACT_OPERATION_BOUND_MS = 5 * 60 * 1_000;
 export const ZERO_GENERATION_CONTROL_OPERATION_BOUND_MS = 5 * 60 * 1_000;
 export const RUNTIME_START_OPERATION_BOUND_MS = RUNTIME_CONTROL_OPERATION_BOUND_MS;
 

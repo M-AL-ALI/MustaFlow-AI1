@@ -163,6 +163,7 @@ import {
   handleNabuflowInvoicePaid,
   _clearNabuflowAllowlistCache,
   isBuilderAllowlistExempt,
+  isSealedStagingAcceptanceExempt,
   recordZeroChargeUsage,
   type NabuflowGateState,
   type NabuflowGateRequest,
@@ -236,6 +237,10 @@ const ENV_KEYS = [
   "BUILDER_ALLOWLIST",
   "BILLING_EXEMPT_ALLOWLIST",
   "REPLIT_DEPLOYMENT",
+  "TENANT_RUNTIME_PROVIDER",
+  "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE",
+  "NABUFLOW_ZERO_GENERATION_TARGET",
+  "NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST",
 ] as const;
 let savedEnv: Record<string, string | undefined>;
 
@@ -711,6 +716,47 @@ describe("enforcement & bypass", () => {
     const prodDecision = await fresh.resolveNabuflowBuildGate("user_e2e", {});
     expect(prodDecision.allowed).toBe(false); // falls through to no_plan
     vi.resetModules();
+  });
+
+  it("permits only an identity listed behind every sealed staging acceptance lock", async () => {
+    process.env.CREDITS_ENFORCEMENT = "true";
+    process.env.REPLIT_DEPLOYMENT = "1";
+    process.env.TENANT_RUNTIME_PROVIDER = "cloudflare";
+    process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE = "staging";
+    process.env.NABUFLOW_ZERO_GENERATION_TARGET = "cloudflare-sealed-staging-v1";
+    process.env.NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST = "runner@example.com";
+    vi.mocked(getClerkUserById).mockResolvedValue({ email: " Runner@Example.com " } as never);
+
+    await expect(isSealedStagingAcceptanceExempt("user_runner")).resolves.toBe(true);
+    await expect(resolveNabuflowBuildGate("user_runner", {})).resolves.toEqual({
+      allowed: true,
+      bypass: "staging_acceptance",
+    });
+  });
+
+  it.each([
+    ["deployment", { REPLIT_DEPLOYMENT: undefined }],
+    ["provider", { TENANT_RUNTIME_PROVIDER: "fly" }],
+    ["namespace", { CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "production" }],
+    ["target", { NABUFLOW_ZERO_GENERATION_TARGET: "legacy" }],
+    ["identity", { NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST: "other@example.com" }],
+    ["malformed allowlist", { NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST: "not-an-email" }],
+  ])("fails closed when the staging acceptance %s lock is absent", async (_label, override) => {
+    process.env.CREDITS_ENFORCEMENT = "true";
+    process.env.REPLIT_DEPLOYMENT = "1";
+    process.env.TENANT_RUNTIME_PROVIDER = "cloudflare";
+    process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE = "staging";
+    process.env.NABUFLOW_ZERO_GENERATION_TARGET = "cloudflare-sealed-staging-v1";
+    process.env.NABUFLOW_ACCEPTANCE_BILLING_EXEMPT_ALLOWLIST = "runner@example.com";
+    for (const [key, value] of Object.entries(override)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    vi.mocked(getClerkUserById).mockResolvedValue({ email: "runner@example.com" } as never);
+
+    await expect(isSealedStagingAcceptanceExempt("user_runner")).resolves.toBe(false);
+    const decision = await resolveNabuflowBuildGate("user_runner", {});
+    expect(decision.allowed).toBe(false);
   });
 
   it("superuser bypasses everything (order: before allowlist and DB reads)", async () => {

@@ -125,7 +125,7 @@ async function requestStripe(
   validateTestSecretKey(secretKey);
   if (
     pathname !== "/v1/payment_intents" &&
-    !/^\/v1\/payment_intents\/pi_[A-Za-z0-9]+$/u.test(pathname)
+    !/^\/v1\/payment_intents\/pi_[A-Za-z0-9]+(?:\/cancel)?$/u.test(pathname)
   ) {
     throw new StripeBrokerError(502, "stripe_execution_failed", false);
   }
@@ -198,6 +198,19 @@ export function retrieveStripePaymentIntent(
     secretKey,
     `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}`,
     { method: "GET" },
+    options,
+  );
+}
+
+export function cancelStripePaymentIntent(
+  secretKey: string,
+  paymentIntentId: string,
+  options: { adapter?: StripeFetchAdapter; timeoutMs?: number } = {},
+): Promise<StripePaymentIntent> {
+  return requestStripe(
+    secretKey,
+    `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}/cancel`,
+    { method: "POST" },
     options,
   );
 }

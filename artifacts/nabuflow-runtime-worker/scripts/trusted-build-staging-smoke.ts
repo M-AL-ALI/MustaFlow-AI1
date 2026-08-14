@@ -4042,6 +4042,33 @@ async function main(): Promise<void> {
     }
 
     const preRunPantryInventory = await capturePantryObjectInventory("pre-run");
+    if (
+      process.env.NABUFLOW_CLEANUP_ONLY === "1" &&
+      process.env.NABUFLOW_ZERO_CLEANUP === "1" &&
+      typeof preRunPantryInventory === "object" &&
+      preRunPantryInventory !== null &&
+      "objects" in preRunPantryInventory &&
+      Array.isArray((preRunPantryInventory as { objects?: unknown }).objects)
+    ) {
+      const inventoryObjects = (preRunPantryInventory as { objects: unknown[] }).objects;
+      for (const object of inventoryObjects) {
+        const key =
+          typeof object === "object" &&
+          object !== null &&
+          typeof (object as { key?: unknown }).key === "string"
+            ? (object as { key: string }).key
+            : "";
+        const root = /^revisions\/pantry-\d{4}-\d{2}-\d{2}\.\d+\/([0-9a-f]{64})\.json$/u.exec(
+          key,
+        )?.[1];
+        if (root !== undefined && !createdShelfRoots.includes(root)) createdShelfRoots.push(root);
+      }
+      record("cleanup.zero-shelf-discovery", 200, {
+        roots: [...createdShelfRoots].sort(),
+        source: "authoritative-r2-list-objects",
+        sideEffectFree: true,
+      });
+    }
     if ((process.env.NABUFLOW_CAPTURE_PANTRY_ASSEMBLY_IDS ?? "").trim() !== "") {
       await captureObservedPantryAssemblyTrails();
     }

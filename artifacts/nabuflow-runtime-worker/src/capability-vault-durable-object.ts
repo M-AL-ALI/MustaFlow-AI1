@@ -16,6 +16,7 @@ import type { WorkerBindings } from "./bindings";
 import type { CapabilityVault, CapabilityVaultInvocationResult } from "./model";
 import { DatabaseBrokerError, executeDatabaseCapability } from "./database-broker";
 import {
+  cancelStripePaymentIntent,
   createStripePaymentIntent,
   retrieveStripePaymentIntent,
   StripeBrokerError,
@@ -49,6 +50,7 @@ interface StoredCapabilityRecord {
 
 interface StoredStripeCapabilityRecord extends StoredCapabilityRecord {
   policy: StripeCapabilityPolicy;
+  state: "active" | "revoking";
 }
 
 interface StripeIdempotencyRecord {
@@ -392,6 +394,7 @@ export class CapabilityVaultDurableObject
         revision: input.revision,
         definition,
         policy,
+        state: "active",
         envelope,
       } satisfies StoredStripeCapabilityRecord);
       return { state: "provisioned", keyId };
@@ -403,23 +406,78 @@ export class CapabilityVaultDurableObject
   async revokeStripe(input: {
     projectId: number;
     expectedRevision: string;
-  }): Promise<"revoked" | "not_found" | "conflict"> {
-    const result = await this.ctx.storage.transaction(async (transaction) => {
+  }): Promise<"revoked" | "not_found" | "conflict" | "cleanup_unavailable"> {
+    const claim = await this.ctx.storage.transaction(async (transaction) => {
       const record = await transaction.get<StoredStripeCapabilityRecord>(STRIPE_STORAGE_KEY);
       if (record === undefined) return "not_found" as const;
       if (record.projectId !== input.projectId || record.revision !== input.expectedRevision) {
         return "conflict" as const;
       }
-      await transaction.delete(STRIPE_STORAGE_KEY);
+      if (record.state !== "revoking") {
+        await transaction.put(STRIPE_STORAGE_KEY, { ...record, state: "revoking" });
+      }
+      return record;
+    });
+    if (typeof claim === "string") return claim;
+
+    const context = {
+      projectId: claim.projectId,
+      provider: claim.definition.provider,
+      name: claim.definition.name,
+      revision: claim.revision,
+    };
+    let credentialBytes: Uint8Array | null = null;
+    try {
+      credentialBytes = await decryptCapabilityMaterial(
+        readKek(this.env, claim.envelope.keyId),
+        context,
+        claim.envelope,
+      );
+      const secretKey = credentialDecoder.decode(credentialBytes);
+      const ownershipRecords = await this.ctx.storage.list({ prefix: "stripe-object:" });
+      for (const ownership of ownershipRecords.values()) {
+        const parsed = ownership as StripeOwnershipRecord;
+        // Capability revision changes do not change ownership of already-created
+        // test objects. The current project-bound credential must reclaim every
+        // object owned by this project's vault before the capability can vanish.
+        if (parsed.projectId !== claim.projectId) {
+          return "cleanup_unavailable";
+        }
+        const current = await retrieveStripePaymentIntent(secretKey, parsed.paymentIntentId, {
+          timeoutMs: claim.definition.limits.timeoutMs,
+        });
+        if (current.status !== "canceled") {
+          const canceled = await cancelStripePaymentIntent(secretKey, parsed.paymentIntentId, {
+            timeoutMs: claim.definition.limits.timeoutMs,
+          });
+          if (canceled.status !== "canceled") return "cleanup_unavailable";
+        }
+      }
+    } catch {
+      return "cleanup_unavailable";
+    } finally {
+      credentialBytes?.fill(0);
+    }
+
+    return this.ctx.storage.transaction(async (transaction) => {
+      const record = await transaction.get<StoredStripeCapabilityRecord>(STRIPE_STORAGE_KEY);
+      if (record === undefined) return "not_found" as const;
+      if (
+        record.projectId !== input.projectId ||
+        record.revision !== input.expectedRevision ||
+        record.state !== "revoking"
+      ) {
+        return "conflict" as const;
+      }
+      const idempotencyRecords = await transaction.list({ prefix: "stripe-idempotency:" });
+      const ownershipRecords = await transaction.list({ prefix: "stripe-object:" });
+      await transaction.delete([
+        STRIPE_STORAGE_KEY,
+        ...idempotencyRecords.keys(),
+        ...ownershipRecords.keys(),
+      ]);
       return "revoked" as const;
     });
-    if (result === "revoked") {
-      const idempotencyRecords = await this.ctx.storage.list({ prefix: "stripe-idempotency:" });
-      const ownershipRecords = await this.ctx.storage.list({ prefix: "stripe-object:" });
-      const keys = [...idempotencyRecords.keys(), ...ownershipRecords.keys()];
-      if (keys.length > 0) await this.ctx.storage.delete(keys);
-    }
-    return result;
   }
 
   async invokeEcho(input: {
@@ -538,6 +596,9 @@ export class CapabilityVaultDurableObject
   }): Promise<CapabilityVaultInvocationResult> {
     const record = await this.ctx.storage.get<StoredStripeCapabilityRecord>(STRIPE_STORAGE_KEY);
     if (record === undefined) return { state: "not_found" };
+    if (record.state === "revoking") {
+      return { state: "stripe_error", status: 503, code: "stripe_unavailable", retryable: true };
+    }
     if (!ownsInvocation(input.projectId, record, input.invocation)) {
       return { state: "tenant_mismatch" };
     }
