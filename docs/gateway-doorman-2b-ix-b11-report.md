@@ -275,11 +275,20 @@ inventory to discover and retire the exact shelf root, then verified both ledger
 | Workspace library typecheck           | Passed                                                                                         |
 | `git diff --check`                    | Passed                                                                                         |
 | Full API suite                        | Not a standing local gate; unrelated Ora/database/global-mock rows fail without lab PostgreSQL |
-| Clean release profile                 | Pending clean-tree delivery ritual; see final addendum                                         |
-| Three-DB-suite exact-base parity      | Pending clean-tree delivery ritual; see final addendum                                         |
+| Clean release profile                 | 18 pass / 0 warn / 3 database-environment failures                                             |
+| Three-DB-suite exact-base parity      | Exact match: base also 18 pass / 0 warn / same 3 failures                                      |
 
 Replit's database-equipped full gate remains the authoritative ship gate. The branch release profile
-and exact-base parity are run only after this report and implementation are committed cleanly.
+and exact-base profile were both run from clean committed trees. The only failures on each were:
+
+1. `api-release-extended`: `ora-realtime-usage` cannot connect to local PostgreSQL at
+   `127.0.0.1:5432`.
+2. `api-account-billing-history`: `ora-memory-consolidation` receives API 500 from that same absent
+   local PostgreSQL service.
+3. `web-build`: dynamic prerender cannot connect to the same local PostgreSQL service.
+
+The branch introduced no additional red row. This is exact environmental base parity, not a waiver
+of Replit's database-equipped ship gate.
 
 ## Evidence index
 
@@ -288,6 +297,8 @@ and exact-base parity are run only after this report and implementation are comm
 | Final cohesive dual-substrate run, `...204623427Z-final.json`                     | `890ee5796d7e11efe5022bbe7094974f1bcdf971fd5771d0efaebd228f15b43a` |
 | Four-surface gate, `...204623427Z-four-surface-gate.json`                         | `4ba8b652aa25071fcc2ad12853b25d2a5d837f106a8bb057648f35f8a8305dd7` |
 | Pantry/build closure, `...210445152Z-989ae5c5eed54118a2dda305bd31690a-final.json` | `7c7d20de243101e68ea689f15546a047d658de90c6a5f37720bc631a0d6e4d29` |
+| Clean branch release profile                                                      | `8ea14d77f2e7e8537a90576d4390fb735c0b43631c7dfd166897a0e5b1a2719e` |
+| Exact-base release profile                                                        | `046e2f907fa45e5c159fbc38ca5bcb39717ffd666f2680d2bee24fb8143567ef` |
 
 The final cohesive record contains 525 sanitized entries and was persisted before cleanup and again
 after cleanup under unique filenames. No credential value, connection string, provider token, or
@@ -323,8 +334,12 @@ real tenant migration, and production publication remain separate founder/Replit
    is mandatory on every exit path.
 5. Parity means one corrected source-and-lock authority accepted by both substrates; substrate-native
    packaging is recorded honestly rather than described as byte-identical execution.
+6. Synthetic secret-scan fixtures are assembled only in memory. The final changed-blob sweep found
+   no contiguous production credential prefix or other common push-protection signature at rest.
 
 ## Delivery state
 
-The implementation and report are ready for the clean-tree release/base-parity ritual. The final
-branch tip and gate evidence are appended after that ritual. Merge and publish remain Replit-only.
+Implementation commit: `50272b8bc699d8283e742ded1d91d62473755ed6`. The report addendum commit is
+the delivery tip identified by the pushed branch ref; embedding its own hash would be
+self-referential. The branch is ready for Replit's merge/ship ritual. No merge or publish was
+performed here.
