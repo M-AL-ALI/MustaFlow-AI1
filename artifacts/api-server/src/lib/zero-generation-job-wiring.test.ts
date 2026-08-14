@@ -43,7 +43,7 @@ describe("Zero sealed generation product wiring", () => {
     expect(backend).not.toContain("STRIPE_SECRET_KEY:");
   });
 
-  it("keeps sealed runtime provisioning credential-free and closes the runtime race", () => {
+  it("keeps sealed runtime provisioning credential-free and accepts a private running descriptor", () => {
     expect(provisioning).toContain("requiresDirectProjectDatabaseProvisioning(process.env)");
     expect(provisioning).toContain("if (!requiresDirectDatabase)");
     expect(projects).toContain("!requiresDirectDatabase || process.env.NEON_API_KEY");
@@ -51,7 +51,10 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).toContain('provisioningStatus: created.endpoint ? "ready" : "provisioning"');
     expect(jobs).toContain("runtimeId = created.runtimeId");
     expect(jobs).toContain("tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(");
-    expect(jobs).toContain("runtime.start completed without a durable endpoint");
+    expect(jobs).not.toContain("runtime.start completed without a durable endpoint");
+    expect(jobs).toContain('startedRuntime.status !== "running"');
+    expect(jobs).toContain("startedRuntime.identity !== result.runtimeId");
+    expect(jobs).toContain("signed grant");
     expect(jobs).toContain("containerUrl: startedRuntime.endpoint");
   });
 });

@@ -7221,15 +7221,18 @@ async function syncAgenticPreviewRuntime(opts: {
       result.runtimeId,
       opts.projectId,
     );
-    if (!startedRuntime.endpoint) {
+    if (startedRuntime.identity !== result.runtimeId || startedRuntime.status !== "running") {
       throw new Error(
-        "zero_runtime_descriptor_incomplete: runtime.start completed without a durable endpoint",
+        "zero_runtime_descriptor_incomplete: runtime.start did not reach the running descriptor",
       );
     }
     await db
       .update(projectsTable)
       .set({
         containerId: result.runtimeId,
+        // Sealed Cloudflare previews are private data-plane routes. Unlike Fly,
+        // their durable descriptor intentionally carries no directly reachable
+        // endpoint; browser access is issued separately through a signed grant.
         containerUrl: startedRuntime.endpoint,
         containerStatus: startedRuntime.status,
         provisioningStatus: "ready",
