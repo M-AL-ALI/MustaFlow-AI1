@@ -167,6 +167,18 @@ export interface ZeroGenerationTenantRuntimeProvider extends LayeredArtifactDepl
     status: RuntimeStatus;
     endpoint: string | null;
   }>;
+  /**
+   * Recover the deterministic preview runtime when the application database no
+   * longer carries its derived identity. A missing Worker-side runtime is the
+   * only condition represented by null; control and transport failures remain
+   * typed failures.
+   */
+  zeroGenerationRuntimeDescriptorForProject(projectId: number): Promise<{
+    identity: string;
+    manifestRevision: string;
+    status: RuntimeStatus;
+    endpoint: string | null;
+  } | null>;
 }
 
 export function supportsZeroGeneration(
@@ -176,7 +188,8 @@ export function supportsZeroGeneration(
   return (
     supportsLayeredArtifactDeployment(provider) &&
     typeof candidate.zeroGenerationControlRequest === "function" &&
-    typeof candidate.zeroGenerationRuntimeDescriptor === "function"
+    typeof candidate.zeroGenerationRuntimeDescriptor === "function" &&
+    typeof candidate.zeroGenerationRuntimeDescriptorForProject === "function"
   );
 }
 

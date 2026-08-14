@@ -1341,6 +1341,27 @@ export class CloudflareRuntimeProvider
       endpoint: runtime.endpoint,
     };
   }
+
+  async zeroGenerationRuntimeDescriptorForProject(projectId: number) {
+    const runtimeId = await deriveRuntimeIdentity({
+      namespace: this.config.deploymentNamespace,
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    try {
+      return await this.zeroGenerationRuntimeDescriptor(runtimeId, projectId);
+    } catch (error) {
+      if (
+        error instanceof CloudflareRuntimeControlError &&
+        error.status === 404 &&
+        error.code === "runtime_not_found"
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
   async updateEnvironment(
     _runtimeId: string,
     _projectId: number,

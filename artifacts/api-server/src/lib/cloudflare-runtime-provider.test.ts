@@ -156,6 +156,43 @@ describe("CloudflareRuntimeProvider", () => {
     ).resolves.toEqual({ ok: true });
   });
 
+  it("recovers the deterministic project runtime without a database-carried identity", async () => {
+    const projectId = 43;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(json(runningRuntime(identity, projectId)));
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(provider.zeroGenerationRuntimeDescriptorForProject(projectId)).resolves.toEqual({
+      identity,
+      manifestRevision: "manifest-1",
+      status: "running",
+      endpoint: null,
+    });
+  });
+
+  it("returns null only for a typed missing deterministic project runtime", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      json(
+        {
+          ok: false,
+          code: "runtime_not_found",
+          message: "Runtime not found",
+          retryable: false,
+          requestId: "runtime-descriptor-missing-44",
+        },
+        404,
+      ),
+    );
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(provider.zeroGenerationRuntimeDescriptorForProject(44)).resolves.toBeNull();
+  });
+
   it("accepts an offset-corrected acceptance clock without changing the production default", async () => {
     const labNow = Date.parse("2026-08-09T23:00:00.000Z");
     const workerNow = labNow - 3 * 60 * 60_000;

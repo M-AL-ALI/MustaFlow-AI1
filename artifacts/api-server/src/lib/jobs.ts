@@ -7177,15 +7177,25 @@ async function syncAgenticPreviewRuntime(opts: {
       throw new Error("Cloudflare Pantry and dock capabilities are unavailable");
     }
     let runtimeId = opts.containerId;
-    if (runtimeId) {
-      const existingRuntime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(
-        runtimeId,
-        opts.projectId,
-      );
-      if (existingRuntime.identity !== runtimeId) {
+    const existingRuntime = runtimeId
+      ? await tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(runtimeId, opts.projectId)
+      : await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(opts.projectId);
+    if (existingRuntime) {
+      if (runtimeId && existingRuntime.identity !== runtimeId) {
         throw new Error(
           "zero_runtime_descriptor_incomplete: runtime identity changed during sealed continuation",
         );
+      }
+      runtimeId = existingRuntime.identity;
+      if (!opts.containerId) {
+        await db
+          .update(projectsTable)
+          .set({
+            containerId: runtimeId,
+            containerUrl: existingRuntime.endpoint,
+            containerStatus: existingRuntime.status,
+          })
+          .where(eq(projectsTable.id, opts.projectId));
       }
       if (
         existingRuntime.status === "running" &&
