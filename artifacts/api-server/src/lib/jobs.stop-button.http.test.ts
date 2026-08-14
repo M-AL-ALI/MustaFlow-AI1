@@ -215,7 +215,8 @@ const {
   function makeDb() {
     const transactionMock = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
       const tx = {
-        select: (_shape?: unknown) => ({
+        execute: vi.fn().mockResolvedValue([]),
+        select: (shape?: unknown) => ({
           from: (table: { __id?: string }) =>
             table.__id === "task_events"
               ? makeSelectChain(
@@ -223,13 +224,15 @@ const {
                     ["completed", "failed", "cancelled"].includes(row.eventType),
                   ),
                 )
-              : makeSelectChain([
-                  {
-                    id: TASK_ID,
-                    status: routeTaskStatus.value,
-                    creditsReserved: null,
-                  },
-                ]),
+              : shape && typeof shape === "object" && Object.keys(shape).join(",") === "id"
+                ? makeSelectChain([])
+                : makeSelectChain([
+                    {
+                      id: TASK_ID,
+                      status: routeTaskStatus.value,
+                      creditsReserved: null,
+                    },
+                  ]),
         }),
         update: (_table: unknown) => ({
           set: (vals: unknown) => ({
@@ -323,6 +326,7 @@ const {
 
 vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
+  ne: () => ({}),
   and: () => ({}),
   or: () => ({}),
   inArray: () => ({}),

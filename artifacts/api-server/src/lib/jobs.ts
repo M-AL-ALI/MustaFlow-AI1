@@ -2103,6 +2103,61 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
   }
 }
 
+// Two-int advisory-lock namespace for the short project-job claim transaction.
+// The prior one-int, session-scoped lock used raw project IDs. On a transaction-
+// pooled Neon connection it could be acquired and released on different backend
+// sessions, leaking the lock; raw IDs also shared a global namespace with queue
+// infrastructure. A transaction-scoped, namespaced lock is released by Postgres
+// at COMMIT/ROLLBACK and cannot outlive or escape its claim transaction.
+export const PROJECT_JOB_LOCK_NAMESPACE = 0x4e424a42; // "NBJB"
+
+export async function claimProjectJobExecution(
+  taskId: number,
+  projectId: number,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${PROJECT_JOB_LOCK_NAMESPACE}, ${projectId})`,
+    );
+
+    // Only an executing or staged-review task blocks this claim. Two concurrent
+    // planning claimants serialize on the xact lock: the first becomes building;
+    // the second then observes it and remains durably queued.
+    const [blocker] = await tx
+      .select({ id: agentTasksTable.id })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.projectId, projectId),
+          ne(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["building", "needs_review", "needs_fix"]),
+        ),
+      )
+      .limit(1);
+
+    if (blocker) {
+      await tx
+        .update(agentTasksTable)
+        .set({ status: "queued" })
+        .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.status, "planning")));
+      return false;
+    }
+
+    const transitioned = await tx
+      .update(agentTasksTable)
+      .set({ status: "building", startedAt: sql`now()` })
+      .where(
+        and(
+          eq(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["queued", "planning"]),
+        ),
+      )
+      .returning({ id: agentTasksTable.id });
+
+    return transitioned.length === 1;
+  });
+}
+
 export async function runJob(input: JobInput): Promise<void> {
   const {
     taskId,
@@ -2198,39 +2253,20 @@ export async function runJob(input: JobInput): Promise<void> {
   const { signal } = abortController;
   activeJobControllers.set(taskId, abortController);
 
-  // Acquire a Postgres session-level advisory lock keyed by projectId.
-  // pg_advisory_lock blocks until the lock is free, serializing same-project jobs
-  // across all Node processes / replicas. Released in the finally block.
-  const lockClient = await pool.connect();
-  let lockAcquired = false;
-
+  // Atomically claim execution across replicas. The short xact-scoped lock is
+  // safe through transaction poolers and cannot survive a dead request/consumer.
   try {
-    await lockClient.query("SELECT pg_advisory_lock($1::bigint)", [projectId]);
-    lockAcquired = true;
+    const claimed = await claimProjectJobExecution(taskId, projectId);
 
-    await emitEvent(taskId, "queued", "Task received, starting pipeline…");
-
-    // Atomically transition queued/planning → building.
-    // Tasks are created with status "queued" (background) or "planning" (immediate foreground).
-    // Using WHERE status IN ('queued','planning') makes the check+update a single round-trip,
-    // eliminating the TOCTOU window. If the user dismissed (canceled) the task while we were
-    // waiting for the advisory lock, status = 'canceled' so 0 rows are updated → abort cleanly.
-    // Both build and refine tasks transition to "building" so the frontend never shows a refine
-    // task stuck on "planning" while the pipeline is actively running.
-    const transitioned = await db
-      .update(agentTasksTable)
-      .set({ status: "building", startedAt: sql`now()` })
-      .where(
-        and(
-          eq(agentTasksTable.id, taskId),
-          inArray(agentTasksTable.status, ["queued", "planning"]),
-        ),
-      )
-      .returning({ id: agentTasksTable.id });
-    if (transitioned.length === 0) {
-      logger.info({ taskId, projectId }, "Task was canceled before pipeline started — skipping");
+    if (!claimed) {
+      logger.info(
+        { taskId, projectId },
+        "Task was canceled, already claimed, or queued behind another project job - skipping",
+      );
       return;
     }
+
+    await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
     // Start the job-level heartbeat now that we're committed to running.
     // Fire immediately (in case the pre-build setup is slow) and every 30 s.
@@ -6886,15 +6922,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
 
-    // Always release the advisory lock and pool client, and clear the in-memory guard.
-    if (lockAcquired) {
-      try {
-        await lockClient.query("SELECT pg_advisory_unlock($1::bigint)", [projectId]);
-      } catch (unlockErr) {
-        logger.warn({ unlockErr, projectId }, "Failed to release advisory lock (non-fatal)");
-      }
-    }
-    lockClient.release();
+    // The cross-replica claim uses a short transaction-scoped advisory lock, so
+    // no session resource survives the claim or needs releasing here.
     activeProjectJobs.delete(projectId);
     activeJobControllers.delete(taskId);
   }
