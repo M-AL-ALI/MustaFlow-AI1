@@ -1,7 +1,7 @@
-import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createHash, createHmac, generateKeyPairSync, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 const CONTROL_URL = "https://nabuflow-runtime-staging.mustafa-alali74.workers.dev";
 const PROVISIONER_URL =
@@ -28,6 +28,11 @@ const launcherEvidencePath = resolve(
   outputRoot,
   `gateway-doorman-2b-ix-b10-${RUN_ID}-launcher-final.json`,
 );
+const runtimeBuildDiagnosticEvidencePath = resolve(
+  outputRoot,
+  `gateway-doorman-2b-ix-b10-${RUN_ID}-zero-build-precleanup.json`,
+);
+const REAL_ZERO_BUILD_ID = process.env.SLICE10_REAL_ZERO_BUILD_ID;
 const wranglerCli = resolve(workerRoot, "node_modules", "wrangler", "bin", "wrangler.js");
 const tsxCli = resolve(workerRoot, "node_modules", "tsx", "dist", "cli.mjs");
 
@@ -111,7 +116,7 @@ function runProcess(
 
 function replaceJsonString(source: string, property: string, value: string): string {
   const pattern = new RegExp(
-    `("${property.replaceAll(/[.*+?^${}()|[\\]\\\\]/gu, "\\$&")}"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`,
+    `("${property.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`,
     "u",
   );
   assertCondition(pattern.test(source), `Provisioner config is missing ${property}`);
@@ -152,12 +157,37 @@ function deploymentVersion(output: string): string | null {
 }
 
 async function deployProvisioner(configPath: string, message: string): Promise<string> {
-  const result = await runProcess(
+  let result = await runProcess(
     process.execPath,
     [wranglerCli, "deploy", "--config", configPath, "--message", message],
     { timeoutMs: 180_000 },
   );
-  assertCondition(result.code === 0, `Provisioner deployment failed (${String(result.code)})`);
+  if (result.code === 3221226505) {
+    const relativeConfig = relative(workerRoot, configPath);
+    assertCondition(
+      !/[\s"']/u.test(relativeConfig) && !/[\s"']/u.test(message),
+      "Provisioner wrapper fallback received an unsafe argument",
+    );
+    record("provisioner.deploy.wrapper-fallback", "native_abort", {
+      primaryExitCode: result.code,
+      stderrBytes: Buffer.byteLength(result.stderr),
+      stdoutBytes: Buffer.byteLength(result.stdout),
+    });
+    result = await runProcess(
+      process.env.ComSpec ?? "cmd.exe",
+      [
+        "/d",
+        "/s",
+        "/c",
+        `node_modules\\.bin\\wrangler.cmd deploy --config ${relativeConfig} --message ${message}`,
+      ],
+      { timeoutMs: 180_000 },
+    );
+  }
+  assertCondition(
+    result.code === 0,
+    `Provisioner deployment failed (${String(result.code)}; stdoutBytes=${String(Buffer.byteLength(result.stdout))}; stderrBytes=${String(Buffer.byteLength(result.stderr))})`,
+  );
   const version = deploymentVersion(`${result.stdout}\n${result.stderr}`);
   assertCondition(version !== null, "Provisioner deployment returned no version ID");
   return version;
@@ -233,6 +263,88 @@ async function writeEvidence(passed: boolean, failure: string | null): Promise<v
   writeFileSync(launcherEvidencePath, envelope, { mode: 0o600 });
 }
 
+async function captureRealZeroBuildDiagnostic(): Promise<void> {
+  assertCondition(
+    typeof REAL_ZERO_BUILD_ID === "string" &&
+      /^pbuild_zero_[0-9a-f]{64}$/u.test(REAL_ZERO_BUILD_ID),
+    "SLICE10_REAL_ZERO_BUILD_ID must identify the completed real Zero build",
+  );
+  const buildId = REAL_ZERO_BUILD_ID;
+  const path = `/_nabuflow/control/v1/build-plane/builds/${buildId}`;
+  const method = "GET";
+  const clockResponse = await fetch(`${CONTROL_URL}/_nabuflow/control/v1/version`);
+  const workerDate = clockResponse.headers.get("date");
+  const workerTime = workerDate === null ? Number.NaN : Date.parse(workerDate);
+  assertCondition(Number.isFinite(workerTime), "Worker Date header is unavailable");
+  const workerClockOffsetMs = workerTime - Date.now();
+  const timestamp = String(Date.now() + workerClockOffsetMs);
+  const nonce = `slice10-zero-build-diagnostic-${crypto.randomUUID()}`;
+  const bodySha256 = createHash("sha256").update("").digest("hex");
+  const canonical = [method, path, timestamp, nonce, bodySha256, ""].join("\n");
+  const signature = createHmac("sha256", controlToken).update(canonical).digest("hex");
+  const response = await fetch(`${CONTROL_URL}${path}`, {
+    method,
+    headers: {
+      "x-nabuflow-timestamp": timestamp,
+      "x-nabuflow-nonce": nonce,
+      "x-nabuflow-body-sha256": bodySha256,
+      "x-nabuflow-signature": signature,
+    },
+    signal: AbortSignal.timeout(60_000),
+  });
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text) as unknown;
+  } catch {
+    body = { malformedJson: true, bytes: Buffer.byteLength(text) };
+  }
+  const recordBody = JSON.stringify(
+    {
+      capturedAt: new Date().toISOString(),
+      projectId: 12,
+      runtimeId: "nrf-e919a75364398a44-p12-preview-primary",
+      buildId,
+      status: response.status,
+      body,
+      purpose: "pre-cleanup typed terminal evidence for the real Zero-generated build",
+      clock: {
+        source: "https-date-header",
+        absoluteOffsetMs: Math.abs(workerClockOffsetMs),
+      },
+    },
+    null,
+    2,
+  );
+  writeFileSync(
+    runtimeBuildDiagnosticEvidencePath,
+    JSON.stringify(
+      {
+        record: JSON.parse(recordBody) as unknown,
+        sha256: createHash("sha256").update(recordBody).digest("hex"),
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+  record("zero.real-build.terminal-evidence", response.status, {
+    buildId,
+    evidencePath: runtimeBuildDiagnosticEvidencePath,
+    evidenceSha256: createHash("sha256")
+      .update(readFileSync(runtimeBuildDiagnosticEvidencePath))
+      .digest("hex"),
+  });
+  assertCondition(
+    response.status === 200,
+    `Real Zero build diagnostic returned ${String(response.status)} (${String((body as { code?: unknown } | null)?.code ?? "unknown")})`,
+  );
+  assertCondition(
+    (body as { state?: unknown } | null)?.state === "succeeded",
+    `Real Zero build is not succeeded (${String((body as { state?: unknown } | null)?.state ?? "unknown")}; ${String((body as { error?: { code?: unknown } } | null)?.error?.code ?? "no-error-code")})`,
+  );
+}
+
 assertCondition(existsSync(wranglerCli), "Pinned Wrangler CLI is unavailable");
 assertCondition(existsSync(tsxCli), "Pinned tsx CLI is unavailable");
 mkdirSync(outputRoot, { recursive: true });
@@ -280,6 +392,10 @@ try {
     ],
     valuesPersisted: false,
   });
+  // Wrangler's Windows process tree can linger briefly after secret bulk and native-abort a
+  // back-to-back deploy. The bounded settle belongs to launcher mechanics, not product timing.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 12_000));
+  await captureRealZeroBuildDiagnostic();
 
   writeFileSync(openConfigPath, buildProvisionerConfig(workloadPair.publicKey, true), {
     mode: 0o600,

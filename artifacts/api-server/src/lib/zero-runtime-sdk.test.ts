@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { transform } from "esbuild";
+import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   runtimeDatabaseCapabilityIntentSchema,
@@ -117,8 +118,42 @@ describe("vendored dual-mode runtime SDK", () => {
     const joined = first.map((file) => `${file.path}\0${file.content}`).join("\0");
     expect(joined).not.toMatch(/postgres(?:ql)?:\/\/|sk_(?:live|test)_|nrf-[a-z0-9]/iu);
     expect(createHash("sha256").update(joined).digest("hex")).toBe(
-      "b4d340682b4eedef210d579d7b87f112e86cfa62e9eb0a131b555e46c2e1f4d7",
+      "9e44d6d6ebefb4b5e86d769cf0cb952d18e87d743d0bef54b5d477d4a63b832a",
     );
+  });
+
+  it("compiles the public index when capability modules share the SDK version export", () => {
+    const index = getVendoredRuntimeSdkFiles().find(
+      (file) => file.path === "nabuflow/runtime/index.ts",
+    )?.content;
+    expect(index).toBeDefined();
+    const sources = new Map([
+      ["/index.ts", index ?? ""],
+      ["/db.ts", 'export const NABUFLOW_RUNTIME_SDK_VERSION = "v1"; export const db = true;'],
+      [
+        "/payments.ts",
+        'export const NABUFLOW_RUNTIME_SDK_VERSION = "v1"; export const payments = true;',
+      ],
+    ]);
+    const options: ts.CompilerOptions = {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Node10,
+      noEmit: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ES2022,
+    };
+    const host = ts.createCompilerHost(options);
+    const originalGetSourceFile = host.getSourceFile.bind(host);
+    host.fileExists = (fileName) => sources.has(fileName) || ts.sys.fileExists(fileName);
+    host.readFile = (fileName) => sources.get(fileName) ?? ts.sys.readFile(fileName);
+    host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+      const source = sources.get(fileName);
+      return source === undefined
+        ? originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile)
+        : ts.createSourceFile(fileName, source, languageVersion, true);
+    };
+    const diagnostics = ts.getPreEmitDiagnostics(ts.createProgram(["/index.ts"], options, host));
+    expect(diagnostics.filter((diagnostic) => diagnostic.code === 2308)).toEqual([]);
   });
 
   it("uses the Stripe capability in sealed mode and an injected direct adapter in Fly mode", async () => {
