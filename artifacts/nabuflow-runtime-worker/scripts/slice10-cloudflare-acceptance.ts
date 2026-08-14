@@ -22,7 +22,9 @@ const RUN_ID = new Date().toISOString().replaceAll(/[:.]/gu, "");
 const workerRoot = resolve(import.meta.dirname, "..");
 const repoRoot = resolve(workerRoot, "..", "..");
 const outputRoot = resolve(repoRoot, "tmp", "gateway-doorman-2b-ix-b10");
-const openConfigPath = resolve(outputRoot, `wrangler-provisioner-open-${RUN_ID}.jsonc`);
+// Wrangler resolves a relative `main` from the config directory. Keep the ephemeral config beside
+// the inert source config so opening the temporary route cannot change entry-point resolution.
+const openConfigPath = resolve(workerRoot, `wrangler.acceptance.open-${RUN_ID}.jsonc`);
 const evidencePath = resolve(outputRoot, `gateway-doorman-2b-ix-b10-${RUN_ID}-gateway-final.json`);
 const launcherEvidencePath = resolve(
   outputRoot,

@@ -3,8 +3,10 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS,
   MAX_RUNTIME_ARTIFACT_FILE_BYTES,
   MAX_RUNTIME_ARTIFACT_BYTES,
+  RUNTIME_CONTROL_OPERATION_BOUND_MS,
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   deriveRuntimeIdentity,
   sha256Hex,
@@ -379,11 +381,20 @@ async function waitForAcceptanceLeaseState(
   lease: AcceptanceLeaseHandle,
   expected: "active" | "provisioned" | "destroyed",
   label: string,
+  updatedAfterMs?: number,
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + 5 * 60_000;
   while (Date.now() < deadline) {
     const current = await acceptanceLeaseStatus(lease, `${label}.status`);
-    if (current.state === expected) return current;
+    const updatedAtMs =
+      typeof current.updatedAt === "string" ? Date.parse(current.updatedAt) : Number.NaN;
+    if (
+      current.state === expected &&
+      (updatedAfterMs === undefined ||
+        (Number.isFinite(updatedAtMs) && updatedAtMs > updatedAfterMs))
+    ) {
+      return current;
+    }
     if (current.state === "failed" || current.state === "expired") {
       throw new Error(`${label}: lease reached typed terminal ${String(current.state)}`);
     }
@@ -437,6 +448,16 @@ async function provisionAcceptanceCapability(
   revision: string,
 ): Promise<void> {
   const lease = await createAcceptanceLease(provider, projectId);
+  const before = await acceptanceLeaseStatus(
+    lease,
+    `acceptance.${provider}.provision.${projectId}.before`,
+  );
+  const beforeUpdatedAtMs =
+    typeof before.updatedAt === "string" ? Date.parse(before.updatedAt) : Number.NaN;
+  assertCondition(
+    Number.isFinite(beforeUpdatedAtMs),
+    `Acceptance ${provider} lease returned no valid pre-provision timestamp`,
+  );
   const result = await acceptanceFetch({
     path: `/_nabuflow/acceptance/v1/leases/${lease.leaseId}/provision-capability`,
     method: "POST",
@@ -456,6 +477,7 @@ async function provisionAcceptanceCapability(
     lease,
     "provisioned",
     `acceptance.${provider}.provision.${projectId}`,
+    beforeUpdatedAtMs,
   );
 }
 
@@ -597,48 +619,105 @@ function isPropagationRetryable(status: number, body: unknown): boolean {
 }
 
 async function signedControlFetch(input: Parameters<typeof makeSignedRequest>[0], label: string) {
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
+  const startedAtMs = Date.now();
+  let attempt = 0;
+  let propagationAttempt = 0;
+  while (Date.now() - startedAtMs < RUNTIME_CONTROL_OPERATION_BOUND_MS) {
+    attempt += 1;
     const result = await signedFetch({
       ...input,
       nonce: attempt === 1 ? input.nonce : nonce(`${label}-retry-${attempt}`),
     });
-    if (!isPropagationRetryable(result.response.status, result.body) || attempt === 8) {
+    if (isPropagationRetryable(result.response.status, result.body)) {
+      propagationAttempt += 1;
+      if (propagationAttempt === 8) return result;
+      const backoffMs = Math.min(500 * 2 ** (propagationAttempt - 1), 5_000);
+      record(`control.retry.${label}`, result.response.status, {
+        attempt: propagationAttempt,
+        backoffMs,
+        code: (result.body as { code?: string }).code,
+      });
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      continue;
+    }
+
+    const code = (result.body as { code?: string } | null)?.code;
+    if (
+      result.response.status !== 409 ||
+      code !== "request_in_progress" ||
+      input.idempotencyKey === undefined
+    ) {
       return result;
     }
-    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
-    record(`control.retry.${label}`, result.response.status, {
+
+    const elapsedMs = Date.now() - startedAtMs;
+    const remainingMs = RUNTIME_CONTROL_OPERATION_BOUND_MS - elapsedMs;
+    if (remainingMs <= 0) break;
+    const backoffMs = Math.min(500, remainingMs);
+    record(`control.follow.${label}`, result.response.status, {
       attempt,
       backoffMs,
-      code: (result.body as { code?: string }).code,
+      code,
+      idempotencyKeyStable: true,
     });
     await new Promise((resolve) => setTimeout(resolve, backoffMs));
   }
-  throw new Error(`${label}: bounded control retry exhausted without a response`);
+  throw new Error(
+    `${label}: durable control operation did not reach a terminal result within its bound`,
+  );
 }
 
 async function signedAuthStableFetch(
   input: Parameters<typeof makeSignedRequest>[0],
   label: string,
 ) {
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
+  const startedAtMs = Date.now();
+  let attempt = 0;
+  let authenticationAttempt = 0;
+  while (Date.now() - startedAtMs < RUNTIME_CONTROL_OPERATION_BOUND_MS) {
+    attempt += 1;
     const result = await signedFetch({
       ...input,
       nonce: attempt === 1 ? input.nonce : nonce(`${label}-auth-retry-${attempt}`),
     });
     const code = (result.body as { code?: string } | null)?.code;
-    if (!(result.response.status === 401 && code === "invalid_signature") || attempt === 8) {
+    if (result.response.status === 401 && code === "invalid_signature") {
+      authenticationAttempt += 1;
+      if (authenticationAttempt === 8) return result;
+      const backoffMs = Math.min(500 * 2 ** (authenticationAttempt - 1), 5_000);
+      record(`control.retry.${label}`, result.response.status, {
+        attempt: authenticationAttempt,
+        backoffMs,
+        code,
+        targetResponseMayBeNonSuccess: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      continue;
+    }
+
+    if (
+      result.response.status !== 409 ||
+      code !== "request_in_progress" ||
+      input.idempotencyKey === undefined
+    ) {
       return result;
     }
-    const backoffMs = Math.min(500 * 2 ** (attempt - 1), 5_000);
-    record(`control.retry.${label}`, result.response.status, {
+
+    const remainingMs = RUNTIME_CONTROL_OPERATION_BOUND_MS - (Date.now() - startedAtMs);
+    if (remainingMs <= 0) break;
+    const backoffMs = Math.min(500, remainingMs);
+    record(`control.follow.${label}`, result.response.status, {
       attempt,
       backoffMs,
       code,
       targetResponseMayBeNonSuccess: true,
+      idempotencyKeyStable: true,
     });
     await new Promise((resolve) => setTimeout(resolve, backoffMs));
   }
-  throw new Error(`${label}: bounded authentication retry exhausted without a response`);
+  throw new Error(
+    `${label}: durable typed-error operation did not reach a terminal result within its bound`,
+  );
 }
 
 async function acceptedReplayableRequest(
@@ -1957,25 +2036,17 @@ async function verifyArtifactRejectionMatrix(initialManifestRevision: string): P
     expectedDeploymentVersion: deploymentVersion,
     sealedArtifactSha256: duplicate.envelope.sealedArtifactSha256,
   };
-  const duplicateCommitFirst = await signedControlFetch(
-    {
-      path: `${duplicatePath}/commit`,
-      method: "POST",
-      body: duplicateCommitBody,
-      nonce: nonce("artifact-duplicate-commit-first"),
-      idempotencyKey: duplicateCommitKey,
-    },
+  const duplicateCommitFirst = await followArtifactCommit(
+    duplicatePath,
+    duplicateCommitBody.sealedArtifactSha256,
     "artifact.duplicate.commit-first",
+    duplicateCommitKey,
   );
-  const duplicateCommitRetry = await signedControlFetch(
-    {
-      path: `${duplicatePath}/commit`,
-      method: "POST",
-      body: duplicateCommitBody,
-      nonce: nonce("artifact-duplicate-commit-retry"),
-      idempotencyKey: duplicateCommitKey,
-    },
+  const duplicateCommitRetry = await followArtifactCommit(
+    duplicatePath,
+    duplicateCommitBody.sealedArtifactSha256,
     "artifact.duplicate.commit-retry",
+    duplicateCommitKey,
   );
   assertStatus(
     "artifact.duplicate.commit-first",
@@ -2051,17 +2122,45 @@ async function beginArtifact(path: string, envelope: unknown, label: string) {
   return result;
 }
 
-function commitArtifact(path: string, sealedArtifactSha256: string, label: string) {
-  return signedControlFetch(
-    {
-      path: `${path}/commit`,
-      method: "POST",
-      body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256 },
-      nonce: nonce(label),
-      idempotencyKey: `${label}-${crypto.randomUUID()}`,
-    },
-    label,
-  );
+async function commitArtifact(path: string, sealedArtifactSha256: string, label: string) {
+  return followArtifactCommit(path, sealedArtifactSha256, label, `${label}-${crypto.randomUUID()}`);
+}
+
+async function followArtifactCommit(
+  path: string,
+  sealedArtifactSha256: string,
+  label: string,
+  idempotencyKey: string,
+) {
+  const startedAtMs = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startedAtMs < ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS) {
+    attempt += 1;
+    const result = await signedControlFetch(
+      {
+        path: `${path}/commit`,
+        method: "POST",
+        body: { locator, expectedDeploymentVersion: deploymentVersion, sealedArtifactSha256 },
+        nonce: nonce(`${label}-follow-${attempt}`),
+        idempotencyKey,
+      },
+      label,
+    );
+    const code = (result.body as { code?: string } | null)?.code;
+    if (result.response.status !== 409 || code !== "request_in_progress") return result;
+
+    record(`${label}.follow`, result.response.status, {
+      attempt,
+      code,
+      idempotencyKeyStable: true,
+    });
+    const remainingMs = ARTIFACT_COMMIT_PROVIDER_OPERATION_BOUND_MS - (Date.now() - startedAtMs);
+    if (remainingMs <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(500, remainingMs)));
+  }
+
+  throw new Error(`${label}: durable commit did not reach a terminal result within its bound`);
 }
 
 function removeArtifact(sealedArtifactSha256: string, label: string) {
