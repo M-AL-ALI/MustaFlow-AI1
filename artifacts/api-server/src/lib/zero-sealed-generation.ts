@@ -22,6 +22,7 @@ export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARG
 - Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
+- Do not create .env files in sealed-native projects, including .env.example. Sealed apps receive no tenant credentials or secret configuration.
 - Bind the HTTP server to 0.0.0.0 and Number(process.env.PORT ?? "8080").
 - GET /healthz must return 200 without touching a database or any external service.
 - package.json scripts are exactly build="tsc" and start="node dist/src/index.js". Set TypeScript rootDir to "." so the source-owned nabuflow module and src/ compile together. Declare every dependency normally; the trusted Pantry resolves and provisions them. Never emit npm install, npx, registry URLs, or lockfile bootstrap commands.
@@ -209,6 +210,11 @@ export function prepareZeroSealedNodeSource(input: {
   skipEligibilityPrecheck?: boolean;
 }): PreparedZeroSealedNodeSource {
   const byPath = new Map(input.files.map((file) => [file.path, { ...file }]));
+  for (const file of byPath.values()) {
+    if (/(?:^|\/)\.env(?:\.|$)/u.test(file.path)) {
+      throw new ZeroSealedSourceContractError(["credential_or_dependency_egress"], file.path);
+    }
+  }
   const packageFile = byPath.get("package.json");
   const entry = byPath.get("src/index.ts");
   const typeScriptConfigFile = byPath.get("tsconfig.json");

@@ -59,6 +59,38 @@ app.listen(port);`,
     expect(result.message).toContain("create package.json, tsconfig.json, and src/index.ts");
   });
 
+  it("rejects .env example files before the trusted-build source scan", async () => {
+    const result = await checkZeroSealedFinalizeContract({
+      files: [
+        packageFile(),
+        tsconfigFile,
+        {
+          path: ".env.example",
+          mimeType: "text/plain",
+          content: "PORT=8080\n",
+        },
+        {
+          path: "src/index.ts",
+          mimeType: "application/typescript",
+          content: `import express from "express";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+const app = express(); const db = createNabuFlowDatabase(); void db;
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+        },
+      ],
+      manifestRevision: "finalize-env-file-regression-v1",
+    });
+
+    expect(result).toMatchObject({
+      passed: false,
+      code: "zero_sealed_source_contract_error",
+      reasonCodes: ["credential_or_dependency_egress"],
+    });
+    expect(result.message).toContain("(.env.example)");
+    expect(result.message).toContain("remove .env files (including .env.example)");
+  });
+
   it("passes a complete sealed-native candidate", async () => {
     const result = await checkZeroSealedFinalizeContract({
       files: [

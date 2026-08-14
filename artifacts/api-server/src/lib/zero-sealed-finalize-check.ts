@@ -30,7 +30,7 @@ const SEALED_SOURCE_REPAIR_GUIDANCE: Readonly<Record<string, string>> = Object.f
   runtime_port: 'derive the port with Number(process.env.PORT ?? "8080")',
   health_route: "serve GET /healthz with HTTP 200 without touching a database or external service",
   credential_or_dependency_egress:
-    "remove credential environment reads, tenant install commands, registry URLs, and arbitrary server-side fetches",
+    "remove .env files (including .env.example), credential environment reads, tenant install commands, registry URLs, and arbitrary server-side fetches",
 });
 
 export function describeZeroSealedSourceRepairs(reasonCodes: readonly string[]): string {
