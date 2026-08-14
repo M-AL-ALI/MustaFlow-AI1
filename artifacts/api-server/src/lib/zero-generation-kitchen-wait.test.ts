@@ -13,6 +13,7 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import {
   ZeroGenerationKitchenError,
+  readZeroGenerationControlWithWeather,
   waitForPantryShelf,
   zeroGenerationReservedOperationTimeout,
 } from "./zero-generation-kitchen";
@@ -60,6 +61,57 @@ function progress(state: "queued" | "running", attempt: number) {
 }
 
 describe("Zero generator Pantry lifecycle waiting", () => {
+  it("retries a typed control-read blackout inside the outer owner deadline", async () => {
+    let elapsedMs = 0;
+    let attempts = 0;
+    const evidence: Array<Readonly<Record<string, unknown>>> = [];
+    const provider = {
+      async zeroGenerationControlRequest(input: {
+        method: "GET" | "POST";
+        operationTimeoutMs?: number;
+      }) {
+        attempts += 1;
+        expect(input.method).toBe("GET");
+        expect(input.operationTimeoutMs).toBe(30_000);
+        if (attempts === 1) {
+          throw Object.assign(new Error("sanitized observation blackout"), {
+            status: 503,
+            code: "control_transport_timeout",
+            retryable: true,
+            transportCause: "request_timeout",
+          });
+        }
+        return { ok: true };
+      },
+    };
+
+    await expect(
+      readZeroGenerationControlWithWeather(provider, "/fixture", {
+        startedAtMs: 0,
+        deadlineMs: 60_000,
+        monotonicNow: () => elapsedMs,
+        sleep: async (milliseconds) => {
+          elapsedMs += milliseconds;
+        },
+        stage: "pantry-shelf-read",
+        timeoutCode: "pantry_stock_timeout",
+        onEvidence: (entry) => evidence.push(entry),
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(attempts).toBe(2);
+    expect(elapsedMs).toBe(2_000);
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        stage: "pantry-shelf-read",
+        attempt: 1,
+        typedError: expect.objectContaining({
+          code: "control_transport_timeout",
+          transportCause: "request_timeout",
+        }),
+      }),
+    ]);
+  });
+
   it("never hands commit or start less than its named reserve", () => {
     expect(ZERO_GENERATION_KITCHEN_PRODUCT_BOUND_MS).toBe(1_800_000);
     expect(ZERO_GENERATION_ASSEMBLY_RESERVE_MS).toBe(1_140_000);
@@ -176,6 +228,60 @@ describe("Zero generator Pantry lifecycle waiting", () => {
     expect(elapsedMs).toBeGreaterThan(300_000);
     expect(result.shelfRootSha256).toBe(shelfRootSha256);
     expect(result.lastProgress).toMatchObject({ ingestState: "running" });
+  });
+
+  it("keeps typed transport weather inside the outer Pantry wait bound", async () => {
+    let elapsedMs = 0;
+    let postCalls = 0;
+    let getCalls = 0;
+    const provider = {
+      async zeroGenerationControlRequest(input: { method: "GET" | "POST" }) {
+        if (input.method === "POST") {
+          postCalls += 1;
+          if (postCalls === 1) {
+            throw Object.assign(new Error("sanitized request timeout"), {
+              status: 503,
+              code: "control_transport_timeout",
+              retryable: true,
+              transportCause: "request_timeout",
+            });
+          }
+          return postCalls === 2
+            ? {
+                ok: true,
+                state: "assembling",
+                assemblyId,
+                revisionRootSha256: null,
+              }
+            : {
+                ok: true,
+                state: "committed",
+                assemblyId,
+                revisionRootSha256: shelfRootSha256,
+              };
+        }
+        getCalls += 1;
+        throw Object.assign(new Error("sanitized connection reset"), {
+          status: 503,
+          code: "control_transport_connection_reset",
+          retryable: true,
+          transportCause: "connection_reset",
+        });
+      },
+    };
+
+    await expect(
+      waitForPantryShelf(provider, await stockRequest(), {
+        deadlineMs: 20_000,
+        monotonicNow: () => elapsedMs,
+        sleep: async (milliseconds) => {
+          elapsedMs += milliseconds;
+        },
+      }),
+    ).resolves.toMatchObject({ shelfRootSha256 });
+    expect(postCalls).toBe(3);
+    expect(getCalls).toBe(1);
+    expect(elapsedMs).toBe(4_000);
   });
 
   it("propagates a terminal Pantry ingest failure immediately with its typed code", async () => {

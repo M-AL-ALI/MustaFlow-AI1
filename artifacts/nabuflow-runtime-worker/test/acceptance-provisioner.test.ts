@@ -326,6 +326,48 @@ async function createLease(
 afterEach(() => vi.useRealTimers());
 
 describe("staging acceptance provisioner", () => {
+  it("defers a durable lease job delivered to the wrong deployment version", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const created = await f.service.handle(
+      request(
+        "/_nabuflow/acceptance/v1/leases",
+        {
+          schemaVersion: 1,
+          projectId: 42,
+          scope: { provider: "neon", organizationId: "neon-dedicated" },
+          ttlSeconds: 300,
+          costCeilingMinorUnits: 0,
+        },
+        { idempotency: "deployment-version-deferral-0001" },
+      ),
+    );
+    expect(created.status).toBe(202);
+    const firstDelivery = f.queue.messages.shift() as DurableOperationQueueMessage;
+    f.env.CF_VERSION_METADATA.id = "acceptance-worker-previous";
+    await f.service.handleQueue(firstDelivery);
+    expect(f.providers.calls.create).toBe(0);
+    expect(f.queue.messages).toHaveLength(1);
+    const deferred = await f.control.getDurableOperation(firstDelivery.jobKey);
+    expect(deferred).toMatchObject({ state: "active", attempt: 0 });
+    expect(deferred?.events).toContainEqual(
+      expect.objectContaining({
+        event: "deployment-version-deferred",
+        deploymentVersion: "acceptance-worker-previous",
+      }),
+    );
+
+    f.env.CF_VERSION_METADATA.id = "acceptance-worker-test-v1";
+    await f.service.handleQueue(f.queue.messages.shift() as DurableOperationQueueMessage);
+    expect(f.providers.calls.create).toBe(1);
+    const lease = (await created.json()) as AcceptanceLeaseResponse;
+    const status = await f.service.handle(
+      request(`/_nabuflow/acceptance/v1/leases/${lease.leaseId}/status`, {}, { method: "GET" }),
+    );
+    await expect(status.json()).resolves.toMatchObject({ state: "active", provider: "neon" });
+  });
+
   it("creates an opaque idempotent lease with encrypted material and no response leakage", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW_MS);
@@ -516,6 +558,13 @@ describe("staging acceptance provisioner", () => {
     expect(flyProvision.status).toBe(202);
     await drain(f);
     expect(f.providers.calls.flySecret).toBe(1);
+    const flyStatus = await f.service.handle(
+      request(`/_nabuflow/acceptance/v1/leases/${fly.leaseId}/status`, {}, { method: "GET" }),
+    );
+    await expect(flyStatus.json()).resolves.toMatchObject({
+      state: "provisioned",
+      provider: "fly",
+    });
 
     for (const response of [dbProvision, stripeProvision, flyProvision]) {
       const text = await response.clone().text();

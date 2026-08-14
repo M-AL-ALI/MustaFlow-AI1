@@ -1311,10 +1311,23 @@ export class CloudflareRuntimeProvider
       );
     }
     const pantry = input.path.startsWith(`${CONTROL_API_PREFIX}/pantry/`);
+    const readTransportTimeoutMs =
+      input.method === "GET" && input.operationTimeoutMs !== undefined
+        ? Math.max(
+            0,
+            Math.floor(
+              (input.operationTimeoutMs -
+                CONTROL_RETRY_DELAYS_MS.reduce((total, delay) => total + delay, 0)) /
+                (CONTROL_RETRY_DELAYS_MS.length + 1),
+            ),
+          )
+        : undefined;
     return this.request({
       method: input.method,
       path: input.path,
       body: input.body,
+      signal: input.signal,
+      transportTimeoutMs: readTransportTimeoutMs,
       idempotencyKey:
         input.method === "GET" ? undefined : (input.idempotencyKey ?? crypto.randomUUID()),
       operation:

@@ -109,6 +109,8 @@ describe("Zero capability eligibility contracts", () => {
     expect(await deriveZeroIntegrationEligibilityIdentity(structuredClone(metadata))).toBe(
       identity,
     );
+    expect(metadata.cloudflare.status).toBe("eligible");
+    if (metadata.cloudflare.status !== "eligible") throw new Error("Fixture must be eligible");
     expect(
       await deriveZeroIntegrationEligibilityIdentity({
         ...metadata,

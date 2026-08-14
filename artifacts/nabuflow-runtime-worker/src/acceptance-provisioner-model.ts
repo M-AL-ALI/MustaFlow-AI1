@@ -124,6 +124,11 @@ export interface AcceptanceVault {
     revision: string;
     nowMs: number;
   }): Promise<StoredAcceptanceLease | null>;
+  markFlySecretProvisioned(input: {
+    leaseId: string;
+    ownerSubjectHash: string;
+    nowMs: number;
+  }): Promise<StoredAcceptanceLease | null>;
   markDestroying(input: {
     leaseId: string;
     ownerSubjectHash: string | null;

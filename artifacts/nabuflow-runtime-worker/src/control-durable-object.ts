@@ -109,6 +109,7 @@ function appendDurableOperationEvent(
   job: StoredDurableOperationJob,
   event: StoredDurableOperationJob["events"][number]["event"],
   nowMs: number,
+  deploymentVersion?: string,
 ): void {
   // Jobs created by the request-owned predecessor may survive a Worker deployment.
   // Normalize their observability fields before any append so rollout cannot strand them.
@@ -121,6 +122,7 @@ function appendDurableOperationEvent(
     event,
     attempt: job.attempt,
     checkpoint: job.checkpoint,
+    ...(deploymentVersion === undefined ? {} : { deploymentVersion }),
   });
   if (job.events.length > ARTIFACT_COMMIT_EVENT_LIMIT) {
     job.events.splice(0, job.events.length - ARTIFACT_COMMIT_EVENT_LIMIT);
@@ -660,6 +662,22 @@ export class ControlDurableObject
       appendDurableOperationEvent(job, "queue-nudged", nowMs);
       await transaction.put(jobKey, job);
       return "recorded" as const;
+    });
+  }
+
+  async recordDurableOperationDeploymentObservation(
+    jobKey: string,
+    deploymentVersion: string,
+    nowMs: number,
+  ): Promise<"matched" | "deferred" | "not_found" | "terminal"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (job === undefined) return "not_found" as const;
+      if (job.state !== "active") return "terminal" as const;
+      if (job.expectedDeploymentVersion === deploymentVersion) return "matched" as const;
+      appendDurableOperationEvent(job, "deployment-version-deferred", nowMs, deploymentVersion);
+      await transaction.put(jobKey, job);
+      return "deferred" as const;
     });
   }
 

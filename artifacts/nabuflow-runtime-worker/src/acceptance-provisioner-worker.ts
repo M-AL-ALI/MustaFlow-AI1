@@ -30,6 +30,7 @@ import type {
   AcceptanceWorkloadVerifier,
   StoredAcceptanceLease,
 } from "./acceptance-provisioner-model";
+import { deferDurableOperationForWrongDeployment } from "./durable-operation-deployment";
 import { Es256AcceptanceWorkloadVerifier } from "./acceptance-workload-identity";
 import type {
   ControlCoordinator,
@@ -133,6 +134,7 @@ function publicLease(lease: StoredAcceptanceLease): AcceptanceLeaseResponse {
     provider: lease.scope.provider,
     resourceIds: lease.resource?.ids ?? [],
     state: lease.state,
+    terminalCode: lease.terminalCode as AcceptanceLeaseResponse["terminalCode"],
     createdAt: new Date(lease.createdAtMs).toISOString(),
     updatedAt: new Date(lease.updatedAtMs).toISOString(),
     expiresAt: new Date(lease.expiresAtMs).toISOString(),
@@ -428,6 +430,16 @@ export class AcceptanceProvisionerService {
   async handleQueue(message: DurableOperationQueueMessage): Promise<void> {
     if (message.kind !== "acceptance-lease") return;
     const control = coordinator(this.env);
+    const deploymentDisposition = await deferDurableOperationForWrongDeployment({
+      coordinator: control,
+      message,
+      deploymentVersion: this.env.CF_VERSION_METADATA.id,
+      nowMs: Date.now(),
+      requeue: async (deferredMessage, delaySeconds) => {
+        await this.env.ACCEPTANCE_OPERATION_QUEUE.send(deferredMessage, { delaySeconds });
+      },
+    });
+    if (deploymentDisposition !== "continue") return;
     const ownerId = crypto.randomUUID();
     const claim = (await control.claimDurableOperationDriver(
       message.jobKey,
@@ -623,6 +635,12 @@ export class AcceptanceProvisionerService {
       });
       if (lease === null) throw new AcceptanceHttpError(403, "acceptance_scope_mismatch", false);
       await checkpoint("vault-complete");
+      lease = await vault(this.env).markFlySecretProvisioned({
+        leaseId: lease.leaseId,
+        ownerSubjectHash: lease.ownerSubjectHash,
+        nowMs: Date.now(),
+      });
+      if (lease === null) throw new AcceptanceHttpError(500, "acceptance_internal_error", false);
       await checkpoint("verified-gone");
       await checkpoint("finalized");
       await this.audit(lease, "provision-fly-secret", "succeeded");

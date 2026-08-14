@@ -70,6 +70,7 @@ interface FixturePackage {
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   scripts?: Record<string, string>;
   bin?: string | Record<string, string>;
   os?: string[];
@@ -124,6 +125,7 @@ async function registryFixture(packages: Record<string, FixturePackage>): Promis
             dependencies: fixture.dependencies ?? {},
             optionalDependencies: fixture.optionalDependencies ?? {},
             peerDependencies: fixture.peerDependencies ?? {},
+            peerDependenciesMeta: fixture.peerDependenciesMeta ?? {},
             scripts: fixture.scripts ?? {},
             bin: fixture.bin,
             os: fixture.os,
@@ -219,13 +221,31 @@ describe("trusted npm Pantry ingest", () => {
     ).toEqual({ "bin-tool": "cli.js" });
     const declarations: PantryRuntimeDependencyDeclarations = new Map<
       string,
-      { dependencies: Record<string, string>; optionalDependencies: Record<string, string> }
+      {
+        dependencies: Record<string, string>;
+        optionalDependencies: Record<string, string>;
+        peerDependencies: Record<string, string>;
+        peerDependenciesMeta: Record<string, { optional?: boolean }>;
+      }
     >([
       [
         "npm:bin-parent@1.0.0",
-        { dependencies: { "bin-tool": "^1.0.0" }, optionalDependencies: {} },
+        {
+          dependencies: { "bin-tool": "^1.0.0" },
+          optionalDependencies: {},
+          peerDependencies: {},
+          peerDependenciesMeta: {},
+        },
       ],
-      ["npm:bin-tool@1.0.0", { dependencies: {}, optionalDependencies: {} }],
+      [
+        "npm:bin-tool@1.0.0",
+        {
+          dependencies: {},
+          optionalDependencies: {},
+          peerDependencies: {},
+          peerDependenciesMeta: {},
+        },
+      ],
     ]);
     expect(() => assertPantryClosureComplete(result.closure, declarations)).not.toThrow();
     const incomplete = structuredClone(result.closure);
@@ -237,6 +257,45 @@ describe("trusted npm Pantry ingest", () => {
     expect(() => assertPantryClosureComplete(incomplete, declarations)).toThrow(
       expect.objectContaining({ code: "dependency_conflict", retryable: false }),
     );
+  });
+
+  it("does not stock an unselected optional peer and still closes required peers", async () => {
+    const { client } = await registryFixture({
+      pg: {
+        peerDependencies: { "pg-native": ">=3.0.1" },
+        peerDependenciesMeta: { "pg-native": { optional: true } },
+      },
+      "pg-native": { dependencies: { libpq: "1.11.0" }, version: "3.5.2" },
+      libpq: { version: "1.11.0", scripts: { install: "node-gyp rebuild" } },
+      "required-peer-parent": { peerDependencies: { "required-peer": "^1.0.0" } },
+      "required-peer": {},
+    });
+
+    const pgOnly = await ingestPantryStockRequest(await stockRequest(["pg"]), client);
+    expect(pgOnly.closure.ingredients.map((ingredient) => ingredient.package.name)).toEqual(["pg"]);
+    expect(pgOnly.closure.ingredients[0]?.dependencies).toEqual([]);
+
+    const explicitlySelected = await ingestPantryStockRequest(
+      await stockRequest(["pg", "pg-native"]),
+      client,
+    );
+    expect(
+      explicitlySelected.closure.ingredients.map((ingredient) => ingredient.package.name),
+    ).toEqual(["libpq", "pg-native", "pg"]);
+
+    const requiredPeer = await ingestPantryStockRequest(
+      await stockRequest(["required-peer-parent"]),
+      client,
+    );
+    expect(requiredPeer.closure.ingredients.map((ingredient) => ingredient.package.name)).toEqual([
+      "required-peer-parent",
+      "required-peer",
+    ]);
+    expect(
+      requiredPeer.closure.ingredients.find(
+        (ingredient) => ingredient.package.name === "required-peer-parent",
+      )?.dependencies,
+    ).toEqual([{ name: "required-peer", version: "1.0.0", kind: "peer" }]);
   });
 
   it("verifies normalized SHA-512 SRI and rejects a mutated tarball", async () => {

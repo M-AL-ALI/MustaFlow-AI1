@@ -1309,6 +1309,60 @@ describe("trusted secretless build plane", () => {
     });
   });
 
+  it("reclaims aged orphan quarantine only while the build plane is quiescent", async () => {
+    const { env, shelf } = await fixtureEnv();
+    const coordinator = new MemoryBuildCoordinator();
+    const bucket = env.TRUSTED_BUILD_OBJECTS as unknown as MemoryR2Bucket;
+    const orphanKey = `quarantine/requests/pbuildreq_${"a".repeat(64)}/${"b".repeat(64)}.json`;
+    await bucket.put(orphanKey, "orphan");
+
+    const gc = () =>
+      handleTrustedBuildWorkerRequest(
+        new Request("https://build.internal/internal/v1/gc", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-nabuflow-build-principal": "build-gc",
+          },
+          body: JSON.stringify({
+            scope: "quarantine",
+            olderThan: "2026-08-11T00:00:00.000Z",
+            maxDeletes: 10,
+          }),
+        }),
+        env,
+        { coordinator },
+      );
+
+    const active = await buildRequest(shelf, "o");
+    await coordinator.begin(
+      {
+        buildId: active.input.buildId,
+        requestId: active.requestId,
+        requestSha256: "c".repeat(64),
+        createdAt: NOW.toISOString(),
+        updatedAt: NOW.toISOString(),
+        requestObjectSha256: "d".repeat(64),
+        sourceObjectSha256: "e".repeat(64),
+        sourceBytes: 1,
+      },
+      1,
+    );
+    const fenced = await gc();
+    expect(fenced.status).toBe(200);
+    await expect(fenced.json()).resolves.toMatchObject({ deletedOrphanObjects: 0 });
+    expect(bucket.objects.has(orphanKey)).toBe(true);
+
+    await coordinator.cancel(active.input.buildId, "2026-08-10T12:00:00.000Z");
+    const swept = await gc();
+    expect(swept.status).toBe(200);
+    await expect(swept.json()).resolves.toMatchObject({
+      deletedBuildIds: [active.input.buildId],
+      deletedOrphanObjects: 1,
+    });
+    expect(bucket.objects.has(orphanKey)).toBe(false);
+  });
+
   it("uses fresh queue messages for logical retries and never orphans queued work", async () => {
     const { env, shelf, queued } = await fixtureEnv();
     const coordinator = new MemoryBuildCoordinator();

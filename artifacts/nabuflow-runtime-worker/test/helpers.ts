@@ -218,6 +218,28 @@ export class MemoryCoordinator implements ControlCoordinator {
     if (this.idempotency.get(key)?.fingerprint === fingerprint) this.idempotency.delete(key);
   }
 
+  async recordDurableOperationDeploymentObservation(
+    jobKey: string,
+    deploymentVersion: string,
+    nowMs: number,
+  ): Promise<"matched" | "deferred" | "not_found" | "terminal"> {
+    const job = await this.getDurableOperation(jobKey);
+    if (job === null) return "not_found";
+    if (job.state !== "active") return "terminal";
+    if (job.expectedDeploymentVersion === deploymentVersion) return "matched";
+    job.eventSequence += 1;
+    job.events.push({
+      sequence: job.eventSequence,
+      at: new Date(nowMs).toISOString(),
+      event: "deployment-version-deferred",
+      attempt: job.attempt,
+      checkpoint: job.checkpoint,
+      deploymentVersion,
+    });
+    job.updatedAtMs = nowMs;
+    return "deferred";
+  }
+
   async registerDurableOperation(
     input: DurableOperationRegistration,
   ): Promise<DurableOperationClaim> {

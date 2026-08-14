@@ -16,6 +16,11 @@ import {
   type ZeroGeneratedDependencyPlan,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
+import {
+  VENDORED_FLY_POSTGRES_TYPES_VERSION,
+  VENDORED_FLY_POSTGRES_VERSION,
+  getVendoredRuntimeSdkFiles,
+} from "./zero-runtime-sdk";
 
 export const ZERO_ELIGIBILITY_METADATA_FILENAME = "eligibility.json" as const;
 export const ZERO_ELIGIBILITY_ASSET_DIRECTORY = "zero-eligibility-assets" as const;
@@ -251,6 +256,45 @@ function packageDependencies(file: BuilderFile | undefined): Set<string> | null 
   }
 }
 
+function packageDependencyVersions(file: BuilderFile | undefined): Map<string, string> | null {
+  if (file === undefined) return null;
+  try {
+    const parsed = JSON.parse(file.content) as {
+      dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
+    };
+    const versions = new Map<string, string>();
+    for (const group of [parsed.dependencies ?? {}, parsed.devDependencies ?? {}]) {
+      for (const [name, value] of Object.entries(group)) {
+        if (typeof value !== "string" || value.length === 0) return null;
+        const previous = versions.get(name);
+        if (previous !== undefined && previous !== value) return null;
+        versions.set(name, value);
+      }
+    }
+    return versions;
+  } catch {
+    return null;
+  }
+}
+
+function hasAttestedFlyPostgresAdapter(
+  byPath: ReadonlyMap<string, BuilderFile>,
+  packageFile: BuilderFile | undefined,
+): boolean {
+  const expected = getVendoredRuntimeSdkFiles().find(
+    (file) => file.path === "nabuflow/runtime/fly-postgres.ts",
+  );
+  const actual = byPath.get("nabuflow/runtime/fly-postgres.ts");
+  const versions = packageDependencyVersions(packageFile);
+  return (
+    expected !== undefined &&
+    actual?.content === expected.content &&
+    versions?.get("pg") === VENDORED_FLY_POSTGRES_VERSION &&
+    versions.get("@types/pg") === VENDORED_FLY_POSTGRES_TYPES_VERSION
+  );
+}
+
 function referencesPackage(source: string, name: string): boolean {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   return new RegExp(
@@ -299,7 +343,9 @@ export async function evaluateZeroGeneratedEligibility(
   if (toolchain !== "node-api") addReason(reasons, "unsupported_toolchain");
 
   const byPath = new Map(input.files.map((file) => [file.path, file]));
-  const packageNames = packageDependencies(byPath.get("package.json"));
+  const packageFile = byPath.get("package.json");
+  const packageNames = packageDependencies(packageFile);
+  const attestedFlyPostgresAdapter = hasAttestedFlyPostgresAdapter(byPath, packageFile);
   const plannedNames = new Set(input.dependencyPlan.intents.map((intent) => intent.name));
   if (packageNames === null) {
     addReason(reasons, "undeclared_dependency", "package.json");
@@ -311,7 +357,7 @@ export async function evaluateZeroGeneratedEligibility(
       }
     }
     for (const name of packageNames) {
-      if (RAW_DATABASE_PACKAGES.has(name))
+      if (RAW_DATABASE_PACKAGES.has(name) && !(name === "pg" && attestedFlyPostgresAdapter))
         addReason(reasons, "raw_database_client", "package.json");
       if (RAW_PAYMENT_PACKAGES.has(name)) addReason(reasons, "raw_payment_client", "package.json");
     }

@@ -126,6 +126,7 @@ import type {
   StoredRuntimeLayeredArtifact,
   RemovedRuntimeLayeredArtifact,
 } from "./model";
+import { deferDurableOperationForWrongDeployment } from "./durable-operation-deployment";
 import { artifactChunkKey, deleteArtifactObjects } from "./artifact-storage";
 import {
   deleteDependencyLayerObjects,
@@ -729,6 +730,20 @@ export async function handleDurableOperationQueue(
     }
     const ownerId = crypto.randomUUID();
     const nowMs = dependencies.nowMs ?? Date.now();
+    const deploymentDisposition = await deferDurableOperationForWrongDeployment({
+      coordinator,
+      message: body,
+      deploymentVersion: env.CF_VERSION_METADATA.id,
+      nowMs,
+      requeue: async (_deferredMessage, delaySeconds) => {
+        message.retry({ delaySeconds });
+      },
+    });
+    if (deploymentDisposition === "ignore") {
+      message.ack();
+      continue;
+    }
+    if (deploymentDisposition === "deferred") continue;
     const claim = await coordinator.claimDurableOperationDriver(body.jobKey, ownerId, nowMs);
     if (claim.state === "not_found" || claim.state === "terminal") {
       message.ack();

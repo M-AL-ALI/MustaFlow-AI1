@@ -49,6 +49,7 @@ describe("acceptance provisioner contract", () => {
       provider: "neon" as const,
       resourceIds: ["project-opaque-id"],
       state: "active" as const,
+      terminalCode: null,
       createdAt: "2026-08-11T00:00:00.000Z",
       updatedAt: "2026-08-11T00:00:01.000Z",
       expiresAt: "2026-08-11T01:00:00.000Z",

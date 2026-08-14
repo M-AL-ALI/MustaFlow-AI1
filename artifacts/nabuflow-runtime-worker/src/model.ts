@@ -260,6 +260,11 @@ export interface ControlCoordinator {
     jobKey: string,
     nowMs: number,
   ): Promise<"recorded" | "not_found" | "terminal">;
+  recordDurableOperationDeploymentObservation(
+    jobKey: string,
+    deploymentVersion: string,
+    nowMs: number,
+  ): Promise<"matched" | "deferred" | "not_found" | "terminal">;
   renewDurableOperation(
     jobKey: string,
     ownerId: string,

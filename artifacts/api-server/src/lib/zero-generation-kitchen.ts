@@ -53,6 +53,8 @@ import {
 const PANTRY_PREFIX = `${CONTROL_API_PREFIX}/pantry`;
 const BUILD_PREFIX = `${CONTROL_API_PREFIX}/build-plane`;
 const BUILD_WAIT_MS = ZERO_GENERATION_KITCHEN_PRODUCT_BOUND_MS;
+const ZERO_GENERATION_CONTROL_READ_ATTEMPT_BOUND_MS = 30_000;
+const ZERO_GENERATION_CONTROL_READ_RETRY_MS = 2_000;
 
 export class ZeroGenerationKitchenError extends Error {
   constructor(
@@ -243,6 +245,7 @@ interface PantryWaitOptions {
   sleep: (milliseconds: number) => Promise<void>;
   signal?: AbortSignal;
   pollIntervalMs?: number;
+  onEvidence?: (evidence: Readonly<Record<string, unknown>>) => void;
 }
 
 function cancelledError(stage: string): ZeroGenerationKitchenError {
@@ -291,38 +294,130 @@ function isControlError(error: unknown, status: number, code: string): boolean {
 }
 
 interface InnerFollowerEvidence {
-  code: "pantry_operation_timeout";
+  code: string;
   elapsedMs: number | null;
   attempts: number | null;
   lastObservedOperationState: string;
+  transportCause: string | null;
 }
 
 function innerFollowerEvidence(error: unknown): InnerFollowerEvidence {
   const input = error as {
+    code?: unknown;
     elapsedMs?: unknown;
     attempts?: unknown;
     lastObservedOperationState?: unknown;
+    transportCause?: unknown;
   };
   return {
-    code: "pantry_operation_timeout",
+    code: typeof input.code === "string" ? input.code : "pantry_operation_timeout",
     elapsedMs: typeof input.elapsedMs === "number" ? input.elapsedMs : null,
     attempts: typeof input.attempts === "number" ? input.attempts : null,
     lastObservedOperationState:
       typeof input.lastObservedOperationState === "string"
         ? input.lastObservedOperationState
-        : "unknown",
+        : typeof input.transportCause === "string"
+          ? `transport_${input.transportCause}_after_dispatch`
+          : "unknown",
+    transportCause: typeof input.transportCause === "string" ? input.transportCause : null,
   };
+}
+
+function isRetryablePantryTransportWeather(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { code?: unknown; retryable?: unknown };
+  return (
+    candidate.retryable === true &&
+    typeof candidate.code === "string" &&
+    [
+      "control_transport_timeout",
+      "control_transport_connection_reset",
+      "control_transport_fetch_exception",
+      "control_plane_unreachable",
+    ].includes(candidate.code)
+  );
+}
+
+export async function readZeroGenerationControlWithWeather(
+  provider: Pick<ZeroGenerationTenantRuntimeProvider, "zeroGenerationControlRequest">,
+  path: string,
+  options: {
+    startedAtMs: number;
+    deadlineMs: number;
+    monotonicNow: () => number;
+    sleep: (milliseconds: number) => Promise<void>;
+    signal?: AbortSignal;
+    stage: string;
+    timeoutCode: string;
+    onEvidence?: (evidence: Readonly<Record<string, unknown>>) => void;
+  },
+): Promise<unknown> {
+  let attempts = 0;
+  let lastTransport: InnerFollowerEvidence | null = null;
+  for (;;) {
+    throwIfCancelled(options.signal, options.stage);
+    const remainingMs = options.deadlineMs - options.monotonicNow();
+    const attemptBoundMs = Math.floor(
+      Math.min(
+        ZERO_GENERATION_CONTROL_READ_ATTEMPT_BOUND_MS,
+        remainingMs - ZERO_GENERATION_INNER_FOLLOWER_MARGIN_MS,
+      ),
+    );
+    if (attemptBoundMs <= 0) {
+      throw new ZeroGenerationKitchenError(
+        options.timeoutCode,
+        "Zero generation control read exceeded its owning product deadline",
+        {
+          stage: options.stage,
+          attempts,
+          elapsedMs: Math.max(0, options.monotonicNow() - options.startedAtMs),
+          lastTransport,
+        },
+      );
+    }
+    attempts += 1;
+    try {
+      return await provider.zeroGenerationControlRequest({
+        method: "GET",
+        path,
+        operationTimeoutMs: attemptBoundMs,
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (!isRetryablePantryTransportWeather(error)) throw error;
+      lastTransport = innerFollowerEvidence(error);
+      options.onEvidence?.({
+        stage: options.stage,
+        operation: "zero-generation-control-read",
+        path,
+        attempt: attempts,
+        remainingMs: Math.max(0, options.deadlineMs - options.monotonicNow()),
+        typedError: lastTransport,
+      });
+    }
+    const retryDelayMs = Math.min(
+      ZERO_GENERATION_CONTROL_READ_RETRY_MS,
+      Math.max(0, options.deadlineMs - options.monotonicNow()),
+    );
+    await cancellableSleep(retryDelayMs, options.sleep, options.signal, options.stage);
+  }
 }
 
 async function refreshPantryDiagnostics(
   provider: Pick<ZeroGenerationTenantRuntimeProvider, "zeroGenerationControlRequest">,
   progress: PantryStockProgressEvidence,
+  options: PantryWaitOptions,
 ): Promise<PantryStockProgressEvidence> {
   try {
     const diagnostics = pantryCatalogAssemblyDiagnosticsResponseSchema.parse(
       await provider.zeroGenerationControlRequest({
         method: "GET",
         path: `${PANTRY_PREFIX}/assemblies/${progress.assemblyId}/diagnostics`,
+        operationTimeoutMs: Math.min(
+          10_000,
+          Math.max(0, options.deadlineMs - options.monotonicNow()),
+        ),
+        signal: options.signal,
       }),
     );
     return {
@@ -398,13 +493,14 @@ export async function waitForPantryShelf(
     } catch (error) {
       if (
         !isControlError(error, 504, "pantry_operation_timeout") &&
-        !isControlError(error, 503, "pantry_operation_terminal_unknown")
+        !isControlError(error, 503, "pantry_operation_terminal_unknown") &&
+        !isRetryablePantryTransportWeather(error)
       )
         throw error;
       lastInnerFollower = innerFollowerEvidence(error);
       if (lastProgress !== null) {
         lastProgress = {
-          ...(await refreshPantryDiagnostics(provider, lastProgress)),
+          ...(await refreshPantryDiagnostics(provider, lastProgress, options)),
           innerFollowerState: lastInnerFollower.lastObservedOperationState,
         };
       }
@@ -436,6 +532,11 @@ export async function waitForPantryShelf(
         await provider.zeroGenerationControlRequest({
           method: "GET",
           path: `${PANTRY_PREFIX}/assemblies/${stock.assemblyId}`,
+          operationTimeoutMs: Math.min(
+            ZERO_GENERATION_CONTROL_READ_ATTEMPT_BOUND_MS,
+            Math.max(0, options.deadlineMs - options.monotonicNow()),
+          ),
+          signal: options.signal,
         }),
       );
       if (!progressParsed.success || progressParsed.data.assemblyId !== stock.assemblyId) {
@@ -468,7 +569,7 @@ export async function waitForPantryShelf(
         metrics: {},
         innerFollowerState: null,
       };
-      lastProgress = await refreshPantryDiagnostics(provider, lastProgress);
+      lastProgress = await refreshPantryDiagnostics(provider, lastProgress, options);
       if (progress.ingest.state === "failed" && !progress.ingest.failure.retryable) {
         throw new ZeroGenerationKitchenError(
           progress.ingest.failure.code,
@@ -479,8 +580,20 @@ export async function waitForPantryShelf(
     } catch (error) {
       // A successful commit atomically removes the assembly before the next stock lookup can
       // observe the committed index. Treat only that narrow race as progress; all other errors
-      // remain typed failures from the signed control transport.
-      if (!isControlError(error, 404, "catalog_not_found")) throw error;
+      // remain typed failures from the signed control transport. Typed transport weather is
+      // retried under the kitchen's outer product deadline rather than masking its authority.
+      if (isRetryablePantryTransportWeather(error)) {
+        lastInnerFollower = innerFollowerEvidence(error);
+        options.onEvidence?.({
+          stage: "pantry-progress-read",
+          operation: "zero-generation-control-read",
+          attempt: poll + 1,
+          remainingMs: Math.max(0, options.deadlineMs - options.monotonicNow()),
+          typedError: lastInnerFollower,
+        });
+      } else if (!isControlError(error, 404, "catalog_not_found")) {
+        throw error;
+      }
     }
 
     poll += 1;
@@ -498,6 +611,14 @@ async function readOutputPayload(
   provider: ZeroGenerationTenantRuntimeProvider,
   output: TrustedBuildOutput,
   scope: "app" | "layer",
+  options: {
+    startedAtMs: number;
+    deadlineMs: number;
+    monotonicNow: () => number;
+    sleep: (milliseconds: number) => Promise<void>;
+    signal?: AbortSignal;
+    onEvidence?: (evidence: Readonly<Record<string, unknown>>) => void;
+  },
   layerIndex = 0,
 ): Promise<Uint8Array> {
   const selected =
@@ -524,10 +645,15 @@ async function readOutputPayload(
   const payload = new Uint8Array(content.payloadBytes);
   let offset = 0;
   for (const descriptor of descriptors) {
-    const response = (await provider.zeroGenerationControlRequest({
-      method: "GET",
-      path: `${BUILD_PREFIX}/builds/${output.buildId}/outputs/${scope}/${contentSha256}/chunks/${descriptor.index}`,
-    })) as { payloadBase64?: string };
+    const response = (await readZeroGenerationControlWithWeather(
+      provider,
+      `${BUILD_PREFIX}/builds/${output.buildId}/outputs/${scope}/${contentSha256}/chunks/${descriptor.index}`,
+      {
+        ...options,
+        stage: "build-output-read",
+        timeoutCode: "build_output_timeout",
+      },
+    )) as { payloadBase64?: string };
     if (typeof response.payloadBase64 !== "string") {
       throw new ZeroGenerationKitchenError("build_output_missing", "Build chunk is unavailable");
     }
@@ -595,12 +721,23 @@ export async function runZeroGenerationKitchen(
     monotonicNow,
     sleep,
     signal: input.signal,
+    onEvidence: input.onEvidence,
   });
   throwIfCancelled(input.signal, "pantry-shelf-read");
-  const shelfResponse = (await provider.zeroGenerationControlRequest({
-    method: "GET",
-    path: `${PANTRY_PREFIX}/revisions/by-root/${shelfRoot}`,
-  })) as { shelf?: unknown };
+  const shelfResponse = (await readZeroGenerationControlWithWeather(
+    provider,
+    `${PANTRY_PREFIX}/revisions/by-root/${shelfRoot}`,
+    {
+      startedAtMs: productStartedAtMs,
+      deadlineMs: assemblyDeadlineMs,
+      monotonicNow,
+      sleep,
+      signal: input.signal,
+      stage: "pantry-shelf-read",
+      timeoutCode: "pantry_stock_timeout",
+      onEvidence: input.onEvidence,
+    },
+  )) as { shelf?: unknown };
   const shelf = pantryCatalogShelfRecordSchema.parse(shelfResponse.shelf);
   if (shelf.state.state !== "committed") {
     throw new ZeroGenerationKitchenError(
@@ -628,10 +765,20 @@ export async function runZeroGenerationKitchen(
   while (monotonicNow() < assemblyDeadlineMs) {
     throwIfCancelled(input.signal, "trusted-build-wait");
     const status = trustedBuildStatusResponseSchema.parse(
-      await provider.zeroGenerationControlRequest({
-        method: "GET",
-        path: `${BUILD_PREFIX}/builds/${buildRequest.input.buildId}`,
-      }),
+      await readZeroGenerationControlWithWeather(
+        provider,
+        `${BUILD_PREFIX}/builds/${buildRequest.input.buildId}`,
+        {
+          startedAtMs: productStartedAtMs,
+          deadlineMs: assemblyDeadlineMs,
+          monotonicNow,
+          sleep,
+          signal: input.signal,
+          stage: "trusted-build-wait",
+          timeoutCode: "build_timeout",
+          onEvidence: input.onEvidence,
+        },
+      ),
     );
     lastBuildState = status.state;
     if (status.state === "failed") {
@@ -677,7 +824,15 @@ export async function runZeroGenerationKitchen(
   });
 
   throwIfCancelled(input.signal, "build-output-read");
-  const appPayload = await readOutputPayload(provider, output, "app");
+  const controlReadOptions = {
+    startedAtMs: productStartedAtMs,
+    deadlineMs: assemblyDeadlineMs,
+    monotonicNow,
+    sleep,
+    signal: input.signal,
+    onEvidence: input.onEvidence,
+  };
+  const appPayload = await readOutputPayload(provider, output, "app", controlReadOptions);
   const app = await sealRuntimeArtifact({
     targetRuntimeIdentity: input.runtimeId,
     manifestRevision: input.manifest.revision,
@@ -689,10 +844,15 @@ export async function runZeroGenerationKitchen(
     throw new ZeroGenerationKitchenError("build_output_invalid", "App reseal changed build bytes");
   }
   const attestation = pantryShelfContentHashesResponseSchema.parse(
-    await provider.zeroGenerationControlRequest({
-      method: "GET",
-      path: `${PANTRY_PREFIX}/revisions/by-root/${shelfRoot}/content-hashes`,
-    }),
+    await readZeroGenerationControlWithWeather(
+      provider,
+      `${PANTRY_PREFIX}/revisions/by-root/${shelfRoot}/content-hashes`,
+      {
+        ...controlReadOptions,
+        stage: "pantry-provenance-read",
+        timeoutCode: "pantry_stock_timeout",
+      },
+    ),
   ) as PantryShelfContentHashesResponse;
   const provenance = await resolveTrustedPantryLayerSealProvenance({
     shelf,
@@ -703,7 +863,7 @@ export async function runZeroGenerationKitchen(
   const sealedLayers = [];
   for (let index = 0; index < output.layers.length; index += 1) {
     const layerOutput = output.layers[index];
-    const payload = await readOutputPayload(provider, output, "layer", index);
+    const payload = await readOutputPayload(provider, output, "layer", controlReadOptions, index);
     const layer = await sealRuntimeArtifactLayer({
       mountPath: layerOutput.content.descriptor.mountPath,
       platform: ZERO_SEALED_BUILD_PLATFORM,

@@ -237,6 +237,22 @@ describe("Zero blueprint and skill capability eligibility", () => {
     expect(result.reasons.map((entry) => entry.code)).toContain(reason);
   });
 
+  it("permits pg only behind the exact platform-owned Fly adapter bytes", async () => {
+    const value = prepared();
+    const tamperedFiles = value.files.map((file) =>
+      file.path === "nabuflow/runtime/fly-postgres.ts"
+        ? { ...file, content: `${file.content}\n// tampered` }
+        : file,
+    );
+    const result = await evaluate({ files: tamperedFiles });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected the tampered adapter to fail closed");
+    expect(result.reasons).toContainEqual({
+      code: "raw_database_client",
+      path: "package.json",
+    });
+  });
+
   it("throws the structured result rather than an untyped eligibility error", async () => {
     await expect(
       assertZeroGeneratedEligibility({

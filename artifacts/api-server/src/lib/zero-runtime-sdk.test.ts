@@ -109,6 +109,7 @@ describe("vendored dual-mode runtime SDK", () => {
     expect(second).toEqual(first);
     expect(first.map((file) => file.path)).toEqual([
       "nabuflow/runtime/db.ts",
+      "nabuflow/runtime/fly-postgres.ts",
       "nabuflow/runtime/payments.ts",
       "nabuflow/runtime/index.ts",
     ]);
@@ -118,8 +119,22 @@ describe("vendored dual-mode runtime SDK", () => {
     const joined = first.map((file) => `${file.path}\0${file.content}`).join("\0");
     expect(joined).not.toMatch(/postgres(?:ql)?:\/\/|sk_(?:live|test)_|nrf-[a-z0-9]/iu);
     expect(createHash("sha256").update(joined).digest("hex")).toBe(
-      "9e44d6d6ebefb4b5e86d769cf0cb952d18e87d743d0bef54b5d477d4a63b832a",
+      "cc5bf8eddb438543fa271b7f539ae57e93d6f88cd7568eb9d859c8b6470aa892",
     );
+  });
+
+  it("injects a lazy, sanitized Fly PostgreSQL adapter without weakening capability mode", () => {
+    const files = getVendoredRuntimeSdkFiles();
+    const adapter = files.find((file) => file.path === "nabuflow/runtime/fly-postgres.ts")?.content;
+    const index = files.find((file) => file.path === "nabuflow/runtime/index.ts")?.content;
+    expect(adapter).toContain('await import("pg")');
+    expect(adapter).not.toMatch(/^import\s+(?!type\b).*\s+from\s+["']pg["']/mu);
+    expect(adapter).toContain(
+      "options.directDriverFactory ?? createNabuFlowFlyPostgresDriverFactory",
+    );
+    expect(adapter).toContain('new NabuFlowDirectDriverError("configuration", false)');
+    expect(adapter).not.toMatch(/error\.message|connectionString\s*[:=]\s*["']/u);
+    expect(index).toContain('export { createNabuFlowDatabase } from "./fly-postgres"');
   });
 
   it("compiles the public index when capability modules share the SDK version export", () => {
@@ -130,6 +145,10 @@ describe("vendored dual-mode runtime SDK", () => {
     const sources = new Map([
       ["/index.ts", index ?? ""],
       ["/db.ts", 'export const NABUFLOW_RUNTIME_SDK_VERSION = "v1"; export const db = true;'],
+      [
+        "/fly-postgres.ts",
+        'export const createNabuFlowDatabase = () => ({ mode: "fly-direct-v1" });',
+      ],
       [
         "/payments.ts",
         'export const NABUFLOW_RUNTIME_SDK_VERSION = "v1"; export const payments = true;',
