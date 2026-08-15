@@ -9,12 +9,14 @@ import {
   validateRuntimeArtifactPath,
 } from "@workspace/tenant-runtime-contracts";
 import {
+  ZERO_SEALED_NODE_PROMPT_EXTENSION,
   ZeroSealedSourceContractError,
   ZeroSealedGenerationConfigurationError,
   prepareZeroSealedNodeRefinement,
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
   requiresDirectProjectDatabaseProvisioning,
+  resolveZeroProjectDeploymentType,
   resolveZeroProjectRuntimePort,
   resolveZeroGenerationTarget,
 } from "./zero-sealed-generation";
@@ -83,6 +85,7 @@ describe("Zero sealed generator integration", () => {
     ).toBe("cloudflare-sealed-staging-v1");
     expect(requiresDirectProjectDatabaseProvisioning({})).toBe(true);
     expect(resolveZeroProjectRuntimePort({})).toBeNull();
+    expect(resolveZeroProjectDeploymentType({})).toBeUndefined();
     expect(
       requiresDirectProjectDatabaseProvisioning({
         [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
@@ -97,6 +100,13 @@ describe("Zero sealed generator integration", () => {
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
       }),
     ).toBe(ZERO_SEALED_RUNTIME_PORT);
+    expect(
+      resolveZeroProjectDeploymentType({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-staging-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toBe("autoscale");
     expect(
       resolveZeroGenerationTarget({
         [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-v1",
@@ -321,6 +331,26 @@ describe("Zero sealed generator integration", () => {
         path: "src/unsafe.ts",
       });
     }
+  });
+
+  it.each(['express.static("public")', 'response.sendFile("public/index.html")'])(
+    "rejects source-only runtime asset dependency %s",
+    (planted) => {
+      const files = generatedFiles().map((file) =>
+        file.path === "src/index.ts" ? { ...file, content: `${file.content}\n${planted};` } : file,
+      );
+      expect(() => prepareZeroSealedNodeSource({ files })).toThrow(
+        expect.objectContaining({
+          reasons: ["runtime_asset_dependency"],
+          path: "src/index.ts",
+        }),
+      );
+    },
+  );
+
+  it("documents compiled-only assets and idempotent capability schema setup", () => {
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("not depend on public/");
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("CREATE TABLE IF NOT EXISTS");
   });
 
   it("memorializes the pre-slice legacy Node prompt bytes", async () => {

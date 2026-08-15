@@ -47,6 +47,7 @@ describe("Zero sealed generation product wiring", () => {
     expect(provisioning).toContain("requiresDirectProjectDatabaseProvisioning(process.env)");
     expect(provisioning).toContain("if (!requiresDirectDatabase)");
     expect(projects).toContain("!requiresDirectDatabase || process.env.NEON_API_KEY");
+    expect(projects).toContain("deploymentType: sealedDeploymentType");
     expect(jobs).not.toContain('created === null || "error" in created || !created.endpoint');
     expect(jobs).not.toContain("if (!runtimeId || !opts.containerUrl)");
     expect(jobs).not.toContain("zero-task-${taskId}-node-v1");

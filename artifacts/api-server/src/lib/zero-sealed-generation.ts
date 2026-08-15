@@ -34,6 +34,8 @@ export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARG
 - Bind the HTTP server to 0.0.0.0 and Number(process.env.PORT ?? "8080").
 - GET /healthz must return 200 without touching a database or any external service.
 - package.json scripts are exactly build="tsc" and start="node dist/src/index.js". Set TypeScript rootDir to "." so the source-owned nabuflow module and src/ compile together. Declare every dependency normally; the trusted Pantry resolves and provisions them. Never emit npm install, npx, registry URLs, or lockfile bootstrap commands.
+- The sealed artifact contains TypeScript compiler output, not source-only assets. Runtime code must not depend on public/, templates/, source JSON, or another file that plain tsc does not emit. Serve small UI assets from compiled code, or import data through a compiler-emitted module; never use express.static or sendFile for source-only paths.
+- When the app declares the database capability, initialize its app-owned schema idempotently through createNabuFlowDatabase before accepting traffic (for example, CREATE TABLE IF NOT EXISTS). Do not invoke migration CLIs, read raw database credentials, or make healthz depend on schema initialization.
 - The source package's Fly-compatible start script remains "node dist/src/index.js". The sealed runtime manifest is fixed at port 8080, health path /healthz, build argv ["npm","run","build"], and sealed-output start argv ["node","src/index.js"].`;
 
 export class ZeroSealedGenerationConfigurationError extends Error {
@@ -56,6 +58,7 @@ export type ZeroSealedSourceContractReason =
   | "network_bind"
   | "runtime_port"
   | "health_route"
+  | "runtime_asset_dependency"
   | "credential_or_dependency_egress";
 
 export class ZeroSealedSourceContractError extends Error {
@@ -123,6 +126,18 @@ export function resolveZeroProjectRuntimePort(
     : null;
 }
 
+/**
+ * A sealed Node application cannot be published as a snapshot-only project.
+ * Legacy/Fly creation omits the field and therefore retains the database default.
+ */
+export function resolveZeroProjectDeploymentType(
+  environment: Record<string, string | undefined>,
+): "autoscale" | undefined {
+  return isZeroSealedGenerationTarget(resolveZeroGenerationTarget(environment))
+    ? "autoscale"
+    : undefined;
+}
+
 export function readZeroPantryPublicKeys(
   environment: Record<string, string | undefined>,
 ): ReadonlyMap<string, string> {
@@ -183,6 +198,7 @@ const SECRET_ENV_PATTERN =
   /process\.env\.(?:DATABASE_URL|STRIPE_[A-Z0-9_]*|PGPASSWORD|NEON_[A-Z0-9_]*|[A-Z0-9_]*(?:TOKEN|SECRET|KEY))/u;
 const INSTALL_OR_REGISTRY_PATTERN =
   /(?:\bnpx\b|\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|dlx)\b|registry\.npmjs\.org)/u;
+const SOURCE_ONLY_RUNTIME_ASSET_PATTERN = /\b(?:express\.static|[A-Za-z_$][\w$]*\.sendFile)\s*\(/u;
 const SEALED_NETWORK_BIND_PATTERN =
   /\b[A-Za-z_$][\w$]*\.listen\s*\(\s*[^,\r\n]+,\s*(["'])0\.0\.0\.0\1\s*(?:,|\))/u;
 const RELATIVE_MODULE_SPECIFIER_PATTERN =
@@ -340,6 +356,14 @@ export function prepareZeroSealedNodeSource(input: {
   if (!entry.content.includes(ZERO_SEALED_HEALTH_PATH)) entryReasons.push("health_route");
   if (entryReasons.length > 0) {
     throw new ZeroSealedSourceContractError(entryReasons, "src/index.ts");
+  }
+  for (const file of byPath.values()) {
+    if (
+      /\.(?:[cm]?ts|tsx)$/u.test(file.path) &&
+      SOURCE_ONLY_RUNTIME_ASSET_PATTERN.test(file.content)
+    ) {
+      throw new ZeroSealedSourceContractError(["runtime_asset_dependency"], file.path);
+    }
   }
   if (input.skipEligibilityPrecheck !== true) {
     for (const file of byPath.values()) {
