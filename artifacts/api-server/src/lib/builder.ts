@@ -17,6 +17,7 @@ import type {
   ZeroGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
 import {
+  isZeroSealedGenerationTarget,
   prepareZeroSealedNodeSource,
   ZERO_SEALED_NODE_PROMPT_EXTENSION,
 } from "./zero-sealed-generation";
@@ -5407,7 +5408,7 @@ async function runStackBuildPipeline(
     { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
   ];
 
-  if (args.zeroGenerationTarget === "cloudflare-sealed-staging-v1") {
+  if (isZeroSealedGenerationTarget(args.zeroGenerationTarget)) {
     messages.push({ role: "system", content: ZERO_SEALED_NODE_PROMPT_EXTENSION });
   }
 
@@ -5524,16 +5525,16 @@ async function runStackBuildPipeline(
   const { files: sanitisedFiles } = scanForSecrets(files);
   let sealed: ReturnType<typeof prepareZeroSealedNodeSource> | null;
   try {
-    sealed =
-      args.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
-        ? prepareZeroSealedNodeSource({
-            files: sanitisedFiles,
-            skipEligibilityPrecheck: true,
-            ...(args.sealedManifestRevision === undefined
-              ? {}
-              : { manifestRevision: args.sealedManifestRevision }),
-          })
-        : null;
+    sealed = isZeroSealedGenerationTarget(args.zeroGenerationTarget)
+      ? prepareZeroSealedNodeSource({
+          files: sanitisedFiles,
+          target: args.zeroGenerationTarget,
+          skipEligibilityPrecheck: true,
+          ...(args.sealedManifestRevision === undefined
+            ? {}
+            : { manifestRevision: args.sealedManifestRevision }),
+        })
+      : null;
     if (sealed !== null) {
       await assertZeroGeneratedEligibility({
         files: sealed.files,
@@ -5548,7 +5549,7 @@ async function runStackBuildPipeline(
   } catch (error) {
     if (
       error instanceof ZeroCapabilityGapError &&
-      args.zeroGenerationTarget === "cloudflare-sealed-staging-v1" &&
+      isZeroSealedGenerationTarget(args.zeroGenerationTarget) &&
       capabilityCorrectionAttempt === 0
     ) {
       const reasonCodes = [...new Set(error.result.reasons.map((reason) => reason.code))].sort();

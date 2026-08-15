@@ -1,0 +1,48 @@
+{
+  "format": "nabuflow-cloudflare-production-cutover-recon/v1",
+  "recordedAt": "2026-08-14",
+  "baseSha": "cf741dc47c4113caf8b77a644cf32071021bc3da",
+  "branch": "codex/cloudflare-production-cutover-recon",
+  "liveMutations": 0,
+  "credentialValuesObserved": 0,
+  "billableWorkloadsStarted": 0,
+  "cloudflare": {
+    "productionWorkersFound": 0,
+    "productionR2BucketsFound": 0,
+    "productionQueuesFound": 0,
+    "productionContainerApplicationsFound": 0
+  },
+  "fly": {
+    "productionApp": "mustaflow-containers",
+    "appState": "suspended",
+    "machineCount": 41,
+    "stoppedMachineCount": 41,
+    "volumeCount": 0,
+    "appSecretCount": 0,
+    "publicIpCount": 0,
+    "certificateCount": 0,
+    "acceptanceStagingAppCount": 0
+  },
+  "dns": {
+    "mustaflowAppHasAuthoritativeRecords": false,
+    "mustaflowComDelegatedToCloudflare": true,
+    "recommendedTenantDomain": "apps.mustaflow.com"
+  },
+  "verification": {
+    "contracts": { "files": 18, "tests": 179, "passed": true },
+    "runtimeWorker": { "files": 30, "tests": 231, "passed": true },
+    "zeroGeneratorApi": { "files": 11, "tests": 104, "passed": true },
+    "workspaceLibraryTypecheck": true,
+    "apiTypecheck": true,
+    "runtimeWorkerTypecheck": true,
+    "contractsLint": true,
+    "runtimeWorkerLint": true,
+    "changedApiLint": true,
+    "modifiedBlobSecretPatternFindings": 0,
+    "diffCheck": true
+  },
+  "hardCutoverBlockers": [
+    "production_artifact_promotion_publish",
+    "production_database_capability_provisioning"
+  ]
+}

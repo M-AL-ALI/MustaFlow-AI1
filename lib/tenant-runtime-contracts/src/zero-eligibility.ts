@@ -2,7 +2,10 @@ import { z } from "zod";
 import { canonicalPantryJson } from "./pantry";
 import { sha256Hex } from "./request-signing";
 import { runtimeManifestContractSchema } from "./control-schemas";
-import { zeroGeneratedDependencyPlanSchema } from "./zero-generation";
+import {
+  zeroGeneratedDependencyPlanSchema,
+  zeroSealedGenerationTargetSchema,
+} from "./zero-generation";
 
 export const ZERO_ELIGIBILITY_FORMAT = "nabu-zero-capability-eligibility/v1" as const;
 export const ZERO_ELIGIBILITY_SCHEMA_VERSION = 1 as const;
@@ -123,7 +126,7 @@ export const zeroGeneratedFileIdentitySchema = z
 
 export const zeroEligibilityEnvelopeSchema = z
   .object({
-    target: z.literal("cloudflare-sealed-staging-v1"),
+    target: zeroSealedGenerationTargetSchema,
     toolchain: z.string().min(1).max(80),
     files: z.array(zeroGeneratedFileIdentitySchema).min(1).max(20_000),
     dependencyPlan: zeroGeneratedDependencyPlanSchema,
@@ -134,6 +137,13 @@ export const zeroEligibilityEnvelopeSchema = z
   })
   .strict()
   .superRefine((envelope, context) => {
+    if (envelope.target !== envelope.dependencyPlan.target) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dependencyPlan", "target"],
+        message: "Eligibility and dependency-plan generation targets must match",
+      });
+    }
     let prior: string | null = null;
     for (const [index, file] of envelope.files.entries()) {
       if (prior !== null && prior >= file.path) {

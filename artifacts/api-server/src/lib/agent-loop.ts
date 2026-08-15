@@ -95,7 +95,10 @@ import {
 } from "./sandbox-shell";
 import { creativeChargeFields } from "./creative-charge-honesty";
 import type { ZeroGenerationTarget } from "@workspace/tenant-runtime-contracts";
-import { ZERO_SEALED_NODE_PROMPT_EXTENSION } from "./zero-sealed-generation";
+import {
+  isZeroSealedGenerationTarget,
+  ZERO_SEALED_NODE_PROMPT_EXTENSION,
+} from "./zero-sealed-generation";
 import { checkZeroSealedFinalizeContract } from "./zero-sealed-finalize-check";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1649,7 +1652,7 @@ function buildSystemPrompt(
     input.liveServerAvailable === false
       ? "Live cloud-server infrastructure is unavailable for this run. Generate the requested architecture, but do not attempt container commands and do not treat server startup or /healthz as a finalization requirement. Continue every available file, syntax, structure, and other non-runtime validation."
       : "";
-  const sealedGeneration = input.zeroGenerationTarget === "cloudflare-sealed-staging-v1";
+  const sealedGeneration = isZeroSealedGenerationTarget(input.zeroGenerationTarget);
 
   // In Developer Mode every project is a real server process inside a Linux
   // container — static-html is never a valid target.  If the stack still reads
@@ -2045,10 +2048,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     legacyProfile: "fixed-node",
   }).servicePort;
   const baseProfile = checkProfileForServicePort(CHECK_PROFILES[stack], servicePort);
-  const liveServerAvailable =
-    input.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
-      ? false
-      : input.liveServerAvailable !== false;
+  const liveServerAvailable = isZeroSealedGenerationTarget(input.zeroGenerationTarget)
+    ? false
+    : input.liveServerAvailable !== false;
   const profile = {
     ...baseProfile,
     checks: checksForLiveServerCapability(baseProfile.checks, liveServerAvailable),
@@ -3138,12 +3140,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         const verifyFailed = profile.checks.filter(
           (c) => c.required && !verifyRun.find((r) => r.id === c.id)?.passed,
         );
-        const sealedFinalizeCheck =
-          input.zeroGenerationTarget === "cloudflare-sealed-staging-v1"
-            ? await checkZeroSealedFinalizeContract({
-                files: workspace.all(),
-              })
-            : null;
+        const sealedFinalizeCheck = isZeroSealedGenerationTarget(input.zeroGenerationTarget)
+          ? await checkZeroSealedFinalizeContract({
+              files: workspace.all(),
+              target: input.zeroGenerationTarget,
+            })
+          : null;
         if (sealedFinalizeCheck !== null) {
           await safeEvent(
             input.onEvent,
@@ -5567,7 +5569,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
         };
       }
-      if (input.zeroGenerationTarget === "cloudflare-sealed-staging-v1") {
+      if (isZeroSealedGenerationTarget(input.zeroGenerationTarget)) {
         const reason = "sealed generation permits only in-process checks; Pantry owns dependencies";
         commandsRun.push({
           step,
@@ -6278,7 +6280,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           }),
         };
       }
-      if (input.zeroGenerationTarget === "cloudflare-sealed-staging-v1") {
+      if (isZeroSealedGenerationTarget(input.zeroGenerationTarget)) {
         if (decision.manager !== "npm") {
           return {
             ok: false,

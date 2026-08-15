@@ -6,9 +6,15 @@ import { runtimeManifestContractSchema } from "./control-schemas";
 export const ZERO_GENERATION_SCHEMA_VERSION = 1 as const;
 export const ZERO_GENERATION_FORMAT = "nabu-zero-generation/v1" as const;
 
-export const ZERO_GENERATION_TARGETS = ["legacy-v1", "cloudflare-sealed-staging-v1"] as const;
+export const ZERO_SEALED_GENERATION_TARGETS = [
+  "cloudflare-sealed-staging-v1",
+  "cloudflare-sealed-v1",
+] as const;
+export const ZERO_GENERATION_TARGETS = ["legacy-v1", ...ZERO_SEALED_GENERATION_TARGETS] as const;
 export const zeroGenerationTargetSchema = z.enum(ZERO_GENERATION_TARGETS);
 export type ZeroGenerationTarget = z.infer<typeof zeroGenerationTargetSchema>;
+export const zeroSealedGenerationTargetSchema = z.enum(ZERO_SEALED_GENERATION_TARGETS);
+export type ZeroSealedGenerationTarget = z.infer<typeof zeroSealedGenerationTargetSchema>;
 
 /**
  * The sealed generator is deliberately inert unless all three deployment-owned
@@ -17,6 +23,8 @@ export type ZeroGenerationTarget = z.infer<typeof zeroGenerationTargetSchema>;
 export const ZERO_SEALED_GENERATION_GATE_ENV = "NABUFLOW_ZERO_GENERATION_TARGET" as const;
 export const ZERO_SEALED_GENERATION_GATE_VALUE = "cloudflare-sealed-staging-v1" as const;
 export const ZERO_SEALED_DEPLOYMENT_NAMESPACE = "staging" as const;
+export const ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE = "cloudflare-sealed-v1" as const;
+export const ZERO_SEALED_PRODUCTION_DEPLOYMENT_NAMESPACE = "production" as const;
 export const ZERO_PANTRY_PUBLIC_KEYS_ENV = "NABUFLOW_PANTRY_TRUSTED_PUBLIC_KEYS" as const;
 export const ZERO_SEALED_RUNTIME_PORT = 8080 as const;
 export const ZERO_SEALED_HEALTH_PATH = "/healthz" as const;
@@ -65,7 +73,7 @@ export const zeroGeneratedDependencyPlanSchema = z
   .object({
     format: z.literal(ZERO_GENERATION_FORMAT),
     schemaVersion: z.literal(ZERO_GENERATION_SCHEMA_VERSION),
-    target: z.literal("cloudflare-sealed-staging-v1"),
+    target: zeroSealedGenerationTargetSchema,
     intents: z.array(pantryPackageIntentSchema).min(1).max(1_000),
   })
   .strict()

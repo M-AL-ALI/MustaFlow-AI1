@@ -8,6 +8,8 @@ import {
   ZERO_SEALED_GENERATION_GATE_VALUE,
   ZERO_SEALED_HEALTH_PATH,
   ZERO_PANTRY_PUBLIC_KEYS_ENV,
+  ZERO_SEALED_PRODUCTION_DEPLOYMENT_NAMESPACE,
+  ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE,
   ZERO_SEALED_RUNTIME_PORT,
   ZERO_SEALED_START_COMMAND,
   zeroGeneratedDependencyPlanSchema,
@@ -15,6 +17,7 @@ import {
   type RuntimeManifestContract,
   type ZeroGeneratedDependencyPlan,
   type ZeroGenerationTarget,
+  type ZeroSealedGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
 import {
@@ -23,7 +26,7 @@ import {
   getVendoredRuntimeSdkFiles,
 } from "./zero-runtime-sdk";
 
-export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET (staging-only):
+export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET:
 - Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
@@ -76,14 +79,23 @@ export function resolveZeroGenerationTarget(
 ): ZeroGenerationTarget {
   const requested = environment[ZERO_SEALED_GENERATION_GATE_ENV];
   if (requested === undefined || requested === "") return "legacy-v1";
-  if (
-    requested !== ZERO_SEALED_GENERATION_GATE_VALUE ||
-    environment.TENANT_RUNTIME_PROVIDER !== "cloudflare" ||
-    environment.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE !== ZERO_SEALED_DEPLOYMENT_NAMESPACE
-  ) {
+  if (environment.TENANT_RUNTIME_PROVIDER !== "cloudflare") {
     throw new ZeroSealedGenerationConfigurationError();
   }
-  return "cloudflare-sealed-staging-v1";
+  const namespace = environment.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE;
+  if (
+    requested === ZERO_SEALED_GENERATION_GATE_VALUE &&
+    namespace === ZERO_SEALED_DEPLOYMENT_NAMESPACE
+  ) {
+    return ZERO_SEALED_GENERATION_GATE_VALUE;
+  }
+  if (
+    requested === ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE &&
+    namespace === ZERO_SEALED_PRODUCTION_DEPLOYMENT_NAMESPACE
+  ) {
+    return ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE;
+  }
+  throw new ZeroSealedGenerationConfigurationError();
 }
 
 /**
@@ -105,7 +117,7 @@ export function requiresDirectProjectDatabaseProvisioning(
 export function resolveZeroProjectRuntimePort(
   environment: Record<string, string | undefined>,
 ): number | null {
-  return resolveZeroGenerationTarget(environment) === "cloudflare-sealed-staging-v1"
+  return isZeroSealedGenerationTarget(resolveZeroGenerationTarget(environment))
     ? ZERO_SEALED_RUNTIME_PORT
     : null;
 }
@@ -171,7 +183,10 @@ const SECRET_ENV_PATTERN =
 const INSTALL_OR_REGISTRY_PATTERN =
   /(?:\bnpx\b|\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|dlx)\b|registry\.npmjs\.org)/u;
 
-function dependencyPlan(pkg: PackageJson): ZeroGeneratedDependencyPlan {
+function dependencyPlan(
+  pkg: PackageJson,
+  target: ZeroSealedGenerationTarget,
+): ZeroGeneratedDependencyPlan {
   const intents = new Map<string, { ecosystem: "npm"; name: string; selector: string }>();
   for (const group of [pkg.dependencies ?? {}, pkg.devDependencies ?? {}]) {
     for (const [name, selector] of Object.entries(group)) {
@@ -188,7 +203,7 @@ function dependencyPlan(pkg: PackageJson): ZeroGeneratedDependencyPlan {
   return zeroGeneratedDependencyPlanSchema.parse({
     format: ZERO_GENERATION_FORMAT,
     schemaVersion: ZERO_GENERATION_SCHEMA_VERSION,
-    target: "cloudflare-sealed-staging-v1",
+    target,
     intents: [...intents.values()].sort((left, right) => {
       const a = `${left.ecosystem}:${left.name}\0${left.selector}`;
       const b = `${right.ecosystem}:${right.name}\0${right.selector}`;
@@ -245,6 +260,7 @@ export function zeroSealedNodeManifestRevision(files: readonly BuilderFile[]): s
 
 export function prepareZeroSealedNodeSource(input: {
   files: readonly BuilderFile[];
+  target?: ZeroSealedGenerationTarget;
   manifestRevision?: string;
   /** Product generator paths run the canonical async eligibility scanner next. */
   skipEligibilityPrecheck?: boolean;
@@ -313,7 +329,7 @@ export function prepareZeroSealedNodeSource(input: {
   const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
   return {
     files,
-    dependencyPlan: dependencyPlan(pkg),
+    dependencyPlan: dependencyPlan(pkg, input.target ?? ZERO_SEALED_GENERATION_GATE_VALUE),
     manifest: makeZeroSealedNodeManifest(
       input.manifestRevision ?? zeroSealedNodeManifestRevision(files),
     ),
@@ -330,6 +346,7 @@ export function prepareZeroSealedNodeRefinement(input: {
   existingFiles: readonly BuilderFile[];
   changedFiles: readonly BuilderFile[];
   removedPaths: readonly string[];
+  target?: ZeroSealedGenerationTarget;
   manifestRevision?: string;
 }): PreparedZeroSealedNodeRefinement {
   const removed = new Set(input.removedPaths);
@@ -342,6 +359,7 @@ export function prepareZeroSealedNodeRefinement(input: {
 
   const prepared = prepareZeroSealedNodeSource({
     files: [...merged.values()],
+    target: input.target,
     manifestRevision: input.manifestRevision,
     skipEligibilityPrecheck: true,
   });
@@ -368,7 +386,10 @@ export function prepareZeroSealedNodeRefinement(input: {
 }
 
 export function isZeroSealedGenerationTarget(
-  target: ZeroGenerationTarget,
-): target is "cloudflare-sealed-staging-v1" {
-  return target === "cloudflare-sealed-staging-v1";
+  target: ZeroGenerationTarget | undefined,
+): target is ZeroSealedGenerationTarget {
+  return (
+    target === ZERO_SEALED_GENERATION_GATE_VALUE ||
+    target === ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE
+  );
 }

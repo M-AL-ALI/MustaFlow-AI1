@@ -115,6 +115,13 @@ export async function handlePublishedDataPlaneRequest(
 
     const sandbox = dependencies.sandbox ?? runtimeSandbox(env, route.sandboxIdentity);
     if (isWebSocketUpgrade(request)) {
+      if (env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE !== "staging") {
+        throw new PublishedHttpError(
+          501,
+          "published_websocket_unavailable",
+          "Published WebSockets are unavailable until the sanitized upgrade boundary is enabled",
+        );
+      }
       if (request.headers.has(OVERRIDE_HEADERS.hostname)) {
         throw new PublishedHttpError(
           400,

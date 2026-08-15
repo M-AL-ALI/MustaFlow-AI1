@@ -5,6 +5,7 @@ import {
   PREVIEW_GRANT_QUERY_PARAM,
   parseRuntimeIdentityForNamespace,
   parseTenantRuntimeConfig,
+  publishedHostnameSchema,
   signPreviewGrant,
   tenantServicePortSchema,
 } from "@workspace/tenant-runtime-contracts";
@@ -26,18 +27,22 @@ interface GrantDependencies {
 function previewGatewayOrigin(raw: string | undefined): string {
   if (!raw) throw new Error("CLOUDFLARE_RUNTIME_PREVIEW_URL is required for preview grants");
   const url = new URL(raw);
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".workers.dev")) {
-    throw new Error("CLOUDFLARE_RUNTIME_PREVIEW_URL must be an HTTPS workers.dev origin");
+  if (
+    url.protocol !== "https:" ||
+    !publishedHostnameSchema.safeParse(url.hostname).success ||
+    /^\d+(?:\.\d+){3}$/u.test(url.hostname)
+  ) {
+    throw new Error("CLOUDFLARE_RUNTIME_PREVIEW_URL must be a public HTTPS hostname origin");
   }
   if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || url.port) {
-    throw new Error("CLOUDFLARE_RUNTIME_PREVIEW_URL must contain only a workers.dev origin");
+    throw new Error("CLOUDFLARE_RUNTIME_PREVIEW_URL must contain only an HTTPS hostname origin");
   }
   return url.origin;
 }
 
 /**
- * Mint a staging Cloudflare preview grant when and only when Cloudflare is the
- * explicitly selected tenant runtime provider. The unset/Fly path returns
+ * Mint a deployment-owned Cloudflare preview grant when and only when Cloudflare
+ * is the explicitly selected tenant runtime provider. The unset/Fly path returns
  * before reading any preview key material.
  */
 export async function mintCloudflarePreviewGrant(
