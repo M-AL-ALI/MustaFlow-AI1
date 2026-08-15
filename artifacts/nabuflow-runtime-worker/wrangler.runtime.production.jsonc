@@ -1,0 +1,101 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nabuflow-runtime-production",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "runtime.apps.mustaflow.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "*.apps.mustaflow.com/*",
+      "zone_name": "mustaflow.com"
+    }
+  ],
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
+  "vars": {
+    "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE": "production",
+    "NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID": "v1",
+    "NABUFLOW_RUNTIME_SLEEP_AFTER": "10m",
+    "NABUFLOW_RUNTIME_LAYER_PLATFORM": "{\"runtime\":\"node\",\"runtimeVersion\":\"22.18.0\",\"nodeAbi\":\"127\",\"os\":\"linux\",\"cpu\":\"x64\",\"libc\":\"glibc\",\"toolchainImageDigest\":\"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738\"}",
+    "CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEN4uFqcUI3q4y7umM5euie7RnRI6V\n9xQF9XbAOlEgaN1d+PDIYpMJYuG8V3gnIx3xuDrjEiqG0LziWyIt8/wKyg==\n-----END PUBLIC KEY-----\n",
+    "NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED": "enabled",
+    "NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID": "org-wispy-scene-66237735",
+    "NABUFLOW_PRODUCTION_NEON_REGION_ID": "aws-us-east-1",
+    "NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS": "86400",
+    "NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS": "25"
+  },
+  "containers": [
+    {
+      "class_name": "NabuflowSandbox",
+      "image": "docker.io/cloudflare/sandbox:0.12.4",
+      "instance_type": "standard-1",
+      "max_instances": 5
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "NABUFLOW_RUNTIME_ARTIFACTS",
+      "bucket_name": "nabuflow-runtime-artifacts-production"
+    }
+  ],
+  "services": [
+    {
+      "binding": "PANTRY_CATALOG",
+      "service": "nabuflow-pantry-production"
+    },
+    {
+      "binding": "TRUSTED_BUILD_PLANE",
+      "service": "nabuflow-build-production"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "DURABLE_OPERATION_QUEUE",
+        "queue": "nabuflow-artifact-commit-production"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "nabuflow-artifact-commit-production",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "nabuflow-artifact-commit-dead-letter-production"
+      }
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NABUFLOW_SANDBOX",
+        "class_name": "NabuflowSandbox"
+      },
+      {
+        "name": "CONTROL_COORDINATOR",
+        "class_name": "ControlDurableObject"
+      },
+      {
+        "name": "CAPABILITY_VAULT",
+        "class_name": "CapabilityVaultDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["NabuflowSandbox", "ControlDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["CapabilityVaultDurableObject"]
+    }
+  ]
+}
