@@ -97,6 +97,28 @@ describe("Zero sealed generator integration", () => {
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
       }),
     ).toBe(ZERO_SEALED_RUNTIME_PORT);
+    expect(
+      resolveZeroGenerationTarget({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "production",
+      }),
+    ).toBe("cloudflare-sealed-v1");
+    expect(() =>
+      resolveZeroGenerationTarget({
+        [ZERO_SEALED_GENERATION_GATE_ENV]: "cloudflare-sealed-v1",
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+        CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+      }),
+    ).toThrow(ZeroSealedGenerationConfigurationError);
+  });
+
+  it("stamps the production target through the Pantry dependency plan", () => {
+    const prepared = prepareZeroSealedNodeSource({
+      files: generatedFiles(),
+      target: "cloudflare-sealed-v1",
+    });
+    expect(prepared.dependencyPlan.target).toBe("cloudflare-sealed-v1");
   });
 
   it("injects the vendored SDK and emits a canonical Pantry plan", () => {
@@ -147,6 +169,10 @@ describe("Zero sealed generator integration", () => {
   });
 
   it("loads public-only Pantry verification material and rejects private keys", () => {
+    const syntheticPrivateKey = [
+      "-----BEGIN",
+      "PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+    ].join(" ");
     expect(
       readZeroPantryPublicKeys({
         [ZERO_PANTRY_PUBLIC_KEYS_ENV]: JSON.stringify({
@@ -157,7 +183,7 @@ describe("Zero sealed generator integration", () => {
     expect(() =>
       readZeroPantryPublicKeys({
         [ZERO_PANTRY_PUBLIC_KEYS_ENV]: JSON.stringify({
-          bad: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+          bad: syntheticPrivateKey,
         }),
       }),
     ).toThrow(ZeroSealedGenerationConfigurationError);

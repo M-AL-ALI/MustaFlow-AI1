@@ -234,6 +234,47 @@ describe("anonymous published application data plane", () => {
     expect(request.headers.get("x-forwarded-for")).toBe("attacker.invalid");
   });
 
+  it("fails closed on published WebSockets outside staging until PG-2 is resolved", async () => {
+    const productionIdentity = await deriveRuntimeIdentity({
+      namespace: "production",
+      projectId: 84,
+      role: "production",
+      slot: "blue",
+    });
+    const productionRuntime = await coordinator.getRuntime(identity);
+    if (productionRuntime === null) throw new Error("staging fixture missing");
+    productionRuntime.descriptor.identity = productionIdentity;
+    await coordinator.putRuntime(productionIdentity, productionRuntime);
+    await coordinator.activateRoute(
+      {
+        hostname: PUBLISHED_HOST,
+        projectId: 84,
+        role: "production",
+        activeSlot: "blue",
+        manifestRevision: "published-manifest-1",
+        servicePort: 8080,
+        sandboxIdentity: productionIdentity,
+      },
+      "published-manifest-1",
+    );
+    env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE = "production";
+    env.NABUFLOW_STAGING_HOST_OVERRIDE_ENABLED = "false";
+
+    const response = await handlePublishedDataPlaneRequest(
+      new Request(`https://${PUBLISHED_HOST}/socket`, {
+        headers: { connection: "Upgrade", upgrade: "websocket" },
+      }),
+      env,
+      { coordinator, sandbox, nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(501);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "published_websocket_unavailable",
+      retryable: false,
+    });
+    expect(sandbox.wsRequests).toHaveLength(0);
+  });
+
   it("strips platform, control, override, and forwarding headers while preserving app auth", async () => {
     sandbox.responseFactory = (request) => {
       const reflected: Record<string, string> = {};

@@ -409,7 +409,7 @@ export async function evaluateZeroGeneratedEligibility(
   );
   files.sort((left, right) => left.path.localeCompare(right.path));
   const envelope = zeroEligibilityEnvelopeSchema.parse({
-    target: "cloudflare-sealed-staging-v1",
+    target: input.dependencyPlan.target,
     toolchain,
     files,
     dependencyPlan: input.dependencyPlan,

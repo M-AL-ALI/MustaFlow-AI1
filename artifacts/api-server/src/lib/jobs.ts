@@ -3114,6 +3114,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
           zeroSealedGeneration = prepareZeroSealedNodeSource({
             files: result.files,
+            target: zeroGenerationTarget,
             skipEligibilityPrecheck: true,
           });
           await assertZeroGeneratedEligibility({
@@ -3680,6 +3681,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             existingFiles,
             changedFiles: refineResult.changedFiles,
             removedPaths: refineResult.removedPaths,
+            target: zeroGenerationTarget,
           });
           await assertZeroGeneratedEligibility({
             files: preparedRefinement.files,

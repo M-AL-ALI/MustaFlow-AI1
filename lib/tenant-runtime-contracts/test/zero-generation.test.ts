@@ -53,6 +53,14 @@ describe("Zero sealed-generation contracts", () => {
         ],
       }).intents,
     ).toHaveLength(2);
+    expect(
+      zeroGeneratedDependencyPlanSchema.parse({
+        format: ZERO_GENERATION_FORMAT,
+        schemaVersion: ZERO_GENERATION_SCHEMA_VERSION,
+        target: "cloudflare-sealed-v1",
+        intents: [{ ecosystem: "npm", name: "express", selector: "4.21.2" }],
+      }).target,
+    ).toBe("cloudflare-sealed-v1");
   });
 
   it("rejects unsorted or duplicate dependency intents", () => {

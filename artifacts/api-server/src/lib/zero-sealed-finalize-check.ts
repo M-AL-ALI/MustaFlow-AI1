@@ -1,4 +1,5 @@
 import type { BuilderFile } from "./builder";
+import type { ZeroSealedGenerationTarget } from "@workspace/tenant-runtime-contracts";
 import {
   ZeroSealedSourceContractError,
   prepareZeroSealedNodeSource,
@@ -42,11 +43,13 @@ export function describeZeroSealedSourceRepairs(reasonCodes: readonly string[]):
 /** Run the job wrapper's sealed-source contract while Zero can still repair it. */
 export async function checkZeroSealedFinalizeContract(input: {
   files: readonly BuilderFile[];
+  target?: ZeroSealedGenerationTarget;
   manifestRevision?: string;
 }): Promise<ZeroSealedFinalizeCheckResult> {
   try {
     const prepared = prepareZeroSealedNodeSource({
       files: input.files,
+      target: input.target,
       ...(input.manifestRevision === undefined ? {} : { manifestRevision: input.manifestRevision }),
       skipEligibilityPrecheck: true,
     });

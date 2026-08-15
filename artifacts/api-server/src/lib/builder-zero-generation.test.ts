@@ -85,6 +85,18 @@ describe("actual Node product generator target", () => {
     );
   });
 
+  it("carries the production sealed target through the same generator path", async () => {
+    const result = await runNodeApiBuildPipeline({
+      projectName: "production-generated-app",
+      projectKind: "node-api",
+      userPrompt: "Create a production records API",
+      agentMode: "power",
+      zeroGenerationTarget: "cloudflare-sealed-v1",
+      modelAdapter: fixtureAdapter([]),
+    });
+    expect(result.sealedGeneration?.dependencyPlan.target).toBe("cloudflare-sealed-v1");
+  });
+
   it("keeps the existing-mode adapter result free of sealed additions", async () => {
     const captured: string[] = [];
     const result = await runNodeApiBuildPipeline({

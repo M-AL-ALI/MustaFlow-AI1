@@ -143,6 +143,13 @@ describe("Zero capability eligibility contracts", () => {
       }),
     ).toThrow(/canonically sorted/u);
 
+    expect(() =>
+      zeroEligibilityEnvelopeSchema.parse({
+        ...envelope(),
+        target: "cloudflare-sealed-v1",
+      }),
+    ).toThrow(/generation targets must match/u);
+
     expect(
       zeroEligibilityResultSchema.parse({
         ok: false,

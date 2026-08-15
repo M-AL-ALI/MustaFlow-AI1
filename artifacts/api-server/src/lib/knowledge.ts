@@ -16,6 +16,7 @@ import { logger } from "./logger";
 import { buildEmbeddingInput, cosineSimilarity, generateEmbedding } from "./embeddings";
 import { anonymiseContent } from "./knowledge-promotion";
 import type { ZeroGenerationTarget } from "@workspace/tenant-runtime-contracts";
+import { isZeroSealedGenerationTarget } from "./zero-sealed-generation";
 import {
   resolveZeroIntegrationEligibility,
   resolveZeroIntegrationEligibilityOutcome,
@@ -54,7 +55,7 @@ export async function getInstalledBlueprintKnowledge(
   target: ZeroGenerationTarget = "legacy-v1",
 ): Promise<string | null> {
   try {
-    if (target === "cloudflare-sealed-staging-v1") {
+    if (isZeroSealedGenerationTarget(target)) {
       const installed = await db
         .select({ blueprintId: projectBlueprintsTable.blueprintId })
         .from(projectBlueprintsTable)
@@ -123,7 +124,7 @@ export async function getInstalledBlueprintKnowledge(
       `=== END INSTALLED BLUEPRINTS ===`,
     ].join("\n");
   } catch (err) {
-    if (target === "cloudflare-sealed-staging-v1") throw err;
+    if (isZeroSealedGenerationTarget(target)) throw err;
     logger.warn({ err, projectId }, "getInstalledBlueprintKnowledge failed — non-fatal");
     return null;
   }
