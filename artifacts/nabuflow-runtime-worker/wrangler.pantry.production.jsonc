@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nabuflow-pantry-production",
+  "main": "src/pantry-index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "PANTRY_REVISION_PUBLIC_KEYS": "{\"pantry-production-2026-08-v1\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1P58KktrdgRUUWyGSdghLSSeHUs1\\n7G87MLs45fYb+MA4GG7RUSu2BR3+OEksIhKNu+lG38sGbM1qfYXAXR2nPQ==\\n-----END PUBLIC KEY-----\\n\"}",
+    "PANTRY_INGEST_SIGNING_KEY_ID": "pantry-production-2026-08-v1"
+  },
+  "r2_buckets": [
+    {
+      "binding": "PANTRY_CATALOG_OBJECTS",
+      "bucket_name": "nabuflow-pantry-catalog-production"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "PANTRY_INGEST_QUEUE",
+        "queue": "nabuflow-pantry-ingest-production"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "nabuflow-pantry-ingest-production",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PANTRY_CATALOG_COORDINATOR",
+        "class_name": "PantryCatalogDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["PantryCatalogDurableObject"]
+    }
+  ]
+}
