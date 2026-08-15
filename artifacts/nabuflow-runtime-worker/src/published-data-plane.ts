@@ -84,9 +84,9 @@ export async function handlePublishedDataPlaneRequest(
       parsedIdentity === null ||
       parsedIdentity.projectId !== route.projectId ||
       parsedIdentity.role !== "production" ||
-      parsedIdentity.slot !== "blue" ||
+      (parsedIdentity.slot !== "blue" && parsedIdentity.slot !== "green") ||
       route.role !== "production" ||
-      route.activeSlot !== "blue"
+      route.activeSlot !== parsedIdentity.slot
     ) {
       throw new PublishedHttpError(
         503,

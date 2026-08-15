@@ -375,6 +375,63 @@ describe("anonymous published application data plane", () => {
     expect(sandbox.wsRequests).toHaveLength(0);
   });
 
+  it("atomically switches published traffic from blue to a healthy green candidate", async () => {
+    const blue = await coordinator.getRuntime(identity);
+    if (blue === null) throw new Error("blue runtime fixture is missing");
+    const greenIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 84,
+      role: "production",
+      slot: "green",
+    });
+    const greenRevision = "published-manifest-green-2";
+    await coordinator.putRuntime(greenIdentity, {
+      ...blue,
+      descriptor: {
+        ...blue.descriptor,
+        identity: greenIdentity,
+        slot: "green",
+        manifestRevision: greenRevision,
+      },
+      manifest: { ...blue.manifest, revision: greenRevision },
+      artifactRevision: "published-artifact-green-2",
+      artifactSha256: "b".repeat(64),
+    });
+    for (const hostname of [PUBLISHED_HOST, WORKER_HOST]) {
+      await expect(
+        coordinator.activateRoute(
+          {
+            hostname,
+            projectId: 84,
+            role: "production",
+            activeSlot: "green",
+            manifestRevision: greenRevision,
+            servicePort: 8080,
+            sandboxIdentity: greenIdentity,
+          },
+          "published-manifest-1",
+        ),
+      ).resolves.toBe("activated");
+    }
+
+    const response = await handlePublishedDataPlaneRequest(
+      new Request(`${ORIGIN}/green`, {
+        headers: await overrideHeaders("/green", "GET", "override-green-slot-0001"),
+      }),
+      env,
+      { coordinator, sandbox, nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(200);
+    expect(sandbox.httpRequests).toHaveLength(1);
+    await expect(coordinator.getRuntime(identity)).resolves.toMatchObject({
+      descriptor: { status: "running", slot: "blue" },
+    });
+    await expect(coordinator.getRoute(PUBLISHED_HOST)).resolves.toMatchObject({
+      activeSlot: "green",
+      sandboxIdentity: greenIdentity,
+    });
+  });
+
   it("keeps preview routing and its missing-session response unchanged", async () => {
     const response = await handleWorkerRequest(
       new Request(`${ORIGIN}${PREVIEW_DATA_PREFIX}/nrf-0000000000000000-p84-preview-primary/`),

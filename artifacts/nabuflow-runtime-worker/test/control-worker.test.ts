@@ -443,7 +443,7 @@ describe("authenticated staging control plane", () => {
       role: "production",
       slot: "green",
     });
-    const greenRejected = await handleControlRequest(
+    const missingGreenRuntime = await handleControlRequest(
       await signedRequest({
         path,
         method: "POST",
@@ -457,8 +457,10 @@ describe("authenticated staging control plane", () => {
       fakeEnv(),
       dependencies,
     );
-    expect(greenRejected.status).toBe(400);
-    await expect(greenRejected.json()).resolves.toMatchObject({ code: "production_blue_required" });
+    expect(missingGreenRuntime.status).toBe(400);
+    await expect(missingGreenRuntime.json()).resolves.toMatchObject({
+      code: "invalid_route_identity",
+    });
     expect(await coordinator.getRoute(hostname)).toBeNull();
 
     const unsigned = await handleControlRequest(

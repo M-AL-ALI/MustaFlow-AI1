@@ -21,6 +21,7 @@ import {
   type RuntimeLayeredArtifactEnvelope,
 } from "@workspace/tenant-runtime-contracts";
 import { handleControlRequest } from "../src/worker";
+import { layeredArtifactAppChunkKey } from "../src/artifact-layer-storage";
 import {
   MemoryCoordinator,
   MemoryR2Bucket,
@@ -404,6 +405,148 @@ describe("additive layered artifact control plane", () => {
     expect(coordinator.layeredArtifacts.size).toBe(0);
     expect(coordinator.runtimeLayers.size).toBe(0);
     expect((env.NABUFLOW_RUNTIME_ARTIFACTS as unknown as MemoryR2Bucket).objects.size).toBe(0);
+  });
+
+  it("promotes a committed preview release through the durable dock without changing its bytes", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const dependencies = { coordinator, backend, nowMs: TEST_NOW_MS };
+    const sourceLocator = { projectId: 42, role: "preview" as const, slot: "primary" as const };
+    const targetLocator = { projectId: 42, role: "production" as const, slot: "blue" as const };
+    const sourceIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      ...sourceLocator,
+    });
+    const targetIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      ...targetLocator,
+    });
+    const sourceBase = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+    const targetBase = "/_nabuflow/control/v1/runtimes/42/production/blue";
+    const targetManifest = {
+      ...ensureBody().manifest,
+      revision: "production-promotion-manifest-1",
+      resourceProfile: "production" as const,
+      public: true,
+    };
+
+    for (const [path, locator, manifest, key] of [
+      [sourceBase, sourceLocator, ensureBody().manifest, "promotion-source-ensure"],
+      [targetBase, targetLocator, targetManifest, "promotion-target-ensure"],
+    ] as const) {
+      const response = await handleControlRequest(
+        await signedRequest({
+          path,
+          method: "PUT",
+          nonce: `${key}-nonce`,
+          idempotencyKey: key,
+          body: {
+            locator,
+            expectedDeploymentVersion: "worker-version-test-1",
+            manifest,
+          },
+        }),
+        env,
+        dependencies,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+    }
+
+    const source = await makeLayeredArtifact({
+      identity: sourceIdentity,
+      artifactRevision: "accepted-preview-release-1",
+      appText: "export default { port: 8080 };\n",
+    });
+    await deliver({
+      base: sourceBase,
+      artifact: source,
+      coordinator,
+      backend,
+      env,
+      key: "promotion-source",
+    });
+    const promotionBody = {
+      sourceLocator,
+      targetLocator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      sourceSealedArtifactSha256: source.envelope.sealedArtifactSha256,
+      targetManifest,
+      targetArtifactRevision: "production-artifact-revision-1",
+      promotionIdentity: "9".repeat(64),
+    };
+    const promoted = await mutationAndDrain({
+      path: `${targetBase}/promotions/layered`,
+      nonce: "production-promotion-nonce-1",
+      idempotencyKey: "production-promotion-operation-1",
+      body: promotionBody,
+      env,
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS,
+    });
+    expect(promoted.status, await promoted.clone().text()).toBe(200);
+    const result = (await promoted.json()) as {
+      targetSealedArtifactSha256: string;
+      appChunksCopied: number;
+      layersReused: number;
+      envelope: RuntimeLayeredArtifactEnvelope;
+    };
+    expect(result).toMatchObject({ appChunksCopied: 1, layersReused: 1 });
+    expect(result.envelope.targetRuntimeIdentity).toBe(targetIdentity);
+    expect(result.envelope.content.appArtifact.content.chunks).toEqual(
+      source.envelope.content.appArtifact.content.chunks,
+    );
+    expect(result.envelope.content.layers).toEqual(source.envelope.content.layers);
+    expect(
+      await coordinator.getLayeredArtifact(targetIdentity, result.targetSealedArtifactSha256),
+    ).toMatchObject({ state: "committed" });
+    const diagnostics = await handleControlRequest(
+      await signedRequest({
+        path: `${targetBase}/promotions/layered/${promotionBody.promotionIdentity}/diagnostics`,
+        method: "GET",
+        nonce: "production-promotion-diagnostics-1",
+      }),
+      env,
+      dependencies,
+    );
+    expect(diagnostics.status).toBe(200);
+    await expect(diagnostics.json()).resolves.toMatchObject({
+      job: {
+        kind: "layered-artifact-promotion",
+        promotionIdentity: promotionBody.promotionIdentity,
+        state: "succeeded",
+        checkpoint: "finalized",
+        terminal: { status: 200, code: "ok" },
+        events: expect.arrayContaining([
+          expect.objectContaining({ event: "checkpoint-advanced", checkpoint: "finalized" }),
+        ]),
+      },
+    });
+
+    const bucket = env.NABUFLOW_RUNTIME_ARTIFACTS as unknown as MemoryR2Bucket;
+    const targetChunkKey = layeredArtifactAppChunkKey(
+      targetIdentity,
+      result.targetSealedArtifactSha256,
+      0,
+    );
+    expect(bucket.objects.get(targetChunkKey)).toEqual(source.appChunks[0]);
+
+    bucket.objects.set(targetChunkKey, new TextEncoder().encode("corrupt immutable bytes"));
+    const corruptedReplay = await mutationAndDrain({
+      path: `${targetBase}/promotions/layered`,
+      nonce: "production-promotion-nonce-2",
+      idempotencyKey: "production-promotion-integrity-recheck",
+      body: promotionBody,
+      env,
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS + 1,
+    });
+    expect(corruptedReplay.status).toBe(422);
+    await expect(corruptedReplay.json()).resolves.toMatchObject({
+      code: "artifact_promotion_target_integrity_mismatch",
+    });
   });
 });
 

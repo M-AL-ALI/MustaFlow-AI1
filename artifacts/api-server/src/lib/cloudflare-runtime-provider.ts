@@ -26,10 +26,15 @@ import {
   uploadRuntimeLayeredArtifactChunkResponseSchema,
   verifyRuntimeArtifactEnvelope,
   verifyRuntimeLayeredArtifactEnvelope,
+  acceptedSealedReleaseSchema,
+  promoteRuntimeLayeredArtifactResponseSchema,
+  activateRouteResponseSchema,
+  deactivateRouteResponseSchema,
   type RuntimeManifestContract,
   type RuntimeDescriptor,
   type RuntimeLocator,
   type TenantRuntimeConfig,
+  type ProductionArtifactRelease,
 } from "@workspace/tenant-runtime-contracts";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { sealRuntimeArtifact } from "./runtime-artifact";
@@ -56,6 +61,7 @@ import {
   type RuntimeSubsystemStatus,
   type TenantRuntimeProvider,
   type ZeroGenerationTenantRuntimeProvider,
+  type ProductionArtifactPromotingTenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
 type CloudflareConfig = NonNullable<TenantRuntimeConfig["cloudflare"]>;
@@ -286,7 +292,8 @@ export class CloudflareRuntimeProvider
     TenantRuntimeProvider,
     ArtifactDeployingTenantRuntimeProvider,
     LayeredArtifactDeployingTenantRuntimeProvider,
-    ZeroGenerationTenantRuntimeProvider
+    ZeroGenerationTenantRuntimeProvider,
+    ProductionArtifactPromotingTenantRuntimeProvider
 {
   readonly providerId = "cloudflare";
   private subsystemStatus: RuntimeSubsystemStatus | null = null;
@@ -608,12 +615,13 @@ export class CloudflareRuntimeProvider
     suffix: string,
     body?: unknown,
     operation?: ControlOperationFollowOptions,
+    idempotencyKey?: string,
   ): Promise<RuntimeDescriptor> {
     const result = await this.request({
       method,
       path: this.path(locator, suffix),
       body,
-      idempotencyKey: method === "GET" ? undefined : crypto.randomUUID(),
+      idempotencyKey: method === "GET" ? undefined : (idempotencyKey ?? crypto.randomUUID()),
       operation,
       parse: {
         parse: (value: unknown) =>
@@ -1412,6 +1420,217 @@ export class CloudflareRuntimeProvider
       slot: "primary",
     });
     await this.stop(id, projectId);
+  }
+  async promoteProductionArtifact(
+    input: Parameters<
+      ProductionArtifactPromotingTenantRuntimeProvider["promoteProductionArtifact"]
+    >[0],
+  ): ReturnType<ProductionArtifactPromotingTenantRuntimeProvider["promoteProductionArtifact"]> {
+    await this.requireControlFeature("artifact-promotion-v1");
+    const acceptedRelease = acceptedSealedReleaseSchema.parse(input.acceptedRelease);
+    const sourceLocator = await this.locator(
+      acceptedRelease.sourceRuntimeIdentity,
+      input.projectId,
+    );
+    if (sourceLocator.role !== "preview" || sourceLocator.slot !== "primary") {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "artifact_promotion_source_invalid",
+        false,
+        "Accepted release does not belong to the project preview runtime",
+      );
+    }
+    const targetLocator: RuntimeLocator = {
+      projectId: input.projectId,
+      role: "production",
+      slot: input.targetSlot,
+    };
+    const targetRuntimeIdentity = await deriveRuntimeIdentity({
+      namespace: this.config.deploymentNamespace,
+      ...targetLocator,
+    });
+    const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+    const targetManifest: RuntimeManifestContract = {
+      ...acceptedRelease.manifest,
+      revision: `prod-${input.promotionIdentity.slice(0, 48)}`,
+      resourceProfile: "production",
+      public: true,
+    };
+    const options: RuntimeOperationOptions = {
+      operationTimeoutMs: input.operationTimeoutMs,
+      signal: input.signal,
+    };
+    const operationKey = `production-publish:${input.promotionIdentity}`;
+
+    await this.descriptorRequest(
+      targetLocator,
+      "PUT",
+      "",
+      { locator: targetLocator, expectedDeploymentVersion, manifest: targetManifest },
+      this.operationOptions(
+        "production-runtime.ensure",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "production_runtime_ensure_timeout",
+        "production_runtime_ensure_cancelled",
+        options,
+      ),
+      `${operationKey}:ensure`,
+    );
+
+    const promotion = await this.request({
+      method: "POST",
+      path: this.path(targetLocator, "/promotions/layered"),
+      body: {
+        sourceLocator,
+        targetLocator,
+        expectedDeploymentVersion,
+        sourceSealedArtifactSha256: acceptedRelease.sealedArtifactSha256,
+        targetManifest,
+        targetArtifactRevision: `production-${input.promotionIdentity.slice(0, 48)}`,
+        promotionIdentity: input.promotionIdentity,
+      },
+      idempotencyKey: `${operationKey}:promote`,
+      operation: this.operationOptions(
+        "layered-artifact.promotion",
+        RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
+        "artifact_promotion_timeout",
+        "artifact_promotion_cancelled",
+        options,
+      ),
+      parse: promoteRuntimeLayeredArtifactResponseSchema,
+    });
+    this.deployedArtifacts.set(targetRuntimeIdentity, {
+      artifactRevision: promotion.artifactRevision,
+      sealedArtifactSha256: promotion.targetSealedArtifactSha256,
+      feature: "artifact-layers-v1",
+    });
+
+    const started = await this.descriptorRequest(
+      targetLocator,
+      "POST",
+      "/start",
+      {
+        locator: targetLocator,
+        expectedDeploymentVersion,
+        artifactRevision: promotion.artifactRevision,
+        artifactSha256: promotion.targetSealedArtifactSha256,
+      },
+      this.operationOptions(
+        "production-runtime.start",
+        RUNTIME_START_OPERATION_BOUND_MS,
+        "production_runtime_start_timeout",
+        "production_runtime_start_cancelled",
+        options,
+      ),
+      `${operationKey}:start`,
+    );
+    if (started.status !== "running" || started.manifestRevision !== targetManifest.revision) {
+      throw new CloudflareRuntimeControlError(
+        502,
+        "production_runtime_not_ready",
+        true,
+        "Production candidate did not reach the ready running state",
+      );
+    }
+
+    await this.request({
+      method: "POST",
+      path: `${CONTROL_API_PREFIX}/routes/${input.hostname}/activate`,
+      body: {
+        route: {
+          hostname: input.hostname,
+          projectId: input.projectId,
+          role: "production",
+          activeSlot: input.targetSlot,
+          manifestRevision: targetManifest.revision,
+          servicePort: targetManifest.servicePort,
+          sandboxIdentity: targetRuntimeIdentity,
+        },
+        expectedPreviousManifestRevision: input.expectedPreviousManifestRevision,
+      },
+      idempotencyKey: `${operationKey}:activate`,
+      operation: this.operationOptions(
+        "production-route.activate",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "production_route_activation_timeout",
+        "production_route_activation_cancelled",
+        options,
+      ),
+      parse: activateRouteResponseSchema,
+    });
+
+    const now = new Date().toISOString();
+    const release: ProductionArtifactRelease = {
+      format: "nabuflow.production-artifact-release/v1",
+      state: "active",
+      promotionIdentity: input.promotionIdentity,
+      sourceVersionId: input.sourceVersionId,
+      sourceSealedArtifactSha256: acceptedRelease.sealedArtifactSha256,
+      targetSealedArtifactSha256: promotion.targetSealedArtifactSha256,
+      targetContentSha256: promotion.targetContentSha256,
+      targetRuntimeIdentity,
+      targetSlot: input.targetSlot,
+      targetManifest,
+      hostname: input.hostname,
+      promotedAt: now,
+      activatedAt: now,
+    };
+    return { runtime: toInfo(started), release };
+  }
+  async rollbackProductionArtifactActivation(input: {
+    activatedRelease: ProductionArtifactRelease;
+    previousRelease: ProductionArtifactRelease | null;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const options: RuntimeOperationOptions = { signal: input.signal };
+    const rollbackKey = `production-publish:${input.activatedRelease.promotionIdentity}:rollback`;
+    if (input.previousRelease === null) {
+      await this.request({
+        method: "DELETE",
+        path: `${CONTROL_API_PREFIX}/routes/${input.activatedRelease.hostname}`,
+        body: {
+          hostname: input.activatedRelease.hostname,
+          expectedManifestRevision: input.activatedRelease.targetManifest.revision,
+          expectedSandboxIdentity: input.activatedRelease.targetRuntimeIdentity,
+        },
+        idempotencyKey: rollbackKey,
+        operation: this.operationOptions(
+          "production-route.rollback",
+          RUNTIME_CONTROL_OPERATION_BOUND_MS,
+          "production_route_rollback_timeout",
+          "production_route_rollback_cancelled",
+          options,
+        ),
+        parse: deactivateRouteResponseSchema,
+      });
+      return;
+    }
+    const previousLocator = await this.locator(input.previousRelease.targetRuntimeIdentity);
+    await this.request({
+      method: "POST",
+      path: `${CONTROL_API_PREFIX}/routes/${input.previousRelease.hostname}/activate`,
+      body: {
+        route: {
+          hostname: input.previousRelease.hostname,
+          projectId: previousLocator.projectId,
+          role: "production",
+          activeSlot: input.previousRelease.targetSlot,
+          manifestRevision: input.previousRelease.targetManifest.revision,
+          servicePort: input.previousRelease.targetManifest.servicePort,
+          sandboxIdentity: input.previousRelease.targetRuntimeIdentity,
+        },
+        expectedPreviousManifestRevision: input.activatedRelease.targetManifest.revision,
+      },
+      idempotencyKey: rollbackKey,
+      operation: this.operationOptions(
+        "production-route.rollback",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "production_route_rollback_timeout",
+        "production_route_rollback_cancelled",
+        options,
+      ),
+      parse: activateRouteResponseSchema,
+    });
   }
   async createProduction(
     _projectId: number,

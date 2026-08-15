@@ -58,7 +58,21 @@ import {
   deployProductionContainer,
   destroyContainer,
   hasContainerLayerCredentials,
+  tenantRuntimeProvider,
 } from "../lib/tenant-runtime";
+import {
+  supportsProductionArtifactPromotion,
+  type ProductionArtifactPromotingTenantRuntimeProvider,
+} from "../lib/tenant-runtime-provider";
+import {
+  acceptedSealedReleaseSchema,
+  parseRuntimeIdentity,
+  productionArtifactPromotionIdentity,
+  type AcceptedSealedRelease,
+  type ProductionArtifactRelease,
+  productionArtifactReleaseSchema,
+} from "@workspace/tenant-runtime-contracts";
+import { CloudflareRuntimeControlError } from "../lib/cloudflare-runtime-provider";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { getProductionSecretMap } from "../lib/container-secrets";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
@@ -125,6 +139,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
 
   // Track which snapshot files to publish. Null = use project_files (staging only).
   let approvedSnapshot: FileSnapshotEntry[] | null = null;
+  let approvedVersionId: number | null = null;
+  let approvedSealedRelease: AcceptedSealedRelease | null = null;
 
   if (env === "production") {
     // Fetch specVersion when the caller supplied an explicit versionId.
@@ -139,6 +155,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
           projectId: projectVersionsTable.projectId,
           filesSnapshot: projectVersionsTable.filesSnapshot,
           testingApprovedAt: projectVersionsTable.testingApprovedAt,
+          sealedRelease: projectVersionsTable.sealedRelease,
         })
         .from(projectVersionsTable)
         .where(
@@ -154,6 +171,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
             filesSnapshot: sv.filesSnapshot as FileSnapshotEntry[] | null,
           }
         : null;
+      if (sv) {
+        approvedVersionId = sv.id;
+        const parsedRelease = acceptedSealedReleaseSchema.safeParse(sv.sealedRelease);
+        approvedSealedRelease = parsedRelease.success ? parsedRelease.data : null;
+      }
     }
 
     // Fetch testedVersion for the auto-resolve (no explicit versionId) path.
@@ -164,7 +186,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       publishVersionId === null
     ) {
       const [tv] = await db
-        .select({ filesSnapshot: projectVersionsTable.filesSnapshot })
+        .select({
+          id: projectVersionsTable.id,
+          filesSnapshot: projectVersionsTable.filesSnapshot,
+          sealedRelease: projectVersionsTable.sealedRelease,
+        })
         .from(projectVersionsTable)
         .where(
           and(
@@ -175,6 +201,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       testedVersionData = tv
         ? { filesSnapshot: tv.filesSnapshot as FileSnapshotEntry[] | null }
         : null;
+      if (tv) {
+        approvedVersionId = tv.id;
+        const parsedRelease = acceptedSealedReleaseSchema.safeParse(tv.sealedRelease);
+        approvedSealedRelease = parsedRelease.success ? parsedRelease.data : null;
+      }
     }
 
     const gate = evaluatePublishGate(
@@ -399,6 +430,20 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
 
   // Generate slug on first publish; preserve existing slug on republish.
   const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
+  const deploymentType = project.deploymentType ?? "static";
+  const productionArtifactProvider: ProductionArtifactPromotingTenantRuntimeProvider | null =
+    supportsProductionArtifactPromotion(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
+  const artifactNativeProduction =
+    env === "production" && deploymentType !== "static" && productionArtifactProvider !== null;
+  if (artifactNativeProduction && (approvedVersionId === null || approvedSealedRelease === null)) {
+    res.status(422).json({
+      error:
+        "The approved project version has no accepted sealed release. Rebuild it through the trusted kitchen before publishing.",
+      code: "sealed_release_required",
+      versionId: approvedVersionId,
+    });
+    return;
+  }
 
   const publishedAt = new Date().toISOString();
   const isRepublish = project.publicSlug !== null;
@@ -430,8 +475,17 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         content: f.content,
         mimeType: f.mimeType,
       })),
+      sealedRelease:
+        env === "production" && approvedSealedRelease !== null ? approvedSealedRelease : undefined,
     })
     .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
+  if (!deploymentVersion) {
+    res.status(500).json({
+      error: "Deployment snapshot could not be persisted.",
+      code: "deployment_snapshot_persistence_failed",
+    });
+    return;
+  }
 
   if (env === "staging") {
     // ── Staging publish ───────────────────────────────────────────────────────
@@ -548,9 +602,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   let prodContainerUrl: string | null = project.prodContainerUrl ?? null;
   let prodContainerStatus = project.prodContainerStatus ?? "stopped";
   let prodContainerId = project.prodContainerId ?? null;
+  let productionRelease: ProductionArtifactRelease | null = null;
+  let previousProductionRelease: ProductionArtifactRelease | null = null;
+  let productionDeploymentFailure: { status: number; code: string; message: string } | null = null;
 
   // ── Gate: autoscale requires Core/pro/team subscription ──────────────────
-  const deploymentType = project.deploymentType ?? "static";
   if (env === "production" && deploymentType === "autoscale" && project.ownerId) {
     const [ownerSub] = await db
       .select({ tier: userSubscriptionsTable.tier })
@@ -573,40 +629,100 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // both go through the blue/green path; container.ts reads the type to
   // set min_machines_running appropriately.
   const shouldDeployContainer =
-    deploymentType !== "static" && !!project.containerId && hasContainerLayerCredentials();
+    deploymentType !== "static" &&
+    (artifactNativeProduction || (!!project.containerId && hasContainerLayerCredentials()));
 
   if (shouldDeployContainer) {
     req.log.info({ projectId }, "Project has dev container — deploying production container");
     try {
-      const servicePort = resolveProjectRuntimeManifest({
-        runtimePort: project.runtimePort,
-        stack: project.stack,
-        legacyProfile: "fixed-node",
-      }).servicePort;
-      // SECURITY: Only inject secrets with environment='production' into production containers.
-      // Development and testing secrets must never reach the production environment.
-      const envVars: Record<string, string> = {
-        PROJECT_ID: String(projectId),
-        NODE_ENV: "production",
-        PORT: String(servicePort),
-        ...(await getProductionSecretMap(projectId)),
-      };
-
-      const prodResult = await deployProductionContainer(
-        projectId,
-        project.prodContainerId ?? null,
-        files.map((f) => ({ path: f.path, content: f.content })),
-        envVars,
-        { servicePort: project.runtimePort },
-      );
-      if (prodResult) {
+      if (artifactNativeProduction) {
+        const sourceVersionId = approvedVersionId!;
+        const acceptedRelease = approvedSealedRelease!;
+        let previousRelease: ProductionArtifactRelease | null = null;
+        if (project.publishedSnapshotId) {
+          const [previousVersion] = await db
+            .select({ productionRelease: projectVersionsTable.productionRelease })
+            .from(projectVersionsTable)
+            .where(eq(projectVersionsTable.id, project.publishedSnapshotId));
+          const parsed = productionArtifactReleaseSchema.safeParse(
+            previousVersion?.productionRelease,
+          );
+          previousRelease = parsed.success && parsed.data.state === "active" ? parsed.data : null;
+          previousProductionRelease = previousRelease;
+        }
+        let currentSlot: "blue" | "green" | null = previousRelease?.targetSlot ?? null;
+        if (currentSlot === null && project.prodContainerId) {
+          try {
+            const parsed = parseRuntimeIdentity(project.prodContainerId);
+            currentSlot =
+              parsed.role === "production" && (parsed.slot === "blue" || parsed.slot === "green")
+                ? parsed.slot
+                : null;
+          } catch {
+            currentSlot = null;
+          }
+        }
+        const targetSlot = currentSlot === "blue" ? "green" : "blue";
+        const promotionIdentity = await productionArtifactPromotionIdentity({
+          format: "nabuflow.production-promotion-identity/v1",
+          projectId,
+          sourceVersionId,
+          sourceSealedArtifactSha256: acceptedRelease.sealedArtifactSha256,
+          targetSlot,
+          hostname: `${slug}.${PLATFORM_DOMAIN}`,
+        });
+        const promoted = await productionArtifactProvider!.promoteProductionArtifact({
+          projectId,
+          sourceVersionId,
+          acceptedRelease,
+          targetSlot,
+          hostname: `${slug}.${PLATFORM_DOMAIN}`,
+          promotionIdentity,
+          expectedPreviousManifestRevision: previousRelease?.targetManifest.revision ?? null,
+        });
+        productionRelease = promoted.release;
         containerDeployed = true;
-        prodContainerId = prodResult.prodContainerId;
-        prodContainerUrl = prodResult.containerUrl;
-        prodContainerStatus = prodResult.status;
+        prodContainerId = promoted.runtime.runtimeId;
+        prodContainerUrl = publicUrl;
+        prodContainerStatus = promoted.runtime.status;
+      } else {
+        const servicePort = resolveProjectRuntimeManifest({
+          runtimePort: project.runtimePort,
+          stack: project.stack,
+          legacyProfile: "fixed-node",
+        }).servicePort;
+        const envVars: Record<string, string> = {
+          PROJECT_ID: String(projectId),
+          NODE_ENV: "production",
+          PORT: String(servicePort),
+          ...(await getProductionSecretMap(projectId)),
+        };
+        const prodResult = await deployProductionContainer(
+          projectId,
+          project.prodContainerId ?? null,
+          files.map((f) => ({ path: f.path, content: f.content })),
+          envVars,
+          { servicePort: project.runtimePort },
+        );
+        if (prodResult) {
+          containerDeployed = true;
+          prodContainerId = prodResult.prodContainerId;
+          prodContainerUrl = prodResult.containerUrl;
+          prodContainerStatus = prodResult.status;
+        }
       }
     } catch (err) {
       req.log.error({ err, projectId }, "Prod container deployment failed");
+      if (artifactNativeProduction) {
+        productionDeploymentFailure =
+          err instanceof CloudflareRuntimeControlError
+            ? { status: err.status, code: err.code, message: err.message }
+            : {
+                status: 500,
+                code: "artifact_promotion_internal_error",
+                message: "Production artifact promotion failed before activation completed",
+              };
+      }
     }
   }
 
@@ -618,12 +734,15 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       { projectId, prodContainerId: project.prodContainerId },
       "Publish aborted: container deploy failed and no fallback allowed",
     );
-    res.status(500).json({
+    res.status(productionDeploymentFailure?.status ?? 500).json({
       error:
         "Production container deployment failed — the health check did not pass within the timeout. " +
         "The existing production version has been preserved. " +
         "Check the deployment logs for details.",
-      code: "container_deploy_failed",
+      code: productionDeploymentFailure?.code ?? "container_deploy_failed",
+      ...(productionDeploymentFailure === null
+        ? {}
+        : { error: productionDeploymentFailure.message }),
     });
     return;
   }
@@ -631,18 +750,67 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // Mark the project published, store which snapshot is live, and save the slug.
   // Must be awaited (not setImmediate) so downstream consumers — including the
   // post-publish health check — observe the updated row.
-  await db
-    .update(projectsTable)
-    .set({
-      status: "published",
-      publishedSnapshotId: deploymentVersion?.id ?? null,
-      publicSlug: slug,
-      prodContainerId,
-      prodContainerUrl,
-      prodContainerStatus,
-      updatedAt: new Date(),
-    })
-    .where(eq(projectsTable.id, projectId));
+  try {
+    if (productionRelease !== null) {
+      await db
+        .update(projectVersionsTable)
+        .set({ productionRelease })
+        .where(eq(projectVersionsTable.id, deploymentVersion.id));
+    }
+    await db
+      .update(projectsTable)
+      .set({
+        status: "published",
+        publishedSnapshotId: deploymentVersion.id,
+        publicSlug: slug,
+        prodContainerId,
+        prodContainerUrl,
+        prodContainerStatus,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectsTable.id, projectId));
+  } catch (error) {
+    if (artifactNativeProduction && productionRelease !== null) {
+      try {
+        await productionArtifactProvider!.rollbackProductionArtifactActivation({
+          activatedRelease: productionRelease,
+          previousRelease: previousProductionRelease,
+        });
+        await db
+          .update(projectVersionsTable)
+          .set({
+            productionRelease: {
+              ...productionRelease,
+              state: "promoted",
+              activatedAt: null,
+            },
+          })
+          .where(eq(projectVersionsTable.id, deploymentVersion.id));
+      } catch (rollbackError) {
+        req.log.error(
+          {
+            error,
+            rollbackError,
+            projectId,
+            promotionIdentity: productionRelease.promotionIdentity,
+          },
+          "Production publish persistence and route rollback both failed",
+        );
+        res.status(503).json({
+          error: "Production activation could not be reconciled after persistence failed.",
+          code: "production_publish_rollback_failed",
+        });
+        return;
+      }
+      res.status(503).json({
+        error:
+          "Production activation was rolled back because publish state could not be persisted.",
+        code: "production_publish_persistence_failed",
+      });
+      return;
+    }
+    throw error;
+  }
 
   // ── Edge CDN: upload to R2, sync KV, purge cache ──────────────────────────
   if (deploymentVersion?.id) {

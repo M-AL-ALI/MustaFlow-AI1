@@ -1541,4 +1541,222 @@ describe("CloudflareRuntimeProvider", () => {
       expect.objectContaining({ capability: "log-tail" }),
     );
   });
+
+  it("promotes, starts, then activates one durable production identity with stable phase keys", async () => {
+    const projectId = 84;
+    const promotionIdentity = "9".repeat(64);
+    const sourceIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const targetIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "production",
+      slot: "green",
+    });
+    const targetRevision = `prod-${promotionIdentity.slice(0, 48)}`;
+    const platform = {
+      runtime: "node" as const,
+      runtimeVersion: "22.18.0",
+      nodeAbi: "127",
+      os: "linux" as const,
+      cpu: "x64" as const,
+      libc: "glibc" as const,
+      toolchainImageDigest: `sha256:${"8".repeat(64)}`,
+    };
+    const sourceApp = await sealRuntimeArtifact({
+      targetRuntimeIdentity: sourceIdentity,
+      manifestRevision: "accepted-manifest-1",
+      artifactRevision: "accepted-app-1",
+      sourceRevision: "accepted-source-1",
+      files: [{ path: "server.mjs", content: "export default { port: 8080 };\n" }],
+    });
+    const layer = await sealRuntimeArtifactLayer({
+      mountPath: "node_modules",
+      platform,
+      files: [{ path: "express/index.js", content: "export default {};\n" }],
+    });
+    const sourceArtifact = await sealLayeredRuntimeArtifact({
+      app: sourceApp,
+      layers: [layer],
+      pantryRevision: {
+        schemaVersion: 1,
+        revisionId: "pantry-2026-08-14.1",
+        rootSha256: "4".repeat(64),
+        state: "committed",
+        stateRevision: 1,
+        updatedAt: "2026-08-14T00:00:00.000Z",
+      },
+      dependencyClosureSha256: "2".repeat(64),
+      buildAttestationSha256: "3".repeat(64),
+      platform,
+      artifactRevision: "accepted-layered-1",
+    });
+    const targetApp = await sealRuntimeArtifact({
+      targetRuntimeIdentity: targetIdentity,
+      manifestRevision: targetRevision,
+      artifactRevision: `production-${promotionIdentity.slice(0, 48)}`,
+      sourceRevision: "accepted-source-1",
+      files: [{ path: "server.mjs", content: "export default { port: 8080 };\n" }],
+    });
+    const targetArtifact = await sealLayeredRuntimeArtifact({
+      app: targetApp,
+      layers: [layer],
+      pantryRevision: sourceArtifact.envelope.content.pantryRevision,
+      dependencyClosureSha256: sourceArtifact.envelope.content.dependencyClosureSha256,
+      buildAttestationSha256: sourceArtifact.envelope.content.buildAttestationSha256,
+      platform,
+      artifactRevision: `production-${promotionIdentity.slice(0, 48)}`,
+    });
+    const acceptedRelease = {
+      format: "nabuflow.accepted-sealed-release/v1" as const,
+      state: "accepted" as const,
+      acceptedAt: "2026-08-14T12:00:00.000Z",
+      sourceRuntimeIdentity: sourceIdentity,
+      sourceRevision: "accepted-source-1",
+      manifest: {
+        revision: "accepted-manifest-1",
+        runtime: "node",
+        buildCommand: ["npm", "run", "build"],
+        startCommand: ["node", "server.mjs"],
+        servicePort: 8080,
+        healthPath: "/healthz",
+        resourceProfile: "dev" as const,
+        public: false,
+      },
+      shelfRevisionId: "pantry-2026-08-14.1",
+      shelfRootSha256: "4".repeat(64),
+      shelfStateRevision: 1,
+      dependencyClosureSha256: "2".repeat(64),
+      buildId: `pbuild_zero_${"5".repeat(64)}`,
+      buildAttestationSha256: "3".repeat(64),
+      artifactRevision: sourceArtifact.envelope.artifactRevision,
+      sealedArtifactSha256: sourceArtifact.envelope.sealedArtifactSha256,
+      contentSha256: sourceArtifact.envelope.contentSha256,
+      appArtifactSha256: sourceArtifact.envelope.content.appArtifact.sealedArtifactSha256,
+      layerContentSha256s: sourceArtifact.envelope.content.layers.map(
+        (entry) => entry.descriptor.contentSha256,
+      ),
+    };
+    const calls: Array<{ method: string; path: string; key: string; body: string }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const key = new Headers(init?.headers).get("idempotency-key") ?? "";
+      calls.push({ method, path, key, body: String(init?.body ?? "") });
+      const runtime = {
+        identity: targetIdentity,
+        projectId,
+        role: "production",
+        slot: "green",
+        status: path.endsWith("/start") ? "running" : "stopped",
+        servicePort: 8080,
+        manifestRevision: targetRevision,
+        deploymentVersion: "staging-v1",
+        endpoint: null,
+        readyAt: path.endsWith("/start") ? "2026-08-14T12:01:00.000Z" : null,
+        lastError: null,
+      };
+      if (path.endsWith("/promotions/layered")) {
+        return json({
+          ok: true,
+          promotionIdentity,
+          sourceSealedArtifactSha256: sourceArtifact.envelope.sealedArtifactSha256,
+          targetSealedArtifactSha256: targetArtifact.envelope.sealedArtifactSha256,
+          targetContentSha256: targetArtifact.envelope.contentSha256,
+          artifactRevision: targetArtifact.envelope.artifactRevision,
+          appChunksCopied: targetArtifact.appChunks.length,
+          layersReused: 1,
+          envelope: targetArtifact.envelope,
+        });
+      }
+      if (path.includes("/routes/") && path.endsWith("/activate")) {
+        return json({
+          ok: true,
+          route: {
+            hostname: "canary.apps.mustaflow.com",
+            projectId,
+            role: "production",
+            activeSlot: "green",
+            manifestRevision: targetRevision,
+            servicePort: 8080,
+            sandboxIdentity: targetIdentity,
+          },
+        });
+      }
+      return json({ runtime });
+    });
+    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    const internals = provider as unknown as {
+      deploymentVersion: string | null;
+      controlFeatures: Set<string>;
+    };
+    internals.deploymentVersion = "staging-v1";
+    internals.controlFeatures.add("artifact-v1");
+    internals.controlFeatures.add("manifest-update-v1");
+    internals.controlFeatures.add("artifact-layers-v1");
+    internals.controlFeatures.add("artifact-promotion-v1");
+
+    const promoted = await provider.promoteProductionArtifact({
+      projectId,
+      sourceVersionId: 118,
+      acceptedRelease,
+      targetSlot: "green",
+      hostname: "canary.apps.mustaflow.com",
+      promotionIdentity,
+      expectedPreviousManifestRevision: "prod-previous",
+      operationTimeoutMs: 5_000,
+    });
+    expect(promoted).toMatchObject({
+      runtime: { runtimeId: targetIdentity, status: "running" },
+      release: { state: "active", promotionIdentity, targetSlot: "green" },
+    });
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "PUT /_nabuflow/control/v1/runtimes/84/production/green",
+      "POST /_nabuflow/control/v1/runtimes/84/production/green/promotions/layered",
+      "POST /_nabuflow/control/v1/runtimes/84/production/green/start",
+      "POST /_nabuflow/control/v1/routes/canary.apps.mustaflow.com/activate",
+    ]);
+    expect(
+      calls.every((call) => call.key.startsWith(`production-publish:${promotionIdentity}:`)),
+    ).toBe(true);
+    expect(new Set(calls.map((call) => call.key)).size).toBe(4);
+
+    const previousIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "production",
+      slot: "blue",
+    });
+    await expect(
+      provider.rollbackProductionArtifactActivation({
+        activatedRelease: promoted.release,
+        previousRelease: {
+          ...promoted.release,
+          promotionIdentity: "7".repeat(64),
+          targetRuntimeIdentity: previousIdentity,
+          targetSlot: "blue",
+          targetManifest: { ...promoted.release.targetManifest, revision: "prod-previous" },
+          promotedAt: "2026-08-14T11:00:00.000Z",
+          activatedAt: "2026-08-14T11:01:00.000Z",
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(calls.at(-1)).toMatchObject({
+      method: "POST",
+      path: "/_nabuflow/control/v1/routes/canary.apps.mustaflow.com/activate",
+      key: `production-publish:${promotionIdentity}:rollback`,
+    });
+    expect(JSON.parse(calls.at(-1)!.body)).toMatchObject({
+      route: {
+        activeSlot: "blue",
+        sandboxIdentity: previousIdentity,
+        manifestRevision: "prod-previous",
+      },
+      expectedPreviousManifestRevision: targetRevision,
+    });
+  });
 });

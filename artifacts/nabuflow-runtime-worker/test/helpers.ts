@@ -37,6 +37,8 @@ import type {
   StoredArtifactCommitJob,
   StoredDurableOperationJob,
   StoredRuntimeManifestRestartJob,
+  StoredAcceptanceLeaseJob,
+  StoredLayeredArtifactPromotionJob,
   StoredRuntimeStartJob,
   RemovedRuntimeLayeredArtifact,
 } from "../src/model";
@@ -171,7 +173,10 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly latestArtifactCommitJobs = new Map<string, string>();
   readonly runtimeLifecycleJobs = new Map<
     string,
-    StoredRuntimeStartJob | StoredRuntimeManifestRestartJob
+    | StoredRuntimeStartJob
+    | StoredRuntimeManifestRestartJob
+    | StoredAcceptanceLeaseJob
+    | StoredLayeredArtifactPromotionJob
   >();
   readonly latestRuntimeLifecycleJobs = new Map<string, string>();
   layerChunkWrites = 0;
@@ -246,9 +251,9 @@ export class MemoryCoordinator implements ControlCoordinator {
     if (input.kind === "v1" || input.kind === "layers-v1") {
       return this.registerArtifactCommit(input);
     }
-    const lifecycleInput = input as Extract<
+    const lifecycleInput = input as Exclude<
       DurableOperationRegistration,
-      { kind: "runtime-start" | "runtime-manifest-restart" }
+      { kind: "v1" | "layers-v1" }
     >;
     const idempotency = this.idempotency.get(lifecycleInput.key);
     if (idempotency !== undefined && idempotency.fingerprint !== lifecycleInput.fingerprint) {
@@ -285,20 +290,16 @@ export class MemoryCoordinator implements ControlCoordinator {
       createdAtMs: lifecycleInput.nowMs,
       updatedAtMs: lifecycleInput.nowMs,
     };
-    const job: StoredRuntimeStartJob | StoredRuntimeManifestRestartJob =
-      lifecycleInput.kind === "runtime-start"
-        ? {
-            ...common,
-            kind: "runtime-start",
-            subjectKey: "start",
-            request: structuredClone(lifecycleInput.request),
-          }
-        : {
-            ...common,
-            kind: "runtime-manifest-restart",
-            subjectKey: "manifest-restart",
-            request: structuredClone(lifecycleInput.request),
-          };
+    const job = {
+      ...common,
+      kind: lifecycleInput.kind,
+      subjectKey: lifecycleInput.subjectKey,
+      request: structuredClone(lifecycleInput.request),
+    } as
+      | StoredRuntimeStartJob
+      | StoredRuntimeManifestRestartJob
+      | StoredAcceptanceLeaseJob
+      | StoredLayeredArtifactPromotionJob;
     this.appendDurableOperationEvent(job, "job-created", lifecycleInput.nowMs);
     this.runtimeLifecycleJobs.set(jobKey, job);
     this.latestRuntimeLifecycleJobs.set(
@@ -349,7 +350,7 @@ export class MemoryCoordinator implements ControlCoordinator {
     runtimeIdentity: string,
     subjectKey: string,
   ): Promise<StoredDurableOperationJob | null> {
-    if (kind === "runtime-start" || kind === "runtime-manifest-restart") {
+    if (kind !== "v1" && kind !== "layers-v1") {
       const jobKey = this.latestRuntimeLifecycleJobs.get(
         `${kind}:${runtimeIdentity}:${subjectKey}`,
       );

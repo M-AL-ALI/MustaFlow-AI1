@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "runId": "production-artifact-promotion-20260815T074221Z",
+  "recordedAt": "2026-08-15T07:42:21.020Z",
+  "branch": "codex/production-artifact-promotion",
+  "baseSha": "182b250fb9f1e317d5964629b76e8a92afb1a147",
+  "implementationCommitSha": "9bfaa5dd3579fd2ca8f4eac03a9e16d36dec7ad8",
+  "authority": {
+    "repoPath": "docs/cloudflare-production-cutover-plan.md",
+    "permanentPath": "C:/Users/mus_1/Documents/Mustaflow AI/docs/cloudflare-production-cutover-plan.md",
+    "sha256": "0e1f0a7a3a67b0f1355ba4c49125d66929cfad00d935170715b595d7e657c625",
+    "copiesByteIdentical": true,
+    "realityCorrection": "The existing contracts admitted production blue and green, but route activation and data-plane dispatch implemented blue only. Slice A makes the existing blue-green contract operational so activation can preserve the previous runtime."
+  },
+  "liveState": {
+    "deployments": 0,
+    "publicSurfacesOpened": 0,
+    "providerLeases": 0,
+    "cloudResourcesCreated": 0,
+    "costUsd": 0,
+    "secretsRequested": 0,
+    "secretsRead": 0
+  },
+  "checks": [
+    {
+      "name": "frozen-offline-install",
+      "result": "pass",
+      "detail": "21 workspace projects; lockfile up to date; zero fetches",
+      "wallMs": 2900
+    },
+    {
+      "name": "workspace-typecheck",
+      "result": "pass",
+      "detail": "libraries plus all artifact and script typechecks",
+      "wallMs": 31500
+    },
+    {
+      "name": "workspace-lint",
+      "result": "pass",
+      "detail": "all 20 participating workspace projects",
+      "wallMs": 18200
+    },
+    {
+      "name": "tenant-runtime-contracts-full",
+      "result": "pass",
+      "detail": "19 files; 183/183 tests",
+      "wallMs": 2671
+    },
+    {
+      "name": "runtime-worker-full",
+      "result": "pass",
+      "detail": "30 files; 234/234 tests",
+      "wallMs": 7255
+    },
+    {
+      "name": "api-promotion-focused",
+      "result": "pass",
+      "detail": "4 files; 53/53 tests",
+      "wallMs": 3269
+    },
+    {
+      "name": "api-full-base-parity",
+      "result": "pass-with-inherited-environment-failures",
+      "detail": "branch 2296 passed, 39 failed, 5 skipped of 2340; exact base 2293 passed, 41 failed, 5 skipped of 2339; branch introduced zero failure names and two base failures did not reproduce",
+      "branchFailureSetSha256": "338c782b83ee86a0dd866b56f9e8447c572e87c39536ca2fbcf0e36e50f622e4",
+      "baseFailureSetSha256": "c61eb580e551aca7d60f3148e7e95dfc9ec0ceaebdbfa24445e4a4c8495b53b5"
+    },
+    {
+      "name": "changed-file-format",
+      "result": "pass",
+      "detail": "25/25 implementation files passed Prettier"
+    },
+    {
+      "name": "diff-check",
+      "result": "pass",
+      "detail": "no whitespace errors"
+    },
+    {
+      "name": "changed-file-secret-pattern-scan",
+      "result": "pass",
+      "detail": "25 files scanned; zero findings"
+    },
+    {
+      "name": "fly-byte-identity",
+      "result": "pass",
+      "detail": "zero Fly-named changed files and zero diff in Fly runtime core"
+    },
+    {
+      "name": "artifact-wire-format-identity",
+      "result": "pass",
+      "detail": "Artifact v1 and dependency-layer contract files have zero diff"
+    }
+  ],
+  "stagingProfileRehearsal": {
+    "classification": "deterministic in-memory staging-profile end-to-end rehearsal; no live deploy authorized or performed",
+    "rows": [
+      "accepted kitchen release persisted on its exact project version",
+      "canonical content-derived promotion identity deterministic",
+      "committed preview layered release independently envelope-verified",
+      "every source application chunk hash-verified",
+      "every immutable dependency layer hash-verified and reused",
+      "production application chunks written by conditional create and independently reverified",
+      "target envelope rebound to the deterministic production runtime and independently resealed",
+      "promotion advanced through durable checkpoints to finalized with a diagnostic event trail",
+      "production runtime ensured and started against the promoted sealed identity",
+      "green candidate atomically activated while the previous blue runtime remained intact",
+      "rollback restored the prior blue route under compare-and-swap semantics",
+      "tampered production bytes rejected with artifact_promotion_target_integrity_mismatch",
+      "promotion lease adoption and deadline terminalization remained in the shared durable job chassis"
+    ]
+  },
+  "storageAndWiring": {
+    "newCloudflareResourcesRequired": [],
+    "existingBindingsReused": [
+      "NABUFLOW_RUNTIME_ARTIFACTS",
+      "NABUFLOW_CONTROL_STATE",
+      "DURABLE_OPERATION_QUEUE",
+      "NABUFLOW_SANDBOX"
+    ],
+    "databaseChange": "project_versions.sealed_release and project_versions.production_release JSONB columns",
+    "wireFormatChanges": "none"
+  },
+  "manifestDeclaration": {
+    "changed": true,
+    "files": ["lib/db/package.json", "pnpm-lock.yaml"],
+    "reason": "The database schema package now types durable release records from tenant-runtime-contracts.",
+    "frozenOfflineProof": "pass"
+  }
+}

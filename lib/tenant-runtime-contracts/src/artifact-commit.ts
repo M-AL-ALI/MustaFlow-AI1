@@ -33,6 +33,7 @@ export const durableOperationKindSchema = z.enum([
   "runtime-start",
   "runtime-manifest-restart",
   "acceptance-lease",
+  "layered-artifact-promotion",
 ]);
 export const artifactCommitCheckpointSchema = z.enum([
   "initialized",
@@ -57,11 +58,19 @@ export const runtimeManifestRestartCheckpointSchema = z.enum([
   "finalized",
 ]);
 export const acceptanceLeaseDurableCheckpointSchema = acceptanceLeaseCheckpointSchema;
+export const layeredArtifactPromotionCheckpointSchema = z.enum([
+  "initialized",
+  "source-verified",
+  "target-created",
+  "payloads-copied",
+  "finalized",
+]);
 export const durableOperationCheckpointSchema = z.union([
   artifactCommitCheckpointSchema,
   runtimeStartCheckpointSchema,
   runtimeManifestRestartCheckpointSchema,
   acceptanceLeaseDurableCheckpointSchema,
+  layeredArtifactPromotionCheckpointSchema,
 ]);
 export const artifactCommitEventKindSchema = z.enum([
   "job-created",
@@ -114,6 +123,39 @@ export const artifactCommitDiagnosticsResponseSchema = z
           .strict()
           .nullable(),
         events: z.array(artifactCommitEventSchema).max(ARTIFACT_COMMIT_EVENT_LIMIT),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const layeredArtifactPromotionDiagnosticsResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    job: z
+      .object({
+        kind: z.literal("layered-artifact-promotion"),
+        runtimeIdentity: z.string().min(1).max(200),
+        promotionIdentity: z.string().regex(/^[0-9a-f]{64}$/),
+        state: z.enum(["active", "succeeded", "failed"]),
+        checkpoint: layeredArtifactPromotionCheckpointSchema,
+        attempt: z.number().int().nonnegative(),
+        leaseUntil: z.string().datetime({ offset: true }).nullable(),
+        deadline: z.string().datetime({ offset: true }),
+        updatedAt: z.string().datetime({ offset: true }),
+        terminal: z
+          .object({
+            status: z.number().int().min(100).max(599),
+            code: z.string().min(1).max(100),
+          })
+          .strict()
+          .nullable(),
+        events: z
+          .array(
+            artifactCommitEventSchema.extend({
+              checkpoint: layeredArtifactPromotionCheckpointSchema,
+            }),
+          )
+          .max(ARTIFACT_COMMIT_EVENT_LIMIT),
       })
       .strict(),
   })
@@ -235,6 +277,9 @@ export type RuntimeManifestRestartCheckpoint = z.infer<
 >;
 export type AcceptanceLeaseDurableCheckpoint = z.infer<
   typeof acceptanceLeaseDurableCheckpointSchema
+>;
+export type LayeredArtifactPromotionCheckpoint = z.infer<
+  typeof layeredArtifactPromotionCheckpointSchema
 >;
 export type ArtifactCommitEventKind = z.infer<typeof artifactCommitEventKindSchema>;
 export type ArtifactCommitEvent = z.infer<typeof artifactCommitEventSchema>;
