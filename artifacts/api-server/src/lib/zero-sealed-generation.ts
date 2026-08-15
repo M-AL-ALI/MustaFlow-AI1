@@ -182,6 +182,8 @@ const SECRET_ENV_PATTERN =
   /process\.env\.(?:DATABASE_URL|STRIPE_[A-Z0-9_]*|PGPASSWORD|NEON_[A-Z0-9_]*|[A-Z0-9_]*(?:TOKEN|SECRET|KEY))/u;
 const INSTALL_OR_REGISTRY_PATTERN =
   /(?:\bnpx\b|\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|dlx)\b|registry\.npmjs\.org)/u;
+const SEALED_NETWORK_BIND_PATTERN =
+  /\b[A-Za-z_$][\w$]*\.listen\s*\(\s*[^,\r\n]+,\s*(["'])0\.0\.0\.0\1\s*(?:,|\))/u;
 
 function dependencyPlan(
   pkg: PackageJson,
@@ -306,7 +308,7 @@ export function prepareZeroSealedNodeSource(input: {
   const entryReasons: ZeroSealedSourceContractReason[] = [];
   if (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
     entryReasons.push("sdk_import");
-  if (!entry.content.includes('"0.0.0.0"')) entryReasons.push("network_bind");
+  if (!SEALED_NETWORK_BIND_PATTERN.test(entry.content)) entryReasons.push("network_bind");
   if (!entry.content.includes("process.env.PORT")) entryReasons.push("runtime_port");
   if (!entry.content.includes(ZERO_SEALED_HEALTH_PATH)) entryReasons.push("health_route");
   if (entryReasons.length > 0) {

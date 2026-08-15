@@ -110,4 +110,51 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
     });
     expect(result).toMatchObject({ passed: true, code: "zero_sealed_source_ready" });
   });
+
+  it("accepts the equivalent single-quoted 0.0.0.0 listen binding", async () => {
+    const result = await checkZeroSealedFinalizeContract({
+      files: [
+        packageFile(),
+        tsconfigFile,
+        {
+          path: "src/index.ts",
+          mimeType: "application/typescript",
+          content: `import express from "express";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+const app = express(); const db = createNabuFlowDatabase(); void db;
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.listen(Number(process.env.PORT ?? "8080"), '0.0.0.0', () => undefined);`,
+        },
+      ],
+      manifestRevision: "finalize-single-quote-regression-v1",
+    });
+
+    expect(result).toMatchObject({ passed: true, code: "zero_sealed_source_ready" });
+  });
+
+  it("does not accept an unrelated 0.0.0.0 string as a listen binding", async () => {
+    const result = await checkZeroSealedFinalizeContract({
+      files: [
+        packageFile(),
+        tsconfigFile,
+        {
+          path: "src/index.ts",
+          mimeType: "application/typescript",
+          content: `import express from "express";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+const app = express(); const db = createNabuFlowDatabase(); void db;
+const advertisedHost = "0.0.0.0"; void advertisedHost;
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.listen(Number(process.env.PORT ?? "8080"));`,
+        },
+      ],
+      manifestRevision: "finalize-unrelated-host-regression-v1",
+    });
+
+    expect(result).toMatchObject({
+      passed: false,
+      code: "zero_sealed_source_contract_error",
+      reasonCodes: ["network_bind"],
+    });
+  });
 });
