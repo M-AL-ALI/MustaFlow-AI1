@@ -30,6 +30,10 @@ import {
   promoteRuntimeLayeredArtifactResponseSchema,
   activateRouteResponseSchema,
   deactivateRouteResponseSchema,
+  productionDatabaseAllocationIdentity,
+  productionDatabaseAllocationResponseSchema,
+  productionDatabaseReleaseResponseSchema,
+  PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
   type RuntimeManifestContract,
   type RuntimeDescriptor,
   type RuntimeLocator,
@@ -62,6 +66,7 @@ import {
   type TenantRuntimeProvider,
   type ZeroGenerationTenantRuntimeProvider,
   type ProductionArtifactPromotingTenantRuntimeProvider,
+  type ProductionDatabaseCapabilityTenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
 type CloudflareConfig = NonNullable<TenantRuntimeConfig["cloudflare"]>;
@@ -293,7 +298,8 @@ export class CloudflareRuntimeProvider
     ArtifactDeployingTenantRuntimeProvider,
     LayeredArtifactDeployingTenantRuntimeProvider,
     ZeroGenerationTenantRuntimeProvider,
-    ProductionArtifactPromotingTenantRuntimeProvider
+    ProductionArtifactPromotingTenantRuntimeProvider,
+    ProductionDatabaseCapabilityTenantRuntimeProvider
 {
   readonly providerId = "cloudflare";
   private subsystemStatus: RuntimeSubsystemStatus | null = null;
@@ -1420,6 +1426,85 @@ export class CloudflareRuntimeProvider
       slot: "primary",
     });
     await this.stop(id, projectId);
+  }
+  async ensureProductionDatabaseCapability(
+    input: Parameters<
+      ProductionDatabaseCapabilityTenantRuntimeProvider["ensureProductionDatabaseCapability"]
+    >[0],
+  ): ReturnType<
+    ProductionDatabaseCapabilityTenantRuntimeProvider["ensureProductionDatabaseCapability"]
+  > {
+    await this.requireControlFeature("production-database-v1");
+    const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+    const allocationIdentity = await productionDatabaseAllocationIdentity({
+      format: "nabuflow.production-database-allocation/v1",
+      deploymentNamespace: "production",
+      projectId: input.projectId,
+    });
+    const response = await this.request({
+      method: "PUT",
+      path: `${CONTROL_API_PREFIX}/capabilities/${input.projectId}/neon-postgres/database/production-allocation`,
+      body: {
+        action: "ensure",
+        projectId: input.projectId,
+        expectedDeploymentVersion,
+        allocationIdentity,
+      },
+      idempotencyKey: `production-database:${allocationIdentity}:ensure`,
+      operation: this.operationOptions(
+        "production-database.ensure",
+        PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
+        "production_database_timeout",
+        "production_database_cancelled",
+        input,
+      ),
+      parse: productionDatabaseAllocationResponseSchema,
+    });
+    return {
+      allocationIdentity: response.allocationIdentity,
+      revision: response.revision,
+      providerProjectId: response.providerProjectId,
+      reused: response.reused,
+    };
+  }
+  async releaseProductionDatabaseCapability(
+    input: Parameters<
+      ProductionDatabaseCapabilityTenantRuntimeProvider["releaseProductionDatabaseCapability"]
+    >[0],
+  ): ReturnType<
+    ProductionDatabaseCapabilityTenantRuntimeProvider["releaseProductionDatabaseCapability"]
+  > {
+    await this.requireControlFeature("production-database-v1");
+    const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+    const allocationIdentity = await productionDatabaseAllocationIdentity({
+      format: "nabuflow.production-database-allocation/v1",
+      deploymentNamespace: "production",
+      projectId: input.projectId,
+    });
+    const response = await this.request({
+      method: "DELETE",
+      path: `${CONTROL_API_PREFIX}/capabilities/${input.projectId}/neon-postgres/database/production-allocation`,
+      body: {
+        action: "release",
+        projectId: input.projectId,
+        expectedDeploymentVersion,
+        allocationIdentity,
+      },
+      idempotencyKey: `production-database:${allocationIdentity}:release`,
+      operation: this.operationOptions(
+        "production-database.release",
+        PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
+        "production_database_timeout",
+        "production_database_cancelled",
+        input,
+      ),
+      parse: productionDatabaseReleaseResponseSchema,
+    });
+    return {
+      allocationIdentity: response.allocationIdentity,
+      providerProjectId: response.providerProjectId,
+      verifiedGone: response.verifiedGone,
+    };
   }
   async promoteProductionArtifact(
     input: Parameters<

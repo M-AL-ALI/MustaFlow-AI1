@@ -21,6 +21,9 @@ import type {
   RuntimeManifestRestartCheckpoint,
   RuntimeStartCheckpoint,
   LayeredArtifactPromotionCheckpoint,
+  ProductionDatabaseDurableCheckpoint,
+  ProductionDatabaseJobRequest,
+  ProductionDatabaseAllocationRecord,
   PromoteRuntimeLayeredArtifactRequest,
   StartRuntimeRequest,
   UpdateRuntimeManifestRequest,
@@ -90,6 +93,7 @@ export type {
   RuntimeManifestRestartCheckpoint,
   RuntimeStartCheckpoint,
   LayeredArtifactPromotionCheckpoint,
+  ProductionDatabaseDurableCheckpoint,
 };
 
 export interface DurableOperationQueueMessage {
@@ -159,12 +163,19 @@ export interface StoredLayeredArtifactPromotionJob extends StoredDurableOperatio
   request: PromoteRuntimeLayeredArtifactRequest;
 }
 
+export interface StoredProductionDatabaseJob extends StoredDurableOperationJobBase {
+  kind: "production-database";
+  checkpoint: ProductionDatabaseDurableCheckpoint;
+  request: ProductionDatabaseJobRequest;
+}
+
 export type StoredDurableOperationJob =
   | StoredArtifactCommitJob
   | StoredRuntimeStartJob
   | StoredRuntimeManifestRestartJob
   | StoredAcceptanceLeaseJob
-  | StoredLayeredArtifactPromotionJob;
+  | StoredLayeredArtifactPromotionJob
+  | StoredProductionDatabaseJob;
 
 export type DurableOperationRegistration =
   | {
@@ -214,6 +225,16 @@ export type DurableOperationRegistration =
       runtimeIdentity: string;
       subjectKey: string;
       request: PromoteRuntimeLayeredArtifactRequest;
+      expectedDeploymentVersion: string;
+      nowMs: number;
+    }
+  | {
+      key: string;
+      fingerprint: string;
+      kind: "production-database";
+      runtimeIdentity: string;
+      subjectKey: string;
+      request: ProductionDatabaseJobRequest;
       expectedDeploymentVersion: string;
       nowMs: number;
     };
@@ -454,6 +475,25 @@ export interface CapabilityVault {
     projectId: number;
     expectedRevision: string;
   }): Promise<"revoked" | "not_found" | "conflict">;
+  getProductionDatabaseAllocation(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<ProductionDatabaseAllocationRecord | null>;
+  provisionProductionDatabase(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    allocation: ProductionDatabaseAllocationRecord;
+    credential: { kind: "neon-connection-string"; value: string };
+  }): Promise<{ state: "provisioned" | "replayed"; keyId: string }>;
+  beginProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<ProductionDatabaseAllocationRecord | null>;
+  completeProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<"released" | "not_found" | "conflict">;
   invokeDatabase(input: {
     projectId: number;
     invocation: CapabilityInvocation;

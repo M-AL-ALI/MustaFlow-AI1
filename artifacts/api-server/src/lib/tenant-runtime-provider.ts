@@ -226,6 +226,35 @@ export function supportsProductionArtifactPromotion(
   );
 }
 
+export interface ProductionDatabaseCapabilityTenantRuntimeProvider extends ProductionArtifactPromotingTenantRuntimeProvider {
+  ensureProductionDatabaseCapability(input: {
+    projectId: number;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<{
+    allocationIdentity: string;
+    revision: string;
+    providerProjectId: string;
+    reused: boolean;
+  }>;
+  releaseProductionDatabaseCapability(input: {
+    projectId: number;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<{ allocationIdentity: string; providerProjectId: string | null; verifiedGone: true }>;
+}
+
+export function supportsProductionDatabaseCapability(
+  provider: TenantRuntimeProvider,
+): provider is ProductionDatabaseCapabilityTenantRuntimeProvider {
+  const candidate = provider as Partial<ProductionDatabaseCapabilityTenantRuntimeProvider>;
+  return (
+    supportsProductionArtifactPromotion(provider) &&
+    typeof candidate.ensureProductionDatabaseCapability === "function" &&
+    typeof candidate.releaseProductionDatabaseCapability === "function"
+  );
+}
+
 export type RuntimeLogLevel = "stdout" | "stderr" | "system";
 
 export class RuntimeProviderUnavailableError extends Error {

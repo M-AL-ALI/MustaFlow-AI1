@@ -4,6 +4,7 @@ import { pantryBuildIdSchema, pantryRevisionIdSchema } from "./pantry";
 import { canonicalJson } from "./runtime-artifact";
 import { sha256Hex } from "./request-signing";
 import { runtimeLayeredArtifactEnvelopeSchema } from "./runtime-artifact-layers";
+import { zeroSealedCapabilitySchema } from "./zero-eligibility";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
@@ -53,6 +54,7 @@ export const acceptedSealedReleaseSchema = z
     contentSha256: sha256Schema,
     appArtifactSha256: sha256Schema,
     layerContentSha256s: z.array(sha256Schema).min(1).max(64),
+    declaredCapabilities: z.array(zeroSealedCapabilitySchema).max(2).default([]),
   })
   .strict();
 

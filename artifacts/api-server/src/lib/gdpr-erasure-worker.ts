@@ -37,7 +37,8 @@ import {
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
 import { evictTierCache } from "./public-ai/authed-user";
-import { destroyContainer } from "./tenant-runtime";
+import { destroyContainer, tenantRuntimeProvider } from "./tenant-runtime";
+import { releaseProductionDatabasesForHardDelete } from "./production-database-lifecycle";
 import { objectStorageClient } from "./objectStorage";
 
 /**
@@ -85,6 +86,11 @@ export async function runGdprErasure(userId: string): Promise<void> {
   }
 
   // ── 2. Destroy Fly.io containers (best-effort) ─────────────────────────────
+  // Durable production databases are project-owned and outlive releases and blue/green flips.
+  // Hard erasure is their only release boundary. Provider deletion and verify-gone deliberately
+  // block row deletion so a retry always retains the project ownership evidence.
+  await releaseProductionDatabasesForHardDelete(tenantRuntimeProvider, projectIds);
+
   for (const project of userProjects) {
     if (project.containerId) {
       try {

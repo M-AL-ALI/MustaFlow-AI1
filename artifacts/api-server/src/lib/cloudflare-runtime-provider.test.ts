@@ -1542,6 +1542,66 @@ describe("CloudflareRuntimeProvider", () => {
     );
   });
 
+  it("ensures and releases one opaque project-owned production database identity", async () => {
+    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    const state = provider as unknown as {
+      deploymentVersion: string | null;
+      controlFeatures: Set<string>;
+    };
+    state.deploymentVersion = "staging-v1";
+    state.controlFeatures.add("production-database-v1");
+    const calls: Array<{ method: string; path: string; key: string; body: unknown }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const body = JSON.parse(String(init?.body)) as {
+        action: "ensure" | "release";
+        allocationIdentity: string;
+      };
+      calls.push({
+        method: String(init?.method),
+        path,
+        key: new Headers(init?.headers).get("idempotency-key") ?? "",
+        body,
+      });
+      return body.action === "ensure"
+        ? json({
+            ok: true,
+            projectId: 42,
+            allocationIdentity: body.allocationIdentity,
+            state: "ready",
+            capability: { provider: "neon-postgres", name: "database" },
+            revision: `production-database-${body.allocationIdentity.slice(0, 48)}`,
+            providerProjectId: "provider-project-42",
+            reused: false,
+          })
+        : json({
+            ok: true,
+            projectId: 42,
+            allocationIdentity: body.allocationIdentity,
+            state: "released",
+            providerProjectId: "provider-project-42",
+            verifiedGone: true,
+          });
+    });
+
+    const ensured = await provider.ensureProductionDatabaseCapability({ projectId: 42 });
+    await expect(provider.releaseProductionDatabaseCapability({ projectId: 42 })).resolves.toEqual({
+      allocationIdentity: ensured.allocationIdentity,
+      providerProjectId: "provider-project-42",
+      verifiedGone: true,
+    });
+    expect(calls.map((call) => [call.method, call.path])).toEqual([
+      ["PUT", "/_nabuflow/control/v1/capabilities/42/neon-postgres/database/production-allocation"],
+      [
+        "DELETE",
+        "/_nabuflow/control/v1/capabilities/42/neon-postgres/database/production-allocation",
+      ],
+    ]);
+    expect(calls[0]?.key).toBe(`production-database:${ensured.allocationIdentity}:ensure`);
+    expect(calls[1]?.key).toBe(`production-database:${ensured.allocationIdentity}:release`);
+    expect(JSON.stringify(calls)).not.toMatch(/connectionString|managementKey|credential/iu);
+  });
+
   it("promotes, starts, then activates one durable production identity with stable phase keys", async () => {
     const projectId = 84;
     const promotionIdentity = "9".repeat(64);
@@ -1613,6 +1673,7 @@ describe("CloudflareRuntimeProvider", () => {
     });
     const acceptedRelease = {
       format: "nabuflow.accepted-sealed-release/v1" as const,
+      declaredCapabilities: [],
       state: "accepted" as const,
       acceptedAt: "2026-08-14T12:00:00.000Z",
       sourceRuntimeIdentity: sourceIdentity,

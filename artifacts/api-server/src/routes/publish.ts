@@ -62,8 +62,14 @@ import {
 } from "../lib/tenant-runtime";
 import {
   supportsProductionArtifactPromotion,
+  supportsProductionDatabaseCapability,
   type ProductionArtifactPromotingTenantRuntimeProvider,
+  type ProductionDatabaseCapabilityTenantRuntimeProvider,
 } from "../lib/tenant-runtime-provider";
+import {
+  ensureDeclaredProductionDatabaseCapability,
+  ProductionDatabasePublishUnavailableError,
+} from "../lib/production-database-lifecycle";
 import {
   acceptedSealedReleaseSchema,
   parseRuntimeIdentity,
@@ -433,6 +439,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   const deploymentType = project.deploymentType ?? "static";
   const productionArtifactProvider: ProductionArtifactPromotingTenantRuntimeProvider | null =
     supportsProductionArtifactPromotion(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
+  const productionDatabaseProvider: ProductionDatabaseCapabilityTenantRuntimeProvider | null =
+    supportsProductionDatabaseCapability(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
   const artifactNativeProduction =
     env === "production" && deploymentType !== "static" && productionArtifactProvider !== null;
   if (artifactNativeProduction && (approvedVersionId === null || approvedSealedRelease === null)) {
@@ -638,6 +646,18 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       if (artifactNativeProduction) {
         const sourceVersionId = approvedVersionId!;
         const acceptedRelease = approvedSealedRelease!;
+        try {
+          await ensureDeclaredProductionDatabaseCapability({
+            provider: productionDatabaseProvider,
+            projectId,
+            declaredCapabilities: acceptedRelease.declaredCapabilities,
+          });
+        } catch (error) {
+          if (error instanceof ProductionDatabasePublishUnavailableError) {
+            throw new CloudflareRuntimeControlError(503, error.code, false, error.message);
+          }
+          throw error;
+        }
         let previousRelease: ProductionArtifactRelease | null = null;
         if (project.publishedSnapshotId) {
           const [previousVersion] = await db

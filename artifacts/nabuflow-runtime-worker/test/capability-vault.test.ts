@@ -212,6 +212,75 @@ describe("capability vault envelope", () => {
     ).resolves.toBe("revoked");
   });
 
+  it("atomically couples a durable production allocation to its encrypted capability", async () => {
+    const storage = new MemoryVaultStorage();
+    const state = { storage } as unknown as DurableObjectState;
+    const vault = new CapabilityVaultDurableObject(state, fakeEnv());
+    const credential =
+      "postgresql://runtime:transient@ep-production-vault.us-east-2.aws.neon.tech/neondb";
+    const allocation = {
+      format: "nabuflow.production-database-allocation/v1" as const,
+      projectId: 42,
+      allocationIdentity: "a".repeat(64),
+      provider: "neon-postgres" as const,
+      providerProjectId: "production-provider-project",
+      providerOrganizationId: "org-production",
+      regionId: "aws-us-east-2",
+      historyRetentionSeconds: 604_800,
+      revision: "production-database-a",
+      state: "ready" as const,
+      createdAt: "2026-08-15T12:00:00.000Z",
+      updatedAt: "2026-08-15T12:00:00.000Z",
+    };
+    await expect(
+      vault.provisionProductionDatabase({
+        projectId: 42,
+        revision: allocation.revision,
+        definition: databaseDefinition,
+        allocation,
+        credential: { kind: "neon-connection-string", value: credential },
+      }),
+    ).resolves.toEqual({ state: "provisioned", keyId: "v1" });
+    expect(storage.serialized()).not.toContain(credential);
+    expect(storage.serialized()).toContain('"providerProjectId":"production-provider-project"');
+
+    const restarted = new CapabilityVaultDurableObject(state, fakeEnv());
+    await expect(
+      restarted.getProductionDatabaseAllocation({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+      }),
+    ).resolves.toMatchObject({ state: "ready", historyRetentionSeconds: 604_800 });
+    await expect(
+      restarted.provisionProductionDatabase({
+        projectId: 42,
+        revision: allocation.revision,
+        definition: databaseDefinition,
+        allocation,
+        credential: { kind: "neon-connection-string", value: credential },
+      }),
+    ).resolves.toEqual({ state: "replayed", keyId: "v1" });
+    await expect(
+      restarted.beginProductionDatabaseRelease({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+      }),
+    ).resolves.toMatchObject({ state: "releasing" });
+    await expect(
+      restarted.completeProductionDatabaseRelease({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+      }),
+    ).resolves.toBe("released");
+    await expect(
+      restarted.getProductionDatabaseAllocation({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+      }),
+    ).resolves.toBeNull();
+    expect(storage.serialized()).not.toContain("production-provider-project");
+  });
+
   it("encrypts a test-only Stripe key and rejects live keys before storage", async () => {
     const storage = new MemoryVaultStorage();
     const vault = new CapabilityVaultDurableObject(

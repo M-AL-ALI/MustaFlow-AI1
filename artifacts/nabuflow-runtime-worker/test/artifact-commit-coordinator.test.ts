@@ -61,6 +61,81 @@ const claim = {
 afterEach(() => vi.useRealTimers());
 
 describe("artifact commit coordinator leases", () => {
+  it("runs production database ownership through the shared renewable lease chassis", async () => {
+    const durable = coordinator();
+    const allocationIdentity = "d".repeat(64);
+    const registration = {
+      key: "production-database-idempotency-42",
+      fingerprint: "e".repeat(64),
+      kind: "production-database" as const,
+      runtimeIdentity: "nrf-production-database-p42-production-blue",
+      subjectKey: allocationIdentity,
+      request: {
+        action: "ensure" as const,
+        projectId: 42,
+        expectedDeploymentVersion: "worker-version-test-1",
+        allocationIdentity,
+      },
+      expectedDeploymentVersion: "worker-version-test-1",
+      nowMs: 1_000,
+    };
+    const first = await durable.registerDurableOperation(registration);
+    expect(first.state).toBe("new");
+    if (first.state !== "new") throw new Error("expected a new database job");
+    const claimed = await durable.claimDurableOperationDriver(first.job.jobKey, "owner-1", 1_000);
+    expect(claimed.state).toBe("claimed");
+    if (claimed.state !== "claimed") throw new Error("expected a claimed database job");
+    await durable.checkpointDurableOperation({
+      jobKey: first.job.jobKey,
+      ownerId: "owner-1",
+      ownerGeneration: claimed.job.attempt,
+      checkpoint: "ownership-verified",
+      nowMs: 2_000,
+    });
+    await expect(
+      durable.claimDurableOperationDriver(first.job.jobKey, "owner-2", 10_000),
+    ).resolves.toMatchObject({ state: "busy" });
+    const adopted = await durable.claimDurableOperationDriver(first.job.jobKey, "owner-2", 20_000);
+    expect(adopted).toMatchObject({
+      state: "adopted",
+      job: { checkpoint: "ownership-verified", attempt: 2 },
+    });
+    if (adopted.state !== "adopted") throw new Error("expected an adopted database job");
+    for (const checkpoint of [
+      "provider-complete",
+      "provider-verified",
+      "vault-complete",
+      "finalized",
+    ] as const) {
+      await durable.checkpointDurableOperation({
+        jobKey: first.job.jobKey,
+        ownerId: "owner-2",
+        ownerGeneration: adopted.job.attempt,
+        checkpoint,
+        nowMs: 21_000,
+      });
+    }
+    await expect(
+      durable.completeDurableOperation(
+        first.job.jobKey,
+        "owner-2",
+        adopted.job.attempt,
+        {
+          status: 200,
+          body: { ok: true },
+        },
+        22_000,
+      ),
+    ).resolves.toBe("completed");
+    await expect(durable.getDurableOperation(first.job.jobKey)).resolves.toMatchObject({
+      state: "succeeded",
+      checkpoint: "finalized",
+      events: expect.arrayContaining([
+        expect.objectContaining({ event: "driver-adopted", attempt: 2 }),
+      ]),
+    });
+  });
+
   it("preserves live-owner in-progress semantics and adopts an expired lease at its checkpoint", async () => {
     const durable = coordinator();
     const first = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });

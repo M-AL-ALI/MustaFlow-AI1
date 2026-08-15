@@ -7,10 +7,12 @@ import {
   parseRuntimeIdentity,
   stripeCapabilityInputSchema,
   stripeCapabilityPolicySchema,
+  productionDatabaseAllocationRecordSchema,
   type CapabilityDefinition,
   type CapabilityInvocation,
   type StripeCapabilityPolicy,
   type StripePaymentIntent,
+  type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVault, CapabilityVaultInvocationResult } from "./model";
@@ -28,6 +30,7 @@ const ECHO_STORAGE_KEY = `capability:${ECHO_PROVIDER}:${ECHO_NAME}`;
 const DATABASE_PROVIDER = "neon-postgres";
 const DATABASE_NAME = "database";
 const DATABASE_STORAGE_KEY = `capability:${DATABASE_PROVIDER}:${DATABASE_NAME}`;
+const PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY = "allocation:production:neon-postgres";
 const STRIPE_PROVIDER = "stripe";
 const STRIPE_NAME = "payments";
 const STRIPE_STORAGE_KEY = `capability:${STRIPE_PROVIDER}:${STRIPE_NAME}`;
@@ -358,6 +361,151 @@ export class CapabilityVaultDurableObject
     });
   }
 
+  async getProductionDatabaseAllocation(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<ProductionDatabaseAllocationRecord | null> {
+    const record = await this.ctx.storage.get<ProductionDatabaseAllocationRecord>(
+      PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
+    );
+    if (record === undefined) return null;
+    const parsed = productionDatabaseAllocationRecordSchema.parse(record);
+    if (
+      parsed.projectId !== input.projectId ||
+      parsed.allocationIdentity !== input.allocationIdentity
+    ) {
+      throw new Error("Production database allocation ownership conflict");
+    }
+    return parsed;
+  }
+
+  async provisionProductionDatabase(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    allocation: ProductionDatabaseAllocationRecord;
+    credential: { kind: "neon-connection-string"; value: string };
+  }): Promise<{ state: "provisioned" | "replayed"; keyId: string }> {
+    const definition = validateDatabaseDefinition(input.definition);
+    const allocation = productionDatabaseAllocationRecordSchema.parse(input.allocation);
+    if (
+      input.credential.kind !== "neon-connection-string" ||
+      allocation.projectId !== input.projectId ||
+      allocation.revision !== input.revision ||
+      allocation.state !== "ready"
+    ) {
+      throw new Error("Production database allocation handoff is invalid");
+    }
+    const keyId = this.env.NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID;
+    if (keyId !== "v1") throw new Error("The configured vault key version is unsupported");
+    const existingAllocation = await this.ctx.storage.get<ProductionDatabaseAllocationRecord>(
+      PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
+    );
+    const existingCapability =
+      await this.ctx.storage.get<StoredCapabilityRecord>(DATABASE_STORAGE_KEY);
+    if (existingAllocation !== undefined || existingCapability !== undefined) {
+      const parsedExisting = productionDatabaseAllocationRecordSchema.safeParse(existingAllocation);
+      if (
+        parsedExisting.success &&
+        existingCapability !== undefined &&
+        parsedExisting.data.projectId === allocation.projectId &&
+        parsedExisting.data.allocationIdentity === allocation.allocationIdentity &&
+        parsedExisting.data.providerProjectId === allocation.providerProjectId &&
+        parsedExisting.data.revision === allocation.revision &&
+        parsedExisting.data.state === "ready" &&
+        existingCapability.projectId === input.projectId &&
+        existingCapability.revision === input.revision
+      ) {
+        return { state: "replayed", keyId: existingCapability.envelope.keyId };
+      }
+      throw new Error("Production database allocation cannot replace existing ownership");
+    }
+    const context = {
+      projectId: input.projectId,
+      provider: definition.provider,
+      name: definition.name,
+      revision: input.revision,
+    };
+    const plaintext = textEncoder.encode(input.credential.value);
+    try {
+      const envelope = await encryptCapabilityMaterial(
+        readKek(this.env, keyId),
+        keyId,
+        context,
+        plaintext,
+      );
+      await this.ctx.storage.transaction(async (transaction) => {
+        const [claimedAllocation, claimedCapability] = await Promise.all([
+          transaction.get(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY),
+          transaction.get(DATABASE_STORAGE_KEY),
+        ]);
+        if (claimedAllocation !== undefined || claimedCapability !== undefined) {
+          throw new Error("Production database allocation was claimed concurrently");
+        }
+        await transaction.put(DATABASE_STORAGE_KEY, {
+          projectId: input.projectId,
+          revision: input.revision,
+          definition,
+          envelope,
+        } satisfies StoredCapabilityRecord);
+        await transaction.put(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY, allocation);
+      });
+      return { state: "provisioned", keyId };
+    } finally {
+      plaintext.fill(0);
+    }
+  }
+
+  async beginProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<ProductionDatabaseAllocationRecord | null> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const record = await transaction.get<ProductionDatabaseAllocationRecord>(
+        PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
+      );
+      if (record === undefined) return null;
+      const parsed = productionDatabaseAllocationRecordSchema.parse(record);
+      if (
+        parsed.projectId !== input.projectId ||
+        parsed.allocationIdentity !== input.allocationIdentity
+      ) {
+        throw new Error("Production database release ownership conflict");
+      }
+      if (parsed.state === "releasing") return parsed;
+      const updated = productionDatabaseAllocationRecordSchema.parse({
+        ...parsed,
+        state: "releasing",
+        updatedAt: new Date().toISOString(),
+      });
+      await transaction.put(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY, updated);
+      return updated;
+    });
+  }
+
+  async completeProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<"released" | "not_found" | "conflict"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const record = await transaction.get<ProductionDatabaseAllocationRecord>(
+        PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
+      );
+      if (record === undefined) return "not_found" as const;
+      const parsed = productionDatabaseAllocationRecordSchema.parse(record);
+      if (
+        parsed.projectId !== input.projectId ||
+        parsed.allocationIdentity !== input.allocationIdentity ||
+        parsed.state !== "releasing"
+      ) {
+        return "conflict" as const;
+      }
+      await transaction.delete(DATABASE_STORAGE_KEY);
+      await transaction.delete(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY);
+      return "released" as const;
+    });
+  }
+
   async provisionStripe(input: {
     projectId: number;
     revision: string;
@@ -529,6 +677,18 @@ export class CapabilityVaultDurableObject
   }): Promise<CapabilityVaultInvocationResult> {
     const record = await this.ctx.storage.get<StoredCapabilityRecord>(DATABASE_STORAGE_KEY);
     if (record === undefined) return { state: "not_found" };
+    const managedAllocation = await this.ctx.storage.get<ProductionDatabaseAllocationRecord>(
+      PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
+    );
+    if (managedAllocation?.state === "releasing") {
+      return {
+        state: "database_error",
+        status: 503,
+        code: "database_unavailable",
+        retryable: true,
+        sqlstate: null,
+      };
+    }
     if (!ownsInvocation(input.projectId, record, input.invocation)) {
       return { state: "tenant_mismatch" };
     }
