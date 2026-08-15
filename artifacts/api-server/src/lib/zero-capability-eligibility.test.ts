@@ -41,7 +41,7 @@ function generatedFiles(source = ""): Array<{ path: string; content: string; mim
       path: "src/index.ts",
       mimeType: "application/typescript",
       content: `import express from "express";
-import { createNabuFlowDatabase, createNabuFlowPayments } from "../nabuflow/runtime/index";
+import { createNabuFlowDatabase, createNabuFlowPayments } from "../nabuflow/runtime/index.js";
 const app = express(); const db = createNabuFlowDatabase(); const payments = createNabuFlowPayments();
 void db; void payments;
 app.get("/healthz", (_request, response) => response.json({ ok: true }));

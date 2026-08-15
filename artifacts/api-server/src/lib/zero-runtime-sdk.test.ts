@@ -119,7 +119,7 @@ describe("vendored dual-mode runtime SDK", () => {
     const joined = first.map((file) => `${file.path}\0${file.content}`).join("\0");
     expect(joined).not.toMatch(/postgres(?:ql)?:\/\/|sk_(?:live|test)_|nrf-[a-z0-9]/iu);
     expect(createHash("sha256").update(joined).digest("hex")).toBe(
-      "cc5bf8eddb438543fa271b7f539ae57e93d6f88cd7568eb9d859c8b6470aa892",
+      "30526eee624903bf42ba6f5bf702a2a47b4d3833076143ece81619a52f94da38",
     );
   });
 
@@ -134,7 +134,15 @@ describe("vendored dual-mode runtime SDK", () => {
     );
     expect(adapter).toContain('new NabuFlowDirectDriverError("configuration", false)');
     expect(adapter).not.toMatch(/error\.message|connectionString\s*[:=]\s*["']/u);
-    expect(index).toContain('export { createNabuFlowDatabase } from "./fly-postgres"');
+    expect(index).toContain('export { createNabuFlowDatabase } from "./fly-postgres.js"');
+    for (const file of files) {
+      const relativeSpecifiers = [
+        ...file.content.matchAll(
+          /\b(?:import|export)\s+(?:[^"'\r\n]+?\s+from\s+)?["'](\.{1,2}\/[^"']+)["']/gu,
+        ),
+      ].map((match) => match[1]);
+      expect(relativeSpecifiers.every((specifier) => /\.js$/u.test(specifier ?? ""))).toBe(true);
+    }
   });
 
   it("compiles the public index when capability modules share the SDK version export", () => {
@@ -155,8 +163,8 @@ describe("vendored dual-mode runtime SDK", () => {
       ],
     ]);
     const options: ts.CompilerOptions = {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Node10,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
       noEmit: true,
       skipLibCheck: true,
       target: ts.ScriptTarget.ES2022,

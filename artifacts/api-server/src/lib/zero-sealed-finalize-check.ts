@@ -25,8 +25,10 @@ const SEALED_SOURCE_REPAIR_GUIDANCE: Readonly<Record<string, string>> = Object.f
   typescript_config: "make tsconfig.json valid JSON",
   typescript_output_layout:
     'set tsconfig.json compilerOptions.rootDir to "." and compilerOptions.outDir to "dist"',
+  typescript_module_specifier:
+    'when TypeScript uses NodeNext, add the emitted .js suffix to every relative import/export specifier (for example "../nabuflow/runtime/index.js")',
   sdk_import:
-    'import and use createNabuFlowDatabase/createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/index.ts; do not use provider clients',
+    'import and use createNabuFlowDatabase/createNabuFlowPayments as needed from "../nabuflow/runtime/index.js" in src/index.ts; do not use provider clients',
   network_bind: 'bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',
   runtime_port: 'derive the port with Number(process.env.PORT ?? "8080")',
   health_route: "serve GET /healthz with HTTP 200 without touching a database or external service",

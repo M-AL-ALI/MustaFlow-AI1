@@ -27,7 +27,7 @@ import {
 } from "./zero-runtime-sdk";
 
 export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET:
-- Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/*.ts. Never import a database or payments provider SDK. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
+- Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index.js" in src/*.ts. Never import a database or payments provider SDK. The explicit .js suffix is required for the emitted ESM path when TypeScript uses NodeNext. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
 - Do not create .env files in sealed-native projects, including .env.example. Sealed apps receive no tenant credentials or secret configuration.
@@ -51,6 +51,7 @@ export type ZeroSealedSourceContractReason =
   | "runtime_scripts"
   | "typescript_config"
   | "typescript_output_layout"
+  | "typescript_module_specifier"
   | "sdk_import"
   | "network_bind"
   | "runtime_port"
@@ -184,6 +185,21 @@ const INSTALL_OR_REGISTRY_PATTERN =
   /(?:\bnpx\b|\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|dlx)\b|registry\.npmjs\.org)/u;
 const SEALED_NETWORK_BIND_PATTERN =
   /\b[A-Za-z_$][\w$]*\.listen\s*\(\s*[^,\r\n]+,\s*(["'])0\.0\.0\.0\1\s*(?:,|\))/u;
+const RELATIVE_MODULE_SPECIFIER_PATTERN =
+  /\b(?:import|export)\s+(?:[^"'\r\n]+?\s+from\s+)?(["'])(\.{1,2}\/[^"']+)\1|\bimport\s*\(\s*(["'])(\.{1,2}\/[^"']+)\3\s*\)/gu;
+
+function firstNodeNextModuleSpecifierFailure(files: Iterable<BuilderFile>): string | undefined {
+  for (const file of files) {
+    if (!/\.(?:[cm]?ts|tsx)$/u.test(file.path)) continue;
+    RELATIVE_MODULE_SPECIFIER_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = RELATIVE_MODULE_SPECIFIER_PATTERN.exec(file.content)) !== null) {
+      const specifier = match[2] ?? match[4] ?? "";
+      if (!/\.(?:[cm]?js|json)$/u.test(specifier)) return file.path;
+    }
+  }
+  return undefined;
+}
 
 function dependencyPlan(
   pkg: PackageJson,
@@ -304,6 +320,17 @@ export function prepareZeroSealedNodeSource(input: {
     typeScriptConfig.compilerOptions?.outDir !== "dist"
   ) {
     throw new ZeroSealedSourceContractError(["typescript_output_layout"], "tsconfig.json");
+  }
+  const nodeNextModuleSpecifierFailure =
+    typeScriptConfig.compilerOptions?.module === "NodeNext" ||
+    typeScriptConfig.compilerOptions?.moduleResolution === "NodeNext"
+      ? firstNodeNextModuleSpecifierFailure(byPath.values())
+      : undefined;
+  if (nodeNextModuleSpecifierFailure !== undefined) {
+    throw new ZeroSealedSourceContractError(
+      ["typescript_module_specifier"],
+      nodeNextModuleSpecifierFailure,
+    );
   }
   const entryReasons: ZeroSealedSourceContractReason[] = [];
   if (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))

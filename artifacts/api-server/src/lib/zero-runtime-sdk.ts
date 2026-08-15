@@ -480,7 +480,7 @@ import {
   type DirectDatabaseDriverFactory,
   type NabuFlowDatabaseClient,
   type NabuFlowDatabaseErrorCode,
-} from "./db";
+} from "./db.js";
 
 type PgPool = {
   connect(): Promise<PoolClient>;
@@ -787,11 +787,11 @@ export function createNabuFlowPayments(
 `);
 
 const INDEX_SOURCE = canonicalSource(String.raw`
-export { NABUFLOW_RUNTIME_SDK_VERSION } from "./db";
-export * from "./db";
-export * from "./payments";
-export * from "./fly-postgres";
-export { createNabuFlowDatabase } from "./fly-postgres";
+export { NABUFLOW_RUNTIME_SDK_VERSION } from "./db.js";
+export * from "./db.js";
+export * from "./payments.js";
+export * from "./fly-postgres.js";
+export { createNabuFlowDatabase } from "./fly-postgres.js";
 `);
 
 const VENDORED_FILES: readonly VendoredRuntimeSdkFile[] = Object.freeze([

@@ -2425,7 +2425,7 @@ Do NOT use window.location.origin, localhost, or placeholder domains in these co
       project.dbProvider !== "none" &&
       project.dbStatus === "connected"
     ) {
-      databaseContext = `DATABASE CONTEXT — This sealed-runtime project has a database capability. Import createNabuFlowDatabase from "../nabuflow/runtime/index" and use parameterized queries through that client. Do not read a connection environment variable, initialize a provider driver, emit migrations, install packages in the tenant runtime, or request database configuration from the user.`;
+      databaseContext = `DATABASE CONTEXT — This sealed-runtime project has a database capability. Import createNabuFlowDatabase from "../nabuflow/runtime/index.js" and use parameterized queries through that client. Do not read a connection environment variable, initialize a provider driver, emit migrations, install packages in the tenant runtime, or request database configuration from the user.`;
     } else if (
       project.dbProvider &&
       project.dbProvider !== "none" &&

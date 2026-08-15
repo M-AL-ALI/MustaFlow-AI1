@@ -40,7 +40,7 @@ function generatedFiles(sourceOnlyChange = false) {
       path: "src/index.ts",
       mimeType: "application/typescript",
       content: `import express from "express";
-import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";
 const app = express(); const db = createNabuFlowDatabase();
 app.get("/healthz", (_request, response) => response.json({ ok: true }));
 app.get("/records", async (_request, response) => response.json(await db.query("select 1")));
@@ -160,12 +160,51 @@ describe("Zero sealed generator integration", () => {
     expect(prepared.files.some((file) => file.content.includes(".nabuflow/runtime"))).toBe(false);
 
     const entry = prepared.files.find((file) => file.path === "src/index.ts");
-    const importSpecifier = entry?.content.match(/from\s+"([^"]*nabuflow\/runtime\/index)"/u)?.[1];
-    expect(importSpecifier).toBe("../nabuflow/runtime/index");
+    const importSpecifier = entry?.content.match(
+      /from\s+"([^"]*nabuflow\/runtime\/index\.js)"/u,
+    )?.[1];
+    expect(importSpecifier).toBe("../nabuflow/runtime/index.js");
     const importTarget = posix.normalize(
-      posix.join(posix.dirname(entry?.path ?? ""), `${importSpecifier}.ts`),
+      posix.join(
+        posix.dirname(entry?.path ?? ""),
+        (importSpecifier ?? "").replace(/\.js$/u, ".ts"),
+      ),
     );
     expect(prepared.files.some((file) => file.path === importTarget)).toBe(true);
+  });
+
+  it("rejects extensionless relative imports before a NodeNext build enters the kitchen", () => {
+    const files = generatedFiles().map((file) => {
+      if (file.path === "package.json") {
+        return {
+          ...file,
+          content: JSON.stringify({ ...JSON.parse(file.content), type: "module" }),
+        };
+      }
+      if (file.path === "tsconfig.json") {
+        return {
+          ...file,
+          content: JSON.stringify({
+            compilerOptions: {
+              rootDir: ".",
+              outDir: "dist",
+              module: "NodeNext",
+              moduleResolution: "NodeNext",
+            },
+          }),
+        };
+      }
+      if (file.path === "src/index.ts") {
+        return { ...file, content: file.content.replace("/index.js", "/index") };
+      }
+      return file;
+    });
+    expect(() => prepareZeroSealedNodeSource({ files })).toThrow(
+      expect.objectContaining({
+        reasons: ["typescript_module_specifier"],
+        path: "src/index.ts",
+      }),
+    );
   });
 
   it("loads public-only Pantry verification material and rejects private keys", () => {

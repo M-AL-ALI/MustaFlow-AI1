@@ -41,7 +41,7 @@ app.listen(port);`,
       code: "zero_sealed_source_contract_error",
       reasonCodes: ["sdk_import", "network_bind"],
       message:
-        'zero_sealed_source_contract_error: sdk_import, network_bind (src/index.ts). Required repairs: import and use createNabuFlowDatabase/createNabuFlowPayments as needed from "../nabuflow/runtime/index" in src/index.ts; do not use provider clients; bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',
+        'zero_sealed_source_contract_error: sdk_import, network_bind (src/index.ts). Required repairs: import and use createNabuFlowDatabase/createNabuFlowPayments as needed from "../nabuflow/runtime/index.js" in src/index.ts; do not use provider clients; bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',
     });
   });
 
@@ -73,7 +73,7 @@ app.listen(port);`,
           path: "src/index.ts",
           mimeType: "application/typescript",
           content: `import express from "express";
-import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";
 const app = express(); const db = createNabuFlowDatabase(); void db;
 app.get("/healthz", (_request, response) => response.json({ ok: true }));
 app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
@@ -100,7 +100,7 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
           path: "src/index.ts",
           mimeType: "application/typescript",
           content: `import express from "express";
-import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";
 const app = express(); const db = createNabuFlowDatabase(); void db;
 app.get("/healthz", (_request, response) => response.json({ ok: true }));
 app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
@@ -120,7 +120,7 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
           path: "src/index.ts",
           mimeType: "application/typescript",
           content: `import express from "express";
-import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";
 const app = express(); const db = createNabuFlowDatabase(); void db;
 app.get("/healthz", (_request, response) => response.json({ ok: true }));
 app.listen(Number(process.env.PORT ?? "8080"), '0.0.0.0', () => undefined);`,
@@ -141,7 +141,7 @@ app.listen(Number(process.env.PORT ?? "8080"), '0.0.0.0', () => undefined);`,
           path: "src/index.ts",
           mimeType: "application/typescript",
           content: `import express from "express";
-import { createNabuFlowDatabase } from "../nabuflow/runtime/index";
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";
 const app = express(); const db = createNabuFlowDatabase(); void db;
 const advertisedHost = "0.0.0.0"; void advertisedHost;
 app.get("/healthz", (_request, response) => response.json({ ok: true }));
