@@ -117,7 +117,9 @@ of piecemeal edits.
 - generator regressions cover the production lock combination and production plan stamp;
 - preview regressions cover custom origin acceptance and non-origin/IP rejection;
 - published-data-plane regression proves staging WebSockets are unchanged and production invokes no
-  sandbox WebSocket call.
+  sandbox WebSocket call;
+- one pre-existing synthetic private-key fixture in a touched test is assembled only at runtime, so
+  the test exercises the identical rejection while no committed blob contains the credential pattern.
 
 No `package.json`, lockfile, `.replit`, or Wrangler manifest changed. Artifact v1, dependency-layer
 format, Fly provider/configuration, tenant egress, and staging resource behavior are unchanged.
@@ -139,10 +141,25 @@ format, Fly provider/configuration, tenant egress, and staging resource behavior
 | Changed API lint                   | PASS                                                 |
 | Modified-blob secret-pattern sweep | PASS — 20 files / 0 findings                         |
 | `git diff --check`                 | PASS                                                 |
+| Reconstructed-fixture regression   | PASS - 1 file / 13 tests                             |
+| Clean release profile              | 18 pass / 0 warn / 3 fail                            |
+| Exact-base clean release profile   | 18 pass / 0 warn / 3 fail                            |
 
 The first API typecheck in the fresh worktree reported only missing workspace declaration outputs
 (`TS6305`). Running the repository's required `tsc --build` prerequisite produced those declarations;
 the unchanged API typecheck then passed. This was build ordering, not a source failure.
+
+The three clean release-profile failures are exact base parity against `cf741dc4`: the two
+database-dependent API rows and the web prerender row all fail because this machine has no PostgreSQL
+listener at `127.0.0.1:5432`. The failing suites, assertions, and `ECONNREFUSED` diagnostics match the
+base exactly; no Pantry or cutover-recon assertion failed. Replit's release profile remains the
+authoritative merge gate.
+
+- branch release-profile report SHA-256:
+  `56c8726ea4286df7dde7a4e2bd88f89295b28892d1efc40a7784289b5dfad158`
+- exact-base release-profile report SHA-256:
+  `0881d291a853fe030c7cd59df94465f83d8186c99d54d2eceb8f041ef8569c7f`
+- implementation commit: `8cf5666baaec969881329f80981c6e47541161e2`
 
 ## Safety and live-state declaration
 

@@ -38,9 +38,27 @@
     "contractsLint": true,
     "runtimeWorkerLint": true,
     "changedApiLint": true,
+    "reconstructedFixtureRegression": { "files": 1, "tests": 13, "passed": true },
     "modifiedBlobSecretPatternFindings": 0,
-    "diffCheck": true
+    "diffCheck": true,
+    "releaseProfile": {
+      "branch": {
+        "pass": 18,
+        "warn": 0,
+        "fail": 3,
+        "reportSha256": "56c8726ea4286df7dde7a4e2bd88f89295b28892d1efc40a7784289b5dfad158"
+      },
+      "exactBase": {
+        "pass": 18,
+        "warn": 0,
+        "fail": 3,
+        "reportSha256": "0881d291a853fe030c7cd59df94465f83d8186c99d54d2eceb8f041ef8569c7f"
+      },
+      "exactFailureParity": true,
+      "environmentalCause": "No PostgreSQL listener at 127.0.0.1:5432"
+    }
   },
+  "implementationCommit": "8cf5666baaec969881329f80981c6e47541161e2",
   "hardCutoverBlockers": [
     "production_artifact_promotion_publish",
     "production_database_capability_provisioning"

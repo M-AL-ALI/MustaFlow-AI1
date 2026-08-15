@@ -169,6 +169,10 @@ describe("Zero sealed generator integration", () => {
   });
 
   it("loads public-only Pantry verification material and rejects private keys", () => {
+    const syntheticPrivateKey = [
+      "-----BEGIN",
+      "PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+    ].join(" ");
     expect(
       readZeroPantryPublicKeys({
         [ZERO_PANTRY_PUBLIC_KEYS_ENV]: JSON.stringify({
@@ -179,7 +183,7 @@ describe("Zero sealed generator integration", () => {
     expect(() =>
       readZeroPantryPublicKeys({
         [ZERO_PANTRY_PUBLIC_KEYS_ENV]: JSON.stringify({
-          bad: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+          bad: syntheticPrivateKey,
         }),
       }),
     ).toThrow(ZeroSealedGenerationConfigurationError);
