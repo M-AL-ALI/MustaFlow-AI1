@@ -39,12 +39,31 @@ const RAW_DATABASE_PACKAGES = new Set([
   "@supabase/supabase-js",
 ]);
 const RAW_PAYMENT_PACKAGES = new Set(["@paddle/paddle-node-sdk", "stripe", "whop"]);
-const RUNTIME_FETCH_PATTERN =
-  /(?:\bfetch\s*\(|\baxios\s*\(|\bgot\s*\(|\brequest\s*\(|\bnew\s+(?:WebSocket|EventSource)\s*\(|\bhttps?\.(?:request|get)\s*\()/u;
+const FETCH_CALL_PATTERN = /\bfetch\s*\(/gu;
+const STATIC_BROWSER_SAME_ORIGIN_FETCH_PATTERN =
+  /\bfetch\s*\(\s*(?:"\/(?!\/)(?:\\.|[^"\\])*"|'\/(?!\/)(?:\\.|[^'\\])*')\s*(?=[,)])/gu;
+const OTHER_RUNTIME_NETWORK_PATTERN =
+  /(?:\baxios\s*\(|\bgot\s*\(|\brequest\s*\(|\bnew\s+(?:WebSocket|EventSource)\s*\(|\bhttps?\.(?:request|get)\s*\()/u;
 const PACKAGE_INSTALL_PATTERN =
   /(?:\bnpx\b|\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|dlx)\b|registry\.npmjs\.org)/u;
 const ENV_READ_PATTERN = /(?:process\.env|import\.meta\.env)\.([A-Z][A-Z0-9_]*)/gu;
 const SDK_PATH_PREFIX = "nabuflow/runtime/";
+
+function containsArbitraryRuntimeFetch(file: { path: string; content: string }): boolean {
+  if (OTHER_RUNTIME_NETWORK_PATTERN.test(file.content)) return true;
+
+  const fetchCalls = [...file.content.matchAll(FETCH_CALL_PATTERN)].length;
+  if (fetchCalls === 0) return false;
+
+  // Files in public/ execute in the end user's browser, not in the sealed
+  // tenant runtime. Permit only literal same-origin paths there so a generated
+  // UI can call its own capability-backed API. Server-side fetches, protocol-
+  // relative or absolute URLs, and dynamic browser targets remain fail-closed.
+  if (!file.path.startsWith("public/")) return true;
+  const sameOriginCalls = [...file.content.matchAll(STATIC_BROWSER_SAME_ORIGIN_FETCH_PATTERN)]
+    .length;
+  return sameOriginCalls !== fetchCalls;
+}
 
 export class ZeroEligibilityInventoryError extends Error {
   readonly code = "zero_eligibility_unclassified";
@@ -377,7 +396,7 @@ export async function evaluateZeroGeneratedEligibility(
     for (const match of file.content.matchAll(ENV_READ_PATTERN)) {
       if (match[1] !== "PORT") addReason(reasons, "credential_assumption", file.path);
     }
-    if (RUNTIME_FETCH_PATTERN.test(file.content)) {
+    if (containsArbitraryRuntimeFetch(file)) {
       addReason(reasons, "arbitrary_runtime_fetch", file.path);
     }
     if (PACKAGE_INSTALL_PATTERN.test(file.content)) {
