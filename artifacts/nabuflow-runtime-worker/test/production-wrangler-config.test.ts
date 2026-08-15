@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-type WranglerConfig = Record<string, unknown>;
+type WranglerConfig = Record<string, unknown> & {
+  containers?: Array<Record<string, unknown>>;
+  queues: { producers: Array<Record<string, unknown>> };
+  r2_buckets: Array<Record<string, unknown>>;
+  routes?: Array<Record<string, unknown>>;
+  services?: Array<Record<string, unknown>>;
+  vars: Record<string, string>;
+};
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -59,9 +66,15 @@ describe("production Wrangler configurations", () => {
       "pantry-production-2026-08-v1",
     ]);
     expect(build.vars.TRUSTED_BUILD_SIGNING_KEY_ID).toBe("build-production-2026-08-v1");
-    expect(Object.keys(JSON.parse(build.vars.TRUSTED_BUILD_PUBLIC_KEYS))).toEqual([
+    const pantryRevisionKeys = JSON.parse(pantry.vars.PANTRY_REVISION_PUBLIC_KEYS);
+    const trustedBuildKeys = JSON.parse(build.vars.TRUSTED_BUILD_PUBLIC_KEYS);
+    expect(Object.keys(trustedBuildKeys)).toEqual([
       "build-production-2026-08-v1",
+      "pantry-production-2026-08-v1",
     ]);
+    expect(trustedBuildKeys["pantry-production-2026-08-v1"]).toBe(
+      pantryRevisionKeys["pantry-production-2026-08-v1"],
+    );
   });
 
   it("pins scale-to-zero-compatible canary capacity and all service bindings", () => {
