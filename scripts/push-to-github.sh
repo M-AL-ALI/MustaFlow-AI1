@@ -48,8 +48,14 @@ git add \
   docs/changelog.md \
   scripts/push-to-github.sh 2>/dev/null || true
 
-# Clear the commit-message template after staging so a stale message from a
-# previous wave can never be reused by a subsequent push.
+# Read commit message FIRST (before any truncation), then clear so it cannot be
+# reused by a subsequent push.  Supports two commit modes:
+#   • STAGED > 0  → normal commit of staged files, using the message if set
+#   • STAGED = 0 + message set → allow-empty marker commit (e.g. publish marker)
+COMMIT_MSG=""
+if [ -f ".local/.commit_message" ] && [ -s ".local/.commit_message" ]; then
+  COMMIT_MSG="$(cat .local/.commit_message)"
+fi
 if [ -f ".local/.commit_message" ]; then
   truncate -s 0 ".local/.commit_message" 2>/dev/null || true
 fi
@@ -57,17 +63,18 @@ fi
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
   echo "Committing $STAGED staged file(s) before push ..."
+  MSG="${COMMIT_MSG:-chore: pending wave commit}"
   HUSKY=0 git \
     -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
     -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
-    commit \
-    --no-verify \
-    -F .local/.commit_message 2>/dev/null \
-    || HUSKY=0 git \
-         -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
-         -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
-         commit --no-verify \
-         -m "chore: pending wave commit"
+    commit --no-verify -m "$MSG"
+  echo "Committed: $(git log --oneline -1)"
+elif [ -n "$COMMIT_MSG" ]; then
+  echo "Allow-empty marker commit: $COMMIT_MSG"
+  HUSKY=0 git \
+    -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
+    -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
+    commit --allow-empty --no-verify -m "$COMMIT_MSG"
   echo "Committed: $(git log --oneline -1)"
 fi
 
