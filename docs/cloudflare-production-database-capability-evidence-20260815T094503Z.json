@@ -1,0 +1,77 @@
+{
+  "format": "nabuflow.production-database-capability-evidence/v1",
+  "recordedAt": "2026-08-15T09:45:03Z",
+  "branch": "codex/production-database-capability",
+  "baseSha": "e73e8096ad1472733789895a016f7d80cd41c28c",
+  "implementationCommit": "d5f1864ad8a1525c7c1cc2656cfef3242d15b083",
+  "cutoverPlanSha256": "52d88efc8560301407ec391e436f91025f163457f6558e9d844876886f4ee39b",
+  "mode": "branch-only-inert",
+  "liveChanges": {
+    "deployments": 0,
+    "publicSurfacesOpened": 0,
+    "providerCalls": 0,
+    "resourcesCreated": 0,
+    "credentialsRequested": 0,
+    "credentialsCaptured": 0,
+    "costUsd": 0
+  },
+  "tests": {
+    "frozenOfflineInstall": {
+      "status": "passed",
+      "seconds": 3.2,
+      "downloads": 0,
+      "lockfileChanged": false
+    },
+    "workspaceTypecheck": { "status": "passed", "seconds": 30.5 },
+    "workspaceLint": { "status": "passed", "seconds": 18.4 },
+    "workspaceFormat": { "status": "passed" },
+    "contracts": { "status": "passed", "files": 20, "passed": 187, "failed": 0 },
+    "runtimeWorker": { "status": "passed", "files": 32, "passed": 244, "failed": 0 },
+    "apiFocused": { "status": "passed", "files": 3, "passed": 56, "failed": 0 },
+    "apiFullBranch": { "passed": 2300, "failed": 39, "skipped": 5, "total": 2344 },
+    "apiFullBase": { "passed": 2296, "failed": 39, "skipped": 5, "total": 2340 },
+    "apiFailureSetSha256": "1097110a875f3e55a0c2381f3a72b7e8a8923b5cca1ad988aea869ed765190aa",
+    "apiFailureSetsExact": true,
+    "releaseProfileBranch": { "passedRows": 18, "warningRows": 0, "failedRows": 3 },
+    "releaseProfileBase": { "passedRows": 18, "warningRows": 0, "failedRows": 3 },
+    "releaseProfileFailureRows": [
+      "api-release-extended",
+      "api-account-billing-history",
+      "web-build"
+    ],
+    "releaseProfileRootCause": "ECONNREFUSED 127.0.0.1:5432",
+    "releaseProfileExactBaseParity": true,
+    "diffCheck": { "status": "passed", "findings": 0 },
+    "credentialPatternScan": { "status": "passed", "findings": 0 }
+  },
+  "compatibility": {
+    "manifestChanges": [],
+    "artifactV1WireFilesChanged": 0,
+    "dependencyLayerWireFilesChanged": 0,
+    "flyNamedFilesChanged": 0,
+    "tenantEgressFilesChanged": 0,
+    "acceptedReleaseCapabilityField": "additive-default-empty"
+  },
+  "productionBindings": {
+    "newSecretNames": ["NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY"],
+    "newVariableNames": [
+      "NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED",
+      "NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID",
+      "NABUFLOW_PRODUCTION_NEON_REGION_ID",
+      "NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS",
+      "NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS"
+    ],
+    "valuesPresent": false,
+    "installationDeferredToFounderCeremony": true
+  },
+  "rehearsal": {
+    "shape": "signed staging-namespace control request through shared durable queue, injected fake provider, real vault contract",
+    "provider": "fake",
+    "allocationCreated": true,
+    "warmReuse": true,
+    "vaultRestartReplay": true,
+    "rawCredentialInResponseOrTrail": false,
+    "hardDeleteVerifiedGone": true,
+    "storageResidue": 0
+  }
+}
