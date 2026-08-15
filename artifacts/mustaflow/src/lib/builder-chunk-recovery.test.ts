@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   BUILDER_CHUNK_REFRESHING_MESSAGE,
-  BuilderChunkRecoveryError,
   BuilderChunkReloadPendingError,
   attemptBuilderChunkRecovery,
   cacheBustedChunkUrl,
