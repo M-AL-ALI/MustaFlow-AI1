@@ -1687,6 +1687,11 @@ export const ListTasksResponseItem = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -1813,6 +1818,11 @@ export const ReorderTasksResponseItem = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -1918,6 +1928,11 @@ export const CancelTaskResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -2022,6 +2037,11 @@ export const ForceStartTaskResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -2130,6 +2150,11 @@ export const UpdateTaskResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -2249,6 +2274,11 @@ export const ApplyTaskStagingResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -2387,6 +2417,11 @@ export const DiscardTaskStagingResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -2512,6 +2547,11 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
@@ -5785,6 +5825,11 @@ export const GetProjectQueueBatchResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "failureEvidence": zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "evidence": zod.record(zod.string(), zod.unknown()).nullable()
+}).optional().describe('Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material.'),
   "warningChecks": zod.array(zod.object({
   "id": zod.string().optional(),
   "label": zod.string().optional(),
