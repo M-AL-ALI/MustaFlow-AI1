@@ -14,6 +14,7 @@ import {
 import {
   ZeroGenerationKitchenError,
   readZeroGenerationControlWithWeather,
+  trustedBuildTerminalError,
   waitForPantryShelf,
   zeroGenerationReservedOperationTimeout,
 } from "./zero-generation-kitchen";
@@ -61,6 +62,73 @@ function progress(state: "queued" | "running", attempt: number) {
 }
 
 describe("Zero generator Pantry lifecycle waiting", () => {
+  it("preserves sanitized trusted-build identity and per-attempt diagnostics", () => {
+    const buildId = `pbuild_zero_${"d".repeat(64)}`;
+    const requestId = `pbuildreq_${"e".repeat(64)}`;
+    const error = trustedBuildTerminalError({
+      ok: true,
+      buildId,
+      requestId,
+      state: "failed",
+      attempt: 1,
+      attempts: [
+        {
+          attempt: 1,
+          progression: [{ pass: 1, stage: "build-command", outcome: "failed" }],
+          collectionProgress: [],
+          secretScanFindings: [],
+          secretScanSummaries: [],
+          memoryProgress: [],
+          verificationProgress: [],
+          lastSuccessfulStage: { pass: 1, stage: "install" },
+          failingStage: { pass: 1, stage: "build-command" },
+          error: {
+            code: "build_failed",
+            message: "Build command failed",
+            retryable: false,
+            status: 422,
+          },
+          diagnostics: {
+            commandLine: "npm run build",
+            exitCode: 2,
+            resolvedPath: "/usr/local/bin:/usr/bin:/bin",
+            resolvedExecutable: "/usr/bin/npm",
+            stdoutTail: "",
+            stderrTail: "sanitized compiler tail",
+          },
+        },
+      ],
+      output: null,
+      error: {
+        code: "build_failed",
+        message: "Build command failed",
+        retryable: false,
+        status: 422,
+      },
+      updatedAt: "2026-08-15T20:09:12.000Z",
+    });
+
+    expect(error).toMatchObject({
+      code: "build_failed",
+      evidence: {
+        stage: "trusted-build-wait",
+        buildId,
+        requestId,
+        attempt: 1,
+        attempts: [
+          {
+            failingStage: { pass: 1, stage: "build-command" },
+            diagnostics: {
+              commandLine: "npm run build",
+              exitCode: 2,
+              stderrTail: "sanitized compiler tail",
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it("retries a typed control-read blackout inside the outer owner deadline", async () => {
     let elapsedMs = 0;
     let attempts = 0;

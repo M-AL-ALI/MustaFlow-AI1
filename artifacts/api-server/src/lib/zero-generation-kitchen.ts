@@ -36,6 +36,7 @@ import {
   type RuntimeManifestContract,
   type TrustedBuildOutput,
   type TrustedBuildRequest,
+  type TrustedBuildStatusResponse,
   type ZeroGeneratedDependencyPlan,
   type AcceptedSealedRelease,
 } from "@workspace/tenant-runtime-contracts";
@@ -67,6 +68,24 @@ export class ZeroGenerationKitchenError extends Error {
     super(message);
     this.name = "ZeroGenerationKitchenError";
   }
+}
+
+export function trustedBuildTerminalError(
+  status: TrustedBuildStatusResponse,
+): ZeroGenerationKitchenError {
+  return new ZeroGenerationKitchenError(
+    status.error?.code ?? "build_failed",
+    "Trusted build failed",
+    {
+      stage: "trusted-build-wait",
+      buildId: status.buildId,
+      requestId: status.requestId,
+      attempt: status.attempt,
+      attempts: status.attempts,
+      publicError: status.error,
+      updatedAt: status.updatedAt,
+    },
+  );
 }
 
 export function zeroGenerationReservedOperationTimeout(input: {
@@ -785,10 +804,7 @@ export async function runZeroGenerationKitchen(
     );
     lastBuildState = status.state;
     if (status.state === "failed") {
-      throw new ZeroGenerationKitchenError(
-        status.error?.code ?? "build_failed",
-        "Trusted build failed",
-      );
+      throw trustedBuildTerminalError(status);
     }
     if (status.state === "cancelled") {
       throw new ZeroGenerationKitchenError("build_cancelled", "Trusted build was cancelled");
