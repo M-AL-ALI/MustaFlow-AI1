@@ -70,12 +70,19 @@ import {
   pantryCatalogStockIdentityStatusResponseSchema,
   pantryShelfContentHashesResponseSchema,
   artifactCommitDiagnosticsResponseSchema,
+  layeredArtifactPromotionDiagnosticsResponseSchema,
   durableOperationDiscoveryRequestSchema,
   durableOperationDiscoveryResponseSchema,
   DURABLE_OPERATION_DISCOVERY_MAX_WINDOW_MS,
   DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
   runtimeManifestRestartDiagnosticsResponseSchema,
   runtimeStartDiagnosticsResponseSchema,
+  promoteRuntimeLayeredArtifactRequestSchema,
+  promoteRuntimeLayeredArtifactResponseSchema,
+  runtimeArtifactSealedHash,
+  runtimeLayeredArtifactContentHash,
+  runtimeLayeredArtifactMergedReleaseHash,
+  runtimeLayeredArtifactSealedHash,
 } from "@workspace/tenant-runtime-contracts";
 import type {
   ActivateRouteRequest,
@@ -104,6 +111,7 @@ import type {
   PantryPlatform,
   RuntimeArtifactLayerContent,
   DurableOperationDiscoveryRequest,
+  PromoteRuntimeLayeredArtifactRequest,
 } from "@workspace/tenant-runtime-contracts";
 import { createHash } from "node:crypto";
 import type { WorkerBindings } from "./bindings";
@@ -116,6 +124,7 @@ import type {
   StoredDurableOperationJob,
   StoredRuntimeManifestRestartJob,
   StoredRuntimeStartJob,
+  StoredLayeredArtifactPromotionJob,
   DurableOperationQueueMessage,
   DurableOperationRegistration,
   ControlCoordinator,
@@ -175,6 +184,7 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "layeredArtifactLayerChunk",
   "layeredArtifactCommit",
   "layeredArtifactRemove",
+  "layeredArtifactPromotion",
   "manifestUpdate",
   "pantryMutation",
   "buildMutation",
@@ -183,6 +193,7 @@ const DURABLE_OPERATION_ENDPOINTS = new Set<Endpoint>([
   "artifactCommit",
   "layeredArtifactCommit",
   "start",
+  "layeredArtifactPromotion",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -226,6 +237,8 @@ type Endpoint =
   | "layeredArtifactCommit"
   | "layeredArtifactCommitDiagnostics"
   | "layeredArtifactRemove"
+  | "layeredArtifactPromotion"
+  | "layeredArtifactPromotionDiagnostics"
   | "manifestUpdate"
   | "pantryRead"
   | "pantryMutation"
@@ -238,6 +251,7 @@ interface MatchedRoute {
   hostname?: string;
   capability?: { projectId: number; provider: string; name: string };
   artifactSha256?: string;
+  promotionIdentity?: string;
   layerContentSha256?: string;
   chunkIndex?: number;
   pantryPath?: string;
@@ -718,7 +732,8 @@ export async function handleDurableOperationQueue(
       (body.kind !== "v1" &&
         body.kind !== "layers-v1" &&
         body.kind !== "runtime-start" &&
-        body.kind !== "runtime-manifest-restart") ||
+        body.kind !== "runtime-manifest-restart" &&
+        body.kind !== "layered-artifact-promotion") ||
       (body.kind === "runtime-start"
         ? body.subjectKey !== "start"
         : body.kind === "runtime-manifest-restart"
@@ -794,7 +809,9 @@ export async function handleDurableOperationQueue(
           ? "layeredArtifactCommit"
           : job.kind === "runtime-start"
             ? "start"
-            : "manifestUpdate";
+            : job.kind === "runtime-manifest-restart"
+              ? "manifestUpdate"
+              : "layeredArtifactPromotion";
     const route: MatchedRoute = {
       endpoint,
       locator,
@@ -806,14 +823,17 @@ export async function handleDurableOperationQueue(
       | CommitRuntimeArtifactRequest
       | CommitRuntimeLayeredArtifactRequest
       | StartRuntimeRequest
-      | UpdateRuntimeManifestRequest =
+      | UpdateRuntimeManifestRequest
+      | PromoteRuntimeLayeredArtifactRequest =
       job.kind === "runtime-start" || job.kind === "runtime-manifest-restart"
         ? job.request
-        : {
-            locator,
-            expectedDeploymentVersion: job.expectedDeploymentVersion,
-            sealedArtifactSha256: job.sealedArtifactSha256,
-          };
+        : job.kind === "layered-artifact-promotion"
+          ? job.request
+          : {
+              locator,
+              expectedDeploymentVersion: job.expectedDeploymentVersion,
+              sealedArtifactSha256: job.sealedArtifactSha256,
+            };
     const execution: DurableOperationExecution = { job, ownerId };
     // eslint-disable-next-line no-console -- metadata-only durable driver evidence
     console.log(
@@ -922,7 +942,8 @@ type ControlInput =
   | ProvisionDatabaseCapabilityRequest
   | RevokeDatabaseCapabilityRequest
   | ProvisionStripeCapabilityRequest
-  | RevokeStripeCapabilityRequest;
+  | RevokeStripeCapabilityRequest
+  | PromoteRuntimeLayeredArtifactRequest;
 
 function getCoordinator(env: WorkerBindings): DurableObjectStub<ControlDurableObject> {
   return env.CONTROL_COORDINATOR.get(env.CONTROL_COORDINATOR.idFromName("control-v1"));
@@ -970,6 +991,19 @@ async function durableOperationRegistrationFor(
       kind: "runtime-manifest-restart",
       runtimeIdentity,
       subjectKey: "manifest-restart",
+      request,
+      expectedDeploymentVersion: request.expectedDeploymentVersion,
+      nowMs,
+    };
+  }
+  if (route.endpoint === "layeredArtifactPromotion") {
+    const request = input as PromoteRuntimeLayeredArtifactRequest;
+    return {
+      key,
+      fingerprint,
+      kind: "layered-artifact-promotion",
+      runtimeIdentity,
+      subjectKey: request.promotionIdentity,
       request,
       expectedDeploymentVersion: request.expectedDeploymentVersion,
       nowMs,
@@ -1344,6 +1378,39 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
       };
     }
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
+  const promotionDiagnosticsMatch = new RegExp(
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/production/(blue|green)/promotions/layered/([0-9a-f]{64})/diagnostics$`,
+  ).exec(pathname);
+  if (promotionDiagnosticsMatch) {
+    if (method !== "GET") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return {
+      endpoint: "layeredArtifactPromotionDiagnostics",
+      locator: {
+        projectId: Number(promotionDiagnosticsMatch[1]),
+        role: "production",
+        slot: promotionDiagnosticsMatch[2] as "blue" | "green",
+      },
+      promotionIdentity: promotionDiagnosticsMatch[3],
+    };
+  }
+  const promotionMatch = new RegExp(
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/production/(blue|green)/promotions/layered$`,
+  ).exec(pathname);
+  if (promotionMatch) {
+    if (method !== "POST") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return {
+      endpoint: "layeredArtifactPromotion",
+      locator: {
+        projectId: Number(promotionMatch[1]),
+        role: "production",
+        slot: promotionMatch[2] as "blue" | "green",
+      },
+    };
   }
   const layeredArtifactMatch = new RegExp(
     `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)/layered-artifacts/([0-9a-f]{64})(?:/(begin|commit|commit-diagnostics|app/chunks/([0-9]+)|layers/([0-9a-f]{64})/chunks/([0-9]+)))?$`,
@@ -1754,6 +1821,7 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
   if (
     route.endpoint === "artifactCommitDiagnostics" ||
     route.endpoint === "layeredArtifactCommitDiagnostics" ||
+    route.endpoint === "layeredArtifactPromotionDiagnostics" ||
     route.endpoint === "startDiagnostics" ||
     route.endpoint === "manifestUpdateDiagnostics"
   ) {
@@ -1809,15 +1877,20 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     route.endpoint !== "layeredArtifactBegin" &&
     route.endpoint !== "layeredArtifactCommit" &&
     route.endpoint !== "layeredArtifactRemove" &&
+    route.endpoint !== "layeredArtifactPromotion" &&
     route.endpoint !== "manifestUpdate"
   ) {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const parsed = parseMutationInput(route.endpoint, body);
+  const parsedLocator =
+    route.endpoint === "layeredArtifactPromotion"
+      ? (parsed as PromoteRuntimeLayeredArtifactRequest).targetLocator
+      : (parsed as Exclude<typeof parsed, PromoteRuntimeLayeredArtifactRequest>).locator;
   if (
-    parsed.locator.projectId !== route.locator.projectId ||
-    parsed.locator.role !== route.locator.role ||
-    parsed.locator.slot !== route.locator.slot
+    parsedLocator.projectId !== route.locator.projectId ||
+    parsedLocator.role !== route.locator.role ||
+    parsedLocator.slot !== route.locator.slot
   ) {
     throw new ControlHttpError(400, "locator_mismatch", "Path and body runtime locators differ");
   }
@@ -1920,6 +1993,7 @@ function parseMutationInput(
     | "layeredArtifactBegin"
     | "layeredArtifactCommit"
     | "layeredArtifactRemove"
+    | "layeredArtifactPromotion"
     | "manifestUpdate",
   body: unknown,
 ):
@@ -1934,6 +2008,7 @@ function parseMutationInput(
   | BeginRuntimeLayeredArtifactRequest
   | CommitRuntimeLayeredArtifactRequest
   | RemoveRuntimeLayeredArtifactRequest
+  | PromoteRuntimeLayeredArtifactRequest
   | UpdateRuntimeManifestRequest {
   if (endpoint === "ensure") return parseStrict(ensureRuntimeRequestSchema, body);
   if (endpoint === "start") return parseStrict(startRuntimeRequestSchema, body);
@@ -1975,6 +2050,9 @@ function parseMutationInput(
   if (endpoint === "layeredArtifactRemove") {
     return parseStrict(removeRuntimeLayeredArtifactRequestSchema, body);
   }
+  if (endpoint === "layeredArtifactPromotion") {
+    return parseStrict(promoteRuntimeLayeredArtifactRequestSchema, body);
+  }
   if (endpoint === "manifestUpdate") return parseStrict(updateRuntimeManifestRequestSchema, body);
   return parseStrict(execRuntimeRequestSchema, body);
 }
@@ -2003,6 +2081,11 @@ async function executeEndpoint(
         supportedRoles: [...RUNTIME_ROLES],
         features: CONTROL_FEATURES.filter((feature) => {
           if (feature === "artifact-layers-v1") return configuredLayerPlatform(env) !== null;
+          if (feature === "artifact-promotion-v1") {
+            return (
+              configuredLayerPlatform(env) !== null && env.DURABLE_OPERATION_QUEUE !== undefined
+            );
+          }
           if (feature === "artifact-commit-diagnostics-v1") {
             return env.DURABLE_OPERATION_QUEUE !== undefined;
           }
@@ -2076,6 +2159,23 @@ async function executeEndpoint(
   }
   if (endpoint === "routeDeactivate") {
     return deactivatePublishedRoute(input as DeactivateRouteRequest, coordinator);
+  }
+  if (endpoint === "layeredArtifactPromotion") {
+    if (
+      artifactCommitExecution === undefined ||
+      artifactCommitExecution === null ||
+      artifactCommitExecution.job.kind !== "layered-artifact-promotion"
+    ) {
+      throw new Error("Layered artifact promotion job is unavailable");
+    }
+    return promoteLayeredArtifact(
+      input as PromoteRuntimeLayeredArtifactRequest,
+      env,
+      coordinator,
+      artifactCommitExecution as DurableOperationExecution & {
+        job: StoredLayeredArtifactPromotionJob;
+      },
+    );
   }
   if (endpoint === "capabilityProvision") {
     const request = input as ProvisionEchoCapabilityRequest;
@@ -2222,6 +2322,59 @@ async function executeEndpoint(
     namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
     ...locator,
   });
+  if (endpoint === "layeredArtifactPromotionDiagnostics") {
+    const promotionIdentity = matchedRoute?.promotionIdentity;
+    if (promotionIdentity === undefined) {
+      throw new ControlHttpError(400, "invalid_request", "Artifact promotion route is incomplete");
+    }
+    const job = await coordinator.getLatestDurableOperation(
+      "layered-artifact-promotion",
+      identity,
+      promotionIdentity,
+    );
+    if (
+      job === null ||
+      job.kind !== "layered-artifact-promotion" ||
+      job.runtimeIdentity !== identity
+    ) {
+      throw new ControlHttpError(
+        404,
+        "artifact_promotion_not_found",
+        "Artifact promotion was not found",
+      );
+    }
+    const terminalBody = job.response?.body as { code?: unknown } | undefined;
+    return {
+      status: 200,
+      body: layeredArtifactPromotionDiagnosticsResponseSchema.parse({
+        ok: true,
+        job: {
+          kind: job.kind,
+          runtimeIdentity: job.runtimeIdentity,
+          promotionIdentity: job.subjectKey,
+          state: job.state,
+          checkpoint: job.checkpoint,
+          attempt: job.attempt,
+          leaseUntil: job.leaseUntilMs === null ? null : new Date(job.leaseUntilMs).toISOString(),
+          deadline: new Date(job.deadlineMs).toISOString(),
+          updatedAt: new Date(job.updatedAtMs).toISOString(),
+          terminal:
+            job.response === undefined
+              ? null
+              : {
+                  status: job.response.status,
+                  code:
+                    typeof terminalBody?.code === "string"
+                      ? terminalBody.code
+                      : job.state === "succeeded"
+                        ? "ok"
+                        : "artifact_promotion_failed",
+                },
+          events: job.events,
+        },
+      }),
+    };
+  }
   if (endpoint === "artifactCommitDiagnostics" || endpoint === "layeredArtifactCommitDiagnostics") {
     const sealedArtifactSha256 = matchedRoute?.artifactSha256;
     if (sealedArtifactSha256 === undefined) {
@@ -3512,6 +3665,311 @@ async function executeEndpoint(
   throw new ControlHttpError(404, "not_found", "Control endpoint not found");
 }
 
+async function promoteLayeredArtifact(
+  request: PromoteRuntimeLayeredArtifactRequest,
+  env: WorkerBindings,
+  coordinator: ControlCoordinator,
+  execution: DurableOperationExecution & { job: StoredLayeredArtifactPromotionJob },
+): Promise<StoredHttpResponse> {
+  assertDeploymentVersion(request.expectedDeploymentVersion, env.CF_VERSION_METADATA.id);
+  const sourceIdentity = await deriveRuntimeIdentity({
+    namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+    ...request.sourceLocator,
+  });
+  const targetIdentity = await deriveRuntimeIdentity({
+    namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+    ...request.targetLocator,
+  });
+  if (execution.job.runtimeIdentity !== targetIdentity) {
+    throw new ControlHttpError(
+      409,
+      "artifact_promotion_identity_conflict",
+      "Promotion job is bound to a different production runtime",
+    );
+  }
+  const source = await coordinator.getLayeredArtifact(
+    sourceIdentity,
+    request.sourceSealedArtifactSha256,
+  );
+  if (source === null || source.state !== "committed") {
+    throw new ControlHttpError(
+      404,
+      "artifact_promotion_source_not_found",
+      "Accepted sealed release is not present in the dock",
+    );
+  }
+  const sourceEnvelope = source.envelope;
+  if (!(await verifyRuntimeLayeredArtifactEnvelope(sourceEnvelope))) {
+    throw new ControlHttpError(
+      422,
+      "artifact_promotion_source_integrity_mismatch",
+      "Accepted sealed release failed envelope verification",
+    );
+  }
+
+  const { sealedArtifactSha256: _sourceAppSealedArtifactSha256, ...sourceAppUnsigned } =
+    sourceEnvelope.content.appArtifact;
+  const targetAppUnsigned = {
+    ...sourceAppUnsigned,
+    targetRuntimeIdentity: targetIdentity,
+    manifestRevision: request.targetManifest.revision,
+    artifactRevision: request.targetArtifactRevision,
+  };
+  const targetApp = {
+    ...targetAppUnsigned,
+    sealedArtifactSha256: await runtimeArtifactSealedHash(targetAppUnsigned),
+  };
+  const { finalMergedReleaseSha256: _sourceMergedReleaseSha256, ...sourceContent } =
+    sourceEnvelope.content;
+  const targetContentWithoutMergedHash = {
+    ...sourceContent,
+    appArtifact: targetApp,
+  };
+  const targetContent = {
+    ...targetContentWithoutMergedHash,
+    finalMergedReleaseSha256: await runtimeLayeredArtifactMergedReleaseHash(
+      targetContentWithoutMergedHash,
+    ),
+  };
+  const targetContentSha256 = await runtimeLayeredArtifactContentHash(targetContent);
+  const { sealedArtifactSha256: _sourceSealedArtifactSha256, ...sourceEnvelopeUnsigned } =
+    sourceEnvelope;
+  const targetUnsigned = {
+    ...sourceEnvelopeUnsigned,
+    content: targetContent,
+    contentSha256: targetContentSha256,
+    targetRuntimeIdentity: targetIdentity,
+    manifestRevision: request.targetManifest.revision,
+    artifactRevision: request.targetArtifactRevision,
+  };
+  const targetEnvelope = {
+    ...targetUnsigned,
+    sealedArtifactSha256: await runtimeLayeredArtifactSealedHash(targetUnsigned),
+  };
+  if (!(await verifyRuntimeLayeredArtifactEnvelope(targetEnvelope))) {
+    throw new ControlHttpError(
+      500,
+      "artifact_promotion_envelope_invalid",
+      "Production artifact rebinding did not produce a valid sealed envelope",
+    );
+  }
+
+  const checkpoint = async (
+    next: StoredLayeredArtifactPromotionJob["checkpoint"],
+  ): Promise<void> => {
+    const updated = await coordinator.checkpointDurableOperation({
+      jobKey: execution.job.jobKey,
+      ownerId: execution.ownerId,
+      ownerGeneration: execution.job.attempt,
+      checkpoint: next,
+      nowMs: Date.now(),
+    });
+    if (updated.kind !== "layered-artifact-promotion") {
+      throw new Error("Artifact promotion job changed kind");
+    }
+    execution.job = updated;
+  };
+
+  if (execution.job.checkpoint === "initialized") {
+    try {
+      await verifyStoredArtifactChunks(
+        env.NABUFLOW_RUNTIME_ARTIFACTS,
+        sourceEnvelope.content.appArtifact.content,
+        (index) =>
+          layeredArtifactAppChunkKey(sourceIdentity, sourceEnvelope.sealedArtifactSha256, index),
+      );
+      for (const layer of sourceEnvelope.content.layers) {
+        await verifyStoredLayerIntegrity(env.NABUFLOW_RUNTIME_ARTIFACTS, layer);
+      }
+    } catch (error) {
+      if (error instanceof ControlHttpError) {
+        throw new ControlHttpError(
+          error.status,
+          "artifact_promotion_source_integrity_mismatch",
+          "Accepted sealed release payload failed integrity verification",
+          error.retryable,
+        );
+      }
+      throw error;
+    }
+    await checkpoint("source-verified");
+  }
+
+  if (execution.job.checkpoint === "source-verified") {
+    const targetRuntime = await requireRuntime(coordinator, targetIdentity);
+    if (
+      targetRuntime.manifest.revision !== request.targetManifest.revision ||
+      canonicalJson(targetRuntime.manifest) !== canonicalJson(request.targetManifest)
+    ) {
+      throw new ControlHttpError(
+        409,
+        "artifact_promotion_manifest_conflict",
+        "Production runtime manifest does not match the promotion target",
+      );
+    }
+    const begun = await coordinator.beginLayeredArtifact({
+      runtimeIdentity: targetIdentity,
+      envelope: targetEnvelope,
+      state: "pending",
+      receivedAppChunks: targetEnvelope.content.appArtifact.content.chunks.map(() => null),
+      expiresAtMs: Date.now() + RUNTIME_ARTIFACT_PENDING_TTL_MS,
+    });
+    if (begun === "conflict") {
+      throw new ControlHttpError(
+        409,
+        "artifact_promotion_target_conflict",
+        "Production artifact address is bound to different metadata",
+      );
+    }
+    await checkpoint("target-created");
+  }
+
+  if (execution.job.checkpoint === "target-created") {
+    const target = await coordinator.getLayeredArtifact(
+      targetIdentity,
+      targetEnvelope.sealedArtifactSha256,
+    );
+    if (target === null) {
+      throw new ControlHttpError(
+        409,
+        "artifact_promotion_target_missing",
+        "Production artifact reservation disappeared",
+        true,
+      );
+    }
+    if (target.state === "committed") {
+      try {
+        await verifyStoredArtifactChunks(
+          env.NABUFLOW_RUNTIME_ARTIFACTS,
+          targetEnvelope.content.appArtifact.content,
+          (index) =>
+            layeredArtifactAppChunkKey(targetIdentity, targetEnvelope.sealedArtifactSha256, index),
+        );
+      } catch (error) {
+        if (error instanceof ControlHttpError) {
+          throw new ControlHttpError(
+            error.status,
+            "artifact_promotion_target_integrity_mismatch",
+            "Immutable production artifact bytes failed integrity verification",
+            error.retryable,
+          );
+        }
+        throw error;
+      }
+    } else {
+      for (
+        let index = 0;
+        index < sourceEnvelope.content.appArtifact.content.chunks.length;
+        index += 1
+      ) {
+        const expectedSha256 = sourceEnvelope.content.appArtifact.content.chunks[index];
+        const sourceKey = layeredArtifactAppChunkKey(
+          sourceIdentity,
+          sourceEnvelope.sealedArtifactSha256,
+          index,
+        );
+        const targetKey = layeredArtifactAppChunkKey(
+          targetIdentity,
+          targetEnvelope.sealedArtifactSha256,
+          index,
+        );
+        const sourceObject = await env.NABUFLOW_RUNTIME_ARTIFACTS.get(sourceKey);
+        if (sourceObject === null) {
+          throw new ControlHttpError(
+            409,
+            "artifact_promotion_source_incomplete",
+            "Accepted sealed release payload is incomplete",
+          );
+        }
+        const sourceBytes = new Uint8Array(await sourceObject.arrayBuffer());
+        if ((await sha256Hex(sourceBytes)) !== expectedSha256) {
+          throw new ControlHttpError(
+            422,
+            "artifact_promotion_source_integrity_mismatch",
+            "Accepted sealed release payload failed integrity verification",
+          );
+        }
+        const existing = await env.NABUFLOW_RUNTIME_ARTIFACTS.get(targetKey);
+        if (existing !== null) {
+          const existingBytes = new Uint8Array(await existing.arrayBuffer());
+          if ((await sha256Hex(existingBytes)) !== expectedSha256) {
+            throw new ControlHttpError(
+              422,
+              "artifact_promotion_target_integrity_mismatch",
+              "Immutable production artifact bytes conflict with the promotion",
+            );
+          }
+        } else {
+          await env.NABUFLOW_RUNTIME_ARTIFACTS.put(targetKey, sourceBytes.slice().buffer, {
+            sha256: expectedSha256,
+            onlyIf: { etagDoesNotMatch: "*" },
+            customMetadata: { sha256: expectedSha256 },
+          });
+          const readback = await env.NABUFLOW_RUNTIME_ARTIFACTS.get(targetKey);
+          if (
+            readback === null ||
+            (await sha256Hex(new Uint8Array(await readback.arrayBuffer()))) !== expectedSha256
+          ) {
+            throw new ControlHttpError(
+              503,
+              "artifact_promotion_storage_unavailable",
+              "Production artifact could not be reverified after storage",
+              true,
+            );
+          }
+        }
+        const recorded = await coordinator.recordLayeredArtifactAppChunk(
+          targetIdentity,
+          targetEnvelope.sealedArtifactSha256,
+          index,
+          expectedSha256,
+        );
+        if (recorded === "not_found" || recorded === "conflict") {
+          throw new ControlHttpError(
+            409,
+            "artifact_promotion_target_conflict",
+            "Production artifact reservation changed during promotion",
+            recorded === "not_found",
+          );
+        }
+      }
+    }
+    await checkpoint("payloads-copied");
+  }
+
+  if (execution.job.checkpoint === "payloads-copied") {
+    const committed = await coordinator.commitLayeredArtifact(
+      targetIdentity,
+      targetEnvelope.sealedArtifactSha256,
+    );
+    if (committed !== "committed") {
+      throw new ControlHttpError(
+        committed === "incomplete" ? 409 : 422,
+        committed === "incomplete"
+          ? "artifact_promotion_target_incomplete"
+          : "artifact_promotion_target_integrity_mismatch",
+        "Production artifact could not be committed",
+      );
+    }
+    await checkpoint("finalized");
+  }
+
+  return {
+    status: 200,
+    body: promoteRuntimeLayeredArtifactResponseSchema.parse({
+      ok: true,
+      promotionIdentity: request.promotionIdentity,
+      sourceSealedArtifactSha256: request.sourceSealedArtifactSha256,
+      targetSealedArtifactSha256: targetEnvelope.sealedArtifactSha256,
+      targetContentSha256,
+      artifactRevision: request.targetArtifactRevision,
+      appChunksCopied: targetEnvelope.content.appArtifact.content.chunks.length,
+      layersReused: targetEnvelope.content.layers.length,
+      envelope: targetEnvelope,
+    }),
+  };
+}
+
 function runtimeContainerId(env: WorkerBindings, identity: string): string {
   return env.NABUFLOW_SANDBOX.idFromName(identity).toString();
 }
@@ -3522,11 +3980,14 @@ async function activatePublishedRoute(
   coordinator: ControlCoordinator,
 ): Promise<StoredHttpResponse> {
   const route = request.route;
-  if (route.role !== "production" || route.activeSlot !== "blue") {
+  if (
+    route.role !== "production" ||
+    (route.activeSlot !== "blue" && route.activeSlot !== "green")
+  ) {
     throw new ControlHttpError(
       400,
-      "production_blue_required",
-      "Published routes require the production-blue runtime",
+      "production_slot_required",
+      "Published routes require a production blue/green runtime",
     );
   }
   const parsedIdentity = await parseRuntimeIdentityForNamespace(
@@ -3653,6 +4114,8 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     layeredArtifactCommit: commitRuntimeLayeredArtifactResponseSchema,
     layeredArtifactCommitDiagnostics: artifactCommitDiagnosticsResponseSchema,
     layeredArtifactRemove: removeRuntimeLayeredArtifactResponseSchema,
+    layeredArtifactPromotion: promoteRuntimeLayeredArtifactResponseSchema,
+    layeredArtifactPromotionDiagnostics: layeredArtifactPromotionDiagnosticsResponseSchema,
     manifestUpdate: ensureRuntimeResponseSchema,
     manifestUpdateDiagnostics: runtimeManifestRestartDiagnosticsResponseSchema,
   }[endpoint];

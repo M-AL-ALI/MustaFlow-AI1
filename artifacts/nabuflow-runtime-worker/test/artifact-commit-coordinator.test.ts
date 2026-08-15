@@ -205,6 +205,82 @@ describe("artifact commit coordinator leases", () => {
     expect(271_001 - 1_000).toBeLessThan(300_000);
   });
 
+  it("adopts a production promotion from its last durable checkpoint and terminalizes before observation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const storage = new MemoryDurableStorage();
+    const env = fakeEnv();
+    const durable = coordinator(storage, env);
+    const registration = {
+      key: "production-promotion-idempotency-1",
+      fingerprint: "6".repeat(64),
+      kind: "layered-artifact-promotion" as const,
+      runtimeIdentity: "nrf-e919a75364398a44-p42-production-green",
+      subjectKey: "9".repeat(64),
+      request: {
+        sourceLocator: { projectId: 42, role: "preview" as const, slot: "primary" as const },
+        targetLocator: { projectId: 42, role: "production" as const, slot: "green" as const },
+        expectedDeploymentVersion: "worker-version-test-1",
+        sourceSealedArtifactSha256: "a".repeat(64),
+        targetManifest: {
+          revision: "production-manifest-1",
+          runtime: "node",
+          buildCommand: ["npm", "run", "build"],
+          startCommand: ["node", "server.mjs"],
+          servicePort: 8080,
+          healthPath: "/healthz",
+          resourceProfile: "production" as const,
+          public: true,
+        },
+        targetArtifactRevision: "production-artifact-1",
+        promotionIdentity: "9".repeat(64),
+      },
+      expectedDeploymentVersion: "worker-version-test-1",
+    };
+    const registered = await durable.registerDurableOperation({ ...registration, nowMs: 1_000 });
+    expect(registered).toMatchObject({ state: "new", job: { checkpoint: "initialized" } });
+    if (registered.state !== "new") throw new Error("expected promotion job");
+    const first = await durable.claimDurableOperationDriver(
+      registered.job.jobKey,
+      "owner-1",
+      1_000,
+    );
+    expect(first.state).toBe("claimed");
+    await durable.checkpointDurableOperation({
+      jobKey: registered.job.jobKey,
+      ownerId: "owner-1",
+      ownerGeneration: 1,
+      checkpoint: "source-verified",
+      nowMs: 2_000,
+    });
+    const adopted = await durable.claimDurableOperationDriver(
+      registered.job.jobKey,
+      "owner-2",
+      17_000,
+    );
+    expect(adopted).toMatchObject({
+      state: "adopted",
+      job: { attempt: 2, checkpoint: "source-verified" },
+    });
+
+    vi.setSystemTime(271_001);
+    await durable.alarm();
+    await expect(
+      durable.registerDurableOperation({ ...registration, nowMs: 271_001 }),
+    ).resolves.toEqual({
+      state: "replay",
+      response: {
+        status: 504,
+        body: {
+          ok: false,
+          code: "artifact_promotion_timeout",
+          message: "Artifact promotion did not complete before the execution deadline",
+          retryable: false,
+        },
+      },
+    });
+  });
+
   it("uses the shared leased job chassis for acceptance cleanup and adopts a killed consumer", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

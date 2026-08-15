@@ -9,6 +9,7 @@ export * from "./pantry-catalog";
 export * from "./runtime-artifact";
 export * from "./runtime-artifact-layers";
 export * from "./preview-grant";
+export * from "./production-artifact";
 export * from "./request-signing";
 export * from "./route-capability";
 export * from "./runtime-identity";

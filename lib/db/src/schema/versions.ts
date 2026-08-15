@@ -9,6 +9,10 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
+import type {
+  AcceptedSealedRelease,
+  ProductionArtifactRelease,
+} from "@workspace/tenant-runtime-contracts";
 
 export type FileSnapshotEntry = {
   path: string;
@@ -51,6 +55,10 @@ export const projectVersionsTable = pgTable("project_versions", {
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
   auditReport: jsonb("audit_report").$type<AuditReport>(),
+  // Trusted kitchen acceptance and production promotion records contain identities and
+  // attestations only. Artifact bytes remain in the sealed dock.
+  sealedRelease: jsonb("sealed_release").$type<AcceptedSealedRelease>(),
+  productionRelease: jsonb("production_release").$type<ProductionArtifactRelease>(),
   // Persisted validation outcome for the snapshot. "passed" = all required
   // checks succeeded; "failed" = produced by the agentic builder with one or
   // more required checks failing (snapshot saved anyway for inspection).

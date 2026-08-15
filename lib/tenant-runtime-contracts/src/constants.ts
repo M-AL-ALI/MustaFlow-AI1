@@ -3,6 +3,7 @@ export const CONTROL_FEATURES = [
   "artifact-v1",
   "manifest-update-v1",
   "artifact-layers-v1",
+  "artifact-promotion-v1",
   "artifact-commit-diagnostics-v1",
   "durable-operation-discovery-v1",
   "runtime-lifecycle-jobs-v1",

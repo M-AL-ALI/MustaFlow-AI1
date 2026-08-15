@@ -70,6 +70,16 @@ export async function refreshNabuflowHelpArticles(
 }
 
 const MIGRATION_STEPS: MigrationStep[] = [
+  {
+    name: "migrate-production-artifact-release-records",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE project_versions
+           ADD COLUMN IF NOT EXISTS sealed_release jsonb,
+           ADD COLUMN IF NOT EXISTS production_release jsonb`,
+      );
+    },
+  },
   // ── migrate-containers ──────────────────────────────────────────────────────
   {
     name: "migrate-containers",

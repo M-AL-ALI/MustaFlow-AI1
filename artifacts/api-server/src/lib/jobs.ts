@@ -144,7 +144,7 @@ import {
   resolveZeroGenerationTarget,
   type PreparedZeroSealedNodeSource,
 } from "./zero-sealed-generation";
-import { runZeroGenerationKitchen } from "./zero-generation-kitchen";
+import { runZeroGenerationKitchen, ZeroGenerationKitchenError } from "./zero-generation-kitchen";
 import { supportsZeroGeneration } from "./tenant-runtime-provider";
 import {
   ZERO_SEALED_RUNTIME_PORT,
@@ -7201,7 +7201,10 @@ async function syncAgenticPreviewRuntime(opts: {
       }
       if (
         existingRuntime.status === "running" &&
-        existingRuntime.manifestRevision === opts.zeroSealedGeneration.manifest.revision
+        existingRuntime.manifestRevision === opts.zeroSealedGeneration.manifest.revision &&
+        // A newly-created project version needs its own durable kitchen acceptance record.
+        // Runtime reuse is safe only for callers that are not producing a publishable version.
+        opts.revision === null
       ) {
         await db
           .update(projectsTable)
@@ -7276,6 +7279,25 @@ async function syncAgenticPreviewRuntime(opts: {
       throw new Error(
         "zero_runtime_descriptor_incomplete: runtime.start did not reach the running descriptor",
       );
+    }
+    if (opts.revision !== null) {
+      const updated = await db
+        .update(projectVersionsTable)
+        .set({ sealedRelease: result.sealedRelease })
+        .where(
+          and(
+            eq(projectVersionsTable.id, opts.revision),
+            eq(projectVersionsTable.projectId, opts.projectId),
+          ),
+        )
+        .returning({ id: projectVersionsTable.id });
+      if (updated.length !== 1) {
+        throw new ZeroGenerationKitchenError(
+          "sealed_release_persistence_failed",
+          "Accepted kitchen result has no project version",
+          { projectId: opts.projectId, versionId: opts.revision },
+        );
+      }
     }
     await db
       .update(projectsTable)

@@ -3,6 +3,8 @@ import type {
   RuntimeArtifactLayerContent,
   RuntimeLayeredArtifactEnvelope,
   RuntimeManifestContract,
+  AcceptedSealedRelease,
+  ProductionArtifactRelease,
 } from "@workspace/tenant-runtime-contracts";
 
 /**
@@ -190,6 +192,37 @@ export function supportsZeroGeneration(
     typeof candidate.zeroGenerationControlRequest === "function" &&
     typeof candidate.zeroGenerationRuntimeDescriptor === "function" &&
     typeof candidate.zeroGenerationRuntimeDescriptorForProject === "function"
+  );
+}
+
+export interface ProductionArtifactPromotingTenantRuntimeProvider extends ZeroGenerationTenantRuntimeProvider {
+  promoteProductionArtifact(input: {
+    projectId: number;
+    sourceVersionId: number;
+    acceptedRelease: AcceptedSealedRelease;
+    targetSlot: "blue" | "green";
+    hostname: string;
+    promotionIdentity: string;
+    expectedPreviousManifestRevision: string | null;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<{ runtime: RuntimeInfo; release: ProductionArtifactRelease }>;
+  rollbackProductionArtifactActivation(input: {
+    activatedRelease: ProductionArtifactRelease;
+    previousRelease: ProductionArtifactRelease | null;
+    signal?: AbortSignal;
+  }): Promise<void>;
+}
+
+export function supportsProductionArtifactPromotion(
+  provider: TenantRuntimeProvider,
+): provider is ProductionArtifactPromotingTenantRuntimeProvider {
+  return (
+    supportsZeroGeneration(provider) &&
+    typeof (provider as Partial<ProductionArtifactPromotingTenantRuntimeProvider>)
+      .promoteProductionArtifact === "function" &&
+    typeof (provider as Partial<ProductionArtifactPromotingTenantRuntimeProvider>)
+      .rollbackProductionArtifactActivation === "function"
   );
 }
 

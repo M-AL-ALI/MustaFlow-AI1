@@ -137,6 +137,32 @@ Build this as one clean slice:
 
 Artifact v1 and dependency-layer wire formats remain unchanged.
 
+#### Slice A implementation record (2026-08-14)
+
+Implemented on `codex/production-artifact-promotion`, inert until the production provider and
+Worker locks are deliberately enabled:
+
+- the trusted kitchen's accepted release record is stored on its exact project version and copied
+  into the immutable deployment snapshot;
+- one canonical content-derived promotion identity binds source version, accepted sealed hash,
+  target slot, and published hostname;
+- the Runtime Worker promotes verified application chunks into the deterministic production
+  namespace, reuses verified immutable dependency layers, independently reseals the target
+  envelope, and runs the work as a checkpointed `layered-artifact-promotion` durable job;
+- the provider follows ensure, promotion, start, and activation under stable phase keys derived
+  from that one promotion identity; and
+- project-state persistence failure performs a compare-and-swap route rollback to the previously
+  active release (or removes the first route), leaving the previous runtime intact.
+
+Reality correction: the earlier runtime implementation admitted only `production/blue` at route
+activation and data-plane dispatch, although the shipped locator and route contracts already
+defined both `blue` and `green`. Safe republish cannot preserve an active candidate with a single
+slot. Slice A therefore makes the existing `blue|green` contract real: promotion always targets the
+inactive slot, health precedes compare-and-swap activation, and rollback reactivates the prior
+slot. This is additive control behavior; Artifact v1 and layer wire formats remain byte-unchanged.
+The historical “production-blue is the sole active slot” implementation note is superseded for
+Cloudflare production publishing by this blue/green rule.
+
 ### 2. Production database capability provisioning
 
 Sealed project provisioning deliberately skips direct `DATABASE_URL` creation. Today only staging

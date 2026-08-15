@@ -20,6 +20,8 @@ import type {
   DurableOperationKind,
   RuntimeManifestRestartCheckpoint,
   RuntimeStartCheckpoint,
+  LayeredArtifactPromotionCheckpoint,
+  PromoteRuntimeLayeredArtifactRequest,
   StartRuntimeRequest,
   UpdateRuntimeManifestRequest,
 } from "@workspace/tenant-runtime-contracts";
@@ -87,6 +89,7 @@ export type {
   DurableOperationKind,
   RuntimeManifestRestartCheckpoint,
   RuntimeStartCheckpoint,
+  LayeredArtifactPromotionCheckpoint,
 };
 
 export interface DurableOperationQueueMessage {
@@ -150,11 +153,18 @@ export interface StoredAcceptanceLeaseJob extends StoredDurableOperationJobBase 
   request: AcceptanceLeaseJobRequest;
 }
 
+export interface StoredLayeredArtifactPromotionJob extends StoredDurableOperationJobBase {
+  kind: "layered-artifact-promotion";
+  checkpoint: LayeredArtifactPromotionCheckpoint;
+  request: PromoteRuntimeLayeredArtifactRequest;
+}
+
 export type StoredDurableOperationJob =
   | StoredArtifactCommitJob
   | StoredRuntimeStartJob
   | StoredRuntimeManifestRestartJob
-  | StoredAcceptanceLeaseJob;
+  | StoredAcceptanceLeaseJob
+  | StoredLayeredArtifactPromotionJob;
 
 export type DurableOperationRegistration =
   | {
@@ -194,6 +204,16 @@ export type DurableOperationRegistration =
       runtimeIdentity: string;
       subjectKey: string;
       request: AcceptanceLeaseJobRequest;
+      expectedDeploymentVersion: string;
+      nowMs: number;
+    }
+  | {
+      key: string;
+      fingerprint: string;
+      kind: "layered-artifact-promotion";
+      runtimeIdentity: string;
+      subjectKey: string;
+      request: PromoteRuntimeLayeredArtifactRequest;
       expectedDeploymentVersion: string;
       nowMs: number;
     };

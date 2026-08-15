@@ -28,6 +28,7 @@ import {
   trustedBuildRequestSchema,
   trustedBuildSourceManifestHash,
   trustedBuildStatusResponseSchema,
+  acceptedSealedReleaseSchema,
   type PantryCatalogShelfRecord,
   type PantryCatalogStockRequest,
   type PantryErrorCode,
@@ -36,6 +37,7 @@ import {
   type TrustedBuildOutput,
   type TrustedBuildRequest,
   type ZeroGeneratedDependencyPlan,
+  type AcceptedSealedRelease,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
 import {
@@ -213,6 +215,7 @@ export interface ZeroKitchenRunResult {
   buildId: string;
   artifactSha256: string;
   coldBuild: boolean;
+  sealedRelease: AcceptedSealedRelease;
 }
 
 export interface PantryStockProgressEvidence {
@@ -951,5 +954,26 @@ export async function runZeroGenerationKitchen(
     buildId: output.buildId,
     artifactSha256: layered.envelope.sealedArtifactSha256,
     coldBuild: output.coldBuild,
+    sealedRelease: acceptedSealedReleaseSchema.parse({
+      format: "nabuflow.accepted-sealed-release/v1",
+      state: "accepted",
+      acceptedAt: now().toISOString(),
+      sourceRuntimeIdentity: input.runtimeId,
+      sourceRevision: output.requestSha256,
+      manifest: input.manifest,
+      shelfRevisionId: shelf.revision.content.revisionId,
+      shelfRootSha256: shelf.revision.rootSha256,
+      shelfStateRevision: shelf.state.stateRevision,
+      dependencyClosureSha256: output.pantryShelf.dependencyClosureSha256,
+      buildId: output.buildId,
+      buildAttestationSha256: output.buildAttestation.statementSha256,
+      artifactRevision: layered.envelope.artifactRevision,
+      sealedArtifactSha256: layered.envelope.sealedArtifactSha256,
+      contentSha256: layered.envelope.contentSha256,
+      appArtifactSha256: layered.envelope.content.appArtifact.sealedArtifactSha256,
+      layerContentSha256s: layered.envelope.content.layers.map(
+        (layer) => layer.descriptor.contentSha256,
+      ),
+    }),
   };
 }
