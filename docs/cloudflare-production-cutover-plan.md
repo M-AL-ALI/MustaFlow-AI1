@@ -9,15 +9,13 @@ Recon branch: `codex/cloudflare-production-cutover-recon`
 ## Decision and current gate
 
 The production cutover is **not configuration-ready yet**. The Pantry, trusted-build plane, sealed
-runtime, doorman capabilities, and generator are shipped, but two deliberate product gaps still
-stand between the inert stack and a production canary:
+runtime, doorman capabilities, generator, durable artifact promotion, and durable production
+database allocation paths are implemented and deliberately inert. Production Worker configurations,
+resources, independent authorities, and the key ceremony still stand between the inert stack and a
+production canary.
 
-1. the Cloudflare provider has no production artifact-promotion/publish implementation; and
-2. new sealed production projects have no production database allocator that writes an opaque
-   database capability into the production Capability Vault.
-
-These are hard gates. The Acceptance Provisioner is staging-only and must not become the production
-database allocator. The staging attestation fixtures must never be promoted into production.
+The Acceptance Provisioner remains staging-only and is not the production database allocator. The
+staging attestation fixtures must never be promoted into production.
 
 The safest cutover keeps the stopped Fly estate intact until a newly generated Cloudflare canary is
 published and healthy. Deleting the Fly app is the irreversible point.
@@ -87,11 +85,15 @@ must be installed in one Replit deployment. Partial Cloudflare configuration fai
 - resources: `NABUFLOW_RUNTIME_ARTIFACTS`, `DURABLE_OPERATION_QUEUE`, `PANTRY_CATALOG`,
   `TRUSTED_BUILD_PLANE`, `NABUFLOW_SANDBOX`, `CONTROL_COORDINATOR`, `CAPABILITY_VAULT`,
   `CF_VERSION_METADATA`;
-- secrets: `CLOUDFLARE_RUNTIME_CONTROL_TOKEN`, `CLOUDFLARE_CAPABILITY_VAULT_KEK_V1`;
+- secrets: `CLOUDFLARE_RUNTIME_CONTROL_TOKEN`, `CLOUDFLARE_CAPABILITY_VAULT_KEK_V1`,
+  `NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY`;
 - public verification material: `CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY`;
 - variables: `CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE=production`,
-  `NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID`, `NABUFLOW_RUNTIME_SLEEP_AFTER`, and
-  `NABUFLOW_RUNTIME_LAYER_PLATFORM`.
+  `NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID`, `NABUFLOW_RUNTIME_SLEEP_AFTER`,
+  `NABUFLOW_RUNTIME_LAYER_PLATFORM`, `NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED=enabled`,
+  `NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID`, `NABUFLOW_PRODUCTION_NEON_REGION_ID`,
+  `NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS`, and
+  `NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS`.
 
 Every `NABUFLOW_STAGING_*` binding is omitted in production.
 
@@ -165,19 +167,48 @@ Cloudflare production publishing by this blue/green rule.
 
 ### 2. Production database capability provisioning
 
-Sealed project provisioning deliberately skips direct `DATABASE_URL` creation. Today only staging
-acceptance can allocate a Neon project and hand an opaque capability to the vault. Production needs
-a distinct trusted allocator with provider management custody, org/cost guards, idempotent project
-ownership, deletion, and verify-gone. Its management-secret binding name is not yet defined in
-shipped contracts; naming and custody belong to that slice and are a cutover gate.
+Sealed project provisioning deliberately skips direct `DATABASE_URL` creation. The production path
+uses a distinct trusted allocator with provider management custody, org/cost guards, idempotent
+project ownership, deletion, and verify-gone. Its management-secret binding is
+`NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY`; installing it remains a founder ceremony and cutover gate.
 
 The result handed to the runtime remains an opaque database capability. No connection string or
 provider management credential may reach the API process, generated source, tenant environment,
 logs, or evidence.
 
+#### Slice B implementation record (2026-08-15)
+
+Implemented on `codex/production-database-capability`, inert until the production database lock and
+the complete production Worker configuration are deliberately installed:
+
+- a canonical identity derived only from deployment namespace `production` and project ID owns one
+  Neon allocation across publishes, versions, runtime restarts, and blue/green flips;
+- database-declaring accepted releases allocate before artifact promotion, while releases that do
+  not declare the capability preserve the existing publish path;
+- a checkpointed `production-database` job in the shared durable-operation chassis performs
+  provider allocation, independent region/history-retention verification, and atomic encrypted
+  Capability Vault handoff;
+- provider management custody is isolated to
+  `NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY` on the Runtime Worker. The API receives opaque allocation
+  metadata only; generated code and tenant containers continue to invoke the fixed doorman
+  `neon-postgres/database` capability and never receive a connection string;
+- exact replay returns the existing allocation, ambiguous body-bearing creates discover and verify
+  the deterministic provider object before retry, and project-count/org/region/retention guards
+  fail before or immediately after the narrow provider operation as appropriate; and
+- soft deletion retains the allocation through the existing 30-day recovery window. Only hard GDPR
+  erasure begins release; provider deletion plus authoritative 404 verification completes before
+  the vault credential/ownership record and product project row may be removed.
+
+Reality correction: the recon described backup policy as undefined. Neon project history retention
+is now an explicit, bounded production input and is independently read/repair/read verified for
+every allocation or reuse. The production ceremony must choose the retention value, region,
+dedicated organization, and project ceiling; it must install the management key by founder handoff.
+No production provider call, resource, route, or binding was created by Slice B.
+
 ### 3. Production configuration files and key ceremony
 
-After the two slices above, add explicit production Wrangler configurations for the three Workers.
+After the two implementation slices above, add explicit production Wrangler configurations for the
+three Workers.
 They must reference only the production resources in this plan, omit staging probes and host
 overrides, keep Pantry/build private, and contain no private signing material. Run a production key
 ceremony with PG-1 overlap (read old+new, write new) for control, preview, Pantry attestation, build
@@ -285,7 +316,9 @@ recon, so that cross-provider deletion inventory is an explicit pre-delete task.
   build, and vault authorities with overlap/rotation; staging fixtures are forbidden.
 - **PG-2 — explicitly fail closed.** Published production WebSockets return typed 501 until the
   sanitizing boundary exists.
-- **PG-3 — promoted production blocker.** Database allocation, ownership, destruction, backup,
-  regional policy, and Capability Vault handoff need the production allocator slice.
+- **PG-3 — implementation closed; operational gate remains.** Allocation, project ownership,
+  verified hard-delete destruction, history-retention policy, region pinning, and Capability Vault
+  handoff are implemented and staging-rehearsed. Cutover still requires the founder-installed
+  management key plus approved production organization, region, retention, and project ceiling.
 - **PG-5 — capacity gate.** The real dual-substrate proof establishes function, not production
   capacity. Set production concurrency/cost ceilings from load evidence before opening traffic.

@@ -71,6 +71,7 @@ import {
   pantryShelfContentHashesResponseSchema,
   artifactCommitDiagnosticsResponseSchema,
   layeredArtifactPromotionDiagnosticsResponseSchema,
+  productionDatabaseDiagnosticsResponseSchema,
   durableOperationDiscoveryRequestSchema,
   durableOperationDiscoveryResponseSchema,
   DURABLE_OPERATION_DISCOVERY_MAX_WINDOW_MS,
@@ -79,6 +80,12 @@ import {
   runtimeStartDiagnosticsResponseSchema,
   promoteRuntimeLayeredArtifactRequestSchema,
   promoteRuntimeLayeredArtifactResponseSchema,
+  ensureProductionDatabaseRequestSchema,
+  releaseProductionDatabaseRequestSchema,
+  productionDatabaseAllocationResponseSchema,
+  productionDatabaseReleaseResponseSchema,
+  productionDatabaseAllocationIdentity,
+  productionDatabaseCapabilityDefinition,
   runtimeArtifactSealedHash,
   runtimeLayeredArtifactContentHash,
   runtimeLayeredArtifactMergedReleaseHash,
@@ -112,6 +119,9 @@ import type {
   RuntimeArtifactLayerContent,
   DurableOperationDiscoveryRequest,
   PromoteRuntimeLayeredArtifactRequest,
+  EnsureProductionDatabaseRequest,
+  ReleaseProductionDatabaseRequest,
+  ProductionDatabaseJobRequest,
 } from "@workspace/tenant-runtime-contracts";
 import { createHash } from "node:crypto";
 import type { WorkerBindings } from "./bindings";
@@ -125,6 +135,7 @@ import type {
   StoredRuntimeManifestRestartJob,
   StoredRuntimeStartJob,
   StoredLayeredArtifactPromotionJob,
+  StoredProductionDatabaseJob,
   DurableOperationQueueMessage,
   DurableOperationRegistration,
   ControlCoordinator,
@@ -135,6 +146,10 @@ import type {
   StoredRuntimeLayeredArtifact,
   RemovedRuntimeLayeredArtifact,
 } from "./model";
+import {
+  ProductionDatabaseAllocator,
+  ProductionDatabaseProviderError,
+} from "./production-database-allocator";
 import { deferDurableOperationForWrongDeployment } from "./durable-operation-deployment";
 import { artifactChunkKey, deleteArtifactObjects } from "./artifact-storage";
 import {
@@ -173,6 +188,8 @@ const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "capabilityRevoke",
   "databaseCapabilityProvision",
   "databaseCapabilityRevoke",
+  "productionDatabaseEnsure",
+  "productionDatabaseRelease",
   "stripeCapabilityProvision",
   "stripeCapabilityRevoke",
   "artifactBegin",
@@ -194,6 +211,8 @@ const DURABLE_OPERATION_ENDPOINTS = new Set<Endpoint>([
   "layeredArtifactCommit",
   "start",
   "layeredArtifactPromotion",
+  "productionDatabaseEnsure",
+  "productionDatabaseRelease",
 ]);
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -223,6 +242,9 @@ type Endpoint =
   | "capabilityRevoke"
   | "databaseCapabilityProvision"
   | "databaseCapabilityRevoke"
+  | "productionDatabaseEnsure"
+  | "productionDatabaseRelease"
+  | "productionDatabaseDiagnostics"
   | "stripeCapabilityProvision"
   | "stripeCapabilityRevoke"
   | "capabilityBinding"
@@ -252,6 +274,7 @@ interface MatchedRoute {
   capability?: { projectId: number; provider: string; name: string };
   artifactSha256?: string;
   promotionIdentity?: string;
+  allocationIdentity?: string;
   layerContentSha256?: string;
   chunkIndex?: number;
   pantryPath?: string;
@@ -269,6 +292,10 @@ interface WorkerDependencies {
   requestId?: string;
   context?: RequestExecutionContext;
   vault?: CapabilityVault;
+  productionDatabaseAllocator?: Pick<
+    ProductionDatabaseAllocator,
+    "ensure" | "release" | "verifyGone"
+  >;
 }
 
 type CommittedRuntimeArtifact =
@@ -642,6 +669,7 @@ export async function handleControlRequest(
       route,
       null,
       nowMs,
+      dependencies.productionDatabaseAllocator,
     );
     validateResponse(route.endpoint, result.body);
     if (needsIdempotency && idempotencyFingerprint !== null) {
@@ -719,7 +747,10 @@ export async function handleControlRequest(
 export async function handleDurableOperationQueue(
   batch: MessageBatch<DurableOperationQueueMessage>,
   env: WorkerBindings,
-  dependencies: Pick<WorkerDependencies, "coordinator" | "backend" | "nowMs"> = {},
+  dependencies: Pick<
+    WorkerDependencies,
+    "coordinator" | "backend" | "nowMs" | "vault" | "productionDatabaseAllocator"
+  > = {},
 ): Promise<void> {
   const coordinator = dependencies.coordinator ?? getCoordinator(env);
   const backend = dependencies.backend ?? new CloudflareSandboxBackend(env);
@@ -733,7 +764,8 @@ export async function handleDurableOperationQueue(
         body.kind !== "layers-v1" &&
         body.kind !== "runtime-start" &&
         body.kind !== "runtime-manifest-restart" &&
-        body.kind !== "layered-artifact-promotion") ||
+        body.kind !== "layered-artifact-promotion" &&
+        body.kind !== "production-database") ||
       (body.kind === "runtime-start"
         ? body.subjectKey !== "start"
         : body.kind === "runtime-manifest-restart"
@@ -811,7 +843,11 @@ export async function handleDurableOperationQueue(
             ? "start"
             : job.kind === "runtime-manifest-restart"
               ? "manifestUpdate"
-              : "layeredArtifactPromotion";
+              : job.kind === "layered-artifact-promotion"
+                ? "layeredArtifactPromotion"
+                : (job as StoredProductionDatabaseJob).request.action === "ensure"
+                  ? "productionDatabaseEnsure"
+                  : "productionDatabaseRelease";
     const route: MatchedRoute = {
       endpoint,
       locator,
@@ -824,10 +860,11 @@ export async function handleDurableOperationQueue(
       | CommitRuntimeLayeredArtifactRequest
       | StartRuntimeRequest
       | UpdateRuntimeManifestRequest
-      | PromoteRuntimeLayeredArtifactRequest =
+      | PromoteRuntimeLayeredArtifactRequest
+      | ProductionDatabaseJobRequest =
       job.kind === "runtime-start" || job.kind === "runtime-manifest-restart"
         ? job.request
-        : job.kind === "layered-artifact-promotion"
+        : job.kind === "layered-artifact-promotion" || job.kind === "production-database"
           ? job.request
           : {
               locator,
@@ -857,10 +894,11 @@ export async function handleDurableOperationQueue(
           env,
           coordinator,
           backend,
-          undefined,
+          dependencies.vault,
           route,
           execution,
           dependencies.nowMs ?? Date.now(),
+          dependencies.productionDatabaseAllocator,
         );
         validateResponse(endpoint, result.body);
       } catch (error) {
@@ -941,6 +979,8 @@ type ControlInput =
   | RevokeEchoCapabilityRequest
   | ProvisionDatabaseCapabilityRequest
   | RevokeDatabaseCapabilityRequest
+  | EnsureProductionDatabaseRequest
+  | ReleaseProductionDatabaseRequest
   | ProvisionStripeCapabilityRequest
   | RevokeStripeCapabilityRequest
   | PromoteRuntimeLayeredArtifactRequest;
@@ -1004,6 +1044,22 @@ async function durableOperationRegistrationFor(
       kind: "layered-artifact-promotion",
       runtimeIdentity,
       subjectKey: request.promotionIdentity,
+      request,
+      expectedDeploymentVersion: request.expectedDeploymentVersion,
+      nowMs,
+    };
+  }
+  if (
+    route.endpoint === "productionDatabaseEnsure" ||
+    route.endpoint === "productionDatabaseRelease"
+  ) {
+    const request = input as ProductionDatabaseJobRequest;
+    return {
+      key,
+      fingerprint,
+      kind: "production-database",
+      runtimeIdentity,
+      subjectKey: request.allocationIdentity,
       request,
       expectedDeploymentVersion: request.expectedDeploymentVersion,
       nowMs,
@@ -1187,6 +1243,210 @@ function getCapabilityVault(
   return env.CAPABILITY_VAULT.get(env.CAPABILITY_VAULT.idFromName(`project:${projectId}`));
 }
 
+const PRODUCTION_DATABASE_CHECKPOINTS = [
+  "initialized",
+  "ownership-verified",
+  "provider-complete",
+  "provider-verified",
+  "vault-complete",
+  "finalized",
+] as const;
+
+async function advanceProductionDatabaseCheckpoint(
+  coordinator: ControlCoordinator,
+  execution: DurableOperationExecution & { job: StoredProductionDatabaseJob },
+  target: StoredProductionDatabaseJob["checkpoint"],
+): Promise<void> {
+  while (execution.job.checkpoint !== target) {
+    const current = PRODUCTION_DATABASE_CHECKPOINTS.indexOf(execution.job.checkpoint);
+    const targetIndex = PRODUCTION_DATABASE_CHECKPOINTS.indexOf(target);
+    if (current < 0 || targetIndex < current) {
+      throw new Error("Production database checkpoint transition is invalid");
+    }
+    const checkpoint = PRODUCTION_DATABASE_CHECKPOINTS[current + 1];
+    if (checkpoint === undefined) throw new Error("Production database checkpoint is unavailable");
+    execution.job = (await coordinator.checkpointDurableOperation({
+      jobKey: execution.job.jobKey,
+      ownerId: execution.ownerId,
+      ownerGeneration: execution.job.attempt,
+      checkpoint,
+      nowMs: Date.now(),
+    })) as StoredProductionDatabaseJob;
+    logDurableOperationCheckpoint(execution.job);
+  }
+}
+
+function productionDatabaseControlError(error: unknown): ControlHttpError {
+  if (error instanceof ProductionDatabaseProviderError) {
+    return new ControlHttpError(error.status, error.code, error.message, error.retryable);
+  }
+  return new ControlHttpError(
+    503,
+    "production_database_internal_error",
+    "The production database operation failed closed",
+    false,
+  );
+}
+
+async function executeProductionDatabaseJob(input: {
+  request: ProductionDatabaseJobRequest;
+  env: WorkerBindings;
+  coordinator: ControlCoordinator;
+  execution: DurableOperationExecution & { job: StoredProductionDatabaseJob };
+  vault: CapabilityVault;
+  allocator: Pick<ProductionDatabaseAllocator, "ensure" | "release" | "verifyGone">;
+}): Promise<StoredHttpResponse> {
+  const expectedIdentity = await productionDatabaseAllocationIdentity({
+    format: "nabuflow.production-database-allocation/v1",
+    deploymentNamespace: "production",
+    projectId: input.request.projectId,
+  });
+  if (input.request.allocationIdentity !== expectedIdentity) {
+    throw new ControlHttpError(
+      409,
+      "production_database_identity_conflict",
+      "Production database identity does not match the project",
+      false,
+    );
+  }
+  try {
+    let allocation = await input.vault.getProductionDatabaseAllocation({
+      projectId: input.request.projectId,
+      allocationIdentity: input.request.allocationIdentity,
+    });
+    if (input.request.action === "ensure") {
+      if (allocation?.state === "releasing") {
+        throw new ControlHttpError(
+          409,
+          "production_database_release_in_progress",
+          "Production database release is already in progress",
+          true,
+        );
+      }
+      await advanceProductionDatabaseCheckpoint(
+        input.coordinator,
+        input.execution,
+        "ownership-verified",
+      );
+      let reused = allocation !== null;
+      if (allocation === null) {
+        const material = await input.allocator.ensure({
+          projectId: input.request.projectId,
+          allocationIdentity: input.request.allocationIdentity,
+        });
+        await advanceProductionDatabaseCheckpoint(
+          input.coordinator,
+          input.execution,
+          "provider-complete",
+        );
+        await advanceProductionDatabaseCheckpoint(
+          input.coordinator,
+          input.execution,
+          "provider-verified",
+        );
+        const handoff = await input.vault.provisionProductionDatabase({
+          projectId: input.request.projectId,
+          revision: material.allocation.revision,
+          definition: productionDatabaseCapabilityDefinition,
+          allocation: material.allocation,
+          credential: { kind: "neon-connection-string", value: material.connectionString },
+        });
+        reused = material.reused || handoff.state === "replayed";
+        allocation = material.allocation;
+      } else {
+        await advanceProductionDatabaseCheckpoint(
+          input.coordinator,
+          input.execution,
+          "provider-verified",
+        );
+      }
+      await advanceProductionDatabaseCheckpoint(
+        input.coordinator,
+        input.execution,
+        "vault-complete",
+      );
+      await advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, "finalized");
+      return {
+        status: 200,
+        body: productionDatabaseAllocationResponseSchema.parse({
+          ok: true,
+          projectId: input.request.projectId,
+          allocationIdentity: input.request.allocationIdentity,
+          state: "ready",
+          capability: { provider: "neon-postgres", name: "database" },
+          revision: allocation.revision,
+          providerProjectId: allocation.providerProjectId,
+          reused,
+        }),
+      };
+    }
+
+    const providerProjectId = allocation?.providerProjectId ?? null;
+    if (allocation !== null && allocation.state !== "releasing") {
+      allocation = await input.vault.beginProductionDatabaseRelease({
+        projectId: input.request.projectId,
+        allocationIdentity: input.request.allocationIdentity,
+      });
+    }
+    await advanceProductionDatabaseCheckpoint(
+      input.coordinator,
+      input.execution,
+      "ownership-verified",
+    );
+    if (allocation !== null) {
+      await input.allocator.release(allocation);
+    }
+    await advanceProductionDatabaseCheckpoint(
+      input.coordinator,
+      input.execution,
+      "provider-complete",
+    );
+    if (allocation !== null && !(await input.allocator.verifyGone(allocation))) {
+      throw new ProductionDatabaseProviderError(
+        503,
+        "production_database_cleanup_incomplete",
+        true,
+        "provider_rejected",
+      );
+    }
+    await advanceProductionDatabaseCheckpoint(
+      input.coordinator,
+      input.execution,
+      "provider-verified",
+    );
+    if (allocation !== null) {
+      const released = await input.vault.completeProductionDatabaseRelease({
+        projectId: input.request.projectId,
+        allocationIdentity: input.request.allocationIdentity,
+      });
+      if (released === "conflict") {
+        throw new ControlHttpError(
+          409,
+          "production_database_identity_conflict",
+          "Production database ownership changed during release",
+          false,
+        );
+      }
+    }
+    await advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, "vault-complete");
+    await advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, "finalized");
+    return {
+      status: 200,
+      body: productionDatabaseReleaseResponseSchema.parse({
+        ok: true,
+        projectId: input.request.projectId,
+        allocationIdentity: input.request.allocationIdentity,
+        state: "released",
+        providerProjectId,
+        verifiedGone: true,
+      }),
+    };
+  } catch (error) {
+    if (error instanceof ControlHttpError) throw error;
+    throw productionDatabaseControlError(error);
+  }
+}
+
 function matchPantryRoute(method: string, pathname: string): MatchedRoute {
   const prefix = `${CONTROL_PREFIX}/pantry`;
   const suffix = pathname.slice(prefix.length);
@@ -1339,6 +1599,38 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
       throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
     }
     return { endpoint: "routeDeactivate", locator: null, hostname: deactivateRouteMatch[1] };
+  }
+  const productionDatabaseMatch = new RegExp(
+    `^${CONTROL_PREFIX}/capabilities/([1-9][0-9]*)/neon-postgres/database/production-allocation$`,
+  ).exec(pathname);
+  if (productionDatabaseMatch) {
+    const projectId = Number(productionDatabaseMatch[1]);
+    const locator: RuntimeLocator = { projectId, role: "production", slot: "blue" };
+    const capability = { projectId, provider: "neon-postgres", name: "database" };
+    if (method === "PUT") {
+      return { endpoint: "productionDatabaseEnsure", locator, capability };
+    }
+    if (method === "DELETE") {
+      return { endpoint: "productionDatabaseRelease", locator, capability };
+    }
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
+  const productionDatabaseDiagnosticsMatch = new RegExp(
+    `^${CONTROL_PREFIX}/capabilities/([1-9][0-9]*)/neon-postgres/database/production-allocation/([0-9a-f]{64})/diagnostics$`,
+  ).exec(pathname);
+  if (productionDatabaseDiagnosticsMatch) {
+    if (method !== "GET") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return {
+      endpoint: "productionDatabaseDiagnostics",
+      locator: {
+        projectId: Number(productionDatabaseDiagnosticsMatch[1]),
+        role: "production",
+        slot: "blue",
+      },
+      allocationIdentity: productionDatabaseDiagnosticsMatch[2],
+    };
   }
   const capabilityMatch = new RegExp(
     `^${CONTROL_PREFIX}/capabilities/([1-9][0-9]*)/([a-z][a-z0-9-]*)/([a-z][a-z0-9-]*)$`,
@@ -1813,6 +2105,22 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     return parseRouteInput(route, url, rawBody);
   }
 
+  if (
+    route.endpoint === "productionDatabaseEnsure" ||
+    route.endpoint === "productionDatabaseRelease"
+  ) {
+    assertNoQuery(url);
+    const body = parseJsonBody(rawBody);
+    const parsed =
+      route.endpoint === "productionDatabaseEnsure"
+        ? parseStrict(ensureProductionDatabaseRequestSchema, body)
+        : parseStrict(releaseProductionDatabaseRequestSchema, body);
+    if (parsed.projectId !== route.locator.projectId) {
+      throw new ControlHttpError(400, "project_mismatch", "Path and body projects differ");
+    }
+    return parsed;
+  }
+
   if (route.endpoint === "status" || route.endpoint === "capabilityBinding") {
     assertNoQuery(url);
     assertEmptyBody(rawBody);
@@ -1822,6 +2130,7 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
     route.endpoint === "artifactCommitDiagnostics" ||
     route.endpoint === "layeredArtifactCommitDiagnostics" ||
     route.endpoint === "layeredArtifactPromotionDiagnostics" ||
+    route.endpoint === "productionDatabaseDiagnostics" ||
     route.endpoint === "startDiagnostics" ||
     route.endpoint === "manifestUpdateDiagnostics"
   ) {
@@ -2067,6 +2376,10 @@ async function executeEndpoint(
   matchedRoute?: MatchedRoute,
   artifactCommitExecution?: DurableOperationExecution | null,
   nowMs = Date.now(),
+  injectedProductionDatabaseAllocator?: Pick<
+    ProductionDatabaseAllocator,
+    "ensure" | "release" | "verifyGone"
+  >,
 ): Promise<StoredHttpResponse> {
   assertArtifactInfrastructure(env);
   if (endpoint.startsWith("layeredArtifact")) assertLayeredArtifactInfrastructure(env);
@@ -2097,6 +2410,21 @@ async function executeEndpoint(
           }
           if (feature === "trusted-build-v1") {
             return env.TRUSTED_BUILD_PLANE !== undefined;
+          }
+          if (feature === "production-database-v1") {
+            const rehearsal =
+              env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE === "staging" &&
+              env.NABUFLOW_STAGING_PRODUCTION_DATABASE_REHEARSAL === "enabled";
+            return (
+              env.DURABLE_OPERATION_QUEUE !== undefined &&
+              env.NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED === "enabled" &&
+              (env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE === "production" || rehearsal) &&
+              typeof env.NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY === "string" &&
+              typeof env.NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID === "string" &&
+              typeof env.NABUFLOW_PRODUCTION_NEON_REGION_ID === "string" &&
+              typeof env.NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS === "string" &&
+              typeof env.NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS === "string"
+            );
           }
           return true;
         }),
@@ -2176,6 +2504,36 @@ async function executeEndpoint(
         job: StoredLayeredArtifactPromotionJob;
       },
     );
+  }
+  if (endpoint === "productionDatabaseEnsure" || endpoint === "productionDatabaseRelease") {
+    if (
+      artifactCommitExecution === undefined ||
+      artifactCommitExecution === null ||
+      artifactCommitExecution.job.kind !== "production-database"
+    ) {
+      throw new Error("Production database durable job is unavailable");
+    }
+    const request = input as ProductionDatabaseJobRequest;
+    if (
+      (endpoint === "productionDatabaseEnsure" && request.action !== "ensure") ||
+      (endpoint === "productionDatabaseRelease" && request.action !== "release")
+    ) {
+      throw new ControlHttpError(
+        400,
+        "production_database_action_mismatch",
+        "Production database action does not match the route",
+      );
+    }
+    return executeProductionDatabaseJob({
+      request,
+      env,
+      coordinator,
+      execution: artifactCommitExecution as DurableOperationExecution & {
+        job: StoredProductionDatabaseJob;
+      },
+      vault: injectedVault ?? getCapabilityVault(env, request.projectId),
+      allocator: injectedProductionDatabaseAllocator ?? new ProductionDatabaseAllocator(env),
+    });
   }
   if (endpoint === "capabilityProvision") {
     const request = input as ProvisionEchoCapabilityRequest;
@@ -2369,6 +2727,60 @@ async function executeEndpoint(
                       : job.state === "succeeded"
                         ? "ok"
                         : "artifact_promotion_failed",
+                },
+          events: job.events,
+        },
+      }),
+    };
+  }
+  if (endpoint === "productionDatabaseDiagnostics") {
+    const allocationIdentity = matchedRoute?.allocationIdentity;
+    if (allocationIdentity === undefined) {
+      throw new ControlHttpError(
+        400,
+        "invalid_request",
+        "Production database diagnostics route is incomplete",
+      );
+    }
+    const job = await coordinator.getLatestDurableOperation(
+      "production-database",
+      identity,
+      allocationIdentity,
+    );
+    if (job === null || job.kind !== "production-database" || job.runtimeIdentity !== identity) {
+      throw new ControlHttpError(
+        404,
+        "production_database_job_not_found",
+        "Production database operation was not found",
+      );
+    }
+    const terminalBody = job.response?.body as { code?: unknown } | undefined;
+    return {
+      status: 200,
+      body: productionDatabaseDiagnosticsResponseSchema.parse({
+        ok: true,
+        job: {
+          kind: job.kind,
+          runtimeIdentity: job.runtimeIdentity,
+          allocationIdentity: job.subjectKey,
+          action: job.request.action,
+          state: job.state,
+          checkpoint: job.checkpoint,
+          attempt: job.attempt,
+          leaseUntil: job.leaseUntilMs === null ? null : new Date(job.leaseUntilMs).toISOString(),
+          deadline: new Date(job.deadlineMs).toISOString(),
+          updatedAt: new Date(job.updatedAtMs).toISOString(),
+          terminal:
+            job.response === undefined
+              ? null
+              : {
+                  status: job.response.status,
+                  code:
+                    typeof terminalBody?.code === "string"
+                      ? terminalBody.code
+                      : job.state === "succeeded"
+                        ? "ok"
+                        : "production_database_failed",
                 },
           events: job.events,
         },
@@ -4100,6 +4512,8 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     capabilityRevoke: capabilityRevokeResponseSchema,
     databaseCapabilityProvision: capabilityProvisionResponseSchema,
     databaseCapabilityRevoke: capabilityRevokeResponseSchema,
+    productionDatabaseEnsure: productionDatabaseAllocationResponseSchema,
+    productionDatabaseRelease: productionDatabaseReleaseResponseSchema,
     stripeCapabilityProvision: capabilityProvisionResponseSchema,
     stripeCapabilityRevoke: capabilityRevokeResponseSchema,
     capabilityBinding: capabilityBindingResponseSchema,
@@ -4116,6 +4530,7 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     layeredArtifactRemove: removeRuntimeLayeredArtifactResponseSchema,
     layeredArtifactPromotion: promoteRuntimeLayeredArtifactResponseSchema,
     layeredArtifactPromotionDiagnostics: layeredArtifactPromotionDiagnosticsResponseSchema,
+    productionDatabaseDiagnostics: productionDatabaseDiagnosticsResponseSchema,
     manifestUpdate: ensureRuntimeResponseSchema,
     manifestUpdateDiagnostics: runtimeManifestRestartDiagnosticsResponseSchema,
   }[endpoint];

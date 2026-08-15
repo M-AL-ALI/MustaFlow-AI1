@@ -8,6 +8,7 @@ export const CONTROL_FEATURES = [
   "durable-operation-discovery-v1",
   "runtime-lifecycle-jobs-v1",
   "trusted-build-v1",
+  "production-database-v1",
 ] as const;
 
 export const RUNTIME_ROLES = ["preview", "production"] as const;

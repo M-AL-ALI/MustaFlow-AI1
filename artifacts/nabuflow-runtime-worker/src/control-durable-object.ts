@@ -177,6 +177,17 @@ function durableOperationAbandonedResponse(
       },
     };
   }
+  if (kind === "production-database") {
+    return {
+      status: 504,
+      body: {
+        ok: false,
+        code: "production_database_timeout",
+        message: "Production database operation did not complete before the execution deadline",
+        retryable: false,
+      },
+    };
+  }
   return {
     status: 503,
     body: {
@@ -233,6 +244,14 @@ const DURABLE_OPERATION_CHECKPOINTS = {
     "payloads-copied",
     "finalized",
   ],
+  "production-database": [
+    "initialized",
+    "ownership-verified",
+    "provider-complete",
+    "provider-verified",
+    "vault-complete",
+    "finalized",
+  ],
 } as const satisfies Record<
   StoredDurableOperationJob["kind"],
   readonly DurableOperationCheckpoint[]
@@ -255,7 +274,8 @@ function durableOperationSubjectMatches(
     (job.kind === "runtime-start" && input.kind === "runtime-start") ||
     (job.kind === "runtime-manifest-restart" && input.kind === "runtime-manifest-restart") ||
     (job.kind === "acceptance-lease" && input.kind === "acceptance-lease") ||
-    (job.kind === "layered-artifact-promotion" && input.kind === "layered-artifact-promotion")
+    (job.kind === "layered-artifact-promotion" && input.kind === "layered-artifact-promotion") ||
+    (job.kind === "production-database" && input.kind === "production-database")
   ) {
     return JSON.stringify(job.request) === JSON.stringify(input.request);
   }
@@ -264,10 +284,12 @@ function durableOperationSubjectMatches(
     job.kind !== "runtime-manifest-restart" &&
     job.kind !== "acceptance-lease" &&
     job.kind !== "layered-artifact-promotion" &&
+    job.kind !== "production-database" &&
     input.kind !== "runtime-start" &&
     input.kind !== "runtime-manifest-restart" &&
     input.kind !== "acceptance-lease" &&
     input.kind !== "layered-artifact-promotion" &&
+    input.kind !== "production-database" &&
     job.sealedArtifactSha256 === input.sealedArtifactSha256
   );
 }
@@ -490,11 +512,17 @@ export class ControlDurableObject
                     kind: "layered-artifact-promotion",
                     request: structuredClone(input.request),
                   }
-                : {
-                    ...common,
-                    kind: input.kind,
-                    sealedArtifactSha256: input.sealedArtifactSha256,
-                  };
+                : input.kind === "production-database"
+                  ? {
+                      ...common,
+                      kind: "production-database",
+                      request: structuredClone(input.request),
+                    }
+                  : {
+                      ...common,
+                      kind: input.kind,
+                      sealedArtifactSha256: input.sealedArtifactSha256,
+                    };
       appendDurableOperationEvent(job, "job-created", input.nowMs);
       await transaction.put(jobKey, job);
       await transaction.put(
@@ -614,7 +642,8 @@ export class ControlDurableObject
       job.kind === "runtime-start" ||
       job.kind === "runtime-manifest-restart" ||
       job.kind === "acceptance-lease" ||
-      job.kind === "layered-artifact-promotion"
+      job.kind === "layered-artifact-promotion" ||
+      job.kind === "production-database"
       ? null
       : job;
   }
@@ -664,7 +693,8 @@ export class ControlDurableObject
       job.kind !== "runtime-start" &&
       job.kind !== "runtime-manifest-restart" &&
       job.kind !== "acceptance-lease" &&
-      job.kind !== "layered-artifact-promotion"
+      job.kind !== "layered-artifact-promotion" &&
+      job.kind !== "production-database"
     )
       return job;
     const layeredJob = await this.getLatestDurableOperation(
@@ -676,7 +706,8 @@ export class ControlDurableObject
       layeredJob.kind !== "runtime-start" &&
       layeredJob.kind !== "runtime-manifest-restart" &&
       layeredJob.kind !== "acceptance-lease" &&
-      layeredJob.kind !== "layered-artifact-promotion"
+      layeredJob.kind !== "layered-artifact-promotion" &&
+      layeredJob.kind !== "production-database"
       ? layeredJob
       : null;
   }
@@ -789,7 +820,8 @@ export class ControlDurableObject
           job.kind === "runtime-start" ||
           job.kind === "runtime-manifest-restart" ||
           job.kind === "acceptance-lease" ||
-          job.kind === "layered-artifact-promotion"
+          job.kind === "layered-artifact-promotion" ||
+          job.kind === "production-database"
         ) {
           throw new Error("Runtime lifecycle checkpoints cannot carry artifact payload hashes");
         }
@@ -824,7 +856,8 @@ export class ControlDurableObject
       job.kind === "runtime-start" ||
       job.kind === "runtime-manifest-restart" ||
       job.kind === "acceptance-lease" ||
-      job.kind === "layered-artifact-promotion"
+      job.kind === "layered-artifact-promotion" ||
+      job.kind === "production-database"
     ) {
       throw new Error("Artifact commit job changed kind");
     }

@@ -974,6 +974,7 @@ export async function runZeroGenerationKitchen(
       layerContentSha256s: layered.envelope.content.layers.map(
         (layer) => layer.descriptor.contentSha256,
       ),
+      declaredCapabilities: inferZeroDeclaredCapabilities(input.files),
     }),
   };
 }

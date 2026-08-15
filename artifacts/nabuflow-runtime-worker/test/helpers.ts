@@ -10,6 +10,7 @@ import {
   type ExecRuntimeRequest,
   type RouteRecord,
   type StripeCapabilityPolicy,
+  type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "../src/bindings";
 import { handleDurableOperationQueue, handleControlRequest } from "../src/worker";
@@ -39,6 +40,7 @@ import type {
   StoredRuntimeManifestRestartJob,
   StoredAcceptanceLeaseJob,
   StoredLayeredArtifactPromotionJob,
+  StoredProductionDatabaseJob,
   StoredRuntimeStartJob,
   RemovedRuntimeLayeredArtifact,
 } from "../src/model";
@@ -49,6 +51,7 @@ import type {
   RuntimeMaterializationTicket,
   RuntimeBackend,
 } from "../src/runtime-backend";
+import type { ProductionDatabaseAllocator } from "../src/production-database-allocator";
 
 export const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 export const TEST_NOW_MS = 1_785_859_200_000;
@@ -70,6 +73,11 @@ export async function drainArtifactCommitQueue(input: {
   coordinator: ControlCoordinator;
   backend: RuntimeBackend;
   nowMs?: number;
+  vault?: CapabilityVault;
+  productionDatabaseAllocator?: Pick<
+    ProductionDatabaseAllocator,
+    "ensure" | "release" | "verifyGone"
+  >;
 }): Promise<number> {
   const queue = input.env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
   const messages = queue.messages.splice(0);
@@ -94,6 +102,8 @@ export async function drainArtifactCommitQueue(input: {
       coordinator: input.coordinator,
       backend: input.backend,
       nowMs: input.nowMs ?? TEST_NOW_MS,
+      vault: input.vault,
+      productionDatabaseAllocator: input.productionDatabaseAllocator,
     },
   );
   return messages.length;
@@ -122,11 +132,18 @@ export async function mutationAndDrain(input: {
   backend: RuntimeBackend;
   nowMs?: number;
   method?: string;
+  vault?: CapabilityVault;
+  productionDatabaseAllocator?: Pick<
+    ProductionDatabaseAllocator,
+    "ensure" | "release" | "verifyGone"
+  >;
 }): Promise<Response> {
   const dependencies = {
     coordinator: input.coordinator,
     backend: input.backend,
     nowMs: input.nowMs ?? TEST_NOW_MS,
+    vault: input.vault,
+    productionDatabaseAllocator: input.productionDatabaseAllocator,
   };
   const accepted = await handleControlRequest(
     await signedRequest({
@@ -177,6 +194,7 @@ export class MemoryCoordinator implements ControlCoordinator {
     | StoredRuntimeManifestRestartJob
     | StoredAcceptanceLeaseJob
     | StoredLayeredArtifactPromotionJob
+    | StoredProductionDatabaseJob
   >();
   readonly latestRuntimeLifecycleJobs = new Map<string, string>();
   layerChunkWrites = 0;
@@ -299,7 +317,8 @@ export class MemoryCoordinator implements ControlCoordinator {
       | StoredRuntimeStartJob
       | StoredRuntimeManifestRestartJob
       | StoredAcceptanceLeaseJob
-      | StoredLayeredArtifactPromotionJob;
+      | StoredLayeredArtifactPromotionJob
+      | StoredProductionDatabaseJob;
     this.appendDurableOperationEvent(job, "job-created", lifecycleInput.nowMs);
     this.runtimeLifecycleJobs.set(jobKey, job);
     this.latestRuntimeLifecycleJobs.set(
@@ -1257,6 +1276,7 @@ export class MemoryCapabilityVault implements CapabilityVault {
     number,
     { revision: string; definition: CapabilityDefinition; credential: string }
   >();
+  readonly productionDatabaseAllocations = new Map<number, ProductionDatabaseAllocationRecord>();
   readonly stripeRecords = new Map<
     number,
     {
@@ -1346,6 +1366,77 @@ export class MemoryCapabilityVault implements CapabilityVault {
     if (record.revision !== input.expectedRevision) return "conflict";
     this.databaseRecords.delete(input.projectId);
     return "revoked";
+  }
+
+  async getProductionDatabaseAllocation(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<ProductionDatabaseAllocationRecord | null> {
+    const allocation = this.productionDatabaseAllocations.get(input.projectId);
+    if (allocation === undefined) return null;
+    if (allocation.allocationIdentity !== input.allocationIdentity) {
+      throw new Error("Production database allocation ownership conflict");
+    }
+    return structuredClone(allocation);
+  }
+
+  async provisionProductionDatabase(input: {
+    projectId: number;
+    revision: string;
+    definition: CapabilityDefinition;
+    allocation: ProductionDatabaseAllocationRecord;
+    credential: { kind: "neon-connection-string"; value: string };
+  }): Promise<{ state: "provisioned" | "replayed"; keyId: string }> {
+    const existing = this.productionDatabaseAllocations.get(input.projectId);
+    if (existing !== undefined) {
+      if (
+        existing.allocationIdentity !== input.allocation.allocationIdentity ||
+        existing.providerProjectId !== input.allocation.providerProjectId ||
+        existing.state !== "ready"
+      ) {
+        throw new Error("Production database allocation ownership conflict");
+      }
+      return { state: "replayed", keyId: "v1" };
+    }
+    this.databaseRecords.set(input.projectId, {
+      revision: input.revision,
+      definition: structuredClone(input.definition),
+      credential: input.credential.value,
+    });
+    this.productionDatabaseAllocations.set(input.projectId, structuredClone(input.allocation));
+    return { state: "provisioned", keyId: "v1" };
+  }
+
+  async beginProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<ProductionDatabaseAllocationRecord | null> {
+    const allocation = await this.getProductionDatabaseAllocation(input);
+    if (allocation === null) return null;
+    const releasing = {
+      ...allocation,
+      state: "releasing" as const,
+      updatedAt: new Date(TEST_NOW_MS).toISOString(),
+    };
+    this.productionDatabaseAllocations.set(input.projectId, releasing);
+    return structuredClone(releasing);
+  }
+
+  async completeProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+  }): Promise<"released" | "not_found" | "conflict"> {
+    const allocation = this.productionDatabaseAllocations.get(input.projectId);
+    if (allocation === undefined) return "not_found";
+    if (
+      allocation.allocationIdentity !== input.allocationIdentity ||
+      allocation.state !== "releasing"
+    ) {
+      return "conflict";
+    }
+    this.productionDatabaseAllocations.delete(input.projectId);
+    this.databaseRecords.delete(input.projectId);
+    return "released";
   }
 
   async invokeDatabase(input: {
