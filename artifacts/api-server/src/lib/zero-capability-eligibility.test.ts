@@ -181,6 +181,41 @@ describe("Zero blueprint and skill capability eligibility", () => {
     ).toBe(true);
   });
 
+  it("allows only literal same-origin fetches in static browser assets", async () => {
+    const value = prepared();
+    const result = await evaluate({
+      files: [
+        ...value.files,
+        {
+          path: "public/index.html",
+          mimeType: "text/html",
+          content:
+            '<script>fetch("/api/incidents"); fetch(\'/api/incidents/active\', { method: "POST" });</script>',
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it.each([
+    ["server-side relative fetch", "src/index.ts", 'void fetch("/api/incidents");'],
+    ["external browser fetch", "public/index.html", 'void fetch("https://example.test");'],
+    ["protocol-relative browser fetch", "public/index.html", 'void fetch("//example.test");'],
+    ["dynamic browser fetch", "public/index.html", "void fetch(runtimeTarget);"],
+  ])("rejects %s", async (_label, filePath, content) => {
+    const value = prepared();
+    const files =
+      filePath === "src/index.ts"
+        ? value.files.map((file) =>
+            file.path === filePath ? { ...file, content: `${file.content}\n${content}` } : file,
+          )
+        : [...value.files, { path: filePath, mimeType: "text/html", content }];
+    const result = await evaluate({ files });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected arbitrary runtime fetch rejection");
+    expect(result.reasons).toContainEqual({ code: "arbitrary_runtime_fetch", path: filePath });
+  });
+
   it.each([
     [
       "undeclared_dependency",
