@@ -15,6 +15,12 @@ const CHUNK_FAILURE_PATTERNS = [
   /unable to preload css/i,
 ];
 
+const CHUNK_DIAGNOSTIC_LIMIT = 480;
+const CHUNK_DIAGNOSTIC_SECRET_PATTERNS = [
+  /\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9_-]+\b/g,
+  /-----BEGIN [^-\r\n]+-----[\s\S]*?-----END [^-\r\n]+-----/g,
+];
+
 const BUILDER_ROUTE_PREFIXES = [
   "/projects",
   "/knowledge",
@@ -66,8 +72,34 @@ export class BuilderChunkRecoveryError extends Error {
   override name = "BuilderChunkRecoveryError";
 
   constructor(options?: ErrorOptions) {
-    super("NabuFlow could not finish loading this workspace.", options);
+    const diagnostic = chunkFailureDiagnostic(options?.cause);
+    super(`NabuFlow could not finish loading this workspace. ${diagnostic}`, options);
   }
+}
+
+function sanitizeChunkDiagnosticText(value: string): string {
+  let sanitized = value.replace(/[\r\n\t]+/g, " ");
+  for (const pattern of CHUNK_DIAGNOSTIC_SECRET_PATTERNS) {
+    sanitized = sanitized.replace(pattern, "[redacted]");
+  }
+  sanitized = sanitized.replace(/(https?:\/\/[^\s?#]+)[?#][^\s]*/gi, "$1?[redacted]");
+  return sanitized.slice(0, CHUNK_DIAGNOSTIC_LIMIT);
+}
+
+export function chunkFailureDiagnostic(error: unknown): string {
+  const candidate =
+    error && typeof error === "object"
+      ? (error as { name?: unknown; message?: unknown })
+      : undefined;
+  const name =
+    candidate && typeof candidate.name === "string"
+      ? sanitizeChunkDiagnosticText(candidate.name)
+      : typeof error;
+  const message =
+    candidate && typeof candidate.message === "string"
+      ? sanitizeChunkDiagnosticText(candidate.message)
+      : sanitizeChunkDiagnosticText(String(error));
+  return `[retry ${name}: ${message}]`;
 }
 
 export function isBuilderRoute(pathname: string): boolean {

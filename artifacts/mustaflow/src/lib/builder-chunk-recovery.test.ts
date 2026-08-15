@@ -6,6 +6,7 @@ import {
   attemptBuilderChunkRecovery,
   cacheBustedChunkUrl,
   chunkAssetUrlFromError,
+  chunkFailureDiagnostic,
   isBuilderChunkLoadFailure,
   retryBuilderChunkImport,
   showBuilderChunkRefreshing,
@@ -78,10 +79,30 @@ describe("Builder chunk recovery", () => {
     ).rejects.toBeInstanceOf(BuilderChunkReloadPendingError);
     await expect(
       retryBuilderChunkImport(vi.fn().mockRejectedValue(chunkFailure), runtime),
-    ).rejects.toBeInstanceOf(BuilderChunkRecoveryError);
+    ).rejects.toMatchObject({
+      name: "BuilderChunkRecoveryError",
+      message:
+        "NabuFlow could not finish loading this workspace. [retry TypeError: still unavailable]",
+    });
 
     expect(showRefreshing).toHaveBeenCalledOnce();
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("bounds and redacts the retained retry diagnostic", () => {
+    const restrictedPrefix = ["rk", "test", ""].join("_");
+    const secret = `${restrictedPrefix}${"x".repeat(96)}`;
+    const diagnostic = chunkFailureDiagnostic(
+      new TypeError(
+        `Failed at https://www.mustaflow.com/assets/chunk.js?token=${secret} with ${secret}`,
+      ),
+    );
+
+    expect(diagnostic).toContain("[retry TypeError:");
+    expect(diagnostic).toContain("https://www.mustaflow.com/assets/chunk.js?[redacted]");
+    expect(diagnostic).not.toContain(secret);
+    expect(diagnostic).toContain("[redacted]");
+    expect(diagnostic.length).toBeLessThanOrEqual(520);
   });
 
   it("recognizes the production failure and extracts its requested chunk", () => {
