@@ -1,0 +1,37 @@
+{
+  "runId": "sealed-test-runtime-rehydration-20260816T190029Z",
+  "baseSha": "084f53c1f0ab9fa12ee63c24d1a999d3b774bc5e",
+  "branch": "codex/sealed-test-runtime-rehydration",
+  "liveObservation": {
+    "projectId": 51,
+    "action": "start sealed test",
+    "terminalCategory": "typed_product_failure",
+    "typedError": "sealed_test_runtime_not_ready",
+    "lastSuccessfulStage": "accepted sealed release selected",
+    "failingStage": "stopped runtime handoff",
+    "approvalDispatched": false,
+    "promotionDispatched": false,
+    "newResourceStarted": false
+  },
+  "rootCause": {
+    "category": "product_orchestration_defect",
+    "mechanism": "durable accepted release survived while the API process-local deployed-artifact guard did not; no exact-release resume path existed before runtime verification",
+    "workerImplicated": false,
+    "wireContractChanged": false
+  },
+  "verification": {
+    "focused": { "passed": 55, "failed": 0 },
+    "tenantRuntimeContracts": { "passed": 187, "failed": 0 },
+    "runtimeWorker": { "passed": 251, "failed": 0 },
+    "apiFull": { "passed": 2331, "failed": 41, "skipped": 5 },
+    "apiFullFailureClassification": "environment/base failures outside all changed paths",
+    "typecheckLibraries": "passed",
+    "typecheckApi": "passed",
+    "eslintChangedFiles": "passed",
+    "prettierChangedFiles": "passed",
+    "diffCheck": "passed"
+  },
+  "manifestsChanged": false,
+  "flyTouched": false,
+  "secretsRecorded": false
+}

@@ -3,6 +3,7 @@ import {
   resolveSealedTestingCandidate,
   resolveSealedTestingHandoff,
   selectAcceptedSealedReleaseForSnapshot,
+  selectSealedTestingHandoff,
 } from "./sealed-testing-candidate";
 
 const sha = (digit: string) => digit.repeat(64);
@@ -105,6 +106,26 @@ describe("sealed testing candidate", () => {
       release,
     });
     expect(handoff.release.sealedArtifactSha256).toBe(release.sealedArtifactSha256);
+  });
+
+  it("selects the exact accepted release before a stopped runtime is resumed", () => {
+    expect(
+      selectSealedTestingHandoff({
+        targetVersion: { id: 157, filesSnapshot: files, sealedRelease: null },
+        candidates: [{ id: 156, filesSnapshot: files, sealedRelease: release }],
+        currentFiles: files,
+      }),
+    ).toEqual({ versionId: 157, sourceVersionId: 156, release });
+  });
+
+  it("rejects changed source before any runtime-resume operation", () => {
+    expect(() =>
+      selectSealedTestingHandoff({
+        targetVersion: { id: 157, filesSnapshot: files, sealedRelease: release },
+        candidates: [],
+        currentFiles: [{ ...files[0], content: "export const changed = true;\n" }, files[1]],
+      }),
+    ).toThrowError(expect.objectContaining({ code: "sealed_test_source_changed" }));
   });
 
   it("never binds a lookalike staging snapshot with divergent bytes", () => {

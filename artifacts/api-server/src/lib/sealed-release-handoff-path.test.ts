@@ -111,4 +111,15 @@ describe("staging -> sealed test approval -> production promotion", () => {
     expect(promotionRoute).toContain("sealedRelease: projectVersionsTable.sealedRelease");
     expect(promotionRoute).toContain("rollbackProductionArtifactActivation");
   });
+
+  it("resumes a stopped sealed preview from the exact accepted release before approval", () => {
+    const source = readFileSync(new URL("../routes/preview-env.ts", import.meta.url), "utf8");
+    const selection = source.indexOf("const selection = selectSealedTestingHandoff({");
+    const resume = source.indexOf("zeroGenerationStartAcceptedSealedRelease({");
+    const verification = source.indexOf("resolveSealedTestingCandidate({");
+    expect(selection).toBeGreaterThan(-1);
+    expect(resume).toBeGreaterThan(selection);
+    expect(verification).toBeGreaterThan(resume);
+    expect(source).toContain("acceptedRelease: selection.release");
+  });
 });

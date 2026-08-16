@@ -183,6 +183,22 @@ export interface ZeroGenerationTenantRuntimeProvider extends LayeredArtifactDepl
     status: RuntimeStatus;
     endpoint: string | null;
   } | null>;
+  /**
+   * Resume the exact accepted preview artifact after an API-process restart.
+   * The durable accepted release is the authority; no local deployment cache
+   * or newest-version selection may substitute for it.
+   */
+  zeroGenerationStartAcceptedSealedRelease(input: {
+    projectId: number;
+    acceptedRelease: AcceptedSealedRelease;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<{
+    identity: string;
+    manifestRevision: string;
+    status: RuntimeStatus;
+    endpoint: string | null;
+  }>;
 }
 
 export function supportsZeroGeneration(
@@ -193,7 +209,8 @@ export function supportsZeroGeneration(
     supportsLayeredArtifactDeployment(provider) &&
     typeof candidate.zeroGenerationControlRequest === "function" &&
     typeof candidate.zeroGenerationRuntimeDescriptor === "function" &&
-    typeof candidate.zeroGenerationRuntimeDescriptorForProject === "function"
+    typeof candidate.zeroGenerationRuntimeDescriptorForProject === "function" &&
+    typeof candidate.zeroGenerationStartAcceptedSealedRelease === "function"
   );
 }
 

@@ -168,6 +168,7 @@ describe("TenantRuntimeProvider Fly adapter", () => {
     expect(supportsLayeredArtifactDeployment(cloudflare)).toBe(true);
     expect(supportsZeroGeneration(cloudflare)).toBe(true);
     expect(typeof cloudflare.zeroGenerationRuntimeDescriptorForProject).toBe("function");
+    expect(typeof cloudflare.zeroGenerationStartAcceptedSealedRelease).toBe("function");
   });
 
   it("keeps the unset provider path constructed as the existing Fly adapter", async () => {
