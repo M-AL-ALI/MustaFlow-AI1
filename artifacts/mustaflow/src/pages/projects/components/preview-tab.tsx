@@ -106,6 +106,15 @@ type Project = {
   builderMode?: string | null;
 };
 
+type TestEnvironmentStatus = {
+  testingStatus: string;
+  testingCandidateSnapshotId: number | null;
+  runningTestSnapshotId: number | null;
+  testedSnapshotId: number | null;
+  testContainerStatus: string | null;
+  isFullStack: boolean;
+};
+
 type ReadinessReport = {
   integrationsNeeded?: Array<{
     name: string;
@@ -145,6 +154,8 @@ type PreviewTabProps = {
   onJumpToSecrets?: () => void;
   /** Task #768: navigate to the Test Environment tab when the user wants to start / approve a test build. */
   onNavigateToTestEnv?: () => void;
+  /** Refresh the project record after testing state changes. */
+  onTestingStatusChanged?: () => void;
   /**
    * Incrementing counter: whenever this value changes the preview iframe
    * is force-reloaded so freshly-built files are visible immediately.
@@ -201,6 +212,7 @@ export function PreviewTab({
   latestReport,
   onJumpToSecrets,
   onNavigateToTestEnv,
+  onTestingStatusChanged,
   refreshTrigger,
   filesPayloadRef,
   filesPayloadSeq,
@@ -212,6 +224,99 @@ export function PreviewTab({
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
   const [readinessExpanded, setReadinessExpanded] = useState(false);
+  const [testEnvironmentStatus, setTestEnvironmentStatus] = useState<TestEnvironmentStatus | null>(
+    null,
+  );
+  const [testEnvironmentBusy, setTestEnvironmentBusy] = useState(false);
+  const [testEnvironmentError, setTestEnvironmentError] = useState<{
+    code: string;
+    message: string;
+  } | null>(null);
+  const refreshTestEnvironment = useCallback(async () => {
+    if (!project.containerId) return null;
+    const response = await authFetch(`/api/projects/${project.id}/preview-env/status`);
+    const body = (await response.json().catch(() => null)) as TestEnvironmentStatus | null;
+    if (!response.ok || body === null) {
+      throw new Error("The test environment status could not be read.");
+    }
+    setTestEnvironmentStatus(body);
+    return body;
+  }, [project.containerId, project.id]);
+  useEffect(() => {
+    if (!project.containerId || project.testingStatus === "passed") return;
+    void refreshTestEnvironment().catch(() => {
+      setTestEnvironmentError({
+        code: "test_environment_status_unavailable",
+        message: "The test environment status could not be read.",
+      });
+    });
+  }, [project.containerId, project.testingStatus, refreshTestEnvironment]);
+  useEffect(() => {
+    if (testEnvironmentStatus?.testingStatus !== "building") return;
+    const timer = window.setInterval(() => {
+      void refreshTestEnvironment().catch(() => {
+        setTestEnvironmentError({
+          code: "test_environment_status_unavailable",
+          message: "The test environment status could not be read.",
+        });
+      });
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [refreshTestEnvironment, testEnvironmentStatus?.testingStatus]);
+  const runTestEnvironmentAction = useCallback(
+    async (action: "start" | "rebuild" | "approve") => {
+      setTestEnvironmentBusy(true);
+      setTestEnvironmentError(null);
+      try {
+        const response = await authFetch(`/api/projects/${project.id}/preview-env/${action}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        const body = (await response.json().catch(() => null)) as
+          | (Partial<TestEnvironmentStatus> & {
+              code?: string;
+              error?: string;
+              testedSnapshotId?: number;
+            })
+          | null;
+        if (!response.ok) {
+          setTestEnvironmentError({
+            code: body?.code ?? "test_environment_action_failed",
+            message: body?.error ?? "The test environment action failed.",
+          });
+          return;
+        }
+        if (action === "approve") {
+          setTestEnvironmentStatus((current) =>
+            current === null
+              ? null
+              : {
+                  ...current,
+                  testingStatus: "passed",
+                  testedSnapshotId: body?.testedSnapshotId ?? current.testingCandidateSnapshotId,
+                },
+          );
+        } else {
+          await refreshTestEnvironment();
+        }
+        onTestingStatusChanged?.();
+      } catch {
+        setTestEnvironmentError({
+          code: "test_environment_transport_failed",
+          message: "The test environment request could not be completed.",
+        });
+      } finally {
+        setTestEnvironmentBusy(false);
+      }
+    },
+    [onTestingStatusChanged, project.id, refreshTestEnvironment],
+  );
+  const effectiveTestingStatus =
+    testEnvironmentStatus?.testingStatus ?? project.testingStatus ?? "idle";
+  const startTestingAction = testEnvironmentStatus?.testingCandidateSnapshotId
+    ? "rebuild"
+    : "start";
   // Secrets — used by the mobile readiness panel to flag missing keys
   const { data: projectSecrets } = useListSecrets(project.id, {
     query: { queryKey: getListSecretsQueryKey(project.id), enabled: !!project.id && isMobile },
@@ -1965,26 +2070,48 @@ export function PreviewTab({
 
       {/* Container waking/starting banner — Phase C server-side containers */}
       {/* Task #768: testing gate nudge — shown for full-stack projects whose draft is not yet test-approved */}
-      {project.containerId && project.testingStatus !== "passed" && (
+      {project.containerId && effectiveTestingStatus !== "passed" && (
         <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-between gap-2 px-3 py-2 text-xs bg-amber-500/10 border-t border-amber-500/20 text-amber-700 dark:text-amber-400">
-          <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex items-center gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              {project.testingStatus === "stale"
-                ? "Draft changed after last test — run a new test before publishing."
-                : project.testingStatus === "ready"
-                  ? "Test environment is ready. Approve it to unlock production publishing."
-                  : "Start a test build to preview and approve this app before publishing."}
-            </span>
+            <div className="min-w-0">
+              <span>
+                {effectiveTestingStatus === "stale"
+                  ? "Draft changed after last test — run a new test before publishing."
+                  : effectiveTestingStatus === "ready"
+                    ? "Test environment is ready. Approve it to unlock production publishing."
+                    : effectiveTestingStatus === "building"
+                      ? "The exact sealed test candidate is being prepared."
+                      : "Start a test build to preview and approve this app before publishing."}
+              </span>
+              {testEnvironmentError && (
+                <p
+                  className="truncate text-[10px] text-destructive"
+                  title={testEnvironmentError.code}
+                >
+                  {testEnvironmentError.code}: {testEnvironmentError.message}
+                </p>
+              )}
+            </div>
           </div>
-          {onNavigateToTestEnv && (
-            <button
-              onClick={onNavigateToTestEnv}
-              className="shrink-0 font-semibold hover:underline focus:outline-none"
-            >
-              Test Environment
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={testEnvironmentBusy || effectiveTestingStatus === "building"}
+            onClick={() =>
+              void runTestEnvironmentAction(
+                effectiveTestingStatus === "ready" ? "approve" : startTestingAction,
+              )
+            }
+            className="shrink-0 rounded-md border border-amber-500/30 bg-background/70 px-2.5 py-1 font-semibold hover:bg-background focus:outline-none disabled:cursor-wait disabled:opacity-60"
+          >
+            {testEnvironmentBusy || effectiveTestingStatus === "building"
+              ? "Testing…"
+              : effectiveTestingStatus === "ready"
+                ? "Approve test"
+                : startTestingAction === "rebuild"
+                  ? "Rebuild test"
+                  : "Start test"}
+          </button>
         </div>
       )}
       {!webContainerLive &&

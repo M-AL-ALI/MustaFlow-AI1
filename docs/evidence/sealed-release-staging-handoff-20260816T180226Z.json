@@ -1,0 +1,83 @@
+{
+  "format": "nabuflow.delivery-evidence/v1",
+  "runId": "sealed-release-staging-handoff-20260816T180226Z",
+  "capturedAt": "2026-08-16T18:02:26.8049146Z",
+  "baseSha": "044cd6df05c91033b73d050b92629fb6172d5b5a",
+  "branch": "codex/sealed-release-staging-handoff",
+  "reportSha256": "ae8a3002d71a836fd4c6f4609ab6765dfc69a6593b4791d93515d2a169ade477",
+  "scope": "artifact-native staging to sealed-test approval to production promotion identity handoff",
+  "checks": {
+    "frozenOfflineInstall": {
+      "status": "pass",
+      "resolved": 2259,
+      "reused": 2227,
+      "downloaded": 0,
+      "durationSeconds": 742.7
+    },
+    "focusedApi": {
+      "status": "pass",
+      "files": 2,
+      "tests": 10
+    },
+    "focusedWorkspace": {
+      "status": "pass",
+      "files": 1,
+      "tests": 2
+    },
+    "workspaceTypecheck": {
+      "status": "pass"
+    },
+    "workspaceLint": {
+      "status": "pass"
+    },
+    "contracts": {
+      "status": "pass",
+      "files": 20,
+      "tests": 187
+    },
+    "runtimeWorker": {
+      "status": "pass",
+      "files": 34,
+      "tests": 251
+    },
+    "apiFull": {
+      "status": "known_lab_base_profile",
+      "passed": 2328,
+      "failed": 39,
+      "skipped": 5,
+      "changedPathFailures": 0
+    },
+    "workspaceFull": {
+      "status": "known_base_sha_pin",
+      "passed": 1051,
+      "failed": 1,
+      "failure": "preview-reconciliation capture fingerprint is stale",
+      "changedPathFailures": 0
+    },
+    "changedFileFormatting": {
+      "status": "pass"
+    },
+    "diffCheck": {
+      "status": "pass"
+    },
+    "manifestChanges": {
+      "status": "none"
+    },
+    "liveActions": {
+      "deployments": 0,
+      "publicSurfaces": 0,
+      "leases": 0,
+      "costUsd": 0
+    }
+  },
+  "identifiers": {
+    "stagingSnapshotField": "stagingPublishedSnapshotId",
+    "testedSnapshotField": "testedSnapshotId",
+    "artifactIdentityField": "sealedArtifactSha256",
+    "productionIdentityField": "promotionIdentity"
+  },
+  "sanitization": {
+    "credentialValues": "not accessed",
+    "secretFindings": 0
+  }
+}

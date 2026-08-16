@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveSealedTestingCandidate } from "./sealed-testing-candidate";
+import {
+  resolveSealedTestingCandidate,
+  resolveSealedTestingHandoff,
+  selectAcceptedSealedReleaseForSnapshot,
+} from "./sealed-testing-candidate";
 
 const sha = (digit: string) => digit.repeat(64);
 const files = [
@@ -73,5 +77,48 @@ describe("sealed testing candidate", () => {
         ...override,
       }),
     ).toThrowError(expect.objectContaining({ code }));
+  });
+
+  it("selects the newest exact snapshot match instead of the newest version", () => {
+    const changedFiles = [{ ...files[0], content: "export const newer = true;\n" }, files[1]];
+    expect(
+      selectAcceptedSealedReleaseForSnapshot({
+        targetSnapshot: files,
+        candidates: [
+          { id: 158, filesSnapshot: changedFiles, sealedRelease: release },
+          { id: 156, filesSnapshot: files, sealedRelease: release },
+        ],
+      }),
+    ).toEqual({ sourceVersionId: 156, release });
+  });
+
+  it("binds a legacy staging snapshot to the exact accepted artifact it will promote", () => {
+    const handoff = resolveSealedTestingHandoff({
+      targetVersion: { id: 157, filesSnapshot: files, sealedRelease: null },
+      candidates: [{ id: 156, filesSnapshot: files, sealedRelease: release }],
+      currentFiles: files,
+      runtime,
+    });
+    expect(handoff).toEqual({
+      versionId: 157,
+      sourceVersionId: 156,
+      release,
+    });
+    expect(handoff.release.sealedArtifactSha256).toBe(release.sealedArtifactSha256);
+  });
+
+  it("never binds a lookalike staging snapshot with divergent bytes", () => {
+    expect(() =>
+      resolveSealedTestingHandoff({
+        targetVersion: {
+          id: 157,
+          filesSnapshot: [{ ...files[0], content: "export const lookalike = true;\n" }, files[1]],
+          sealedRelease: null,
+        },
+        candidates: [{ id: 156, filesSnapshot: files, sealedRelease: release }],
+        currentFiles: files,
+        runtime,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "sealed_test_release_invalid" }));
   });
 });
