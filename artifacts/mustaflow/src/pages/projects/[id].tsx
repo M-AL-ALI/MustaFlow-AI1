@@ -5271,6 +5271,9 @@ export default function ProjectWorkspacePage() {
                     return payload.report ?? null;
                   })()}
                   onJumpToSecrets={() => setActiveTab("secrets")}
+                  onTestingStatusChanged={() => {
+                    void refetchProject();
+                  }}
                 />
               )}
               {activeTab === "plan" && (

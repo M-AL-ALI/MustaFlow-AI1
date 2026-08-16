@@ -11,7 +11,7 @@
  */
 
 import { Router } from "express";
-import { eq, and, desc, isNull } from "drizzle-orm";
+import { eq, and, desc, isNotNull, isNull } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -36,7 +36,7 @@ import {
   resolveZeroGenerationTarget,
 } from "../lib/zero-sealed-generation";
 import {
-  resolveSealedTestingCandidate,
+  resolveSealedTestingHandoff,
   SealedTestingCandidateError,
 } from "../lib/sealed-testing-candidate";
 import { encryptionService } from "../lib/encryption";
@@ -50,6 +50,7 @@ import { mintCloudflarePreviewGrant } from "../lib/cloudflare-preview-grant";
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
 const LAUNCH_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SEALED_RELEASE_CANDIDATE_LIMIT = 32;
 
 const router = Router();
 
@@ -99,6 +100,102 @@ function generateLaunchToken(): string {
 /** Hash a launch token for DB storage. */
 function hashLaunchToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+type TestingSourceFile = {
+  path: string;
+  content: string | null;
+  mimeType: string | null;
+};
+
+async function prepareSealedTestingHandoff(input: {
+  projectId: number;
+  stagingPublishedSnapshotId: number | null;
+  files: TestingSourceFile[];
+}) {
+  const sealedVersions = await db
+    .select({
+      id: projectVersionsTable.id,
+      filesSnapshot: projectVersionsTable.filesSnapshot,
+      sealedRelease: projectVersionsTable.sealedRelease,
+    })
+    .from(projectVersionsTable)
+    .where(
+      and(
+        eq(projectVersionsTable.projectId, input.projectId),
+        isNotNull(projectVersionsTable.sealedRelease),
+      ),
+    )
+    .orderBy(desc(projectVersionsTable.createdAt))
+    .limit(SEALED_RELEASE_CANDIDATE_LIMIT);
+  const targetVersionId = input.stagingPublishedSnapshotId ?? sealedVersions[0]?.id ?? null;
+  const [targetVersion] =
+    targetVersionId === null
+      ? []
+      : await db
+          .select({
+            id: projectVersionsTable.id,
+            filesSnapshot: projectVersionsTable.filesSnapshot,
+            sealedRelease: projectVersionsTable.sealedRelease,
+          })
+          .from(projectVersionsTable)
+          .where(
+            and(
+              eq(projectVersionsTable.projectId, input.projectId),
+              eq(projectVersionsTable.id, targetVersionId),
+            ),
+          )
+          .limit(1);
+  if (!targetVersion) {
+    throw new SealedTestingCandidateError(
+      "sealed_test_release_invalid",
+      "No staging or accepted sealed version is available for testing",
+    );
+  }
+  if (!supportsZeroGeneration(tenantRuntimeProvider)) {
+    throw new SealedTestingCandidateError(
+      "sealed_test_release_invalid",
+      "The active runtime provider cannot resolve sealed testing releases",
+    );
+  }
+  const runtime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(
+    input.projectId,
+  );
+  const candidate = resolveSealedTestingHandoff({
+    targetVersion: {
+      id: targetVersion.id,
+      filesSnapshot: targetVersion.filesSnapshot as TestingSourceFile[] | null,
+      sealedRelease: targetVersion.sealedRelease,
+    },
+    candidates: sealedVersions.map((version) => ({
+      id: version.id,
+      filesSnapshot: version.filesSnapshot as TestingSourceFile[] | null,
+      sealedRelease: version.sealedRelease,
+    })),
+    currentFiles: input.files,
+    runtime,
+  });
+  if (targetVersion.sealedRelease === null || targetVersion.sealedRelease === undefined) {
+    await db
+      .update(projectVersionsTable)
+      .set({ sealedRelease: candidate.release })
+      .where(
+        and(
+          eq(projectVersionsTable.projectId, input.projectId),
+          eq(projectVersionsTable.id, candidate.versionId),
+        ),
+      );
+    logger.info(
+      {
+        projectId: input.projectId,
+        targetVersionId: candidate.versionId,
+        sourceVersionId: candidate.sourceVersionId,
+        sealedArtifactSha256: candidate.release.sealedArtifactSha256,
+      },
+      "Bound legacy staging snapshot to its exact accepted sealed release",
+    );
+  }
+  return candidate;
 }
 
 // ── GET /projects/:id/preview-env/status ─────────────────────────────────────
@@ -177,39 +274,11 @@ router.post("/projects/:id/preview-env/start", requireProjectOwnership, async (r
       });
       return;
     }
-    const [latestVersion] = await db
-      .select({
-        id: projectVersionsTable.id,
-        filesSnapshot: projectVersionsTable.filesSnapshot,
-        sealedRelease: projectVersionsTable.sealedRelease,
-      })
-      .from(projectVersionsTable)
-      .where(eq(projectVersionsTable.projectId, projectId))
-      .orderBy(desc(projectVersionsTable.createdAt))
-      .limit(1);
-    let runtime;
     try {
-      runtime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(projectId);
-    } catch (error) {
-      req.log.warn({ error, projectId }, "Sealed test runtime descriptor read failed");
-      res.status(503).json({
-        error: "The sealed test runtime could not be verified.",
-        code: "sealed_test_runtime_unavailable",
-      });
-      return;
-    }
-    try {
-      const candidate = resolveSealedTestingCandidate({
-        versionId: latestVersion?.id ?? 0,
-        versionSnapshot:
-          (latestVersion?.filesSnapshot as Array<{
-            path: string;
-            content: string | null;
-            mimeType: string | null;
-          }> | null) ?? null,
-        currentFiles: files,
-        sealedRelease: latestVersion?.sealedRelease,
-        runtime,
+      const candidate = await prepareSealedTestingHandoff({
+        projectId,
+        stagingPublishedSnapshotId: project.stagingPublishedSnapshotId,
+        files,
       });
       await db
         .update(projectsTable)
@@ -236,7 +305,12 @@ router.post("/projects/:id/preview-env/start", requireProjectOwnership, async (r
         res.status(409).json({ error: error.message, code: error.code });
         return;
       }
-      throw error;
+      req.log.warn({ error, projectId }, "Sealed test runtime descriptor read failed");
+      res.status(503).json({
+        error: "The sealed test runtime could not be verified.",
+        code: "sealed_test_runtime_unavailable",
+      });
+      return;
     }
   }
 
@@ -384,6 +458,54 @@ router.post("/projects/:id/preview-env/rebuild", requireProjectOwnership, async 
   if (files.length === 0) {
     res.status(422).json({ error: "Project has no files." });
     return;
+  }
+
+  if (isZeroSealedGenerationTarget(resolveZeroGenerationTarget(process.env))) {
+    if (!supportsZeroGeneration(tenantRuntimeProvider)) {
+      res.status(503).json({
+        error: "The sealed test runtime provider is unavailable.",
+        code: "sealed_test_runtime_unavailable",
+      });
+      return;
+    }
+    try {
+      const candidate = await prepareSealedTestingHandoff({
+        projectId,
+        stagingPublishedSnapshotId: project.stagingPublishedSnapshotId,
+        files,
+      });
+      await db
+        .update(projectsTable)
+        .set({
+          testingStatus: "ready",
+          testingCandidateSnapshotId: candidate.versionId,
+          runningTestSnapshotId: candidate.versionId,
+          testedSnapshotId: null,
+          testContainerStatus: "running",
+          updatedAt: new Date(),
+        })
+        .where(eq(projectsTable.id, projectId));
+      res.json({
+        ok: true,
+        candidateSnapshotId: candidate.versionId,
+        testingStatus: "ready",
+        isFullStack: true,
+        sealedRuntime: true,
+        message: "The exact staged sealed preview is ready for testing approval.",
+      });
+      return;
+    } catch (error) {
+      if (error instanceof SealedTestingCandidateError) {
+        res.status(409).json({ error: error.message, code: error.code });
+        return;
+      }
+      req.log.warn({ error, projectId }, "Sealed test runtime descriptor read failed");
+      res.status(503).json({
+        error: "The sealed test runtime could not be verified.",
+        code: "sealed_test_runtime_unavailable",
+      });
+      return;
+    }
   }
 
   const [candidateVersion] = await db
