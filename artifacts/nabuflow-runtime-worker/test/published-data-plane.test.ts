@@ -7,7 +7,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { handlePublishedDataPlaneRequest } from "../src/published-data-plane";
 import { handleWorkerRequest } from "../src/worker";
 import type { StoredRuntime } from "../src/model";
-import { MemoryCoordinator, TEST_NOW_MS, TEST_SECRET, fakeEnv } from "./helpers";
+import {
+  MemoryArtifactCommitQueue,
+  MemoryCoordinator,
+  TEST_NOW_MS,
+  TEST_SECRET,
+  fakeEnv,
+} from "./helpers";
 
 const WORKER_HOST = "nabuflow-runtime-staging.mustafa-alali74.workers.dev";
 const ORIGIN = `https://${WORKER_HOST}`;
@@ -430,6 +436,72 @@ describe("anonymous published application data plane", () => {
       activeSlot: "green",
       sandboxIdentity: greenIdentity,
     });
+  });
+
+  it("coalesces durable recovery instead of forwarding to a missing tenant process", async () => {
+    const queue = env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+        coordinator,
+        sandbox,
+        runtimeStatus: async () => ({ running: false, lastError: "Tenant service is not running" }),
+        nowMs: TEST_NOW_MS,
+      });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "published_runtime_recovering",
+        retryable: true,
+      });
+    }
+
+    expect(sandbox.httpRequests).toHaveLength(0);
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(1);
+    const recovery = await coordinator.getLatestDurableOperation(
+      "runtime-start",
+      identity,
+      "start",
+    );
+    if (recovery === null) throw new Error("published runtime recovery job is missing");
+    expect(recovery).toMatchObject({
+      kind: "runtime-start",
+      runtimeIdentity: identity,
+      subjectKey: "start",
+      request: {
+        artifactRevision: "published-artifact-1",
+        artifactSha256: "a".repeat(64),
+      },
+    });
+    expect(queue.messages).toHaveLength(2);
+    expect(new Set(queue.messages.map((message) => message.jobKey))).toEqual(
+      new Set([recovery.jobKey]),
+    );
+  });
+
+  it("bounds an unresponsive upstream and recovers when the process disappears", async () => {
+    let statusChecks = 0;
+    sandbox.responseFactory = (request) =>
+      new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener("abort", () => reject(request.signal.reason), {
+          once: true,
+        });
+      });
+    const response = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/hung`), env, {
+      coordinator,
+      sandbox,
+      runtimeStatus: async () => ({
+        running: statusChecks++ === 0,
+        lastError: statusChecks === 1 ? null : "Tenant service is not running",
+      }),
+      upstreamHeaderTimeoutMs: 5,
+      nowMs: TEST_NOW_MS,
+    });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "published_runtime_recovering",
+      retryable: true,
+    });
+    expect(statusChecks).toBe(2);
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(1);
   });
 
   it("keeps preview routing and its missing-session response unchanged", async () => {

@@ -457,9 +457,9 @@ describe("authenticated staging control plane", () => {
       fakeEnv(),
       dependencies,
     );
-    expect(missingGreenRuntime.status).toBe(400);
+    expect(missingGreenRuntime.status).toBe(409);
     await expect(missingGreenRuntime.json()).resolves.toMatchObject({
-      code: "invalid_route_identity",
+      code: "published_runtime_not_ready",
     });
     expect(await coordinator.getRoute(hostname)).toBeNull();
 
@@ -508,6 +508,71 @@ describe("authenticated staging control plane", () => {
     const replayed = await handleControlRequest(replay, fakeEnv(), dependencies);
     expect(replayed.status).toBe(409);
     await expect(replayed.json()).resolves.toMatchObject({ code: "replay_detected" });
+
+    const greenManifestRevision = "published-manifest-green-2";
+    await coordinator.putRuntime(greenIdentity, {
+      ...runtime,
+      descriptor: {
+        ...runtime.descriptor,
+        identity: greenIdentity,
+        slot: "green",
+        manifestRevision: greenManifestRevision,
+      },
+      manifest: { ...runtime.manifest, revision: greenManifestRevision },
+      artifactRevision: "published-artifact-green-2",
+      artifactSha256: "b".repeat(64),
+    });
+    const greenBody = {
+      route: {
+        ...body.route,
+        activeSlot: "green" as const,
+        manifestRevision: greenManifestRevision,
+        sandboxIdentity: greenIdentity,
+      },
+      expectedPreviousManifestRevision: "published-manifest-1",
+    };
+    const greenActivated = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-green-valid-01",
+        idempotencyKey: "route-activate-green-valid",
+        body: greenBody,
+      }),
+      fakeEnv(),
+      dependencies,
+    );
+    expect(greenActivated.status).toBe(200);
+    await expect(greenActivated.json()).resolves.toMatchObject({
+      route: { activeSlot: "green", sandboxIdentity: greenIdentity },
+    });
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "green",
+      sandboxIdentity: greenIdentity,
+    });
+
+    const blueReactivated = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-blue-valid-001",
+        idempotencyKey: "route-reactivate-blue-valid",
+        body: {
+          ...body,
+          expectedPreviousManifestRevision: greenManifestRevision,
+        },
+      }),
+      fakeEnv(),
+      dependencies,
+    );
+    expect(blueReactivated.status).toBe(200);
+    await expect(blueReactivated.json()).resolves.toMatchObject({
+      route: { activeSlot: "blue", sandboxIdentity: identity },
+    });
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "blue",
+      sandboxIdentity: identity,
+    });
 
     const deletePath = `/_nabuflow/control/v1/routes/${hostname}`;
     const deleted = await handleControlRequest(

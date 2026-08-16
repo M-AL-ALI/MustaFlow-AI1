@@ -3,6 +3,7 @@ import {
   CONTROL_PROTOCOL_VERSION,
   deriveRuntimeIdentity,
   verifyControlRequestSignature,
+  type ProductionArtifactRelease,
 } from "@workspace/tenant-runtime-contracts";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { RuntimeProviderUnavailableError } from "./tenant-runtime-provider";
@@ -2000,6 +2001,7 @@ describe("CloudflareRuntimeProvider", () => {
       hostname: "canary.apps.mustaflow.com",
       promotionIdentity,
       expectedPreviousManifestRevision: "prod-previous",
+      previousRelease: null,
       operationTimeoutMs: 5_000,
     });
     expect(promoted).toMatchObject({
@@ -2023,18 +2025,19 @@ describe("CloudflareRuntimeProvider", () => {
       role: "production",
       slot: "blue",
     });
+    const previousRelease: ProductionArtifactRelease = {
+      ...promoted.release,
+      promotionIdentity: "7".repeat(64),
+      targetRuntimeIdentity: previousIdentity,
+      targetSlot: "blue",
+      targetManifest: { ...promoted.release.targetManifest, revision: "prod-previous" },
+      promotedAt: "2026-08-14T11:00:00.000Z",
+      activatedAt: "2026-08-14T11:01:00.000Z",
+    };
     await expect(
       provider.rollbackProductionArtifactActivation({
         activatedRelease: promoted.release,
-        previousRelease: {
-          ...promoted.release,
-          promotionIdentity: "7".repeat(64),
-          targetRuntimeIdentity: previousIdentity,
-          targetSlot: "blue",
-          targetManifest: { ...promoted.release.targetManifest, revision: "prod-previous" },
-          promotedAt: "2026-08-14T11:00:00.000Z",
-          activatedAt: "2026-08-14T11:01:00.000Z",
-        },
+        previousRelease,
       }),
     ).resolves.toBeUndefined();
     expect(calls.at(-1)).toMatchObject({
@@ -2052,5 +2055,103 @@ describe("CloudflareRuntimeProvider", () => {
       },
       expectedPreviousManifestRevision: targetRevision,
     });
+
+    calls.length = 0;
+    let activationCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const key = new Headers(init?.headers).get("idempotency-key") ?? "";
+      calls.push({ method, path, key, body: String(init?.body ?? "") });
+      const runtime = {
+        identity: targetIdentity,
+        projectId,
+        role: "production",
+        slot: "green",
+        status: path.endsWith("/start") ? "running" : "stopped",
+        servicePort: 8080,
+        manifestRevision: targetRevision,
+        deploymentVersion: "staging-v1",
+        endpoint: null,
+        readyAt: path.endsWith("/start") ? "2026-08-14T12:01:00.000Z" : null,
+        lastError: null,
+      };
+      if (path.endsWith("/promotions/layered")) {
+        return json({
+          ok: true,
+          promotionIdentity,
+          sourceSealedArtifactSha256: sourceArtifact.envelope.sealedArtifactSha256,
+          targetSealedArtifactSha256: targetArtifact.envelope.sealedArtifactSha256,
+          targetContentSha256: targetArtifact.envelope.contentSha256,
+          artifactRevision: targetArtifact.envelope.artifactRevision,
+          appChunksCopied: targetArtifact.appChunks.length,
+          layersReused: 1,
+          envelope: targetArtifact.envelope,
+        });
+      }
+      if (path.includes("/routes/") && path.endsWith("/activate")) {
+        activationCalls += 1;
+        return activationCalls === 1
+          ? json(
+              {
+                ok: false,
+                code: "invalid_route_identity",
+                message: "Published route identity is invalid for this deployment",
+                retryable: false,
+                requestId: "activation-failure",
+              },
+              400,
+            )
+          : json(
+              {
+                ok: false,
+                code: "route_activation_conflict",
+                message: "The published route changed before activation",
+                retryable: false,
+                requestId: "rollback-conflict",
+              },
+              409,
+            );
+      }
+      if (method === "DELETE") return json({ ok: true });
+      return json({ runtime });
+    });
+    const failedProvider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    const failedInternals = failedProvider as unknown as {
+      deploymentVersion: string | null;
+      controlFeatures: Set<string>;
+    };
+    failedInternals.deploymentVersion = "staging-v1";
+    failedInternals.controlFeatures.add("artifact-v1");
+    failedInternals.controlFeatures.add("manifest-update-v1");
+    failedInternals.controlFeatures.add("artifact-layers-v1");
+    failedInternals.controlFeatures.add("artifact-promotion-v1");
+
+    await expect(
+      failedProvider.promoteProductionArtifact({
+        projectId,
+        sourceVersionId: 118,
+        acceptedRelease,
+        targetSlot: "green",
+        hostname: "canary.apps.mustaflow.com",
+        promotionIdentity,
+        expectedPreviousManifestRevision: "prod-previous",
+        previousRelease,
+        operationTimeoutMs: 5_000,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_route_identity" });
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "PUT /_nabuflow/control/v1/runtimes/84/production/green",
+      "POST /_nabuflow/control/v1/runtimes/84/production/green/promotions/layered",
+      "POST /_nabuflow/control/v1/runtimes/84/production/green/start",
+      "POST /_nabuflow/control/v1/routes/canary.apps.mustaflow.com/activate",
+      "POST /_nabuflow/control/v1/routes/canary.apps.mustaflow.com/activate",
+      "DELETE /_nabuflow/control/v1/runtimes/84/production/green",
+    ]);
+    expect(calls.at(-1)?.key).toMatch(
+      new RegExp(
+        `^production-publish:${promotionIdentity}:discard-candidate:request-[0-9a-f]{64}$`,
+      ),
+    );
   });
 });

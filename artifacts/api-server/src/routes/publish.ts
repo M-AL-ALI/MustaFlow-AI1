@@ -178,6 +178,7 @@ async function promoteAcceptedArtifact(input: {
     hostname: input.hostname,
     promotionIdentity,
     expectedPreviousManifestRevision: previousRelease?.targetManifest.revision ?? null,
+    previousRelease,
   });
   return {
     release: promoted.release,

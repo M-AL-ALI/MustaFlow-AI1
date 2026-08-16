@@ -4410,7 +4410,7 @@ async function activatePublishedRoute(
     parsedIdentity === null ||
     parsedIdentity.projectId !== route.projectId ||
     parsedIdentity.role !== "production" ||
-    parsedIdentity.slot !== "blue"
+    parsedIdentity.slot !== route.activeSlot
   ) {
     throw new ControlHttpError(
       400,
@@ -4424,7 +4424,7 @@ async function activatePublishedRoute(
     runtime === null ||
     runtime.descriptor.status !== "running" ||
     runtime.descriptor.role !== "production" ||
-    runtime.descriptor.slot !== "blue" ||
+    runtime.descriptor.slot !== route.activeSlot ||
     runtime.descriptor.projectId !== route.projectId ||
     runtime.descriptor.manifestRevision !== route.manifestRevision ||
     runtime.manifest.revision !== route.manifestRevision ||
@@ -4434,7 +4434,7 @@ async function activatePublishedRoute(
     throw new ControlHttpError(
       409,
       "published_runtime_not_ready",
-      "The production-blue runtime is not ready for route activation",
+      "The selected production runtime is not ready for route activation",
       true,
     );
   }
