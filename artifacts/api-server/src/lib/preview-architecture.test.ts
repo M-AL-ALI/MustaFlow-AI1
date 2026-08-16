@@ -14,6 +14,7 @@ const versionsSource = readSource("artifacts/api-server/src/routes/versions.ts")
 const filesSource = readSource("artifacts/api-server/src/routes/files.ts");
 const eventsSource = readSource("artifacts/api-server/src/routes/events.ts");
 const previewEnvSource = readSource("artifacts/api-server/src/routes/preview-env.ts");
+const tasksSource = readSource("artifacts/api-server/src/routes/tasks.ts");
 const livePreviewProxySource = readSource("artifacts/api-server/src/lib/livePreviewProxy.ts");
 const flyRuntimeProviderSource = readSource("artifacts/api-server/src/lib/fly-runtime-provider.ts");
 const projectFilesPreviewSource = readSource(
@@ -55,6 +56,18 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(eventsSource).toContain("STAGED_PREVIEW_STATUSES");
     expect(eventsSource).toContain("reconciliationAllowed: !stagedTask");
     expect(eventsSource).toContain('res.setHeader("Cache-Control", "no-store")');
+  });
+
+  it("marks volatile task and preview observations as non-cacheable", () => {
+    expect(tasksSource).toMatch(
+      /router\.get\("\/projects\/:id\/tasks"[\s\S]*?Cache-Control", "no-store"/u,
+    );
+    expect(eventsSource).toMatch(
+      /"\/projects\/:id\/tasks\/:taskId\/events"[\s\S]*?Cache-Control", "no-store"/u,
+    );
+    expect(previewEnvSource).toMatch(
+      /router\.get\("\/projects\/:id\/preview-env\/status"[\s\S]*?Cache-Control", "no-store"/u,
+    );
   });
 
   it("manual editor save publishes project_files_changed", () => {

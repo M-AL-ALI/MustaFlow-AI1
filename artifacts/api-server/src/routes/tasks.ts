@@ -43,6 +43,7 @@ const TERMINAL_TASK_EVENT_TYPES = ["completed", "failed", "cancelled"];
 const router: IRouter = Router();
 
 router.get("/projects/:id/tasks", requireProjectOwnership, async (req, res): Promise<void> => {
+  res.setHeader("Cache-Control", "no-store");
   const params = ListTasksParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

@@ -103,6 +103,7 @@ function hashLaunchToken(token: string): string {
 
 // ── GET /projects/:id/preview-env/status ─────────────────────────────────────
 router.get("/projects/:id/preview-env/status", requireProjectOwnership, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const projectId = Number(req.params.id);
   const [project] = await db
     .select({

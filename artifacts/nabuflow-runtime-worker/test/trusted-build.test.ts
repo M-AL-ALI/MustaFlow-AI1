@@ -20,15 +20,16 @@ import {
   type TrustedBuildRequest,
 } from "@workspace/tenant-runtime-contracts";
 import { makePantryFixture, PANTRY_TEST_KEY } from "../scripts/pantry-catalog-fixture";
-import type {
-  StoredTrustedBuild,
-  TrustedBuildBegin,
-  TrustedBuildCell,
-  TrustedBuildClaim,
-  TrustedBuildCoordinator,
-  TrustedBuildDiagnostics,
-  TrustedBuildFailure,
-  TrustedBuildWorkerBindings,
+import {
+  TRUSTED_BUILD_OPERATION_BOUND_MS,
+  type StoredTrustedBuild,
+  type TrustedBuildBegin,
+  type TrustedBuildCell,
+  type TrustedBuildClaim,
+  type TrustedBuildCoordinator,
+  type TrustedBuildDiagnostics,
+  type TrustedBuildFailure,
+  type TrustedBuildWorkerBindings,
 } from "../src/trusted-build-model";
 import {
   handleTrustedBuildQueue,
@@ -1081,8 +1082,17 @@ describe("trusted secretless build plane", () => {
     );
     const statusText = await status.text();
     expect(status.status, statusText).toBe(200);
-    const body = JSON.parse(statusText) as { state: string; output: TrustedBuildOutput };
+    const body = JSON.parse(statusText) as {
+      state: string;
+      output: TrustedBuildOutput;
+      createdAt: string;
+      deadlineAt: string;
+    };
     expect(body.state).toBe("succeeded");
+    expect(body.createdAt).toBe(NOW.toISOString());
+    expect(body.deadlineAt).toBe(
+      new Date(NOW.getTime() + TRUSTED_BUILD_OPERATION_BOUND_MS).toISOString(),
+    );
     expect(body.output.coldBuild).toBe(true);
     expect(body.output.upstreamRequests).toBe(0);
     expect(body.output.layers).toHaveLength(1);
