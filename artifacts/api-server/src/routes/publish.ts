@@ -88,6 +88,7 @@ import {
   selectAcceptedSealedReleaseForSnapshot,
   SealedTestingCandidateError,
 } from "../lib/sealed-testing-candidate";
+import { removeUncommittedProductionSnapshot } from "../lib/production-publish-retry-safety";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
 import {
   r2Enabled,
@@ -608,6 +609,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     return;
   }
 
+  let productionSnapshotCommitted = false;
+  let productionSnapshotNeedsReconciliation = false;
+  // Prettier would reindent the entire legacy route body for this guard.
+  // prettier-ignore
+  try {
   if (env === "staging") {
     // ── Staging publish ───────────────────────────────────────────────────────
     const stagingUrl = `https://${slug}-staging.${PLATFORM_DOMAIN}/`;
@@ -895,6 +901,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
           },
           "Production publish persistence and route rollback both failed",
         );
+        productionSnapshotNeedsReconciliation = true;
         res.status(503).json({
           error: "Production activation could not be reconciled after persistence failed.",
           code: "production_publish_rollback_failed",
@@ -910,6 +917,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     }
     throw error;
   }
+  productionSnapshotCommitted = true;
 
   // ── Edge CDN: upload to R2, sync KV, purge cache ──────────────────────────
   if (deploymentVersion?.id) {
@@ -1142,6 +1150,58 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       ? "Production container deployed. Public URL proxies to the live container."
       : "Public URL serves the frozen snapshot. Draft edits do not affect it until you publish again.",
   });
+  } finally {
+    if (
+      env === "production" &&
+      !productionSnapshotCommitted &&
+      !productionSnapshotNeedsReconciliation
+    ) {
+      try {
+        const removed = await removeUncommittedProductionSnapshot({
+          snapshotVersionId: deploymentVersion.id,
+          committed: productionSnapshotCommitted,
+          needsReconciliation: productionSnapshotNeedsReconciliation,
+          loadReferences: async () => {
+            const [references] = await db
+              .select({
+                publishedSnapshotId: projectsTable.publishedSnapshotId,
+                stagingPublishedSnapshotId: projectsTable.stagingPublishedSnapshotId,
+                testedSnapshotId: projectsTable.testedSnapshotId,
+              })
+              .from(projectsTable)
+              .where(eq(projectsTable.id, projectId));
+            return references;
+          },
+          removeSnapshot: async (snapshotVersionId) => {
+            await db
+              .delete(projectVersionsTable)
+              .where(
+                and(
+                  eq(projectVersionsTable.id, snapshotVersionId),
+                  eq(projectVersionsTable.projectId, projectId),
+                ),
+              );
+          },
+        });
+        if (removed) {
+          req.log.info(
+            { projectId, snapshotVersionId: deploymentVersion.id },
+            "Removed uncommitted production publish snapshot",
+          );
+        }
+      } catch (cleanupError) {
+        req.log.error(
+          {
+            projectId,
+            snapshotVersionId: deploymentVersion.id,
+            errorClass:
+              cleanupError instanceof Error ? cleanupError.constructor.name : "UnknownError",
+          },
+          "Failed to remove uncommitted production publish snapshot",
+        );
+      }
+    }
+  }
 });
 
 // ── POST /api/projects/:id/promote ───────────────────────────────────────────

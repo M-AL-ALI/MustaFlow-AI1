@@ -1756,9 +1756,81 @@ describe("CloudflareRuntimeProvider", () => {
         "/_nabuflow/control/v1/capabilities/42/neon-postgres/database/production-allocation",
       ],
     ]);
-    expect(calls[0]?.key).toBe(`production-database:${ensured.allocationIdentity}:ensure`);
-    expect(calls[1]?.key).toBe(`production-database:${ensured.allocationIdentity}:release`);
+    expect(calls[0]?.key).toMatch(
+      new RegExp(`^production-database:${ensured.allocationIdentity}:ensure:request-[0-9a-f]{64}$`),
+    );
+    expect(calls[1]?.key).toMatch(
+      new RegExp(
+        `^production-database:${ensured.allocationIdentity}:release:request-[0-9a-f]{64}$`,
+      ),
+    );
     expect(JSON.stringify(calls)).not.toMatch(/connectionString|managementKey|credential/iu);
+  });
+
+  it("replays an identical publish prerequisite but uses a fresh wire key after a control-version change", async () => {
+    const projectId = 43;
+    const seen = new Map<string, string>();
+    const calls: Array<{ key: string; body: string }> = [];
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      const key = new Headers(init?.headers).get("idempotency-key") ?? "";
+      const body = String(init?.body ?? "");
+      const previousBody = seen.get(key);
+      calls.push({ key, body });
+      if (previousBody !== undefined && previousBody !== body) {
+        return json(
+          {
+            code: "idempotency_conflict",
+            message: "The idempotency key was used for a different request",
+            retryable: false,
+            requestId: "request-conflict",
+          },
+          409,
+        );
+      }
+      seen.set(key, body);
+      const parsed = JSON.parse(body) as { allocationIdentity: string };
+      return json({
+        ok: true,
+        projectId,
+        allocationIdentity: parsed.allocationIdentity,
+        state: "ready",
+        capability: { provider: "neon-postgres", name: "database" },
+        revision: `production-database-${parsed.allocationIdentity.slice(0, 48)}`,
+        providerProjectId: "provider-project-43",
+        reused: calls.length > 1,
+      });
+    });
+
+    const providerForVersion = (deploymentVersion: string): CloudflareRuntimeProvider => {
+      const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+      const state = provider as unknown as {
+        deploymentVersion: string | null;
+        controlFeatures: Set<string>;
+      };
+      state.deploymentVersion = deploymentVersion;
+      state.controlFeatures.add("production-database-v1");
+      return provider;
+    };
+
+    const firstProvider = providerForVersion("production-worker-v1");
+    await expect(
+      firstProvider.ensureProductionDatabaseCapability({ projectId }),
+    ).resolves.toMatchObject({ reused: false });
+    await expect(
+      firstProvider.ensureProductionDatabaseCapability({ projectId }),
+    ).resolves.toMatchObject({ reused: true });
+
+    const rotatedProvider = providerForVersion("production-worker-v2");
+    await expect(
+      rotatedProvider.ensureProductionDatabaseCapability({ projectId }),
+    ).resolves.toMatchObject({ reused: true });
+
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.key).toBe(calls[1]?.key);
+    expect(calls[0]?.body).toBe(calls[1]?.body);
+    expect(calls[2]?.key).not.toBe(calls[0]?.key);
+    expect(calls[2]?.body).not.toBe(calls[0]?.body);
+    expect(new Set(calls.map((call) => call.key)).size).toBe(2);
   });
 
   it("promotes, starts, then activates one durable production identity with stable phase keys", async () => {
@@ -1968,8 +2040,10 @@ describe("CloudflareRuntimeProvider", () => {
     expect(calls.at(-1)).toMatchObject({
       method: "POST",
       path: "/_nabuflow/control/v1/routes/canary.apps.mustaflow.com/activate",
-      key: `production-publish:${promotionIdentity}:rollback`,
     });
+    expect(calls.at(-1)?.key).toMatch(
+      new RegExp(`^production-publish:${promotionIdentity}:rollback:request-[0-9a-f]{64}$`),
+    );
     expect(JSON.parse(calls.at(-1)!.body)).toMatchObject({
       route: {
         activeSlot: "blue",
