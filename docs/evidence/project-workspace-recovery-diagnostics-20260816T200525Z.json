@@ -1,0 +1,74 @@
+{
+  "runId": "project-workspace-recovery-diagnostics-20260816T200525Z",
+  "capturedAt": "2026-08-16T20:05:25.9074586Z",
+  "branch": "codex/workspace-recovery-diagnostics",
+  "base": "4c86789a6184a73b4e3e8c39c7f5acbcaeb025b9",
+  "liveMutation": false,
+  "promotionAttempted": false,
+  "flyTouched": false,
+  "costIncurred": false,
+  "historicalFailure": {
+    "occurrences": 3,
+    "timestampsUtc": [
+      "2026-08-16T19:29:08.953Z",
+      "2026-08-16T19:29:30.400Z",
+      "2026-08-16T19:29:40.488Z"
+    ],
+    "terminalClass": "BuilderChunkRecoveryError",
+    "retryClass": "TypeError",
+    "messageClass": "failed_dynamic_module_fetch",
+    "assetPath": "/assets/_id_-CqHj69aa.js",
+    "routeScope": "project-workspace"
+  },
+  "cleanReload": {
+    "workspaceRendered": true,
+    "assetStatus": 200,
+    "assetMediaType": "text/javascript",
+    "assetBytes": 844580,
+    "fromDiskCache": false,
+    "fromServiceWorker": false,
+    "cacheBustedHeadStatus": 200,
+    "moduleExecuted": true,
+    "newWorkspaceErrors": 0
+  },
+  "classification": {
+    "projectDataImplicated": false,
+    "moduleEvaluationImplicated": false,
+    "recentPreviewControlsImplicated": false,
+    "sharedWorkspaceTransportImplicated": true,
+    "lowerLevelHistoricalNetworkCauseAvailable": false,
+    "scope": "all project workspaces"
+  },
+  "flashlight": {
+    "storage": "tab-scoped session storage",
+    "probeMethod": "HEAD",
+    "probeBody": false,
+    "probeTimeoutMs": 3000,
+    "queryForwarded": false,
+    "stackPersisted": false,
+    "projectIdentifierPersisted": false,
+    "freeFormTextPersisted": false,
+    "recordClearedOnSuccessfulImport": true
+  },
+  "verification": {
+    "focusedTests": { "passed": 19, "failed": 0 },
+    "fullTests": {
+      "passed": 1057,
+      "failed": 1,
+      "preExistingFailure": "preview-reconciliation expected SHA is stale; base blob and worktree fixture both begin abe274da while the test expects ec751002"
+    },
+    "localViteModulesTransformed": 4075,
+    "manifestsChanged": false,
+    "lockfilesChanged": false
+  },
+  "unexpectedButUnrelated": [
+    {
+      "class": "preview_iframe_blocked_by_response",
+      "effectOnWorkspaceRoute": "none"
+    },
+    {
+      "class": "localhost_clerk_frontend_unavailable",
+      "effectOnProductionClassification": "none"
+    }
+  ]
+}
