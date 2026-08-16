@@ -50,6 +50,12 @@ export type TaskReport = {
    */
   previewSyncFailed?: boolean;
   warnings: string[];
+  /** Sanitized typed evidence for a terminal platform failure. */
+  failureEvidence?: {
+    code: string;
+    message: string;
+    evidence: Readonly<Record<string, unknown>> | null;
+  };
   /** Non-required checks that failed. Present when versionValidationStatus=passed_with_warnings. */
   warningChecks?: Array<{ id: string; label: string; message: string }>;
   suggestions?: string[];

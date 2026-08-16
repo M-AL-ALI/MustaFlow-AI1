@@ -6744,6 +6744,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       logger.error({ err, taskId, projectId }, "Builder job failed");
       const message = err instanceof Error ? err.message : "Unknown builder error";
+      const failureEvidence =
+        err instanceof ZeroGenerationKitchenError
+          ? { code: err.code, message: err.message, evidence: err.evidence }
+          : undefined;
+      if (failureEvidence !== undefined) analyticsErrorCategory = failureEvidence.code;
       await emitEvent(taskId, "failed", message);
 
       // Notify project owner of build failure (fire-and-forget)
@@ -6802,6 +6807,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             filesRemoved: [],
             previewUpdated: false,
             warnings: [],
+            ...(failureEvidence === undefined ? {} : { failureEvidence }),
             suggestions,
             integrationsNeeded: [],
           },
