@@ -96,12 +96,10 @@ export function resolveSealedTestingHandoff(input: {
   sourceVersionId: number;
   release: AcceptedSealedRelease;
 } {
-  const selection = selectAcceptedSealedReleaseForSnapshot({
-    targetSnapshot: input.targetVersion.filesSnapshot,
-    candidates: [
-      input.targetVersion,
-      ...input.candidates.filter((v) => v.id !== input.targetVersion.id),
-    ],
+  const selection = selectSealedTestingHandoff({
+    targetVersion: input.targetVersion,
+    candidates: input.candidates,
+    currentFiles: input.currentFiles,
   });
   resolveSealedTestingCandidate({
     versionId: input.targetVersion.id,
@@ -110,6 +108,44 @@ export function resolveSealedTestingHandoff(input: {
     sealedRelease: selection.release,
     runtime: input.runtime,
   });
+  return {
+    versionId: input.targetVersion.id,
+    sourceVersionId: selection.sourceVersionId,
+    release: selection.release,
+  };
+}
+
+/**
+ * Resolve the immutable source/release binding before touching runtime state.
+ * A stopped accepted runtime can then be resumed with this exact release and
+ * independently reverified by resolveSealedTestingCandidate afterwards.
+ */
+export function selectSealedTestingHandoff(input: {
+  targetVersion: SealedVersionCandidate;
+  candidates: readonly SealedVersionCandidate[];
+  currentFiles: readonly SnapshotFile[];
+}): {
+  versionId: number;
+  sourceVersionId: number;
+  release: AcceptedSealedRelease;
+} {
+  const selection = selectAcceptedSealedReleaseForSnapshot({
+    targetSnapshot: input.targetVersion.filesSnapshot,
+    candidates: [
+      input.targetVersion,
+      ...input.candidates.filter((v) => v.id !== input.targetVersion.id),
+    ],
+  });
+  if (
+    input.targetVersion.filesSnapshot === null ||
+    canonicalSealedSnapshot(input.targetVersion.filesSnapshot) !==
+      canonicalSealedSnapshot(input.currentFiles)
+  ) {
+    throw new SealedTestingCandidateError(
+      "sealed_test_source_changed",
+      "The accepted sealed release does not match the current source snapshot",
+    );
+  }
   return {
     versionId: input.targetVersion.id,
     sourceVersionId: selection.sourceVersionId,

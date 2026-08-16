@@ -36,7 +36,8 @@ import {
   resolveZeroGenerationTarget,
 } from "../lib/zero-sealed-generation";
 import {
-  resolveSealedTestingHandoff,
+  resolveSealedTestingCandidate,
+  selectSealedTestingHandoff,
   SealedTestingCandidateError,
 } from "../lib/sealed-testing-candidate";
 import { encryptionService } from "../lib/encryption";
@@ -158,10 +159,7 @@ async function prepareSealedTestingHandoff(input: {
       "The active runtime provider cannot resolve sealed testing releases",
     );
   }
-  const runtime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(
-    input.projectId,
-  );
-  const candidate = resolveSealedTestingHandoff({
+  const selection = selectSealedTestingHandoff({
     targetVersion: {
       id: targetVersion.id,
       filesSnapshot: targetVersion.filesSnapshot as TestingSourceFile[] | null,
@@ -173,8 +171,26 @@ async function prepareSealedTestingHandoff(input: {
       sealedRelease: version.sealedRelease,
     })),
     currentFiles: input.files,
-    runtime,
   });
+  let runtime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(
+    input.projectId,
+  );
+  if (runtime === null || runtime.status !== "running") {
+    runtime = await tenantRuntimeProvider.zeroGenerationStartAcceptedSealedRelease({
+      projectId: input.projectId,
+      acceptedRelease: selection.release,
+    });
+  }
+  const candidate = {
+    ...selection,
+    ...resolveSealedTestingCandidate({
+      versionId: targetVersion.id,
+      versionSnapshot: targetVersion.filesSnapshot as TestingSourceFile[] | null,
+      currentFiles: input.files,
+      sealedRelease: selection.release,
+      runtime,
+    }),
+  };
   if (targetVersion.sealedRelease === null || targetVersion.sealedRelease === undefined) {
     await db
       .update(projectVersionsTable)

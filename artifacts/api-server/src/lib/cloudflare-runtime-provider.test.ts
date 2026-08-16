@@ -72,6 +72,39 @@ function runningRuntime(identity: string, projectId: number): Record<string, unk
   };
 }
 
+function acceptedRelease(identity: string) {
+  const hash = (digit: string) => digit.repeat(64);
+  return {
+    format: "nabuflow.accepted-sealed-release/v1" as const,
+    state: "accepted" as const,
+    acceptedAt: "2026-08-16T10:00:00.000Z",
+    sourceRuntimeIdentity: identity,
+    sourceRevision: "source-r5",
+    manifest: {
+      revision: "manifest-1",
+      runtime: "node-api" as const,
+      buildCommand: ["npm", "run", "build"],
+      startCommand: ["node", "src/index.js"],
+      servicePort: 8080,
+      healthPath: "/healthz",
+      resourceProfile: "dev" as const,
+      public: false,
+    },
+    shelfRevisionId: "pantry-2026-08-16.1",
+    shelfRootSha256: hash("1"),
+    shelfStateRevision: 1,
+    dependencyClosureSha256: hash("2"),
+    buildId: `pbuild_${"a".repeat(32)}`,
+    buildAttestationSha256: hash("3"),
+    artifactRevision: "artifact-r5",
+    sealedArtifactSha256: hash("4"),
+    contentSha256: hash("5"),
+    appArtifactSha256: hash("6"),
+    layerContentSha256s: [hash("7")],
+    declaredCapabilities: ["database" as const],
+  };
+}
+
 async function v1Artifact(identity: string) {
   return sealRuntimeArtifact({
     targetRuntimeIdentity: identity,
@@ -228,6 +261,95 @@ describe("CloudflareRuntimeProvider", () => {
 
     const provider = new CloudflareRuntimeProvider(config);
     await expect(provider.zeroGenerationRuntimeDescriptorForProject(44)).resolves.toBeNull();
+  });
+
+  it("resumes the exact durable accepted release after the local deployment cache is lost", async () => {
+    const projectId = 51;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const release = acceptedRelease(identity);
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method, path, body });
+      if (path.endsWith("/version") && init?.headers === undefined) {
+        return json({ code: "unauthorized" }, 401);
+      }
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-layers-v1", "manifest-update-v1"],
+        });
+      }
+      return json({
+        runtime: {
+          identity,
+          projectId,
+          role: "preview",
+          slot: "primary",
+          status: method === "POST" ? "running" : "stopped",
+          servicePort: 8080,
+          manifestRevision: release.manifest.revision,
+          deploymentVersion: "staging-v1",
+          endpoint: null,
+          readyAt: method === "POST" ? "2026-08-16T10:10:00.000Z" : null,
+          lastError: null,
+        },
+      });
+    });
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(
+      provider.zeroGenerationStartAcceptedSealedRelease({
+        projectId,
+        acceptedRelease: release,
+      }),
+    ).resolves.toMatchObject({ identity, status: "running" });
+
+    const startCall = calls.find(
+      (call) => call.method === "POST" && call.path.endsWith("/preview/primary/start"),
+    );
+    expect(startCall?.body).toMatchObject({
+      artifactRevision: release.artifactRevision,
+      artifactSha256: release.sealedArtifactSha256,
+    });
+    expect(calls.filter((call) => call.path.includes("/layered-artifacts/"))).toHaveLength(0);
+  });
+
+  it("fails closed instead of starting a durable runtime with a mismatched manifest", async () => {
+    const projectId = 51;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      json({
+        runtime: {
+          ...(runningRuntime(identity, projectId) as { runtime: Record<string, unknown> }).runtime,
+          status: "stopped",
+          manifestRevision: "different-manifest",
+        },
+      }),
+    );
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(
+      provider.zeroGenerationStartAcceptedSealedRelease({
+        projectId,
+        acceptedRelease: acceptedRelease(identity),
+      }),
+    ).rejects.toMatchObject({ code: "sealed_release_runtime_mismatch", retryable: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("accepts an offset-corrected acceptance clock without changing the production default", async () => {

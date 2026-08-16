@@ -38,6 +38,7 @@ import {
   type RuntimeDescriptor,
   type RuntimeLocator,
   type TenantRuntimeConfig,
+  type AcceptedSealedRelease,
   type ProductionArtifactRelease,
 } from "@workspace/tenant-runtime-contracts";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
@@ -1388,6 +1389,72 @@ export class CloudflareRuntimeProvider
       }
       throw error;
     }
+  }
+
+  async zeroGenerationStartAcceptedSealedRelease(input: {
+    projectId: number;
+    acceptedRelease: AcceptedSealedRelease;
+    operationTimeoutMs?: number;
+    signal?: AbortSignal;
+  }) {
+    const release = acceptedSealedReleaseSchema.parse(input.acceptedRelease);
+    const locator = await this.locator(release.sourceRuntimeIdentity, input.projectId);
+    if (locator.role !== "preview" || locator.slot !== "primary") {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "sealed_release_runtime_mismatch",
+        false,
+        "Accepted sealed release does not target the project preview runtime",
+      );
+    }
+    const current = await this.zeroGenerationRuntimeDescriptor(
+      release.sourceRuntimeIdentity,
+      input.projectId,
+    );
+    if (
+      current.identity !== release.sourceRuntimeIdentity ||
+      current.manifestRevision !== release.manifest.revision
+    ) {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "sealed_release_runtime_mismatch",
+        false,
+        "Accepted sealed release does not match the durable preview runtime",
+      );
+    }
+    await this.requireControlFeature("artifact-layers-v1");
+    this.deployedArtifacts.set(release.sourceRuntimeIdentity, {
+      artifactRevision: release.artifactRevision,
+      sealedArtifactSha256: release.sealedArtifactSha256,
+      feature: "artifact-layers-v1",
+    });
+    if (current.status === "running") return current;
+
+    const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+    const started = await this.descriptorRequest(
+      locator,
+      "POST",
+      "/start",
+      {
+        locator,
+        expectedDeploymentVersion,
+        artifactRevision: release.artifactRevision,
+        artifactSha256: release.sealedArtifactSha256,
+      },
+      this.operationOptions(
+        "runtime-start",
+        RUNTIME_START_OPERATION_BOUND_MS,
+        "runtime_start_timeout",
+        "runtime_start_cancelled",
+        input,
+      ),
+    );
+    return {
+      identity: started.identity,
+      manifestRevision: started.manifestRevision,
+      status: started.status,
+      endpoint: started.endpoint,
+    };
   }
   async updateEnvironment(
     _runtimeId: string,
