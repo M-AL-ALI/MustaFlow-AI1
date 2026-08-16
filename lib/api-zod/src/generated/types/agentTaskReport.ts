@@ -16,6 +16,13 @@ export type AgentTaskReport = {
   filesRemoved?: string[];
   previewUpdated?: boolean;
   warnings?: string[];
+  /** Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material. */
+  failureEvidence?: {
+  code: string;
+  message: string;
+  /** @nullable */
+  evidence: { [key: string]: unknown } | null;
+};
   /** Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean. */
   warningChecks?: {
   id?: string;

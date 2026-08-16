@@ -9135,6 +9135,16 @@ components:
             filesRemoved: { type: array, items: { type: string } }
             previewUpdated: { type: boolean }
             warnings: { type: array, items: { type: string } }
+            failureEvidence:
+              type: object
+              description: "Sanitized typed evidence for a terminal platform failure. Values are safe for operator diagnostics and never contain secret material."
+              required: [code, message, evidence]
+              properties:
+                code: { type: string }
+                message: { type: string }
+                evidence:
+                  type: ["object", "null"]
+                  additionalProperties: true
             warningChecks:
               type: array
               description: "Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean."
