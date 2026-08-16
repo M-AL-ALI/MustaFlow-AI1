@@ -40,7 +40,10 @@ import {
   trustedBuildSandboxCellId,
 } from "./trusted-build-cell";
 import type { TrustedBuildDurableObject } from "./trusted-build-durable-object";
-import { TRUSTED_BUILD_MAX_ATTEMPTS } from "./trusted-build-model";
+import {
+  TRUSTED_BUILD_MAX_ATTEMPTS,
+  TRUSTED_BUILD_OPERATION_BOUND_MS,
+} from "./trusted-build-model";
 import type {
   StoredTrustedBuild,
   TrustedBuildCell,
@@ -1113,6 +1116,10 @@ async function handleStatus(
               retryable: build.failure.retryable,
               status: build.failure.status,
             },
+      createdAt: build.createdAt,
+      deadlineAt:
+        build.deadlineAt ??
+        new Date(Date.parse(build.createdAt) + TRUSTED_BUILD_OPERATION_BOUND_MS).toISOString(),
       updatedAt: build.updatedAt,
     }),
   );

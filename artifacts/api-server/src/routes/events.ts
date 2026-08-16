@@ -23,6 +23,7 @@ router.get(
   "/projects/:id/tasks/:taskId/events",
   requireProjectOwnership,
   async (req, res): Promise<void> => {
+    res.setHeader("Cache-Control", "no-store");
     const projectId = Number(req.params.id);
     const taskId = Number(req.params.taskId);
     if (!Number.isFinite(projectId) || !Number.isFinite(taskId)) {

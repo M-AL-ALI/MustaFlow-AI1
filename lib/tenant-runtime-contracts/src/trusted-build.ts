@@ -509,6 +509,9 @@ export const trustedBuildStatusResponseSchema = z
     attempts: z.array(trustedBuildAttemptEvidenceSchema).max(10),
     output: trustedBuildOutputSchema.nullable(),
     error: trustedBuildPublicErrorSchema.nullable(),
+    /** Optional during rolling upgrades; new coordinators always emit both fields. */
+    createdAt: z.string().datetime({ offset: true }).optional(),
+    deadlineAt: z.string().datetime({ offset: true }).optional(),
     updatedAt: z.string().datetime({ offset: true }),
   })
   .strict()

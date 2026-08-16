@@ -1,22 +1,37 @@
-import type {
-  PantryErrorCode,
-  TrustedBuildAttemptEvidence,
-  TrustedBuildCollectionProgress,
-  TrustedBuildCommandDiagnostics,
-  TrustedBuildMemoryProgress,
-  TrustedBuildOutput,
-  TrustedBuildRequest,
-  TrustedBuildSecretScanFinding,
-  TrustedBuildSecretScanSummary,
-  TrustedBuildStage,
-  TrustedBuildState,
-  TrustedBuildVerificationProgress,
+import {
+  ZERO_GENERATION_ASSEMBLY_RESERVE_MS,
+  type PantryErrorCode,
+  type TrustedBuildAttemptEvidence,
+  type TrustedBuildCollectionProgress,
+  type TrustedBuildCommandDiagnostics,
+  type TrustedBuildMemoryProgress,
+  type TrustedBuildOutput,
+  type TrustedBuildRequest,
+  type TrustedBuildSecretScanFinding,
+  type TrustedBuildSecretScanSummary,
+  type TrustedBuildStage,
+  type TrustedBuildState,
+  type TrustedBuildVerificationProgress,
 } from "@workspace/tenant-runtime-contracts";
 import type { Sandbox } from "@cloudflare/sandbox";
 import type { TrustedBuildDurableObject } from "./trusted-build-durable-object";
 
 export const TRUSTED_BUILD_MAX_ATTEMPTS = 3;
 export const TRUSTED_BUILD_QUEUE_WATCHDOG_MS = 60_000;
+/**
+ * The coordinator owns an absolute build deadline that no request, lease, or
+ * consumer heartbeat can extend.  The remaining minute belongs to the kitchen
+ * so it can observe and surface the coordinator's durable typed terminal.
+ */
+export const TRUSTED_BUILD_OPERATION_BOUND_MS = 1_080_000;
+export const TRUSTED_BUILD_TERMINAL_OBSERVATION_MARGIN_MS = 60_000;
+
+if (
+  TRUSTED_BUILD_OPERATION_BOUND_MS + TRUSTED_BUILD_TERMINAL_OBSERVATION_MARGIN_MS >
+  ZERO_GENERATION_ASSEMBLY_RESERVE_MS
+) {
+  throw new Error("Trusted build deadline exceeds the kitchen assembly reserve");
+}
 
 export interface TrustedBuildQueueMessage {
   schemaVersion: 1;
@@ -42,6 +57,8 @@ export interface StoredTrustedBuild {
   attempt: number;
   queueDeliveries: number;
   createdAt: string;
+  /** Persisted for new builds; legacy records derive the same value from createdAt. */
+  deadlineAt?: string;
   updatedAt: string;
   leaseUntil: string | null;
   cellId: string | null;

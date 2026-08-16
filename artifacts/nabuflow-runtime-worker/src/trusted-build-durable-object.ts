@@ -1,7 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { getSandbox } from "@cloudflare/sandbox";
 import type { TrustedBuildStage, TrustedBuildState } from "@workspace/tenant-runtime-contracts";
-import { TRUSTED_BUILD_MAX_ATTEMPTS, TRUSTED_BUILD_QUEUE_WATCHDOG_MS } from "./trusted-build-model";
+import {
+  TRUSTED_BUILD_MAX_ATTEMPTS,
+  TRUSTED_BUILD_OPERATION_BOUND_MS,
+  TRUSTED_BUILD_QUEUE_WATCHDOG_MS,
+} from "./trusted-build-model";
 import type {
   StoredTrustedBuild,
   TrustedBuildBegin,
@@ -31,6 +35,53 @@ function requestKey(requestId: string): string {
 
 function isTerminal(state: TrustedBuildState): boolean {
   return state === "succeeded" || state === "failed" || state === "cancelled";
+}
+
+function deadlineMs(build: StoredTrustedBuild): number {
+  const persisted = (build as StoredTrustedBuild & { deadlineAt?: string }).deadlineAt;
+  const parsedPersisted = persisted === undefined ? Number.NaN : Date.parse(persisted);
+  if (Number.isFinite(parsedPersisted)) return parsedPersisted;
+  const createdAt = Date.parse(build.createdAt);
+  return Number.isFinite(createdAt) ? createdAt + TRUSTED_BUILD_OPERATION_BOUND_MS : 0;
+}
+
+function persistDeadlineIfMissing(build: StoredTrustedBuild): void {
+  if (build.deadlineAt === undefined || !Number.isFinite(Date.parse(build.deadlineAt))) {
+    build.deadlineAt = new Date(deadlineMs(build)).toISOString();
+  }
+}
+
+function terminalizeDeadline(build: StoredTrustedBuild, nowMs: number): boolean {
+  persistDeadlineIfMissing(build);
+  if (isTerminal(build.state) || nowMs < deadlineMs(build)) return false;
+  const failedAt = new Date(nowMs).toISOString();
+  const failure: TrustedBuildFailure = {
+    code: "build_timeout",
+    message: "The trusted build exceeded its absolute operation deadline",
+    retryable: true,
+    status: 504,
+    failedAt,
+    negativeCacheUntil: new Date(nowMs + TRUSTED_BUILD_QUEUE_WATCHDOG_MS).toISOString(),
+  };
+  build.state = "failed";
+  build.updatedAt = failedAt;
+  build.failure = failure;
+  build.leaseUntil = null;
+  build.cellId = null;
+  const evidence = build.attempts?.find((item) => item.attempt === build.attempt);
+  if (evidence !== undefined) {
+    evidence.failingStage ??= {
+      pass: evidence.lastSuccessfulStage?.pass ?? null,
+      stage: evidence.lastSuccessfulStage?.stage ?? "orchestration",
+    };
+    evidence.error = {
+      code: failure.code,
+      message: failure.message,
+      retryable: failure.retryable,
+      status: failure.status,
+    };
+  }
+  return true;
 }
 
 export class TrustedBuildDurableObject
@@ -77,6 +128,9 @@ export class TrustedBuildDurableObject
       if (active >= maxActive) return { state: "backpressure" };
       const build: StoredTrustedBuild = {
         ...request,
+        deadlineAt: new Date(
+          Date.parse(request.createdAt) + TRUSTED_BUILD_OPERATION_BOUND_MS,
+        ).toISOString(),
         state: "queued",
         attempt: 0,
         queueDeliveries: 0,
@@ -94,7 +148,10 @@ export class TrustedBuildDurableObject
     });
     if (result.state === "created") {
       await this.scheduleWatchdog(
-        Date.parse(result.build.updatedAt) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS,
+        Math.min(
+          Date.parse(result.build.updatedAt) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS,
+          deadlineMs(result.build),
+        ),
       );
     }
     return result;
@@ -368,6 +425,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return { state: "not_found" };
       if (isTerminal(build.state)) return { state: "terminal", build };
+      if (terminalizeDeadline(build, Date.parse(now))) {
+        await transaction.put(key, build);
+        return { state: "terminal", build };
+      }
       if (
         build.state !== "queued" &&
         build.leaseUntil !== null &&
@@ -417,7 +478,9 @@ export class TrustedBuildDurableObject
       await transaction.put(key, build);
       return { state: "claimed", build };
     });
-    if (result.state === "claimed") await this.scheduleWatchdog(Date.parse(leaseUntil));
+    if (result.state === "claimed") {
+      await this.scheduleWatchdog(Math.min(Date.parse(leaseUntil), deadlineMs(result.build)));
+    }
     return result;
   }
 
@@ -432,13 +495,22 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found" as const;
       if (isTerminal(build.state)) return "terminal" as const;
+      if (terminalizeDeadline(build, Date.parse(now))) {
+        await transaction.put(key, build);
+        return "terminal" as const;
+      }
       if (build.attempt !== attempt) return "stale" as const;
       build.updatedAt = now;
       build.leaseUntil = leaseUntil;
       await transaction.put(key, build);
       return "updated" as const;
     });
-    if (result === "updated") await this.scheduleWatchdog(Date.parse(leaseUntil));
+    if (result === "updated") {
+      const build = await this.get(buildId);
+      if (build !== null) {
+        await this.scheduleWatchdog(Math.min(Date.parse(leaseUntil), deadlineMs(build)));
+      }
+    }
     return result;
   }
 
@@ -452,6 +524,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found" as const;
       if (isTerminal(build.state)) return "terminal" as const;
+      if (terminalizeDeadline(build, Date.now())) {
+        await transaction.put(key, build);
+        return "terminal" as const;
+      }
       if (build.attempt !== attempt) return "stale" as const;
       build.cellId = cellId;
       await transaction.put(key, build);
@@ -471,6 +547,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found";
       if (build.state === "cancelled") return "cancelled";
+      if (terminalizeDeadline(build, Date.parse(now))) {
+        await transaction.put(key, build);
+        return "conflict";
+      }
       if (build.attempt !== attempt || build.state !== expected) return "conflict";
       build.state = next;
       build.updatedAt = now;
@@ -490,6 +570,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found";
       if (build.state === "cancelled") return "cancelled";
+      if (terminalizeDeadline(build, Date.parse(now))) {
+        await transaction.put(key, build);
+        return "conflict";
+      }
       if (build.attempt !== attempt || build.state !== "verifying") return "conflict";
       build.state = "succeeded";
       build.outputObjectSha256 = outputObjectSha256;
@@ -511,6 +595,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found";
       if (build.state === "cancelled") return "cancelled";
+      if (terminalizeDeadline(build, Date.parse(failure.failedAt))) {
+        await transaction.put(key, build);
+        return "stale";
+      }
       if (build.attempt !== attempt) return "stale";
       build.state = "failed";
       build.failure = failure;
@@ -533,6 +621,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found";
       if (build.state === "cancelled") return "cancelled";
+      if (terminalizeDeadline(build, Date.parse(now))) {
+        await transaction.put(key, build);
+        return "conflict";
+      }
       if (build.attempt !== attempt || build.state !== expected) return "conflict";
       build.state = "queued";
       build.updatedAt = now;
@@ -542,7 +634,12 @@ export class TrustedBuildDurableObject
       return "updated";
     });
     if (result === "updated") {
-      await this.scheduleWatchdog(Date.parse(now) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS);
+      const build = await this.get(buildId);
+      if (build !== null) {
+        await this.scheduleWatchdog(
+          Math.min(Date.parse(now) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS, deadlineMs(build)),
+        );
+      }
     }
     return result;
   }
@@ -556,6 +653,10 @@ export class TrustedBuildDurableObject
       const build = await transaction.get<StoredTrustedBuild>(key);
       if (build === undefined) return "not_found";
       if (isTerminal(build.state)) return "already-terminal";
+      if (terminalizeDeadline(build, Date.parse(now))) {
+        await transaction.put(key, build);
+        return "already-terminal";
+      }
       build.state = "cancelled";
       build.updatedAt = now;
       build.leaseUntil = null;
@@ -596,21 +697,27 @@ export class TrustedBuildDurableObject
     const builds = await this.ctx.storage.list<StoredTrustedBuild>({ prefix: BUILD_PREFIX });
     for (const snapshot of builds.values()) {
       if (isTerminal(snapshot.state)) continue;
-      const dueAt =
+      const dueAt = Math.min(
         snapshot.state === "queued" || snapshot.leaseUntil === null
           ? Date.parse(snapshot.updatedAt) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS
-          : Date.parse(snapshot.leaseUntil);
+          : Date.parse(snapshot.leaseUntil),
+        deadlineMs(snapshot),
+      );
       if (dueAt > nowMs) continue;
       const recovery = await this.ctx.storage.transaction(async (transaction) => {
         const key = buildKey(snapshot.buildId);
         const build = await transaction.get<StoredTrustedBuild>(key);
         if (build === undefined || isTerminal(build.state)) return null;
+        const cellId = build.cellId;
+        if (terminalizeDeadline(build, nowMs)) {
+          await transaction.put(key, build);
+          return { action: "failed" as const, cellId, build };
+        }
         const currentDueAt =
           build.state === "queued" || build.leaseUntil === null
             ? Date.parse(build.updatedAt) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS
             : Date.parse(build.leaseUntil);
         if (currentDueAt > nowMs) return null;
-        const cellId = build.cellId;
         if (build.attempt >= TRUSTED_BUILD_MAX_ATTEMPTS) {
           const failedAt = new Date(nowMs).toISOString();
           const failure: TrustedBuildFailure = {
@@ -731,10 +838,12 @@ export class TrustedBuildDurableObject
     let next: number | null = null;
     for (const build of builds.values()) {
       if (isTerminal(build.state)) continue;
-      const dueAt =
+      const dueAt = Math.min(
         build.state === "queued" || build.leaseUntil === null
           ? Date.parse(build.updatedAt) + TRUSTED_BUILD_QUEUE_WATCHDOG_MS
-          : Date.parse(build.leaseUntil);
+          : Date.parse(build.leaseUntil),
+        deadlineMs(build),
+      );
       next = next === null ? dueAt : Math.min(next, dueAt);
     }
     if (next !== null) await this.ctx.storage.setAlarm(Math.max(Date.now() + 1_000, next));
