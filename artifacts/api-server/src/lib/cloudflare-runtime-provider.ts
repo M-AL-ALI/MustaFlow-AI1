@@ -79,6 +79,17 @@ const MAX_RETRY_AFTER_MS = 1_000;
 const OPERATION_FOLLOW_DELAY_MS = 1_000;
 export const CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS = 10;
 
+async function requestBoundIdempotencyKey(input: {
+  baseKey: string;
+  method: string;
+  path: string;
+  body: string | Uint8Array;
+}): Promise<string> {
+  const bodySha256 = await sha256Hex(input.body);
+  const requestSha256 = await sha256Hex(`${input.method}\n${input.path}\n${bodySha256}`);
+  return `${input.baseKey}:request-${requestSha256}`;
+}
+
 interface ControlOperationFollowOptions {
   operation: string;
   operationBoundMs: number;
@@ -468,10 +479,18 @@ export class CloudflareRuntimeProvider
       if (input.operation === undefined) {
         throw new Error("Idempotent control mutations require an operation follower");
       }
-      return this.followOperation(
-        { ...encoded, idempotencyKey: input.idempotencyKey },
-        input.operation,
-      );
+      let idempotencyKey: string;
+      try {
+        idempotencyKey = await requestBoundIdempotencyKey({
+          baseKey: input.idempotencyKey,
+          method,
+          path: input.path,
+          body,
+        });
+      } catch (error) {
+        throw preDispatchError(error);
+      }
+      return this.followOperation({ ...encoded, idempotencyKey }, input.operation);
     }
     return this.requestEncoded(encoded);
   }
@@ -484,8 +503,19 @@ export class CloudflareRuntimeProvider
     operation: ControlOperationFollowOptions;
     parse: { parse(value: unknown): T };
   }): Promise<T> {
+    let idempotencyKey: string;
+    try {
+      idempotencyKey = await requestBoundIdempotencyKey({
+        baseKey: input.idempotencyKey,
+        method: input.method,
+        path: input.path,
+        body: input.body,
+      });
+    } catch (error) {
+      throw preDispatchError(error);
+    }
     return this.followOperation(
-      { ...input, contentType: "application/octet-stream" },
+      { ...input, idempotencyKey, contentType: "application/octet-stream" },
       input.operation,
     );
   }

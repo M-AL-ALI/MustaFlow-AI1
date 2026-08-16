@@ -1,0 +1,83 @@
+{
+  "schema": "nabuflow.publish-idempotency-retry-safety-evidence/v1",
+  "runId": "publish-idempotency-retry-safety-20260816T223928Z",
+  "branch": "codex/publish-idempotency-retry-safety",
+  "baseSha": "c7fbe70f5003f0c29e5728f686f0fb9a00e7a9a4",
+  "entryPath": {
+    "kind": "real_ui",
+    "route": "POST /api/projects/51/publish",
+    "clientSuppliedIdempotencyKey": false
+  },
+  "failure": {
+    "httpStatus": 409,
+    "typedCode": "idempotency_conflict",
+    "stage": "production-database.ensure/idempotency",
+    "sanitizedMessage": "The idempotency key was used for a different request"
+  },
+  "mechanism": {
+    "baseKeyShape": "production-database:<allocationIdentity>:ensure",
+    "changedRequestField": "expectedDeploymentVersion",
+    "workerFingerprintShape": "sha256(method + pathAndQuery + signed.bodySha256)",
+    "clientPersistedKey": false,
+    "classification": "server-owned stable business key reused after signed request precondition changed"
+  },
+  "blastRadius": {
+    "everySecondPublish": false,
+    "exactRetryReplaySafe": true,
+    "affectedClass": "governed mutations whose stable business key spans a changed signed request identity"
+  },
+  "partialState": {
+    "zeroPartialStateClaim": false,
+    "identifiedResidue": [
+      {
+        "kind": "project_version_row_with_copied_files_snapshot",
+        "versionId": 159,
+        "label": "Republished",
+        "referenced": false
+      }
+    ],
+    "intendedCandidateVersionId": 158,
+    "artifactActivationReached": false,
+    "r2UploadReached": false,
+    "kvRouteUpdateReached": false,
+    "projectPublicationPersistenceReached": false,
+    "liveCleanupPerformed": false
+  },
+  "verification": {
+    "install": {
+      "command": "pnpm install --frozen-lockfile --prefer-offline --reporter=append-only",
+      "result": "passed",
+      "resolved": 2259,
+      "reused": 2227,
+      "downloaded": 0,
+      "durationSeconds": 805.7
+    },
+    "focusedTests": {
+      "result": "passed",
+      "files": 3,
+      "tests": 43
+    },
+    "adjacentTests": {
+      "result": "46 passed, 2 unrelated baseline fixture failures",
+      "relevantFailures": 0
+    },
+    "typecheck": "passed",
+    "changedFileLint": "passed",
+    "diffCheck": "passed",
+    "completeApiSuite": {
+      "passed": 2334,
+      "failed": 41,
+      "skipped": 5,
+      "classification": "environment and unrelated baseline failures; focused change suites green"
+    }
+  },
+  "liveMutations": {
+    "deployments": 0,
+    "publishRetries": 0,
+    "newSurfaces": 0,
+    "providerResources": 0,
+    "flyOperations": 0,
+    "costUsd": 0
+  },
+  "manifestChanges": []
+}
