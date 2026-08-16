@@ -52,6 +52,7 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).not.toContain("if (!runtimeId || !opts.containerUrl)");
     expect(jobs).not.toContain("zero-task-${taskId}-node-v1");
     expect(jobs).toContain('provisioningStatus: created.endpoint ? "ready" : "provisioning"');
+    expect(jobs).toContain("healthPath: opts.zeroSealedGeneration.manifest.healthPath");
     expect(jobs).toContain("runtimeId = created.runtimeId");
     expect(jobs).toContain("tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(");
     expect(jobs).toContain("tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(");

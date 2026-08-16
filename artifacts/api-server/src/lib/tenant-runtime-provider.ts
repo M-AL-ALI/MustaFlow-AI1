@@ -64,6 +64,8 @@ export interface RuntimeProductionOptions {
 
 export interface RuntimeServiceOptions {
   servicePort?: number | null;
+  /** Provider-owned startup probe path for a sealed runtime. */
+  healthPath?: string | null;
   operationTimeoutMs?: number;
   signal?: AbortSignal;
 }

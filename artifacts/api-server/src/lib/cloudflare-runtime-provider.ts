@@ -865,7 +865,7 @@ export class CloudflareRuntimeProvider
           buildCommand: ["npm", "run", "build"],
           startCommand: commandForStack(stack),
           servicePort,
-          healthPath: "/",
+          healthPath: options?.healthPath ?? "/",
           resourceProfile: "dev",
           public: false,
         },

@@ -136,6 +136,7 @@ describe("CloudflareRuntimeProvider", () => {
       manifest: {
         runtime: "node-api",
         servicePort: 8080,
+        healthPath: "/",
       },
     });
     await expect(
@@ -154,6 +155,42 @@ describe("CloudflareRuntimeProvider", () => {
         { consumeOnce: async () => true },
       ),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("preserves the sealed health path when ensuring a Cloudflare runtime", async () => {
+    const projectId = 44;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(json({ code: "unauthorized" }, 401))
+      .mockResolvedValueOnce(
+        json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-v1", "manifest-update-v1"],
+        }),
+      )
+      .mockResolvedValueOnce(json(runningRuntime(identity, projectId)));
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await provider.create(projectId, "node-api", undefined, {
+      servicePort: 8080,
+      healthPath: "/healthz",
+    });
+
+    const request = vi.mocked(fetch).mock.calls[2] as [string, RequestInit];
+    expect(JSON.parse(String(request[1].body))).toMatchObject({
+      manifest: {
+        servicePort: 8080,
+        healthPath: "/healthz",
+      },
+    });
   });
 
   it("recovers the deterministic project runtime without a database-carried identity", async () => {

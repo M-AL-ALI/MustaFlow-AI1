@@ -7243,6 +7243,7 @@ async function syncAgenticPreviewRuntime(opts: {
     } else {
       const created = await tenantRuntimeProvider.create(opts.projectId, opts.stack, undefined, {
         servicePort: opts.runtimePort,
+        healthPath: opts.zeroSealedGeneration.manifest.healthPath,
         signal: opts.signal,
       });
       if (created === null || "error" in created) {
