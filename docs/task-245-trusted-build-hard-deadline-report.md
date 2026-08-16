@@ -48,6 +48,15 @@ All forensic control-plane requests were signed GETs. Temporary Replit diagnosti
 - Focused API cache-posture suite: 1 file / 24 tests passed; API typecheck passed.
 - Runtime Worker and API lint passed.
 - `git diff --check` passed.
+- Local release profile: `pass=18`, `warn=0`, `fail=3`. All three red groups are
+  database-dependent (`ora-realtime-usage`, `ora-memory-consolidation`, and the
+  dynamic-prerender phase of the web build) and failed only with
+  `ECONNREFUSED 127.0.0.1:5432` because this lab has no PostgreSQL service.
+- Exact-base parity against `bfec1f446b30c6fd0c65995548e348cd3997056e`
+  reproduced the same three failing groups and the same connection refusal.
+  The earlier typechecks, focused suites, builds before dynamic prerender, and
+  lint remained green. Replit's database-equipped release profile is the
+  authoritative merge gate.
 - New deadline regressions prove:
   - alarm-only typed terminal after every request/consumer dies;
   - exact 18-minute boundary and named observation margin;
