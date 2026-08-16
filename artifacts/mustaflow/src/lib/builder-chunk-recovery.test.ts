@@ -36,6 +36,7 @@ describe("Builder chunk recovery", () => {
     const expectedModule = { default: () => null };
     const importer = vi.fn().mockRejectedValueOnce(chunkFailure);
     const importModule = vi.fn().mockResolvedValueOnce(expectedModule);
+    const waitBeforeRetry = vi.fn().mockResolvedValue(undefined);
     const reload = vi.fn();
 
     await expect(
@@ -45,6 +46,7 @@ describe("Builder chunk recovery", () => {
         storage: memoryStorage(),
         reload,
         importModule,
+        waitBeforeRetry,
         showRefreshing: vi.fn(),
         scheduleReload: (run) => run(),
         retryToken: () => "transient-lab",
@@ -55,7 +57,53 @@ describe("Builder chunk recovery", () => {
     expect(importModule).toHaveBeenCalledWith(
       "https://www.mustaflow.com/assets/_id_-C9c46yz6.js?mustaflow_chunk_retry=transient-lab",
     );
+    expect(waitBeforeRetry).toHaveBeenCalledOnce();
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed CSS preload as a stylesheet instead of importing CSS as JavaScript", async () => {
+    const expectedModule = { default: () => null };
+    const cssFailure = new TypeError(
+      "Unable to preload CSS for https://www.mustaflow.com/assets/_id_-DOOs4slz.css",
+    );
+    const importer = vi
+      .fn()
+      .mockRejectedValueOnce(cssFailure)
+      .mockResolvedValueOnce(expectedModule);
+    const importModule = vi.fn();
+    const loadStylesheet = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      retryBuilderChunkImport(importer, {
+        pathname: "/projects/51",
+        origin: "https://www.mustaflow.com",
+        storage: memoryStorage(),
+        importModule,
+        loadStylesheet,
+        waitBeforeRetry: vi.fn().mockResolvedValue(undefined),
+        retryToken: () => "css-propagation",
+      }),
+    ).resolves.toBe(expectedModule);
+
+    expect(loadStylesheet).toHaveBeenCalledWith(
+      "https://www.mustaflow.com/assets/_id_-DOOs4slz.css?mustaflow_chunk_retry=css-propagation",
+    );
+    expect(importModule).not.toHaveBeenCalled();
+    expect(importer).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears a stale reload guard after the route chunk loads", async () => {
+    const storage = memoryStorage();
+    const removeItem = vi.spyOn(storage, "removeItem");
+
+    await expect(
+      retryBuilderChunkImport(vi.fn().mockResolvedValue({ default: () => null }), {
+        pathname: "/projects/51",
+        storage,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(removeItem).toHaveBeenCalledWith("mustaflow:builder-chunk-recovery:v2:/projects/51");
   });
 
   it("requests exactly one guarded reload when the retry also fails", async () => {
@@ -68,6 +116,7 @@ describe("Builder chunk recovery", () => {
       storage,
       reload,
       importModule: vi.fn().mockRejectedValue(new TypeError("still unavailable")),
+      waitBeforeRetry: vi.fn().mockResolvedValue(undefined),
       showRefreshing,
       scheduleReload: (run: () => void) => run(),
       retryToken: () => "persistent-lab",

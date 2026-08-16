@@ -1,5 +1,6 @@
 const BUILDER_CHUNK_RECOVERY_PREFIX = "mustaflow:builder-chunk-recovery:v2";
 const BUILDER_CHUNK_RETRY_PARAM = "mustaflow_chunk_retry";
+const BUILDER_CHUNK_RETRY_DELAY_MS = 250;
 
 export const BUILDER_CHUNK_REFRESHING_MESSAGE = "NabuFlow was updated — refreshing…";
 
@@ -55,6 +56,8 @@ export type BuilderChunkRuntime = {
   storage: ChunkRecoveryStorage;
   reload: () => void;
   importModule: <T>(url: string) => Promise<T>;
+  loadStylesheet: (url: string) => Promise<void>;
+  waitBeforeRetry: () => Promise<void>;
   showRefreshing: () => void;
   scheduleReload: (reload: () => void) => void;
   retryToken: () => string;
@@ -225,6 +228,24 @@ function defaultImportModule<T>(url: string): Promise<T> {
   return import(/* @vite-ignore */ url) as Promise<T>;
 }
 
+export function loadBuilderStylesheet(url: string, doc: Document = document): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stylesheet = doc.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = url;
+    stylesheet.addEventListener("load", () => resolve(), { once: true });
+    stylesheet.addEventListener(
+      "error",
+      () => {
+        stylesheet.remove();
+        reject(new Error("Builder stylesheet retry failed."));
+      },
+      { once: true },
+    );
+    doc.head.append(stylesheet);
+  });
+}
+
 export function showBuilderChunkRefreshing(doc: Document = document): void {
   if (doc.querySelector("[data-builder-chunk-refreshing]")) return;
 
@@ -259,6 +280,11 @@ function defaultRuntime(): BuilderChunkRuntime {
     storage: window.sessionStorage,
     reload: () => window.location.reload(),
     importModule: defaultImportModule,
+    loadStylesheet: (url) => loadBuilderStylesheet(url),
+    waitBeforeRetry: () =>
+      new Promise((resolve) => {
+        window.setTimeout(resolve, BUILDER_CHUNK_RETRY_DELAY_MS);
+      }),
     showRefreshing: () => showBuilderChunkRefreshing(),
     scheduleReload: (reload) => {
       window.setTimeout(reload, 120);
@@ -295,10 +321,12 @@ export async function retryBuilderChunkImport<T>(
   importer: () => Promise<T>,
   runtimeOverrides?: Partial<BuilderChunkRuntime>,
 ): Promise<T> {
+  const runtime = runtimeWithDefaults(runtimeOverrides);
   try {
-    return await importer();
+    const loaded = await importer();
+    clearBuilderChunkReloadGuard(runtime.pathname, runtime.storage);
+    return loaded;
   } catch (firstError) {
-    const runtime = runtimeWithDefaults(runtimeOverrides);
     const assetUrl = chunkAssetUrlFromError(firstError);
     const failure = {
       pathname: runtime.pathname,
@@ -309,11 +337,25 @@ export async function retryBuilderChunkImport<T>(
     markChunkErrorHandled(firstError);
 
     try {
+      await runtime.waitBeforeRetry();
       if (assetUrl) {
         const retryUrl = cacheBustedChunkUrl(assetUrl, runtime.retryToken(), runtime.origin);
-        return await runtime.importModule<T>(retryUrl);
+        if (new URL(retryUrl).pathname.endsWith(".css")) {
+          // A Vite preload failure may name the stylesheet that blocked a lazy
+          // route. CSS is not a JavaScript module: load a cache-busted stylesheet
+          // first, then rerun the original importer so Vite can finish the route.
+          await runtime.loadStylesheet(retryUrl);
+          const loaded = await importer();
+          clearBuilderChunkReloadGuard(runtime.pathname, runtime.storage);
+          return loaded;
+        }
+        const loaded = await runtime.importModule<T>(retryUrl);
+        clearBuilderChunkReloadGuard(runtime.pathname, runtime.storage);
+        return loaded;
       }
-      return await importer();
+      const loaded = await importer();
+      clearBuilderChunkReloadGuard(runtime.pathname, runtime.storage);
+      return loaded;
     } catch (retryError) {
       if (requestBuilderChunkReload(failure, runtime)) {
         throw new BuilderChunkReloadPendingError({ cause: retryError });
