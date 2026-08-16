@@ -131,6 +131,21 @@ describe("Zero sealed generator integration", () => {
     expect(prepared.dependencyPlan.target).toBe("cloudflare-sealed-v1");
   });
 
+  it("keeps sealed health serving while database capability initialization settles", () => {
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(
+      "bind the HTTP listener before awaiting database capability or schema initialization",
+    );
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(
+      "make database routes await that promise before querying",
+    );
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(
+      "must not terminate the process or make healthz fail",
+    );
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).not.toContain(
+      "initialize its app-owned schema idempotently through createNabuFlowDatabase before accepting traffic",
+    );
+  });
+
   it("injects the vendored SDK and emits a canonical Pantry plan", () => {
     const prepared = prepareZeroSealedNodeSource({
       files: generatedFiles(),
