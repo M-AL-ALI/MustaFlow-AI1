@@ -11,7 +11,7 @@
  */
 
 import { Router } from "express";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -28,7 +28,17 @@ import {
   execInContainer,
   getContainerStatus,
   npmInstallInBackground,
+  tenantRuntimeProvider,
 } from "../lib/tenant-runtime";
+import { supportsZeroGeneration } from "../lib/tenant-runtime-provider";
+import {
+  isZeroSealedGenerationTarget,
+  resolveZeroGenerationTarget,
+} from "../lib/zero-sealed-generation";
+import {
+  resolveSealedTestingCandidate,
+  SealedTestingCandidateError,
+} from "../lib/sealed-testing-candidate";
 import { encryptionService } from "../lib/encryption";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import { logger } from "../lib/logger";
@@ -156,6 +166,77 @@ router.post("/projects/:id/preview-env/start", requireProjectOwnership, async (r
   if (files.length === 0) {
     res.status(422).json({ error: "Project has no files. Build the project first." });
     return;
+  }
+
+  if (isZeroSealedGenerationTarget(resolveZeroGenerationTarget(process.env))) {
+    if (!supportsZeroGeneration(tenantRuntimeProvider)) {
+      res.status(503).json({
+        error: "The sealed test runtime provider is unavailable.",
+        code: "sealed_test_runtime_unavailable",
+      });
+      return;
+    }
+    const [latestVersion] = await db
+      .select({
+        id: projectVersionsTable.id,
+        filesSnapshot: projectVersionsTable.filesSnapshot,
+        sealedRelease: projectVersionsTable.sealedRelease,
+      })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.projectId, projectId))
+      .orderBy(desc(projectVersionsTable.createdAt))
+      .limit(1);
+    let runtime;
+    try {
+      runtime = await tenantRuntimeProvider.zeroGenerationRuntimeDescriptorForProject(projectId);
+    } catch (error) {
+      req.log.warn({ error, projectId }, "Sealed test runtime descriptor read failed");
+      res.status(503).json({
+        error: "The sealed test runtime could not be verified.",
+        code: "sealed_test_runtime_unavailable",
+      });
+      return;
+    }
+    try {
+      const candidate = resolveSealedTestingCandidate({
+        versionId: latestVersion?.id ?? 0,
+        versionSnapshot:
+          (latestVersion?.filesSnapshot as Array<{
+            path: string;
+            content: string | null;
+            mimeType: string | null;
+          }> | null) ?? null,
+        currentFiles: files,
+        sealedRelease: latestVersion?.sealedRelease,
+        runtime,
+      });
+      await db
+        .update(projectsTable)
+        .set({
+          testingStatus: "ready",
+          testingCandidateSnapshotId: candidate.versionId,
+          runningTestSnapshotId: candidate.versionId,
+          testedSnapshotId: null,
+          testContainerStatus: "running",
+          updatedAt: new Date(),
+        })
+        .where(eq(projectsTable.id, projectId));
+      res.json({
+        ok: true,
+        candidateSnapshotId: candidate.versionId,
+        testingStatus: "ready",
+        isFullStack: true,
+        sealedRuntime: true,
+        message: "The accepted sealed preview is ready for testing approval.",
+      });
+      return;
+    } catch (error) {
+      if (error instanceof SealedTestingCandidateError) {
+        res.status(409).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
   }
 
   const [candidateVersion] = await db
