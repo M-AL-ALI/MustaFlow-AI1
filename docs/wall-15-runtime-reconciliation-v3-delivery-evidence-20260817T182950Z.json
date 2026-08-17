@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "wall": 15,
+  "capturedAt": "2026-08-17T18:29:50.4622931Z",
+  "base": "ba6656489f77433eb986c6208c9b967c13561799",
+  "branch": "codex/runtime-reconciliation-v3",
+  "productionFrozen": true,
+  "productionRequests": [],
+  "productionMutations": [],
+  "semanticsVersion": "runtime-reconciliation-v3",
+  "phase1": {
+    "healthProbeUsesCapabilityBinding": false,
+    "previewStoppedWithoutProcess": "valid-non-serving-idle",
+    "project51TargetsSharingDamage": ["preview-primary", "production-blue", "production-green"],
+    "capturedRequestId": "e0ecf724-aa61-427c-8997-2b465a100bb8"
+  },
+  "repairExecution": {
+    "jobKind": "runtime-start",
+    "requestLifetimeExecution": false,
+    "queueDriven": true,
+    "checkpointed": true,
+    "leased": true,
+    "watchdogRedelivery": true,
+    "response": "202 repair-scheduled"
+  },
+  "verification": {
+    "offlineFrozenInstall": {
+      "status": "passed",
+      "workspaceProjects": 21,
+      "downloads": 0,
+      "lockfileChanged": false
+    },
+    "contracts": { "files": 20, "tests": 187, "status": "passed" },
+    "runtimeWorker": { "files": 36, "tests": 269, "status": "passed" },
+    "focusedWorker": { "files": 3, "tests": 30, "status": "passed" },
+    "focusedContractSchemas": { "files": 1, "tests": 23, "status": "passed" },
+    "repositoryTypecheck": "passed",
+    "repositoryLint": "passed",
+    "packageTypecheckAndLint": "passed",
+    "diffCheck": "passed",
+    "changedFilePrettier": "passed",
+    "manifestChanges": [],
+    "wireChanges": [
+      "runtime-reconciliation-v3 semantics identity",
+      "typed repairAction and decision values",
+      "metadata-only repairJob receipt",
+      "repair-scheduled success outcome"
+    ],
+    "repositoryPrettier": {
+      "status": "inherited-failure",
+      "unchangedFiles": [
+        "artifacts/nabuflow-runtime-worker/wrangler.build.production.jsonc",
+        "artifacts/nabuflow-runtime-worker/wrangler.pantry.production.jsonc",
+        "artifacts/nabuflow-runtime-worker/wrangler.runtime.production.jsonc"
+      ]
+    }
+  },
+  "incidentalFindings": [
+    {
+      "id": "wall15-incidental-1",
+      "class": "inherited-format-drift",
+      "scope": "three unchanged production Wrangler JSONC files",
+      "action": "reported-only"
+    }
+  ]
+}

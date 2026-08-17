@@ -137,6 +137,7 @@ describe("runtime availability", () => {
       attempts: 2,
       conclusive: true,
       processId: "tenant-service",
+      repairAction: "reregister-and-rebind",
       trail: [
         {
           attempt: 1,
@@ -152,6 +153,7 @@ describe("runtime availability", () => {
             health: "unknown",
           },
           decision: "ambiguous",
+          repairAction: "none",
         },
         {
           attempt: 2,
@@ -167,6 +169,7 @@ describe("runtime availability", () => {
             health: "ready",
           },
           decision: "ready",
+          repairAction: "reregister-and-rebind",
         },
       ],
     });
@@ -191,6 +194,7 @@ describe("runtime availability", () => {
       attempts: RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS,
       conclusive: false,
       processId: null,
+      repairAction: "none",
       trail: Array.from(
         { length: RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS },
         (_, index) => ({
@@ -207,9 +211,117 @@ describe("runtime availability", () => {
             health: "unknown" as const,
           },
           decision: "ambiguous" as const,
+          repairAction: "none" as const,
         }),
       ),
     });
     expect(availability).toHaveBeenCalledTimes(RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS);
+  });
+
+  it("maps the exact e0ecf724 trail to a governed restart under v3", async () => {
+    const backend = new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS);
+    const runtime = capturedRuntime();
+    runtime.descriptor = {
+      ...runtime.descriptor,
+      identity: "nrf-ab8e18ef4ebebedd-p51-preview-primary",
+      role: "preview",
+      slot: "primary",
+      status: "error",
+      manifestRevision:
+        "zero-node-v1-f8dd2e2df3487cc3c3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039",
+      readyAt: null,
+      lastError: "Runtime availability failed (health:health_transport)",
+    };
+    runtime.manifest.revision = runtime.descriptor.manifestRevision;
+    runtime.processId = null;
+    const availability = vi.spyOn(backend, "availability").mockResolvedValue({
+      ready: false,
+      stage: "health",
+      cause: "health_transport",
+      status: null,
+    });
+
+    const result = await backend.reconcile(runtime);
+
+    expect(result).toMatchObject({
+      ready: false,
+      stage: "health",
+      cause: "health_transport",
+      attempts: 3,
+      conclusive: true,
+      processId: null,
+      repairAction: "restart-and-rebind",
+    });
+    expect(result.trail).toEqual([
+      expect.objectContaining({ attempt: 1, decision: "ambiguous", repairAction: "none" }),
+      expect.objectContaining({ attempt: 2, decision: "ambiguous", repairAction: "none" }),
+      expect.objectContaining({
+        attempt: 3,
+        decision: "repair-required",
+        repairAction: "restart-and-rebind",
+        decisionInputs: {
+          storedStatus: "error",
+          storedProcessIdentity: "absent",
+          providerProcess: "running",
+          health: "unknown",
+        },
+      }),
+    ]);
+    expect(availability).toHaveBeenCalledTimes(3);
+  });
+
+  it("distinguishes an explicitly stopped preview as healthy idle", async () => {
+    const backend = new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS);
+    const runtime = capturedRuntime();
+    runtime.descriptor.role = "preview";
+    runtime.descriptor.slot = "primary";
+    runtime.descriptor.status = "stopped";
+    runtime.descriptor.readyAt = null;
+    runtime.processId = null;
+    vi.spyOn(backend, "availability").mockResolvedValue({
+      ready: false,
+      stage: "process",
+      cause: "process_missing",
+      status: null,
+    });
+
+    await expect(backend.reconcile(runtime)).resolves.toMatchObject({
+      conclusive: true,
+      repairAction: "settle-idle",
+      trail: [expect.objectContaining({ decision: "healthy-idle", repairAction: "settle-idle" })],
+    });
+  });
+
+  it("requires a governed start for missing processes in damaged preview and both production slots", async () => {
+    for (const locator of [
+      { role: "preview", slot: "primary" },
+      { role: "production", slot: "blue" },
+      { role: "production", slot: "green" },
+    ] as const) {
+      const backend = new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS);
+      const runtime = capturedRuntime();
+      runtime.descriptor.role = locator.role;
+      runtime.descriptor.slot = locator.slot;
+      runtime.descriptor.status = "error";
+      runtime.descriptor.readyAt = null;
+      runtime.processId = null;
+      vi.spyOn(backend, "availability").mockResolvedValue({
+        ready: false,
+        stage: "process",
+        cause: "process_missing",
+        status: null,
+      });
+
+      await expect(backend.reconcile(runtime)).resolves.toMatchObject({
+        conclusive: true,
+        repairAction: "restart-and-rebind",
+        trail: [
+          expect.objectContaining({
+            decision: "repair-required",
+            repairAction: "restart-and-rebind",
+          }),
+        ],
+      });
+    }
   });
 });

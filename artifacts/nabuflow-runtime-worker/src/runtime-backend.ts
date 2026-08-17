@@ -12,6 +12,7 @@ import {
 import type {
   ExecRuntimeRequest,
   RuntimeReconciliationObservation,
+  RuntimeReconciliationRepairAction,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
@@ -238,6 +239,7 @@ export interface BackendReconciliationResult extends BackendAvailabilityResult {
   attempts: number;
   conclusive: boolean;
   processId: string | null;
+  repairAction: RuntimeReconciliationRepairAction;
   trail: RuntimeReconciliationObservation[];
 }
 
@@ -305,6 +307,7 @@ function reconciliationObservation(
   attempt: number,
   observedAtMs: number,
   ambiguous: boolean,
+  repairAction: RuntimeReconciliationRepairAction,
 ): RuntimeReconciliationObservation {
   const providerProcess =
     observation.stage === "health"
@@ -322,14 +325,20 @@ function reconciliationObservation(
         : observation.cause === "health_status"
           ? "rejected"
           : "unknown";
-  const decision = ambiguous
-    ? "ambiguous"
-    : observation.ready
-      ? "ready"
-      : observation.stage === "process" &&
-          (observation.cause === "process_missing" || observation.cause === "process_not_running")
-        ? "confirmed-stopped"
-        : "confirmed-error";
+  const decision =
+    repairAction === "restart-and-rebind"
+      ? "repair-required"
+      : repairAction === "settle-idle"
+        ? "healthy-idle"
+        : ambiguous
+          ? "ambiguous"
+          : observation.ready
+            ? "ready"
+            : observation.stage === "process" &&
+                (observation.cause === "process_missing" ||
+                  observation.cause === "process_not_running")
+              ? "confirmed-stopped"
+              : "confirmed-error";
   const sources: RuntimeReconciliationObservation["sources"] =
     observation.stage === "health"
       ? ["provider-metadata", "process-probe", "health-probe"]
@@ -350,7 +359,46 @@ function reconciliationObservation(
       health,
     },
     decision,
+    repairAction,
   };
+}
+
+function reconciliationRepairAction(
+  storedRuntime: StoredRuntime,
+  observation: BackendAvailabilityResult,
+  atObservationCap: boolean,
+): RuntimeReconciliationRepairAction {
+  if (observation.ready) {
+    return storedRuntime.processId === null ? "reregister-and-rebind" : "none";
+  }
+  const processDefinitelyAbsent =
+    observation.stage === "process" &&
+    (observation.cause === "process_missing" || observation.cause === "process_not_running");
+  if (
+    storedRuntime.descriptor.role === "preview" &&
+    storedRuntime.descriptor.status === "stopped" &&
+    processDefinitelyAbsent
+  ) {
+    return "settle-idle";
+  }
+  const falseTerminalDamage =
+    storedRuntime.descriptor.status === "error" &&
+    storedRuntime.processId === null &&
+    storedRuntime.artifactSha256 !== null;
+  if (!falseTerminalDamage) return "none";
+  if (processDefinitelyAbsent || observation.cause === "health_status") {
+    return "restart-and-rebind";
+  }
+  if (
+    atObservationCap &&
+    observation.stage === "health" &&
+    (observation.cause === "health_timeout" || observation.cause === "health_transport")
+  ) {
+    // V3 repairs only the captured false-terminal state after the full observation budget.
+    // A truthful running descriptor keeps ambiguous transport non-mutating and retryable.
+    return "restart-and-rebind";
+  }
+  return "none";
 }
 
 export class CloudflareSandboxBackend implements RuntimeBackend {
@@ -509,16 +557,20 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       attempt += 1
     ) {
       const observation = await this.availability(candidate);
-      const ambiguous =
+      const otherwiseAmbiguous =
         observation.cause === "health_timeout" ||
         observation.cause === "health_transport" ||
         observation.cause === "process_check_failed";
+      const atObservationCap = attempt === RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS;
+      const repairAction = reconciliationRepairAction(runtime, observation, atObservationCap);
+      const ambiguous = otherwiseAmbiguous && repairAction === "none";
       const trailEntry = reconciliationObservation(
         runtime,
         observation,
         attempt,
         this.nowMs(),
         ambiguous,
+        repairAction,
       );
       trail.push(trailEntry);
       await onObservation?.(structuredClone(trailEntry));
@@ -528,6 +580,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
           attempts: attempt,
           conclusive: !ambiguous,
           processId: observation.ready ? TENANT_PROCESS_ID : null,
+          repairAction,
           trail,
         };
       }

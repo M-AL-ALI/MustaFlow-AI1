@@ -130,6 +130,7 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
       health: "ready",
     },
     decision: "ready",
+    repairAction: "reregister-and-rebind",
   } as const;
   const terminal = {
     at: "2026-08-04T12:00:01.000Z",
@@ -160,9 +161,16 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
       ok: true,
       reconciliationId: "wall-12-green",
       outcome: "restored",
-      observation: { attempts: 1, stage: "health", cause: "ready", status: 200 },
+      observation: {
+        attempts: 1,
+        stage: "health",
+        cause: "ready",
+        status: 200,
+        repairAction: "reregister-and-rebind",
+      },
       capability: "bound",
       runtime,
+      repairJob: null,
       evidence,
     },
     reconciliationAudit: {

@@ -623,21 +623,7 @@ export async function handleControlRequest(
       (lookup.state === "new" || lookup.state === "pending") &&
       durableJob !== undefined
     ) {
-      await coordinator.recordDurableOperationNudge(durableJob.jobKey, nowMs);
-      try {
-        await env.DURABLE_OPERATION_QUEUE?.send(durableOperationQueueMessage(durableJob));
-      } catch {
-        // The coordinator watchdog retries this nudge independently of the request.
-        // eslint-disable-next-line no-console -- metadata-only queue availability evidence
-        console.error(
-          JSON.stringify({
-            event: "durable_operation_queue_nudge_failed",
-            kind: durableJob.kind,
-            checkpoint: durableJob.checkpoint,
-            attempt: durableJob.attempt,
-          }),
-        );
-      }
+      await nudgeDurableOperation(coordinator, env, durableJob, nowMs);
       await recordAudit(
         coordinator,
         requestId,
@@ -1035,6 +1021,104 @@ function durableOperationQueueMessage(
     subjectKey: job.subjectKey,
     kind: job.kind,
   };
+}
+
+async function nudgeDurableOperation(
+  coordinator: ControlCoordinator,
+  env: WorkerBindings,
+  job: StoredDurableOperationJob,
+  nowMs: number,
+): Promise<void> {
+  await coordinator.recordDurableOperationNudge(job.jobKey, nowMs);
+  try {
+    await env.DURABLE_OPERATION_QUEUE?.send(durableOperationQueueMessage(job));
+  } catch {
+    // The coordinator watchdog retries this nudge independently of the request.
+    // eslint-disable-next-line no-console -- metadata-only queue availability evidence
+    console.error(
+      JSON.stringify({
+        event: "durable_operation_queue_nudge_failed",
+        kind: job.kind,
+        checkpoint: job.checkpoint,
+        attempt: job.attempt,
+      }),
+    );
+  }
+}
+
+async function scheduleRuntimeReconciliationRepair(input: {
+  coordinator: ControlCoordinator;
+  env: WorkerBindings;
+  identity: string;
+  runtime: StoredRuntime;
+  request: ReconcileRuntimeRequest;
+  nowMs: number;
+}): Promise<{ jobKey: string; state: "active" | "succeeded" | "failed"; attempt: number }> {
+  assertArtifactInfrastructure(input.env);
+  if (input.runtime.artifactRevision === null || input.runtime.artifactSha256 === null) {
+    throw new ControlHttpError(
+      409,
+      "runtime_reconciliation_artifact_missing",
+      "Runtime reconciliation cannot restart without a committed artifact",
+      false,
+    );
+  }
+  const request = startRuntimeRequestSchema.parse({
+    locator: input.request.locator,
+    expectedDeploymentVersion: input.env.CF_VERSION_METADATA.id,
+    artifactRevision: input.runtime.artifactRevision,
+    artifactSha256: input.runtime.artifactSha256,
+  });
+  const key = `${RUNTIME_RECONCILIATION_SEMANTICS_VERSION}:${input.request.reconciliationId}:runtime-start-repair`;
+  const fingerprint = await sha256Hex(
+    canonicalJson({
+      action: "restart-and-rebind",
+      runtimeIdentity: input.identity,
+      request,
+    }),
+  );
+  const claim = await input.coordinator.registerDurableOperation({
+    key,
+    fingerprint,
+    kind: "runtime-start",
+    runtimeIdentity: input.identity,
+    subjectKey: "start",
+    request,
+    expectedDeploymentVersion: request.expectedDeploymentVersion,
+    nowMs: input.nowMs,
+  });
+  if (claim.state === "conflict") {
+    throw new ControlHttpError(
+      409,
+      "runtime_reconciliation_repair_conflict",
+      "Runtime reconciliation repair identity conflicts with another request",
+      false,
+    );
+  }
+  if (claim.state === "replay" && (claim.response.status < 200 || claim.response.status >= 300)) {
+    throw new ControlHttpError(
+      503,
+      "runtime_reconciliation_repair_failed",
+      "The durable runtime reconciliation repair reached a typed failure",
+      true,
+    );
+  }
+  const job =
+    "job" in claim && claim.job !== undefined
+      ? claim.job
+      : await input.coordinator.getLatestDurableOperation("runtime-start", input.identity, "start");
+  if (job === null || job.kind !== "runtime-start") {
+    throw new ControlHttpError(
+      503,
+      "runtime_reconciliation_repair_unavailable",
+      "The durable runtime reconciliation repair could not be observed",
+      true,
+    );
+  }
+  if (job.state === "active") {
+    await nudgeDurableOperation(input.coordinator, input.env, job, input.nowMs);
+  }
+  return { jobKey: job.jobKey, state: job.state, attempt: job.attempt };
 }
 
 async function durableOperationRegistrationFor(
@@ -4161,6 +4245,7 @@ async function executeEndpoint(
             health: entry.decisionInputs.health,
           },
           decision: entry.decision,
+          repairAction: entry.repairAction,
         });
         await coordinator.appendRuntimeReconciliationObservation(requestId, sanitized);
       });
@@ -4177,9 +4262,42 @@ async function executeEndpoint(
 
       const containerId = runtimeContainerId(env, identity);
       const previousBinding = await coordinator.getContainerBinding(containerId);
-      let outcome: "restored" | "confirmed-stopped" | "confirmed-error" | "unchanged";
+      let outcome:
+        | "restored"
+        | "repair-scheduled"
+        | "healthy-idle"
+        | "confirmed-stopped"
+        | "confirmed-error"
+        | "unchanged";
       let capability: "bound" | "unbound";
-      if (observation.ready && observation.processId !== null) {
+      let repairJob: {
+        jobKey: string;
+        state: "active" | "succeeded" | "failed";
+        attempt: number;
+      } | null = null;
+      let responseStatus = 200;
+      if (observation.repairAction === "restart-and-rebind") {
+        repairJob = await scheduleRuntimeReconciliationRepair({
+          coordinator,
+          env,
+          identity,
+          runtime,
+          request,
+          nowMs,
+        });
+        outcome = "repair-scheduled";
+        capability = previousBinding === identity ? "bound" : "unbound";
+        responseStatus = repairJob.state === "succeeded" ? 200 : 202;
+      } else if (observation.repairAction === "settle-idle") {
+        runtime.descriptor.status = "stopped";
+        runtime.descriptor.lastError = null;
+        runtime.descriptor.readyAt = null;
+        runtime.processId = null;
+        await coordinator.putRuntime(identity, runtime);
+        await coordinator.unbindContainer(containerId, identity);
+        outcome = "healthy-idle";
+        capability = "unbound";
+      } else if (observation.ready && observation.processId !== null) {
         const alreadyTruthful =
           runtime.descriptor.status === "running" &&
           runtime.descriptor.lastError === null &&
@@ -4222,16 +4340,16 @@ async function executeEndpoint(
       }
       await coordinator.appendSystemLog(
         identity,
-        `Governed runtime reconciliation ${request.reconciliationId} completed (outcome=${outcome}, stage=${observation.stage}, cause=${observation.cause}, attempts=${observation.attempts}).`,
+        `Governed runtime reconciliation ${request.reconciliationId} completed (outcome=${outcome}, stage=${observation.stage}, cause=${observation.cause}, repair=${observation.repairAction}, attempts=${observation.attempts}).`,
       );
       const record = await coordinator.completeRuntimeReconciliation(requestId, {
         at: new Date().toISOString(),
-        status: 200,
+        status: responseStatus,
         code: "ok",
         retryable: false,
       });
       return {
-        status: 200,
+        status: responseStatus,
         body: {
           ok: true,
           reconciliationId: request.reconciliationId,
@@ -4241,9 +4359,11 @@ async function executeEndpoint(
             stage: observation.stage,
             cause: observation.cause,
             status: observation.status,
+            repairAction: observation.repairAction,
           },
           capability,
           runtime: structuredClone(runtime.descriptor),
+          repairJob,
           evidence: reconciliationEvidence(record),
         },
       };

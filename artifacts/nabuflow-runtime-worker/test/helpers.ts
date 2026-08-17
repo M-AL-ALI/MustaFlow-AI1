@@ -1161,6 +1161,7 @@ export class MockBackend implements RuntimeBackend {
     attempts: 1,
     conclusive: true,
     processId: "tenant-service",
+    repairAction: "reregister-and-rebind",
     trail: [
       {
         attempt: 1,
@@ -1176,6 +1177,7 @@ export class MockBackend implements RuntimeBackend {
           health: "ready",
         },
         decision: "ready",
+        repairAction: "reregister-and-rebind",
       },
     ],
   };
