@@ -2017,6 +2017,11 @@ describe("CloudflareRuntimeProvider", () => {
     expect(
       calls.every((call) => call.key.startsWith(`production-publish:${promotionIdentity}:`)),
     ).toBe(true);
+    expect(calls.at(-1)?.key).toMatch(
+      new RegExp(
+        `^production-publish:${promotionIdentity}:activate:semantics-active-slot-v2:request-[0-9a-f]{64}$`,
+      ),
+    );
     expect(new Set(calls.map((call) => call.key)).size).toBe(4);
 
     const previousIdentity = await deriveRuntimeIdentity({
@@ -2045,7 +2050,9 @@ describe("CloudflareRuntimeProvider", () => {
       path: "/_nabuflow/control/v1/routes/canary.apps.mustaflow.com/activate",
     });
     expect(calls.at(-1)?.key).toMatch(
-      new RegExp(`^production-publish:${promotionIdentity}:rollback:request-[0-9a-f]{64}$`),
+      new RegExp(
+        `^production-publish:${promotionIdentity}:rollback:semantics-active-slot-v2:request-[0-9a-f]{64}$`,
+      ),
     );
     expect(JSON.parse(calls.at(-1)!.body)).toMatchObject({
       route: {

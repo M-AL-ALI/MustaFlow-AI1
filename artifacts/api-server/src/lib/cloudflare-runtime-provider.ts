@@ -79,6 +79,18 @@ const MAX_RETRY_AFTER_MS = 1_000;
 const OPERATION_FOLLOW_DELAY_MS = 1_000;
 export const CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS = 10;
 
+/**
+ * Route activation terminals are replayed durably. Bump this named revision only
+ * when the meaning of a route-activation request changes; otherwise a terminal
+ * produced by older execution semantics can permanently shadow the corrected
+ * handler for an identical request body.
+ */
+const PRODUCTION_ROUTE_ACTIVATION_SEMANTICS_REVISION = "active-slot-v2";
+
+function routeActivationIdempotencyKey(baseKey: string): string {
+  return `${baseKey}:semantics-${PRODUCTION_ROUTE_ACTIVATION_SEMANTICS_REVISION}`;
+}
+
 async function requestBoundIdempotencyKey(input: {
   baseKey: string;
   method: string;
@@ -1748,7 +1760,7 @@ export class CloudflareRuntimeProvider
           },
           expectedPreviousManifestRevision: input.expectedPreviousManifestRevision,
         },
-        idempotencyKey: `${operationKey}:activate`,
+        idempotencyKey: routeActivationIdempotencyKey(`${operationKey}:activate`),
         operation: this.operationOptions(
           "production-route.activate",
           RUNTIME_CONTROL_OPERATION_BOUND_MS,
@@ -1869,7 +1881,7 @@ export class CloudflareRuntimeProvider
         },
         expectedPreviousManifestRevision: input.activatedRelease.targetManifest.revision,
       },
-      idempotencyKey: rollbackKey,
+      idempotencyKey: routeActivationIdempotencyKey(rollbackKey),
       operation: this.operationOptions(
         "production-route.rollback",
         RUNTIME_CONTROL_OPERATION_BOUND_MS,

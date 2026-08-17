@@ -378,34 +378,40 @@ describe("authenticated staging control plane", () => {
 
   it("authenticates, CAS-activates, replay-protects, and removes a published route", async () => {
     const coordinator = new MemoryCoordinator();
+    const env = {
+      ...fakeEnv(),
+      CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "production",
+    };
+    const projectId = 51;
+    const blueManifestRevision = "prod-e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5";
     const identity = await deriveRuntimeIdentity({
-      namespace: "staging",
-      projectId: 84,
+      namespace: "production",
+      projectId,
       role: "production",
       slot: "blue",
     });
     const runtime: StoredRuntime = {
       descriptor: {
         identity,
-        projectId: 84,
+        projectId,
         role: "production",
         slot: "blue",
         status: "running",
         servicePort: 8080,
-        manifestRevision: "published-manifest-1",
+        manifestRevision: blueManifestRevision,
         deploymentVersion: "worker-version-test-1",
         endpoint: null,
         readyAt: new Date(TEST_NOW_MS).toISOString(),
         lastError: null,
       },
       manifest: {
-        revision: "published-manifest-1",
-        runtime: "node",
-        buildCommand: ["node", "--version"],
-        startCommand: ["node", "server.mjs"],
+        revision: blueManifestRevision,
+        runtime: "node-api",
+        buildCommand: ["npm", "run", "build"],
+        startCommand: ["node", "src/index.js"],
         servicePort: 8080,
-        healthPath: "/health",
-        resourceProfile: "dev",
+        healthPath: "/healthz",
+        resourceProfile: "production",
         public: true,
       },
       artifactRevision: "published-artifact-1",
@@ -417,15 +423,15 @@ describe("authenticated staging control plane", () => {
       logs: [],
     };
     await coordinator.putRuntime(identity, runtime);
-    const hostname = "project-84.apps.mustaflow.com";
+    const hostname = "platform-canary.apps.mustaflow.com";
     const path = `/_nabuflow/control/v1/routes/${hostname}/activate`;
     const body = {
       route: {
         hostname,
-        projectId: 84,
+        projectId,
         role: "production" as const,
         activeSlot: "blue" as const,
-        manifestRevision: "published-manifest-1",
+        manifestRevision: blueManifestRevision,
         servicePort: 8080,
         sandboxIdentity: identity,
       },
@@ -438,8 +444,8 @@ describe("authenticated staging control plane", () => {
     };
 
     const greenIdentity = await deriveRuntimeIdentity({
-      namespace: "staging",
-      projectId: 84,
+      namespace: "production",
+      projectId,
       role: "production",
       slot: "green",
     });
@@ -454,7 +460,7 @@ describe("authenticated staging control plane", () => {
           route: { ...body.route, activeSlot: "green", sandboxIdentity: greenIdentity },
         },
       }),
-      fakeEnv(),
+      env,
       dependencies,
     );
     expect(missingGreenRuntime.status).toBe(409);
@@ -468,7 +474,7 @@ describe("authenticated staging control plane", () => {
         method: "POST",
         body: JSON.stringify(body),
       }),
-      fakeEnv(),
+      env,
       dependencies,
     );
     expect(unsigned.status).toBe(401);
@@ -481,7 +487,7 @@ describe("authenticated staging control plane", () => {
       body,
     });
     tampered.headers.set("x-nabuflow-signature", "0".repeat(64));
-    expect((await handleControlRequest(tampered, fakeEnv(), dependencies)).status).toBe(401);
+    expect((await handleControlRequest(tampered, env, dependencies)).status).toBe(401);
 
     const expired = await signedRequest({
       path,
@@ -491,7 +497,7 @@ describe("authenticated staging control plane", () => {
       timestamp: TEST_NOW_MS - 60_001,
       body,
     });
-    expect((await handleControlRequest(expired, fakeEnv(), dependencies)).status).toBe(401);
+    expect((await handleControlRequest(expired, env, dependencies)).status).toBe(401);
 
     const valid = await signedRequest({
       path,
@@ -501,11 +507,11 @@ describe("authenticated staging control plane", () => {
       body,
     });
     const replay = valid.clone() as Request;
-    const activated = await handleControlRequest(valid, fakeEnv(), dependencies);
+    const activated = await handleControlRequest(valid, env, dependencies);
     expect(activated.status).toBe(200);
     await expect(activated.json()).resolves.toMatchObject({ ok: true, route: { hostname } });
     expect((await coordinator.getRoute(hostname))?.sandboxIdentity).toBe(identity);
-    const replayed = await handleControlRequest(replay, fakeEnv(), dependencies);
+    const replayed = await handleControlRequest(replay, env, dependencies);
     expect(replayed.status).toBe(409);
     await expect(replayed.json()).resolves.toMatchObject({ code: "replay_detected" });
 
@@ -529,7 +535,7 @@ describe("authenticated staging control plane", () => {
         manifestRevision: greenManifestRevision,
         sandboxIdentity: greenIdentity,
       },
-      expectedPreviousManifestRevision: "published-manifest-1",
+      expectedPreviousManifestRevision: blueManifestRevision,
     };
     const greenActivated = await handleControlRequest(
       await signedRequest({
@@ -539,7 +545,7 @@ describe("authenticated staging control plane", () => {
         idempotencyKey: "route-activate-green-valid",
         body: greenBody,
       }),
-      fakeEnv(),
+      env,
       dependencies,
     );
     expect(greenActivated.status).toBe(200);
@@ -562,7 +568,7 @@ describe("authenticated staging control plane", () => {
           expectedPreviousManifestRevision: greenManifestRevision,
         },
       }),
-      fakeEnv(),
+      env,
       dependencies,
     );
     expect(blueReactivated.status).toBe(200);
@@ -583,11 +589,11 @@ describe("authenticated staging control plane", () => {
         idempotencyKey: "route-delete-valid",
         body: {
           hostname,
-          expectedManifestRevision: "published-manifest-1",
+          expectedManifestRevision: blueManifestRevision,
           expectedSandboxIdentity: identity,
         },
       }),
-      fakeEnv(),
+      env,
       dependencies,
     );
     expect(deleted.status).toBe(200);
