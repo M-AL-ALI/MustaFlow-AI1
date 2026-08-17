@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "runId": "wall-8-20260817T025045Z",
+  "branch": "codex/published-route-slot-honesty",
+  "baseSha": "bc3070ca48bf683ac037c40d85cd5affbbaa4416",
+  "liveMutation": false,
+  "flyTouched": false,
+  "newPublicSurface": false,
+  "newSpend": false,
+  "diagnosis": {
+    "projectId": 51,
+    "publishedVersionId": 149,
+    "approvedVersionId": 158,
+    "publishedHostname": "platform-canary.apps.mustaflow.com",
+    "routeTargetSlot": "blue",
+    "routeTargetRuntimeIdentity": "nrf-ab8e18ef4ebebedd-p51-production-blue",
+    "publishedActivatedAt": "2026-08-15T23:11:58.905Z",
+    "historicalHealthChecks": [
+      {
+        "observedAt": "2026-08-15T23:12:37.411820Z",
+        "status": 200,
+        "latencyMs": 629
+      },
+      {
+        "observedAt": "2026-08-15T23:17:37.406407Z",
+        "status": 200,
+        "latencyMs": 628
+      }
+    ],
+    "currentPublicProbes": {
+      "root": {
+        "result": "timeout",
+        "elapsedSeconds": 15.011,
+        "responseBytes": 0
+      },
+      "healthz": {
+        "result": "timeout",
+        "elapsedSeconds": 15.011,
+        "responseBytes": 0
+      }
+    },
+    "routeStore": {
+      "kind": "control-durable-object-storage",
+      "objectId": "e57de76559a30d3ba40c8aa34f307e1d9b7ef9a6a5d258ec499336b20be9b691",
+      "namespaceId": "961b6358eab7429cafc2e893e243d2b9",
+      "directReadResult": "SQLITE_AUTH"
+    },
+    "blueRuntime": {
+      "state": "Running",
+      "memory": "244 MiB",
+      "disk": "625.5 MB",
+      "vmStoppedEvents": 4,
+      "eventDeployment": "d0345428",
+      "firstObservedEventAt": "2026-08-16T03:18:29Z"
+    },
+    "greenCandidate": {
+      "runtimeIdentity": "nrf-ab8e18ef4ebebedd-p51-production-green",
+      "state": "Running",
+      "memory": "347.6 MiB",
+      "databaseReference": false,
+      "routeMutationReached": false
+    },
+    "rootCauses": [
+      "route activation hard-coded blue after accepting a blue-or-green contract",
+      "status and logs reads persisted keepAlive false onto live Sandboxes",
+      "published forwarding trusted a stale running descriptor and had no upstream-header bound",
+      "failed activation left its started target candidate unreclaimed"
+    ]
+  },
+  "verification": [
+    {
+      "command": "pnpm exec vitest run test/control-worker.test.ts test/published-data-plane.test.ts test/sandbox-policy.test.ts",
+      "result": "pass",
+      "testFiles": 3,
+      "tests": 33
+    },
+    {
+      "command": "pnpm exec vitest run src/lib/cloudflare-runtime-provider.test.ts",
+      "result": "pass",
+      "testFiles": 1,
+      "tests": 36
+    },
+    {
+      "command": "pnpm test (nabuflow-runtime-worker)",
+      "result": "pass",
+      "testFiles": 34,
+      "tests": 254
+    },
+    {
+      "command": "pnpm test (tenant-runtime-contracts)",
+      "result": "pass",
+      "testFiles": 20,
+      "tests": 187
+    },
+    {
+      "command": "pnpm run typecheck",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm run lint",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm exec prettier --check <all slice files>",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm install --frozen-lockfile --offline",
+      "result": "pass",
+      "downloads": 0,
+      "lockfileChanged": false
+    }
+  ],
+  "incidentalFindings": [
+    "The production route record has no signed metadata-only forensic read surface and Durable Object Data Studio rejects its storage query with SQLITE_AUTH.",
+    "Workers Observability is disabled for the production container application.",
+    "Repository-wide Prettier check fails on three untouched production Wrangler JSONC files that are byte-identical to the verified base.",
+    "The complete API test command is not self-contained in this credential-free worktree: 39 files failed, predominantly on missing DATABASE_URL and other environment bindings, with additional unrelated shared-suite assertions; the scoped API provider suite passes 36/36."
+  ]
+}

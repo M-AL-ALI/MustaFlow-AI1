@@ -303,9 +303,10 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   async status(runtime: StoredRuntime): Promise<BackendStatusResult> {
     if (runtime.processId === null) return { running: false, lastError: null };
     try {
-      const process = await this.sandbox(runtime.descriptor.identity, false).getProcess(
-        runtime.processId,
-      );
+      const process = await this.sandbox(
+        runtime.descriptor.identity,
+        runtimeReadKeepsContainerAlive(runtime.descriptor.status),
+      ).getProcess(runtime.processId);
       if (process === null) return { running: false, lastError: "Tenant service is not running" };
       const status = await process.getStatus();
       return {
@@ -351,7 +352,8 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   async logs(runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }> {
     if (runtime.processId === null) return { stdout: "", stderr: "" };
     try {
-      const logs = await this.sandbox(runtime.descriptor.identity, false).getProcessLogs(
+      const keepAlive = runtimeReadKeepsContainerAlive(runtime.descriptor.status);
+      const logs = await this.sandbox(runtime.descriptor.identity, keepAlive).getProcessLogs(
         runtime.processId,
       );
       return { stdout: logs.stdout, stderr: logs.stderr };
@@ -797,6 +799,12 @@ export function runtimeSandboxOptions(keepAlive: boolean, sleepAfter: string) {
     // whose file client rejects streams; RPC is required to carry the stream into the DO.
     transport: "rpc" as const,
   };
+}
+
+export function runtimeReadKeepsContainerAlive(
+  status: StoredRuntime["descriptor"]["status"],
+): boolean {
+  return status === "running" || status === "starting";
 }
 
 function releaseRootFor(sealedArtifactSha256: string): string {

@@ -322,3 +322,73 @@ recon, so that cross-provider deletion inventory is an explicit pre-delete task.
   management key plus approved production organization, region, retention, and project ceiling.
 - **PG-5 — capacity gate.** The real dual-substrate proof establishes function, not production
   capacity. Set production concurrency/cost ceilings from load evidence before opening traffic.
+
+## Wall #8 production route diagnosis — 2026-08-17
+
+This record was written before the Wall #8 repair branch was opened.
+
+### Authoritative state
+
+- GitHub `main` is `bc3070ca48bf683ac037c40d85cd5affbbaa4416`.
+- Project 51 still publishes v149 and still stages/tests the approved v158. The v158 row has no
+  `productionRelease`; the failed green activation did not advance project publish state.
+- The v149 `productionRelease` is `active`, targets slot `blue`, and names runtime
+  `nrf-ab8e18ef4ebebedd-p51-production-blue`. Both `promotedAt` and `activatedAt` are
+  `2026-08-15T23:11:58.905Z`, proving that the original publication completed its final route
+  activation rather than merely starting a runtime.
+- The original route did serve. Persisted post-publish checks for v149 returned HTTP 200 at
+  `2026-08-15T23:12:37.411820Z` and `2026-08-15T23:17:37.406407Z`, at 629 ms and 628 ms.
+- The production route registry is the `control-v1` Control Durable Object's `_cf_KV` storage,
+  not a Workers KV namespace. Cloudflare Data Studio exposes the table but rejects value reads
+  with `SQLITE_AUTH`. The public data plane nevertheless proves the current entry is present and
+  internally consistent with the old blue runtime: every missing-route, malformed-identity,
+  manifest, port, or persisted-status mismatch returns immediate typed JSON before forwarding;
+  instead both `/` and `/healthz` reached Cloudflare and timed out after 15.01 seconds with zero
+  response bytes. The only remaining code path is `containerFetch` to the stored blue target.
+- Cloudflare's live container census names three Project 51 instances: preview-primary,
+  production-blue, and production-green. Blue is reported `Running` in Washington with 244 MiB
+  memory, 625.5 MB disk, and four `VMStopped` events at deployment `d0345428` beginning
+  `2026-08-16T03:18:29Z`. Green is reported `Running` in Washington with 347.6 MiB memory and no
+  recent errors.
+- The green candidate is
+  `nrf-ab8e18ef4ebebedd-p51-production-green`. It is started but unreferenced: v158 has no
+  production release, Project 51 and v149 still reference blue, and the route-activation function
+  rejects green before its compare-and-swap call. Therefore tonight's failed activation did not
+  mutate route state, while its pre-activation start left a live orphan candidate.
+
+### Mechanism and repair scope
+
+There are two independent product defects.
+
+1. Route activation accepts a `blue|green` route contract, then hard-codes the parsed identity and
+   runtime descriptor to `blue`. Blue-to-green publication therefore fails before the route CAS.
+   The validation must instead require the parsed identity and runtime descriptor slot to equal
+   the route's actual `activeSlot`, in both directions.
+2. Published liveness trusts a durable `running` descriptor but never verifies that its tenant
+   process survived a container VM stop/restart, and the unbounded `containerFetch` can then hold a
+   public request forever. The trigger is also concrete: `CloudflareSandboxBackend.start()` sets
+   keepalive true, but its `status()` and `logs()` accessors reopen the same Sandbox with
+   `keepAlive: false`; the installed Sandbox SDK persists that change and stops the container when
+   its activity window expires. The v149 health history, later `VMStopped` events, and current
+   zero-byte hang are the resulting sequence. The repair must keep read-only inspection from
+   disabling live keepalive, bound forwarding, return a typed retryable failure rather than a dark
+   connection, and drive recovery through the existing durable runtime-start job rather than
+   making one public request own execution.
+
+Activation failure cleanup is part of the same repair. A target runtime that was promoted and
+started but not made authoritative must be stopped/destroyed and its target artifact reclaimed.
+Cleanup must first reconcile whether activation committed, so an ambiguous response can never
+destroy the runtime that actually became active.
+
+### Incidental findings
+
+1. **Route-store terminology/observability mismatch.** Operational requests and earlier reports
+   call the record a KV route, but it lives in opaque Control Durable Object `_cf_KV` storage and
+   has no signed metadata-only read surface. Cloudflare Data Studio blocks reads with
+   `SQLITE_AUTH`, so direct forensic discovery depends on behavioral and application-ledger
+   correlation. Evidence: production `control-v1` object
+   `e57de76559a30d3ba40c8aa34f307e1d9b7ef9a6a5d258ec499336b20be9b691` and the rejected `_cf_KV`
+   query. Reported only; no diagnostic surface is added in this commission.
+2. **Container observability disabled.** The production container Logs tab reports “Workers
+   Observability is Disabled,” preventing application-log correlation for the dark blue runtime.
+   Reported only; enabling it may affect cost and is outside this commission.

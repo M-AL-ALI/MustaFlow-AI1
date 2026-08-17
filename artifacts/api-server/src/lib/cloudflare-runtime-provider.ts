@@ -1706,41 +1706,6 @@ export class CloudflareRuntimeProvider
       ),
       `${operationKey}:start`,
     );
-    if (started.status !== "running" || started.manifestRevision !== targetManifest.revision) {
-      throw new CloudflareRuntimeControlError(
-        502,
-        "production_runtime_not_ready",
-        true,
-        "Production candidate did not reach the ready running state",
-      );
-    }
-
-    await this.request({
-      method: "POST",
-      path: `${CONTROL_API_PREFIX}/routes/${input.hostname}/activate`,
-      body: {
-        route: {
-          hostname: input.hostname,
-          projectId: input.projectId,
-          role: "production",
-          activeSlot: input.targetSlot,
-          manifestRevision: targetManifest.revision,
-          servicePort: targetManifest.servicePort,
-          sandboxIdentity: targetRuntimeIdentity,
-        },
-        expectedPreviousManifestRevision: input.expectedPreviousManifestRevision,
-      },
-      idempotencyKey: `${operationKey}:activate`,
-      operation: this.operationOptions(
-        "production-route.activate",
-        RUNTIME_CONTROL_OPERATION_BOUND_MS,
-        "production_route_activation_timeout",
-        "production_route_activation_cancelled",
-        options,
-      ),
-      parse: activateRouteResponseSchema,
-    });
-
     const now = new Date().toISOString();
     const release: ProductionArtifactRelease = {
       format: "nabuflow.production-artifact-release/v1",
@@ -1757,7 +1722,108 @@ export class CloudflareRuntimeProvider
       promotedAt: now,
       activatedAt: now,
     };
+
+    try {
+      if (started.status !== "running" || started.manifestRevision !== targetManifest.revision) {
+        throw new CloudflareRuntimeControlError(
+          502,
+          "production_runtime_not_ready",
+          true,
+          "Production candidate did not reach the ready running state",
+        );
+      }
+
+      await this.request({
+        method: "POST",
+        path: `${CONTROL_API_PREFIX}/routes/${input.hostname}/activate`,
+        body: {
+          route: {
+            hostname: input.hostname,
+            projectId: input.projectId,
+            role: "production",
+            activeSlot: input.targetSlot,
+            manifestRevision: targetManifest.revision,
+            servicePort: targetManifest.servicePort,
+            sandboxIdentity: targetRuntimeIdentity,
+          },
+          expectedPreviousManifestRevision: input.expectedPreviousManifestRevision,
+        },
+        idempotencyKey: `${operationKey}:activate`,
+        operation: this.operationOptions(
+          "production-route.activate",
+          RUNTIME_CONTROL_OPERATION_BOUND_MS,
+          "production_route_activation_timeout",
+          "production_route_activation_cancelled",
+          options,
+        ),
+        parse: activateRouteResponseSchema,
+      });
+    } catch (activationError) {
+      try {
+        await this.discardFailedProductionCandidate({
+          candidateRelease: release,
+          previousRelease: input.previousRelease,
+          targetLocator,
+          signal: input.signal,
+        });
+      } catch {
+        throw new CloudflareRuntimeControlError(
+          503,
+          "production_candidate_cleanup_failed",
+          true,
+          "Production activation failed and its candidate could not be safely reclaimed",
+        );
+      }
+      throw activationError;
+    }
     return { runtime: toInfo(started), release };
+  }
+
+  private async discardFailedProductionCandidate(input: {
+    candidateRelease: ProductionArtifactRelease;
+    previousRelease: ProductionArtifactRelease | null;
+    targetLocator: RuntimeLocator;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    try {
+      await this.rollbackProductionArtifactActivation({
+        activatedRelease: input.candidateRelease,
+        previousRelease: input.previousRelease,
+        signal: input.signal,
+      });
+    } catch (error) {
+      const expectedNoActivation =
+        error instanceof CloudflareRuntimeControlError &&
+        (error.code === "route_activation_conflict" ||
+          error.code === "route_deactivation_conflict" ||
+          error.code === "published_route_not_found");
+      if (!expectedNoActivation) throw error;
+    }
+
+    try {
+      await this.request({
+        method: "DELETE",
+        path: this.path(input.targetLocator),
+        body: {
+          locator: input.targetLocator,
+          reason: "Production route activation failed before the candidate became authoritative",
+        },
+        idempotencyKey: `production-publish:${input.candidateRelease.promotionIdentity}:discard-candidate`,
+        operation: this.operationOptions(
+          "production-runtime.discard-candidate",
+          RUNTIME_CONTROL_OPERATION_BOUND_MS,
+          "production_candidate_cleanup_timeout",
+          "production_candidate_cleanup_cancelled",
+          { signal: input.signal },
+        ),
+        parse: { parse: () => true },
+      });
+    } catch (error) {
+      if (!(error instanceof CloudflareRuntimeControlError && error.code === "runtime_not_found")) {
+        throw error;
+      }
+    }
+    this.deployedArtifacts.delete(input.candidateRelease.targetRuntimeIdentity);
   }
   async rollbackProductionArtifactActivation(input: {
     activatedRelease: ProductionArtifactRelease;

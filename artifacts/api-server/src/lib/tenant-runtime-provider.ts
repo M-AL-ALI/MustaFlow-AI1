@@ -223,6 +223,7 @@ export interface ProductionArtifactPromotingTenantRuntimeProvider extends ZeroGe
     hostname: string;
     promotionIdentity: string;
     expectedPreviousManifestRevision: string | null;
+    previousRelease: ProductionArtifactRelease | null;
     operationTimeoutMs?: number;
     signal?: AbortSignal;
   }): Promise<{ runtime: RuntimeInfo; release: ProductionArtifactRelease }>;
