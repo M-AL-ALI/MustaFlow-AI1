@@ -151,6 +151,84 @@ const strictEmptySchema = z.object({}).strict();
 const successSchema = z.object({ ok: z.literal(true) }).strict();
 const runtimeResponseSchema = z.object({ runtime: runtimeDescriptorSchema }).strict();
 
+export const RUNTIME_RECONCILIATION_SEMANTICS_VERSION = "runtime-reconciliation-v2" as const;
+export const RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT =
+  RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS;
+
+export const runtimeReconciliationObservationSourceSchema = z.enum([
+  "provider-metadata",
+  "process-probe",
+  "health-probe",
+]);
+export const runtimeReconciliationObservationStageSchema = z.enum(["process", "health"]);
+export const runtimeReconciliationObservationCauseSchema = z.enum([
+  "ready",
+  "process_missing",
+  "process_not_running",
+  "process_check_failed",
+  "health_status",
+  "health_pre_dispatch",
+  "health_timeout",
+  "health_transport",
+]);
+export const runtimeReconciliationObservationSchema = z
+  .object({
+    attempt: z.number().int().min(1).max(RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT),
+    observedAt: z.string().datetime({ offset: true }),
+    stage: runtimeReconciliationObservationStageSchema,
+    cause: runtimeReconciliationObservationCauseSchema,
+    status: z.number().int().min(100).max(599).nullable(),
+    sources: z.array(runtimeReconciliationObservationSourceSchema).min(1).max(3),
+    decisionInputs: z
+      .object({
+        storedStatus: z.enum(RUNTIME_STATUSES),
+        storedProcessIdentity: z.enum(["present", "absent"]),
+        providerProcess: z.enum(["running", "missing", "not-running", "unknown"]),
+        health: z.enum(["not-probed", "ready", "rejected", "unknown"]),
+      })
+      .strict(),
+    decision: z.enum(["ready", "confirmed-stopped", "confirmed-error", "ambiguous"]),
+  })
+  .strict();
+export const runtimeReconciliationTerminalSchema = z
+  .object({
+    at: z.string().datetime({ offset: true }),
+    status: z.number().int().min(100).max(599),
+    code: z.string().min(1).max(100),
+    retryable: z.boolean(),
+  })
+  .strict();
+export const runtimeReconciliationEvidenceSchema = z
+  .object({
+    semanticsVersion: z.literal(RUNTIME_RECONCILIATION_SEMANTICS_VERSION),
+    reconciliationId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+    trail: z
+      .array(runtimeReconciliationObservationSchema)
+      .max(RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT),
+    terminal: runtimeReconciliationTerminalSchema,
+  })
+  .strict();
+export const runtimeReconciliationAuditRecordSchema = z
+  .object({
+    requestId: z.string().min(1).max(200),
+    reconciliationId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+    semanticsVersion: z.literal(RUNTIME_RECONCILIATION_SEMANTICS_VERSION),
+    locator: runtimeLocatorSchema,
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    trail: z
+      .array(runtimeReconciliationObservationSchema)
+      .max(RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT),
+    terminal: runtimeReconciliationTerminalSchema.nullable(),
+  })
+  .strict();
+export const runtimeReconciliationAuditResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    record: runtimeReconciliationAuditRecordSchema,
+  })
+  .strict();
+
 export const controlErrorResponseSchema = z
   .object({
     ok: z.literal(false),
@@ -158,6 +236,7 @@ export const controlErrorResponseSchema = z
     message: z.string().min(1).max(2_000),
     retryable: z.boolean(),
     requestId: z.string().min(1).max(200),
+    evidence: runtimeReconciliationEvidenceSchema.optional(),
   })
   .strict();
 
@@ -216,6 +295,7 @@ export const reconcileRuntimeRequestSchema = z
     expectedStatus: z.enum(RUNTIME_STATUSES),
     expectedManifestRevision: revisionSchema,
     reconciliationId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+    semanticsVersion: z.literal(RUNTIME_RECONCILIATION_SEMANTICS_VERSION),
   })
   .strict();
 export const reconcileRuntimeResponseSchema = z
@@ -242,6 +322,7 @@ export const reconcileRuntimeResponseSchema = z
       .strict(),
     capability: z.enum(["bound", "unbound"]),
     runtime: runtimeDescriptorSchema,
+    evidence: runtimeReconciliationEvidenceSchema,
   })
   .strict();
 
@@ -382,6 +463,10 @@ export const controlEndpointSchemas = {
     request: reconcileRuntimeRequestSchema,
     response: reconcileRuntimeResponseSchema,
   },
+  reconciliationAudit: {
+    request: strictEmptySchema,
+    response: runtimeReconciliationAuditResponseSchema,
+  },
   exec: { request: execRuntimeRequestSchema, response: execRuntimeResponseSchema },
   logs: { request: logsRuntimeRequestSchema, response: logsRuntimeResponseSchema },
   files: { request: filesRuntimeRequestSchema, response: filesRuntimeResponseSchema },
@@ -411,6 +496,10 @@ export const controlEndpointContracts = {
     method: "POST",
     path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/reconcile`,
   },
+  reconciliationAudit: {
+    method: "GET",
+    path: `${CONTROL_API_PREFIX}/audit/reconciliations/:requestId`,
+  },
   exec: { method: "POST", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/exec` },
   logs: { method: "GET", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/logs` },
   files: { method: "PUT", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/files` },
@@ -432,6 +521,14 @@ export type StopRuntimeRequest = z.infer<typeof stopRuntimeRequestSchema>;
 export type DestroyRuntimeRequest = z.infer<typeof destroyRuntimeRequestSchema>;
 export type StatusRuntimeRequest = z.infer<typeof statusRuntimeRequestSchema>;
 export type ReconcileRuntimeRequest = z.infer<typeof reconcileRuntimeRequestSchema>;
+export type RuntimeReconciliationObservation = z.infer<
+  typeof runtimeReconciliationObservationSchema
+>;
+export type RuntimeReconciliationTerminal = z.infer<typeof runtimeReconciliationTerminalSchema>;
+export type RuntimeReconciliationEvidence = z.infer<typeof runtimeReconciliationEvidenceSchema>;
+export type RuntimeReconciliationAuditRecord = z.infer<
+  typeof runtimeReconciliationAuditRecordSchema
+>;
 export type ExecRuntimeRequest = z.infer<typeof execRuntimeRequestSchema>;
 export type LogsRuntimeRequest = z.infer<typeof logsRuntimeRequestSchema>;
 export type FilesRuntimeRequest = z.infer<typeof filesRuntimeRequestSchema>;
@@ -448,6 +545,9 @@ export type StopRuntimeResponse = z.infer<typeof stopRuntimeResponseSchema>;
 export type DestroyRuntimeResponse = z.infer<typeof destroyRuntimeResponseSchema>;
 export type StatusRuntimeResponse = z.infer<typeof statusRuntimeResponseSchema>;
 export type ReconcileRuntimeResponse = z.infer<typeof reconcileRuntimeResponseSchema>;
+export type RuntimeReconciliationAuditResponse = z.infer<
+  typeof runtimeReconciliationAuditResponseSchema
+>;
 export type ExecRuntimeResponse = z.infer<typeof execRuntimeResponseSchema>;
 export type LogsRuntimeResponse = z.infer<typeof logsRuntimeResponseSchema>;
 export type FilesRuntimeResponse = z.infer<typeof filesRuntimeResponseSchema>;

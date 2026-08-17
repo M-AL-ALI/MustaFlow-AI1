@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   deriveRuntimeIdentity,
+  RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
   sha256Hex,
   signControlRequest,
 } from "@workspace/tenant-runtime-contracts";
@@ -876,6 +877,13 @@ describe("authenticated staging control plane", () => {
       };
       await coordinator.putRuntime(identity, runtime);
       if (slot === "blue") {
+        coordinator.idempotency.set("wall-12-reconcile-blue", {
+          fingerprint: "legacy-runtime-reconciliation-v1",
+          pending: false,
+          response: { status: 503, body: { code: "legacy-inconclusive-terminal" } },
+        });
+      }
+      if (slot === "blue") {
         backend.reconciliationResult = {
           ready: false,
           stage: "process",
@@ -884,6 +892,23 @@ describe("authenticated staging control plane", () => {
           attempts: 1,
           conclusive: true,
           processId: null,
+          trail: [
+            {
+              attempt: 1,
+              observedAt: new Date(TEST_NOW_MS + index).toISOString(),
+              stage: "process",
+              cause: "process_missing",
+              status: null,
+              sources: ["provider-metadata"],
+              decisionInputs: {
+                storedStatus: "error",
+                storedProcessIdentity: "absent",
+                providerProcess: "missing",
+                health: "not-probed",
+              },
+              decision: "confirmed-stopped",
+            },
+          ],
         };
       }
       const path = `/_nabuflow/control/v1/runtimes/92/production/${slot}/reconcile`;
@@ -898,12 +923,18 @@ describe("authenticated staging control plane", () => {
             expectedStatus: "error",
             expectedManifestRevision: runtime.manifest.revision,
             reconciliationId: `wall-12-${slot}`,
+            semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
           },
         }),
         env,
         { coordinator, backend, nowMs: TEST_NOW_MS + index },
       );
       expect(response.status).toBe(200);
+      expect(
+        coordinator.idempotency.has(
+          `${RUNTIME_RECONCILIATION_SEMANTICS_VERSION}:wall-12-reconcile-${slot}`,
+        ),
+      ).toBe(true);
       await expect(response.json()).resolves.toMatchObject(
         slot === "blue"
           ? { outcome: "confirmed-stopped", capability: "unbound", runtime: { status: "stopped" } }
@@ -920,6 +951,7 @@ describe("authenticated staging control plane", () => {
             expectedStatus: "error",
             expectedManifestRevision: runtime.manifest.revision,
             reconciliationId: `wall-12-${slot}`,
+            semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
           },
         }),
         env,
@@ -931,6 +963,43 @@ describe("authenticated staging control plane", () => {
       expect(await coordinator.getContainerBinding(containerId)).toBe(
         slot === "green" ? identity : null,
       );
+      if (slot === "green") {
+        const conflict = await handleControlRequest(
+          await signedRequest({
+            path,
+            method: "POST",
+            nonce: "nonce-reconcile-green-conflict",
+            idempotencyKey: "wall-14-reconcile-green-conflict",
+            body: {
+              locator: { projectId: 92, role: "production", slot },
+              expectedStatus: "error",
+              expectedManifestRevision: runtime.manifest.revision,
+              reconciliationId: "wall-14-green-conflict",
+              semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
+            },
+          }),
+          env,
+          {
+            coordinator,
+            backend,
+            nowMs: TEST_NOW_MS + 5,
+            requestId: "wall14-conflict-request",
+          },
+        );
+        expect(conflict.status).toBe(409);
+        await expect(conflict.json()).resolves.toMatchObject({
+          code: "runtime_reconciliation_conflict",
+          evidence: {
+            reconciliationId: "wall-14-green-conflict",
+            trail: [],
+            terminal: {
+              status: 409,
+              code: "runtime_reconciliation_conflict",
+              retryable: true,
+            },
+          },
+        });
+      }
     }
   });
 
@@ -942,10 +1011,28 @@ describe("authenticated staging control plane", () => {
       stage: "health",
       cause: "health_transport",
       status: null,
-      attempts: 1,
+      attempts: 3,
       conclusive: false,
       processId: null,
+      trail: Array.from({ length: 3 }, (_, index) => ({
+        attempt: index + 1,
+        observedAt: new Date(TEST_NOW_MS).toISOString(),
+        stage: "health",
+        cause: "health_transport",
+        status: null,
+        sources: ["provider-metadata", "process-probe", "health-probe"],
+        decisionInputs: {
+          storedStatus: "error",
+          storedProcessIdentity: "absent",
+          providerProcess: "running",
+          health: "unknown",
+        },
+        decision: "ambiguous",
+      })),
     };
+    (backend.reconciliationResult.trail[0] as unknown as Record<string, unknown>)[
+      "rawTransportDetail"
+    ] = "private upstream response body and stack";
     const env = fakeEnv();
     const identity = await deriveRuntimeIdentity({
       namespace: "staging",
@@ -999,18 +1086,85 @@ describe("authenticated staging control plane", () => {
           expectedManifestRevision:
             "zero-node-v1-f8dd2e2df3487cc3c3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039",
           reconciliationId: "wall-12-preview",
+          semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
         },
       }),
       env,
-      { coordinator, backend, nowMs: TEST_NOW_MS },
+      {
+        coordinator,
+        backend,
+        nowMs: TEST_NOW_MS,
+        requestId: "wall14-inconclusive-request",
+      },
     );
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
+    const terminalBody = await response.json();
+    expect(terminalBody).toMatchObject({
       code: "runtime_reconciliation_inconclusive",
       retryable: true,
+      requestId: "wall14-inconclusive-request",
+      evidence: {
+        semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
+        reconciliationId: "wall-12-preview",
+        trail: [
+          { attempt: 1, decision: "ambiguous" },
+          { attempt: 2, decision: "ambiguous" },
+          { attempt: 3, decision: "ambiguous" },
+        ],
+        terminal: {
+          status: 503,
+          code: "runtime_reconciliation_inconclusive",
+          retryable: true,
+        },
+      },
     });
+    expect(JSON.stringify(terminalBody)).not.toContain("private upstream");
+    const persisted = await coordinator.getRuntimeReconciliation("wall14-inconclusive-request");
+    expect(persisted?.trail).toHaveLength(3);
+    expect(JSON.stringify(persisted)).not.toContain("rawTransportDetail");
     expect(await coordinator.getRuntime(identity)).toEqual(before);
     expect(coordinator.containerBindings.size).toBe(0);
+
+    const auditCount = coordinator.audits.length;
+    const reconciliationSnapshot = structuredClone(coordinator.runtimeReconciliations);
+    const putRuntime = vi.spyOn(coordinator, "putRuntime");
+    const beginReconciliation = vi.spyOn(coordinator, "beginRuntimeReconciliation");
+    const appendObservation = vi.spyOn(coordinator, "appendRuntimeReconciliationObservation");
+    const completeReconciliation = vi.spyOn(coordinator, "completeRuntimeReconciliation");
+    const auditRead = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/audit/reconciliations/wall14-inconclusive-request",
+        method: "GET",
+        nonce: "nonce-reconcile-audit-read-001",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS + 1 },
+    );
+    expect(auditRead.status).toBe(200);
+    await expect(auditRead.json()).resolves.toEqual({ ok: true, record: persisted });
+    expect(coordinator.audits).toHaveLength(auditCount);
+    expect(coordinator.runtimeReconciliations).toEqual(reconciliationSnapshot);
+    expect(putRuntime).not.toHaveBeenCalled();
+    expect(beginReconciliation).not.toHaveBeenCalled();
+    expect(appendObservation).not.toHaveBeenCalled();
+    expect(completeReconciliation).not.toHaveBeenCalled();
+
+    const missingAudit = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/audit/reconciliations/wall14-missing-request",
+        method: "GET",
+        nonce: "nonce-reconcile-audit-read-002",
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS + 2 },
+    );
+    expect(missingAudit.status).toBe(404);
+    await expect(missingAudit.json()).resolves.toMatchObject({
+      code: "runtime_reconciliation_audit_not_found",
+      retryable: false,
+    });
+    expect(coordinator.audits).toHaveLength(auditCount);
+    expect(coordinator.runtimeReconciliations).toEqual(reconciliationSnapshot);
   });
 
   it("runs the complete control lifecycle through the shared schemas", async () => {

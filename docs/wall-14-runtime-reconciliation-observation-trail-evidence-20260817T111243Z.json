@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "wall": 14,
+  "capturedAt": "2026-08-17T11:12:43Z",
+  "base": "ce58802d0136ba6b8a907f4c5c6dfad42601da8a",
+  "branch": "codex/reconciliation-observation-trail",
+  "implementationCommit": "0e4f1cdca35f9ddc031a6a1b7c0a802517a16418",
+  "productionFrozen": true,
+  "productionMutations": [],
+  "surface": {
+    "method": "GET",
+    "path": "/_nabuflow/control/v1/audit/reconciliations/:requestId",
+    "signed": true,
+    "metadataOnly": true,
+    "unknownCode": "runtime_reconciliation_audit_not_found",
+    "unknownStatus": 404
+  },
+  "identity": {
+    "semanticsVersion": "runtime-reconciliation-v2",
+    "idempotencyNamespace": "runtime-reconciliation-v2:",
+    "legacyReplayIsolationProven": true
+  },
+  "trail": {
+    "maximumAttempts": 3,
+    "retainedRecords": 256,
+    "sources": ["provider-metadata", "process-probe", "health-probe"],
+    "causes": [
+      "ready",
+      "process_missing",
+      "process_not_running",
+      "process_check_failed",
+      "health_status",
+      "health_pre_dispatch",
+      "health_timeout",
+      "health_transport"
+    ],
+    "persistedBeforeNextAttempt": true,
+    "survivesCoordinatorRestart": true,
+    "rawDetailPersisted": false,
+    "rawDetailReturned": false
+  },
+  "verification": {
+    "offlineInstall": {
+      "result": "pass",
+      "frozenLockfile": true,
+      "offline": true,
+      "resolved": 1899,
+      "reused": 1870,
+      "downloaded": 0,
+      "durationSeconds": 603
+    },
+    "focusedTests": { "result": "pass", "tests": 54 },
+    "contracts": { "result": "pass", "files": 20, "tests": 187 },
+    "runtimeWorker": { "result": "pass", "files": 36, "tests": 265 },
+    "packageTypechecks": "pass",
+    "packageLints": "pass",
+    "workspaceTypecheck": "pass",
+    "workspaceLint": "pass",
+    "prettier": "pass",
+    "diffCheck": "pass"
+  },
+  "manifests": {
+    "changed": false,
+    "lockfileChanged": false,
+    "dependenciesAdded": false
+  },
+  "constraints": {
+    "artifactV1Changed": false,
+    "layerWireChanged": false,
+    "flyTouched": false,
+    "newPublicSurfaceOpened": false,
+    "newSpend": false,
+    "secretValuesRead": false
+  }
+}

@@ -25,6 +25,9 @@ import type {
   ProductionDatabaseJobRequest,
   ProductionDatabaseAllocationRecord,
   PromoteRuntimeLayeredArtifactRequest,
+  RuntimeReconciliationAuditRecord,
+  RuntimeReconciliationObservation,
+  RuntimeReconciliationTerminal,
   StartRuntimeRequest,
   UpdateRuntimeManifestRequest,
 } from "@workspace/tenant-runtime-contracts";
@@ -341,6 +344,16 @@ export interface ControlCoordinator {
     nowMs: number,
   ): Promise<"completed" | "already_terminal" | "not_owner">;
   recordAudit(record: ControlAuditRecord): Promise<void>;
+  beginRuntimeReconciliation(record: RuntimeReconciliationAuditRecord): Promise<void>;
+  appendRuntimeReconciliationObservation(
+    requestId: string,
+    observation: RuntimeReconciliationObservation,
+  ): Promise<RuntimeReconciliationAuditRecord>;
+  completeRuntimeReconciliation(
+    requestId: string,
+    terminal: RuntimeReconciliationTerminal,
+  ): Promise<RuntimeReconciliationAuditRecord>;
+  getRuntimeReconciliation(requestId: string): Promise<RuntimeReconciliationAuditRecord | null>;
   getRuntime(identity: string): Promise<StoredRuntime | null>;
   putRuntime(identity: string, runtime: StoredRuntime): Promise<void>;
   putRuntimeIfManifestRevision(
