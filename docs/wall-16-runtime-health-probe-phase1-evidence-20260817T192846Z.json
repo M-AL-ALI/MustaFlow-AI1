@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-17T19:28:46.794Z",
+  "commission": "wall-16-runtime-health-probe",
+  "verifiedBase": "0f4d0bae405af3c21bf4ab758256b8bfc925f950",
+  "productionFrozen": true,
+  "sourceEvidence": [
+    {
+      "path": "docs/flip-day-phase1-wall16-trigger-evidence-20260817T191457Z.json",
+      "sha256": "c236d350d718404457abefd36f5a477bcde7c52e339ec68c13874badd14d12c6"
+    },
+    {
+      "path": "docs/wall-12-runtime-recovery-phase1-evidence-20260817T083648Z.json",
+      "sha256": "58cc3b3d02df774263004782a21d17550341fd6e038cdbc9cf22a2fa7005dbee"
+    }
+  ],
+  "capturedPreviewTrail": {
+    "requestId": "09f16134-1e91-4d37-80b4-df480ee8f949",
+    "identity": "nrf-ab8e18ef4ebebedd-p51-preview-primary",
+    "storedStatus": "running",
+    "storedProcessIdentity": "present",
+    "providerProcess": "running",
+    "observations": [
+      {
+        "attempt": 1,
+        "observedAt": "2026-08-17T15:57:14.535Z",
+        "stage": "health",
+        "cause": "health_transport",
+        "status": null
+      },
+      {
+        "attempt": 2,
+        "observedAt": "2026-08-17T15:57:14.882Z",
+        "stage": "health",
+        "cause": "health_transport",
+        "status": null
+      },
+      {
+        "attempt": 3,
+        "observedAt": "2026-08-17T15:57:15.227Z",
+        "stage": "health",
+        "cause": "health_transport",
+        "status": null
+      }
+    ],
+    "terminalAt": "2026-08-17T15:57:15.382Z",
+    "terminalCode": "runtime_reconciliation_inconclusive",
+    "retryable": true
+  },
+  "previewRepairStart": {
+    "startCommand": ["node", "src/index.js"],
+    "host": "0.0.0.0",
+    "port": 8080,
+    "healthPath": "/healthz",
+    "processId": "tenant-service",
+    "waitForPortStatusRange": [200, 399],
+    "waitForPortTimeoutMs": 30000,
+    "processStartedAt": "2026-08-17T15:56:53.754Z",
+    "jobFinalizedAt": "2026-08-17T15:56:54.054Z",
+    "jobTerminal": "succeeded"
+  },
+  "productionContrast": {
+    "greenProcessStartedAt": "2026-08-17T05:14:39.158Z",
+    "greenJobTerminal": "succeeded",
+    "greenLaterObservation": "health_transport",
+    "publicRouteReturnedTenantHttp200": false,
+    "finding": "Preview and production use the same start-time HTTP readiness contract and the same later availability implementation. The evidence does not support a structural preview-only health exception."
+  },
+  "transportClassification": {
+    "known": "The process lookup succeeded and the signal-bearing health Request then failed promptly during the Sandbox containerFetch RPC path.",
+    "notTimeout": true,
+    "maximumObservedAttemptSpacingMs": 347,
+    "configuredTimeoutMs": 5000,
+    "rawClassPersisted": false,
+    "refusedVsUnresolvableVsConnectionLoss": "not recoverable from the shipped allowlisted trail",
+    "codeMechanism": "The outer Worker constructs AbortSignal.timeout and a Request, passes the Request across the Sandbox RPC boundary, and receives a Response across that boundary. Workers RPC documents those types as supported, so the sanitized evidence cannot assign the failure specifically to signal serialization. It does establish that this cross-context probe path failed while the Sandbox SDK's internal port-watch path succeeded."
+  },
+  "authorityVerdict": {
+    "previewServingRequired": true,
+    "previewIdleException": "Only an explicitly stopped preview with no process is a valid non-serving idle state.",
+    "servingCriterion": "A running preview, blue, or green runtime must answer its manifest healthPath with HTTP 200-399 on manifest servicePort.",
+    "selectedFixFork": "Move the bounded HTTP probe and its AbortSignal inside NabuflowSandbox, send only plain typed inputs/results across RPC, preserve the HTTP criterion for all three slots, and mint reconciliation semantics v4 so v3 terminals cannot shadow corrected observations."
+  },
+  "phase1Actions": {
+    "productionReads": 0,
+    "productionWrites": 0,
+    "reconciliationRuns": 0,
+    "deploys": 0,
+    "newPublicSurfaces": 0,
+    "flyActions": 0,
+    "secondPublish": false
+  }
+}

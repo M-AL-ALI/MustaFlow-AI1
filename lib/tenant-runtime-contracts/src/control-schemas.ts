@@ -151,7 +151,7 @@ const strictEmptySchema = z.object({}).strict();
 const successSchema = z.object({ ok: z.literal(true) }).strict();
 const runtimeResponseSchema = z.object({ runtime: runtimeDescriptorSchema }).strict();
 
-export const RUNTIME_RECONCILIATION_SEMANTICS_VERSION = "runtime-reconciliation-v3" as const;
+export const RUNTIME_RECONCILIATION_SEMANTICS_VERSION = "runtime-reconciliation-v4" as const;
 export const RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT =
   RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS;
 

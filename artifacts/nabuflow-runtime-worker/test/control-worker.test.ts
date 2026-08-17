@@ -883,6 +883,11 @@ describe("authenticated staging control plane", () => {
           pending: false,
           response: { status: 503, body: { code: "v2-inconclusive-terminal" } },
         });
+        coordinator.idempotency.set("runtime-reconciliation-v3:wall-12-reconcile-blue", {
+          fingerprint: "legacy-runtime-reconciliation-v3",
+          pending: false,
+          response: { status: 503, body: { code: "v3-inconclusive-terminal" } },
+        });
       }
       backend.reconciliationResult = {
         ready: false,
@@ -1143,7 +1148,7 @@ describe("authenticated staging control plane", () => {
       runtime: { status: "error", readyAt: null },
       repairJob: { state: "active", attempt: 0 },
       evidence: {
-        semanticsVersion: "runtime-reconciliation-v3",
+        semanticsVersion: "runtime-reconciliation-v4",
         trail: [
           { decision: "ambiguous", repairAction: "none" },
           { decision: "ambiguous", repairAction: "none" },

@@ -10,6 +10,7 @@ export const CONTROL_FEATURES = [
   "runtime-reconciliation-v1",
   "runtime-reconciliation-v2",
   "runtime-reconciliation-v3",
+  "runtime-reconciliation-v4",
   "trusted-build-v1",
   "production-database-v1",
 ] as const;
