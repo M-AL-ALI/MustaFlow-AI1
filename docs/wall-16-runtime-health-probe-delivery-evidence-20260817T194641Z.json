@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-17T19:46:41.682Z",
+  "commission": "wall-16-runtime-health-probe",
+  "branch": "codex/runtime-health-probe-rpc-boundary",
+  "base": "0f4d0bae405af3c21bf4ab758256b8bfc925f950",
+  "implementationCommit": "4f9af0cefa351c498ee30f837ee29bc75b17789f",
+  "implementationTree": "97ac71d26d7de7ec7612d142218fa94c6b9ad32c",
+  "diagnosis": {
+    "previewContract": "running preview serves manifest HTTP health on manifest servicePort and healthPath",
+    "previewIdleException": "explicit stopped preview with no process is non-serving healthy-idle",
+    "capturedRequestId": "09f16134-1e91-4d37-80b4-df480ee8f949",
+    "capturedCause": "health_transport",
+    "attemptSpacingMs": [347, 345],
+    "configuredHealthTimeoutMs": 5000,
+    "preciseClass": "prompt non-timeout exception on the cross-context containerFetch path; lower-level cause unavailable because the shipped sanitized trail did not persist it",
+    "selectedRepair": "construct and consume the bounded HTTP request inside NabuflowSandbox and return a plain sanitized verdict over RPC",
+    "semanticsVersion": "runtime-reconciliation-v4"
+  },
+  "verification": {
+    "frozenOfflineInstall": {
+      "command": "pnpm install --offline --frozen-lockfile",
+      "workspaceProjects": 21,
+      "resolved": 1899,
+      "reused": 1870,
+      "downloaded": 0,
+      "elapsed": "7m 8.9s",
+      "result": "pass"
+    },
+    "focusedAvailability": {
+      "command": "pnpm --filter @workspace/nabuflow-runtime-worker test -- runtime-availability.test.ts",
+      "files": 1,
+      "tests": 12,
+      "result": "pass"
+    },
+    "contracts": {
+      "typecheck": "pass",
+      "lint": "pass",
+      "testFiles": 20,
+      "tests": 187,
+      "result": "pass"
+    },
+    "runtimeWorker": {
+      "typecheck": "pass",
+      "lint": "pass",
+      "testFiles": 36,
+      "tests": 274,
+      "result": "pass"
+    },
+    "repository": {
+      "typecheck": "pass",
+      "lint": "pass",
+      "prettierChangedFiles": "pass",
+      "gitDiffCheck": "pass"
+    }
+  },
+  "regressionCoverage": [
+    "outer Worker sends a JSON-serializable health-probe envelope rather than Request/Response primitives",
+    "Sandbox-local request targets http://localhost:8080/healthz and owns the AbortSignal",
+    "malformed or sub-minimum timeout fails pre-dispatch with zero container dispatch",
+    "raw transport exception is reduced to the exact sanitized health_transport result",
+    "HTTP 503 remains definite health_status rather than transport ambiguity",
+    "captured running-plus-identity-present signature resolves ready for preview, blue, and green",
+    "explicit stopped preview remains healthy-idle",
+    "v2 and v3 durable idempotency recordings do not shadow v4",
+    "same-key v4 replay does not duplicate a reconciliation or repair job"
+  ],
+  "changeDeclaration": {
+    "manifestFilesChanged": [],
+    "lockfileChanged": false,
+    "wireShapeChanged": false,
+    "wireSemanticLiteralAdded": "runtime-reconciliation-v4",
+    "controlFeaturesAdded": ["runtime-reconciliation-v4"],
+    "flyFilesChanged": [],
+    "productionMutations": 0,
+    "deployments": 0,
+    "reconciliationRuns": 0,
+    "newPublicSurfaces": 0,
+    "newSpendUsd": 0
+  },
+  "machine": {
+    "freeBytesAfterVerification": 78393794560,
+    "installProgressWasMonotonic": true,
+    "diskSaturationObserved": false
+  },
+  "incidentalFindings": {
+    "inheritedSyntheticSecretPatternCount": 3,
+    "introducedSyntheticSecretPatternCount": 0,
+    "paths": [
+      "artifacts/api-server/src/tests/preview-security.test.ts",
+      "artifacts/nabuflow-runtime-worker/scripts/trusted-build-staging-smoke.ts"
+    ]
+  }
+}

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as SandboxModule from "@cloudflare/sandbox";
 import { RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS } from "@workspace/tenant-runtime-contracts";
 import type { StoredRuntime } from "../src/model";
-import { CloudflareSandboxBackend } from "../src/runtime-backend";
+import {
+  CloudflareSandboxBackend,
+  NabuflowSandbox,
+  RUNTIME_AVAILABILITY_TIMEOUT_MS,
+} from "../src/runtime-backend";
 import { TEST_NOW_MS, fakeEnv } from "./helpers";
 
 const IDENTITY = "nrf-ab8e18ef4ebebedd-p51-production-green";
@@ -56,15 +60,16 @@ afterEach(() => {
 describe("runtime availability", () => {
   it("probes the captured identity at its manifest health path and port", async () => {
     const getStatus = vi.fn(async () => "running");
-    const containerFetch = vi.fn(async (_request: Request, _port: number) =>
-      Promise.resolve(new Response(null, { status: 204 })),
+    const probeRuntimeHealth = vi.fn(
+      async (_input: { servicePort: number; healthPath: string; timeoutMs: number }) =>
+        Promise.resolve({ ready: true, stage: "health", cause: "ready", status: 204 } as const),
     );
     const calls: Array<{ identity: string; options: unknown }> = [];
     setSandboxFactoryForTest((_namespace, identity, options) => {
       calls.push({ identity, options });
       return {
         getProcess: vi.fn(async () => ({ getStatus })),
-        containerFetch,
+        probeRuntimeHealth,
       } as never;
     });
 
@@ -73,10 +78,87 @@ describe("runtime availability", () => {
     expect(result).toEqual({ ready: true, stage: "health", cause: "ready", status: 204 });
     expect(calls.map((call) => call.identity)).toEqual([IDENTITY, IDENTITY]);
     expect(calls.at(-1)?.options).toMatchObject({ keepAlive: true, transport: "rpc" });
+    expect(probeRuntimeHealth).toHaveBeenCalledTimes(1);
+    const [input] = probeRuntimeHealth.mock.calls[0];
+    expect(input).toEqual({
+      servicePort: 8080,
+      healthPath: "/healthz",
+      timeoutMs: RUNTIME_AVAILABILITY_TIMEOUT_MS,
+    });
+    expect(JSON.parse(JSON.stringify(input))).toEqual(input);
+    expect(input).not.toBeInstanceOf(Request);
+  });
+
+  it("constructs the request and timeout inside the Sandbox RPC target", async () => {
+    const containerFetch = vi.fn(
+      async (_request: Request, _port: number) => new Response(null, { status: 204 }),
+    );
+    const result = await NabuflowSandbox.prototype.probeRuntimeHealth.call(
+      { containerFetch } as never,
+      { servicePort: 8080, healthPath: "/healthz", timeoutMs: 5_000.9 },
+    );
+
+    expect(result).toEqual({ ready: true, stage: "health", cause: "ready", status: 204 });
     expect(containerFetch).toHaveBeenCalledTimes(1);
-    const [request, port] = containerFetch.mock.calls[0];
-    expect(new URL(request.url).pathname).toBe("/healthz");
+    const [request, port] = containerFetch.mock.calls[0] as [Request, number];
+    expect(request.url).toBe("http://localhost:8080/healthz");
+    expect(request.signal).toBeInstanceOf(AbortSignal);
     expect(port).toBe(8080);
+  });
+
+  it("fails a malformed local probe before dispatch", async () => {
+    const containerFetch = vi.fn();
+    await expect(
+      NabuflowSandbox.prototype.probeRuntimeHealth.call({ containerFetch } as never, {
+        servicePort: 8080,
+        healthPath: "/healthz",
+        timeoutMs: 0.9,
+      }),
+    ).resolves.toEqual({
+      ready: false,
+      stage: "health",
+      cause: "health_pre_dispatch",
+      status: null,
+    });
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns only a sanitized transport verdict from the local probe", async () => {
+    const containerFetch = vi.fn(async (_request: Request, _port: number) => {
+      throw new TypeError("private provider transport detail");
+    });
+
+    await expect(
+      NabuflowSandbox.prototype.probeRuntimeHealth.call({ containerFetch } as never, {
+        servicePort: 8080,
+        healthPath: "/healthz",
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toEqual({
+      ready: false,
+      stage: "health",
+      cause: "health_transport",
+      status: null,
+    });
+  });
+
+  it("preserves a definite HTTP rejection as a typed health status", async () => {
+    const containerFetch = vi.fn(
+      async (_request: Request, _port: number) => new Response(null, { status: 503 }),
+    );
+
+    await expect(
+      NabuflowSandbox.prototype.probeRuntimeHealth.call({ containerFetch } as never, {
+        servicePort: 8080,
+        healthPath: "/healthz",
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toEqual({
+      ready: false,
+      stage: "health",
+      cause: "health_status",
+      status: 503,
+    });
   });
 
   it("distinguishes an adopted process with a closed health listener from a stopped process", async () => {
@@ -85,7 +167,7 @@ describe("runtime availability", () => {
       () =>
         ({
           getProcess: runningProcess,
-          containerFetch: vi.fn(async () => {
+          probeRuntimeHealth: vi.fn(async () => {
             throw new TypeError("private transport detail");
           }),
         }) as never,
@@ -105,6 +187,65 @@ describe("runtime availability", () => {
       cause: "process_missing",
       status: null,
     });
+  });
+
+  it("resolves the exact 09f16134 signature through the local probe for all three slots", async () => {
+    for (const locator of [
+      { role: "preview", slot: "primary" },
+      { role: "production", slot: "blue" },
+      { role: "production", slot: "green" },
+    ] as const) {
+      const runtime = capturedRuntime();
+      runtime.descriptor.role = locator.role;
+      runtime.descriptor.slot = locator.slot;
+      runtime.descriptor.identity = `nrf-ab8e18ef4ebebedd-p51-${locator.role}-${locator.slot}`;
+      runtime.processId = "tenant-service";
+      const probeRuntimeHealth = vi.fn(async () => ({
+        ready: true,
+        stage: "health" as const,
+        cause: "ready" as const,
+        status: 200,
+      }));
+      setSandboxFactoryForTest(
+        () =>
+          ({
+            getProcess: vi.fn(async () => ({ getStatus: async () => "running" })),
+            probeRuntimeHealth,
+          }) as never,
+      );
+
+      const result = await new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS).reconcile(
+        runtime,
+      );
+
+      expect(result).toMatchObject({
+        ready: true,
+        stage: "health",
+        cause: "ready",
+        status: 200,
+        attempts: 1,
+        conclusive: true,
+        processId: "tenant-service",
+        repairAction: "none",
+        trail: [
+          expect.objectContaining({
+            decision: "ready",
+            repairAction: "none",
+            decisionInputs: {
+              storedStatus: "running",
+              storedProcessIdentity: "present",
+              providerProcess: "running",
+              health: "ready",
+            },
+          }),
+        ],
+      });
+      expect(probeRuntimeHealth).toHaveBeenCalledWith({
+        servicePort: 8080,
+        healthPath: "/healthz",
+        timeoutMs: RUNTIME_AVAILABILITY_TIMEOUT_MS,
+      });
+    }
   });
 
   it("does not treat one ambiguous observation as a terminal reconciliation verdict", async () => {

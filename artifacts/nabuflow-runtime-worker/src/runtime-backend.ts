@@ -42,6 +42,19 @@ export const DOORMAN_HOST = CAPABILITY_DOORMAN_HOST;
 const TENANT_PROCESS_ID = "tenant-service";
 export const RUNTIME_AVAILABILITY_TIMEOUT_MS = RUNTIME_RECONCILIATION_OBSERVATION_TIMEOUT_MS;
 
+export interface RuntimeHealthProbeInput {
+  servicePort: number;
+  healthPath: string;
+  timeoutMs: number;
+}
+
+export interface RuntimeHealthProbeResult {
+  ready: boolean;
+  stage: "health";
+  cause: "ready" | "health_status" | "health_pre_dispatch" | "health_timeout" | "health_transport";
+  status: number | null;
+}
+
 export class ContainerProxy extends SandboxContainerProxy {
   async fetch(request: Request): Promise<Response> {
     if (new URL(request.url).hostname === DOORMAN_HOST) {
@@ -60,6 +73,65 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
   enableInternet = false;
   interceptHttps = true;
   allowedHosts = [DOORMAN_HOST];
+
+  /**
+   * Run the bounded tenant health request inside the Sandbox Durable Object.
+   *
+   * Workers RPC supports Request, Response, and AbortSignal, but the captured
+   * production failure occurred on that cross-context request/response path.
+   * Keeping all fetch primitives here and returning a small value object removes
+   * body-stream and cancellation lifetimes from the outer RPC boundary.
+   */
+  async probeRuntimeHealth(input: RuntimeHealthProbeInput): Promise<RuntimeHealthProbeResult> {
+    let signal: AbortSignal;
+    let request: Request;
+    try {
+      const timeoutMs = Math.floor(input.timeoutMs);
+      if (
+        !Number.isSafeInteger(input.servicePort) ||
+        input.servicePort < 1 ||
+        input.servicePort > 65_535 ||
+        typeof input.healthPath !== "string" ||
+        !input.healthPath.startsWith("/") ||
+        !Number.isSafeInteger(timeoutMs) ||
+        timeoutMs < 1
+      ) {
+        throw new TypeError("Runtime health probe input is invalid");
+      }
+      signal = AbortSignal.timeout(timeoutMs);
+      request = new Request(new URL(input.healthPath, `http://localhost:${input.servicePort}`), {
+        method: "GET",
+        redirect: "manual",
+        signal,
+      });
+    } catch {
+      return {
+        ready: false,
+        stage: "health",
+        cause: "health_pre_dispatch",
+        status: null,
+      };
+    }
+
+    try {
+      const response = await this.containerFetch(request, input.servicePort);
+      const ready = response.status >= 200 && response.status <= 399;
+      await response.body?.cancel().catch(() => undefined);
+      return {
+        ready,
+        stage: "health",
+        cause: ready ? "ready" : "health_status",
+        status: response.status,
+      };
+    } catch {
+      return {
+        ready: false,
+        stage: "health",
+        cause: signal.aborted ? "health_timeout" : "health_transport",
+        status: null,
+      };
+    }
+  }
 
   async prepareRuntimeMaterialization(sealedArtifactSha256: string): Promise<{ ok: true }> {
     const stageRoot = runtimeMaterializationStageRoot(sealedArtifactSha256);
@@ -499,44 +571,17 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       };
     }
 
-    let signal: AbortSignal;
-    let request: Request;
     try {
-      signal = AbortSignal.timeout(RUNTIME_AVAILABILITY_TIMEOUT_MS);
-      request = new Request(
-        new URL(runtime.manifest.healthPath, "https://tenant.runtime.invalid"),
-        {
-          method: "GET",
-          redirect: "manual",
-          signal,
-        },
-      );
+      return await this.sandbox(runtime.descriptor.identity, true).probeRuntimeHealth({
+        servicePort: runtime.manifest.servicePort,
+        healthPath: runtime.manifest.healthPath,
+        timeoutMs: RUNTIME_AVAILABILITY_TIMEOUT_MS,
+      });
     } catch {
       return {
         ready: false,
         stage: "health",
-        cause: "health_pre_dispatch",
-        status: null,
-      };
-    }
-    try {
-      const response = await this.sandbox(runtime.descriptor.identity, true).containerFetch(
-        request,
-        runtime.manifest.servicePort,
-      );
-      const ready = response.status >= 200 && response.status <= 399;
-      await response.body?.cancel().catch(() => undefined);
-      return {
-        ready,
-        stage: "health",
-        cause: ready ? "ready" : "health_status",
-        status: response.status,
-      };
-    } catch {
-      return {
-        ready: false,
-        stage: "health",
-        cause: signal.aborted ? "health_timeout" : "health_transport",
+        cause: "health_transport",
         status: null,
       };
     }
