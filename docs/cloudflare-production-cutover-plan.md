@@ -549,3 +549,24 @@ marker is verified, its branch is merged, and its report/evidence are present in
 authority folder. Deletion is part of the ship ritual, not a deferred housekeeping errand. Active
 worktrees, the main checkout, package stores, and permanent authority documents are never cleanup
 targets.
+
+### Wall #11 durability and revision-receipt closeout — 2026-08-17
+
+The Wall #11 branch was made durable before any further production action. Ten explicitly approved
+scratch targets were deleted after their merge and authority-document guards passed, freeing
+`104,035,803,136` measured bytes while preserving the live Wall #11 worktree, main checkout, pnpm
+store, and permanent docs. The frozen/offline install then reused `1,870` packages and downloaded
+zero. The implementation and Phase 1 authority record were pushed before this after-action
+accounting.
+
+Revision `163` is not evidence of a second unreferenced release. `project_versions.id` is a global
+PostgreSQL `serial`, so deleted rows and rows for other projects leave permanent gaps. A production
+publish attempt allocates a deployment snapshot before provider work; Ship 7 removes that snapshot
+on every unsuccessful, non-reconciliation exit, but cannot and must not rewind the sequence. The
+post-v159 timeline contains two such failed retries. The one successful v158 publish then committed
+its own production deployment snapshot, and the later authoritative preview-state receipt reported
+the latest Project 51 row as `163`. IDs `160` through `162` cannot be assigned one-for-one from the
+surviving rows: they are sequence consumption in a globally shared table, not three surviving
+Project 51 revisions. The authenticated version-list tab could not be attached by the automation
+after two bounded attempts, and a direct unauthenticated request correctly returned HTTP 401, so no
+cookie, token, or hidden database binding was read to manufacture stronger evidence.
