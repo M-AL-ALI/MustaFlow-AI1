@@ -9,6 +9,9 @@ import {
   type CapabilityInvocation,
   type ExecRuntimeRequest,
   type RouteRecord,
+  type RuntimeReconciliationAuditRecord,
+  type RuntimeReconciliationObservation,
+  type RuntimeReconciliationTerminal,
   type StripeCapabilityPolicy,
   type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
@@ -52,6 +55,7 @@ import type {
   BackendStatusResult,
   RuntimeMaterializationTicket,
   RuntimeBackend,
+  RuntimeReconciliationObservationSink,
 } from "../src/runtime-backend";
 import type { ProductionDatabaseAllocator } from "../src/production-database-allocator";
 
@@ -182,6 +186,7 @@ export class MemoryCoordinator implements ControlCoordinator {
     { fingerprint: string; pending: boolean; response?: StoredHttpResponse }
   >();
   readonly audits: ControlAuditRecord[] = [];
+  readonly runtimeReconciliations = new Map<string, RuntimeReconciliationAuditRecord>();
   readonly runtimes = new Map<string, StoredRuntime>();
   readonly routes = new Map<string, RouteRecord>();
   readonly containerBindings = new Map<string, string>();
@@ -746,6 +751,47 @@ export class MemoryCoordinator implements ControlCoordinator {
     this.audits.push(structuredClone(record));
   }
 
+  async beginRuntimeReconciliation(record: RuntimeReconciliationAuditRecord): Promise<void> {
+    if (this.runtimeReconciliations.has(record.requestId)) {
+      throw new Error("Runtime reconciliation request identity already exists");
+    }
+    this.runtimeReconciliations.set(record.requestId, structuredClone(record));
+  }
+
+  async appendRuntimeReconciliationObservation(
+    requestId: string,
+    observation: RuntimeReconciliationObservation,
+  ): Promise<RuntimeReconciliationAuditRecord> {
+    const record = this.runtimeReconciliations.get(requestId);
+    if (record === undefined) throw new Error("Runtime reconciliation record was not initialized");
+    if (record.terminal !== null) throw new Error("Runtime reconciliation is already terminal");
+    if (observation.attempt !== record.trail.length + 1) {
+      throw new Error("Runtime reconciliation observation sequence is invalid");
+    }
+    record.trail.push(structuredClone(observation));
+    record.updatedAt = observation.observedAt;
+    return structuredClone(record);
+  }
+
+  async completeRuntimeReconciliation(
+    requestId: string,
+    terminal: RuntimeReconciliationTerminal,
+  ): Promise<RuntimeReconciliationAuditRecord> {
+    const record = this.runtimeReconciliations.get(requestId);
+    if (record === undefined) throw new Error("Runtime reconciliation record was not initialized");
+    if (record.terminal === null) {
+      record.terminal = structuredClone(terminal);
+      record.updatedAt = terminal.at;
+    }
+    return structuredClone(record);
+  }
+
+  async getRuntimeReconciliation(
+    requestId: string,
+  ): Promise<RuntimeReconciliationAuditRecord | null> {
+    return structuredClone(this.runtimeReconciliations.get(requestId) ?? null);
+  }
+
   async getRuntime(identity: string): Promise<StoredRuntime | null> {
     const runtime = this.runtimes.get(identity);
     return runtime === undefined ? null : structuredClone(runtime);
@@ -1115,6 +1161,23 @@ export class MockBackend implements RuntimeBackend {
     attempts: 1,
     conclusive: true,
     processId: "tenant-service",
+    trail: [
+      {
+        attempt: 1,
+        observedAt: new Date(TEST_NOW_MS).toISOString(),
+        stage: "health",
+        cause: "ready",
+        status: 200,
+        sources: ["provider-metadata", "process-probe", "health-probe"],
+        decisionInputs: {
+          storedStatus: "error",
+          storedProcessIdentity: "absent",
+          providerProcess: "running",
+          health: "ready",
+        },
+        decision: "ready",
+      },
+    ],
   };
   readonly reconciliationChecks: string[] = [];
 
@@ -1140,8 +1203,14 @@ export class MockBackend implements RuntimeBackend {
     return { ...this.availabilityResult };
   }
 
-  async reconcile(runtime: StoredRuntime): Promise<BackendReconciliationResult> {
+  async reconcile(
+    runtime: StoredRuntime,
+    onObservation?: RuntimeReconciliationObservationSink,
+  ): Promise<BackendReconciliationResult> {
     this.reconciliationChecks.push(runtime.descriptor.identity);
+    for (const observation of this.reconciliationResult.trail) {
+      await onObservation?.(structuredClone(observation));
+    }
     return { ...this.reconciliationResult };
   }
 

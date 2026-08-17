@@ -6,7 +6,12 @@ import {
   DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
   sha256Hex,
 } from "@workspace/tenant-runtime-contracts";
-import type { RouteRecord } from "@workspace/tenant-runtime-contracts";
+import type {
+  RouteRecord,
+  RuntimeReconciliationAuditRecord,
+  RuntimeReconciliationObservation,
+  RuntimeReconciliationTerminal,
+} from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type {
   ControlAuditRecord,
@@ -39,6 +44,7 @@ import {
 const IDEMPOTENCY_PENDING_TTL_MS = 10 * 60 * 1_000;
 const IDEMPOTENCY_COMPLETED_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_AUDIT_RECORDS = 1_000;
+const MAX_RUNTIME_RECONCILIATION_RECORDS = 256;
 const MAX_RUNTIME_LOGS = 1_000;
 const MAX_LOG_MESSAGE_LENGTH = 100_000;
 
@@ -54,6 +60,14 @@ interface StoredIdempotencyRecord {
 
 function runtimeKey(identity: string): string {
   return `runtime:${identity}`;
+}
+
+function runtimeReconciliationKey(requestId: string): string {
+  return `runtime-reconciliation:${requestId}`;
+}
+
+function runtimeReconciliationSequenceKey(sequence: number): string {
+  return `runtime-reconciliation-sequence:${sequence.toString().padStart(12, "0")}`;
 }
 
 function routeKey(hostname: string): string {
@@ -981,6 +995,79 @@ export class ControlDurableObject
     if (oldest > 0) {
       await this.ctx.storage.delete(`audit:${oldest.toString().padStart(12, "0")}`);
     }
+  }
+
+  async beginRuntimeReconciliation(record: RuntimeReconciliationAuditRecord): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const key = runtimeReconciliationKey(record.requestId);
+      if ((await transaction.get<RuntimeReconciliationAuditRecord>(key)) !== undefined) {
+        throw new Error("Runtime reconciliation request identity already exists");
+      }
+      const sequence = (await transaction.get<number>("runtime-reconciliation:sequence")) ?? 0;
+      const nextSequence = sequence + 1;
+      await transaction.put({
+        "runtime-reconciliation:sequence": nextSequence,
+        [runtimeReconciliationSequenceKey(nextSequence)]: record.requestId,
+        [key]: record,
+      });
+      const oldest = nextSequence - MAX_RUNTIME_RECONCILIATION_RECORDS;
+      if (oldest > 0) {
+        const oldestSequenceKey = runtimeReconciliationSequenceKey(oldest);
+        const oldestRequestId = await transaction.get<string>(oldestSequenceKey);
+        await transaction.delete([
+          oldestSequenceKey,
+          ...(oldestRequestId === undefined ? [] : [runtimeReconciliationKey(oldestRequestId)]),
+        ]);
+      }
+    });
+  }
+
+  async appendRuntimeReconciliationObservation(
+    requestId: string,
+    observation: RuntimeReconciliationObservation,
+  ): Promise<RuntimeReconciliationAuditRecord> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = runtimeReconciliationKey(requestId);
+      const record = await transaction.get<RuntimeReconciliationAuditRecord>(key);
+      if (record === undefined)
+        throw new Error("Runtime reconciliation record was not initialized");
+      if (record.terminal !== null) throw new Error("Runtime reconciliation is already terminal");
+      if (observation.attempt !== record.trail.length + 1) {
+        throw new Error("Runtime reconciliation observation sequence is invalid");
+      }
+      record.trail.push(observation);
+      record.updatedAt = observation.observedAt;
+      await transaction.put(key, record);
+      return structuredClone(record);
+    });
+  }
+
+  async completeRuntimeReconciliation(
+    requestId: string,
+    terminal: RuntimeReconciliationTerminal,
+  ): Promise<RuntimeReconciliationAuditRecord> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = runtimeReconciliationKey(requestId);
+      const record = await transaction.get<RuntimeReconciliationAuditRecord>(key);
+      if (record === undefined)
+        throw new Error("Runtime reconciliation record was not initialized");
+      if (record.terminal === null) {
+        record.terminal = terminal;
+        record.updatedAt = terminal.at;
+        await transaction.put(key, record);
+      }
+      return structuredClone(record);
+    });
+  }
+
+  async getRuntimeReconciliation(
+    requestId: string,
+  ): Promise<RuntimeReconciliationAuditRecord | null> {
+    return (
+      (await this.ctx.storage.get<RuntimeReconciliationAuditRecord>(
+        runtimeReconciliationKey(requestId),
+      )) ?? null
+    );
   }
 
   async getRuntime(identity: string): Promise<StoredRuntime | null> {

@@ -10,6 +10,7 @@ import {
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   RUNTIME_ARTIFACT_PENDING_TTL_MS,
   RUNTIME_ROLES,
+  RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
   activateRouteRequestSchema,
   activateRouteResponseSchema,
   capabilityProvisionResponseSchema,
@@ -53,6 +54,8 @@ import {
   statusRuntimeResponseSchema,
   reconcileRuntimeRequestSchema,
   reconcileRuntimeResponseSchema,
+  runtimeReconciliationAuditResponseSchema,
+  runtimeReconciliationObservationSchema,
   stopRuntimeRequestSchema,
   stopRuntimeResponseSchema,
   verifyControlRequestSignature,
@@ -116,6 +119,8 @@ import type {
   StartRuntimeRequest,
   StatusRuntimeRequest,
   ReconcileRuntimeRequest,
+  RuntimeReconciliationAuditRecord,
+  RuntimeReconciliationEvidence,
   StopRuntimeRequest,
   UpdateRuntimeManifestRequest,
   PantryPlatform,
@@ -234,6 +239,7 @@ const AUTH_HEADERS = {
 type Endpoint =
   | "version"
   | "durableOperationDiscovery"
+  | "reconciliationAudit"
   | "ensure"
   | "start"
   | "startDiagnostics"
@@ -279,6 +285,7 @@ interface MatchedRoute {
   endpoint: Endpoint;
   locator: RuntimeLocator | null;
   hostname?: string;
+  auditRequestId?: string;
   capability?: { projectId: number; provider: string; name: string };
   artifactSha256?: string;
   promotionIdentity?: string;
@@ -339,6 +346,7 @@ class ControlHttpError extends Error {
     readonly code: string,
     message: string,
     readonly retryable = false,
+    readonly evidence?: RuntimeReconciliationEvidence,
   ) {
     super(message);
   }
@@ -440,7 +448,9 @@ export async function handleControlRequest(
   const context = dependencies.context ?? { stage: "initialization" };
   const nowMs = dependencies.nowMs ?? Date.now();
   const coordinator = dependencies.coordinator ?? getCoordinator(env);
-  const backend = dependencies.backend ?? new CloudflareSandboxBackend(env);
+  const backend =
+    dependencies.backend ??
+    new CloudflareSandboxBackend(env, () => dependencies.nowMs ?? Date.now());
   const url = new URL(request.url);
   const pathAndQuery = `${url.pathname}${url.search}`;
   let rawBody: Uint8Array;
@@ -544,7 +554,12 @@ export async function handleControlRequest(
   }
 
   const idempotencyKey = request.headers.get(AUTH_HEADERS.idempotencyKey) ?? "";
+  const idempotencyStorageKey =
+    route.endpoint === "reconcile"
+      ? `${RUNTIME_RECONCILIATION_SEMANTICS_VERSION}:${idempotencyKey}`
+      : idempotencyKey;
   const needsIdempotency = MUTATION_ENDPOINTS.has(route.endpoint);
+  const persistRequestAudit = route.endpoint !== "reconciliationAudit";
   const needsDurableOperation =
     DURABLE_OPERATION_ENDPOINTS.has(route.endpoint) ||
     (route.endpoint === "manifestUpdate" &&
@@ -577,7 +592,7 @@ export async function handleControlRequest(
           route,
           input,
           env,
-          idempotencyKey,
+          idempotencyStorageKey,
           idempotencyFingerprint,
           nowMs,
         )
@@ -585,7 +600,7 @@ export async function handleControlRequest(
     const lookup =
       durableRegistration !== null
         ? await coordinator.registerDurableOperation(durableRegistration)
-        : await coordinator.beginIdempotency(idempotencyKey, idempotencyFingerprint, nowMs);
+        : await coordinator.beginIdempotency(idempotencyStorageKey, idempotencyFingerprint, nowMs);
     const durableJob =
       "job" in lookup ? (lookup.job as StoredDurableOperationJob | undefined) : undefined;
     if (lookup.state === "replay") {
@@ -678,20 +693,28 @@ export async function handleControlRequest(
       null,
       nowMs,
       dependencies.productionDatabaseAllocator,
+      requestId,
     );
     validateResponse(route.endpoint, result.body);
     if (needsIdempotency && idempotencyFingerprint !== null) {
-      await coordinator.completeIdempotency(idempotencyKey, idempotencyFingerprint, result, nowMs);
+      await coordinator.completeIdempotency(
+        idempotencyStorageKey,
+        idempotencyFingerprint,
+        result,
+        nowMs,
+      );
     }
-    await recordAudit(
-      coordinator,
-      requestId,
-      request.method,
-      route.endpoint,
-      route.locator,
-      { status: result.status, code: "ok" },
-      route.capability?.projectId,
-    );
+    if (persistRequestAudit) {
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        route.endpoint,
+        route.locator,
+        { status: result.status, code: "ok" },
+        route.capability?.projectId,
+      );
+    }
     return jsonResponse(result.status, result.body);
   } catch (error) {
     if (!(error instanceof ControlHttpError)) {
@@ -715,7 +738,7 @@ export async function handleControlRequest(
         // the mutation twice. A deliberate new operation uses a new key.
         const body = errorBody(controlError, requestId);
         await coordinator.completeIdempotency(
-          idempotencyKey,
+          idempotencyStorageKey,
           idempotencyFingerprint,
           { status: controlError.status, body },
           nowMs,
@@ -729,18 +752,20 @@ export async function handleControlRequest(
         );
       }
     }
-    try {
-      await recordAudit(
-        coordinator,
-        requestId,
-        request.method,
-        route.endpoint,
-        route.locator,
-        controlError,
-        route.capability?.projectId,
-      );
-    } catch (finalizationError) {
-      logControlErrorFinalizationFailure(requestId, route.endpoint, "audit", finalizationError);
+    if (persistRequestAudit) {
+      try {
+        await recordAudit(
+          coordinator,
+          requestId,
+          request.method,
+          route.endpoint,
+          route.locator,
+          controlError,
+          route.capability?.projectId,
+        );
+      } catch (finalizationError) {
+        logControlErrorFinalizationFailure(requestId, route.endpoint, "audit", finalizationError);
+      }
     }
     return errorResponse(
       controlError.status,
@@ -748,6 +773,8 @@ export async function handleControlRequest(
       controlError.message,
       controlError.retryable,
       requestId,
+      {},
+      controlError.evidence,
     );
   }
 }
@@ -1587,6 +1614,19 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     }
     return { endpoint: "durableOperationDiscovery", locator: null };
   }
+  const reconciliationAuditMatch = new RegExp(
+    `^${CONTROL_PREFIX}/audit/reconciliations/([A-Za-z0-9][A-Za-z0-9_-]{0,199})$`,
+  ).exec(pathname);
+  if (reconciliationAuditMatch) {
+    if (method !== "GET") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return {
+      endpoint: "reconciliationAudit",
+      locator: null,
+      auditRequestId: reconciliationAuditMatch[1],
+    };
+  }
   if (pathname.startsWith(`${CONTROL_PREFIX}/pantry/`)) {
     return matchPantryRoute(method, pathname);
   }
@@ -2091,6 +2131,11 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
       ...(url.searchParams.has("kind") ? { kind: url.searchParams.get("kind") } : {}),
     });
   }
+  if (route.endpoint === "reconciliationAudit") {
+    assertNoQuery(url);
+    assertEmptyBody(rawBody);
+    return {};
+  }
   if (
     route.endpoint === "pantryRead" ||
     route.endpoint === "pantryMutation" ||
@@ -2394,7 +2439,25 @@ async function executeEndpoint(
     ProductionDatabaseAllocator,
     "ensure" | "release" | "verifyGone"
   >,
+  requestId?: string,
 ): Promise<StoredHttpResponse> {
+  if (endpoint === "reconciliationAudit") {
+    if (matchedRoute?.auditRequestId === undefined) {
+      throw new ControlHttpError(400, "invalid_request", "Audit request identity is required");
+    }
+    const record = await coordinator.getRuntimeReconciliation(matchedRoute.auditRequestId);
+    if (record === null) {
+      throw new ControlHttpError(
+        404,
+        "runtime_reconciliation_audit_not_found",
+        "Runtime reconciliation audit record was not found",
+      );
+    }
+    return {
+      status: 200,
+      body: runtimeReconciliationAuditResponseSchema.parse({ ok: true, record }),
+    };
+  }
   assertArtifactInfrastructure(env);
   if (endpoint.startsWith("layeredArtifact")) assertLayeredArtifactInfrastructure(env);
   const deploymentVersion = env.CF_VERSION_METADATA.id;
@@ -4057,90 +4120,149 @@ async function executeEndpoint(
   }
   if (endpoint === "reconcile") {
     const request = input as ReconcileRuntimeRequest;
-    if (
-      runtime.descriptor.status !== request.expectedStatus ||
-      runtime.descriptor.manifestRevision !== request.expectedManifestRevision
-    ) {
-      throw new ControlHttpError(
-        409,
-        "runtime_reconciliation_conflict",
-        "Runtime state changed before reconciliation",
-        true,
-      );
+    if (requestId === undefined) {
+      throw new Error("Runtime reconciliation request identity is unavailable");
     }
-    const observation = await backend.reconcile(runtime);
-    if (!observation.conclusive) {
-      // An ambiguous provider observation is evidence, not a terminal verdict.
-      // No runtime, capability binding, or runtime log is changed on this path.
-      throw new ControlHttpError(
-        503,
-        "runtime_reconciliation_inconclusive",
-        `Runtime reconciliation remained ambiguous after ${observation.attempts} observations (${observation.stage}:${observation.cause})`,
-        true,
-      );
-    }
+    const createdAt = new Date(nowMs).toISOString();
+    await coordinator.beginRuntimeReconciliation({
+      requestId,
+      reconciliationId: request.reconciliationId,
+      semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
+      locator: request.locator,
+      createdAt,
+      updatedAt: createdAt,
+      trail: [],
+      terminal: null,
+    });
+    try {
+      if (
+        runtime.descriptor.status !== request.expectedStatus ||
+        runtime.descriptor.manifestRevision !== request.expectedManifestRevision
+      ) {
+        throw new ControlHttpError(
+          409,
+          "runtime_reconciliation_conflict",
+          "Runtime state changed before reconciliation",
+          true,
+        );
+      }
+      const observation = await backend.reconcile(runtime, async (entry) => {
+        const sanitized = runtimeReconciliationObservationSchema.parse({
+          attempt: entry.attempt,
+          observedAt: entry.observedAt,
+          stage: entry.stage,
+          cause: entry.cause,
+          status: entry.status,
+          sources: entry.sources,
+          decisionInputs: {
+            storedStatus: entry.decisionInputs.storedStatus,
+            storedProcessIdentity: entry.decisionInputs.storedProcessIdentity,
+            providerProcess: entry.decisionInputs.providerProcess,
+            health: entry.decisionInputs.health,
+          },
+          decision: entry.decision,
+        });
+        await coordinator.appendRuntimeReconciliationObservation(requestId, sanitized);
+      });
+      if (!observation.conclusive) {
+        // An ambiguous provider observation is evidence, not a terminal verdict.
+        // No runtime, capability binding, or runtime log is changed on this path.
+        throw new ControlHttpError(
+          503,
+          "runtime_reconciliation_inconclusive",
+          `Runtime reconciliation remained ambiguous after ${observation.attempts} observations (${observation.stage}:${observation.cause})`,
+          true,
+        );
+      }
 
-    const containerId = runtimeContainerId(env, identity);
-    const previousBinding = await coordinator.getContainerBinding(containerId);
-    let outcome: "restored" | "confirmed-stopped" | "confirmed-error" | "unchanged";
-    let capability: "bound" | "unbound";
-    if (observation.ready && observation.processId !== null) {
-      const alreadyTruthful =
-        runtime.descriptor.status === "running" &&
-        runtime.descriptor.lastError === null &&
-        runtime.processId === observation.processId &&
-        previousBinding === identity;
-      runtime.descriptor.status = "running";
-      runtime.descriptor.lastError = null;
-      runtime.descriptor.readyAt ??= new Date(nowMs).toISOString();
-      runtime.processId = observation.processId;
-      await coordinator.putRuntime(identity, runtime);
-      await coordinator.bindContainer(containerId, identity);
-      outcome = alreadyTruthful ? "unchanged" : "restored";
-      capability = "bound";
-    } else {
-      const cleanStop =
-        observation.stage === "process" &&
-        (observation.cause === "process_missing" || observation.cause === "process_not_running");
-      const nextStatus = cleanStop ? "stopped" : "error";
-      const nextError = cleanStop
-        ? null
-        : `Runtime reconciliation failed (${observation.stage}:${observation.cause})`;
-      const alreadyTruthful =
-        runtime.descriptor.status === nextStatus &&
-        runtime.descriptor.lastError === nextError &&
-        runtime.descriptor.readyAt === null &&
-        runtime.processId === null &&
-        previousBinding === null;
-      runtime.descriptor.status = nextStatus;
-      runtime.descriptor.lastError = nextError;
-      runtime.descriptor.readyAt = null;
-      runtime.processId = null;
-      await coordinator.putRuntime(identity, runtime);
-      await coordinator.unbindContainer(containerId, identity);
-      outcome = alreadyTruthful ? "unchanged" : cleanStop ? "confirmed-stopped" : "confirmed-error";
-      capability = "unbound";
-    }
-    await coordinator.appendSystemLog(
-      identity,
-      `Governed runtime reconciliation ${request.reconciliationId} completed (outcome=${outcome}, stage=${observation.stage}, cause=${observation.cause}, attempts=${observation.attempts}).`,
-    );
-    return {
-      status: 200,
-      body: {
-        ok: true,
-        reconciliationId: request.reconciliationId,
-        outcome,
-        observation: {
-          attempts: observation.attempts,
-          stage: observation.stage,
-          cause: observation.cause,
-          status: observation.status,
+      const containerId = runtimeContainerId(env, identity);
+      const previousBinding = await coordinator.getContainerBinding(containerId);
+      let outcome: "restored" | "confirmed-stopped" | "confirmed-error" | "unchanged";
+      let capability: "bound" | "unbound";
+      if (observation.ready && observation.processId !== null) {
+        const alreadyTruthful =
+          runtime.descriptor.status === "running" &&
+          runtime.descriptor.lastError === null &&
+          runtime.processId === observation.processId &&
+          previousBinding === identity;
+        runtime.descriptor.status = "running";
+        runtime.descriptor.lastError = null;
+        runtime.descriptor.readyAt ??= new Date(nowMs).toISOString();
+        runtime.processId = observation.processId;
+        await coordinator.putRuntime(identity, runtime);
+        await coordinator.bindContainer(containerId, identity);
+        outcome = alreadyTruthful ? "unchanged" : "restored";
+        capability = "bound";
+      } else {
+        const cleanStop =
+          observation.stage === "process" &&
+          (observation.cause === "process_missing" || observation.cause === "process_not_running");
+        const nextStatus = cleanStop ? "stopped" : "error";
+        const nextError = cleanStop
+          ? null
+          : `Runtime reconciliation failed (${observation.stage}:${observation.cause})`;
+        const alreadyTruthful =
+          runtime.descriptor.status === nextStatus &&
+          runtime.descriptor.lastError === nextError &&
+          runtime.descriptor.readyAt === null &&
+          runtime.processId === null &&
+          previousBinding === null;
+        runtime.descriptor.status = nextStatus;
+        runtime.descriptor.lastError = nextError;
+        runtime.descriptor.readyAt = null;
+        runtime.processId = null;
+        await coordinator.putRuntime(identity, runtime);
+        await coordinator.unbindContainer(containerId, identity);
+        outcome = alreadyTruthful
+          ? "unchanged"
+          : cleanStop
+            ? "confirmed-stopped"
+            : "confirmed-error";
+        capability = "unbound";
+      }
+      await coordinator.appendSystemLog(
+        identity,
+        `Governed runtime reconciliation ${request.reconciliationId} completed (outcome=${outcome}, stage=${observation.stage}, cause=${observation.cause}, attempts=${observation.attempts}).`,
+      );
+      const record = await coordinator.completeRuntimeReconciliation(requestId, {
+        at: new Date().toISOString(),
+        status: 200,
+        code: "ok",
+        retryable: false,
+      });
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          reconciliationId: request.reconciliationId,
+          outcome,
+          observation: {
+            attempts: observation.attempts,
+            stage: observation.stage,
+            cause: observation.cause,
+            status: observation.status,
+          },
+          capability,
+          runtime: structuredClone(runtime.descriptor),
+          evidence: reconciliationEvidence(record),
         },
-        capability,
-        runtime: structuredClone(runtime.descriptor),
-      },
-    };
+      };
+    } catch (error) {
+      const classified = toControlError(error);
+      const record = await coordinator.completeRuntimeReconciliation(requestId, {
+        at: new Date().toISOString(),
+        status: classified.status,
+        code: classified.code,
+        retryable: classified.retryable,
+      });
+      throw new ControlHttpError(
+        classified.status,
+        classified.code,
+        classified.message,
+        classified.retryable,
+        reconciliationEvidence(record),
+      );
+    }
   }
   if (endpoint === "exec") {
     if (runtime.descriptor.status !== "running") {
@@ -4618,6 +4740,7 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
   const schema = {
     version: versionResponseSchema,
     durableOperationDiscovery: durableOperationDiscoveryResponseSchema,
+    reconciliationAudit: runtimeReconciliationAuditResponseSchema,
     ensure: ensureRuntimeResponseSchema,
     start: startRuntimeResponseSchema,
     startDiagnostics: runtimeStartDiagnosticsResponseSchema,
@@ -5059,6 +5182,20 @@ function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 2_000) : "Unknown runtime error";
 }
 
+function reconciliationEvidence(
+  record: RuntimeReconciliationAuditRecord,
+): RuntimeReconciliationEvidence {
+  if (record.terminal === null) {
+    throw new Error("Runtime reconciliation terminal evidence is unavailable");
+  }
+  return {
+    semanticsVersion: record.semanticsVersion,
+    reconciliationId: record.reconciliationId,
+    trail: structuredClone(record.trail),
+    terminal: structuredClone(record.terminal),
+  };
+}
+
 function toControlError(error: unknown): ControlHttpError {
   if (error instanceof ControlHttpError) return error;
   return new ControlHttpError(500, "internal_error", "The staging control plane failed", true);
@@ -5071,6 +5208,7 @@ function errorBody(error: ControlHttpError, requestId: string): unknown {
     message: error.message,
     retryable: error.retryable,
     requestId,
+    ...(error.evidence === undefined ? {} : { evidence: error.evidence }),
   });
 }
 
@@ -5081,10 +5219,11 @@ function errorResponse(
   retryable: boolean,
   requestId: string,
   headers: HeadersInit = {},
+  evidence?: RuntimeReconciliationEvidence,
 ): Response {
   return jsonResponse(
     status,
-    errorBody(new ControlHttpError(status, code, message, retryable), requestId),
+    errorBody(new ControlHttpError(status, code, message, retryable, evidence), requestId),
     headers,
   );
 }

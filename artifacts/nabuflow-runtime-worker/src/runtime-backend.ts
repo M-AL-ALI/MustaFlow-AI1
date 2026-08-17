@@ -9,7 +9,10 @@ import {
   compareUtf8,
   sha256Hex,
 } from "@workspace/tenant-runtime-contracts";
-import type { ExecRuntimeRequest } from "@workspace/tenant-runtime-contracts";
+import type {
+  ExecRuntimeRequest,
+  RuntimeReconciliationObservation,
+} from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
 import type {
@@ -235,7 +238,12 @@ export interface BackendReconciliationResult extends BackendAvailabilityResult {
   attempts: number;
   conclusive: boolean;
   processId: string | null;
+  trail: RuntimeReconciliationObservation[];
 }
+
+export type RuntimeReconciliationObservationSink = (
+  observation: RuntimeReconciliationObservation,
+) => Promise<void>;
 
 export interface RuntimeMaterializationTicket {
   payloadContentSha256s: string[];
@@ -252,7 +260,10 @@ export interface RuntimeBackend {
   destroy(runtime: StoredRuntime): Promise<void>;
   status(runtime: StoredRuntime): Promise<BackendStatusResult>;
   availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult>;
-  reconcile(runtime: StoredRuntime): Promise<BackendReconciliationResult>;
+  reconcile(
+    runtime: StoredRuntime,
+    onObservation?: RuntimeReconciliationObservationSink,
+  ): Promise<BackendReconciliationResult>;
   exec(runtime: StoredRuntime, request: ExecRuntimeRequest): Promise<BackendExecResult>;
   logs(runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }>;
   materialize(
@@ -288,8 +299,65 @@ export interface RuntimeBackend {
   ): Promise<{ filesWritten: number; layersMaterialized: number }>;
 }
 
+function reconciliationObservation(
+  storedRuntime: StoredRuntime,
+  observation: BackendAvailabilityResult,
+  attempt: number,
+  observedAtMs: number,
+  ambiguous: boolean,
+): RuntimeReconciliationObservation {
+  const providerProcess =
+    observation.stage === "health"
+      ? "running"
+      : observation.cause === "process_missing"
+        ? "missing"
+        : observation.cause === "process_not_running"
+          ? "not-running"
+          : "unknown";
+  const health =
+    observation.stage === "process"
+      ? "not-probed"
+      : observation.ready
+        ? "ready"
+        : observation.cause === "health_status"
+          ? "rejected"
+          : "unknown";
+  const decision = ambiguous
+    ? "ambiguous"
+    : observation.ready
+      ? "ready"
+      : observation.stage === "process" &&
+          (observation.cause === "process_missing" || observation.cause === "process_not_running")
+        ? "confirmed-stopped"
+        : "confirmed-error";
+  const sources: RuntimeReconciliationObservation["sources"] =
+    observation.stage === "health"
+      ? ["provider-metadata", "process-probe", "health-probe"]
+      : observation.cause === "process_missing"
+        ? ["provider-metadata"]
+        : ["provider-metadata", "process-probe"];
+  return {
+    attempt,
+    observedAt: new Date(observedAtMs).toISOString(),
+    stage: observation.stage,
+    cause: observation.cause,
+    status: observation.status,
+    sources,
+    decisionInputs: {
+      storedStatus: storedRuntime.descriptor.status,
+      storedProcessIdentity: storedRuntime.processId === null ? "absent" : "present",
+      providerProcess,
+      health,
+    },
+    decision,
+  };
+}
+
 export class CloudflareSandboxBackend implements RuntimeBackend {
-  constructor(private readonly env: WorkerBindings) {}
+  constructor(
+    private readonly env: WorkerBindings,
+    private readonly nowMs: () => number = Date.now,
+  ) {}
 
   async start(runtime: StoredRuntime): Promise<BackendStartResult> {
     const sandbox = this.sandbox(runtime.descriptor.identity, true);
@@ -426,11 +494,15 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     }
   }
 
-  async reconcile(runtime: StoredRuntime): Promise<BackendReconciliationResult> {
+  async reconcile(
+    runtime: StoredRuntime,
+    onObservation?: RuntimeReconciliationObservationSink,
+  ): Promise<BackendReconciliationResult> {
     // Reconciliation is the only path allowed to recover the platform-owned process
     // identity after a stale descriptor lost it. Ordinary metadata reads never probe.
     const candidate = structuredClone(runtime);
     candidate.processId = TENANT_PROCESS_ID;
+    const trail: RuntimeReconciliationObservation[] = [];
     for (
       let attempt = 1;
       attempt <= RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS;
@@ -441,12 +513,22 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
         observation.cause === "health_timeout" ||
         observation.cause === "health_transport" ||
         observation.cause === "process_check_failed";
+      const trailEntry = reconciliationObservation(
+        runtime,
+        observation,
+        attempt,
+        this.nowMs(),
+        ambiguous,
+      );
+      trail.push(trailEntry);
+      await onObservation?.(structuredClone(trailEntry));
       if (!ambiguous || attempt === RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS) {
         return {
           ...observation,
           attempts: attempt,
           conclusive: !ambiguous,
           processId: observation.ready ? TENANT_PROCESS_ID : null,
+          trail,
         };
       }
     }

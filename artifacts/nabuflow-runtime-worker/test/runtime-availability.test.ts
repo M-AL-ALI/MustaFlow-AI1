@@ -90,7 +90,7 @@ describe("runtime availability", () => {
           }),
         }) as never,
     );
-    const backend = new CloudflareSandboxBackend(fakeEnv());
+    const backend = new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS);
     await expect(backend.availability(capturedRuntime())).resolves.toEqual({
       ready: false,
       stage: "health",
@@ -108,9 +108,10 @@ describe("runtime availability", () => {
   });
 
   it("does not treat one ambiguous observation as a terminal reconciliation verdict", async () => {
-    const backend = new CloudflareSandboxBackend(fakeEnv());
+    const backend = new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS);
     const runtime = capturedRuntime();
     runtime.processId = null;
+    const persistedAttempts: number[] = [];
     const availability = vi
       .spyOn(backend, "availability")
       .mockResolvedValueOnce({
@@ -119,9 +120,16 @@ describe("runtime availability", () => {
         cause: "health_transport",
         status: null,
       })
-      .mockResolvedValueOnce({ ready: true, stage: "health", cause: "ready", status: 200 });
+      .mockImplementationOnce(async () => {
+        expect(persistedAttempts).toEqual([1]);
+        return { ready: true, stage: "health", cause: "ready", status: 200 };
+      });
 
-    await expect(backend.reconcile(runtime)).resolves.toEqual({
+    await expect(
+      backend.reconcile(runtime, async (observation) => {
+        persistedAttempts.push(observation.attempt);
+      }),
+    ).resolves.toEqual({
       ready: true,
       stage: "health",
       cause: "ready",
@@ -129,12 +137,45 @@ describe("runtime availability", () => {
       attempts: 2,
       conclusive: true,
       processId: "tenant-service",
+      trail: [
+        {
+          attempt: 1,
+          observedAt: new Date(TEST_NOW_MS).toISOString(),
+          stage: "health",
+          cause: "health_transport",
+          status: null,
+          sources: ["provider-metadata", "process-probe", "health-probe"],
+          decisionInputs: {
+            storedStatus: "running",
+            storedProcessIdentity: "absent",
+            providerProcess: "running",
+            health: "unknown",
+          },
+          decision: "ambiguous",
+        },
+        {
+          attempt: 2,
+          observedAt: new Date(TEST_NOW_MS).toISOString(),
+          stage: "health",
+          cause: "ready",
+          status: 200,
+          sources: ["provider-metadata", "process-probe", "health-probe"],
+          decisionInputs: {
+            storedStatus: "running",
+            storedProcessIdentity: "absent",
+            providerProcess: "running",
+            health: "ready",
+          },
+          decision: "ready",
+        },
+      ],
     });
     expect(availability).toHaveBeenCalledTimes(2);
+    expect(persistedAttempts).toEqual([1, 2]);
   });
 
   it("returns inconclusive after the named ambiguous-observation cap", async () => {
-    const backend = new CloudflareSandboxBackend(fakeEnv());
+    const backend = new CloudflareSandboxBackend(fakeEnv(), () => TEST_NOW_MS);
     const availability = vi.spyOn(backend, "availability").mockResolvedValue({
       ready: false,
       stage: "health",
@@ -150,6 +191,24 @@ describe("runtime availability", () => {
       attempts: RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS,
       conclusive: false,
       processId: null,
+      trail: Array.from(
+        { length: RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS },
+        (_, index) => ({
+          attempt: index + 1,
+          observedAt: new Date(TEST_NOW_MS).toISOString(),
+          stage: "health" as const,
+          cause: "health_timeout" as const,
+          status: null,
+          sources: ["provider-metadata", "process-probe", "health-probe"] as const,
+          decisionInputs: {
+            storedStatus: "running" as const,
+            storedProcessIdentity: "present" as const,
+            providerProcess: "running" as const,
+            health: "unknown" as const,
+          },
+          decision: "ambiguous" as const,
+        }),
+      ),
     });
     expect(availability).toHaveBeenCalledTimes(RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS);
   });

@@ -7,6 +7,7 @@ import {
   controlEndpointContracts,
   controlEndpointSchemas,
   controlErrorResponseSchema,
+  RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
   runtimeDescriptorSchema,
 } from "../src/control-schemas";
 
@@ -76,7 +77,9 @@ function requestFixtures(): Record<keyof typeof controlEndpointSchemas, unknown>
       expectedStatus: "error",
       expectedManifestRevision: manifest.revision,
       reconciliationId: "wall-12-green",
+      semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
     },
+    reconciliationAudit: {},
     exec: { locator, argv: ["npm", "test"], cwd: "/workspace", timeoutMs: 30_000 },
     logs: { locator, cursor: "cursor-10", limit: 200, follow: false },
     files: {
@@ -113,6 +116,33 @@ function requestFixtures(): Record<keyof typeof controlEndpointSchemas, unknown>
 
 function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown> {
   const runtime = runtimeDescriptor();
+  const observation = {
+    attempt: 1,
+    observedAt: "2026-08-04T12:00:00.000Z",
+    stage: "health",
+    cause: "ready",
+    status: 200,
+    sources: ["provider-metadata", "process-probe", "health-probe"],
+    decisionInputs: {
+      storedStatus: "error",
+      storedProcessIdentity: "absent",
+      providerProcess: "running",
+      health: "ready",
+    },
+    decision: "ready",
+  } as const;
+  const terminal = {
+    at: "2026-08-04T12:00:01.000Z",
+    status: 200,
+    code: "ok",
+    retryable: false,
+  } as const;
+  const evidence = {
+    semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
+    reconciliationId: "wall-12-green",
+    trail: [observation],
+    terminal,
+  } as const;
   return {
     version: {
       protocolVersion: "1",
@@ -133,6 +163,20 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
       observation: { attempts: 1, stage: "health", cause: "ready", status: 200 },
       capability: "bound",
       runtime,
+      evidence,
+    },
+    reconciliationAudit: {
+      ok: true,
+      record: {
+        requestId: "reconciliation-request-1",
+        reconciliationId: "wall-12-green",
+        semanticsVersion: RUNTIME_RECONCILIATION_SEMANTICS_VERSION,
+        locator,
+        createdAt: "2026-08-04T12:00:00.000Z",
+        updatedAt: "2026-08-04T12:00:01.000Z",
+        trail: [observation],
+        terminal,
+      },
     },
     exec: { ok: true, stdout: "ok\n", stderr: "", exitCode: 0, timedOut: false },
     logs: {
@@ -175,6 +219,7 @@ describe("control-plane schemas", () => {
       "destroy",
       "status",
       "reconcile",
+      "reconciliationAudit",
       "exec",
       "logs",
       "files",
