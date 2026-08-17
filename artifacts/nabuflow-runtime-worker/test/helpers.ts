@@ -46,6 +46,7 @@ import type {
 } from "../src/model";
 import type {
   BackendAvailabilityResult,
+  BackendReconciliationResult,
   BackendExecResult,
   BackendStartResult,
   BackendStatusResult,
@@ -314,6 +315,14 @@ export class MemoryCoordinator implements ControlCoordinator {
       kind: lifecycleInput.kind,
       subjectKey: lifecycleInput.subjectKey,
       request: structuredClone(lifecycleInput.request),
+      ...(lifecycleInput.kind === "runtime-start" &&
+      lifecycleInput.publishedRecoveryIdentity !== undefined
+        ? { publishedRecoveryIdentity: lifecycleInput.publishedRecoveryIdentity }
+        : {}),
+      ...(lifecycleInput.kind === "runtime-start" &&
+      lifecycleInput.publishedRecoveryGeneration !== undefined
+        ? { publishedRecoveryGeneration: lifecycleInput.publishedRecoveryGeneration }
+        : {}),
     } as
       | StoredRuntimeStartJob
       | StoredRuntimeManifestRestartJob
@@ -1098,6 +1107,16 @@ export class MockBackend implements RuntimeBackend {
     status: 200,
   };
   readonly availabilityChecks: string[] = [];
+  reconciliationResult: BackendReconciliationResult = {
+    ready: true,
+    stage: "health",
+    cause: "ready",
+    status: 200,
+    attempts: 1,
+    conclusive: true,
+    processId: "tenant-service",
+  };
+  readonly reconciliationChecks: string[] = [];
 
   async start(_runtime: StoredRuntime): Promise<BackendStartResult> {
     this.starts += 1;
@@ -1119,6 +1138,11 @@ export class MockBackend implements RuntimeBackend {
   async availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult> {
     this.availabilityChecks.push(runtime.descriptor.identity);
     return { ...this.availabilityResult };
+  }
+
+  async reconcile(runtime: StoredRuntime): Promise<BackendReconciliationResult> {
+    this.reconciliationChecks.push(runtime.descriptor.identity);
+    return { ...this.reconciliationResult };
   }
 
   async exec(_runtime: StoredRuntime, _request: ExecRuntimeRequest): Promise<BackendExecResult> {

@@ -1,6 +1,7 @@
 import { getSandbox } from "@cloudflare/sandbox";
 import {
   canonicalJson,
+  PUBLISHED_RUNTIME_RECOVERY_MAX_FAILED_TERMINALS,
   parseRuntimeIdentityForNamespace,
   publishedHostnameSchema,
   sha256Hex,
@@ -8,7 +9,12 @@ import {
   type StartRuntimeRequest,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
-import type { ControlCoordinator, DurableOperationQueueMessage, StoredRuntime } from "./model";
+import type {
+  ControlCoordinator,
+  DurableOperationQueueMessage,
+  StoredRuntime,
+  StoredRuntimeStartJob,
+} from "./model";
 import {
   CloudflareSandboxBackend,
   NabuflowSandbox,
@@ -54,11 +60,13 @@ export interface PublishedDataPlaneDependencies {
     runtime: StoredRuntime,
   ) => Promise<{ running: boolean; lastError: string | null }>;
   runtimeAvailability?: (runtime: StoredRuntime) => Promise<BackendAvailabilityResult>;
-  recoverRuntime?: (runtime: StoredRuntime) => Promise<"scheduled" | "unavailable">;
+  recoverRuntime?: (runtime: StoredRuntime) => Promise<PublishedRecoveryResult>;
   upstreamHeaderTimeoutMs?: number;
   nowMs?: number;
   requestId?: string;
 }
+
+export type PublishedRecoveryResult = "scheduled" | "unavailable" | "exhausted";
 
 class PublishedHttpError extends Error {
   constructor(
@@ -114,7 +122,6 @@ export async function handlePublishedDataPlaneRequest(
     const runtime = await dependencies.coordinator.getRuntime(route.sandboxIdentity);
     if (
       runtime === null ||
-      runtime.descriptor.status !== "running" ||
       runtime.descriptor.manifestRevision !== route.manifestRevision ||
       runtime.manifest.revision !== route.manifestRevision ||
       runtime.descriptor.servicePort !== route.servicePort ||
@@ -125,6 +132,11 @@ export async function handlePublishedDataPlaneRequest(
         "published_runtime_unavailable",
         "Published application is temporarily unavailable",
         true,
+      );
+    }
+    if (runtime.descriptor.status !== "running") {
+      throw publishedRecoveryError(
+        await schedulePublishedRuntimeRecovery(runtime, env, dependencies),
       );
     }
 
@@ -184,12 +196,11 @@ export async function handlePublishedDataPlaneRequest(
           safePublishedErrorClass(error),
         );
         const recovery = await recoverIfRuntimeUnavailable(runtime, env, dependencies);
+        if (recovery !== "unavailable") throw publishedRecoveryError(recovery);
         throw new PublishedHttpError(
           503,
-          recovery === "scheduled" ? "published_runtime_recovering" : "published_upstream_timeout",
-          recovery === "scheduled"
-            ? "Published application is restarting"
-            : "Published application did not respond in time",
+          "published_upstream_timeout",
+          "Published application did not respond in time",
           true,
         );
       }
@@ -201,14 +212,7 @@ export async function handlePublishedDataPlaneRequest(
         safePublishedErrorClass(error),
       );
       const recovery = await recoverIfRuntimeUnavailable(runtime, env, dependencies);
-      throw new PublishedHttpError(
-        503,
-        recovery === "scheduled" ? "published_runtime_recovering" : "published_runtime_unavailable",
-        recovery === "scheduled"
-          ? "Published application is restarting"
-          : "Published application is temporarily unavailable",
-        true,
-      );
+      throw publishedRecoveryError(recovery);
     }
   } catch (error) {
     if (!(error instanceof PublishedHttpError)) throw error;
@@ -230,21 +234,14 @@ async function requireRuntimeProcess(
   const status = await runtimeStatus(runtime);
   if (status.running) return;
   const recovery = await schedulePublishedRuntimeRecovery(runtime, env, dependencies);
-  throw new PublishedHttpError(
-    503,
-    recovery === "scheduled" ? "published_runtime_recovering" : "published_runtime_unavailable",
-    recovery === "scheduled"
-      ? "Published application is restarting"
-      : "Published application is temporarily unavailable",
-    true,
-  );
+  throw publishedRecoveryError(recovery);
 }
 
 async function recoverIfRuntimeUnavailable(
   runtime: StoredRuntime,
   env: WorkerBindings,
   dependencies: PublishedDataPlaneDependencies,
-): Promise<"scheduled" | "unavailable"> {
+): Promise<PublishedRecoveryResult> {
   const runtimeAvailability =
     dependencies.runtimeAvailability ??
     (dependencies.runtimeStatus === undefined
@@ -305,7 +302,7 @@ export async function schedulePublishedRuntimeRecovery(
   runtime: StoredRuntime,
   env: WorkerBindings,
   dependencies: PublishedDataPlaneDependencies,
-): Promise<"scheduled" | "unavailable"> {
+): Promise<PublishedRecoveryResult> {
   if (dependencies.recoverRuntime !== undefined) return dependencies.recoverRuntime(runtime);
   if (runtime.artifactRevision === null || runtime.artifactSha256 === null) return "unavailable";
 
@@ -320,21 +317,62 @@ export async function schedulePublishedRuntimeRecovery(
     artifactSha256: runtime.artifactSha256,
   };
   const fingerprint = await sha256Hex(canonicalJson(request));
-  const recoveryIdentity = await sha256Hex(
+  const baseIdentity = await sha256Hex(
     canonicalJson({
+      version: "published-runtime-recovery-v2",
       runtimeIdentity: runtime.descriptor.identity,
-      readyAt: runtime.descriptor.readyAt,
       artifactRevision: runtime.artifactRevision,
       artifactSha256: runtime.artifactSha256,
     }),
   );
+  const latest = await dependencies.coordinator.getLatestDurableOperation(
+    "runtime-start",
+    runtime.descriptor.identity,
+    "start",
+  );
+  let recoveryIdentity: string;
+  let generation = 0;
+  if (latest?.kind === "runtime-start" && latest.state === "active") {
+    const sameArtifact =
+      latest.request.artifactRevision === runtime.artifactRevision &&
+      latest.request.artifactSha256 === runtime.artifactSha256;
+    if (!sameArtifact) return "unavailable";
+    await nudgePublishedRuntimeRecovery(latest, env, dependencies);
+    return "scheduled";
+  }
+  if (
+    latest?.kind === "runtime-start" &&
+    latest.state === "failed" &&
+    latest.publishedRecoveryIdentity !== undefined &&
+    latest.publishedRecoveryGeneration !== undefined &&
+    latest.request.artifactRevision === runtime.artifactRevision &&
+    latest.request.artifactSha256 === runtime.artifactSha256
+  ) {
+    generation = latest.publishedRecoveryGeneration + 1;
+    if (generation >= PUBLISHED_RUNTIME_RECOVERY_MAX_FAILED_TERMINALS) return "exhausted";
+    recoveryIdentity = latest.publishedRecoveryIdentity;
+  } else {
+    // A successful recovery starts a new bounded series only if the runtime later
+    // becomes unavailable. Chaining to its durable job identity avoids transient clocks.
+    recoveryIdentity = await sha256Hex(
+      canonicalJson({
+        baseIdentity,
+        predecessor:
+          latest?.kind === "runtime-start" && latest.state === "succeeded"
+            ? latest.jobKey
+            : "initial",
+      }),
+    );
+  }
   const claim = await dependencies.coordinator.registerDurableOperation({
-    key: `published-runtime-recovery:${recoveryIdentity}`,
+    key: `published-runtime-recovery:v2:${recoveryIdentity}:generation-${generation}`,
     fingerprint,
     kind: "runtime-start",
     runtimeIdentity: runtime.descriptor.identity,
     subjectKey: "start",
     request,
+    publishedRecoveryIdentity: recoveryIdentity,
+    publishedRecoveryGeneration: generation,
     expectedDeploymentVersion: env.CF_VERSION_METADATA.id,
     nowMs: dependencies.nowMs ?? Date.now(),
   });
@@ -348,6 +386,15 @@ export async function schedulePublishedRuntimeRecovery(
     ));
   if (job === null || job.kind !== "runtime-start") return "unavailable";
 
+  await nudgePublishedRuntimeRecovery(job, env, dependencies);
+  return "scheduled";
+}
+
+async function nudgePublishedRuntimeRecovery(
+  job: StoredRuntimeStartJob,
+  env: WorkerBindings,
+  dependencies: PublishedDataPlaneDependencies,
+): Promise<void> {
   const nowMs = dependencies.nowMs ?? Date.now();
   await dependencies.coordinator.recordDurableOperationNudge(job.jobKey, nowMs);
   try {
@@ -371,7 +418,31 @@ export async function schedulePublishedRuntimeRecovery(
       }),
     );
   }
-  return "scheduled";
+}
+
+function publishedRecoveryError(recovery: PublishedRecoveryResult): PublishedHttpError {
+  if (recovery === "scheduled") {
+    return new PublishedHttpError(
+      503,
+      "published_runtime_recovering",
+      "Published application is restarting",
+      true,
+    );
+  }
+  if (recovery === "exhausted") {
+    return new PublishedHttpError(
+      503,
+      "published_runtime_recovery_exhausted",
+      "Published application recovery reached its retry cap",
+      false,
+    );
+  }
+  return new PublishedHttpError(
+    503,
+    "published_runtime_unavailable",
+    "Published application is temporarily unavailable",
+    true,
+  );
 }
 
 async function resolvePublishedHostname(

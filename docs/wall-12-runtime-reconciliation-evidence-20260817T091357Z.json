@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260817T091357Z",
+  "branch": "codex/published-runtime-reconciliation",
+  "base": "81a8c84a4531bbaebf46da5957b62dd859203258",
+  "productionFrozen": true,
+  "liveMutations": [],
+  "contract": {
+    "status": {
+      "method": "GET",
+      "path": "/_nabuflow/control/v1/runtimes/:projectId/:role/:slot",
+      "businessStateWrites": 0,
+      "backendProbes": 0
+    },
+    "reconciliation": {
+      "method": "POST",
+      "path": "/_nabuflow/control/v1/runtimes/:projectId/:role/:slot/reconcile",
+      "signed": true,
+      "idempotent": true,
+      "audited": true,
+      "expectedStateGuarded": true,
+      "ambiguousObservationCap": 3,
+      "observationTimeoutMs": 5000,
+      "operationBoundMs": 20000,
+      "observationAndFinalizationMarginMs": 5000
+    },
+    "publishedRecovery": {
+      "activeJobClassification": "published_runtime_recovering",
+      "maxConsecutiveFailedTerminals": 3,
+      "capCode": "published_runtime_recovery_exhausted",
+      "capRetryable": false,
+      "identityVersion": "published-runtime-recovery-v2"
+    }
+  },
+  "capturedFixtures": {
+    "projectId": 51,
+    "productionGreen": {
+      "identity": "nrf-ab8e18ef4ebebedd-p51-production-green",
+      "manifestRevision": "prod-a8940c976f1cf943d03c5bccd52e3bdb5b1ea51b8d56e228",
+      "artifactRevision": "production-a8940c976f1cf943d03c5bccd52e3bdb5b1ea51b8d56e228",
+      "artifactSha256": "1034b3dbfa46a83b34528132bf58d1590be1a0d8a20bf1aea834da2e95c2b954"
+    },
+    "productionBlue": {
+      "manifestRevision": "prod-e7060cad1aab9f5764727d28ffc058f186117c80ec77ab5"
+    },
+    "previewPrimary": {
+      "manifestRevision": "zero-node-v1-f8dd2e2df3487cc3c3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039"
+    }
+  },
+  "verification": {
+    "frozenOfflineInstall": {
+      "command": "pnpm install --offline --frozen-lockfile",
+      "result": "pass",
+      "downloads": 0,
+      "lockfileChanged": false
+    },
+    "contracts": {
+      "typecheck": "pass",
+      "lint": "pass",
+      "tests": { "files": 20, "tests": 187, "result": "pass" }
+    },
+    "runtimeWorker": {
+      "typecheck": "pass",
+      "lint": "pass",
+      "tests": { "files": 35, "tests": 264, "result": "pass" }
+    },
+    "workspace": {
+      "typecheck": "pass",
+      "lint": "pass"
+    },
+    "diffCheck": "pass",
+    "manifestChanges": []
+  },
+  "postShipOperation": {
+    "notRunInThisBranchDelivery": true,
+    "targets": [
+      "project-51/preview/primary",
+      "project-51/production/blue",
+      "project-51/production/green"
+    ],
+    "rule": "Each target is invoked once with a unique reconciliationId and idempotency key after Worker parity is proven; every sanitized response is retained before the public probe."
+  }
+}

@@ -176,6 +176,7 @@ describe("additive layered artifact control plane", () => {
         "artifact-commit-diagnostics-v1",
         "durable-operation-discovery-v1",
         "runtime-lifecycle-jobs-v1",
+        "runtime-reconciliation-v1",
       ],
     });
     const identity = await deriveRuntimeIdentity({

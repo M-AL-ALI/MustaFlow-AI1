@@ -71,6 +71,12 @@ function requestFixtures(): Record<keyof typeof controlEndpointSchemas, unknown>
     stop: { locator, reason: "idle policy" },
     destroy: { locator, reason: "project deleted" },
     status: { locator },
+    reconcile: {
+      locator,
+      expectedStatus: "error",
+      expectedManifestRevision: manifest.revision,
+      reconciliationId: "wall-12-green",
+    },
     exec: { locator, argv: ["npm", "test"], cwd: "/workspace", timeoutMs: 30_000 },
     logs: { locator, cursor: "cursor-10", limit: 200, follow: false },
     files: {
@@ -120,6 +126,14 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
     stop: { runtime: { ...runtime, status: "stopped" } },
     destroy: { ok: true },
     status: { runtime },
+    reconcile: {
+      ok: true,
+      reconciliationId: "wall-12-green",
+      outcome: "restored",
+      observation: { attempts: 1, stage: "health", cause: "ready", status: 200 },
+      capability: "bound",
+      runtime,
+    },
     exec: { ok: true, stdout: "ok\n", stderr: "", exitCode: 0, timedOut: false },
     logs: {
       entries: [
@@ -160,6 +174,7 @@ describe("control-plane schemas", () => {
       "stop",
       "destroy",
       "status",
+      "reconcile",
       "exec",
       "logs",
       "files",

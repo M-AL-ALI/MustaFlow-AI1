@@ -542,6 +542,84 @@ describe("anonymous published application data plane", () => {
     );
   });
 
+  it("classifies a descriptor with an attached active recovery job as recovering", async () => {
+    const first = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+      coordinator,
+      sandbox,
+      runtimeStatus: async () => ({ running: false, lastError: null }),
+      nowMs: TEST_NOW_MS,
+    });
+    expect(first.status).toBe(503);
+    const runtime = await coordinator.getRuntime(identity);
+    if (runtime === null) throw new Error("runtime fixture is missing");
+    runtime.descriptor.status = "starting";
+    runtime.processId = null;
+    await coordinator.putRuntime(identity, runtime);
+
+    const attached = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+      coordinator,
+      sandbox,
+      nowMs: TEST_NOW_MS + 1,
+    });
+    expect(attached.status).toBe(503);
+    await expect(attached.json()).resolves.toMatchObject({
+      code: "published_runtime_recovering",
+      retryable: true,
+    });
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(1);
+  });
+
+  it("caps consecutive failed published recovery terminals with a typed outcome", async () => {
+    const runtime = await coordinator.getRuntime(identity);
+    if (runtime === null) throw new Error("runtime fixture is missing");
+    runtime.descriptor.status = "error";
+    runtime.processId = null;
+    await coordinator.putRuntime(identity, runtime);
+
+    for (let generation = 0; generation < 3; generation += 1) {
+      const response = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+        coordinator,
+        sandbox,
+        nowMs: TEST_NOW_MS + generation,
+      });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "published_runtime_recovering",
+      });
+      const job = await coordinator.getLatestDurableOperation("runtime-start", identity, "start");
+      if (job === null || job.kind !== "runtime-start") {
+        throw new Error("recovery job is missing");
+      }
+      expect(job.publishedRecoveryGeneration).toBe(generation);
+      const claim = await coordinator.claimDurableOperationDriver(
+        job.jobKey,
+        `owner-${generation}`,
+        TEST_NOW_MS + generation,
+      );
+      if (claim.state !== "claimed" && claim.state !== "adopted") {
+        throw new Error(`recovery claim was ${claim.state}`);
+      }
+      await expect(
+        coordinator.failDurableOperation(job.jobKey, `owner-${generation}`, claim.job.attempt, {
+          status: 503,
+          body: { code: "runtime_start_failed", retryable: true },
+        }),
+      ).resolves.toBe("completed");
+    }
+
+    const exhausted = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+      coordinator,
+      sandbox,
+      nowMs: TEST_NOW_MS + 4,
+    });
+    expect(exhausted.status).toBe(503);
+    await expect(exhausted.json()).resolves.toMatchObject({
+      code: "published_runtime_recovery_exhausted",
+      retryable: false,
+    });
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(3);
+  });
+
   it("keeps preview routing and its missing-session response unchanged", async () => {
     const response = await handleWorkerRequest(
       new Request(`${ORIGIN}${PREVIEW_DATA_PREFIX}/nrf-0000000000000000-p84-preview-primary/`),
