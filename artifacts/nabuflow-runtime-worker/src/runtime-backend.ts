@@ -34,6 +34,7 @@ import {
 
 export const DOORMAN_HOST = CAPABILITY_DOORMAN_HOST;
 const TENANT_PROCESS_ID = "tenant-service";
+export const RUNTIME_AVAILABILITY_TIMEOUT_MS = 5_000;
 
 export class ContainerProxy extends SandboxContainerProxy {
   async fetch(request: Request): Promise<Response> {
@@ -207,6 +208,25 @@ export interface BackendExecResult {
 export interface BackendStatusResult {
   running: boolean;
   lastError: string | null;
+  cause?: "running" | "process_missing" | "process_not_running" | "process_check_failed";
+}
+
+export type RuntimeAvailabilityStage = "process" | "health";
+export type RuntimeAvailabilityCause =
+  | "ready"
+  | "process_missing"
+  | "process_not_running"
+  | "process_check_failed"
+  | "health_status"
+  | "health_pre_dispatch"
+  | "health_timeout"
+  | "health_transport";
+
+export interface BackendAvailabilityResult {
+  ready: boolean;
+  stage: RuntimeAvailabilityStage;
+  cause: RuntimeAvailabilityCause;
+  status: number | null;
 }
 
 export interface RuntimeMaterializationTicket {
@@ -223,6 +243,7 @@ export interface RuntimeBackend {
   stop(runtime: StoredRuntime): Promise<void>;
   destroy(runtime: StoredRuntime): Promise<void>;
   status(runtime: StoredRuntime): Promise<BackendStatusResult>;
+  availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult>;
   exec(runtime: StoredRuntime, request: ExecRuntimeRequest): Promise<BackendExecResult>;
   logs(runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }>;
   materialize(
@@ -301,25 +322,97 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   }
 
   async status(runtime: StoredRuntime): Promise<BackendStatusResult> {
-    if (runtime.processId === null) return { running: false, lastError: null };
+    if (runtime.processId === null) {
+      return { running: false, lastError: null, cause: "process_missing" };
+    }
     try {
       const process = await this.sandbox(
         runtime.descriptor.identity,
         runtimeReadKeepsContainerAlive(runtime.descriptor.status),
       ).getProcess(runtime.processId);
-      if (process === null) return { running: false, lastError: "Tenant service is not running" };
+      if (process === null) {
+        return {
+          running: false,
+          lastError: "Tenant service is not running",
+          cause: "process_missing",
+        };
+      }
       const status = await process.getStatus();
+      const running = status === "running" || status === "starting";
       return {
-        running: status === "running" || status === "starting",
+        running,
         lastError:
           status === "failed" || status === "error"
             ? `Tenant service process ended with status ${status}`
             : null,
+        cause: running ? "running" : "process_not_running",
       };
     } catch (error) {
       return {
         running: false,
         lastError: error instanceof Error ? error.message : "Runtime status check failed",
+        cause: "process_check_failed",
+      };
+    }
+  }
+
+  async availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult> {
+    const processStatus = await this.status(runtime);
+    if (!processStatus.running) {
+      return {
+        ready: false,
+        stage: "process",
+        cause:
+          processStatus.cause === undefined || processStatus.cause === "running"
+            ? runtime.processId === null
+              ? "process_missing"
+              : processStatus.lastError === null
+                ? "process_not_running"
+                : "process_check_failed"
+            : processStatus.cause,
+        status: null,
+      };
+    }
+
+    let signal: AbortSignal;
+    let request: Request;
+    try {
+      signal = AbortSignal.timeout(RUNTIME_AVAILABILITY_TIMEOUT_MS);
+      request = new Request(
+        new URL(runtime.manifest.healthPath, "https://tenant.runtime.invalid"),
+        {
+          method: "GET",
+          redirect: "manual",
+          signal,
+        },
+      );
+    } catch {
+      return {
+        ready: false,
+        stage: "health",
+        cause: "health_pre_dispatch",
+        status: null,
+      };
+    }
+    try {
+      const response = await this.sandbox(runtime.descriptor.identity, true).containerFetch(
+        request,
+        runtime.manifest.servicePort,
+      );
+      const ready = response.status >= 200 && response.status <= 399;
+      await response.body?.cancel().catch(() => undefined);
+      return {
+        ready,
+        stage: "health",
+        cause: ready ? "ready" : "health_status",
+        status: response.status,
+      };
+    } catch {
+      return {
+        ready: false,
+        stage: "health",
+        cause: signal.aborted ? "health_timeout" : "health_transport",
+        status: null,
       };
     }
   }

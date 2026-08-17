@@ -31,10 +31,21 @@ export class Sandbox<_Env = unknown> {
   async mkdir(..._args: unknown[]): Promise<void> {}
 }
 
+type SandboxFactory = (namespace: unknown, identity: string, options: unknown) => Sandbox;
+
+let sandboxFactory: SandboxFactory | null = null;
+
+export function setSandboxFactoryForTest(factory: SandboxFactory | null): void {
+  sandboxFactory = factory;
+}
+
 export function getSandbox<Instance extends Sandbox>(
-  _namespace: unknown,
-  _identity: string,
-  _options: unknown,
+  namespace: unknown,
+  identity: string,
+  options: unknown,
 ): Instance {
+  if (sandboxFactory !== null) {
+    return sandboxFactory(namespace, identity, options) as Instance;
+  }
   return new Sandbox() as Instance;
 }

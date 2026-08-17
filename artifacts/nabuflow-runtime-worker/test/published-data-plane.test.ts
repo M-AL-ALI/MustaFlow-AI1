@@ -504,6 +504,44 @@ describe("anonymous published application data plane", () => {
     expect(coordinator.runtimeLifecycleJobs.size).toBe(1);
   });
 
+  it("recovers an adopted runtime whose process is running but health port is unavailable", async () => {
+    sandbox.responseFactory = () => {
+      throw new TypeError("private transport detail must not be persisted");
+    };
+    const response = await handlePublishedDataPlaneRequest(
+      new Request(`${ORIGIN}/adopted-green`),
+      env,
+      {
+        coordinator,
+        sandbox,
+        runtimeAvailability: async () => ({
+          ready: false,
+          stage: "health",
+          cause: "health_transport",
+          status: null,
+        }),
+        nowMs: TEST_NOW_MS,
+      },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "published_runtime_recovering",
+      retryable: true,
+    });
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(1);
+    const stored = await coordinator.getRuntime(identity);
+    expect(stored?.logs.map((entry) => entry.message)).toEqual(
+      expect.arrayContaining([
+        "Published availability failed (stage=request, cause=transport, class=TypeError).",
+        "Published availability failed (stage=health, cause=health_transport).",
+      ]),
+    );
+    expect(stored?.logs.map((entry) => entry.message).join("\n")).not.toContain(
+      "private transport detail",
+    );
+  });
+
   it("keeps preview routing and its missing-session response unchanged", async () => {
     const response = await handleWorkerRequest(
       new Request(`${ORIGIN}${PREVIEW_DATA_PREFIX}/nrf-0000000000000000-p84-preview-primary/`),

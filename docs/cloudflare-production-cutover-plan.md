@@ -503,3 +503,49 @@ deletion.
    opened in this slice.
 3. **Read-only public probes are operational nudges.** A published request can schedule durable
    runtime recovery, so forensic probes must record their causal position in the runtime timeline.
+
+## Wall #11 published runtime availability diagnosis — 2026-08-17
+
+This record was written before Phase 2 code. Production state remained frozen: no rollback,
+second publish, runtime restart, route mutation, or Fly action. Repository main and the inspected
+source are exact `0223d0f5b2067bc7a08476b5d7d7336427c0deff`.
+
+The published route targets the private deterministic Sandbox identity
+`nrf-ab8e18ef4ebebedd-p51-production-green` on port `8080`; no IP address is assigned or stored.
+Its shipped path validates route/runtime identity, production role and active slot, manifest
+revision, service port, durable `running`, then resolves the saved process and accepts Sandbox
+process status `running|starting`. It forwards through `containerFetch` with a named ten-second
+response-header bound.
+
+The v158 publish adopted the existing deterministic green. Its old start terminal replayed, so
+this publish skipped the fresh path's materialize, process start, and 30-second `/healthz` port
+check. Activation validated the old durable descriptor, not current port readiness. Cloudflare
+reports the same VM Running with live CPU/network, but the public port hop returns only typed
+`published_runtime_unavailable`.
+
+The exact exception class is unrecoverable because shipped code collapses both a terminally
+unrecoverable stopped process and every non-timeout `containerFetch` exception into the same code,
+discarding the exception. Container logs and SSH are disabled, and raw DO KV reads are blocked.
+This classification/observability gap is part of the root mechanism; Phase 2 must preserve a
+sanitized availability stage and make activation and public forwarding share one live
+process-plus-health-path assessment.
+
+Clock drift is ruled out. No readiness decision uses wall-clock deltas; `readyAt` is an opaque
+recovery-identity component, header deadlines are durations, and provider bounds use a monotonic
+clock.
+
+Blue remains Running by design. The authority requires the previous release to remain intact as
+warm rollback standby, and successful promotion never destroys it. It is not an orphan.
+
+Full evidence and diagnosis:
+
+- `docs/wall-11-published-runtime-availability-phase1-evidence-20260817T053311Z.json`
+- `docs/wall-11-published-runtime-availability-phase1-diagnosis-20260817T053311Z.md`
+
+### Permanent scratch-worktree close ritual
+
+At every slice close, the scratch worktree is removed after—and only after—the named publish
+marker is verified, its branch is merged, and its report/evidence are present in the permanent
+authority folder. Deletion is part of the ship ritual, not a deferred housekeeping errand. Active
+worktrees, the main checkout, package stores, and permanent authority documents are never cleanup
+targets.
