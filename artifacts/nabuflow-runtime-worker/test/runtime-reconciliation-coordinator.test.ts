@@ -57,6 +57,7 @@ function observation(attempt: number, cause: "health_transport" | "ready") {
       health: cause === "ready" ? "ready" : "unknown",
     },
     decision: cause === "ready" ? "ready" : "ambiguous",
+    repairAction: cause === "ready" ? "reregister-and-rebind" : "none",
   } satisfies RuntimeReconciliationObservation;
 }
 

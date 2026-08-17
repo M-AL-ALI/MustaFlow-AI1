@@ -151,7 +151,7 @@ const strictEmptySchema = z.object({}).strict();
 const successSchema = z.object({ ok: z.literal(true) }).strict();
 const runtimeResponseSchema = z.object({ runtime: runtimeDescriptorSchema }).strict();
 
-export const RUNTIME_RECONCILIATION_SEMANTICS_VERSION = "runtime-reconciliation-v2" as const;
+export const RUNTIME_RECONCILIATION_SEMANTICS_VERSION = "runtime-reconciliation-v3" as const;
 export const RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT =
   RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS;
 
@@ -171,6 +171,15 @@ export const runtimeReconciliationObservationCauseSchema = z.enum([
   "health_timeout",
   "health_transport",
 ]);
+export const runtimeReconciliationRepairActionSchema = z.enum([
+  "none",
+  "reregister-and-rebind",
+  "restart-and-rebind",
+  "settle-idle",
+]);
+export type RuntimeReconciliationRepairAction = z.infer<
+  typeof runtimeReconciliationRepairActionSchema
+>;
 export const runtimeReconciliationObservationSchema = z
   .object({
     attempt: z.number().int().min(1).max(RUNTIME_RECONCILIATION_OBSERVATION_TRAIL_LIMIT),
@@ -187,7 +196,15 @@ export const runtimeReconciliationObservationSchema = z
         health: z.enum(["not-probed", "ready", "rejected", "unknown"]),
       })
       .strict(),
-    decision: z.enum(["ready", "confirmed-stopped", "confirmed-error", "ambiguous"]),
+    decision: z.enum([
+      "ready",
+      "repair-required",
+      "healthy-idle",
+      "confirmed-stopped",
+      "confirmed-error",
+      "ambiguous",
+    ]),
+    repairAction: runtimeReconciliationRepairActionSchema,
   })
   .strict();
 export const runtimeReconciliationTerminalSchema = z
@@ -302,7 +319,14 @@ export const reconcileRuntimeResponseSchema = z
   .object({
     ok: z.literal(true),
     reconciliationId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
-    outcome: z.enum(["restored", "confirmed-stopped", "confirmed-error", "unchanged"]),
+    outcome: z.enum([
+      "restored",
+      "repair-scheduled",
+      "healthy-idle",
+      "confirmed-stopped",
+      "confirmed-error",
+      "unchanged",
+    ]),
     observation: z
       .object({
         attempts: z.number().int().min(1).max(RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS),
@@ -318,10 +342,19 @@ export const reconcileRuntimeResponseSchema = z
           "health_transport",
         ]),
         status: z.number().int().min(100).max(599).nullable(),
+        repairAction: runtimeReconciliationRepairActionSchema,
       })
       .strict(),
     capability: z.enum(["bound", "unbound"]),
     runtime: runtimeDescriptorSchema,
+    repairJob: z
+      .object({
+        jobKey: z.string().min(1).max(1_000),
+        state: z.enum(["active", "succeeded", "failed"]),
+        attempt: z.number().int().nonnegative(),
+      })
+      .strict()
+      .nullable(),
     evidence: runtimeReconciliationEvidenceSchema,
   })
   .strict();

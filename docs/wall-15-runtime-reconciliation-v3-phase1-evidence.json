@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "wall": 15,
+  "capturedAt": "2026-08-17",
+  "base": "ba6656489f77433eb986c6208c9b967c13561799",
+  "branch": "codex/runtime-reconciliation-v3",
+  "productionFrozen": true,
+  "productionRequests": [],
+  "healthProbeTransport": {
+    "process": "Sandbox.getProcess(tenant-service).getStatus()",
+    "health": "Sandbox.containerFetch(manifest.healthPath, manifest.servicePort)",
+    "capabilityBindingConsulted": false,
+    "capabilityBindingPath": "tenant outbound request to CAPABILITY_DOORMAN_HOST -> handleCapabilityIntentFromContainer -> coordinator container binding"
+  },
+  "previewIdleSemantics": {
+    "explicitStoppedWithoutProcess": "valid non-serving idle",
+    "servingRequiresStoredStatus": "running",
+    "project51StoredStatus": "error",
+    "project51IdleEligible": false
+  },
+  "capturedDamage": {
+    "shared": {
+      "storedStatus": "error",
+      "storedProcessIdentity": "absent",
+      "capability": "unbound",
+      "retainedArtifact": true,
+      "wall12ProviderVmState": "running"
+    },
+    "preview": {
+      "requestId": "e0ecf724-aa61-427c-8997-2b465a100bb8",
+      "manifestRevision": "zero-node-v1-f8dd2e2df3487cc3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039",
+      "observations": 3,
+      "providerProcess": "running",
+      "health": "unknown",
+      "cause": "health_transport"
+    },
+    "blue": {
+      "manifestRevision": "prod-e7060cad1aab9f5764727d28ffc058f186117c80ec77ab5"
+    },
+    "green": {
+      "manifestRevision": "prod-a8940c976f1cf943d03c5bccd52e3bdb5b1ea51b8d56e228"
+    }
+  },
+  "phase2Verdicts": [
+    "ready",
+    "repair-required",
+    "healthy-idle",
+    "confirmed-stopped",
+    "confirmed-error",
+    "ambiguous-only-for-uncaptured-or-truthful-state-weather"
+  ],
+  "mutations": []
+}
