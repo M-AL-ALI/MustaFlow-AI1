@@ -12,7 +12,10 @@ identity so the Wall #13 inconclusive result cannot shadow a new run.
 - Branch: `codex/reconciliation-observation-trail`.
 - Implementation commit: `0e4f1cdca35f9ddc031a6a1b7c0a802517a16418`.
 - Evidence: `wall-14-runtime-reconciliation-observation-trail-evidence-20260817T111243Z.json`.
-- Evidence SHA-256: `ae80fb522f901867f650fa40ae92bb54b0a8f9cdcbf421506b7ce3d45a33735e`.
+- Canonical/permanent LF evidence SHA-256:
+  `79dc9f2487b5181c5c769b2172dc151a0f3aa979149c03818763c1ff4ce086aa`.
+- Windows checked-out evidence SHA-256 (CRLF materialization):
+  `ae80fb522f901867f650fa40ae92bb54b0a8f9cdcbf421506b7ce3d45a33735e`.
 
 Production remained frozen. No reconciliation, deployment, publish, rollback, runtime restart,
 route change, capability mutation, resource creation, new public surface, Fly action, or new spend
