@@ -1,0 +1,63 @@
+{
+  "schema": "nabuflow.wall10.published_route_real_state_verification.v1",
+  "runId": "20260817T041737Z",
+  "base": "5bce65eb8a9553ca20cba2e7f4e17686d9ef44c7",
+  "branch": "codex/published-route-real-state",
+  "implementation": {
+    "activationSemanticsRevision": "active-slot-v2",
+    "activationKeyShape": "production-publish:<promotion>:activate:semantics-active-slot-v2:request-<sha256>",
+    "rollbackKeyShape": "production-publish:<promotion>:rollback:semantics-active-slot-v2:request-<sha256>",
+    "generalReplaySemanticsChanged": false,
+    "wireFormatsChanged": false,
+    "manifestsChanged": false
+  },
+  "verification": {
+    "frozenOfflineInstall": {
+      "passed": true,
+      "duration": "10m32.6s",
+      "packages": 2259,
+      "downloads": 0,
+      "lockfileChanged": false
+    },
+    "focusedApiProvider": {
+      "filesPassed": 1,
+      "testsPassed": 36
+    },
+    "focusedWorkerRouteControl": {
+      "filesPassed": 2,
+      "testsPassed": 20
+    },
+    "runtimeWorker": {
+      "filesPassed": 34,
+      "testsPassed": 254
+    },
+    "tenantRuntimeContracts": {
+      "filesPassed": 20,
+      "testsPassed": 187
+    },
+    "workspaceTypecheck": "passed",
+    "workspaceLint": "passed",
+    "changedFilesPrettier": "passed",
+    "gitDiffCheck": "passed",
+    "rootPrettier": {
+      "passed": false,
+      "wall10FilesPassed": true,
+      "baseUnchangedFailures": [
+        "artifacts/nabuflow-runtime-worker/wrangler.build.production.jsonc",
+        "artifacts/nabuflow-runtime-worker/wrangler.pantry.production.jsonc",
+        "artifacts/nabuflow-runtime-worker/wrangler.runtime.production.jsonc"
+      ]
+    }
+  },
+  "lockfile": {
+    "sha256": "B8DA847F2D8C8B30A5A84BFB362AB1176D86FD70DAFE972EDC6FCA9A684BD54E",
+    "changed": false
+  },
+  "safety": {
+    "liveMutationsFromBranch": 0,
+    "newResources": 0,
+    "newPublicSurfaces": 0,
+    "flyActions": 0,
+    "secretValuesObserved": 0
+  }
+}

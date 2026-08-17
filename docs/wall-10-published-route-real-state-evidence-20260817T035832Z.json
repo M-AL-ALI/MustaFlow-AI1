@@ -1,0 +1,116 @@
+{
+  "schema": "nabuflow.wall10.published_route_real_state_evidence.v1",
+  "runId": "20260817T035832Z",
+  "capturedBeforeProductCodeChange": true,
+  "base": "5bce65eb8a9553ca20cba2e7f4e17686d9ef44c7",
+  "branch": "codex/published-route-real-state",
+  "worker": {
+    "versionId": "5a494b01-7712-48e9-bc71-3432f415a3e5",
+    "sourceGitSha": "7d9a3a036fbe4731055566c48bf7462320bade47"
+  },
+  "failure": {
+    "componentOnNewWorker": "control request idempotency replay boundary",
+    "codePath": "handleControlRequest lookup.state === replay before executeEndpoint",
+    "storedTerminalOrigin": "pre-Wall-8 activatePublishedRoute literal-blue identity check",
+    "code": "invalid_route_identity",
+    "message": "Published route identity is invalid for this deployment",
+    "presented": {
+      "projectId": 51,
+      "role": "production",
+      "slot": "green",
+      "identity": "nrf-ab8e18ef4ebebedd-p51-production-green"
+    },
+    "oldExpectation": {
+      "slot": "blue"
+    },
+    "currentEndpointExecuted": false
+  },
+  "applicationLedger": {
+    "projectId": 51,
+    "publicSlug": "platform-canary",
+    "publishedSnapshotId": 149,
+    "stagingPublishedSnapshotId": 158,
+    "testingCandidateSnapshotId": 158,
+    "testedSnapshotId": 158,
+    "testingStatus": "passed",
+    "projectUpdatedAt": "2026-08-16T22:25:17.587506+00:00",
+    "version158ProductionRelease": null
+  },
+  "persistedProductionRelease": {
+    "state": "active",
+    "format": "nabuflow.production-artifact-release/v1",
+    "hostname": "platform-canary.apps.mustaflow.com",
+    "promotedAt": "2026-08-15T23:11:58.905Z",
+    "activatedAt": "2026-08-15T23:11:58.905Z",
+    "targetSlot": "blue",
+    "sourceVersionId": 147,
+    "promotionIdentity": "e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5f22b64bad95b79c2",
+    "targetRuntimeIdentity": "nrf-ab8e18ef4ebebedd-p51-production-blue",
+    "targetManifestRevision": "prod-e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5",
+    "servicePort": 8080
+  },
+  "routeRecord": {
+    "storage": "Control Durable Object _cf_KV route:platform-canary.apps.mustaflow.com",
+    "directRead": "rejected_by_cloudflare_sqlite_auth",
+    "valueShape": "unversioned RouteRecord",
+    "formatField": "absent",
+    "lastModifiedField": "absent",
+    "lastAuthoritativeWriteEvidence": "2026-08-15T23:11:58.905Z",
+    "route": {
+      "hostname": "platform-canary.apps.mustaflow.com",
+      "projectId": 51,
+      "role": "production",
+      "activeSlot": "blue",
+      "manifestRevision": "prod-e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5",
+      "servicePort": 8080,
+      "sandboxIdentity": "nrf-ab8e18ef4ebebedd-p51-production-blue"
+    }
+  },
+  "publicProbes": [
+    {
+      "path": "/",
+      "status": 503,
+      "code": "published_runtime_recovering",
+      "message": "Published application is restarting",
+      "requestId": "9e5313f7-85ee-4685-97ff-d513084214c8"
+    },
+    {
+      "path": "/healthz",
+      "status": 503,
+      "code": "published_runtime_recovering",
+      "message": "Published application is restarting",
+      "requestId": "14bd8410-aaf5-4989-963e-e06d1ea94766"
+    }
+  ],
+  "runtimeTimeline": {
+    "wall9AfterFailure": {
+      "previewPrimary": "running",
+      "productionBlue": "stopped",
+      "productionGreen": "running",
+      "activeInstances": 2
+    },
+    "afterPublicRecoveryProbe": {
+      "previewPrimary": "running",
+      "productionBlue": "running",
+      "productionGreen": "running",
+      "activeInstances": 3
+    },
+    "blueHistoricalFirstVmStoppedAt": "2026-08-16T03:18:29Z",
+    "blueStopAttribution": "historical keepAlive observation defect; activation cleanup targets green only"
+  },
+  "greenCandidate": {
+    "identity": "nrf-ab8e18ef4ebebedd-p51-production-green",
+    "state": "running",
+    "authoritative": false,
+    "adoptable": true,
+    "reason": "deterministic v158 target; approved sealed release unchanged; route and ledger remain blue"
+  },
+  "safety": {
+    "liveMutations": 0,
+    "publicRecoveryNudgesFromReadProbes": 2,
+    "newResources": 0,
+    "newPublicSurfaces": 0,
+    "flyActions": 0,
+    "secretValuesObserved": 0
+  }
+}

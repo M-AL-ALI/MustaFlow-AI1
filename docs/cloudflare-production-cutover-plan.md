@@ -392,3 +392,114 @@ destroy the runtime that actually became active.
 2. **Container observability disabled.** The production container Logs tab reports “Workers
    Observability is Disabled,” preventing application-log correlation for the dark blue runtime.
    Reported only; enabling it may affect cost and is outside this commission.
+
+## Wall #10 production route diagnosis — 2026-08-17
+
+This record was written on branch `codex/published-route-real-state` before any product source was
+changed. The verified base is `5bce65eb8a9553ca20cba2e7f4e17686d9ef44c7`; that empty
+“Published your App” commit is tree-identical to its parent `7d9a3a03`.
+
+### Exact failure mechanism on Worker `5a494b01`
+
+The Wall #9 retry did reach the newly deployed Worker, but the repaired activation function did
+not run. `handleControlRequest` called `beginIdempotency` for the request-bound activation key,
+received `lookup.state === "replay"`, and returned the stored terminal response before
+`executeEndpoint`. The stored response was the deterministic 400 created by the pre-Wall #8
+`activatePublishedRoute` implementation. That old implementation compared the presented green
+identity slot to the literal expectation `blue`:
+
+- presented route slot: `green`
+- presented identity: `nrf-ab8e18ef4ebebedd-p51-production-green`
+- presented project/role: `51` / `production`
+- old expected slot: literal `blue`
+- resulting typed terminal: `invalid_route_identity` / `Published route identity is invalid for
+this deployment`
+
+The source-fixed Worker correctly expects `route.activeSlot`, but a same-body retry derives the
+same request-bound idempotency key and therefore replays the old terminal. Source deployment
+parity alone cannot invalidate a completed idempotency record whose semantics changed.
+
+### Persisted production and route state
+
+The production application ledger remains honest and unchanged by the failed green activation:
+
+```json
+{
+  "projectId": 51,
+  "publishedSnapshotId": 149,
+  "stagingPublishedSnapshotId": 158,
+  "testingCandidateSnapshotId": 158,
+  "testedSnapshotId": 158,
+  "testingStatus": "passed",
+  "productionRelease": {
+    "state": "active",
+    "format": "nabuflow.production-artifact-release/v1",
+    "hostname": "platform-canary.apps.mustaflow.com",
+    "promotedAt": "2026-08-15T23:11:58.905Z",
+    "targetSlot": "blue",
+    "activatedAt": "2026-08-15T23:11:58.905Z",
+    "sourceVersionId": 147,
+    "promotionIdentity": "e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5f22b64bad95b79c2",
+    "targetRuntimeIdentity": "nrf-ab8e18ef4ebebedd-p51-production-blue",
+    "targetManifestRevision": "prod-e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5",
+    "servicePort": 8080
+  },
+  "version158ProductionRelease": null
+}
+```
+
+The Control Durable Object persists the route as an unversioned strict `RouteRecord`; the exact
+shape implied by the authoritative v149 release and confirmed by the public data plane is:
+
+```json
+{
+  "hostname": "platform-canary.apps.mustaflow.com",
+  "projectId": 51,
+  "role": "production",
+  "activeSlot": "blue",
+  "manifestRevision": "prod-e7e60acd1aab9f576472f7d28ffc058f186117c80ec77ab5",
+  "servicePort": 8080,
+  "sandboxIdentity": "nrf-ab8e18ef4ebebedd-p51-production-blue"
+}
+```
+
+There is no `format`, `updatedAt`, or native last-modified field in the persisted DO route value;
+the last authoritative route-write time available is v149's `activatedAt` above. Cloudflare Data
+Studio again rejected direct `_cf_KV` value access with `SQLITE_AUTH`. This absence is reported as
+an observability limitation, not filled with a guessed timestamp.
+
+### Public truth and runtime timeline
+
+Read-only probes to both `/` and `/healthz` returned HTTP 503 with typed code
+`published_runtime_recovering` and message `Published application is restarting`. The route is not
+serving green/v158. The recovery target is the stored blue identity: after the probes, Cloudflare's
+container census changed from Wall #9's blue `Stopped` / green `Running` to blue `Running` / green
+`Running`, with preview also running (`3/5`). The probes are reads at the product surface but, by
+the repaired liveness design, idempotently nudge recovery.
+
+Blue's stop predates this Wall #9 publish attempt. Wall #8 captured four historical `VMStopped`
+events on blue beginning `2026-08-16T03:18:29Z`, caused by observation reopening the Sandbox with
+`keepAlive:false`. The Wall #9 activation-failure cleanup addresses only the green target and its
+rollback; it contains no operation that stops the previous blue runtime. The later public read
+successfully restarted that same blue identity. Therefore the stopped row seen after Wall #9 was
+the historical liveness defect's state, not a mutation performed by the failed green activation.
+
+The green candidate is adoptable, not authoritative. It is the deterministic v158 target identity,
+is currently running, and v158's approved sealed release remains unchanged; the route and ledger
+still own blue. A retry with a semantics-revisioned activation idempotency identity can safely
+re-run ensure/promote/start idempotently and activate this exact green candidate. If activation
+fails, the already-shipped candidate reconciliation path must prove it non-authoritative before
+deletion.
+
+### Incidental findings
+
+1. **Completed idempotency terminals have no execution-semantics revision.** A deterministic
+   product fix can remain unreachable forever for an unchanged logical request because the old
+   terminal is correctly replayed. Wall #10 addresses this for route activation with an explicit
+   named semantics revision; it does not weaken general replay guarantees.
+2. **The route value has no last-modified evidence.** The raw DO value is an unversioned
+   `RouteRecord`, and the signed control surface exposes mutation but no metadata-only read.
+   Direct dashboard storage reads are prohibited. Reported; no new public diagnostic surface is
+   opened in this slice.
+3. **Read-only public probes are operational nudges.** A published request can schedule durable
+   runtime recovery, so forensic probes must record their causal position in the runtime timeline.
