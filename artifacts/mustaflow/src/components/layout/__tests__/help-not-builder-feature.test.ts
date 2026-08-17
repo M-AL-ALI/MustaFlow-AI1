@@ -12,7 +12,8 @@ const collapse = (s: string) => s.replace(/\s+/g, " ");
  *
  * Two contracts, guarded with static source assertions (the repo convention for
  * heavily-dependent layout/route wiring):
- *   1. The Builder slide-out nav does not link to support tickets.
+ *   1. The Builder slide-out nav does not expose the private support-ticket
+ *      index. Its Help & Support entry opens the neutral /help surface instead.
  *   2. Help/support routes render the neutral HelpLayout, never AppLayout (which
  *      mounts the Builder SlideOutNav for signed-in users).
  */
