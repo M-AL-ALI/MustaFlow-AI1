@@ -3,8 +3,13 @@ import {
   deriveRuntimeIdentity,
   signStagingHostOverride,
 } from "@workspace/tenant-runtime-contracts";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handlePublishedDataPlaneRequest } from "../src/published-data-plane";
+import {
+  forwardPublishedRuntimeRequestInSandbox,
+  type RuntimeHealthProbeInput,
+  type RuntimeHealthProbeResult,
+} from "../src/runtime-backend";
 import { handleWorkerRequest } from "../src/worker";
 import type { StoredRuntime } from "../src/model";
 import {
@@ -24,6 +29,20 @@ class MockPublishedSandbox {
   readonly wsRequests: Request[] = [];
   responseFactory: (request: Request) => Response | Promise<Response> = (request) =>
     Response.json({ method: request.method, url: request.url });
+  availability: RuntimeHealthProbeResult = {
+    ready: true,
+    stage: "health",
+    cause: "ready",
+    status: 200,
+  };
+
+  async fetch(request: Request): Promise<Response> {
+    return forwardPublishedRuntimeRequestInSandbox(this, request);
+  }
+
+  async probeRuntimeHealth(_input: RuntimeHealthProbeInput): Promise<RuntimeHealthProbeResult> {
+    return this.availability;
+  }
 
   async containerFetch(request: Request, port: number): Promise<Response> {
     expect(port).toBe(8080);
@@ -438,6 +457,171 @@ describe("anonymous published application data plane", () => {
     });
   });
 
+  it("serves both captured wall-17 requests through the in-context forwarding boundary", async () => {
+    const availability = vi.fn(async () => ({
+      ready: true as const,
+      stage: "health" as const,
+      cause: "ready" as const,
+      status: 200,
+    }));
+    sandbox.responseFactory = (request) =>
+      new Response(request.url.endsWith("/healthz") ? "healthy" : "real page", {
+        status: 200,
+        headers: { "x-nabuflow-internal-forward-failure": "must-not-escape" },
+      });
+
+    const captures = [
+      {
+        path: "/",
+        requestId: "7db94653-907b-4625-bfa7-4b921c3ec446",
+        expected: "real page",
+      },
+      {
+        path: "/healthz",
+        requestId: "ea59ce09-d0f5-4073-92f8-0b50faadf4b3",
+        expected: "healthy",
+      },
+    ] as const;
+
+    for (const capture of captures) {
+      const response = await handlePublishedDataPlaneRequest(
+        new Request(`${ORIGIN}${capture.path}`),
+        env,
+        {
+          coordinator,
+          sandbox,
+          runtimeAvailability: availability,
+          requestId: capture.requestId,
+          nowMs: TEST_NOW_MS,
+        },
+      );
+      expect(response.status).toBe(200);
+      await expect(response.text()).resolves.toBe(capture.expected);
+      expect(response.headers.has("x-nabuflow-internal-forward-failure")).toBe(false);
+    }
+
+    expect(availability).toHaveBeenCalledTimes(2);
+    expect(sandbox.httpRequests.map((request) => request.url)).toEqual([
+      "https://tenant.published.invalid/",
+      "https://tenant.published.invalid/healthz",
+    ]);
+  });
+
+  it("rejects a preview primary identity before the production route judge or forwarding path", async () => {
+    const previewIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 84,
+      role: "preview",
+      slot: "primary",
+    });
+    const previewRouteCoordinator = new Proxy(coordinator, {
+      get(target, property, receiver) {
+        if (property === "getRoute") {
+          return async () => ({
+            hostname: PUBLISHED_HOST,
+            projectId: 84,
+            role: "preview",
+            activeSlot: "primary",
+            manifestRevision: "published-manifest-1",
+            servicePort: 8080,
+            sandboxIdentity: previewIdentity,
+          });
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const availability = vi.fn();
+
+    const response = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+      coordinator: previewRouteCoordinator,
+      sandbox,
+      runtimeAvailability: availability,
+      requestId: "wall17-preview-primary-route",
+      nowMs: TEST_NOW_MS,
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "published_runtime_unavailable",
+      evidence: { stage: "route", cause: "identity_mismatch" },
+    });
+    expect(availability).not.toHaveBeenCalled();
+    expect(sandbox.httpRequests).toHaveLength(0);
+  });
+
+  it("reports a sanitized transport terminal without mislabeling a healthy runtime", async () => {
+    sandbox.responseFactory = () => {
+      throw new TypeError("raw private transport detail");
+    };
+    const requestId = "7db94653-907b-4625-bfa7-4b921c3ec446";
+    const response = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+      coordinator,
+      sandbox,
+      runtimeAvailability: async () => ({
+        ready: true,
+        stage: "health",
+        cause: "ready",
+        status: 200,
+      }),
+      requestId,
+      nowMs: TEST_NOW_MS,
+    });
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      code: "published_upstream_transport_unavailable",
+      retryable: true,
+      requestId,
+      evidence: {
+        stage: "request",
+        cause: "transport",
+        status: null,
+        errorClass: "TypeError",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("raw private transport detail");
+    const stored = await coordinator.getRuntime(identity);
+    expect(stored?.logs.at(-1)?.message).toBe(
+      `Published availability failed (requestId=${requestId}, stage=request, cause=transport, class=TypeError).`,
+    );
+    expect(stored?.logs.at(-1)?.message).not.toContain("raw private transport detail");
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(0);
+  });
+
+  it("classifies an invalid forwarding budget before dispatch without a retry storm", async () => {
+    const availability = vi.fn(async () => ({
+      ready: true as const,
+      stage: "health" as const,
+      cause: "ready" as const,
+      status: 200,
+    }));
+    const response = await handlePublishedDataPlaneRequest(new Request(`${ORIGIN}/`), env, {
+      coordinator,
+      sandbox,
+      runtimeAvailability: availability,
+      upstreamHeaderTimeoutMs: 0,
+      requestId: "wall17-pre-dispatch-budget",
+      nowMs: TEST_NOW_MS,
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "published_upstream_pre_dispatch_failed",
+      retryable: false,
+      evidence: {
+        stage: "request",
+        cause: "pre_dispatch",
+        status: null,
+        errorClass: "TypeError",
+      },
+    });
+    expect(availability).toHaveBeenCalledTimes(1);
+    expect(sandbox.httpRequests).toHaveLength(0);
+    expect(coordinator.runtimeLifecycleJobs.size).toBe(0);
+  });
+
   it("coalesces durable recovery instead of forwarding to a missing tenant process", async () => {
     const queue = env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -505,9 +689,6 @@ describe("anonymous published application data plane", () => {
   });
 
   it("recovers an adopted runtime whose process is running but health port is unavailable", async () => {
-    sandbox.responseFactory = () => {
-      throw new TypeError("private transport detail must not be persisted");
-    };
     const response = await handlePublishedDataPlaneRequest(
       new Request(`${ORIGIN}/adopted-green`),
       env,
@@ -533,8 +714,9 @@ describe("anonymous published application data plane", () => {
     const stored = await coordinator.getRuntime(identity);
     expect(stored?.logs.map((entry) => entry.message)).toEqual(
       expect.arrayContaining([
-        "Published availability failed (stage=request, cause=transport, class=TypeError).",
-        "Published availability failed (stage=health, cause=health_transport).",
+        expect.stringMatching(
+          /^Published availability failed \(requestId=[0-9a-f-]+, stage=health, cause=health_transport\)\.$/,
+        ),
       ]),
     );
     expect(stored?.logs.map((entry) => entry.message).join("\n")).not.toContain(

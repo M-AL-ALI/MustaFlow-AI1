@@ -1,0 +1,103 @@
+{
+  "format": "nabuflow.wall-17-front-door-phase1-evidence/v1",
+  "capturedAtLabUtc": "2026-08-17T20:52:20Z",
+  "baseline": {
+    "requiredMain": "ad8f3d02e5c8fdce67f065215eeea1e9be0cd22e",
+    "sourceCheckout": "C:/Users/mus_1/Documents/Mustaflow AI/.work-runtime-parity-f182f4f5-20260817",
+    "sourceCheckoutClean": true,
+    "productionFrozen": true
+  },
+  "verdict": {
+    "classification": "same_disease_second_call_site",
+    "routeSlot": "green",
+    "staleAvailabilitySnapshot": false,
+    "slotMisTarget": false,
+    "mechanism": "The public data plane created an abort-bearing Request in the outer Worker and called sandbox.containerFetch across Workers RPC. The v4 in-context judge then found green ready/health/200, so the old serving boundary emitted published_runtime_unavailable.",
+    "exactTransportErrorClass": null,
+    "exactTransportErrorClassReason": "The shipped generic log was not correlated to the public request ID; TypeError is consistent with prior captures but was not asserted as observed."
+  },
+  "routeRecordContract": {
+    "fields": [
+      "hostname",
+      "projectId",
+      "role",
+      "activeSlot",
+      "manifestRevision",
+      "servicePort",
+      "sandboxIdentity"
+    ],
+    "availabilitySnapshot": false,
+    "lastModifiedField": false,
+    "lastAuthoritativeMutation": "2026-08-16T17:54:51-08:00",
+    "mutationOwner": "successful v158 production publication"
+  },
+  "target": {
+    "hostname": "platform-canary.apps.mustaflow.com",
+    "projectId": 51,
+    "publishedVersion": 158,
+    "slot": "green",
+    "identity": "nrf-ab8e18ef4ebebedd-p51-production-green",
+    "servicePort": 8080,
+    "manifestRevision": "prod-a8940c976f1cf943d03c5bccd52e3bdb5b1ea51b8d56e228",
+    "storedStatus": "running",
+    "storedProcessIdentity": "present",
+    "capability": "bound"
+  },
+  "v4Availability": {
+    "observedAt": "2026-08-17T17:22:20.735Z",
+    "stage": "health",
+    "cause": "ready",
+    "status": 200,
+    "providerProcess": "running",
+    "decision": "ready",
+    "repairAction": "none"
+  },
+  "captured503s": [
+    {
+      "path": "/",
+      "requestId": "7db94653-907b-4625-bfa7-4b921c3ec446",
+      "httpDate": "2026-08-17T17:23:11Z",
+      "wallSeconds": 1.5798454,
+      "status": 503,
+      "code": "published_runtime_unavailable",
+      "retryable": true,
+      "responseBytes": 180,
+      "requestHeaderTimeoutMs": 10000,
+      "judgmentStage": "request",
+      "judgmentCause": "transport"
+    },
+    {
+      "path": "/healthz",
+      "requestId": "ea59ce09-d0f5-4073-92f8-0b50faadf4b3",
+      "httpDate": "2026-08-17T17:23:11Z",
+      "wallSeconds": 1.9245001,
+      "status": 503,
+      "code": "published_runtime_unavailable",
+      "retryable": true,
+      "responseBytes": 180,
+      "requestHeaderTimeoutMs": 10000,
+      "judgmentStage": "request",
+      "judgmentCause": "transport"
+    }
+  ],
+  "readOnlyRouteInspection": {
+    "signedMetadataReadSurfaceExists": false,
+    "cloudflareDataStudio": [
+      { "operation": "PRAGMA table_info('_cf_KV')", "result": "SQLITE_AUTH" },
+      { "operation": "SELECT key, hex(value) FROM _cf_KV", "result": "SQLITE_AUTH" }
+    ],
+    "mutationAttempted": false
+  },
+  "safety": {
+    "reconciliationRun": false,
+    "publishRun": false,
+    "rollback": false,
+    "runtimeRestart": false,
+    "routeMutation": false,
+    "deployment": false,
+    "newPublicSurface": false,
+    "newSpend": false,
+    "flyAction": false,
+    "secretValueRead": false
+  }
+}
