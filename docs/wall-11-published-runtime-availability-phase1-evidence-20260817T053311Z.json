@@ -1,0 +1,113 @@
+{
+  "format": "nabuflow.wall-11-published-runtime-availability-phase1-evidence/v1",
+  "capturedAtLabUtc": "2026-08-17T05:33:11Z",
+  "frozenState": {
+    "repositoryMain": "0223d0f5b2067bc7a08476b5d7d7336427c0deff",
+    "sourceCheckout": "0223d0f5b2067bc7a08476b5d7d7336427c0deff",
+    "sourceCheckoutClean": true,
+    "rollback": false,
+    "secondPublish": false,
+    "runtimeRestart": false,
+    "routeMutation": false,
+    "flyAction": false
+  },
+  "publishedRoute": {
+    "hostname": "platform-canary.apps.mustaflow.com",
+    "projectId": 51,
+    "publishedVersion": 158,
+    "targetSlot": "green",
+    "targetIdentity": "nrf-ab8e18ef4ebebedd-p51-production-green",
+    "targetInstance": "13b17870f2689a1764da0742b5da883e8dba084fec666fa53c21408768dda286",
+    "servicePort": 8080,
+    "transportAddress": "deterministic Sandbox Durable Object identity; no IP address is assigned or persisted",
+    "routeResult": {
+      "status": 503,
+      "code": "published_runtime_unavailable",
+      "attemptsFromPriorFrozenCapture": 8
+    }
+  },
+  "routeAssessment": {
+    "metadataGates": [
+      "runtime identity namespace/project/production/slot matches route",
+      "route role is production and activeSlot matches identity slot",
+      "durable runtime exists and descriptor status is running",
+      "descriptor and manifest revisions match the route",
+      "descriptor and manifest service ports match route servicePort"
+    ],
+    "processCriterion": "saved process id resolves and Sandbox process status is running or starting",
+    "freshStartCriterion": "kill prior processes, start sealed app with HOST=0.0.0.0 and PORT=8080, then waitForPort on manifest healthPath for HTTP 200-399 for at most 30000ms at 250ms intervals",
+    "requestHeaderTimeoutMs": 10000,
+    "failureBoundary": "after durable metadata checks, in process/port availability assessment",
+    "classificationGap": "non-timeout containerFetch exceptions are caught without inspecting or recording the exception and returned as published_runtime_unavailable; process-not-running with an unavailable recovery claim returns the same code",
+    "exactExceptionClassRecoverableFromCurrentEvidence": false
+  },
+  "adoptionVersusFreshStart": {
+    "adopted": "the deterministic production-publish start idempotency operation replayed its prior terminal; no materialize/start/waitForPort side effect ran during this publish",
+    "fresh": "a new start execution persists starting, materializes the exact sealed artifact, starts the fixed tenant process, waits for healthPath on port 8080, then persists processId, status running, and a new readyAt",
+    "registrationDifference": "adoption retained the prior durable processId/readyAt/running descriptor; fresh start would replace processId/readyAt only after a successful live port check",
+    "routeVisibility": "the route sees identity, slot, manifest revision, service port, and durable descriptor state; it does not see a separately persisted port-readiness fact"
+  },
+  "cloudflare": {
+    "containerApplicationId": "a03f9741-75eb-45fe-8660-5434486cf166",
+    "application": {
+      "activeInstances": 3,
+      "healthyInstances": 2,
+      "maxInstances": 5,
+      "privateNetwork": true,
+      "assignedIpv4": false,
+      "assignedIpv6": false
+    },
+    "green": {
+      "state": "running",
+      "location": "iad22",
+      "memoryMiB": 340.52,
+      "cpuPercent1m": 1.41,
+      "cpuPercent5m": 1.3,
+      "cpuPercent15m": 1.2,
+      "rxKbps": 531.1,
+      "txKbps": 8.6,
+      "diskMb": 678.53,
+      "recentError": {
+        "class": "VMStopped",
+        "count": 3,
+        "providerTimestamp": "2026-08-16T04:09:42"
+      }
+    },
+    "blue": {
+      "identity": "nrf-ab8e18ef4ebebedd-p51-production-blue",
+      "instance": "0cbfccea4e8d5306b17c23610a6ab25297dcb5dfd0b133ba54dcece22827a05f",
+      "state": "running",
+      "location": "iad10",
+      "memoryMiB": 244.84,
+      "cpuPercent1m": 0.24,
+      "rxKbps": 33.06,
+      "txKbps": 0.82,
+      "diskMb": 625.27,
+      "recentError": {
+        "class": "VMStopped",
+        "count": 6,
+        "providerTimestamp": "2026-08-17T00:16:05"
+      },
+      "disposition": "intentionally retained warm rollback release"
+    }
+  },
+  "clockAudit": {
+    "availabilityUsesWallClockDelta": false,
+    "readyAtUse": "opaque recovery-identity input only",
+    "headerBound": "AbortSignal timeout duration, not wall time",
+    "providerFollowerBounds": "monotonic clock",
+    "labProviderClockDriftCanCauseThisFailure": false
+  },
+  "observabilityLimits": {
+    "containerLogs": "Cloudflare Container Observability disabled; no application log trail",
+    "ssh": "disabled; enabling requires config and Worker redeploy and was not attempted",
+    "rawDurableObjectKv": "Cloudflare Data Studio rejected _cf_KV.key reads with SQLITE_AUTH",
+    "directListenerInspection": "not available without changing the frozen system",
+    "wranglerInstanceRead": "application-level inventory only; per-instance id passed to containers info returned not found and Wrangler then emitted a Windows libuv assertion"
+  },
+  "incidentalFindings": [
+    "Cloudflare CLI reports three active container instances but only two healthy, while the instance table labels all three Running",
+    "wrangler containers info on an instance id returns application-not-found and then triggers a Windows libuv assertion",
+    "the project browser stream logged a later revision 163 receipt while the visible approved/published release remains v158; reported only"
+  ]
+}

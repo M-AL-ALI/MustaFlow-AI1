@@ -45,6 +45,7 @@ import type {
   RemovedRuntimeLayeredArtifact,
 } from "../src/model";
 import type {
+  BackendAvailabilityResult,
   BackendExecResult,
   BackendStartResult,
   BackendStatusResult,
@@ -1090,6 +1091,13 @@ export class MockBackend implements RuntimeBackend {
   execs = 0;
   materializations = 0;
   processLogs = { stdout: "server ready\n", stderr: "" };
+  availabilityResult: BackendAvailabilityResult = {
+    ready: true,
+    stage: "health",
+    cause: "ready",
+    status: 200,
+  };
+  readonly availabilityChecks: string[] = [];
 
   async start(_runtime: StoredRuntime): Promise<BackendStartResult> {
     this.starts += 1;
@@ -1105,7 +1113,12 @@ export class MockBackend implements RuntimeBackend {
   }
 
   async status(_runtime: StoredRuntime): Promise<BackendStatusResult> {
-    return { running: true, lastError: null };
+    return { running: true, lastError: null, cause: "running" };
+  }
+
+  async availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult> {
+    this.availabilityChecks.push(runtime.descriptor.identity);
+    return { ...this.availabilityResult };
   }
 
   async exec(_runtime: StoredRuntime, _request: ExecRuntimeRequest): Promise<BackendExecResult> {

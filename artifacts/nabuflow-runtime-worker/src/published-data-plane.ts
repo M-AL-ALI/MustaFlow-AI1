@@ -9,7 +9,11 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { ControlCoordinator, DurableOperationQueueMessage, StoredRuntime } from "./model";
-import { CloudflareSandboxBackend, NabuflowSandbox } from "./runtime-backend";
+import {
+  CloudflareSandboxBackend,
+  NabuflowSandbox,
+  type BackendAvailabilityResult,
+} from "./runtime-backend";
 
 export const PUBLISHED_UPSTREAM_HEADER_TIMEOUT_MS = 10_000;
 
@@ -49,6 +53,7 @@ export interface PublishedDataPlaneDependencies {
   runtimeStatus?: (
     runtime: StoredRuntime,
   ) => Promise<{ running: boolean; lastError: string | null }>;
+  runtimeAvailability?: (runtime: StoredRuntime) => Promise<BackendAvailabilityResult>;
   recoverRuntime?: (runtime: StoredRuntime) => Promise<"scheduled" | "unavailable">;
   upstreamHeaderTimeoutMs?: number;
   nowMs?: number;
@@ -169,9 +174,16 @@ export async function handlePublishedDataPlaneRequest(
       return sanitizeUpstreamResponse(
         await sandbox.containerFetch(upstreamRequest, route.servicePort),
       );
-    } catch {
+    } catch (error) {
       if (upstreamTimeoutSignal.aborted) {
-        const recovery = await recoverIfRuntimeStopped(runtime, env, dependencies);
+        await recordPublishedAvailabilityFailure(
+          dependencies.coordinator,
+          runtime.descriptor.identity,
+          "request",
+          "timeout",
+          safePublishedErrorClass(error),
+        );
+        const recovery = await recoverIfRuntimeUnavailable(runtime, env, dependencies);
         throw new PublishedHttpError(
           503,
           recovery === "scheduled" ? "published_runtime_recovering" : "published_upstream_timeout",
@@ -181,10 +193,20 @@ export async function handlePublishedDataPlaneRequest(
           true,
         );
       }
+      await recordPublishedAvailabilityFailure(
+        dependencies.coordinator,
+        runtime.descriptor.identity,
+        "request",
+        "transport",
+        safePublishedErrorClass(error),
+      );
+      const recovery = await recoverIfRuntimeUnavailable(runtime, env, dependencies);
       throw new PublishedHttpError(
         503,
-        "published_runtime_unavailable",
-        "Published application is temporarily unavailable",
+        recovery === "scheduled" ? "published_runtime_recovering" : "published_runtime_unavailable",
+        recovery === "scheduled"
+          ? "Published application is restarting"
+          : "Published application is temporarily unavailable",
         true,
       );
     }
@@ -207,7 +229,7 @@ async function requireRuntimeProcess(
   if (runtimeStatus === null) return;
   const status = await runtimeStatus(runtime);
   if (status.running) return;
-  const recovery = await recoverPublishedRuntime(runtime, env, dependencies);
+  const recovery = await schedulePublishedRuntimeRecovery(runtime, env, dependencies);
   throw new PublishedHttpError(
     503,
     recovery === "scheduled" ? "published_runtime_recovering" : "published_runtime_unavailable",
@@ -218,22 +240,68 @@ async function requireRuntimeProcess(
   );
 }
 
-async function recoverIfRuntimeStopped(
+async function recoverIfRuntimeUnavailable(
   runtime: StoredRuntime,
   env: WorkerBindings,
   dependencies: PublishedDataPlaneDependencies,
 ): Promise<"scheduled" | "unavailable"> {
-  const runtimeStatus =
-    dependencies.runtimeStatus ??
-    (dependencies.sandbox === undefined
-      ? (candidate: StoredRuntime) => new CloudflareSandboxBackend(env).status(candidate)
-      : null);
-  if (runtimeStatus === null) return "unavailable";
-  const status = await runtimeStatus(runtime);
-  return status.running ? "unavailable" : recoverPublishedRuntime(runtime, env, dependencies);
+  const runtimeAvailability =
+    dependencies.runtimeAvailability ??
+    (dependencies.runtimeStatus === undefined
+      ? dependencies.sandbox === undefined
+        ? (candidate: StoredRuntime) => new CloudflareSandboxBackend(env).availability(candidate)
+        : null
+      : async (candidate: StoredRuntime): Promise<BackendAvailabilityResult> => {
+          const status = await dependencies.runtimeStatus!(candidate);
+          return {
+            ready: status.running,
+            stage: "process",
+            cause: status.running
+              ? "ready"
+              : status.lastError === null
+                ? "process_not_running"
+                : "process_check_failed",
+            status: null,
+          };
+        });
+  if (runtimeAvailability === null) return "unavailable";
+  const availability = await runtimeAvailability(runtime);
+  if (availability.ready) return "unavailable";
+  await recordPublishedAvailabilityFailure(
+    dependencies.coordinator,
+    runtime.descriptor.identity,
+    availability.stage,
+    availability.cause,
+    null,
+  );
+  return schedulePublishedRuntimeRecovery(runtime, env, dependencies);
 }
 
-async function recoverPublishedRuntime(
+async function recordPublishedAvailabilityFailure(
+  coordinator: ControlCoordinator,
+  runtimeIdentity: string,
+  stage: string,
+  cause: string,
+  errorClass: string | null,
+): Promise<void> {
+  try {
+    await coordinator.appendSystemLog(
+      runtimeIdentity,
+      `Published availability failed (stage=${stage}, cause=${cause}${errorClass === null ? "" : `, class=${errorClass}`}).`,
+    );
+  } catch {
+    // Availability evidence must never mask the typed public terminal or recovery nudge.
+  }
+}
+
+function safePublishedErrorClass(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  return ["AbortError", "Error", "NetworkError", "TimeoutError", "TypeError"].includes(error.name)
+    ? error.name
+    : "Error";
+}
+
+export async function schedulePublishedRuntimeRecovery(
   runtime: StoredRuntime,
   env: WorkerBindings,
   dependencies: PublishedDataPlaneDependencies,

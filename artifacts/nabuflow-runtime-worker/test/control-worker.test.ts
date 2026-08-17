@@ -437,9 +437,10 @@ describe("authenticated staging control plane", () => {
       },
       expectedPreviousManifestRevision: null,
     };
+    const backend = new MockBackend();
     const dependencies = {
       coordinator,
-      backend: new MockBackend(),
+      backend,
       nowMs: TEST_NOW_MS,
     };
 
@@ -537,6 +538,63 @@ describe("authenticated staging control plane", () => {
       },
       expectedPreviousManifestRevision: blueManifestRevision,
     };
+    backend.availabilityResult = {
+      ready: false,
+      stage: "health",
+      cause: "health_transport",
+      status: null,
+    };
+    const staleGreen = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-green-stale-01",
+        idempotencyKey: "route-activate-green-stale",
+        body: greenBody,
+      }),
+      env,
+      dependencies,
+    );
+    expect(staleGreen.status).toBe(409);
+    await expect(staleGreen.json()).resolves.toMatchObject({
+      code: "published_runtime_not_ready",
+    });
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "blue",
+      sandboxIdentity: identity,
+    });
+    await expect(coordinator.getRuntime(greenIdentity)).resolves.toMatchObject({
+      logs: expect.arrayContaining([
+        expect.objectContaining({
+          message:
+            "Published route activation rejected runtime availability (stage=health, cause=health_transport).",
+        }),
+      ]),
+    });
+    const greenRecovery = await coordinator.getLatestDurableOperation(
+      "runtime-start",
+      greenIdentity,
+      "start",
+    );
+    expect(greenRecovery).toMatchObject({
+      kind: "runtime-start",
+      runtimeIdentity: greenIdentity,
+      state: "active",
+      request: {
+        artifactRevision: "published-artifact-green-2",
+        artifactSha256: "b".repeat(64),
+      },
+    });
+    expect(
+      (env.DURABLE_OPERATION_QUEUE as unknown as { messages: unknown[] }).messages,
+    ).toHaveLength(1);
+
+    backend.availabilityResult = {
+      ready: true,
+      stage: "health",
+      cause: "ready",
+      status: 200,
+    };
     const greenActivated = await handleControlRequest(
       await signedRequest({
         path,
@@ -556,6 +614,58 @@ describe("authenticated staging control plane", () => {
       activeSlot: "green",
       sandboxIdentity: greenIdentity,
     });
+    backend.availabilityResult = {
+      ready: false,
+      stage: "process",
+      cause: "process_not_running",
+      status: null,
+    };
+    const staleBlue = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-blue-stale-001",
+        idempotencyKey: "route-reactivate-blue-stale",
+        body: {
+          ...body,
+          expectedPreviousManifestRevision: greenManifestRevision,
+        },
+      }),
+      env,
+      dependencies,
+    );
+    expect(staleBlue.status).toBe(409);
+    await expect(staleBlue.json()).resolves.toMatchObject({
+      code: "published_runtime_not_ready",
+    });
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "green",
+      sandboxIdentity: greenIdentity,
+    });
+    const blueRecovery = await coordinator.getLatestDurableOperation(
+      "runtime-start",
+      identity,
+      "start",
+    );
+    expect(blueRecovery).toMatchObject({
+      kind: "runtime-start",
+      runtimeIdentity: identity,
+      state: "active",
+      request: {
+        artifactRevision: "published-artifact-1",
+        artifactSha256: "a".repeat(64),
+      },
+    });
+    expect(
+      (env.DURABLE_OPERATION_QUEUE as unknown as { messages: unknown[] }).messages,
+    ).toHaveLength(2);
+
+    backend.availabilityResult = {
+      ready: true,
+      stage: "health",
+      cause: "ready",
+      status: 200,
+    };
 
     const blueReactivated = await handleControlRequest(
       await signedRequest({
@@ -579,6 +689,13 @@ describe("authenticated staging control plane", () => {
       activeSlot: "blue",
       sandboxIdentity: identity,
     });
+    expect(backend.availabilityChecks).toEqual([
+      identity,
+      greenIdentity,
+      greenIdentity,
+      identity,
+      identity,
+    ]);
 
     const deletePath = `/_nabuflow/control/v1/routes/${hostname}`;
     const deleted = await handleControlRequest(
@@ -599,6 +716,40 @@ describe("authenticated staging control plane", () => {
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toEqual({ ok: true, hostname });
     expect(await coordinator.getRoute(hostname)).toBeNull();
+
+    backend.availabilityResult = {
+      ready: false,
+      stage: "health",
+      cause: "health_status",
+      status: 503,
+    };
+    const reconciledStatus = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/51/production/green",
+        method: "GET",
+        nonce: "nonce-runtime-health-status-1",
+      }),
+      env,
+      dependencies,
+    );
+    expect(reconciledStatus.status).toBe(200);
+    await expect(reconciledStatus.json()).resolves.toMatchObject({
+      runtime: {
+        identity: greenIdentity,
+        status: "error",
+        readyAt: null,
+        lastError: "Runtime availability failed (health:health_status)",
+      },
+    });
+    await expect(coordinator.getRuntime(greenIdentity)).resolves.toMatchObject({
+      processId: null,
+      descriptor: { status: "error", readyAt: null },
+      logs: expect.arrayContaining([
+        expect.objectContaining({
+          message: "Runtime availability failed (stage=health, cause=health_status).",
+        }),
+      ]),
+    });
   });
 
   it("runs the complete control lifecycle through the shared schemas", async () => {

@@ -1,0 +1,67 @@
+{
+  "capturedAtLabUtc": "2026-08-17T07:24:59Z",
+  "productionFrozen": true,
+  "branch": "codex/published-runtime-availability",
+  "base": "0223d0f5b2067bc7a08476b5d7d7336427c0deff",
+  "implementationCommit": "baca4751e6c804ddb77a8ec01d849d4edfdc8c3a",
+  "cleanup": {
+    "totalBytesFreed": 104035803136,
+    "freeBytesAfterSweep": 104018276352,
+    "pid19760PresentAtTerminationCheck": false,
+    "protectedTargetsPresent": true,
+    "approvedTargetsAbsent": true,
+    "targets": [
+      { "name": ".work-cloudflare-production-cutover-recon-base", "bytes": 1636052992 },
+      { "name": ".work-production-database-capability-base", "bytes": 1649274880 },
+      { "name": ".work-project-workspace-chunk-recovery", "bytes": 1865588736 },
+      { "name": ".work-sealed-release-staging-handoff", "bytes": 94228500480 },
+      { "name": ".work-sealed-test-runtime-rehydration", "bytes": 213561344 },
+      { "name": ".work-workspace-recovery-diagnostics", "bytes": 205971456 },
+      { "name": ".work-publish-idempotency-retry-safety", "bytes": 1843871744 },
+      { "name": ".work-runtime-production-deploy-20260817T032911Z", "bytes": 555212800 },
+      { "name": ".work-wall10-published-route-state", "bytes": 1833562112 },
+      {
+        "name": "nabuflow-runtime-production-7d9a3a03-dry-run-20260817T033300Z",
+        "bytes": 4206592
+      }
+    ]
+  },
+  "offlineInstall": {
+    "command": "pnpm install --frozen-lockfile --offline",
+    "durationSeconds": 476.7,
+    "packages": 1899,
+    "reused": 1870,
+    "downloaded": 0,
+    "result": "pass"
+  },
+  "verification": {
+    "runtimeWorker": { "files": 35, "passed": 257, "failed": 0 },
+    "tenantRuntimeContracts": { "files": 20, "passed": 187, "failed": 0 },
+    "repositoryTypecheck": "pass",
+    "repositoryLint": "pass",
+    "changedFilePrettier": "pass",
+    "gitDiffCheck": "pass",
+    "manifestDiff": "empty"
+  },
+  "revision163": {
+    "projectVersionIdKind": "database-wide PostgreSQL serial",
+    "v159GuardedDeletion": "previously proven",
+    "failedPostV159PublishRetries": 2,
+    "failedSnapshotCleanup": "Ship 7 finally boundary removes uncommitted unreferenced rows",
+    "latestAuthenticatedPreviewStateReceipt": 163,
+    "classification": "committed snapshot from successful publish; not orphan evidence",
+    "ids160Through162": "not independently assignable from surviving rows; global sequence gaps",
+    "authenticatedVersionListRead": "two bounded browser-control attachment timeouts",
+    "unauthenticatedDirectRead": "HTTP 401 with Unauthenticated body",
+    "liveCleanupPerformed": false
+  },
+  "liveMutations": {
+    "deployment": false,
+    "publish": false,
+    "runtimeRestart": false,
+    "route": false,
+    "publicSurface": false,
+    "fly": false,
+    "spend": false
+  }
+}

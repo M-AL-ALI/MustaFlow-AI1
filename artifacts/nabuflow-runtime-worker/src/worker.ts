@@ -158,7 +158,10 @@ import {
   dependencyLayerChunkKey,
   layeredArtifactAppChunkKey,
 } from "./artifact-layer-storage";
-import { handlePublishedDataPlaneRequest } from "./published-data-plane";
+import {
+  handlePublishedDataPlaneRequest,
+  schedulePublishedRuntimeRecovery,
+} from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
 import {
@@ -2483,7 +2486,7 @@ async function executeEndpoint(
     };
   }
   if (endpoint === "routeActivate") {
-    return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator);
+    return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator, backend, nowMs);
   }
   if (endpoint === "routeDeactivate") {
     return deactivatePublishedRoute(input as DeactivateRouteRequest, coordinator);
@@ -4037,14 +4040,24 @@ async function executeEndpoint(
   }
   if (endpoint === "status") {
     if (runtime.descriptor.status === "running" || runtime.descriptor.status === "starting") {
-      const status = await backend.status(runtime);
-      if (!status.running) {
+      const availability = await backend.availability(runtime);
+      if (!availability.ready) {
         await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
-        runtime.descriptor.status = status.lastError === null ? "stopped" : "error";
-        runtime.descriptor.lastError = status.lastError;
+        const cleanStop =
+          availability.stage === "process" &&
+          (availability.cause === "process_missing" ||
+            availability.cause === "process_not_running");
+        runtime.descriptor.status = cleanStop ? "stopped" : "error";
+        runtime.descriptor.lastError = cleanStop
+          ? null
+          : `Runtime availability failed (${availability.stage}:${availability.cause})`;
         runtime.descriptor.readyAt = null;
         runtime.processId = null;
         await coordinator.putRuntime(identity, runtime);
+        await coordinator.appendSystemLog(
+          identity,
+          `Runtime availability failed (stage=${availability.stage}, cause=${availability.cause}).`,
+        );
       }
     }
     return {
@@ -4390,6 +4403,8 @@ async function activatePublishedRoute(
   request: ActivateRouteRequest,
   env: WorkerBindings,
   coordinator: ControlCoordinator,
+  backend: RuntimeBackend,
+  nowMs: number,
 ): Promise<StoredHttpResponse> {
   const route = request.route;
   if (
@@ -4435,6 +4450,26 @@ async function activatePublishedRoute(
       409,
       "published_runtime_not_ready",
       "The selected production runtime is not ready for route activation",
+      true,
+    );
+  }
+
+  const availability = await backend.availability(runtime);
+  if (!availability.ready) {
+    await coordinator.appendSystemLog(
+      route.sandboxIdentity,
+      `Published route activation rejected runtime availability (stage=${availability.stage}, cause=${availability.cause}).`,
+    );
+    const recovery = await schedulePublishedRuntimeRecovery(runtime, env, {
+      coordinator,
+      nowMs,
+    });
+    throw new ControlHttpError(
+      409,
+      "published_runtime_not_ready",
+      recovery === "scheduled"
+        ? "The selected production runtime is recovering before route activation"
+        : "The selected production runtime is not ready for route activation",
       true,
     );
   }
