@@ -7,6 +7,7 @@ export const CONTROL_FEATURES = [
   "artifact-commit-diagnostics-v1",
   "durable-operation-discovery-v1",
   "runtime-lifecycle-jobs-v1",
+  "runtime-reconciliation-v1",
   "trusted-build-v1",
   "production-database-v1",
 ] as const;

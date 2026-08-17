@@ -22,6 +22,15 @@ export const RUNTIME_CONTROL_OPERATION_BOUND_MS = 5 * 60 * 1_000;
 export const RUNTIME_ARTIFACT_OPERATION_BOUND_MS = 5 * 60 * 1_000;
 export const ZERO_GENERATION_CONTROL_OPERATION_BOUND_MS = 5 * 60 * 1_000;
 export const RUNTIME_START_OPERATION_BOUND_MS = RUNTIME_CONTROL_OPERATION_BOUND_MS;
+/**
+ * A governed reconciliation may repeat only ambiguous provider observations.
+ * Three five-second observations leave a five-second evidence/finalization margin
+ * inside the twenty-second mutation bound.
+ */
+export const RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS = 3;
+export const RUNTIME_RECONCILIATION_OBSERVATION_TIMEOUT_MS = 5_000;
+export const RUNTIME_RECONCILIATION_OPERATION_BOUND_MS = 20_000;
+export const PUBLISHED_RUNTIME_RECOVERY_MAX_FAILED_TERMINALS = 3;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const revisionSchema = z.string().min(1).max(200);
@@ -201,6 +210,41 @@ export const destroyRuntimeResponseSchema = successSchema;
 export const statusRuntimeRequestSchema = z.object({ locator: runtimeLocatorSchema }).strict();
 export const statusRuntimeResponseSchema = runtimeResponseSchema;
 
+export const reconcileRuntimeRequestSchema = z
+  .object({
+    locator: runtimeLocatorSchema,
+    expectedStatus: z.enum(RUNTIME_STATUSES),
+    expectedManifestRevision: revisionSchema,
+    reconciliationId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+  })
+  .strict();
+export const reconcileRuntimeResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    reconciliationId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+    outcome: z.enum(["restored", "confirmed-stopped", "confirmed-error", "unchanged"]),
+    observation: z
+      .object({
+        attempts: z.number().int().min(1).max(RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS),
+        stage: z.enum(["process", "health"]),
+        cause: z.enum([
+          "ready",
+          "process_missing",
+          "process_not_running",
+          "process_check_failed",
+          "health_status",
+          "health_pre_dispatch",
+          "health_timeout",
+          "health_transport",
+        ]),
+        status: z.number().int().min(100).max(599).nullable(),
+      })
+      .strict(),
+    capability: z.enum(["bound", "unbound"]),
+    runtime: runtimeDescriptorSchema,
+  })
+  .strict();
+
 export const execRuntimeRequestSchema = z
   .object({
     locator: runtimeLocatorSchema,
@@ -334,6 +378,10 @@ export const controlEndpointSchemas = {
   stop: { request: stopRuntimeRequestSchema, response: stopRuntimeResponseSchema },
   destroy: { request: destroyRuntimeRequestSchema, response: destroyRuntimeResponseSchema },
   status: { request: statusRuntimeRequestSchema, response: statusRuntimeResponseSchema },
+  reconcile: {
+    request: reconcileRuntimeRequestSchema,
+    response: reconcileRuntimeResponseSchema,
+  },
   exec: { request: execRuntimeRequestSchema, response: execRuntimeResponseSchema },
   logs: { request: logsRuntimeRequestSchema, response: logsRuntimeResponseSchema },
   files: { request: filesRuntimeRequestSchema, response: filesRuntimeResponseSchema },
@@ -359,6 +407,10 @@ export const controlEndpointContracts = {
   stop: { method: "POST", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/stop` },
   destroy: { method: "DELETE", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot` },
   status: { method: "GET", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot` },
+  reconcile: {
+    method: "POST",
+    path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/reconcile`,
+  },
   exec: { method: "POST", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/exec` },
   logs: { method: "GET", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/logs` },
   files: { method: "PUT", path: `${CONTROL_API_PREFIX}/runtimes/:projectId/:role/:slot/files` },
@@ -379,6 +431,7 @@ export type StartRuntimeRequest = z.infer<typeof startRuntimeRequestSchema>;
 export type StopRuntimeRequest = z.infer<typeof stopRuntimeRequestSchema>;
 export type DestroyRuntimeRequest = z.infer<typeof destroyRuntimeRequestSchema>;
 export type StatusRuntimeRequest = z.infer<typeof statusRuntimeRequestSchema>;
+export type ReconcileRuntimeRequest = z.infer<typeof reconcileRuntimeRequestSchema>;
 export type ExecRuntimeRequest = z.infer<typeof execRuntimeRequestSchema>;
 export type LogsRuntimeRequest = z.infer<typeof logsRuntimeRequestSchema>;
 export type FilesRuntimeRequest = z.infer<typeof filesRuntimeRequestSchema>;
@@ -394,6 +447,7 @@ export type StartRuntimeResponse = z.infer<typeof startRuntimeResponseSchema>;
 export type StopRuntimeResponse = z.infer<typeof stopRuntimeResponseSchema>;
 export type DestroyRuntimeResponse = z.infer<typeof destroyRuntimeResponseSchema>;
 export type StatusRuntimeResponse = z.infer<typeof statusRuntimeResponseSchema>;
+export type ReconcileRuntimeResponse = z.infer<typeof reconcileRuntimeResponseSchema>;
 export type ExecRuntimeResponse = z.infer<typeof execRuntimeResponseSchema>;
 export type LogsRuntimeResponse = z.infer<typeof logsRuntimeResponseSchema>;
 export type FilesRuntimeResponse = z.infer<typeof filesRuntimeResponseSchema>;

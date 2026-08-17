@@ -142,6 +142,9 @@ export interface StoredRuntimeStartJob extends StoredDurableOperationJobBase {
   kind: "runtime-start";
   checkpoint: RuntimeStartCheckpoint;
   request: StartRuntimeRequest;
+  /** Present only for data-plane recovery jobs; ordinary signed starts remain unchanged. */
+  publishedRecoveryIdentity?: string;
+  publishedRecoveryGeneration?: number;
 }
 
 export interface StoredRuntimeManifestRestartJob extends StoredDurableOperationJobBase {
@@ -195,6 +198,8 @@ export type DurableOperationRegistration =
       runtimeIdentity: string;
       subjectKey: "start";
       request: StartRuntimeRequest;
+      publishedRecoveryIdentity?: string;
+      publishedRecoveryGeneration?: number;
       expectedDeploymentVersion: string;
       nowMs: number;
     }

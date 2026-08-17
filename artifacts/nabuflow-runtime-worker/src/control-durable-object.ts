@@ -277,7 +277,13 @@ function durableOperationSubjectMatches(
     (job.kind === "layered-artifact-promotion" && input.kind === "layered-artifact-promotion") ||
     (job.kind === "production-database" && input.kind === "production-database")
   ) {
-    return JSON.stringify(job.request) === JSON.stringify(input.request);
+    return (
+      JSON.stringify(job.request) === JSON.stringify(input.request) &&
+      (job.kind !== "runtime-start" ||
+        input.kind !== "runtime-start" ||
+        (job.publishedRecoveryIdentity === input.publishedRecoveryIdentity &&
+          job.publishedRecoveryGeneration === input.publishedRecoveryGeneration))
+    );
   }
   return (
     job.kind !== "runtime-start" &&
@@ -493,7 +499,17 @@ export class ControlDurableObject
       };
       const job: StoredDurableOperationJob =
         input.kind === "runtime-start"
-          ? { ...common, kind: "runtime-start", request: structuredClone(input.request) }
+          ? {
+              ...common,
+              kind: "runtime-start",
+              request: structuredClone(input.request),
+              ...(input.publishedRecoveryIdentity === undefined
+                ? {}
+                : { publishedRecoveryIdentity: input.publishedRecoveryIdentity }),
+              ...(input.publishedRecoveryGeneration === undefined
+                ? {}
+                : { publishedRecoveryGeneration: input.publishedRecoveryGeneration }),
+            }
           : input.kind === "runtime-manifest-restart"
             ? {
                 ...common,

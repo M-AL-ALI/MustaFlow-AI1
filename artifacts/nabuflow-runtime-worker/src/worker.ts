@@ -51,6 +51,8 @@ import {
   startRuntimeResponseSchema,
   statusRuntimeRequestSchema,
   statusRuntimeResponseSchema,
+  reconcileRuntimeRequestSchema,
+  reconcileRuntimeResponseSchema,
   stopRuntimeRequestSchema,
   stopRuntimeResponseSchema,
   verifyControlRequestSignature,
@@ -113,6 +115,7 @@ import type {
   RemoveRuntimeLayeredArtifactRequest,
   StartRuntimeRequest,
   StatusRuntimeRequest,
+  ReconcileRuntimeRequest,
   StopRuntimeRequest,
   UpdateRuntimeManifestRequest,
   PantryPlatform,
@@ -182,6 +185,7 @@ const MAX_REQUEST_BYTES = 256 * 1024;
 const MUTATION_ENDPOINTS = new Set<Endpoint>([
   "ensure",
   "start",
+  "reconcile",
   "stop",
   "destroy",
   "exec",
@@ -237,6 +241,7 @@ type Endpoint =
   | "stop"
   | "destroy"
   | "status"
+  | "reconcile"
   | "exec"
   | "logs"
   | "routeActivate"
@@ -976,6 +981,7 @@ type ControlInput =
   | StopRuntimeRequest
   | DestroyRuntimeRequest
   | StatusRuntimeRequest
+  | ReconcileRuntimeRequest
   | ExecRuntimeRequest
   | LogsRuntimeRequest
   | ProvisionEchoCapabilityRequest
@@ -1800,7 +1806,7 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const match = new RegExp(
-    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|start-diagnostics|stop|exec|logs|capability-binding))?$`,
+    `^${CONTROL_PREFIX}/runtimes/([1-9][0-9]*)/(preview|production)/(primary|blue|green)(?:/(start|start-diagnostics|stop|exec|logs|capability-binding|reconcile))?$`,
   ).exec(pathname);
   if (!match) throw new ControlHttpError(404, "not_found", "Control endpoint not found");
 
@@ -1812,6 +1818,7 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
   const suffix = match[4];
   if (method === "PUT" && suffix === undefined) return { endpoint: "ensure", locator };
   if (method === "POST" && suffix === "start") return { endpoint: "start", locator };
+  if (method === "POST" && suffix === "reconcile") return { endpoint: "reconcile", locator };
   if (method === "GET" && suffix === "start-diagnostics") {
     return { endpoint: "startDiagnostics", locator };
   }
@@ -2180,6 +2187,7 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
   if (
     route.endpoint !== "ensure" &&
     route.endpoint !== "start" &&
+    route.endpoint !== "reconcile" &&
     route.endpoint !== "stop" &&
     route.endpoint !== "destroy" &&
     route.endpoint !== "exec" &&
@@ -2296,6 +2304,7 @@ function parseMutationInput(
   endpoint:
     | "ensure"
     | "start"
+    | "reconcile"
     | "stop"
     | "destroy"
     | "exec"
@@ -2311,6 +2320,7 @@ function parseMutationInput(
 ):
   | EnsureRuntimeRequest
   | StartRuntimeRequest
+  | ReconcileRuntimeRequest
   | StopRuntimeRequest
   | DestroyRuntimeRequest
   | ExecRuntimeRequest
@@ -2324,6 +2334,7 @@ function parseMutationInput(
   | UpdateRuntimeManifestRequest {
   if (endpoint === "ensure") return parseStrict(ensureRuntimeRequestSchema, body);
   if (endpoint === "start") return parseStrict(startRuntimeRequestSchema, body);
+  if (endpoint === "reconcile") return parseStrict(reconcileRuntimeRequestSchema, body);
   if (endpoint === "stop") return parseStrict(stopRuntimeRequestSchema, body);
   if (endpoint === "destroy") return parseStrict(destroyRuntimeRequestSchema, body);
   if (endpoint === "artifactBegin") {
@@ -4039,30 +4050,96 @@ async function executeEndpoint(
     return { status: 200, body: { ok: true } };
   }
   if (endpoint === "status") {
-    if (runtime.descriptor.status === "running" || runtime.descriptor.status === "starting") {
-      const availability = await backend.availability(runtime);
-      if (!availability.ready) {
-        await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
-        const cleanStop =
-          availability.stage === "process" &&
-          (availability.cause === "process_missing" ||
-            availability.cause === "process_not_running");
-        runtime.descriptor.status = cleanStop ? "stopped" : "error";
-        runtime.descriptor.lastError = cleanStop
-          ? null
-          : `Runtime availability failed (${availability.stage}:${availability.cause})`;
-        runtime.descriptor.readyAt = null;
-        runtime.processId = null;
-        await coordinator.putRuntime(identity, runtime);
-        await coordinator.appendSystemLog(
-          identity,
-          `Runtime availability failed (stage=${availability.stage}, cause=${availability.cause}).`,
-        );
-      }
-    }
     return {
       status: 200,
-      body: { runtime: (await requireRuntime(coordinator, identity)).descriptor },
+      body: { runtime: structuredClone(runtime.descriptor) },
+    };
+  }
+  if (endpoint === "reconcile") {
+    const request = input as ReconcileRuntimeRequest;
+    if (
+      runtime.descriptor.status !== request.expectedStatus ||
+      runtime.descriptor.manifestRevision !== request.expectedManifestRevision
+    ) {
+      throw new ControlHttpError(
+        409,
+        "runtime_reconciliation_conflict",
+        "Runtime state changed before reconciliation",
+        true,
+      );
+    }
+    const observation = await backend.reconcile(runtime);
+    if (!observation.conclusive) {
+      // An ambiguous provider observation is evidence, not a terminal verdict.
+      // No runtime, capability binding, or runtime log is changed on this path.
+      throw new ControlHttpError(
+        503,
+        "runtime_reconciliation_inconclusive",
+        `Runtime reconciliation remained ambiguous after ${observation.attempts} observations (${observation.stage}:${observation.cause})`,
+        true,
+      );
+    }
+
+    const containerId = runtimeContainerId(env, identity);
+    const previousBinding = await coordinator.getContainerBinding(containerId);
+    let outcome: "restored" | "confirmed-stopped" | "confirmed-error" | "unchanged";
+    let capability: "bound" | "unbound";
+    if (observation.ready && observation.processId !== null) {
+      const alreadyTruthful =
+        runtime.descriptor.status === "running" &&
+        runtime.descriptor.lastError === null &&
+        runtime.processId === observation.processId &&
+        previousBinding === identity;
+      runtime.descriptor.status = "running";
+      runtime.descriptor.lastError = null;
+      runtime.descriptor.readyAt ??= new Date(nowMs).toISOString();
+      runtime.processId = observation.processId;
+      await coordinator.putRuntime(identity, runtime);
+      await coordinator.bindContainer(containerId, identity);
+      outcome = alreadyTruthful ? "unchanged" : "restored";
+      capability = "bound";
+    } else {
+      const cleanStop =
+        observation.stage === "process" &&
+        (observation.cause === "process_missing" || observation.cause === "process_not_running");
+      const nextStatus = cleanStop ? "stopped" : "error";
+      const nextError = cleanStop
+        ? null
+        : `Runtime reconciliation failed (${observation.stage}:${observation.cause})`;
+      const alreadyTruthful =
+        runtime.descriptor.status === nextStatus &&
+        runtime.descriptor.lastError === nextError &&
+        runtime.descriptor.readyAt === null &&
+        runtime.processId === null &&
+        previousBinding === null;
+      runtime.descriptor.status = nextStatus;
+      runtime.descriptor.lastError = nextError;
+      runtime.descriptor.readyAt = null;
+      runtime.processId = null;
+      await coordinator.putRuntime(identity, runtime);
+      await coordinator.unbindContainer(containerId, identity);
+      outcome = alreadyTruthful ? "unchanged" : cleanStop ? "confirmed-stopped" : "confirmed-error";
+      capability = "unbound";
+    }
+    await coordinator.appendSystemLog(
+      identity,
+      `Governed runtime reconciliation ${request.reconciliationId} completed (outcome=${outcome}, stage=${observation.stage}, cause=${observation.cause}, attempts=${observation.attempts}).`,
+    );
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        reconciliationId: request.reconciliationId,
+        outcome,
+        observation: {
+          attempts: observation.attempts,
+          stage: observation.stage,
+          cause: observation.cause,
+          status: observation.status,
+        },
+        capability,
+        runtime: structuredClone(runtime.descriptor),
+      },
     };
   }
   if (endpoint === "exec") {
@@ -4464,6 +4541,14 @@ async function activatePublishedRoute(
       coordinator,
       nowMs,
     });
+    if (recovery === "exhausted") {
+      throw new ControlHttpError(
+        409,
+        "published_runtime_recovery_exhausted",
+        "Published runtime recovery reached its retry cap",
+        false,
+      );
+    }
     throw new ControlHttpError(
       409,
       "published_runtime_not_ready",
@@ -4539,6 +4624,7 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     stop: stopRuntimeResponseSchema,
     destroy: destroyRuntimeResponseSchema,
     status: statusRuntimeResponseSchema,
+    reconcile: reconcileRuntimeResponseSchema,
     exec: execRuntimeResponseSchema,
     logs: logsRuntimeResponseSchema,
     routeActivate: activateRouteResponseSchema,

@@ -2,6 +2,8 @@ import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@c
 import { createHash } from "node:crypto";
 import {
   CAPABILITY_DOORMAN_HOST,
+  RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS,
+  RUNTIME_RECONCILIATION_OBSERVATION_TIMEOUT_MS,
   TENANT_RUNTIME_MODE_ENV,
   argvToCommandString,
   compareUtf8,
@@ -34,7 +36,7 @@ import {
 
 export const DOORMAN_HOST = CAPABILITY_DOORMAN_HOST;
 const TENANT_PROCESS_ID = "tenant-service";
-export const RUNTIME_AVAILABILITY_TIMEOUT_MS = 5_000;
+export const RUNTIME_AVAILABILITY_TIMEOUT_MS = RUNTIME_RECONCILIATION_OBSERVATION_TIMEOUT_MS;
 
 export class ContainerProxy extends SandboxContainerProxy {
   async fetch(request: Request): Promise<Response> {
@@ -229,6 +231,12 @@ export interface BackendAvailabilityResult {
   status: number | null;
 }
 
+export interface BackendReconciliationResult extends BackendAvailabilityResult {
+  attempts: number;
+  conclusive: boolean;
+  processId: string | null;
+}
+
 export interface RuntimeMaterializationTicket {
   payloadContentSha256s: string[];
 }
@@ -244,6 +252,7 @@ export interface RuntimeBackend {
   destroy(runtime: StoredRuntime): Promise<void>;
   status(runtime: StoredRuntime): Promise<BackendStatusResult>;
   availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult>;
+  reconcile(runtime: StoredRuntime): Promise<BackendReconciliationResult>;
   exec(runtime: StoredRuntime, request: ExecRuntimeRequest): Promise<BackendExecResult>;
   logs(runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }>;
   materialize(
@@ -415,6 +424,33 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
         status: null,
       };
     }
+  }
+
+  async reconcile(runtime: StoredRuntime): Promise<BackendReconciliationResult> {
+    // Reconciliation is the only path allowed to recover the platform-owned process
+    // identity after a stale descriptor lost it. Ordinary metadata reads never probe.
+    const candidate = structuredClone(runtime);
+    candidate.processId = TENANT_PROCESS_ID;
+    for (
+      let attempt = 1;
+      attempt <= RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS;
+      attempt += 1
+    ) {
+      const observation = await this.availability(candidate);
+      const ambiguous =
+        observation.cause === "health_timeout" ||
+        observation.cause === "health_transport" ||
+        observation.cause === "process_check_failed";
+      if (!ambiguous || attempt === RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS) {
+        return {
+          ...observation,
+          attempts: attempt,
+          conclusive: !ambiguous,
+          processId: observation.ready ? TENANT_PROCESS_ID : null,
+        };
+      }
+    }
+    throw new Error("Runtime reconciliation observation budget was not applied");
   }
 
   async exec(runtime: StoredRuntime, request: ExecRuntimeRequest): Promise<BackendExecResult> {

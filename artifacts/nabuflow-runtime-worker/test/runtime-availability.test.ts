@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as SandboxModule from "@cloudflare/sandbox";
+import { RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS } from "@workspace/tenant-runtime-contracts";
 import type { StoredRuntime } from "../src/model";
 import { CloudflareSandboxBackend } from "../src/runtime-backend";
 import { TEST_NOW_MS, fakeEnv } from "./helpers";
@@ -104,5 +105,52 @@ describe("runtime availability", () => {
       cause: "process_missing",
       status: null,
     });
+  });
+
+  it("does not treat one ambiguous observation as a terminal reconciliation verdict", async () => {
+    const backend = new CloudflareSandboxBackend(fakeEnv());
+    const runtime = capturedRuntime();
+    runtime.processId = null;
+    const availability = vi
+      .spyOn(backend, "availability")
+      .mockResolvedValueOnce({
+        ready: false,
+        stage: "health",
+        cause: "health_transport",
+        status: null,
+      })
+      .mockResolvedValueOnce({ ready: true, stage: "health", cause: "ready", status: 200 });
+
+    await expect(backend.reconcile(runtime)).resolves.toEqual({
+      ready: true,
+      stage: "health",
+      cause: "ready",
+      status: 200,
+      attempts: 2,
+      conclusive: true,
+      processId: "tenant-service",
+    });
+    expect(availability).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns inconclusive after the named ambiguous-observation cap", async () => {
+    const backend = new CloudflareSandboxBackend(fakeEnv());
+    const availability = vi.spyOn(backend, "availability").mockResolvedValue({
+      ready: false,
+      stage: "health",
+      cause: "health_timeout",
+      status: null,
+    });
+
+    await expect(backend.reconcile(capturedRuntime())).resolves.toEqual({
+      ready: false,
+      stage: "health",
+      cause: "health_timeout",
+      status: null,
+      attempts: RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS,
+      conclusive: false,
+      processId: null,
+    });
+    expect(availability).toHaveBeenCalledTimes(RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS);
   });
 });

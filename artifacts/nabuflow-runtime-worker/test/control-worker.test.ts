@@ -736,20 +736,281 @@ describe("authenticated staging control plane", () => {
     await expect(reconciledStatus.json()).resolves.toMatchObject({
       runtime: {
         identity: greenIdentity,
-        status: "error",
-        readyAt: null,
-        lastError: "Runtime availability failed (health:health_status)",
+        status: "running",
+        readyAt: new Date(TEST_NOW_MS).toISOString(),
+        lastError: null,
       },
     });
     await expect(coordinator.getRuntime(greenIdentity)).resolves.toMatchObject({
-      processId: null,
-      descriptor: { status: "error", readyAt: null },
-      logs: expect.arrayContaining([
-        expect.objectContaining({
-          message: "Runtime availability failed (stage=health, cause=health_status).",
-        }),
-      ]),
+      processId: "published-service",
+      descriptor: { status: "running", readyAt: new Date(TEST_NOW_MS).toISOString() },
     });
+    expect(backend.availabilityChecks).toHaveLength(5);
+  });
+
+  it("keeps repeated signed status reads metadata-only across transport-failure stubs", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    backend.availabilityResult = {
+      ready: false,
+      stage: "health",
+      cause: "health_transport",
+      status: null,
+    };
+    const env = fakeEnv();
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 91,
+      role: "production",
+      slot: "green",
+    });
+    const runtime: StoredRuntime = {
+      descriptor: {
+        identity,
+        projectId: 91,
+        role: "production",
+        slot: "green",
+        status: "running",
+        servicePort: 8080,
+        manifestRevision: "captured-wall-12-green",
+        deploymentVersion: env.CF_VERSION_METADATA.id,
+        endpoint: null,
+        readyAt: new Date(TEST_NOW_MS).toISOString(),
+        lastError: null,
+      },
+      manifest: {
+        revision: "captured-wall-12-green",
+        runtime: "node",
+        buildCommand: ["npm", "run", "build"],
+        startCommand: ["npm", "start"],
+        servicePort: 8080,
+        healthPath: "/healthz",
+        resourceProfile: "standard",
+        public: true,
+      },
+      artifactRevision: "captured-wall-12-artifact",
+      artifactSha256: "c".repeat(64),
+      processId: "tenant-service",
+      stdoutLength: 0,
+      stderrLength: 0,
+      nextLogSequence: 0,
+      logs: [],
+    };
+    await coordinator.putRuntime(identity, runtime);
+    const containerId = env.NABUFLOW_SANDBOX.idFromName(identity).toString();
+    await coordinator.bindContainer(containerId, identity);
+    const before = structuredClone(await coordinator.getRuntime(identity));
+    const beforeBindings = [...coordinator.containerBindings.entries()];
+
+    for (let read = 0; read < 2; read += 1) {
+      const response = await handleControlRequest(
+        await signedRequest({
+          path: "/_nabuflow/control/v1/runtimes/91/production/green",
+          method: "GET",
+          nonce: `nonce-metadata-only-${read}`,
+        }),
+        env,
+        { coordinator, backend, nowMs: TEST_NOW_MS },
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ runtime: runtime.descriptor });
+    }
+
+    expect(backend.availabilityChecks).toHaveLength(0);
+    expect(await coordinator.getRuntime(identity)).toEqual(before);
+    expect([...coordinator.containerBindings.entries()]).toEqual(beforeBindings);
+  });
+
+  it("reconciles captured blue and green states only through the governed mutation", async () => {
+    for (const [index, slot] of (["blue", "green"] as const).entries()) {
+      const coordinator = new MemoryCoordinator();
+      const backend = new MockBackend();
+      const env = fakeEnv();
+      const identity = await deriveRuntimeIdentity({
+        namespace: "staging",
+        projectId: 92,
+        role: "production",
+        slot,
+      });
+      const capturedManifestRevision =
+        slot === "blue"
+          ? "prod-e7060cad1aab9f5764727d28ffc058f186117c80ec77ab5"
+          : "prod-a8940c976f1cf943d03c5bccd52e3bdb5b1ea51b8d56e228";
+      const runtime: StoredRuntime = {
+        descriptor: {
+          identity,
+          projectId: 92,
+          role: "production",
+          slot,
+          status: "error",
+          servicePort: 8080,
+          manifestRevision: capturedManifestRevision,
+          deploymentVersion: env.CF_VERSION_METADATA.id,
+          endpoint: null,
+          readyAt: null,
+          lastError: "Captured stale transport verdict",
+        },
+        manifest: {
+          revision: capturedManifestRevision,
+          runtime: "node",
+          buildCommand: ["npm", "run", "build"],
+          startCommand: ["npm", "start"],
+          servicePort: 8080,
+          healthPath: "/healthz",
+          resourceProfile: "standard",
+          public: true,
+        },
+        artifactRevision:
+          slot === "green"
+            ? "production-a8940c976f1cf943d03c5bccd52e3bdb5b1ea51b8d56e228"
+            : "captured-blue-artifact",
+        artifactSha256:
+          slot === "green"
+            ? "1034b3dbfa46a83b34528132bf58d1590be1a0d8a20bf1aea834da2e95c2b954"
+            : "a".repeat(64),
+        processId: null,
+        stdoutLength: 0,
+        stderrLength: 0,
+        nextLogSequence: 0,
+        logs: [],
+      };
+      await coordinator.putRuntime(identity, runtime);
+      if (slot === "blue") {
+        backend.reconciliationResult = {
+          ready: false,
+          stage: "process",
+          cause: "process_missing",
+          status: null,
+          attempts: 1,
+          conclusive: true,
+          processId: null,
+        };
+      }
+      const path = `/_nabuflow/control/v1/runtimes/92/production/${slot}/reconcile`;
+      const response = await handleControlRequest(
+        await signedRequest({
+          path,
+          method: "POST",
+          nonce: `nonce-reconcile-${slot}-001`,
+          idempotencyKey: `wall-12-reconcile-${slot}`,
+          body: {
+            locator: { projectId: 92, role: "production", slot },
+            expectedStatus: "error",
+            expectedManifestRevision: runtime.manifest.revision,
+            reconciliationId: `wall-12-${slot}`,
+          },
+        }),
+        env,
+        { coordinator, backend, nowMs: TEST_NOW_MS + index },
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject(
+        slot === "blue"
+          ? { outcome: "confirmed-stopped", capability: "unbound", runtime: { status: "stopped" } }
+          : { outcome: "restored", capability: "bound", runtime: { status: "running" } },
+      );
+      const replay = await handleControlRequest(
+        await signedRequest({
+          path,
+          method: "POST",
+          nonce: `nonce-reconcile-${slot}-002`,
+          idempotencyKey: `wall-12-reconcile-${slot}`,
+          body: {
+            locator: { projectId: 92, role: "production", slot },
+            expectedStatus: "error",
+            expectedManifestRevision: runtime.manifest.revision,
+            reconciliationId: `wall-12-${slot}`,
+          },
+        }),
+        env,
+        { coordinator, backend, nowMs: TEST_NOW_MS + index + 1 },
+      );
+      expect(replay.status).toBe(200);
+      expect(backend.reconciliationChecks).toEqual([identity]);
+      const containerId = env.NABUFLOW_SANDBOX.idFromName(identity).toString();
+      expect(await coordinator.getContainerBinding(containerId)).toBe(
+        slot === "green" ? identity : null,
+      );
+    }
+  });
+
+  it("leaves runtime and capability state untouched after an ambiguous governed observation", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    backend.reconciliationResult = {
+      ready: false,
+      stage: "health",
+      cause: "health_transport",
+      status: null,
+      attempts: 1,
+      conclusive: false,
+      processId: null,
+    };
+    const env = fakeEnv();
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId: 93,
+      role: "preview",
+      slot: "primary",
+    });
+    await coordinator.putRuntime(identity, {
+      descriptor: {
+        identity,
+        projectId: 93,
+        role: "preview",
+        slot: "primary",
+        status: "error",
+        servicePort: 8080,
+        manifestRevision:
+          "zero-node-v1-f8dd2e2df3487cc3c3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039",
+        deploymentVersion: env.CF_VERSION_METADATA.id,
+        endpoint: null,
+        readyAt: null,
+        lastError: "Captured stale transport verdict",
+      },
+      manifest: {
+        revision: "zero-node-v1-f8dd2e2df3487cc3c3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039",
+        runtime: "node",
+        buildCommand: ["npm", "run", "build"],
+        startCommand: ["npm", "start"],
+        servicePort: 8080,
+        healthPath: "/healthz",
+        resourceProfile: "standard",
+        public: true,
+      },
+      artifactRevision: "captured-preview-artifact",
+      artifactSha256: "d".repeat(64),
+      processId: null,
+      stdoutLength: 0,
+      stderrLength: 0,
+      nextLogSequence: 0,
+      logs: [],
+    });
+    const before = structuredClone(await coordinator.getRuntime(identity));
+    const response = await handleControlRequest(
+      await signedRequest({
+        path: "/_nabuflow/control/v1/runtimes/93/preview/primary/reconcile",
+        method: "POST",
+        nonce: "nonce-reconcile-ambiguous-001",
+        idempotencyKey: "wall-12-reconcile-ambiguous",
+        body: {
+          locator: { projectId: 93, role: "preview", slot: "primary" },
+          expectedStatus: "error",
+          expectedManifestRevision:
+            "zero-node-v1-f8dd2e2df3487cc3c3c5e8f008266ef4ce0b61ac8dbb7bb56849389784b7e039",
+          reconciliationId: "wall-12-preview",
+        },
+      }),
+      env,
+      { coordinator, backend, nowMs: TEST_NOW_MS },
+    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "runtime_reconciliation_inconclusive",
+      retryable: true,
+    });
+    expect(await coordinator.getRuntime(identity)).toEqual(before);
+    expect(coordinator.containerBindings.size).toBe(0);
   });
 
   it("runs the complete control lifecycle through the shared schemas", async () => {
