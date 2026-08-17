@@ -1,0 +1,103 @@
+{
+  "format": "nabuflow.wall-17-front-door-delivery-evidence/v1",
+  "capturedAtLabUtc": "2026-08-17T21:17:22Z",
+  "branch": "codex/published-route-front-door",
+  "base": "ad8f3d02e5c8fdce67f065215eeea1e9be0cd22e",
+  "verdict": "same_disease_second_call_site",
+  "shape": {
+    "availabilityJudge": "CloudflareSandboxBackend.availability (runtime-reconciliation-v4)",
+    "forwardBoundary": "NabuflowSandbox native Durable Object fetch",
+    "containerRequestConstruction": "Sandbox execution context",
+    "streamingPreserved": true,
+    "readsWriteAvailabilityState": false,
+    "healingMutation": "existing idempotent durable runtime-start recovery only",
+    "semanticsIdentityChanged": false
+  },
+  "capturedWall17Fixtures": [
+    {
+      "path": "/",
+      "requestId": "7db94653-907b-4625-bfa7-4b921c3ec446",
+      "oldCode": "published_runtime_unavailable",
+      "oldWallSeconds": 1.5798454,
+      "v4HealthStatus": 200
+    },
+    {
+      "path": "/healthz",
+      "requestId": "ea59ce09-d0f5-4073-92f8-0b50faadf4b3",
+      "oldCode": "published_runtime_unavailable",
+      "oldWallSeconds": 1.9245001,
+      "v4HealthStatus": 200
+    }
+  ],
+  "verification": {
+    "frozenOfflineInstall": {
+      "projects": 21,
+      "resolved": 1899,
+      "reused": 1870,
+      "downloaded": 0,
+      "elapsedSeconds": 392.1,
+      "result": "pass"
+    },
+    "focused": { "files": 2, "tests": 31, "result": "pass" },
+    "contracts": { "files": 20, "tests": 187, "result": "pass" },
+    "worker": { "files": 36, "tests": 278, "result": "pass" },
+    "workerTypecheck": "pass",
+    "workerLint": "pass",
+    "repositoryTypecheck": "pass",
+    "repositoryLint": "pass",
+    "changedFilePrettier": "pass",
+    "gitDiffCheck": "pass",
+    "productionBundleDryRun": {
+      "result": "pass",
+      "uploadKiB": 1453.62,
+      "gzipKiB": 295.54
+    },
+    "repositoryPrettier": {
+      "result": "inherited-failure",
+      "untouchedFiles": [
+        "artifacts/nabuflow-runtime-worker/wrangler.build.production.jsonc",
+        "artifacts/nabuflow-runtime-worker/wrangler.pantry.production.jsonc",
+        "artifacts/nabuflow-runtime-worker/wrangler.runtime.production.jsonc"
+      ]
+    }
+  },
+  "changes": {
+    "source": [
+      "artifacts/nabuflow-runtime-worker/src/runtime-backend.ts",
+      "artifacts/nabuflow-runtime-worker/src/published-data-plane.ts"
+    ],
+    "tests": ["artifacts/nabuflow-runtime-worker/test/published-data-plane.test.ts"],
+    "authority": [
+      "docs/wall-17-front-door-phase1-diagnosis-20260817T205220Z.md",
+      "docs/wall-17-front-door-phase1-evidence-20260817T205220Z.json",
+      "docs/wall-17-front-door-delivery-report.md",
+      "docs/wall-17-front-door-delivery-evidence-20260817T211722Z.json",
+      "docs/wall-17-front-door-delivery-20260817T211722Z.sha256"
+    ]
+  },
+  "declarations": {
+    "manifestChanges": false,
+    "lockfileChanges": false,
+    "lockfileSha256": "B8DA847F2D8C8B30A5A84BFB362AB1176D86FD70DAFE972EDC6FCA9A684BD54E",
+    "publishedErrorWireChange": "additive bounded sanitized evidence object",
+    "controlWireChanges": false,
+    "artifactV1Changes": false,
+    "artifactLayerChanges": false,
+    "tenantEgressChanges": false,
+    "flyFilesChanged": false
+  },
+  "safety": {
+    "productionFrozen": true,
+    "reconciliationRun": false,
+    "secondPublish": false,
+    "rollback": false,
+    "runtimeRestart": false,
+    "routeMutation": false,
+    "deployment": false,
+    "newPublicSurface": false,
+    "newSpend": false,
+    "flyAction": false,
+    "secretValueRead": false
+  },
+  "freeBytesAfterVerification": 74991353856
+}

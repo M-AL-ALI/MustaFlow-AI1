@@ -41,6 +41,26 @@ import {
 export const DOORMAN_HOST = CAPABILITY_DOORMAN_HOST;
 const TENANT_PROCESS_ID = "tenant-service";
 export const RUNTIME_AVAILABILITY_TIMEOUT_MS = RUNTIME_RECONCILIATION_OBSERVATION_TIMEOUT_MS;
+export const PUBLISHED_RUNTIME_FORWARD_ORIGIN =
+  "https://published-runtime-forward.nabuflow.internal";
+export const PUBLISHED_RUNTIME_FORWARD_PORT_HEADER = "x-nabuflow-internal-service-port";
+export const PUBLISHED_RUNTIME_FORWARD_TIMEOUT_HEADER = "x-nabuflow-internal-timeout-ms";
+const PUBLISHED_RUNTIME_FORWARD_FAILURE_HEADER = "x-nabuflow-internal-forward-failure";
+const PUBLISHED_RUNTIME_FORWARD_FAILURE_STAGE_HEADER = "x-nabuflow-internal-forward-stage";
+const PUBLISHED_RUNTIME_FORWARD_FAILURE_CAUSE_HEADER = "x-nabuflow-internal-forward-cause";
+const PUBLISHED_RUNTIME_FORWARD_FAILURE_CLASS_HEADER = "x-nabuflow-internal-forward-class";
+
+export type PublishedRuntimeForwardFailureCause = "pre_dispatch" | "timeout" | "transport";
+
+export interface PublishedRuntimeForwardFailure {
+  stage: "request";
+  cause: PublishedRuntimeForwardFailureCause;
+  errorClass: "AbortError" | "Error" | "NetworkError" | "TimeoutError" | "TypeError" | "unknown";
+}
+
+interface RuntimeContainerFetch {
+  containerFetch(request: Request, port: number): Promise<Response>;
+}
 
 export interface RuntimeHealthProbeInput {
   servicePort: number;
@@ -53,6 +73,107 @@ export interface RuntimeHealthProbeResult {
   stage: "health";
   cause: "ready" | "health_status" | "health_pre_dispatch" | "health_timeout" | "health_transport";
   status: number | null;
+}
+
+function publishedForwardErrorClass(error: unknown): PublishedRuntimeForwardFailure["errorClass"] {
+  if (!(error instanceof Error)) return "unknown";
+  return ["AbortError", "Error", "NetworkError", "TimeoutError", "TypeError"].includes(error.name)
+    ? (error.name as PublishedRuntimeForwardFailure["errorClass"])
+    : "Error";
+}
+
+function publishedForwardFailureResponse(
+  cause: PublishedRuntimeForwardFailureCause,
+  errorClass: PublishedRuntimeForwardFailure["errorClass"],
+): Response {
+  return new Response(null, {
+    status: 502,
+    headers: {
+      [PUBLISHED_RUNTIME_FORWARD_FAILURE_HEADER]: "1",
+      [PUBLISHED_RUNTIME_FORWARD_FAILURE_STAGE_HEADER]: "request",
+      [PUBLISHED_RUNTIME_FORWARD_FAILURE_CAUSE_HEADER]: cause,
+      [PUBLISHED_RUNTIME_FORWARD_FAILURE_CLASS_HEADER]: errorClass,
+      "cache-control": "no-store",
+    },
+  });
+}
+
+export function readPublishedRuntimeForwardFailure(
+  response: Response,
+): PublishedRuntimeForwardFailure | null {
+  if (response.headers.get(PUBLISHED_RUNTIME_FORWARD_FAILURE_HEADER) !== "1") return null;
+  const stage = response.headers.get(PUBLISHED_RUNTIME_FORWARD_FAILURE_STAGE_HEADER);
+  const cause = response.headers.get(PUBLISHED_RUNTIME_FORWARD_FAILURE_CAUSE_HEADER);
+  const errorClass = response.headers.get(PUBLISHED_RUNTIME_FORWARD_FAILURE_CLASS_HEADER);
+  if (
+    stage !== "request" ||
+    (cause !== "pre_dispatch" && cause !== "timeout" && cause !== "transport") ||
+    (errorClass !== "AbortError" &&
+      errorClass !== "Error" &&
+      errorClass !== "NetworkError" &&
+      errorClass !== "TimeoutError" &&
+      errorClass !== "TypeError" &&
+      errorClass !== "unknown")
+  ) {
+    return { stage: "request", cause: "transport", errorClass: "unknown" };
+  }
+  return { stage, cause, errorClass };
+}
+
+export async function forwardPublishedRuntimeRequestInSandbox(
+  sandbox: RuntimeContainerFetch,
+  request: Request,
+): Promise<Response> {
+  let signal: AbortSignal;
+  let upstream: Request;
+  let servicePort: number;
+  try {
+    const url = new URL(request.url);
+    if (url.origin !== PUBLISHED_RUNTIME_FORWARD_ORIGIN) {
+      throw new TypeError("Published forwarding origin is invalid");
+    }
+    servicePort = Number(request.headers.get(PUBLISHED_RUNTIME_FORWARD_PORT_HEADER));
+    const timeoutMs = Math.floor(
+      Number(request.headers.get(PUBLISHED_RUNTIME_FORWARD_TIMEOUT_HEADER)),
+    );
+    if (
+      !Number.isSafeInteger(servicePort) ||
+      servicePort < 1 ||
+      servicePort > 65_535 ||
+      !Number.isSafeInteger(timeoutMs) ||
+      timeoutMs < 1
+    ) {
+      throw new TypeError("Published forwarding input is invalid");
+    }
+
+    const headers = new Headers(request.headers);
+    headers.delete(PUBLISHED_RUNTIME_FORWARD_PORT_HEADER);
+    headers.delete(PUBLISHED_RUNTIME_FORWARD_TIMEOUT_HEADER);
+    signal = AbortSignal.timeout(timeoutMs);
+    const body = request.method === "GET" || request.method === "HEAD" ? null : request.body;
+    upstream = new Request(
+      new URL(`${url.pathname}${url.search}`, "https://tenant.published.invalid"),
+      {
+        method: request.method,
+        headers,
+        body,
+        redirect: "manual",
+        signal,
+        ...(body === null ? {} : ({ duplex: "half" } as RequestInit & { duplex: "half" })),
+      },
+    );
+  } catch (error) {
+    return publishedForwardFailureResponse("pre_dispatch", publishedForwardErrorClass(error));
+  }
+
+  try {
+    return await sandbox.containerFetch(upstream, servicePort);
+  } catch (error) {
+    return publishedForwardFailureResponse(
+      signal.aborted ? "timeout" : "transport",
+      publishedForwardErrorClass(error),
+    );
+  }
 }
 
 export class ContainerProxy extends SandboxContainerProxy {
@@ -73,6 +194,18 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
   enableInternet = false;
   interceptHttps = true;
   allowedHosts = [DOORMAN_HOST];
+
+  /**
+   * Preserve streaming HTTP semantics across the Durable Object's native Fetch
+   * boundary while constructing the abort-bearing container request in the
+   * Sandbox execution context. Availability remains a separate value-only RPC.
+   */
+  async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).origin === PUBLISHED_RUNTIME_FORWARD_ORIGIN) {
+      return forwardPublishedRuntimeRequestInSandbox(this, request);
+    }
+    return super.fetch(request);
+  }
 
   /**
    * Run the bounded tenant health request inside the Sandbox Durable Object.
