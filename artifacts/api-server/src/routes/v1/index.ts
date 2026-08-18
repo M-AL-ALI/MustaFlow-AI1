@@ -44,7 +44,7 @@ import { publishDomainEvent } from "../../lib/event-bus";
 import { dispatchWebhookEvent } from "../../lib/webhook-dispatcher";
 import { getAuth } from "@clerk/express";
 import { logger } from "../../lib/logger";
-import { checkV1ProjectAccess, isPatAuth } from "./access";
+import { checkV1ProjectAccess, isPatAuth, projectRoleForV1Scopes } from "./access";
 import projectsRouter from "./projects";
 import buildsRouter from "./builds";
 import filesRouter from "./files";
@@ -143,7 +143,7 @@ router.get("/projects/:id/domains", async (req, res): Promise<void> => {
 // ── POST /api/v1/projects/:id/domains ────────────────────────────────────────
 router.post("/projects/:id/domains", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
-  if (!(await checkV1ProjectAccess(req, projectId))) {
+  if (!(await checkV1ProjectAccess(req, projectId, "admin"))) {
     res.status(404).json({ error: "Project not found." });
     return;
   }
@@ -207,7 +207,7 @@ router.delete("/projects/:id/domains/:domainId", async (req, res): Promise<void>
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
-  if (!(await checkV1ProjectAccess(req, projectId))) {
+  if (!(await checkV1ProjectAccess(req, projectId, "admin"))) {
     res.status(404).json({ error: "Project not found." });
     return;
   }
@@ -249,7 +249,7 @@ router.post("/projects/:id/domains/:domainId/verify", async (req, res): Promise<
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
-  if (!(await checkV1ProjectAccess(req, projectId))) {
+  if (!(await checkV1ProjectAccess(req, projectId, "admin"))) {
     res.status(404).json({ error: "Project not found." });
     return;
   }
@@ -378,6 +378,14 @@ router.post("/tokens", async (req, res): Promise<void> => {
   const resolvedScopes = Array.isArray(scopes)
     ? scopes.filter((s) => validScopes.includes(s))
     : ["projects:read", "builds:read", "files:read"];
+
+  if (
+    projectId != null &&
+    !(await checkV1ProjectAccess(req, projectId, projectRoleForV1Scopes(resolvedScopes)))
+  ) {
+    res.status(404).json({ error: "Project not found." });
+    return;
+  }
 
   const raw = generateRawToken();
   const tokenHash = hashToken(raw);

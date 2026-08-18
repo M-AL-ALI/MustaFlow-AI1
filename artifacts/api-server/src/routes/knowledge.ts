@@ -11,6 +11,7 @@ import { isAdminUser } from "../lib/adminAuth";
 import { getOrCreateCredits } from "./credits";
 import { buildEmbeddingInput, generateEmbedding } from "../lib/embeddings";
 import { anonymiseContent } from "../lib/knowledge-promotion";
+import { checkProjectAccess, listAccessibleProjectIds } from "../lib/auth";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -129,6 +130,15 @@ router.get("/knowledge", async (req, res): Promise<void> => {
   let projectCondition: SQL;
 
   if (projectId !== null) {
+    if (!req.userId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    const access = await checkProjectAccess(req.userId, projectId, "viewer");
+    if (access !== "granted") {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
     // Specific project: entries for that project + global
     projectCondition = or(
       eq(knowledgeEntriesTable.approvedForReuse, true),
@@ -136,11 +146,7 @@ router.get("/knowledge", async (req, res): Promise<void> => {
     ) as SQL;
   } else if (req.userId) {
     // Authenticated, no project filter: return entries for ALL of the user's projects + global + user-scope
-    const ownedProjects = await db
-      .select({ id: projectsTable.id })
-      .from(projectsTable)
-      .where(and(eq(projectsTable.ownerId, req.userId), isNull(projectsTable.deletedAt)));
-    const ownedIds = ownedProjects.map((p) => p.id);
+    const ownedIds = await listAccessibleProjectIds(req.userId, "viewer");
 
     if (ownedIds.length > 0) {
       projectCondition = or(
@@ -201,6 +207,18 @@ router.post("/knowledge", async (req, res): Promise<void> => {
   if (!body.title || !body.content) {
     res.status(400).json({ error: "title and content are required" });
     return;
+  }
+
+  if (!req.userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  if (body.projectId != null) {
+    const access = await checkProjectAccess(req.userId, body.projectId, "member");
+    if (access !== "granted") {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
   }
 
   const [row] = await db
@@ -330,11 +348,27 @@ router.post("/knowledge/:id/rate", async (req, res): Promise<void> => {
   }
 
   const [existing] = await db
-    .select({ id: knowledgeEntriesTable.id })
+    .select({
+      id: knowledgeEntriesTable.id,
+      userId: knowledgeEntriesTable.userId,
+      projectId: knowledgeEntriesTable.projectId,
+      isPublic: knowledgeEntriesTable.isPublic,
+      approvedForReuse: knowledgeEntriesTable.approvedForReuse,
+    })
     .from(knowledgeEntriesTable)
     .where(eq(knowledgeEntriesTable.id, entryId));
 
   if (!existing) {
+    res.status(404).json({ error: "Entry not found" });
+    return;
+  }
+
+  const canRatePublicEntry = existing.isPublic && existing.approvedForReuse;
+  const canRateOwnedEntry = existing.userId === userId;
+  const canRateProjectEntry =
+    existing.projectId != null &&
+    (await checkProjectAccess(userId, existing.projectId, "viewer")) === "granted";
+  if (!canRatePublicEntry && !canRateOwnedEntry && !canRateProjectEntry) {
     res.status(404).json({ error: "Entry not found" });
     return;
   }

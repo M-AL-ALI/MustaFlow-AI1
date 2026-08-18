@@ -31,6 +31,7 @@ import {
 import { storeUploadedImage, getImageBuffer } from "../lib/image-storage";
 import { IMAGE_CREDIT_COSTS } from "./image-credits";
 import { logger } from "../lib/logger";
+import { checkProjectAccess } from "../lib/auth";
 import { resolveTierForUser } from "../lib/public-ai/authed-user";
 import { consumeOraQuota, refundOraQuota } from "../lib/public-ai/ora-usage";
 
@@ -66,13 +67,6 @@ router.post("/images/generate", async (req, res): Promise<void> => {
     return;
   }
 
-  if (!isImageProviderConfigured()) {
-    res.status(503).json({
-      error: "Image generation is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
-    });
-    return;
-  }
-
   const parsed = EnqueueImageGenerationBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -90,6 +84,21 @@ router.post("/images/generate", async (req, res): Promise<void> => {
     variationCount,
     projectId,
   } = parsed.data;
+
+  if (
+    typeof projectId === "number" &&
+    (await checkProjectAccess(userId, projectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  if (!isImageProviderConfigured()) {
+    res.status(503).json({
+      error: "Image generation is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
+    });
+    return;
+  }
 
   const safeVariationCount = variationCount;
   const imageUser = await resolveTierForUser(userId);
@@ -510,13 +519,6 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
     return;
   }
 
-  if (!isImageProviderConfigured()) {
-    res.status(503).json({
-      error: "Image editing is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
-    });
-    return;
-  }
-
   const parentId = Number(req.params.id);
   if (!Number.isFinite(parentId)) {
     res.status(400).json({ error: "Invalid image id" });
@@ -531,6 +533,21 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
 
   const { instruction, quality, projectId, origin, oraProjectId } = parsed.data;
   const isOraEdit = origin === "ora";
+
+  if (
+    typeof projectId === "number" &&
+    (await checkProjectAccess(userId, projectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  if (!isImageProviderConfigured()) {
+    res.status(503).json({
+      error: "Image editing is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
+    });
+    return;
+  }
 
   // Resolve the Ora project the edited result should be filed under. Invalid,
   // foreign, or archived projects silently degrade to Personal (null) — the

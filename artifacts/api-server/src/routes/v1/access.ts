@@ -2,41 +2,48 @@
  * Shared project-access guard for all v1 routes.
  *
  * Enforces two layers:
- * 1. Ownership: the project must be owned by req.userId.
+ * 1. Current access: req.userId must own the project or hold a live
+ *    organization membership at the required role.
  * 2. PAT project-scope: if the token is project-scoped (req.patProjectId is set),
  *    the requested projectId must match it exactly.
  *
- * Session-auth callers (patProjectId = undefined) pass layer 2 automatically
- * and are only bound by ownership.
+ * Session-auth callers (patProjectId = undefined) pass layer 2 automatically;
+ * both authentication modes remain bound by the canonical live-access check.
  */
 
 import type { Request, Response, NextFunction } from "express";
-import { and, eq, isNull } from "drizzle-orm";
-import { db, projectsTable } from "@workspace/db";
 import type { PATRequest } from "../../lib/pat-auth";
+import { checkProjectAccess, type ProjectRole } from "../../lib/auth";
 
-export async function checkV1ProjectAccess(req: Request, projectId: number): Promise<boolean> {
+export async function checkV1ProjectAccess(
+  req: Request,
+  projectId: number,
+  minRole: ProjectRole = "viewer",
+): Promise<boolean> {
   const userId = req.userId!;
 
   // PAT project-scoped: the token may only access a single project.
-  // Even if the user owns other projects, the token cannot reach them.
+  // The canonical access predicate still runs so a stale or invalid scope can
+  // never substitute for actual owner/organization authorization.
   const patReq = req as unknown as PATRequest;
   if (patReq.patProjectId !== null && patReq.patProjectId !== undefined) {
-    return patReq.patProjectId === projectId;
+    if (patReq.patProjectId !== projectId) return false;
   }
 
-  // User-scoped PAT or session auth: verify ownership.
-  const [proj] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(
-      and(
-        eq(projectsTable.id, projectId),
-        eq(projectsTable.ownerId, userId),
-        isNull(projectsTable.deletedAt),
-      ),
-    );
-  return Boolean(proj);
+  return (await checkProjectAccess(userId, projectId, minRole)) === "granted";
+}
+
+/** Minimum live project role needed to mint a project-scoped PAT. */
+export function projectRoleForV1Scopes(scopes: readonly string[]): ProjectRole {
+  if (scopes.includes("domains:write") || scopes.includes("webhooks:write")) return "admin";
+  if (
+    scopes.includes("projects:write") ||
+    scopes.includes("builds:trigger") ||
+    scopes.includes("files:write")
+  ) {
+    return "member";
+  }
+  return "viewer";
 }
 
 /**

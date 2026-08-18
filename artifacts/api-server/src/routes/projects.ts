@@ -7,6 +7,7 @@ import {
   chatMessagesTable,
   agentTasksTable,
   projectActivityTable,
+  workspacesTable,
 } from "@workspace/db";
 import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
 import {
@@ -215,6 +216,23 @@ router.post("/projects", async (req, res): Promise<void> => {
     builderMode: requestedBuilderMode,
     ...projectInput
   } = parsed.data;
+
+  if (projectInput.workspaceId != null) {
+    const [workspace] = await db
+      .select({ id: workspacesTable.id })
+      .from(workspacesTable)
+      .where(
+        and(
+          eq(workspacesTable.id, projectInput.workspaceId),
+          eq(workspacesTable.ownerUserId, req.userId),
+          isNull(workspacesTable.deletedAt),
+        ),
+      );
+    if (!workspace) {
+      res.status(404).json({ error: "Workspace not found" });
+      return;
+    }
+  }
 
   // Derive platform from kind
   const platformMap: Record<string, string> = {

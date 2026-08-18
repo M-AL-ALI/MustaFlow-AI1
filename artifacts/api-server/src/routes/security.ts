@@ -12,6 +12,7 @@ import {
 } from "@workspace/db";
 import type { CveSeverity, CveStatus, CvePatchStatus } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { requireAdmin } from "../lib/adminAuth";
 import { generateSbom } from "../lib/sbom";
 import { getAuth } from "@clerk/express";
 import { logger } from "../lib/logger";
@@ -31,7 +32,7 @@ const router: IRouter = Router();
  * GET /api/security/cve
  * List stored CVE findings. Optionally filter by status.
  */
-router.get("/security/cve", async (req, res): Promise<void> => {
+router.get("/security/cve", requireAdmin, async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Not authenticated" });
     return;
@@ -58,7 +59,7 @@ router.get("/security/cve", async (req, res): Promise<void> => {
  * Returns the last scan timestamp and critical/high counts.
  * Calling this endpoint acknowledges any pending "new findings" notification.
  */
-router.get("/security/cve/scan-status", async (req, res): Promise<void> => {
+router.get("/security/cve/scan-status", requireAdmin, async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Not authenticated" });
     return;
@@ -72,22 +73,26 @@ router.get("/security/cve/scan-status", async (req, res): Promise<void> => {
  * POST /api/security/cve/scan-status/acknowledge
  * Resets the newCriticalHighSinceLastScan counter so the notification clears.
  */
-router.post("/security/cve/scan-status/acknowledge", async (req, res): Promise<void> => {
-  if (!req.userId) {
-    res.status(401).json({ error: "Not authenticated" });
-    return;
-  }
+router.post(
+  "/security/cve/scan-status/acknowledge",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    if (!req.userId) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
 
-  acknowledgeNewFindings();
-  res.json({ acknowledged: true });
-});
+    acknowledgeNewFindings();
+    res.json({ acknowledged: true });
+  },
+);
 
 /**
  * POST /api/security/cve/scan
  * Trigger a fresh npm audit scan, upsert results into DB, return findings.
  * Automatically enqueues CVE auto-protect jobs for new critical findings.
  */
-router.post("/security/cve/scan", async (req, res): Promise<void> => {
+router.post("/security/cve/scan", requireAdmin, async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Not authenticated" });
     return;
@@ -148,7 +153,7 @@ router.post("/security/cve/scan", async (req, res): Promise<void> => {
  * PATCH /api/security/cve/:id/dismiss
  * Dismiss a specific CVE finding.
  */
-router.patch("/security/cve/:id/dismiss", async (req, res): Promise<void> => {
+router.patch("/security/cve/:id/dismiss", requireAdmin, async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Not authenticated" });
     return;
@@ -489,7 +494,7 @@ function collectPackages(deps: Record<string, NpmLsPackage>, seen: Map<string, s
  * GET /security/sbom
  * Generate and download a CycloneDX 1.4 SBOM for the workspace dependencies.
  */
-router.get("/security/sbom", async (req, res): Promise<void> => {
+router.get("/security/sbom", requireAdmin, async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Not authenticated" });
     return;
@@ -621,7 +626,7 @@ router.get("/projects/:id/sbom", requireProjectOwnership, async (req, res): Prom
  * If the finding has a projectId, writes the patched file(s) to project_files
  * and creates a version snapshot. Otherwise, the patch is informational only.
  */
-router.post("/security/cve/:id/apply-patch", async (req, res): Promise<void> => {
+router.post("/security/cve/:id/apply-patch", requireAdmin, async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Not authenticated" });
     return;

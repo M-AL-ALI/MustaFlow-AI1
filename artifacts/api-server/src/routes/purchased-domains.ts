@@ -41,6 +41,7 @@ import { activateSslForDomain } from "./ssl";
 import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
 import { publishDomainEvent } from "../lib/event-bus";
 import { logger } from "../lib/logger";
+import { checkProjectAccess } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -273,6 +274,14 @@ router.post("/domains/purchase", async (req, res): Promise<void> => {
     return;
   }
 
+  if (
+    projectId !== undefined &&
+    (await checkProjectAccess(userId, projectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
   const hostname = rawHostname.trim().toLowerCase();
   if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(hostname)) {
     res.status(400).json({ error: "Invalid hostname" });
@@ -433,6 +442,14 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
   // (the UI redirects back with only sessionId; projectId isn't re-sent on every confirm)
   let resolvedProjectId: number | undefined = projectId;
 
+  if (
+    resolvedProjectId !== undefined &&
+    (await checkProjectAccess(userId, resolvedProjectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
   // Verify Stripe payment
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
@@ -501,6 +518,14 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown";
     res.status(502).json({ error: `Stripe error: ${msg}` });
+    return;
+  }
+
+  if (
+    resolvedProjectId !== undefined &&
+    (await checkProjectAccess(userId, resolvedProjectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
     return;
   }
 
@@ -599,17 +624,11 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
   // Auto-attach to project if provided (either from request body or recovered from session metadata)
   if (resolvedProjectId) {
     try {
-      // Verify the project exists AND belongs to this user (prevent IDOR)
+      // Reconfirm that the project still exists before attaching the domain.
       const [project] = await db
         .select({ id: projectsTable.id })
         .from(projectsTable)
-        .where(
-          and(
-            eq(projectsTable.id, resolvedProjectId),
-            eq(projectsTable.ownerId, userId),
-            isNull(projectsTable.deletedAt),
-          ),
-        );
+        .where(and(eq(projectsTable.id, resolvedProjectId), isNull(projectsTable.deletedAt)));
 
       if (project) {
         const token = `mustaflow-verify=${randomHex()}`;
@@ -686,6 +705,14 @@ router.post("/domains/transfer-in", async (req, res): Promise<void> => {
 
   if (!rawHostname || !authCode) {
     res.status(400).json({ error: "hostname and authCode are required" });
+    return;
+  }
+
+  if (
+    projectId !== undefined &&
+    (await checkProjectAccess(userId, projectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
     return;
   }
 
@@ -850,6 +877,14 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
   // projectId can come from the request body OR be recovered from Stripe session metadata
   let resolvedTransferProjectId: number | undefined = projectId;
 
+  if (
+    resolvedTransferProjectId !== undefined &&
+    (await checkProjectAccess(userId, resolvedTransferProjectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
     res.status(503).json({ error: "Payment system unavailable" });
@@ -915,6 +950,14 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown";
     res.status(502).json({ error: `Stripe error: ${msg}` });
+    return;
+  }
+
+  if (
+    resolvedTransferProjectId !== undefined &&
+    (await checkProjectAccess(userId, resolvedTransferProjectId, "member")) !== "granted"
+  ) {
+    res.status(404).json({ error: "Project not found" });
     return;
   }
 
