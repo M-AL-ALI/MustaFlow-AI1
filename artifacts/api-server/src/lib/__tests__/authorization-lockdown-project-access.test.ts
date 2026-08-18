@@ -1,0 +1,66 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  testDatabaseUrl: (process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test"),
+  selectResults: [] as unknown[][],
+  select: vi.fn(),
+}));
+
+vi.mock("@workspace/db", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@workspace/db")>();
+  mocks.select.mockImplementation(() => {
+    const rows = mocks.selectResults.shift() ?? [];
+    const query = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(async () => rows),
+    };
+    query.from.mockReturnValue(query);
+    query.innerJoin.mockReturnValue(query);
+    return query;
+  });
+  return { ...original, db: { ...original.db, select: mocks.select } };
+});
+
+describe("authorization lockdown: canonical project access", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectResults = [];
+  });
+
+  it("grants the active project owner", async () => {
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: null }]];
+    const { checkProjectAccess } = await import("../auth");
+
+    await expect(checkProjectAccess("owner", 1401, "admin")).resolves.toBe("granted");
+    expect(mocks.select).toHaveBeenCalledTimes(1);
+  });
+
+  it("grants a live organization collaborator whose role meets the minimum", async () => {
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: 81 }], [{ role: "admin" }]];
+    const { checkProjectAccess } = await import("../auth");
+
+    await expect(checkProjectAccess("collaborator", 1402, "member")).resolves.toBe("granted");
+  });
+
+  it("denies when no live organization membership survives the active-org join", async () => {
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: 82 }], []];
+    const { checkProjectAccess } = await import("../auth");
+
+    await expect(checkProjectAccess("former-collaborator", 1403)).resolves.toBe("denied");
+  });
+
+  it("denies a live collaborator below the route's required role", async () => {
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: 83 }], [{ role: "viewer" }]];
+    const { checkProjectAccess } = await import("../auth");
+
+    await expect(checkProjectAccess("viewer", 1404, "member")).resolves.toBe("denied");
+  });
+
+  it("lists owned and live-organization projects returned by the central scope query", async () => {
+    mocks.selectResults = [[{ organizationId: 84, role: "viewer" }], [{ id: 1405 }, { id: 1406 }]];
+    const { listAccessibleProjectIds } = await import("../auth");
+
+    await expect(listAccessibleProjectIds("collaborator", "viewer")).resolves.toEqual([1405, 1406]);
+  });
+});

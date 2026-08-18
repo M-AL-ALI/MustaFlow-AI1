@@ -56,7 +56,7 @@ router.post("/projects/:id/webhooks", async (req, res): Promise<void> => {
   }
 
   const projectId = Number(req.params.id);
-  if (!(await checkV1ProjectAccess(req, projectId))) {
+  if (!(await checkV1ProjectAccess(req, projectId, "admin"))) {
     res.status(404).json({ error: "Project not found." });
     return;
   }
@@ -116,7 +116,7 @@ router.delete("/projects/:id/webhooks/:webhookId", async (req, res): Promise<voi
   const projectId = Number(req.params.id);
   const webhookId = Number(req.params.webhookId);
 
-  if (!(await checkV1ProjectAccess(req, projectId))) {
+  if (!(await checkV1ProjectAccess(req, projectId, "admin"))) {
     res.status(404).json({ error: "Project not found." });
     return;
   }

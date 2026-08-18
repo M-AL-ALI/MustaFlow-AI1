@@ -123,7 +123,7 @@ router.put(
       return;
     }
 
-    if (!(await checkV1ProjectAccess(req, projectId))) {
+    if (!(await checkV1ProjectAccess(req, projectId, "member"))) {
       res.status(404).json({ error: "Project not found." });
       return;
     }

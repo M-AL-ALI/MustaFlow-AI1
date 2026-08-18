@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -8,10 +8,23 @@ import {
   projectVersionsTable,
 } from "@workspace/db";
 import { GetRecentActivityResponse } from "@workspace/api-zod";
+import { listAccessibleProjectIds } from "../lib/auth";
 
 const router: IRouter = Router();
 
-router.get("/activity", async (_req, res): Promise<void> => {
+router.get("/activity", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const projectIds = await listAccessibleProjectIds(userId, "viewer");
+  if (projectIds.length === 0) {
+    res.json([]);
+    return;
+  }
+
   const [messages, tasks, versions, projects] = await Promise.all([
     db
       .select({
@@ -24,6 +37,7 @@ router.get("/activity", async (_req, res): Promise<void> => {
       })
       .from(chatMessagesTable)
       .leftJoin(projectsTable, eq(projectsTable.id, chatMessagesTable.projectId))
+      .where(inArray(chatMessagesTable.projectId, projectIds))
       .orderBy(desc(chatMessagesTable.createdAt))
       .limit(15),
     db
@@ -37,6 +51,7 @@ router.get("/activity", async (_req, res): Promise<void> => {
       })
       .from(agentTasksTable)
       .leftJoin(projectsTable, eq(projectsTable.id, agentTasksTable.projectId))
+      .where(inArray(agentTasksTable.projectId, projectIds))
       .orderBy(desc(agentTasksTable.createdAt))
       .limit(15),
     db
@@ -49,9 +64,15 @@ router.get("/activity", async (_req, res): Promise<void> => {
       })
       .from(projectVersionsTable)
       .leftJoin(projectsTable, eq(projectsTable.id, projectVersionsTable.projectId))
+      .where(inArray(projectVersionsTable.projectId, projectIds))
       .orderBy(desc(projectVersionsTable.createdAt))
       .limit(15),
-    db.select().from(projectsTable).orderBy(desc(projectsTable.createdAt)).limit(10),
+    db
+      .select()
+      .from(projectsTable)
+      .where(inArray(projectsTable.id, projectIds))
+      .orderBy(desc(projectsTable.createdAt))
+      .limit(10),
   ]);
 
   const items = [

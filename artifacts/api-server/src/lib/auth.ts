@@ -1,8 +1,14 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { getAuth } from "@clerk/express";
 import { createHash } from "node:crypto";
-import { and, eq, gt, isNull } from "drizzle-orm";
-import { db, projectsTable, orgMembersTable, oraxDesktopSessionsTable } from "@workspace/db";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import {
+  db,
+  projectsTable,
+  orgMembersTable,
+  organizationsTable,
+  oraxDesktopSessionsTable,
+} from "@workspace/db";
 import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,6 +232,75 @@ function roleMeets(actual: string, minimum: ProjectRole): boolean {
   return actualRank >= ROLE_RANK[minimum];
 }
 
+export type ProjectAccessDecision = "granted" | "not_found" | "denied";
+
+/**
+ * Canonical project-access predicate for routes whose project id is not named
+ * `req.params.id` (for example body/query ids and project-owned child rows).
+ * This is the same owner-or-organization policy used by requireProjectAccess.
+ */
+export async function checkProjectAccess(
+  userId: string,
+  projectId: number,
+  minRole: ProjectRole = "viewer",
+): Promise<ProjectAccessDecision> {
+  const [project] = await db
+    .select({
+      ownerId: projectsTable.ownerId,
+      organizationId: projectsTable.organizationId,
+    })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+  if (!project) return "not_found";
+  if (project.ownerId === userId) return "granted";
+
+  if (project.organizationId != null) {
+    const [member] = await db
+      .select({ role: orgMembersTable.role })
+      .from(orgMembersTable)
+      .innerJoin(organizationsTable, eq(organizationsTable.id, orgMembersTable.organizationId))
+      .where(
+        and(
+          eq(orgMembersTable.organizationId, project.organizationId),
+          eq(orgMembersTable.userId, userId),
+          isNull(organizationsTable.deletedAt),
+        ),
+      );
+    if (member && roleMeets(member.role, minRole)) return "granted";
+  }
+
+  return "denied";
+}
+
+/** Return every active project the user may access at the requested role. */
+export async function listAccessibleProjectIds(
+  userId: string,
+  minRole: ProjectRole = "viewer",
+): Promise<number[]> {
+  const memberships = await db
+    .select({ organizationId: orgMembersTable.organizationId, role: orgMembersTable.role })
+    .from(orgMembersTable)
+    .innerJoin(organizationsTable, eq(organizationsTable.id, orgMembersTable.organizationId))
+    .where(and(eq(orgMembersTable.userId, userId), isNull(organizationsTable.deletedAt)));
+  const organizationIds = memberships
+    .filter((membership) => roleMeets(membership.role, minRole))
+    .map((membership) => membership.organizationId);
+
+  const accessCondition =
+    organizationIds.length > 0
+      ? or(
+          eq(projectsTable.ownerId, userId),
+          inArray(projectsTable.organizationId, organizationIds),
+        )
+      : eq(projectsTable.ownerId, userId);
+  const rows = await db
+    .select({ id: projectsTable.id })
+    .from(projectsTable)
+    .where(and(accessCondition!, isNull(projectsTable.deletedAt)));
+  return rows.map((row) => row.id);
+}
+
 export function requireProjectAccess(minRole: ProjectRole = "viewer"): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (!req.userId) {
@@ -238,34 +313,14 @@ export function requireProjectAccess(minRole: ProjectRole = "viewer"): RequestHa
       res.status(400).json({ error: "Invalid project id" });
       return;
     }
-    const [project] = await db
-      .select()
-      .from(projectsTable)
-      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-    if (!project) {
+    const decision = await checkProjectAccess(req.userId, projectId, minRole);
+    if (decision === "not_found") {
       res.status(404).json({ error: "Project not found" });
       return;
     }
-    // Direct project owner always has full access — preserves solo-user behaviour.
-    if (project.ownerId === req.userId) {
+    if (decision === "granted") {
       next();
       return;
-    }
-    // Otherwise, check org membership when the project is org-scoped.
-    if (project.organizationId != null) {
-      const [member] = await db
-        .select({ role: orgMembersTable.role })
-        .from(orgMembersTable)
-        .where(
-          and(
-            eq(orgMembersTable.organizationId, project.organizationId),
-            eq(orgMembersTable.userId, req.userId),
-          ),
-        );
-      if (member && roleMeets(member.role, minRole)) {
-        next();
-        return;
-      }
     }
     res.status(403).json({ error: "You do not have access to this project" });
   };
