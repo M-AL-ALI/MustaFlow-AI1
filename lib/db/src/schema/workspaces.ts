@@ -1,4 +1,18 @@
-import { index, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  serial,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
+
+export const WORKSPACE_MEMBER_ROLES = ["owner", "admin", "builder", "viewer", "billing"] as const;
+export type WorkspaceMemberRole = (typeof WORKSPACE_MEMBER_ROLES)[number];
+
+export const workspaceMemberRoleEnum = pgEnum("workspace_member_role", WORKSPACE_MEMBER_ROLES);
 
 export const workspacesTable = pgTable(
   "workspaces",
@@ -15,5 +29,26 @@ export const workspacesTable = pgTable(
   (t) => [index("workspaces_owner_user_idx").on(t.ownerUserId)],
 );
 
+export const workspaceMembersTable = pgTable(
+  "workspace_members",
+  {
+    workspaceId: integer("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    role: workspaceMemberRoleEnum("role").notNull(),
+    /** Actor that established the membership; owners created by signup/backfill self-attest. */
+    invitedBy: text("invited_by").notNull(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.userId], name: "workspace_members_pk" }),
+    index("workspace_members_user_idx").on(t.userId),
+    index("workspace_members_workspace_role_idx").on(t.workspaceId, t.role),
+  ],
+);
+
 export type Workspace = typeof workspacesTable.$inferSelect;
 export type InsertWorkspace = typeof workspacesTable.$inferInsert;
+export type WorkspaceMember = typeof workspaceMembersTable.$inferSelect;
+export type InsertWorkspaceMember = typeof workspaceMembersTable.$inferInsert;

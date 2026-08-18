@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, workspacesTable } from "@workspace/db";
 import { z } from "zod";
+import { createOwnedWorkspace } from "../lib/workspace-foundation";
 
 const router: IRouter = Router();
 
@@ -19,30 +20,12 @@ const WorkspaceUpdateSchema = z.object({
 
 const activeWorkspaces = isNull(workspacesTable.deletedAt);
 
-async function ensureDefaultWorkspace(userId: string) {
-  const existing = await db
-    .select()
-    .from(workspacesTable)
-    .where(and(eq(workspacesTable.ownerUserId, userId), activeWorkspaces))
-    .limit(1);
-
-  if (existing.length > 0) return existing[0];
-
-  const [created] = await db
-    .insert(workspacesTable)
-    .values({ ownerUserId: userId, name: "My Workspace", type: "personal" })
-    .returning();
-
-  return created;
-}
-
 router.get("/workspaces", async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
   const userId = req.userId;
-  await ensureDefaultWorkspace(userId);
 
   const rows = await db
     .select()
@@ -65,12 +48,10 @@ router.post("/workspaces", async (req, res): Promise<void> => {
   }
 
   const userId = req.userId;
-  const [workspace] = await db
-    .insert(workspacesTable)
-    .values({ ownerUserId: userId, ...parsed.data })
-    .returning();
-
-  if (!workspace) {
+  let workspace;
+  try {
+    workspace = await createOwnedWorkspace({ ownerUserId: userId, ...parsed.data });
+  } catch {
     res.status(500).json({ error: "Failed to create workspace" });
     return;
   }
@@ -175,5 +156,4 @@ router.delete("/workspaces/:id", async (req, res): Promise<void> => {
   res.json({ deleted: true });
 });
 
-export { ensureDefaultWorkspace };
 export default router;

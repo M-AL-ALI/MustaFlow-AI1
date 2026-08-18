@@ -8,7 +8,7 @@
 //   user.deleted                   — soft-delete all user projects, revoke sessions
 //                                    and PATs, remove all org memberships
 //   organizationMembership.deleted — remove user from the specific org in org_members
-//   user.created                   — safety-net starter credit grant (100 credits)
+//   user.created                   — starter credits plus an owned default workspace
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
@@ -19,11 +19,11 @@ import {
   projectsTable,
   orgMembersTable,
   organizationsTable,
-  userCreditsTable,
   previewSessionsTable,
   personalAccessTokensTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { ensureUserSignupFoundation } from "../lib/workspace-foundation";
 
 const router: IRouter = Router();
 
@@ -183,20 +183,26 @@ async function handleOrgMembershipDeleted(data: Record<string, unknown>): Promis
 }
 
 // ── user.created ──────────────────────────────────────────────────────────────
-// Safety-net: grants 100 starter credits if the user row doesn't already exist.
-// The primary grant happens in-band during sign-up; this catches any race
-// condition where that grant was missed.
-async function handleUserCreated(data: Record<string, unknown>): Promise<void> {
+// Grants starter credits and creates the user's owned default workspace. Both
+// operations are idempotent because Clerk may deliver the same event more than once.
+export async function handleUserCreated(data: Record<string, unknown>): Promise<void> {
   const userId = data.id as string | undefined;
   if (!userId) {
     logger.warn({ data }, "user.created event missing id — skipped");
     return;
   }
 
-  // Use ON CONFLICT DO NOTHING so concurrent/duplicate webhook deliveries are safe.
-  await db.insert(userCreditsTable).values({ userId, balance: 100 }).onConflictDoNothing();
+  const firstName = typeof data.first_name === "string" ? data.first_name.trim() : "";
+  const lastName = typeof data.last_name === "string" ? data.last_name.trim() : "";
+  const username = typeof data.username === "string" ? data.username.trim() : "";
+  const displayName = [firstName, lastName].filter(Boolean).join(" ") || username || null;
 
-  logger.info({ userId }, "Clerk user.created — starter 100 credits granted via webhook");
+  const result = await ensureUserSignupFoundation({ userId, displayName });
+
+  logger.info(
+    { userId, workspaceId: result.workspace.id, workspaceCreated: result.workspaceCreated },
+    "Clerk user.created — signup foundation established",
+  );
 }
 
 export default router;
