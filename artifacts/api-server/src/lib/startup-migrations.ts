@@ -115,6 +115,150 @@ export async function applyProjectOwnerSchemaHardening(
   await client.query(`CREATE INDEX IF NOT EXISTS projects_workspace_idx ON projects(workspace_id)`);
 }
 
+export interface WorkspaceFoundationBackfillResult {
+  existingWorkspaceOwnerMembershipsCreated: number;
+  defaultWorkspacesCreated: number;
+  defaultWorkspaceOwnerMembershipsCreated: number;
+}
+
+/**
+ * Establish workspace membership and signup defaults without using a display name as identity.
+ * The application has no canonical local users table, so the backfill enumerates every durable
+ * user-bearing table. Optional cached profile names are display copy only and fall back to
+ * "My workspace".
+ */
+export async function applyWorkspaceFoundationMigration(
+  client: Pick<import("pg").PoolClient, "query">,
+): Promise<WorkspaceFoundationBackfillResult> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      DO $$
+      BEGIN
+        CREATE TYPE workspace_member_role AS ENUM ('owner', 'admin', 'builder', 'viewer', 'billing');
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS workspace_members (
+        workspace_id integer NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id text NOT NULL,
+        role workspace_member_role NOT NULL,
+        invited_by text NOT NULL,
+        joined_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT workspace_members_pk PRIMARY KEY (workspace_id, user_id)
+      )
+    `);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS workspace_members_user_idx ON workspace_members(user_id)`,
+    );
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS workspace_members_workspace_role_idx
+        ON workspace_members(workspace_id, role)
+    `);
+
+    // Serialize the short backfill against signup workspace inserts. This makes repeated or
+    // concurrent startup runs idempotent without treating a mutable display name as identity.
+    await client.query(`LOCK TABLE workspaces IN SHARE ROW EXCLUSIVE MODE`);
+
+    const existingOwners = await client.query<{ workspace_id: number }>(`
+      INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_at)
+      SELECT id, owner_user_id, 'owner', owner_user_id, created_at
+        FROM workspaces
+      ON CONFLICT (workspace_id, user_id) DO NOTHING
+      RETURNING workspace_id
+    `);
+
+    const defaultWorkspaces = await client.query<{
+      id: number;
+      owner_user_id: string;
+      created_at: Date;
+    }>(`
+      WITH existing_users AS (
+        SELECT user_id FROM user_credits
+        UNION SELECT owner_id AS user_id FROM projects
+        UNION SELECT user_id FROM org_members
+        UNION SELECT user_id FROM user_subscriptions
+        UNION SELECT user_id FROM personal_access_tokens
+        UNION SELECT user_id FROM community_profiles
+        UNION SELECT user_id FROM ora_profiles
+        UNION SELECT owner_user_id AS user_id FROM workspaces
+      ), org_display_names AS (
+        SELECT user_id, MIN(NULLIF(BTRIM(display_name), '')) AS display_name
+          FROM org_members
+         GROUP BY user_id
+      ), candidate_users AS (
+        SELECT
+          existing_users.user_id,
+          COALESCE(
+            NULLIF(BTRIM(community.display_name), ''),
+            NULLIF(BTRIM(ora.preferred_name), ''),
+            org_display_names.display_name
+          ) AS display_name
+        FROM existing_users
+        LEFT JOIN community_profiles AS community ON community.user_id = existing_users.user_id
+        LEFT JOIN ora_profiles AS ora ON ora.user_id = existing_users.user_id
+        LEFT JOIN org_display_names ON org_display_names.user_id = existing_users.user_id
+        WHERE existing_users.user_id <> 'demo-user'
+          AND NOT EXISTS (
+          SELECT 1
+            FROM workspaces AS existing
+           WHERE existing.owner_user_id = existing_users.user_id
+             AND existing.deleted_at IS NULL
+        )
+      )
+      INSERT INTO workspaces (owner_user_id, name, type)
+      SELECT
+        user_id,
+        CASE
+          WHEN display_name IS NULL THEN 'My workspace'
+          ELSE LEFT(REGEXP_REPLACE(display_name, '\\s+', ' ', 'g'), 100) || '''s workspace'
+        END,
+        'personal'
+      FROM candidate_users
+      RETURNING id, owner_user_id, created_at
+    `);
+
+    let defaultWorkspaceOwnerMembershipsCreated = 0;
+    if (defaultWorkspaces.rows.length > 0) {
+      const defaultOwners = await client.query<{ workspace_id: number }>(
+        `INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_at)
+         SELECT id, owner_user_id, 'owner', owner_user_id, created_at
+           FROM workspaces
+          WHERE id = ANY($1::integer[])
+         ON CONFLICT (workspace_id, user_id) DO NOTHING
+         RETURNING workspace_id`,
+        [defaultWorkspaces.rows.map((workspace) => workspace.id)],
+      );
+      defaultWorkspaceOwnerMembershipsCreated = defaultOwners.rowCount ?? 0;
+    }
+
+    const ownerless = await client.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+        FROM workspaces AS workspace
+       WHERE NOT EXISTS (
+         SELECT 1
+           FROM workspace_members AS member
+          WHERE member.workspace_id = workspace.id
+            AND member.role = 'owner'
+       )
+    `);
+    if (Number(ownerless.rows[0]?.count ?? "0") !== 0) {
+      throw new Error("workspace_owner_membership_backfill_incomplete");
+    }
+
+    await client.query("COMMIT");
+    return {
+      existingWorkspaceOwnerMembershipsCreated: existingOwners.rowCount ?? 0,
+      defaultWorkspacesCreated: defaultWorkspaces.rowCount ?? 0,
+      defaultWorkspaceOwnerMembershipsCreated,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 const BILLING_CREDITS_HELP_SLUG = "billing-credits";
 const NABUFLOW_HELP_SLUGS = ["faq-what-is-mustaflow", "faq-build-mobile-apps"] as const;
 
@@ -5288,6 +5432,13 @@ const MIGRATION_STEPS: MigrationStep[] = [
         },
         "startup-migrations: stored integration credentials processed",
       );
+    },
+  },
+  {
+    name: "migrate-workspace-foundation",
+    async run(client) {
+      const result = await applyWorkspaceFoundationMigration(client);
+      logger.info(result, "startup-migrations: workspace foundation established");
     },
   },
 ];
