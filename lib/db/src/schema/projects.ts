@@ -15,7 +15,9 @@ export const projectsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     ownerId: text("owner_id").notNull(),
-    workspaceId: integer("workspace_id").references(() => workspacesTable.id),
+    workspaceId: integer("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id),
     name: text("name").notNull(),
     description: text("description"),
     kind: text("kind").notNull().default("web"),

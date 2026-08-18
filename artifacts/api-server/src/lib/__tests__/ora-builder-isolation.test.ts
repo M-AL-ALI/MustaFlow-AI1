@@ -42,12 +42,13 @@ vi.mock("../embeddings", () => ({
 
 const FIXED_VECTOR = Array.from({ length: 1536 }, () => 0.1);
 
-import { db, knowledgeEntriesTable, projectsTable, pool } from "@workspace/db";
+import { db, knowledgeEntriesTable, projectsTable, pool, workspacesTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { loadKnowledgeContext } from "../jobs";
 import { writeKnowledge } from "../knowledge";
 import knowledgeRouter from "../../routes/knowledge";
 import oraMemoriesRouter from "../../routes/ora-memories";
+import { createOwnedWorkspace } from "../workspace-foundation";
 
 // Unique owner per run so seeded rows never collide with real data or a
 // previous run, and cleanup is a single delete-by-userId.
@@ -58,6 +59,7 @@ const ORA_MARKER = `ORA_SECRET_${TEST_USER}`;
 const BUILDER_MARKER = `BUILDER_LESSON_${TEST_USER}`;
 
 let projectId: number;
+let workspaceId: number;
 
 // Express apps mounting the REAL routers with a fake auth shim that sets
 // req.userId — mirrors how attachUser populates it in production.
@@ -94,11 +96,17 @@ async function seedKnowledgeRow(values: Partial<typeof knowledgeEntriesTable.$in
 }
 
 beforeAll(async () => {
+  const workspace = await createOwnedWorkspace({
+    ownerUserId: TEST_USER,
+    name: `Isolation workspace ${TEST_USER}`,
+    type: "personal",
+  });
+  workspaceId = workspace.id;
   // A project owned by the test user — loadKnowledgeContext pulls the owner's
   // user-scope entries via the project's ownerId.
   const [project] = await db
     .insert(projectsTable)
-    .values({ name: `iso-test-${TEST_USER}`, ownerId: TEST_USER })
+    .values({ name: `iso-test-${TEST_USER}`, ownerId: TEST_USER, workspaceId })
     .returning({ id: projectsTable.id });
   projectId = project!.id;
 });
@@ -107,6 +115,7 @@ afterAll(async () => {
   // Clean up everything this suite created.
   await db.delete(knowledgeEntriesTable).where(eq(knowledgeEntriesTable.userId, TEST_USER));
   await db.delete(projectsTable).where(eq(projectsTable.ownerId, TEST_USER));
+  await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
 });
 
 describe("Ora ↔ Builder memory isolation", () => {

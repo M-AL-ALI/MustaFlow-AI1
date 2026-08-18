@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import express from "express";
 import request from "supertest";
 import { and, eq, inArray } from "drizzle-orm";
-import { db, supportTicketsTable, projectsTable } from "@workspace/db";
+import { db, supportTicketsTable, projectsTable, workspacesTable } from "@workspace/db";
+import { createOwnedWorkspace } from "../../lib/workspace-foundation";
 
 /**
  * Regression tests: Support tickets are private to their owner (Task #1315).
@@ -67,6 +68,7 @@ const ALL_USERS = [USER_A, USER_B];
 
 let projectA: number;
 let projectB: number;
+const workspaceIds: number[] = [];
 
 function actAs(userId: string) {
   vi.mocked(resolveAuthedOraUser).mockResolvedValue({
@@ -92,15 +94,26 @@ async function escalateAs(app: express.Express, userId: string, body: Record<str
 }
 
 beforeAll(async () => {
+  const workspaceA = await createOwnedWorkspace({
+    ownerUserId: USER_A,
+    name: "Owner A workspace",
+    type: "personal",
+  });
+  const workspaceB = await createOwnedWorkspace({
+    ownerUserId: USER_B,
+    name: "Owner B workspace",
+    type: "personal",
+  });
+  workspaceIds.push(workspaceA.id, workspaceB.id);
   const [a] = await db
     .insert(projectsTable)
-    .values({ ownerId: USER_A, name: "Owner A project" })
+    .values({ ownerId: USER_A, workspaceId: workspaceA.id, name: "Owner A project" })
     .returning({ id: projectsTable.id });
   projectA = a!.id;
 
   const [b] = await db
     .insert(projectsTable)
-    .values({ ownerId: USER_B, name: "Owner B project" })
+    .values({ ownerId: USER_B, workspaceId: workspaceB.id, name: "Owner B project" })
     .returning({ id: projectsTable.id });
   projectB = b!.id;
 });
@@ -108,6 +121,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(supportTicketsTable).where(inArray(supportTicketsTable.userId, ALL_USERS));
   await db.delete(projectsTable).where(inArray(projectsTable.ownerId, ALL_USERS));
+  await db.delete(workspacesTable).where(inArray(workspacesTable.id, workspaceIds));
 });
 
 describe("Support tickets are scoped to their owner", () => {

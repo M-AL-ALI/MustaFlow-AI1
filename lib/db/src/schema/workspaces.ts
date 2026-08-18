@@ -7,7 +7,9 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const WORKSPACE_MEMBER_ROLES = ["owner", "admin", "builder", "viewer", "billing"] as const;
 export type WorkspaceMemberRole = (typeof WORKSPACE_MEMBER_ROLES)[number];
@@ -19,6 +21,8 @@ export const workspacesTable = pgTable(
   {
     id: serial("id").primaryKey(),
     ownerUserId: text("owner_user_id").notNull(),
+    /** Stable machine identity for governed system workspaces; display names remain labels. */
+    systemKey: text("system_key"),
     name: text("name").notNull(),
     description: text("description"),
     type: text("type").notNull().default("personal"),
@@ -26,7 +30,12 @@ export const workspacesTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("workspaces_owner_user_idx").on(t.ownerUserId)],
+  (t) => [
+    index("workspaces_owner_user_idx").on(t.ownerUserId),
+    uniqueIndex("workspaces_system_key_unique")
+      .on(t.systemKey)
+      .where(sql`${t.systemKey} IS NOT NULL`),
+  ],
 );
 
 export const workspaceMembersTable = pgTable(

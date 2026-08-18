@@ -4,6 +4,10 @@ import { db, projectsTable, projectFilesTable, projectActivityTable } from "@wor
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
 import { enqueueProvisionProjectJob } from "../lib/provisioning";
+import {
+  ProjectWorkspaceUnavailableError,
+  resolveProjectWorkspaceId,
+} from "../lib/workspace-tenancy";
 
 const router: IRouter = Router();
 
@@ -25,6 +29,20 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
     .from(projectFilesTable)
     .where(eq(projectFilesTable.projectId, projectId));
 
+  let workspaceId: number;
+  try {
+    workspaceId = await resolveProjectWorkspaceId({
+      userId: req.userId!,
+      requestedWorkspaceId: original.workspaceId,
+    });
+  } catch (error) {
+    if (error instanceof ProjectWorkspaceUnavailableError) {
+      res.status(409).json({ error: error.code });
+      return;
+    }
+    throw error;
+  }
+
   const [newProject] = await db
     .insert(projectsTable)
     .values({
@@ -32,6 +50,7 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
       kind: original.kind,
       description: original.description,
       ownerId: req.userId!,
+      workspaceId,
       status: "draft",
       agentMode: original.agentMode,
       lastTaskSummary: `Duplicated from "${original.name}"`,

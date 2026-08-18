@@ -7,7 +7,6 @@ import {
   chatMessagesTable,
   agentTasksTable,
   projectActivityTable,
-  workspacesTable,
 } from "@workspace/db";
 import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
 import {
@@ -38,6 +37,10 @@ import {
   resolveZeroProjectDeploymentType,
   resolveZeroProjectRuntimePort,
 } from "../lib/zero-sealed-generation";
+import {
+  ProjectWorkspaceUnavailableError,
+  resolveProjectWorkspaceId,
+} from "../lib/workspace-tenancy";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -217,21 +220,18 @@ router.post("/projects", async (req, res): Promise<void> => {
     ...projectInput
   } = parsed.data;
 
-  if (projectInput.workspaceId != null) {
-    const [workspace] = await db
-      .select({ id: workspacesTable.id })
-      .from(workspacesTable)
-      .where(
-        and(
-          eq(workspacesTable.id, projectInput.workspaceId),
-          eq(workspacesTable.ownerUserId, req.userId),
-          isNull(workspacesTable.deletedAt),
-        ),
-      );
-    if (!workspace) {
-      res.status(404).json({ error: "Workspace not found" });
+  let workspaceId: number;
+  try {
+    workspaceId = await resolveProjectWorkspaceId({
+      userId: req.userId,
+      requestedWorkspaceId: projectInput.workspaceId,
+    });
+  } catch (error) {
+    if (error instanceof ProjectWorkspaceUnavailableError) {
+      res.status(409).json({ error: error.code });
       return;
     }
+    throw error;
   }
 
   // Derive platform from kind
@@ -262,7 +262,7 @@ router.post("/projects", async (req, res): Promise<void> => {
     .insert(projectsTable)
     .values({
       ownerId: req.userId!,
-      workspaceId: projectInput.workspaceId ?? null,
+      workspaceId,
       name: projectInput.name,
       description: projectInput.description ?? null,
       kind: projectInput.kind,

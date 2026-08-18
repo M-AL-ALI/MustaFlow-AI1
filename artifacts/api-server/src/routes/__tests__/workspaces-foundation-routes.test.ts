@@ -43,6 +43,7 @@ function workspace(id: number, ownerUserId = "owner-a") {
   return {
     id,
     ownerUserId,
+    systemKey: "fixture-system-key",
     name: "Display label",
     description: null,
     type: "personal",
@@ -78,6 +79,7 @@ describe("workspace foundation routes", () => {
     expect(response.body).toEqual([
       expect.objectContaining({ id: 1, ownerUserId: "owner-a", name: "Display label" }),
     ]);
+    expect(response.body[0]).not.toHaveProperty("systemKey");
     expect(mocks.createOwnedWorkspace).not.toHaveBeenCalled();
   });
 
@@ -97,6 +99,7 @@ describe("workspace foundation routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ id: 7, ownerUserId: "owner-a" });
+    expect(response.body).not.toHaveProperty("systemKey");
   });
 
   it("creates a workspace through the transactional owner-membership helper", async () => {
@@ -117,5 +120,6 @@ describe("workspace foundation routes", () => {
       description: "Display copy",
       type: "team",
     });
+    expect(response.body).not.toHaveProperty("systemKey");
   });
 });

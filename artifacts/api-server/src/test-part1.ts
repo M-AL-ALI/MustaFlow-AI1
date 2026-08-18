@@ -9,6 +9,7 @@
 import { db } from "@workspace/db";
 import { projectsTable, agentTasksTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { resolveProjectWorkspaceId } from "./lib/workspace-tenancy";
 
 const REAL_USER_ID = "user_3Dv2h4CdaJoviog3ToUryvt3kft";
 const PROJECT_NAME = "Towco Fullstack";
@@ -38,11 +39,13 @@ async function main() {
 
   // ── Step 1: Create project ──────────────────────────────────────────────
   console.log("Step 1: Creating project…");
+  const workspaceId = await resolveProjectWorkspaceId({ userId: REAL_USER_ID });
   const [project] = await db
     .insert(projectsTable)
     .values({
       name: PROJECT_NAME,
       ownerId: REAL_USER_ID,
+      workspaceId,
       kind: "web",
       stack: "node-api",
       builderMode: "agentic",
