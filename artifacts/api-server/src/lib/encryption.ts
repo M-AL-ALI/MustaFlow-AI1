@@ -36,6 +36,11 @@ const IV_BYTES = 12;
 const _TAG_BYTES = 16;
 const VERSION_PREFIX = "v1:";
 
+/** True when a stored value already uses the platform's versioned ciphertext envelope. */
+export function isEncryptedValue(value: string): boolean {
+  return value.startsWith(VERSION_PREFIX);
+}
+
 export interface EncryptionService {
   encrypt(plaintext: string): string;
   decrypt(ciphertext: string): string;
@@ -68,7 +73,7 @@ class AES256GcmEncryptionService implements EncryptionService {
 
   decrypt(stored: string): string {
     // Legacy plaintext — was stored before encryption was active
-    if (!stored.startsWith(VERSION_PREFIX)) {
+    if (!isEncryptedValue(stored)) {
       return stored;
     }
     const parts = stored.slice(VERSION_PREFIX.length).split(":");

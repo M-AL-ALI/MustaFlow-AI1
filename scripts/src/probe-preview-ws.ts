@@ -39,8 +39,8 @@ console.log("echo port:", echoPort);
 const sid = randomBytes(8).toString("hex");
 const { rows: pr } = await pool.query<{ id: number }>(
   `INSERT INTO projects
-     (name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
-   VALUES ($1,'draft','agentic',$2,'running',now(),now())
+     (owner_id, name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
+   VALUES ('ws-probe-user',$1,'draft','agentic',$2,'running',now(),now())
    RETURNING id`,
   ["ws-probe-project", `http://127.0.0.1:${echoPort}`],
 );

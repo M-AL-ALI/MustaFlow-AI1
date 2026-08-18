@@ -11,6 +11,7 @@
 import { db, mcpServersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
+import { encryptionService } from "./encryption";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
@@ -91,7 +92,8 @@ export interface McpTool {
   serverId: number;
   serverName: string;
   endpoint: string;
-  authHeader: string | null;
+  /** Versioned ciphertext from storage. Decrypted only while assembling the outbound request. */
+  storedAuthHeader: string | null;
 }
 
 interface McpListResult {
@@ -104,12 +106,13 @@ interface McpListResult {
 
 async function jsonRpc(
   endpoint: string,
-  authHeader: string | null,
+  storedAuthHeader: string | null,
   method: string,
   params: Record<string, unknown>,
   timeoutMs = 8_000,
 ): Promise<unknown> {
   await assertSafeEndpoint(endpoint);
+  const authHeader = storedAuthHeader ? encryptionService.decrypt(storedAuthHeader) : null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -171,7 +174,7 @@ export async function discoverMcpTools(): Promise<McpTool[]> {
         serverId: row.id,
         serverName: row.name,
         endpoint: row.endpoint,
-        authHeader: row.authHeader,
+        storedAuthHeader: row.authHeader,
       });
     }
   }
@@ -187,7 +190,7 @@ export async function callMcpTool(
   args: Record<string, unknown>,
 ): Promise<{ ok: boolean; result?: unknown; error?: string }> {
   try {
-    const r = await jsonRpc(tool.endpoint, tool.authHeader, "tools/call", {
+    const r = await jsonRpc(tool.endpoint, tool.storedAuthHeader, "tools/call", {
       name: tool.serverToolName,
       arguments: args,
     });

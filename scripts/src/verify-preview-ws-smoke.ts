@@ -165,9 +165,9 @@ const sessionIds: string[] = [];
 async function insertTestProject(containerPort: number): Promise<number> {
   const { rows } = await pool.query<{ id: number }>(
     `INSERT INTO projects
-       (name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
+       (owner_id, name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
      VALUES
-       ($1, 'draft', 'agentic', $2, 'running', now(), now())
+       ('smoke-test-user', $1, 'draft', 'agentic', $2, 'running', now(), now())
      RETURNING id`,
     ["ws-smoke-test-project", `http://127.0.0.1:${containerPort}`],
   );

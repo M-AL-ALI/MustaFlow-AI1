@@ -22,6 +22,7 @@ import {
 } from "./namecheap";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
+import { encryptionService } from "./encryption";
 import { sendDomainRenewalWarning, sendDomainRenewalFailure } from "./emailClient";
 
 const INITIAL_DELAY_MS = 60_000;
@@ -338,11 +339,13 @@ async function runTransferPolling(): Promise<void> {
   }
 
   for (const domain of pendingTransfers) {
-    // `transferAuthCode` is repurposed post-confirmation to store the Namecheap TransferID
-    const namecheapTransferId = domain.transferAuthCode;
-    if (!namecheapTransferId) continue;
-
     try {
+      // `transferAuthCode` is repurposed post-confirmation to store the Namecheap TransferID.
+      const namecheapTransferId = domain.transferAuthCode
+        ? encryptionService.decrypt(domain.transferAuthCode)
+        : null;
+      if (!namecheapTransferId) continue;
+
       const statusResult = await getTransferStatus(namecheapTransferId);
       if (!statusResult) continue;
 
@@ -357,10 +360,7 @@ async function runTransferPolling(): Promise<void> {
           })
           .where(eq(purchasedDomainsTable.id, domain.id));
 
-        logger.info(
-          { hostname: domain.hostname, namecheapTransferId },
-          "Transfer completed — domain marked active",
-        );
+        logger.info({ hostname: domain.hostname }, "Transfer completed — domain marked active");
       } else if (statusResult.status === "Cancelled" || statusResult.status === "Failed") {
         await db
           .update(purchasedDomainsTable)
@@ -372,7 +372,7 @@ async function runTransferPolling(): Promise<void> {
           .where(eq(purchasedDomainsTable.id, domain.id));
 
         logger.warn(
-          { hostname: domain.hostname, namecheapTransferId, statusResult },
+          { hostname: domain.hostname, statusResult },
           "Transfer failed/cancelled — domain marked transfer_failed",
         );
       } else {

@@ -57,7 +57,7 @@ export const mcpServersTable = pgTable(
     description: text("description"),
     /** Full HTTPS endpoint of the MCP server (JSON-RPC over HTTP). */
     endpoint: text("endpoint").notNull(),
-    /** Optional auth header value (encrypted at rest is future work). */
+    /** Optional auth header value, stored with the platform AES-256-GCM envelope. */
     authHeader: text("auth_header"),
     /** When false, the server is registered but skipped at tool registration time. */
     enabled: boolean("enabled").notNull().default(true),

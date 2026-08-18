@@ -14,6 +14,11 @@ async function main() {
     return;
   }
 
+  const ownerId = process.env.SEED_OWNER_ID?.trim();
+  if (!ownerId) {
+    throw new Error("SEED_OWNER_ID is required when creating sample projects");
+  }
+
   const seeds = [
     {
       name: "Aurora Notes",
@@ -40,7 +45,10 @@ async function main() {
   ];
 
   for (const seed of seeds) {
-    const [p] = await db.insert(projectsTable).values(seed).returning();
+    const [p] = await db
+      .insert(projectsTable)
+      .values({ ...seed, ownerId })
+      .returning();
     if (!p) continue;
     await db.insert(chatMessagesTable).values([
       {
