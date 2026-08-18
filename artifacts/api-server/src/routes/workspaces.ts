@@ -30,11 +30,9 @@ const publicWorkspaceFields = {
   updatedAt: workspacesTable.updatedAt,
 };
 
-function publicWorkspace<T extends { systemKey?: string | null }>(
-  workspace: T,
-): Omit<T, "systemKey"> {
-  const { systemKey: _systemKey, ...safe } = workspace;
-  return safe;
+function publicWorkspace<T extends Record<string, unknown>>(workspace: T): Omit<T, "systemKey"> {
+  const { systemKey: _systemKey, ...safe } = workspace as Record<string, unknown>;
+  return safe as Omit<T, "systemKey">;
 }
 
 router.get("/workspaces", async (req, res): Promise<void> => {
