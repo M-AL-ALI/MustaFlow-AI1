@@ -14,7 +14,7 @@ export const projectsTable = pgTable(
   "projects",
   {
     id: serial("id").primaryKey(),
-    ownerId: text("owner_id").notNull().default("demo-user"),
+    ownerId: text("owner_id").notNull(),
     workspaceId: integer("workspace_id").references(() => workspacesTable.id),
     name: text("name").notNull(),
     description: text("description"),
@@ -269,7 +269,11 @@ export const projectsTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("projects_org_idx").on(t.organizationId)],
+  (t) => [
+    index("projects_org_idx").on(t.organizationId),
+    index("projects_owner_idx").on(t.ownerId),
+    index("projects_workspace_idx").on(t.workspaceId),
+  ],
 );
 
 export type Project = typeof projectsTable.$inferSelect;

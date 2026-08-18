@@ -42,6 +42,7 @@ import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
 import { publishDomainEvent } from "../lib/event-bus";
 import { logger } from "../lib/logger";
 import { checkProjectAccess } from "../lib/auth";
+import { encryptionService } from "../lib/encryption";
 
 const router: IRouter = Router();
 
@@ -115,6 +116,13 @@ async function getPurchasedDomainForUser(id: number, userId: string) {
     .from(purchasedDomainsTable)
     .where(and(eq(purchasedDomainsTable.id, id), eq(purchasedDomainsTable.userId, userId)));
   return row ?? null;
+}
+
+/** Keep the credential-bearing storage column out of ordinary domain responses. */
+function redactPurchasedDomainCredential<T extends { transferAuthCode: string | null }>(
+  domain: T,
+): T {
+  return { ...domain, transferAuthCode: null };
 }
 
 // ── Helper: build a verification token ───────────────────────────────────────
@@ -212,7 +220,7 @@ router.get("/domains/purchased", async (req, res): Promise<void> => {
     .where(eq(purchasedDomainsTable.userId, userId))
     .orderBy(desc(purchasedDomainsTable.createdAt));
 
-  res.json({ domains });
+  res.json({ domains: domains.map(redactPurchasedDomainCredential) });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +241,7 @@ router.get("/domains/purchased/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json({ domain });
+  res.json({ domain: redactPurchasedDomainCredential(domain) });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -537,7 +545,7 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
       and(eq(purchasedDomainsTable.hostname, hostname), eq(purchasedDomainsTable.userId, userId)),
     );
   if (existing) {
-    res.json({ domain: existing, alreadyRegistered: true });
+    res.json({ domain: redactPurchasedDomainCredential(existing), alreadyRegistered: true });
     return;
   }
 
@@ -667,7 +675,7 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
   }
 
   logger.info({ hostname, userId, orderId: namecheapOrderId }, "Domain purchased successfully");
-  res.status(201).json({ domain: newDomain });
+  res.status(201).json({ domain: redactPurchasedDomainCredential(newDomain) });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1010,7 +1018,7 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
       stripePaymentIntentId: paymentIntentId ?? null,
       stripeCustomerId: resolvedTransferCustomerId,
       projectId: resolvedTransferProjectId ?? null,
-      transferAuthCode: transferId ?? null,
+      transferAuthCode: transferId ? encryptionService.encrypt(transferId) : null,
       pricePaidUsd,
       renewalPriceUsd,
       whoisFirstName: defaultContact.firstName,
@@ -1026,7 +1034,7 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
     .returning();
 
   res.status(201).json({
-    domain: newDomain,
+    domain: newDomain ? redactPurchasedDomainCredential(newDomain) : newDomain,
     note: "Transfer initiated. It typically takes 5–7 days to complete.",
   });
 });
@@ -1065,7 +1073,7 @@ router.patch("/domains/purchased/:id/auto-renew", async (req, res): Promise<void
     .where(eq(purchasedDomainsTable.id, id))
     .returning();
 
-  res.json({ domain: updated });
+  res.json({ domain: updated ? redactPurchasedDomainCredential(updated) : updated });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1119,7 +1127,7 @@ router.patch("/domains/purchased/:id/whois", async (req, res): Promise<void> => 
     .where(eq(purchasedDomainsTable.id, id))
     .returning();
 
-  res.json({ domain: updated });
+  res.json({ domain: updated ? redactPurchasedDomainCredential(updated) : updated });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1337,7 +1345,7 @@ router.post("/domains/purchased/:id/renew/confirm", async (req, res): Promise<vo
       .where(eq(purchasedDomainsTable.id, id))
       .returning();
 
-    res.json({ domain: updated });
+    res.json({ domain: updated ? redactPurchasedDomainCredential(updated) : updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
     res.status(502).json({ error: msg });
@@ -1362,16 +1370,20 @@ router.get("/domains/purchased/:id/auth-code", async (req, res): Promise<void> =
     return;
   }
 
-  // Fetch from Namecheap if configured; fall back to stored code
+  const storedAuthCode = domain.transferAuthCode
+    ? encryptionService.decrypt(domain.transferAuthCode)
+    : null;
+
+  // Fetch from Namecheap if configured; fall back to the decrypted stored code.
   const authCode = namecheapEnabled()
-    ? ((await getAuthCode(domain.hostname)) ?? domain.transferAuthCode)
-    : domain.transferAuthCode;
+    ? ((await getAuthCode(domain.hostname)) ?? storedAuthCode)
+    : storedAuthCode;
 
   // Store the latest auth code for caching
-  if (authCode && authCode !== domain.transferAuthCode) {
+  if (authCode && authCode !== storedAuthCode) {
     await db
       .update(purchasedDomainsTable)
-      .set({ transferAuthCode: authCode, updatedAt: sql`now()` })
+      .set({ transferAuthCode: encryptionService.encrypt(authCode), updatedAt: sql`now()` })
       .where(eq(purchasedDomainsTable.id, id));
   }
 
@@ -1409,7 +1421,7 @@ router.post("/domains/purchased/:id/release", async (req, res): Promise<void> =>
   logger.info({ hostname: domain.hostname, userId }, "Domain released for transfer-out");
 
   res.json({
-    domain: updated,
+    domain: updated ? redactPurchasedDomainCredential(updated) : updated,
     note: "Registrar lock removed. Obtain the auth code and initiate the transfer at your new registrar.",
   });
 });
@@ -1502,7 +1514,7 @@ router.patch("/domains/purchased/:id/project", async (req, res): Promise<void> =
     .where(eq(purchasedDomainsTable.id, id))
     .returning();
 
-  res.json({ domain: updated });
+  res.json({ domain: updated ? redactPurchasedDomainCredential(updated) : updated });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1535,7 +1547,7 @@ router.get("/domains/purchased/:id/info", async (req, res): Promise<void> => {
     }
   }
 
-  res.json({ domain, namecheapInfo: info });
+  res.json({ domain: redactPurchasedDomainCredential(domain), namecheapInfo: info });
 });
 
 export default router;

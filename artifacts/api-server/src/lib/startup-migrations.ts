@@ -14,11 +14,106 @@
 
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
+import { encryptionService, isEncryptedValue, type EncryptionService } from "./encryption";
 
 type MigrationStep = {
   name: string;
   run: (client: import("pg").PoolClient) => Promise<void>;
 };
+
+export interface CredentialBackfillResult {
+  mcpServersEncrypted: number;
+  purchasedDomainsEncrypted: number;
+  skippedBecauseEncryptionUnavailable: boolean;
+}
+
+/**
+ * Encrypt the two legacy credential columns in-place using the active platform cipher.
+ * Existing versioned ciphertext is skipped, and each update is compare-and-set so a
+ * concurrent credential replacement cannot be overwritten by stale migration data.
+ */
+export async function backfillStoredIntegrationCredentials(
+  client: Pick<import("pg").PoolClient, "query">,
+  service: EncryptionService = encryptionService,
+): Promise<CredentialBackfillResult> {
+  if (service.isDevelopmentOnly) {
+    return {
+      mcpServersEncrypted: 0,
+      purchasedDomainsEncrypted: 0,
+      skippedBecauseEncryptionUnavailable: true,
+    };
+  }
+
+  let mcpServersEncrypted = 0;
+  let purchasedDomainsEncrypted = 0;
+
+  await client.query("BEGIN");
+  try {
+    const mcpRows = await client.query<{ id: number; auth_header: string }>(
+      `SELECT id, auth_header
+         FROM mcp_servers
+        WHERE auth_header IS NOT NULL`,
+    );
+    for (const row of mcpRows.rows) {
+      if (isEncryptedValue(row.auth_header)) {
+        service.decrypt(row.auth_header);
+        continue;
+      }
+      const result = await client.query(
+        `UPDATE mcp_servers
+            SET auth_header = $1,
+                updated_at = now()
+          WHERE id = $2
+            AND auth_header = $3`,
+        [service.encrypt(row.auth_header), row.id, row.auth_header],
+      );
+      mcpServersEncrypted += result.rowCount ?? 0;
+    }
+
+    const domainRows = await client.query<{ id: number; transfer_auth_code: string }>(
+      `SELECT id, transfer_auth_code
+         FROM purchased_domains
+        WHERE transfer_auth_code IS NOT NULL`,
+    );
+    for (const row of domainRows.rows) {
+      if (isEncryptedValue(row.transfer_auth_code)) {
+        service.decrypt(row.transfer_auth_code);
+        continue;
+      }
+      const result = await client.query(
+        `UPDATE purchased_domains
+            SET transfer_auth_code = $1,
+                updated_at = now()
+          WHERE id = $2
+            AND transfer_auth_code = $3`,
+        [service.encrypt(row.transfer_auth_code), row.id, row.transfer_auth_code],
+      );
+      purchasedDomainsEncrypted += result.rowCount ?? 0;
+    }
+
+    await client.query("COMMIT");
+    return {
+      mcpServersEncrypted,
+      purchasedDomainsEncrypted,
+      skippedBecauseEncryptionUnavailable: false,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
+/** Drop the legacy shared-owner default and add the missing ownership lookup indexes. */
+export async function applyProjectOwnerSchemaHardening(
+  client: Pick<import("pg").PoolClient, "query">,
+): Promise<void> {
+  await client.query(`ALTER TABLE projects ALTER COLUMN owner_id DROP DEFAULT`);
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS workspaces_owner_user_idx ON workspaces(owner_user_id)`,
+  );
+  await client.query(`CREATE INDEX IF NOT EXISTS projects_owner_idx ON projects(owner_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS projects_workspace_idx ON projects(workspace_id)`);
+}
 
 const BILLING_CREDITS_HELP_SLUG = "billing-credits";
 const NABUFLOW_HELP_SLUGS = ["faq-what-is-mustaflow", "faq-build-mobile-apps"] as const;
@@ -5173,6 +5268,26 @@ const MIGRATION_STEPS: MigrationStep[] = [
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$
       `);
+    },
+  },
+  {
+    name: "migrate-project-owner-and-scope-indexes",
+    async run(client) {
+      await applyProjectOwnerSchemaHardening(client);
+    },
+  },
+  {
+    name: "migrate-stored-integration-credentials",
+    async run(client) {
+      const result = await backfillStoredIntegrationCredentials(client);
+      logger.info(
+        {
+          mcpServersEncrypted: result.mcpServersEncrypted,
+          purchasedDomainsEncrypted: result.purchasedDomainsEncrypted,
+          skippedBecauseEncryptionUnavailable: result.skippedBecauseEncryptionUnavailable,
+        },
+        "startup-migrations: stored integration credentials processed",
+      );
     },
   },
 ];

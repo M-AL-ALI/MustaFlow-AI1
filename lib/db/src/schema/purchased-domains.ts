@@ -43,8 +43,8 @@ export const purchasedDomainsTable = pgTable(
     renewalFailedAt: timestamp("renewal_failed_at", { withTimezone: true }),
     // renewalFailureReason: error message from failed renewal.
     renewalFailureReason: text("renewal_failure_reason"),
-    // transferAuthCode: EPP auth code for outbound transfers (decrypted on demand).
-    // Stored as plaintext here; callers responsible for access control.
+    // transferAuthCode: EPP auth code for outbound transfers, or the provider transfer ID
+    // while an inbound transfer is pending. Stored with the platform AES-256-GCM envelope.
     transferAuthCode: text("transfer_auth_code"),
     // whoisContactData: JSONB blob of WHOIS contact fields for display / update.
     whoisFirstName: text("whois_first_name"),

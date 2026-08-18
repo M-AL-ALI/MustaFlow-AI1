@@ -506,8 +506,12 @@ mcpRouter.use(requireAdmin);
 
 mcpRouter.get("/mcp-servers", async (_req, res): Promise<void> => {
   const rows = await db.select().from(mcpServersTable);
-  res.json(rows);
+  res.json(rows.map(redactMcpServerCredential));
 });
+
+function redactMcpServerCredential<T extends { authHeader: string | null }>(row: T): T {
+  return { ...row, authHeader: row.authHeader ? "configured" : null };
+}
 
 const mcpCreateSchema = z.object({
   name: z.string().min(1).max(120),
@@ -536,12 +540,12 @@ mcpRouter.post("/mcp-servers", async (req, res): Promise<void> => {
       name: parsed.data.name,
       description: parsed.data.description ?? null,
       endpoint: parsed.data.endpoint,
-      authHeader: parsed.data.authHeader ?? null,
+      authHeader: parsed.data.authHeader ? encryptionService.encrypt(parsed.data.authHeader) : null,
       enabled: parsed.data.enabled ?? true,
       createdBy: actor,
     })
     .returning();
-  res.json(row);
+  res.json(row ? redactMcpServerCredential(row) : row);
 });
 
 const mcpPatchSchema = mcpCreateSchema.partial();
@@ -561,9 +565,13 @@ mcpRouter.patch("/mcp-servers/:id", async (req, res): Promise<void> => {
       return;
     }
   }
+  const { authHeader, ...plainUpdates } = parsed.data;
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
-  for (const [k, v] of Object.entries(parsed.data)) {
+  for (const [k, v] of Object.entries(plainUpdates)) {
     if (v !== undefined) updateData[k] = v;
+  }
+  if (authHeader !== undefined) {
+    updateData.authHeader = authHeader ? encryptionService.encrypt(authHeader) : null;
   }
   const [row] = await db
     .update(mcpServersTable)
@@ -574,7 +582,7 @@ mcpRouter.patch("/mcp-servers/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  res.json(row);
+  res.json(redactMcpServerCredential(row));
 });
 
 mcpRouter.delete("/mcp-servers/:id", async (req, res): Promise<void> => {

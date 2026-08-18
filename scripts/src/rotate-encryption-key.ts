@@ -7,6 +7,8 @@
  *   - project_secrets.value_encrypted
  *   - projects.preview_db_url
  *   - project_github_connections.encrypted_token
+ *   - mcp_servers.auth_header
+ *   - purchased_domains.transfer_auth_code
  *
  * Run with --dry-run to print row counts without writing any changes.
  *
@@ -143,6 +145,12 @@ async function main() {
       table: "project_github_connections",
       idCol: "id",
       encryptedCol: "encrypted_token",
+    },
+    { table: "mcp_servers", idCol: "id", encryptedCol: "auth_header" },
+    {
+      table: "purchased_domains",
+      idCol: "id",
+      encryptedCol: "transfer_auth_code",
     },
   ];
 
