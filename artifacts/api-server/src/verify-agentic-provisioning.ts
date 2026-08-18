@@ -8,10 +8,11 @@
  *
  * Safe to run repeatedly. Soft-deletes the project at the end.
  */
-import { db, pool, projectsTable, secretsTable } from "@workspace/db";
+import { db, pool, projectsTable, secretsTable, workspacesTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { Client } from "pg";
 import { destroyContainer, hasContainerLayerCredentials } from "./lib/tenant-runtime";
+import { createOwnedWorkspace } from "./lib/workspace-foundation";
 
 const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
 const NEON_KEY = process.env.NEON_API_KEY ?? "";
@@ -48,20 +49,33 @@ async function main(): Promise<void> {
   console.log(`FLY_APP_NAME:   ${FLY_APP}`);
   console.log("");
 
-  // 1. Insert a throwaway test project stamped agentic.
-  const [project] = await db
-    .insert(projectsTable)
-    .values({
-      ownerId: "verify-task-762",
-      name: "Verify #762 (auto-cleanup)",
-      kind: "web",
-      platform: "web",
-      projectFormat: "static-html",
-      stack: "static-html",
-      builderMode: "agentic",
-      provisioningStatus: "provisioning",
-    })
-    .returning();
+  // 1. Insert a throwaway workspace and project stamped agentic.
+  const verificationOwnerId = "verify-task-762";
+  const workspace = await createOwnedWorkspace({
+    ownerUserId: verificationOwnerId,
+    name: "Verify #762 workspace (auto-cleanup)",
+    type: "personal",
+  });
+  let project;
+  try {
+    [project] = await db
+      .insert(projectsTable)
+      .values({
+        ownerId: verificationOwnerId,
+        workspaceId: workspace.id,
+        name: "Verify #762 (auto-cleanup)",
+        kind: "web",
+        platform: "web",
+        projectFormat: "static-html",
+        stack: "static-html",
+        builderMode: "agentic",
+        provisioningStatus: "provisioning",
+      })
+      .returning();
+  } catch (error) {
+    await db.delete(workspacesTable).where(eq(workspacesTable.id, workspace.id));
+    throw error;
+  }
   if (!project) throw new Error("Failed to insert test project");
   console.log(`[setup] Inserted test project id=${project.id}`);
 
@@ -142,6 +156,10 @@ async function main(): Promise<void> {
     await db
       .delete(projectsTable)
       .where(eq(projectsTable.id, project.id))
+      .catch(() => {});
+    await db
+      .delete(workspacesTable)
+      .where(eq(workspacesTable.id, workspace.id))
       .catch(() => {});
     console.log(`[cleanup] DB project id=${project.id} hard-deleted`);
   }

@@ -15,6 +15,10 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, projectArtifactsTable } from "@workspace/db";
 import { checkV1ProjectAccess, requirePatScope } from "./access";
 import type { PATRequest } from "../../lib/pat-auth";
+import {
+  ProjectWorkspaceUnavailableError,
+  resolveProjectWorkspaceId,
+} from "../../lib/workspace-tenancy";
 
 const router: IRouter = Router();
 
@@ -138,10 +142,22 @@ router.post("/projects", requirePatScope("projects:write"), async (req, res): Pr
 
   const projectFormat = resolvedStack === "react-vite" && !isMobile ? "react-vite" : "static-html";
 
+  let workspaceId: number;
+  try {
+    workspaceId = await resolveProjectWorkspaceId({ userId: req.userId! });
+  } catch (error) {
+    if (error instanceof ProjectWorkspaceUnavailableError) {
+      res.status(409).json({ error: error.code });
+      return;
+    }
+    throw error;
+  }
+
   const [project] = await db
     .insert(projectsTable)
     .values({
       ownerId: req.userId!,
+      workspaceId,
       name: name.trim().slice(0, 120),
       description: typeof description === "string" ? description.trim().slice(0, 500) : null,
       kind: resolvedKind,

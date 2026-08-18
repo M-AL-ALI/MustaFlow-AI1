@@ -50,11 +50,19 @@ async function main(): Promise<void> {
 
   // ── Step 2: Resolve workspace ─────────────────────────────────────────────
   const wsRow = await pool.query(
-    `SELECT id FROM workspaces WHERE owner_user_id = $1 AND deleted_at IS NULL LIMIT 1`,
+    `SELECT workspace.id
+       FROM workspaces AS workspace
+       JOIN workspace_members AS member ON member.workspace_id = workspace.id
+      WHERE member.user_id = $1
+        AND member.role = 'owner'
+        AND workspace.deleted_at IS NULL
+      ORDER BY workspace.created_at ASC, workspace.id ASC
+      LIMIT 1`,
     [OWNER_ID],
   );
-  const workspaceId: number | null = wsRow.rows[0]?.id ?? null;
-  console.log(`[SETUP] Workspace ID: ${workspaceId ?? "none"}`);
+  const workspaceId: number | undefined = wsRow.rows[0]?.id;
+  if (!workspaceId) throw new Error("E2E owner has no active owner workspace");
+  console.log(`[SETUP] Workspace ID: ${workspaceId}`);
 
   // ── Step 3: Create project ────────────────────────────────────────────────
   // static-legacy: no Fly provisioning, preview served from DB.

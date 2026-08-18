@@ -28,6 +28,10 @@ import { requireProjectOwnership } from "../lib/auth";
 import { requireAdmin } from "../lib/adminAuth";
 import { enqueueProvisionProjectJob } from "../lib/provisioning";
 import { logger } from "../lib/logger";
+import {
+  ProjectWorkspaceUnavailableError,
+  resolveProjectWorkspaceId,
+} from "../lib/workspace-tenancy";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -268,10 +272,13 @@ router.post("/gallery-templates/:slug/use", async (req, res): Promise<void> => {
       return;
     }
 
+    const workspaceId = await resolveProjectWorkspaceId({ userId });
+
     const [newProject] = await db
       .insert(projectsTable)
       .values({
         ownerId: userId,
+        workspaceId,
         name: tpl.title,
         description: tpl.description,
         kind: tpl.platform === "mobile" ? "mobile-cross" : "web",
@@ -313,6 +320,10 @@ router.post("/gallery-templates/:slug/use", async (req, res): Promise<void> => {
 
     res.status(201).json({ projectId: newProject.id });
   } catch (err) {
+    if (err instanceof ProjectWorkspaceUnavailableError) {
+      res.status(409).json({ error: err.code });
+      return;
+    }
     logger.error({ err }, "Failed to use gallery template");
     res.status(500).json({ error: "Failed to create project from template" });
   }
@@ -342,10 +353,13 @@ router.post("/gallery-templates/:slug/fork", async (req, res): Promise<void> => 
       return;
     }
 
+    const workspaceId = await resolveProjectWorkspaceId({ userId });
+
     const [newProject] = await db
       .insert(projectsTable)
       .values({
         ownerId: userId,
+        workspaceId,
         name: `${tpl.title} (fork)`,
         description: tpl.description,
         kind: tpl.platform === "mobile" ? "mobile-cross" : "web",
@@ -384,6 +398,10 @@ router.post("/gallery-templates/:slug/fork", async (req, res): Promise<void> => 
 
     res.status(201).json({ projectId: newProject.id });
   } catch (err) {
+    if (err instanceof ProjectWorkspaceUnavailableError) {
+      res.status(409).json({ error: err.code });
+      return;
+    }
     logger.error({ err }, "Failed to fork gallery template");
     res.status(500).json({ error: "Failed to fork template" });
   }

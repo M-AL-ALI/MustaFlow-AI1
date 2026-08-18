@@ -37,14 +37,25 @@ console.log("echo port:", echoPort);
 
 // ── DB setup ─────────────────────────────────────────────────────────────────
 const sid = randomBytes(8).toString("hex");
-const { rows: pr } = await pool.query<{ id: number }>(
-  `INSERT INTO projects
-     (owner_id, name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
-   VALUES ('ws-probe-user',$1,'draft','agentic',$2,'running',now(),now())
-   RETURNING id`,
-  ["ws-probe-project", `http://127.0.0.1:${echoPort}`],
+const probeOwnerId = `ws-probe-user-${sid}`;
+const { rows: pr } = await pool.query<{ id: number; workspace_id: number }>(
+  `WITH created_workspace AS (
+     INSERT INTO workspaces (owner_user_id, name, type)
+     VALUES ($1, 'WS probe workspace', 'personal')
+     RETURNING id, created_at
+   ), created_membership AS (
+     INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_at)
+     SELECT id, $1, 'owner', $1, created_at FROM created_workspace
+   )
+   INSERT INTO projects
+     (owner_id, workspace_id, name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
+   SELECT $1, id, $2, 'draft', 'agentic', $3, 'running', now(), now()
+     FROM created_workspace
+   RETURNING id, workspace_id`,
+  [probeOwnerId, "ws-probe-project", `http://127.0.0.1:${echoPort}`],
 );
 const pid = pr[0]!.id;
+const workspaceId = pr[0]!.workspace_id;
 await pool.query(
   `INSERT INTO preview_sessions
      (session_id, project_id, user_id, launch_token_hash, launch_token_used,
@@ -111,6 +122,7 @@ await new Promise<void>((resolve) => {
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 await pool.query("DELETE FROM preview_sessions WHERE session_id=$1", [sid]);
 await pool.query("DELETE FROM projects WHERE id=$1", [pid]);
+await pool.query("DELETE FROM workspaces WHERE id=$1", [workspaceId]);
 await pool.end();
 echoServer.close();
 console.log("done.");

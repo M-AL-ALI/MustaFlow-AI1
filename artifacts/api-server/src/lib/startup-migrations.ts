@@ -259,6 +259,185 @@ export async function applyWorkspaceFoundationMigration(
   }
 }
 
+const LEGACY_TESTS_WORKSPACE_SYSTEM_KEY = "legacy-tests-adoption-v1";
+
+export interface WorkspaceTenancyBackfillResult {
+  legacyWorkspaceCreated: number;
+  legacyOwnerMembershipsCreatedOrCorrected: number;
+  demoProjectsAdoptedActive: number;
+  demoProjectsAdoptedSoftDeleted: number;
+  projectsBackfilledActive: number;
+  projectsBackfilledSoftDeleted: number;
+  projectsWithNullWorkspace: number;
+}
+
+/**
+ * Adopt legacy pseudo-tenant projects, file every remaining project deterministically,
+ * and only then enforce the project/workspace relationship at the database boundary.
+ * The internal system key is durable identity; "Legacy tests" is display copy only.
+ */
+export async function applyWorkspaceTenancyMigration(
+  client: Pick<import("pg").PoolClient, "query">,
+  legacyOwnerId: string | undefined = process.env.LEGACY_ADOPTION_OWNER_ID,
+): Promise<WorkspaceTenancyBackfillResult> {
+  const normalizedOwnerId = legacyOwnerId?.trim();
+  if (!normalizedOwnerId) {
+    throw new Error("legacy_adoption_owner_id_missing");
+  }
+  if (normalizedOwnerId === "demo-user") {
+    throw new Error("legacy_adoption_owner_id_invalid");
+  }
+
+  await client.query("BEGIN");
+  try {
+    await client.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_key text`);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS workspaces_system_key_unique
+        ON workspaces(system_key)
+        WHERE system_key IS NOT NULL
+    `);
+
+    // Exclude concurrent project/workspace writers until the invariant and NOT NULL fence agree.
+    await client.query(`LOCK TABLE workspaces IN SHARE ROW EXCLUSIVE MODE`);
+    await client.query(`LOCK TABLE workspace_members IN SHARE ROW EXCLUSIVE MODE`);
+    await client.query(`LOCK TABLE projects IN SHARE ROW EXCLUSIVE MODE`);
+
+    const existingLegacyWorkspace = await client.query<{
+      id: number;
+      owner_user_id: string;
+      deleted_at: Date | null;
+    }>(
+      `SELECT id, owner_user_id, deleted_at
+         FROM workspaces
+        WHERE system_key = $1
+        FOR UPDATE`,
+      [LEGACY_TESTS_WORKSPACE_SYSTEM_KEY],
+    );
+
+    if (existingLegacyWorkspace.rows.length > 1) {
+      throw new Error("legacy_adoption_workspace_identity_ambiguous");
+    }
+
+    let legacyWorkspaceId: number;
+    let legacyWorkspaceCreated = 0;
+    const existingLegacy = existingLegacyWorkspace.rows[0];
+    if (existingLegacy) {
+      if (existingLegacy.owner_user_id !== normalizedOwnerId) {
+        throw new Error("legacy_adoption_workspace_owner_mismatch");
+      }
+      if (existingLegacy.deleted_at !== null) {
+        throw new Error("legacy_adoption_workspace_deleted");
+      }
+      legacyWorkspaceId = existingLegacy.id;
+    } else {
+      const created = await client.query<{ id: number }>(
+        `INSERT INTO workspaces (owner_user_id, system_key, name, type)
+         VALUES ($1, $2, 'Legacy tests', 'personal')
+         RETURNING id`,
+        [normalizedOwnerId, LEGACY_TESTS_WORKSPACE_SYSTEM_KEY],
+      );
+      const createdId = created.rows[0]?.id;
+      if (!createdId) throw new Error("legacy_adoption_workspace_create_failed");
+      legacyWorkspaceId = createdId;
+      legacyWorkspaceCreated = 1;
+    }
+
+    const legacyMembership = await client.query(
+      `INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_at)
+       VALUES ($1, $2, 'owner', $2, now())
+       ON CONFLICT (workspace_id, user_id) DO UPDATE
+         SET role = 'owner',
+             invited_by = EXCLUDED.invited_by
+       WHERE workspace_members.role IS DISTINCT FROM 'owner'
+          OR workspace_members.invited_by IS DISTINCT FROM EXCLUDED.invited_by
+       RETURNING workspace_id`,
+      [legacyWorkspaceId, normalizedOwnerId],
+    );
+
+    const adopted = await client.query<{ deleted_at: Date | null }>(
+      `UPDATE projects
+          SET owner_id = $1,
+              workspace_id = $2
+        WHERE owner_id = 'demo-user'
+      RETURNING deleted_at`,
+      [normalizedOwnerId, legacyWorkspaceId],
+    );
+
+    const backfilled = await client.query<{ deleted_at: Date | null }>(`
+      WITH project_defaults AS (
+        SELECT
+          project.id AS project_id,
+          (
+            SELECT member.workspace_id
+              FROM workspace_members AS member
+              JOIN workspaces AS workspace ON workspace.id = member.workspace_id
+             WHERE member.user_id = project.owner_id
+               AND member.role = 'owner'
+               AND workspace.deleted_at IS NULL
+             ORDER BY workspace.created_at ASC, member.joined_at ASC, workspace.id ASC
+             LIMIT 1
+          ) AS workspace_id
+          FROM projects AS project
+         WHERE project.workspace_id IS NULL
+      )
+      UPDATE projects AS project
+         SET workspace_id = project_defaults.workspace_id
+        FROM project_defaults
+       WHERE project.id = project_defaults.project_id
+         AND project_defaults.workspace_id IS NOT NULL
+      RETURNING project.deleted_at
+    `);
+
+    const nullWorkspace = await client.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+        FROM projects
+       WHERE workspace_id IS NULL
+    `);
+    const projectsWithNullWorkspace = Number(nullWorkspace.rows[0]?.count ?? "0");
+    if (projectsWithNullWorkspace !== 0) {
+      throw new Error(`project_workspace_backfill_incomplete:${projectsWithNullWorkspace}`);
+    }
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+            FROM pg_constraint AS constraint_row
+            JOIN pg_class AS source_table ON source_table.oid = constraint_row.conrelid
+           WHERE source_table.relname = 'projects'
+             AND constraint_row.contype = 'f'
+             AND pg_get_constraintdef(constraint_row.oid) =
+                 'FOREIGN KEY (workspace_id) REFERENCES workspaces(id)'
+        ) THEN
+          ALTER TABLE projects
+            ADD CONSTRAINT projects_workspace_tenancy_fk
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id);
+        END IF;
+      END $$
+    `);
+    await client.query(`ALTER TABLE projects ALTER COLUMN workspace_id SET NOT NULL`);
+
+    await client.query("COMMIT");
+
+    const countCategory = (rows: Array<{ deleted_at: Date | null }>, deleted: boolean) =>
+      rows.filter((row) => (row.deleted_at !== null) === deleted).length;
+
+    return {
+      legacyWorkspaceCreated,
+      legacyOwnerMembershipsCreatedOrCorrected: legacyMembership.rowCount ?? 0,
+      demoProjectsAdoptedActive: countCategory(adopted.rows, false),
+      demoProjectsAdoptedSoftDeleted: countCategory(adopted.rows, true),
+      projectsBackfilledActive: countCategory(backfilled.rows, false),
+      projectsBackfilledSoftDeleted: countCategory(backfilled.rows, true),
+      projectsWithNullWorkspace,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 const BILLING_CREDITS_HELP_SLUG = "billing-credits";
 const NABUFLOW_HELP_SLUGS = ["faq-what-is-mustaflow", "faq-build-mobile-apps"] as const;
 
@@ -5439,6 +5618,13 @@ const MIGRATION_STEPS: MigrationStep[] = [
     async run(client) {
       const result = await applyWorkspaceFoundationMigration(client);
       logger.info(result, "startup-migrations: workspace foundation established");
+    },
+  },
+  {
+    name: "migrate-workspace-tenancy",
+    async run(client) {
+      const result = await applyWorkspaceTenancyMigration(client);
+      logger.info(result, "startup-migrations: workspace tenancy established");
     },
   },
 ];

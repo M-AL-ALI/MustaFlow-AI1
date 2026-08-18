@@ -5,6 +5,7 @@ import {
   agentTasksTable,
   projectVersionsTable,
   knowledgeEntriesTable,
+  pool,
 } from "@workspace/db";
 
 async function main() {
@@ -17,6 +18,22 @@ async function main() {
   const ownerId = process.env.SEED_OWNER_ID?.trim();
   if (!ownerId) {
     throw new Error("SEED_OWNER_ID is required when creating sample projects");
+  }
+
+  const defaultWorkspaceRows = await pool.query<{ id: number }>(
+    `SELECT workspace.id
+       FROM workspaces AS workspace
+       JOIN workspace_members AS member ON member.workspace_id = workspace.id
+      WHERE member.user_id = $1
+        AND member.role = 'owner'
+        AND workspace.deleted_at IS NULL
+      ORDER BY workspace.created_at ASC, workspace.id ASC
+      LIMIT 1`,
+    [ownerId],
+  );
+  const defaultWorkspace = defaultWorkspaceRows.rows[0];
+  if (!defaultWorkspace) {
+    throw new Error("SEED_OWNER_ID has no active owner workspace");
   }
 
   const seeds = [
@@ -47,7 +64,7 @@ async function main() {
   for (const seed of seeds) {
     const [p] = await db
       .insert(projectsTable)
-      .values({ ...seed, ownerId })
+      .values({ ...seed, ownerId, workspaceId: defaultWorkspace.id })
       .returning();
     if (!p) continue;
     await db.insert(chatMessagesTable).values([

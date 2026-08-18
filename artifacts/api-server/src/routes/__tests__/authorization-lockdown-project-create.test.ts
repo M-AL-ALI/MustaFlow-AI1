@@ -6,6 +6,18 @@ vi.hoisted(() => {
   process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
 });
 
+const tenancy = vi.hoisted(() => {
+  class Unavailable extends Error {
+    readonly code = "project_workspace_unavailable";
+  }
+  return {
+    Unavailable,
+    resolveProjectWorkspaceId: vi.fn(async () => {
+      throw new Unavailable();
+    }),
+  };
+});
+
 vi.mock("@workspace/db", async (importOriginal) => {
   const original = await importOriginal<typeof import("@workspace/db")>();
   const select = vi.fn(() => ({
@@ -27,9 +39,13 @@ vi.mock("../../lib/zero-sealed-generation", () => ({
   resolveZeroProjectDeploymentType: vi.fn(),
   resolveZeroProjectRuntimePort: vi.fn(),
 }));
+vi.mock("../../lib/workspace-tenancy", () => ({
+  ProjectWorkspaceUnavailableError: tenancy.Unavailable,
+  resolveProjectWorkspaceId: tenancy.resolveProjectWorkspaceId,
+}));
 
 describe("authorization lockdown: project workspace selection", () => {
-  it("denies POST /projects when workspaceId belongs to another user", async () => {
+  it("passes a caller hint to the central selector and returns its typed fail-closed outcome", async () => {
     const router = (await import("../projects")).default;
     const app = express();
     app.use(express.json());
@@ -45,7 +61,11 @@ describe("authorization lockdown: project workspace selection", () => {
       workspaceId: 770,
     });
 
-    expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: "Workspace not found" });
+    expect(tenancy.resolveProjectWorkspaceId).toHaveBeenCalledWith({
+      userId: "requesting-user",
+      requestedWorkspaceId: 770,
+    });
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ error: "project_workspace_unavailable" });
   });
 });

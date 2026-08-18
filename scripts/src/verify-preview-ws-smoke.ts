@@ -160,17 +160,28 @@ function startEchoServer(): Promise<number> {
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
 let testProjectId: number | null = null;
+let testWorkspaceId: number | null = null;
 const sessionIds: string[] = [];
 
 async function insertTestProject(containerPort: number): Promise<number> {
-  const { rows } = await pool.query<{ id: number }>(
-    `INSERT INTO projects
-       (owner_id, name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
-     VALUES
-       ('smoke-test-user', $1, 'draft', 'agentic', $2, 'running', now(), now())
-     RETURNING id`,
-    ["ws-smoke-test-project", `http://127.0.0.1:${containerPort}`],
+  const ownerId = `smoke-test-user-${randomBytes(8).toString("hex")}`;
+  const { rows } = await pool.query<{ id: number; workspace_id: number }>(
+    `WITH created_workspace AS (
+       INSERT INTO workspaces (owner_user_id, name, type)
+       VALUES ($1, 'WS smoke workspace', 'personal')
+       RETURNING id, created_at
+     ), created_membership AS (
+       INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_at)
+       SELECT id, $1, 'owner', $1, created_at FROM created_workspace
+     )
+     INSERT INTO projects
+       (owner_id, workspace_id, name, status, builder_mode, test_container_url, test_container_status, created_at, updated_at)
+     SELECT $1, id, $2, 'draft', 'agentic', $3, 'running', now(), now()
+       FROM created_workspace
+     RETURNING id, workspace_id`,
+    [ownerId, "ws-smoke-test-project", `http://127.0.0.1:${containerPort}`],
   );
+  testWorkspaceId = rows[0]!.workspace_id;
   return rows[0]!.id;
 }
 
@@ -197,6 +208,9 @@ async function cleanUp(): Promise<void> {
   }
   if (testProjectId !== null) {
     await pool.query(`DELETE FROM projects WHERE id = $1`, [testProjectId]);
+  }
+  if (testWorkspaceId !== null) {
+    await pool.query(`DELETE FROM workspaces WHERE id = $1`, [testWorkspaceId]);
   }
   await pool.end();
 }

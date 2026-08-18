@@ -19,6 +19,23 @@ const WorkspaceUpdateSchema = z.object({
 });
 
 const activeWorkspaces = isNull(workspacesTable.deletedAt);
+const publicWorkspaceFields = {
+  id: workspacesTable.id,
+  ownerUserId: workspacesTable.ownerUserId,
+  name: workspacesTable.name,
+  description: workspacesTable.description,
+  type: workspacesTable.type,
+  deletedAt: workspacesTable.deletedAt,
+  createdAt: workspacesTable.createdAt,
+  updatedAt: workspacesTable.updatedAt,
+};
+
+function publicWorkspace<T extends { systemKey?: string | null }>(
+  workspace: T,
+): Omit<T, "systemKey"> {
+  const { systemKey: _systemKey, ...safe } = workspace;
+  return safe;
+}
 
 router.get("/workspaces", async (req, res): Promise<void> => {
   if (!req.userId) {
@@ -28,12 +45,12 @@ router.get("/workspaces", async (req, res): Promise<void> => {
   const userId = req.userId;
 
   const rows = await db
-    .select()
+    .select(publicWorkspaceFields)
     .from(workspacesTable)
     .where(and(eq(workspacesTable.ownerUserId, userId), activeWorkspaces))
     .orderBy(desc(workspacesTable.createdAt));
 
-  res.json(rows);
+  res.json(rows.map(publicWorkspace));
 });
 
 router.post("/workspaces", async (req, res): Promise<void> => {
@@ -56,7 +73,7 @@ router.post("/workspaces", async (req, res): Promise<void> => {
     return;
   }
 
-  res.status(201).json(workspace);
+  res.status(201).json(publicWorkspace(workspace));
 });
 
 router.get("/workspaces/:id", async (req, res): Promise<void> => {
@@ -72,7 +89,7 @@ router.get("/workspaces/:id", async (req, res): Promise<void> => {
 
   const userId = req.userId;
   const [workspace] = await db
-    .select()
+    .select(publicWorkspaceFields)
     .from(workspacesTable)
     .where(
       and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces),
@@ -82,7 +99,7 @@ router.get("/workspaces/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Workspace not found" });
     return;
   }
-  res.json(workspace);
+  res.json(publicWorkspace(workspace));
 });
 
 router.patch("/workspaces/:id", async (req, res): Promise<void> => {
@@ -109,7 +126,7 @@ router.patch("/workspaces/:id", async (req, res): Promise<void> => {
     .where(
       and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces),
     )
-    .returning();
+    .returning(publicWorkspaceFields);
 
   if (!workspace) {
     res.status(404).json({ error: "Workspace not found" });
