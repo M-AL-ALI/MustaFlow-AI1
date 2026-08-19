@@ -13,3 +13,4 @@ pnpm-lock.yaml
 attached_assets/
 artifacts/ora-mobile/expo-env.d.ts
 scripts/benchmark-results/
+scripts/zero-guidance/*.json
