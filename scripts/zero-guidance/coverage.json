@@ -1,0 +1,95 @@
+{
+  "coverage": [
+    {
+      "description": "Every consumed source has one stable, sanitized, content-derived manifest row.",
+      "id": "deterministic:manifest-integrity",
+      "layer": "deterministic"
+    },
+    {
+      "description": "The iterative agent assembly retains its bounded tool and completion contract.",
+      "id": "live:agent-loop",
+      "layer": "live"
+    },
+    {
+      "description": "Blueprint guidance installs the declared integration contract without hidden handoffs.",
+      "id": "live:blueprint-guidance",
+      "layer": "live"
+    },
+    {
+      "description": "Build-family instructions produce complete source under their declared stack contract.",
+      "id": "live:build-generation",
+      "layer": "live"
+    },
+    {
+      "description": "Conversation instructions respond plainly and choose one useful next step.",
+      "id": "live:conversation",
+      "layer": "live"
+    },
+    {
+      "description": "Developer-mode instructions debug, refactor, review, or explain without changing intent.",
+      "id": "live:developer-intent",
+      "layer": "live"
+    },
+    {
+      "description": "Intent instructions distinguish conversation, planning, and build work.",
+      "id": "live:intent",
+      "layer": "live"
+    },
+    {
+      "description": "Job, repair, and memory context reaches generation with the intended precedence.",
+      "id": "live:jobs-context",
+      "layer": "live"
+    },
+    {
+      "description": "Message routing selects the matching prompt family and preserves project context.",
+      "id": "live:message-routing",
+      "layer": "live"
+    },
+    {
+      "description": "Planning instructions produce structured, actionable plans without generating code.",
+      "id": "live:planning",
+      "layer": "live"
+    },
+    {
+      "description": "Refinement instructions preserve unaffected behavior and return bounded changes.",
+      "id": "live:refinement",
+      "layer": "live"
+    },
+    {
+      "description": "Repair instructions make the smallest evidence-backed correction.",
+      "id": "live:repair",
+      "layer": "live"
+    },
+    {
+      "description": "Review instructions issue evidence-backed verdicts without inventing missing source.",
+      "id": "live:review",
+      "layer": "live"
+    },
+    {
+      "description": "Reviewer context is representative, bounded, and explicit about truncation.",
+      "id": "live:reviewer-context",
+      "layer": "live"
+    },
+    {
+      "description": "Eligibility metadata selects supported sealed behavior and rejects unsupported behavior clearly.",
+      "id": "live:sealed-eligibility",
+      "layer": "live"
+    },
+    {
+      "description": "Sealed generation uses capabilities, fixed runtime contracts, and no tenant credentials.",
+      "id": "live:sealed-generation",
+      "layer": "live"
+    },
+    {
+      "description": "Skill instructions are discoverable and applied only for the matching task and target.",
+      "id": "live:skill-guidance",
+      "layer": "live"
+    },
+    {
+      "description": "Test-planning instructions cover the requested user-visible behavior.",
+      "id": "live:test-planning",
+      "layer": "live"
+    }
+  ],
+  "schemaVersion": 1
+}

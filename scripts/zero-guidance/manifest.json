@@ -1,0 +1,4118 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "consumers": [
+        "agent-loop"
+      ],
+      "contentBytes": 18980,
+      "contentSha256": "c539603cd7d490f19ca96df5576c240cfe133980facccf90c1563b0564a166f3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:agent-loop"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:agent-loop:build-system-prompt",
+      "kind": "context-assembler",
+      "selector": "function:buildSystemPrompt",
+      "sourcePath": "artifacts/api-server/src/lib/agent-loop.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "blueprints"
+      ],
+      "contentBytes": 3567,
+      "contentSha256": "435fb342528c0f9d2b638c040475631939448595d7a9a99e71c47a3319f631b0",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:blueprints:install",
+      "kind": "context-assembler",
+      "selector": "function:installBlueprint",
+      "sourcePath": "artifacts/api-server/src/lib/blueprints.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "blueprints"
+      ],
+      "contentBytes": 994,
+      "contentSha256": "2173bf2cac722b4e87721a0a72210696aa7840c354431173be3363d226e5cd0e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:blueprints:load",
+      "kind": "context-assembler",
+      "selector": "function:loadBlueprints",
+      "sourcePath": "artifacts/api-server/src/lib/blueprints.ts"
+    },
+    {
+      "consumers": [
+        "eligibility",
+        "jobs"
+      ],
+      "contentBytes": 4303,
+      "contentSha256": "7096474c15d599a17ca2b385b68b9f53db4337c41eac88dce9cd5e36bfb74be7",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "assembler:eligibility:generated-output",
+      "kind": "context-assembler",
+      "selector": "function:evaluateZeroGeneratedEligibility",
+      "sourcePath": "artifacts/api-server/src/lib/zero-capability-eligibility.ts"
+    },
+    {
+      "consumers": [
+        "eligibility",
+        "jobs"
+      ],
+      "contentBytes": 1189,
+      "contentSha256": "d6fa5c6e938b392661e7d3d3b20fc8ce171d3bc23089fba1383be8a3faeab843",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "assembler:eligibility:inventory",
+      "kind": "context-assembler",
+      "selector": "function:loadZeroEligibilityInventory",
+      "sourcePath": "artifacts/api-server/src/lib/zero-capability-eligibility.ts"
+    },
+    {
+      "consumers": [
+        "eligibility",
+        "jobs"
+      ],
+      "contentBytes": 701,
+      "contentSha256": "44fe97b3336681ff5f0130393fdf731af6f4959c1143590bf228328a84ebe7c8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "assembler:eligibility:resolve-integration",
+      "kind": "context-assembler",
+      "selector": "function:resolveZeroIntegrationEligibilityOutcome",
+      "sourcePath": "artifacts/api-server/src/lib/zero-capability-eligibility.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 8309,
+      "contentSha256": "65dd496fa52ace9363396860a35ceaf1ef67e3e25c55664f00bbfb100655f09b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:jobs-context"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:jobs:knowledge-context",
+      "kind": "context-assembler",
+      "selector": "function:loadKnowledgeContext",
+      "sourcePath": "artifacts/api-server/src/lib/jobs.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "repair"
+      ],
+      "contentBytes": 6483,
+      "contentSha256": "9e0ba7c635447a1764cf75bb9c7cdbd23e7e754731b0c0b9969d248cf265a6af",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:repair"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:jobs:repair-prompt",
+      "kind": "context-assembler",
+      "selector": "function:buildRepairPrompt",
+      "sourcePath": "artifacts/api-server/src/lib/jobs.ts"
+    },
+    {
+      "consumers": [
+        "generation",
+        "jobs"
+      ],
+      "contentBytes": 222582,
+      "contentSha256": "39219d5d5308c04cb47e59c7b60434cd8ddeda72cc422cd72f04f3f64b60c7be",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:jobs-context"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:jobs:run-job",
+      "kind": "context-assembler",
+      "selector": "function:runJob",
+      "sourcePath": "artifacts/api-server/src/lib/jobs.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 3103,
+      "contentSha256": "5999884632171a3da17f319d59bc69e2867361a9194ac21a2dd1a2606ccbdc93",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:knowledge:installed-blueprints",
+      "kind": "context-assembler",
+      "selector": "function:getInstalledBlueprintKnowledge",
+      "sourcePath": "artifacts/api-server/src/lib/knowledge.ts"
+    },
+    {
+      "consumers": [
+        "intent-routing",
+        "messages"
+      ],
+      "contentBytes": 71558,
+      "contentSha256": "a836a54d9cd7d6afb0351e871eb4c51a7c8d2507da94fddfab1ce7f97b820c87",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:message-routing"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:messages:routing",
+      "kind": "context-assembler",
+      "selector": "file",
+      "sourcePath": "artifacts/api-server/src/routes/messages.ts"
+    },
+    {
+      "consumers": [
+        "reviewer"
+      ],
+      "contentBytes": 3459,
+      "contentSha256": "d13168bd643ece773a572ac9c52a3ac084fd22bafbad31bb33a8cdddbdf4dfe3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:reviewer-context"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:reviewer:file-context",
+      "kind": "context-assembler",
+      "selector": "function:buildReviewerContextFromFiles",
+      "sourcePath": "artifacts/api-server/src/lib/reviewer-context.ts"
+    },
+    {
+      "consumers": [
+        "reviewer"
+      ],
+      "contentBytes": 841,
+      "contentSha256": "cd336fb93b7c5e2d03e8949100366f6152c78b28275a6de30a2062a66a4ce2ef",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:reviewer-context"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:reviewer:workspace-context",
+      "kind": "context-assembler",
+      "selector": "function:buildReviewerWorkspaceContext",
+      "sourcePath": "artifacts/api-server/src/lib/reviewer-context.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "sealed-generation"
+      ],
+      "contentBytes": 1491,
+      "contentSha256": "3a80e8565b97ebeb7f151744ed306750bbb2a1cc1bf4c33ad5d8ecf5d1bdfe7a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-generation"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "assembler:sealed-node:prepare-refinement",
+      "kind": "context-assembler",
+      "selector": "function:prepareZeroSealedNodeRefinement",
+      "sourcePath": "artifacts/api-server/src/lib/zero-sealed-generation.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "sealed-generation"
+      ],
+      "contentBytes": 4535,
+      "contentSha256": "8e34c7f1470d6bf6afecb8089ae4b4b8637b45fa6adbab2e7996bff7b2aa51ef",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-generation"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "assembler:sealed-node:prepare-source",
+      "kind": "context-assembler",
+      "selector": "function:prepareZeroSealedNodeSource",
+      "sourcePath": "artifacts/api-server/src/lib/zero-sealed-generation.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "skills"
+      ],
+      "contentBytes": 1008,
+      "contentSha256": "62e78174d07d149ead9afbe53625c85867a3e53b857cc1df33bddb1181bae37d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:skills:format-index",
+      "kind": "context-assembler",
+      "selector": "function:formatSkillIndex",
+      "sourcePath": "artifacts/api-server/src/lib/builder-skills.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "skills"
+      ],
+      "contentBytes": 924,
+      "contentSha256": "72a1fc988b3c1099ee04cd79da8427c3eb50f88c41d93f37487cd7bb2a35e2c1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:skills:target-content",
+      "kind": "context-assembler",
+      "selector": "function:loadSkillContentForTarget",
+      "sourcePath": "artifacts/api-server/src/lib/builder-skills.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "skills"
+      ],
+      "contentBytes": 519,
+      "contentSha256": "4cbac2b4353e78fb624f77ed9d8f6898bd3647de3b796dd947afd6bccf67a7a3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "assembler:skills:target-index",
+      "kind": "context-assembler",
+      "selector": "function:listEnabledSkillsForTarget",
+      "sourcePath": "artifacts/api-server/src/lib/builder-skills.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1571,
+      "contentSha256": "d749f538da03ed3f92fc2b22ef7b3ead976a9d16b0b3ee17f658f3a4d040dcfc",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:ai-anthropic:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-anthropic/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 548,
+      "contentSha256": "d9ddc26e5912c98771c684e354bbf67178dbd1833c8525800acd2e204e7b97da",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:ai-anthropic:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-anthropic/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1812,
+      "contentSha256": "b4df06bb35900d49e6b618706183681382deb52ad68944af48d68597012559fd",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:ai-gemini:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-gemini/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 545,
+      "contentSha256": "809be4e1480ffa748b333382fb1bd3b5ce6f5ee744b4459a4f5ad3e4af64d1a4",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:ai-gemini:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-gemini/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1797,
+      "contentSha256": "ab300f6e2f7a316e2dc9000bd2073c9d4820c48b06c28e811409e7258187ad9f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:ai-openai:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-openai/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 545,
+      "contentSha256": "9445de1703f7227f3a300c001dbe761525a4b2d4229663e04348679d904e794e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:ai-openai:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-openai/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1572,
+      "contentSha256": "3c1ca2d48871c958c2fe55b19dff31cf9135cdb8215576d1cf60764a69a28d3c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:ai-openrouter:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-openrouter/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "d82f9e91c9930b05966a532c48277278686e4efed7f60809ba68625d85b404b8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:ai-openrouter:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-openrouter/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 3906,
+      "contentSha256": "99a2e878e4c3113282f74d3776556a9043b4c69396fcfdaf7e2729cb6de1f848",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:ai-providers:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-providers/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 548,
+      "contentSha256": "0187de37a1a720609c41a04683ef581ec3dda287e19ce25fc621e2a0c276d63e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:ai-providers:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-providers/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1597,
+      "contentSha256": "cee2fef9b12baf4e988bf9af7b56db78d487b252065b46dfb1ac363e230658e4",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:ai-replicate:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-replicate/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 548,
+      "contentSha256": "f52eee82ba7c17847f406f0ba94274bc3acfed396ad90708ec63f5945df46aed",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:ai-replicate:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/ai-replicate/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1801,
+      "contentSha256": "1f3076af974ab7a452909aaf5208590273746c308eba6e4f45e02e10f0258ca3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:auth-auth0:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-auth0/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 546,
+      "contentSha256": "96815a774cfbfea47fa4d37b3be35100c4549f16ad02e5e9e5a45a76454a6e7a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:auth-auth0:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-auth0/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2643,
+      "contentSha256": "a5e1a41521bf74e60ba0faa880401253443f21cd4936ab3cd48825cd62664624",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:auth-clerk-managed:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-clerk-managed/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 554,
+      "contentSha256": "5ead68950f7fa427359fe1af2a431107ba07af11d5536c689e9f61460818daf4",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:auth-clerk-managed:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-clerk-managed/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2401,
+      "contentSha256": "b3715f17ee5258d9b14be99eb178659c660dbb3ddd55170bde98369428dc57a1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:auth-nextauth:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-nextauth/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "51885606327a9885107ac25fb918a6e3dd87489f5bf14fc32204fea69c98448f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:auth-nextauth:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-nextauth/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 3653,
+      "contentSha256": "6c7cc0860b03bf7aa79b25795596829cd5e40846f2c69764e5d4ac6e41c6378a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:auth-replit:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-replit/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 547,
+      "contentSha256": "719f70481aedcf35c712e853b4a996758163abea77c2c86a0e9c8106f56aa450",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:auth-replit:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-replit/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2334,
+      "contentSha256": "20d664d99b3bf3b61420c9aa56aaf31e2aff10421f83260deefa8a78dcdd93ca",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:auth-supabase:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-supabase/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "b23b87501d0bd71996dc422ffd91bd8dd5ab0bcb89ac5f63ba18f32181cf456c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:auth-supabase:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/auth-supabase/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2244,
+      "contentSha256": "dbeff95fdba7a21138752a3ac5e3b06bd01107f337172d4552b00502a93c0509",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:comm-discord:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-discord/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 548,
+      "contentSha256": "a07a056610c31b3f4d386a601f6e5f854828f3702873d594374c26f6fc404835",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:comm-discord:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-discord/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2004,
+      "contentSha256": "6f4edefc96be958261d3365e17585df8f10467f27637719dba4bf7c6997ade9c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:comm-pusher:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-pusher/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 547,
+      "contentSha256": "4f31f3fd8db8e9994e52d0f94d91f8c1a5d91ca10fc9f190505ea5a433e96392",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:comm-pusher:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-pusher/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1697,
+      "contentSha256": "215fa5060e4250c07142005ac05e2ad2c2d2e2a5466b79cfca34403370132303",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:comm-resend:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-resend/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 547,
+      "contentSha256": "0e482c215e335caa3e83100c3f255e670aacbc62ae9209633c04ad13aaff49b8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:comm-resend:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-resend/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1603,
+      "contentSha256": "e2472db28ef4a8111624d0638a2f3e5deff727fc553381400255f4cd2096609e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:comm-sendgrid:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-sendgrid/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "dc67b193ad20bdffc4a10c1e0391708fc07c891a970c574da18f1fbb4ddb0c38",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:comm-sendgrid:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-sendgrid/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2229,
+      "contentSha256": "63ece8973443f51fd7a987eea72ea28e112d89dd8da11a7c8e7af1223cea0269",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:comm-slack:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-slack/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 546,
+      "contentSha256": "224288d80188dfbc2bd6fc9ceee88db08cd312f356812c6fc21e487c7b9f43f1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:comm-slack:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-slack/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1873,
+      "contentSha256": "1fe44d2a1a139ee156655b7d757f85ceb0cf8dc1de37a99689eec5a8ab3497f8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:comm-twilio:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-twilio/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 547,
+      "contentSha256": "0de6cc643ab554bd2ae9fca9becb1d38ba29d2f000f18bb9c9c899ca92361a0e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:comm-twilio:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/comm-twilio/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2520,
+      "contentSha256": "419d303c152907c2a0d21de19fbfd95d5a8c3a20c9613bdf89eee4a0e73cc780",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-firebase:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-firebase/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 486,
+      "contentSha256": "1593d4ba162c09fa26a4e3e1067b9cde76e641c40b93702644301ed29b304f3f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-firebase:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-firebase/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1778,
+      "contentSha256": "3847be947c4069adcae80064449d6a08e1f42385b0419f6b98603eea1937f347",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-mongodb:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-mongodb/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 485,
+      "contentSha256": "eb47c5f7574db693de766722b3a5ddb9a594c25723c30781905cfb540a9f06ae",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-mongodb:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-mongodb/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2186,
+      "contentSha256": "f02f90c2d28b0eaf3fcd20d1656dee640820a4fa2e4d21f23754dad6622da077",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-neon:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-neon/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 683,
+      "contentSha256": "3a06d65520eae707e5fb143f32626abdad1fef540b72bc03fd6a053ede54ac4e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-neon:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-neon/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2218,
+      "contentSha256": "2a2c64a35f8edb71f9c2431d974eeb2991bc82fd5fcf91b448b6c995f7e0a9bb",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-planetscale:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-planetscale/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 489,
+      "contentSha256": "0d2283a83a01c3c0241023facf73f6466d8f5133343067fb1bd01a915b4576ec",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-planetscale:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-planetscale/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2510,
+      "contentSha256": "a95c8878f7da7f8ad5e9d4bac5ac9bddd9fc755f3cf442cc288be783572578fc",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-postgres:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-postgres/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 687,
+      "contentSha256": "73cae17863c611f1d9f92d79eec7bb1e831faffb7cc12ad4362ef311a6a1da82",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-postgres:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-postgres/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2084,
+      "contentSha256": "5d71d7e8f69eca593f786032b0cb8f834f40e5e6b6d81494267fa559f01ea0a1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-redis:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-redis/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 483,
+      "contentSha256": "93762a93c76f753910375d7568ad7ee29ddaa0c22323299ef3c852e98f7ba861",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-redis:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-redis/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2167,
+      "contentSha256": "a34001c042cd7bf831cb1a08b96736608ec2c28a1cab6d1dafd4986494c0138f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-sqlite:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-sqlite/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 484,
+      "contentSha256": "a9aac51ffc7fdab2d1fe6798fb903bada6e4b79542cfda463054ed2fc415776e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-sqlite:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-sqlite/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2190,
+      "contentSha256": "9da9532d4f2eea5f7866604c389ae38565f18138b77cf010951929e1a433c0c8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:db-supabase:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/db-supabase/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 486,
+      "contentSha256": "cadae4aefa8bc667b62f385e91f03c290403221e813a5553eeaa57e67590f4c7",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:db-supabase:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/db-supabase/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2158,
+      "contentSha256": "1e49e439204b94f536d0592e4e507104ba5f421168516e4800da314cd352071c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:devops-flyio:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-flyio/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 548,
+      "contentSha256": "f3e4eb2b086efa4da8e39c879413ae55004d411377e358589e6f90872a366a94",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:devops-flyio:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-flyio/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2423,
+      "contentSha256": "24d4434c2d113adcec8a50d6763594ef48ef588fcc2b99c54d8c623b56419b3d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:devops-github:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-github/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "910b01f5ab0225661df4f6035d0a95ec3bef274829151b56152647856c6d8412",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:devops-github:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-github/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2093,
+      "contentSha256": "4ca2ba49789aa8001d646ff7e82eccd6737fb89b06a401da81755609370428c8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:devops-logflare:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-logflare/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 551,
+      "contentSha256": "0c0889827feb6542444bb21a8eb5749be82ac7e2546a4df3692b457b58f42dd1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:devops-logflare:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-logflare/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1926,
+      "contentSha256": "2a69f44c96ed74bc8ba07479cabe9c90229c2ee18559b4c2b9ac03471d9a2fec",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:devops-posthog:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-posthog/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 550,
+      "contentSha256": "da6e95ebb517bebb553a9af9539c853a701bbf4d0e92d25feed41421ef4c6e14",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:devops-posthog:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-posthog/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2077,
+      "contentSha256": "a5278cf3f089c49b6ef963a0af14a31eeee7610a6806cea5b09b911f6d16fd1e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:devops-sentry:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-sentry/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "93de7c8b2f07c26ba0fab1b118f6fb465211107e97baeff223f23323ce6287ff",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:devops-sentry:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-sentry/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2148,
+      "contentSha256": "25c717119a63ef89df46a378f99b84349da55429dcab45911bf02c7f9db3a05e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:devops-vercel:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-vercel/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 549,
+      "contentSha256": "b416c45f9957ed66c3cd1bc6a479f3104ba6a8d9e1c2a292305ba4fe7ec2d5ed",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:devops-vercel:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/devops-vercel/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1989,
+      "contentSha256": "89378ed1af52a10809dd6f35a7bb8c2e0ab5a96ab1bfafe216abadadadf7f13e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:payments-paddle:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-paddle/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 605,
+      "contentSha256": "d1420cd277f4636b23cdad1bf3d3bf0416e2d6861a17a6cb99120fdea5a06e78",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:payments-paddle:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-paddle/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2314,
+      "contentSha256": "2a29adc396eaddf4dcaa702ef07d00649ea15966a197ff0d822eadd1fc31b806",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:payments-revenuecat:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-revenuecat/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 609,
+      "contentSha256": "a74d10f1a3bee07899afb2d95ba2820f000157a2f43a88ef554776ad6b522a84",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:payments-revenuecat:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-revenuecat/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 3296,
+      "contentSha256": "139cd0c20bdd0a786bb0da6981100dd129d522180772ca0d87f96110644c8c09",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:payments-stripe:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-stripe/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 707,
+      "contentSha256": "1a231a55c0aa3abf6b7edd532c4ede5d2a82d6910e5aef465a33ee68ac1d1946",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:payments-stripe:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-stripe/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1405,
+      "contentSha256": "d4c0a872d7a393d30a077ecd64a79b9d0c341005946f05ddf53a973431604e2c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:payments-whop:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-whop/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 603,
+      "contentSha256": "93c0bc9ac9923e434f9a0f2d7af637e99b3ceb6ab3b6685c46343b54bcbb0a5c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:payments-whop:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/payments-whop/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2546,
+      "contentSha256": "2d340e3d4631596b52732fa007ffdade8b0d5eeebce1741c608693bd70a22227",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:storage-cloudinary:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-cloudinary/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 554,
+      "contentSha256": "1174d0cfa05a9ae73d5827000f25f350775731a495fa0307957ce95f5844d1f2",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:storage-cloudinary:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-cloudinary/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2849,
+      "contentSha256": "e2e7eeced4889fa00dc44a99f7d35ec85dac97e30e3c4e7f468bbf39fcb9c214",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:storage-object:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-object/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 550,
+      "contentSha256": "be1ff1877d5701fcbca55d01cca021849d5c6ce4f472a864903079040c52c370",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:storage-object:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-object/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 2837,
+      "contentSha256": "ee7c8978ce5e57edccbc4e13667e776d60410979b0b88ef7f84f7a8cbb748c45",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:storage-r2:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-r2/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 546,
+      "contentSha256": "07eb3afe48342b02041498533ea6e99ff0dcbc6849eceaaf430a18857d98b2b2",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:storage-r2:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-r2/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 3092,
+      "contentSha256": "ed28afc17fbf99b8869261d4d3c6132e64953e7e680807b47fe54f9c48077d94",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:storage-s3:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-s3/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 546,
+      "contentSha256": "a58a04400e0b475294948a807bc1ae98b99d0fa47d9eb565a48a988568b30f72",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:storage-s3:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-s3/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 1877,
+      "contentSha256": "05379b000d0e8b1484dc61287b1374e90569e3445cf4b8da29a7f502212cee17",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:blueprint-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "blueprint:storage-uploadthing:document",
+      "kind": "blueprint-instructions",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-uploadthing/blueprint.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "jobs",
+        "knowledge"
+      ],
+      "contentBytes": 555,
+      "contentSha256": "3a2f0d30e18b125d51ac4cdca2e88318118231ffaba146cbfa1d5e98f2ac5d4b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "blueprint:storage-uploadthing:eligibility",
+      "kind": "blueprint-eligibility",
+      "selector": "file",
+      "sourcePath": "blueprints/storage-uploadthing/eligibility.json"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "sealed-generation"
+      ],
+      "contentBytes": 3099,
+      "contentSha256": "1cd42bb510a2e0e2d887302282dccdcd507d7fc92d2b24952cc320ed6f3f3ef7",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-generation"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "guidance:sealed-node:prompt-extension",
+      "kind": "sealed-guidance",
+      "selector": "variable:ZERO_SEALED_NODE_PROMPT_EXTENSION",
+      "sourcePath": "artifacts/api-server/src/lib/zero-sealed-generation.ts"
+    },
+    {
+      "consumers": [
+        "architect"
+      ],
+      "contentBytes": 2142,
+      "contentSha256": "e0f9ab18ff92b4ce2f9dfcc01b6c11c76ddd7d1421ca762e0e635f398469819c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:review"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:architect:ARCHITECT_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:ARCHITECT_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/architect.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1476,
+      "contentSha256": "e80e4576271862b2cb5716de74246dff13b44aa46c5ddadf42a3284a9d935fdc",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:ANIMATION_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:ANIMATION_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 474,
+      "contentSha256": "f62df61628038b78ee402b1c6e9da6d385d09ed470dcf46c9b6ec8be1cae6eb2",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:ANIMATION_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:ANIMATION_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1402,
+      "contentSha256": "da9a025badabdb93ad0a9b860e8b9da5c195c5af1bbf5d95666ecdf04ff540fe",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:AUTOMATION_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:AUTOMATION_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 441,
+      "contentSha256": "b54b230462f0e2898cedcebad1dce0289c73487fe114b93aa55b6ea6209cc05e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:AUTOMATION_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:AUTOMATION_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 926,
+      "contentSha256": "af5ade760b5b7a7012926fac9add2ec915ceff732bbc4d5dacedf0f8f8459075",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:repair"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:BROWSER_FIX_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:BROWSER_FIX_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1149,
+      "contentSha256": "5cff6c62163ea152b4c8a9d0f362c6e348d9f4e34a49c280d847b7172d143672",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 407,
+      "contentSha256": "4bcc1d90a3570f19a7f287220fa59099557c7f989cdf09de5f3c08ddd3543130",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:conversation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:CLARIFY_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:CLARIFY_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 28,
+      "contentSha256": "8d71f5932b8ab81b88006e57a2f0693482c33fd69b9f3587cc62d8c8912c3883",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:conversation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:CONVERSE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:CONVERSE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1633,
+      "contentSha256": "cfe4bc882dcec60fd493705e8cd9baee2833504609a987c7846d7d6337a299af",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:review"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:CRITIQUE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:CRITIQUE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 899,
+      "contentSha256": "6dcbdf9cce8d8615a46571cc9fc03eda0bb5d2de40297368c59352d46ac8b5ec",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:repair"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:CVE_PATCH_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:CVE_PATCH_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 958,
+      "contentSha256": "32db84ffcb80f39683a6ff31a98d2d6412424aef62df1fe82c9860e31a90aabd",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:developer-intent"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:DEBUG_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:DEBUG_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 900,
+      "contentSha256": "bdbf6203f462dbaaf23325ba0391e1d5662405087996d81149162feec28b8223",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:conversation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:EXPLAIN_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:EXPLAIN_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2316,
+      "contentSha256": "4d57bbe0b9015c5e502e10c5193fc09837abe2522df3c1f4bb2a5ab3201d55f3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:FASTAPI_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:FASTAPI_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1051,
+      "contentSha256": "0f86ca15d2aba4314959e1c66848cd9871838d09bde4c379eb9595a788698219",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:FASTAPI_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:FASTAPI_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2424,
+      "contentSha256": "e79c182c9357e767edee5b1607d51772666f715ac03dbc66ef463f40bb71e33d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:FLASK_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:FLASK_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1011,
+      "contentSha256": "0c8e4cb36f26fd7736f6edef48cb31f191720c988545291b4920bf32c5b91de1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:FLASK_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:FLASK_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2784,
+      "contentSha256": "a4179d326369e5a8d63b808ad44a5778beda41018f590c39690443f861a6a6b2",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:GO_GIN_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:GO_GIN_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1080,
+      "contentSha256": "ca739e51fbb4cb7c1218d0709cc253edb940336b51a4b1459e6ba7f9a083386d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:GO_GIN_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:GO_GIN_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 4584,
+      "contentSha256": "ab4c43c0b20405fc2096b280566dab8234692bf16e7453297a83e69d438ad50f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:intent"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:INTENT_CLASSIFIER_SYSTEM",
+      "kind": "static-prompt",
+      "selector": "variable:INTENT_CLASSIFIER_SYSTEM",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 3609,
+      "contentSha256": "12c61c0b9049c7a213b87d66b5b51c90dbfc489254053ecbaa9ef8248a51b5fb",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:MOBILE_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:MOBILE_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 3387,
+      "contentSha256": "4f8a78a783ee0213eefbc6202cc52d8a6559913452427ca0632171d60abf444a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:review"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:MOBILE_CRITIQUE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:MOBILE_CRITIQUE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 612,
+      "contentSha256": "53ca20c89d0c184f1ab79cc358b6451924ff2979b75e171bf5a7700cf4fb1b34",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:planning"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:MOBILE_PLAN_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:MOBILE_PLAN_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1235,
+      "contentSha256": "97aaee20d97bf88d56135360b3eff810b8353fc1d1545af7fad6cc4dc139aa8f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:MOBILE_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:MOBILE_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 3265,
+      "contentSha256": "f363a3388cedc558789d1a8ae3d4262a72462a5b797ade468893ee98416ac7d6",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:NEXTJS_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:NEXTJS_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1319,
+      "contentSha256": "29c1b6e5849debabf436f5a90aac848c87ec1174d2e5ca64c7fbabd2548d483f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:NEXTJS_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:NEXTJS_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2865,
+      "contentSha256": "cb9f3f7e84a5ed9b7c8ac415dc747a8bc324676eca96700c32befd8e77108217",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:NODE_API_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:NODE_API_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1045,
+      "contentSha256": "46ed237b348faea0e211a9e0038d06ae0339cc658323cd1693c682585424ad2a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:NODE_API_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:NODE_API_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2284,
+      "contentSha256": "abc40b473708df6af5b595961fcdf06d2066d549666d2def2d88de1dc9277d2e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:NODE_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:NODE_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1270,
+      "contentSha256": "588ff94afbd15b4526cfd81dcc33aab731361ac7d02c1db86e66d393e47f2f98",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:NODE_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:NODE_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1520,
+      "contentSha256": "906a5e48d89f3317da236486a32a70c41024d5fb86c173680e2aa0158218916c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:planning"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:PLAN_DECOMPOSE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:PLAN_DECOMPOSE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2158,
+      "contentSha256": "7fd28ae9b32311897ab436321c31b5f69a7fb5fc8d4810826b301c89825ea55b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:planning"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:PLAN_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:PLAN_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 2448,
+      "contentSha256": "23cdf6992cd0d76aaaabb23059dc12a202c04507d4bc657f1ff40ba681ff7e3d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:PYTHON_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:PYTHON_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1279,
+      "contentSha256": "dbc791ec6e7e83cd72fe0df6ee2f8d30a9d2027a25f31deb8edd17952132c449",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:PYTHON_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:PYTHON_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 3821,
+      "contentSha256": "e02f7ab8daa888c71ce3a4f6011a69e9ca01b52c978e1aff335528ebfdd6697b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:REACT_VITE_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:REACT_VITE_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1591,
+      "contentSha256": "11ee29958f78c09e3b9aa6d9f3039be0be981dd1a7b447af3edf0ecbd941048d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:REACT_VITE_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:REACT_VITE_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 978,
+      "contentSha256": "03a9ed7f6dd4047341465de2d85ec2f2e4dd1f84a13cc1f592e6c435eea249cd",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:developer-intent"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:REFACTOR_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:REFACTOR_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1717,
+      "contentSha256": "e0696b4d3c3e07e968176912bffd0d0b3e8ea4be97fe38f9009e13f66cc44593",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 859,
+      "contentSha256": "e0269573557d78fb2f82255a206115a1a5089f4f3c73382ae9bc343ee4fd1b95",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:review"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:REVIEW_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:REVIEW_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1304,
+      "contentSha256": "5127c2cecce10464c03723151edad848dcb884009cf929a590ff17b1f57356b8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:build-generation"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:SLIDES_BUILD_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:SLIDES_BUILD_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 507,
+      "contentSha256": "04c8c1560252b853dbf6197cef4a87605b424e1545b17c213bbba7b302a1f110",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:refinement"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:SLIDES_REFINE_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:SLIDES_REFINE_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "builder"
+      ],
+      "contentBytes": 1305,
+      "contentSha256": "229c2016f0ce6d7d6aaedd019e5f1f4f40f9b6e6bba32bbcc1ea511faf2bd430",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:test-planning"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "prompt:builder:TEST_GENERATION_SYSTEM_PROMPT",
+      "kind": "static-prompt",
+      "selector": "variable:TEST_GENERATION_SYSTEM_PROMPT",
+      "sourcePath": "artifacts/api-server/src/lib/builder.ts"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 478,
+      "contentSha256": "79958b09982a13812051c166e20bcf1a8514eef3cd44058c639b825ab1424326",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:astro:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/astro/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3067,
+      "contentSha256": "b1919a47ed35d908ead6c0637e8daf8652cac63bc4123906f629e6e7f36a9d38",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:astro:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/astro/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 542,
+      "contentSha256": "1ffca48f4698dc9570fad24eff07e4b734493640c6f00072a7152132c1d8166f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:auth-clerk:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/auth-clerk/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3085,
+      "contentSha256": "441f9ebe272d18e0a78791ae9e9c46b6d930a643fa946dd7c5f5b9d9d5aee2a4",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:auth-clerk:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/auth-clerk/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 476,
+      "contentSha256": "bb14cca40dd35889ced5609ae668abccf3556c7332957ef2e695f55d3a275f53",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:bun:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/bun/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2394,
+      "contentSha256": "ba7a6a257a9a7867eeb99b4b86ddd3383f9ebb6c6061f526b1388d9fdb38b657",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:bun:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/bun/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 480,
+      "contentSha256": "4f1703064ea5ca17fae674b5dc49b9beb545db23aa19999b29fa5e5a54613ae6",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:chartjs:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/chartjs/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2511,
+      "contentSha256": "a67f0e8199a8ba7b9af0c2d1d84d307148621b0c9feeb1301cefc8537298cb56",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:chartjs:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/chartjs/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 542,
+      "contentSha256": "d9e2c9c11d26c110e4507e5945f20ce1fe9ecb740e23a6037844df3b5526505e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:cloudinary:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/cloudinary/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3718,
+      "contentSha256": "8186e66d8cab5142173ddcbecbe94716808b3bb968c9b0c949871d30d7ec109f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:cloudinary:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/cloudinary/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 475,
+      "contentSha256": "b3441a1a39675609da8b4c44ef97f8c97f55f02f8f2d392834efe92bed14db8e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:d3:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/d3/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3219,
+      "contentSha256": "25acf8168f2644ba6084672dbdfec5cfe0db4b83c3cf82c3c4372765d9c85079",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:d3:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/d3/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 477,
+      "contentSha256": "cedb3d1c1ee77f7edc92881b446a4e833ecd49123964bc48f9518f6bfe4b0d17",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:deno:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/deno/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2090,
+      "contentSha256": "e67bca2606cd8762ecd2067ed22ccaccaf1f052ce5dcece6aad102adc31fc696",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:deno:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/deno/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 679,
+      "contentSha256": "95260eeb3cbb3cea1a34ea522d2fd6404d6d5adffa8c808161b7721a85ecd071",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:drizzle:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/drizzle/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3410,
+      "contentSha256": "9500d4913563405307e2cd815ef8d2617352617666c00bc95ae4e91d5246429e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:drizzle:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/drizzle/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 484,
+      "contentSha256": "f2c20f24bfcf9099ccf5ac50abaae34eafa38cb431e6371b4f2c221f5c99ea8d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:expo-mobile:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/expo-mobile/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3151,
+      "contentSha256": "c68b482b371a524f1db33d2a54883c77316d6311f930e019fea586c540be9a13",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:expo-mobile:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/expo-mobile/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 480,
+      "contentSha256": "d731965bd91a085bdaa3a61dad315bc2c919407b46d8dee13593523dceeef87f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:fastapi:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/fastapi/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3069,
+      "contentSha256": "751112a8a3ec6327bcaad38726dcc04596fe665a358112f9f75092c85072cda8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:fastapi:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/fastapi/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 595,
+      "contentSha256": "3119ffc5944ad98bc77fc2e92b9884b355bebc60a4836d4a18777d358507a28d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:firebase:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/firebase/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3630,
+      "contentSha256": "dee4726f50deb1d0a12cd85a26070f7ac2547d1fd04e3aed252a44808e9719f3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:firebase:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/firebase/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 478,
+      "contentSha256": "15bfad188c71f10124e47cbab2dae59bc738569b95e48845aefe04ea168b1536",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:flask:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/flask/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2701,
+      "contentSha256": "7276ac805bcc34adf6eddd441e4f48eba09924caaef3b2b53cc24b48ed7bbb4a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:flask:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/flask/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 486,
+      "contentSha256": "af9a4b0ff23ae4ba58e18cb4e044b927395a5391c314030a1fbb2ae26cc3eb84",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:framer-motion:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/framer-motion/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2618,
+      "contentSha256": "158ade87cb5310729d604ec134c0292cdc770fa2e5e555ac16378db490c46cd8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:framer-motion:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/framer-motion/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 477,
+      "contentSha256": "5f773de6ef65537c86f900cf960cb47d6e80a6162b7d327651a8e2d955222749",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:gsap:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/gsap/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2664,
+      "contentSha256": "665977aaa74c843c0deba0e232ea87eee7e956ada5a393ee531163c963744bf7",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:gsap:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/gsap/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 477,
+      "contentSha256": "04e8cb6336caadcd6c0d9cc55fd903f91a7f6850243c6b29f3789d6046fea8a7",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:hono:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/hono/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2316,
+      "contentSha256": "08d4c4c5c6b6bc5b110c36684d1a7879b63dd6c5a2cd1f911360561d24677a75",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:hono:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/hono/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 490,
+      "contentSha256": "1e0328d10ec0768f72ca7ff04f7c81fab2cb528c0df26751119d38820925dbc1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:nextjs-app-router:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/nextjs-app-router/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3606,
+      "contentSha256": "275d50437d04f2d4726956669be5ff0aa6b7d9650c0e58a334909eddcd8f201e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:nextjs-app-router:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/nextjs-app-router/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 688,
+      "contentSha256": "826ec2dde91b81dfc6a2f252ffdfe44395a493c7ec7ce755c017d791d7cdef3d",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:postgres-drizzle:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/postgres-drizzle/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3989,
+      "contentSha256": "72e03e90a1c71a0e387b0e12fe7679b01a3f460b0c11d7e749651932d6acf247",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:postgres-drizzle:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/postgres-drizzle/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 534,
+      "contentSha256": "1f8be21cf4ab86d1552ec5ba8e81899ad139d33182753add170827585f721547",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:prisma:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/prisma/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3183,
+      "contentSha256": "ebe9dd63ea0fa3fd37fd961c4464048c28f43c496715f5fe97665a48d6d991fb",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:prisma:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/prisma/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 481,
+      "contentSha256": "7ba7a3533c7e0ef699a64c242a3beeb9ff8ef1768cc6ce09ba821680172df850",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:radix-ui:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/radix-ui/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3197,
+      "contentSha256": "ba12280801328943f27e3db14f1fc093d976c7a07cf3020a02aa4d800b78d24b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:radix-ui:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/radix-ui/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 483,
+      "contentSha256": "9baef3f09b6de66707d669522c17249505bf34b6def3df8505a97e3f26c55924",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:react-vite:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/react-vite/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3441,
+      "contentSha256": "ca0e4195faf55ae7e238d8ba1700fead7cb5e285894640ce2eb0dff73d6e3896",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:react-vite:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/react-vite/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 478,
+      "contentSha256": "f1f328ab9ad3075e750f34e7a90d848051c4022bbe6d5e63f7d05b3a2f8a0b1b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:remix:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/remix/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2960,
+      "contentSha256": "9cf589133940dcedebf3dc78300375a687c37309576f79b110d4dc576117f0e1",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:remix:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/remix/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 538,
+      "contentSha256": "d588a6201322630d129f5fdbf4ba86294c3fcbe4bcb6ec6208626dfba05d958b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:resend:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/resend/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3371,
+      "contentSha256": "b38ddd9157b5a2bc963a10734c7650fa6b72aed53aeba02731f6797fadbd3cee",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:resend:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/resend/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 540,
+      "contentSha256": "868c4b30de2f95f31125411ab223afc91e174339db195fda7b8209cebb756b77",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:sendgrid:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/sendgrid/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3309,
+      "contentSha256": "010fa3b8a6a34c7c9fa7f0c779b1a3404b2859cb822822c4bb807e83d4e106a5",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:sendgrid:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/sendgrid/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 482,
+      "contentSha256": "9cd3f031bc41f25dfd7d27230d7e295fbfe0e95e30a205574e6f44ca81a032a0",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:shadcn-ui:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/shadcn-ui/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3059,
+      "contentSha256": "fb1d2dbda40531d464baea7093ebbf4e6ee83d4009b525b89518ee6ae3158e3b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:shadcn-ui:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/shadcn-ui/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 703,
+      "contentSha256": "c50093d0373b83b85d5f04030045fd7b776c6a56d58a715560b6d2b510f9aa2f",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:stripe-payments:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/stripe-payments/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 4583,
+      "contentSha256": "5441aebc805f4baf91397538ec42019f7d01d3a522d39fede82461d06186a7b6",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:stripe-payments:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/stripe-payments/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 595,
+      "contentSha256": "d2d5400db498b3af51e4c5455744884831e56dfb442c09ee4b282146728685b5",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:supabase:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/supabase/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3223,
+      "contentSha256": "f174ec5b830d800ab410b5011a27ec8f7d21374a1626c5aac4214500588665cd",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:supabase:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/supabase/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 482,
+      "contentSha256": "5c14ee36578b1d3aff7c9b57a3d4e2cefc12cff6a70bcabc646ab01d58985364",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:sveltekit:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/sveltekit/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2760,
+      "contentSha256": "b8b4afec763d03fb8453be642739ffc6dfc3fc83f3f2aa37142604de80e3d878",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:sveltekit:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/sveltekit/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 484,
+      "contentSha256": "bef8f47ebc5e965485d3d15c000d82eb37b328cd857039a91825ee7683605f29",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:tailwind-v4:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/tailwind-v4/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2614,
+      "contentSha256": "ac1bbcb928e9f12a0c82f3facadc831b32c1fe91c935a802e16c80a80da996fa",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:tailwind-v4:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/tailwind-v4/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 487,
+      "contentSha256": "8fd6f4728eefad65fefb8fdf8bd27503ea352b20ede05950b1e626b41db2298c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:tanstack-query:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/tanstack-query/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3316,
+      "contentSha256": "622fc2017c2af674866fa58299d5d60596d779ea62ad37248681e1ba6c8b825c",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:tanstack-query:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/tanstack-query/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 480,
+      "contentSha256": "5929cff5bdab9de7932a8d110e3587e157e4ef1d934c9fa7506919711d3fb051",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:threejs:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/threejs/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 3139,
+      "contentSha256": "857c528fb3422d433da43b9914acc2da1cb5fa5a573e5c25f924440534b8dc72",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:threejs:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/threejs/SKILL.md"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 477,
+      "contentSha256": "9d9c409ffdcc0c7b77f301831d2e038bb7f7b679a964f10e1fc6cff0ae05248a",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:sealed-eligibility"
+      ],
+      "deliveryModes": [
+        "sealed"
+      ],
+      "id": "skill:vue3:eligibility",
+      "kind": "skill-eligibility",
+      "selector": "file",
+      "sourcePath": "skills/vue3/eligibility.json"
+    },
+    {
+      "consumers": [
+        "agent-loop",
+        "builder-skills"
+      ],
+      "contentBytes": 2527,
+      "contentSha256": "3d2863f38624de7ab9e07ee3391d79786c4aeb9b544eebfc001f196b2660bd5b",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:skill-guidance"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing"
+      ],
+      "id": "skill:vue3:instructions",
+      "kind": "skill-instructions",
+      "selector": "file",
+      "sourcePath": "skills/vue3/SKILL.md"
+    }
+  ]
+}
