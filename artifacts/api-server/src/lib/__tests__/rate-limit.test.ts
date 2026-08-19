@@ -17,7 +17,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Request, Response, NextFunction } from "express";
-import { aiBuilderLimiter, oraLimiter, createLimiterForDomainVerify } from "../rateLimit";
+import {
+  admissionClientIp,
+  aiBuilderLimiter,
+  oraLimiter,
+  createLimiterForDomainVerify,
+} from "../rateLimit";
 import { logger } from "../logger";
 
 type FakeReq = Request & {
@@ -27,7 +32,12 @@ type FakeReq = Request & {
 function makeReq(ip: string): FakeReq {
   const ee = new EventEmitter();
   const req = ee as unknown as FakeReq;
-  req.headers = { "x-forwarded-for": ip };
+  req.headers = {
+    "x-forwarded-for": "198.51.100.200, 198.51.100.201",
+    forwarded: "for=198.51.100.202;proto=https",
+    "cf-connecting-ip": "198.51.100.203",
+    "x-real-ip": "198.51.100.204",
+  };
   req.socket = { remoteAddress: ip } as Request["socket"];
   req.abort = () => ee.emit("aborted");
   return req;
@@ -70,6 +80,18 @@ function makeRes(): FakeRes {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("admission network identity", () => {
+  it("uses the immediate socket and ignores every forwarding-header identity", () => {
+    expect(admissionClientIp(makeReq("10.0.0.42"))).toBe("10.0.0.42");
+  });
+
+  it("uses one non-header fallback when the socket identity is missing", () => {
+    const req = makeReq("10.0.0.43");
+    req.socket = { remoteAddress: undefined } as Request["socket"];
+    expect(admissionClientIp(req)).toBe("unknown");
+  });
 });
 
 // ─── createLimiter (sliding window) ──────────────────────────────────────────

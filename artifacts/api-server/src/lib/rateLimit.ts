@@ -47,12 +47,17 @@ interface LimiterOpts {
   upgradeAvailable?: boolean;
 }
 
+/**
+ * Return the only network identity that admission control is allowed to use.
+ *
+ * This is deliberately the immediate socket address. We do not have captured
+ * proxy-topology evidence that would make any caller-visible forwarding header
+ * trustworthy, so X-Forwarded-For, Forwarded, provider headers, and X-Real-IP
+ * must not influence an admission bucket. Revisiting this policy requires new
+ * topology evidence; a healthy proxy deployment by itself is not sufficient.
+ */
 export function admissionClientIp(req: Request): string {
-  return (
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
-    req.socket.remoteAddress ??
-    "unknown"
-  );
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 // Apply the limit decision: set headers, then 429 or next() based on `count`.
