@@ -37,6 +37,15 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).toContain("zeroGenerationTarget,");
   });
 
+  it("routes convertible websites deliberately and keeps incompatible projects typed", () => {
+    expect(jobs).toContain("resolveZeroSealedProjectRouting");
+    expect(jobs).toContain("projectArtifactsTable");
+    expect(jobs).toContain("ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE");
+    expect(jobs).toContain("sealedProjectRecovery");
+    expect(jobs).toContain("recoveryAction: sealedProjectRecovery.action");
+    expect(jobs).not.toContain("Sealed Zero generation accepts Node API projects only");
+  });
+
   it("injects only the platform-owned non-secret runtime mode after sealing", () => {
     expect(backend).toContain('[TENANT_RUNTIME_MODE_ENV]: "cloudflare-capability-v1"');
     expect(backend).not.toContain("DATABASE_URL:");

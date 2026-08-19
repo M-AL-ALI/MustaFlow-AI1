@@ -27,6 +27,7 @@ import {
 } from "./zero-runtime-sdk";
 
 export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET:
+- Treat a request for a plain website as a complete Node/Express website: serve its real HTML, CSS, and browser JavaScript from compiler-emitted code while preserving the requested design and content. Do not switch the project back to a browser-only framework.
 - Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index.js" in src/*.ts. Never import a database or payments provider SDK. The explicit .js suffix is required for the emitted ESM path when TypeScript uses NodeNext. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.

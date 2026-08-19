@@ -2517,6 +2517,13 @@ function MessageRow({
           <InlineBuilderError
             message={(planPayload as { message?: string }).message ?? msg.content}
             suggestions={(planPayload as { suggestions?: string[] }).suggestions}
+            recoveryAction={
+              (
+                planPayload as {
+                  recoveryAction?: { label: string; prompt: string };
+                }
+              ).recoveryAction
+            }
             onTryFix={onSendMessage}
           />
         ) : isConverse || isClarifying ? (

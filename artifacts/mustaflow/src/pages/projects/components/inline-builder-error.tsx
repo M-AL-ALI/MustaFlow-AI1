@@ -4,11 +4,13 @@ export function InlineBuilderError({
   title = "I couldn't finish this step.",
   message,
   suggestions,
+  recoveryAction,
   onTryFix,
 }: {
   title?: string;
   message: string;
   suggestions?: string[];
+  recoveryAction?: { label: string; prompt: string };
   onTryFix?: (text: string) => void;
 }) {
   const isInsufficientCredits = message.startsWith("Insufficient credits");
@@ -51,7 +53,7 @@ export function InlineBuilderError({
               <span className="min-w-0 flex-1 leading-relaxed text-foreground/80">
                 {suggestion}
               </span>
-              {onTryFix && (
+              {onTryFix && !recoveryAction && (
                 <button
                   type="button"
                   onClick={() => onTryFix(suggestion)}
@@ -62,6 +64,19 @@ export function InlineBuilderError({
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {recoveryAction && onTryFix && (
+        <div className="pl-5 pt-1">
+          <button
+            type="button"
+            onClick={() => onTryFix(recoveryAction.prompt)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-[11px] font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+          >
+            <RotateCcw className="h-3 w-3" />
+            {recoveryAction.label}
+          </button>
         </div>
       )}
     </div>
