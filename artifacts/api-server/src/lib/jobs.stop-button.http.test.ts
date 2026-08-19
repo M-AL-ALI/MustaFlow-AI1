@@ -53,6 +53,7 @@ const {
   fakeDeploymentLogsTable,
   fakeToolAuditTable,
   fakeBuilderSkillsTable,
+  fakeNabuflowOrgSeatsTable,
   TASK_ID,
   PROJECT_ID,
   mockProject: _mockProject,
@@ -118,6 +119,7 @@ const {
   const fakeDeploymentLogsTable = { __id: "deployment_logs" };
   const fakeToolAuditTable = { __id: "tool_audit" };
   const fakeBuilderSkillsTable = { __id: "builder_skills" };
+  const fakeNabuflowOrgSeatsTable = { __id: "nabuflow_org_seats" };
 
   // ── Chainable drizzle-like query builder ─────────────────────────────────
   function makeSelectChain(result: unknown[]): unknown {
@@ -125,6 +127,7 @@ const {
     const chain: Record<string, unknown> = {
       from: (_table: unknown) => chain,
       where: (..._args: unknown[]) => chain,
+      innerJoin: (..._args: unknown[]) => chain,
       orderBy: (..._args: unknown[]) => chain,
       limit: (_n: number) => p,
       then: p.then.bind(p),
@@ -316,6 +319,7 @@ const {
     fakeDeploymentLogsTable,
     fakeToolAuditTable,
     fakeBuilderSkillsTable,
+    fakeNabuflowOrgSeatsTable,
     TASK_ID,
     PROJECT_ID,
     mockProject,
@@ -325,6 +329,7 @@ const {
 // ── vi.mock() calls — all hoisted before any import ───────────────────────────
 
 vi.mock("drizzle-orm", () => ({
+  count: () => ({}),
   eq: () => ({}),
   ne: () => ({}),
   and: () => ({}),
@@ -365,6 +370,24 @@ vi.mock("@workspace/db", () => ({
   deploymentLogsTable: fakeDeploymentLogsTable,
   toolAuditTable: fakeToolAuditTable,
   builderSkillsTable: fakeBuilderSkillsTable,
+  nabuflowOrgSeatsTable: fakeNabuflowOrgSeatsTable,
+}));
+
+vi.mock("./parallel-build-admission", () => ({
+  PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE:
+    "This build did not start because capacity checks are temporarily unavailable. Try again shortly.",
+  resolveParallelBuildAdmissionScope: vi.fn(async (ownerId: string) => ({
+    kind: "owner",
+    ownerId,
+    planId: "bounded-exempt",
+    limit: 12,
+    lockId: 1,
+  })),
+  evaluateParallelBuildAdmission: vi.fn((_scope: unknown, activeBuilds: number) => ({
+    allowed: true,
+    limit: 12,
+    activeBuilds,
+  })),
 }));
 
 // Auth: requireProjectOwnership passthrough — no Clerk required
