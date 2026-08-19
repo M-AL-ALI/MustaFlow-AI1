@@ -17,6 +17,7 @@ import {
   appTestRunsTable,
   cveFindingsTable,
   projectDomainsTable,
+  projectArtifactsTable,
   projectActivityTable,
   notificationsTable,
   type AgentTaskCompletionKind,
@@ -145,6 +146,13 @@ import {
   type PreparedZeroSealedNodeSource,
 } from "./zero-sealed-generation";
 import { runZeroGenerationKitchen, ZeroGenerationKitchenError } from "./zero-generation-kitchen";
+import {
+  ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE,
+  ZERO_SEALED_PROJECT_TYPE_MESSAGE,
+  ZERO_SEALED_PROJECT_TYPE_RECOVERY,
+  ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS,
+  resolveZeroSealedProjectRouting,
+} from "./zero-sealed-project-routing";
 import { supportsZeroGeneration } from "./tenant-runtime-provider";
 import {
   ZERO_SEALED_RUNTIME_PORT,
@@ -2776,16 +2784,74 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
-        if (resolvedIsMobile || resolvedProjectStack !== "node-api") {
-          throw new Error("Sealed Zero generation accepts Node API projects only");
+        const sealedProjectRouting = resolveZeroSealedProjectRouting({
+          projectKind: project.kind,
+          platform: project.platform,
+          stack: resolvedProjectStack,
+          projectFormat: resolvedProjectFormat,
+          isMobile: resolvedIsMobile,
+        });
+        if (!sealedProjectRouting.eligible) {
+          throw new ZeroGenerationKitchenError(
+            ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE,
+            ZERO_SEALED_PROJECT_TYPE_MESSAGE,
+            {
+              stage: "project-type-routing",
+              reason: sealedProjectRouting.reason,
+              projectKind: project.kind,
+              platform: project.platform,
+              stack: resolvedProjectStack,
+              projectFormat: resolvedProjectFormat,
+            },
+          );
         }
-        if (project.runtimePort !== ZERO_SEALED_RUNTIME_PORT) {
-          await db
-            .update(projectsTable)
-            .set({ runtimePort: ZERO_SEALED_RUNTIME_PORT })
-            .where(eq(projectsTable.id, projectId));
-          project.runtimePort = ZERO_SEALED_RUNTIME_PORT;
+
+        const projectMetadataChanged =
+          project.stack !== sealedProjectRouting.stack ||
+          project.projectFormat !== sealedProjectRouting.projectFormat ||
+          project.stackLocked !== true ||
+          project.runtimePort !== ZERO_SEALED_RUNTIME_PORT;
+        if (projectMetadataChanged) {
+          await db.transaction(async (tx) => {
+            await tx
+              .update(projectsTable)
+              .set({
+                stack: sealedProjectRouting.stack,
+                projectFormat: sealedProjectRouting.projectFormat,
+                stackLocked: true,
+                runtimePort: ZERO_SEALED_RUNTIME_PORT,
+                updatedAt: sql`now()`,
+              })
+              .where(eq(projectsTable.id, projectId));
+            await tx
+              .update(projectArtifactsTable)
+              .set({
+                stack: sealedProjectRouting.stack,
+                projectFormat: sealedProjectRouting.projectFormat,
+                updatedAt: sql`now()`,
+              })
+              .where(
+                and(
+                  eq(projectArtifactsTable.projectId, projectId),
+                  eq(projectArtifactsTable.isPrimary, true),
+                  isNull(projectArtifactsTable.deletedAt),
+                ),
+              );
+          });
         }
+        if (sealedProjectRouting.reason === "convertible_website") {
+          await emitEvent(
+            taskId,
+            "architecture_changed",
+            "Preparing this website for the production builder.",
+          );
+        }
+        resolvedProjectStack = sealedProjectRouting.stack;
+        resolvedProjectFormat = sealedProjectRouting.projectFormat;
+        project.stack = sealedProjectRouting.stack;
+        project.projectFormat = sealedProjectRouting.projectFormat;
+        project.stackLocked = true;
+        project.runtimePort = ZERO_SEALED_RUNTIME_PORT;
       }
 
       const isSlidesProject = !resolvedIsMobile && resolvedProjectStack === "slides";
@@ -6743,11 +6809,20 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         return;
       }
       logger.error({ err, taskId, projectId }, "Builder job failed");
-      const message = err instanceof Error ? err.message : "Unknown builder error";
+      const rawMessage = err instanceof Error ? err.message : "Unknown builder error";
       const failureEvidence =
         err instanceof ZeroGenerationKitchenError
           ? { code: err.code, message: err.message, evidence: err.evidence }
           : undefined;
+      const sealedProjectRecovery =
+        failureEvidence?.code === ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE
+          ? {
+              message: ZERO_SEALED_PROJECT_TYPE_MESSAGE,
+              suggestions: [...ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS],
+              action: { ...ZERO_SEALED_PROJECT_TYPE_RECOVERY },
+            }
+          : undefined;
+      const message = sealedProjectRecovery?.message ?? rawMessage;
       if (failureEvidence !== undefined) analyticsErrorCategory = failureEvidence.code;
       await emitEvent(taskId, "failed", message);
 
@@ -6780,7 +6855,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // Generate specific fix suggestions via AI (parallel with DB writes)
       const finalTokenCount = flushTokenCount(taskId);
       const [suggestions] = await Promise.all([
-        generateFixSuggestions(userPrompt, message),
+        sealedProjectRecovery?.suggestions ?? generateFixSuggestions(userPrompt, message),
         db
           .update(agentTasksTable)
           .set({
@@ -6809,6 +6884,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             warnings: [],
             ...(failureEvidence === undefined ? {} : { failureEvidence }),
             suggestions,
+            ...(sealedProjectRecovery === undefined
+              ? {}
+              : { recoveryAction: sealedProjectRecovery.action }),
             integrationsNeeded: [],
           },
         })
@@ -6894,10 +6972,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           agentMode,
           planMode: false,
           origin: jobOrigin,
-          plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<
-            string,
-            unknown
-          >,
+          plan: {
+            kind: "error",
+            message,
+            suggestions,
+            ...(failureEvidence === undefined ? {} : { code: failureEvidence.code }),
+            ...(sealedProjectRecovery === undefined
+              ? {}
+              : { recoveryAction: sealedProjectRecovery.action }),
+            ...errBatchMeta,
+          } as unknown as Record<string, unknown>,
         });
       } catch {
         // best-effort

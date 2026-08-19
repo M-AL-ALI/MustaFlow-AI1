@@ -364,6 +364,12 @@ describe("Zero sealed generator integration", () => {
   );
 
   it("documents compiled-only assets and idempotent capability schema setup", () => {
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(
+      "Treat a request for a plain website as a complete Node/Express website",
+    );
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(
+      "preserving the requested design and content",
+    );
     expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("not depend on public/");
     expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("CREATE TABLE IF NOT EXISTS");
   });
