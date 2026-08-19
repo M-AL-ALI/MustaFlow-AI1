@@ -54,10 +54,10 @@ describe("Wave 7B-3 reviewer excerpt selection", () => {
     expect(selectedPaths).not.toContain("package.json");
     expect(selectedPaths).not.toContain("vite.config.ts");
     expect(selectedPaths).not.toContain("tsconfig.json");
-    expect(context.fileExcerpts).toHaveLength(8);
-    expect(context.fileExcerpts.reduce((total, excerpt) => total + excerpt.content.length, 0)).toBe(
-      30_000,
-    );
+    expect(context.fileExcerpts.length).toBeLessThanOrEqual(8);
+    expect(
+      context.fileExcerpts.reduce((total, excerpt) => total + excerpt.content.length, 0),
+    ).toBeLessThanOrEqual(30_000);
   });
 
   it("reports requested files that are missing from the workspace", () => {
@@ -163,6 +163,34 @@ describe("Wave 7B-3 reviewer excerpt selection", () => {
     for (const path of assembled.reviewerAssembledPromptStats.selectedPaths) {
       expect(assembled.userMessage).toContain(`--- ${path} ---`);
     }
+  });
+
+  it("passes a complete generated source file beyond the former excerpt cap through to review", () => {
+    const closingSource = '\napp.listen(port, "0.0.0.0");\n';
+    const completeSource = `${"const flag = true;\n".repeat(400)}${closingSource}`;
+    expect(completeSource.length).toBeGreaterThan(6_000);
+    expect(completeSource.length).toBeLessThan(30_000);
+
+    const selected = buildReviewerContextFromFiles({
+      diff: { filesAdded: ["src/index.ts"], filesModified: [], filesRemoved: [] },
+      workspaceFiles: [{ path: "src/index.ts", content: completeSource }],
+      reviewRequest: "Review src/index.ts.",
+    });
+    const assembled = assembleArchitectReviewPrompt({
+      userRequest: "Build a complete website.",
+      agentMode: "lite",
+      diff: selected.diff,
+      fileExcerpts: selected.fileExcerpts,
+    });
+
+    expect(selected.fileExcerpts[0]).toMatchObject({
+      path: "src/index.ts",
+      content: completeSource,
+      truncated: false,
+      originalChars: completeSource.length,
+    });
+    expect(assembled.userMessage).toContain(closingSource.trim());
+    expect(assembled.userMessage).not.toContain("REVIEW CONTEXT TRUNCATED");
   });
 
   it("records honest zero assembled stats when no files are eligible", () => {

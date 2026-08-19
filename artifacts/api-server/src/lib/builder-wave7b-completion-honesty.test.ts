@@ -263,10 +263,14 @@ describe("Builder Wave 7B completion honesty", () => {
           {
             path: "src/App.tsx",
             content: "export default function App(){return <main>Reviewed</main>}",
+            truncated: false,
+            originalChars: 59,
           },
           {
             path: "src/new.ts",
             content: "export const ready = true;",
+            truncated: false,
+            originalChars: 26,
           },
         ],
       }),
@@ -471,7 +475,7 @@ describe("Builder Wave 7B completion honesty", () => {
     }
   });
 
-  it("caps reviewer excerpts by file count, per-file size, and total size", () => {
+  it("caps reviewer context by file count and total size while marking an incomplete file", () => {
     const changed = Array.from({ length: 10 }, (_, index) => ({
       path: `src/file-${index}.ts`,
       content: String(index).repeat(7_000),
@@ -484,10 +488,13 @@ describe("Builder Wave 7B completion honesty", () => {
       },
     });
 
-    expect(context.fileExcerpts).toHaveLength(5);
-    expect(context.fileExcerpts.every((file) => file.content.length <= 6_000)).toBe(true);
-    expect(context.fileExcerpts.reduce((total, file) => total + file.content.length, 0)).toBe(
-      30_000,
+    expect(context.fileExcerpts.length).toBeLessThanOrEqual(8);
+    expect(
+      context.fileExcerpts.reduce((total, file) => total + file.content.length, 0),
+    ).toBeLessThanOrEqual(30_000);
+    expect(context.fileExcerpts.some((file) => file.truncated)).toBe(true);
+    expect(context.fileExcerpts.find((file) => file.truncated)?.content).toContain(
+      "REVIEW CONTEXT TRUNCATED",
     );
   });
 });

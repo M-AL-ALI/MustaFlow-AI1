@@ -31,8 +31,10 @@ import {
   tenantRuntimeProvider,
 } from "./tenant-runtime";
 import { getContainerSecretMap } from "./container-secrets";
+import { mintCloudflarePreviewGrant } from "./cloudflare-preview-grant";
 import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
+import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 
 const runtimeGatewayHostname = tenantRuntimeProvider.getGatewayHostname();
 const runtimeGatewayLabel = tenantRuntimeProvider.getGatewayLabel();
@@ -66,6 +68,39 @@ function projectIdFromUrl(url: string | undefined): number | null {
   if (!url) return null;
   const pathname = url.split("?")[0] ?? "";
   return matchPreviewPath(pathname)?.projectId ?? null;
+}
+
+/**
+ * Resolve the browser-facing launch URL for a private Cloudflare preview runtime.
+ * Cloudflare descriptors intentionally have no directly reachable container URL;
+ * the browser instead redeems a short-lived signed grant at the runtime data plane.
+ */
+export async function resolveCloudflareLivePreviewLaunchUrl(
+  project: Pick<PreviewProject, "id" | "containerId" | "containerStatus" | "runtimePort" | "stack">,
+  requestUrl: string | undefined,
+  environment: Record<string, string | undefined> = process.env,
+): Promise<string | null> {
+  if (!project.containerId || project.containerStatus !== "running") return null;
+  const manifest = resolveProjectRuntimeManifest({
+    runtimePort: project.runtimePort,
+    stack: project.stack,
+    legacyProfile: "fixed-node",
+  });
+  const grant = await mintCloudflarePreviewGrant(
+    {
+      projectId: project.id,
+      runtimeId: project.containerId,
+      servicePort: manifest.servicePort,
+    },
+    environment,
+  );
+  if (grant === null) return null;
+
+  const sourceUrl = new URL(requestUrl ?? "/", "https://platform.invalid");
+  const matched = matchPreviewPath(sourceUrl.pathname);
+  const launchUrl = new URL(grant.launchUrl);
+  if (matched?.rest) launchUrl.pathname = `${launchUrl.pathname}${matched.rest}`;
+  return launchUrl.toString();
 }
 
 type PreviewProject = {
@@ -355,6 +390,20 @@ export async function handleLivePreviewHttp(
   next: NextFunction,
   project: PreviewProject,
 ): Promise<void> {
+  const cloudflareLaunchUrl = await resolveCloudflareLivePreviewLaunchUrl(
+    project,
+    req.originalUrl ?? req.url,
+  );
+  if (cloudflareLaunchUrl !== null) {
+    res
+      .status(302)
+      .setHeader("Cache-Control", "no-store")
+      .setHeader("Referrer-Policy", "no-referrer")
+      .setHeader("Location", cloudflareLaunchUrl)
+      .end();
+    return;
+  }
+
   // Container layer not configured in this environment — serve files from DB.
   if (!(await isContainerLayerConfigured())) {
     await serveProjectFilesPreview(

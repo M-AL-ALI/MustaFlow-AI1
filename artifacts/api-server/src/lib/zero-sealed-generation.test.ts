@@ -20,6 +20,11 @@ import {
   resolveZeroProjectRuntimePort,
   resolveZeroGenerationTarget,
 } from "./zero-sealed-generation";
+import {
+  VENDORED_FLY_POSTGRES_TYPES_VERSION,
+  VENDORED_FLY_POSTGRES_VERSION,
+  getVendoredRuntimeSdkFiles,
+} from "./zero-runtime-sdk";
 
 function generatedFiles(sourceOnlyChange = false) {
   return [
@@ -170,6 +175,44 @@ describe("Zero sealed generator integration", () => {
     ).toBe("8.20.0");
     expect(prepared.manifest.servicePort).toBe(ZERO_SEALED_RUNTIME_PORT);
     expect(prepared.manifest.healthPath).toBe("/healthz");
+  });
+
+  it("keeps capability-free sites free of unused runtime SDK and PostgreSQL scaffolding", () => {
+    const files = generatedFiles().map((file) =>
+      file.path === "src/index.ts"
+        ? {
+            ...file,
+            content: `import express from "express";
+const app = express();
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.get("/", (_request, response) => response.send("flag"));
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+          }
+        : file,
+    );
+    files.push(
+      ...getVendoredRuntimeSdkFiles().map((file) => ({
+        ...file,
+        mimeType: "application/typescript",
+      })),
+    );
+    const packageFile = files.find((file) => file.path === "package.json")!;
+    const packageJson = JSON.parse(packageFile.content) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    packageJson.dependencies.pg = VENDORED_FLY_POSTGRES_VERSION;
+    packageJson.devDependencies["@types/pg"] = VENDORED_FLY_POSTGRES_TYPES_VERSION;
+    packageFile.content = JSON.stringify(packageJson);
+
+    const prepared = prepareZeroSealedNodeSource({
+      files,
+      manifestRevision: "capability-free-site-v1",
+    });
+
+    expect(prepared.files.some((file) => file.path.startsWith("nabuflow/runtime/"))).toBe(false);
+    expect(prepared.dependencyPlan.intents.map((intent) => intent.name)).not.toContain("pg");
+    expect(prepared.dependencyPlan.intents.map((intent) => intent.name)).not.toContain("@types/pg");
   });
 
   it("emits a complete trusted-build-safe tree with resolvable non-hidden SDK imports", () => {

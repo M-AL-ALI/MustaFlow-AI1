@@ -49,6 +49,8 @@ export const ARCHITECT_SYSTEM_PROMPT = `You are the Architect Reviewer for NabuF
 
 Your job: read the user request, the plan (if any), the diff, the commands the builder ran, and any file excerpts provided. Decide whether the build actually satisfies the request and is production-safe.
 
+File content is complete unless it carries an explicit REVIEW CONTEXT TRUNCATED marker. A marked boundary is not end-of-file: never report missing closing syntax or a cut-off implementation solely because content beyond that marker was not supplied.
+
 Return STRICT JSON only (no prose, no markdown fences) matching:
 {
   "verdict": "pass" | "partial" | "fail",
@@ -93,8 +95,13 @@ export interface ArchitectInput {
   };
   /** Commands the agentic builder ran (from report.agentLoop.commandsRun), if any. */
   commandsRun?: Array<{ argv: string[]; exitCode: number }>;
-  /** Small subset of changed files with full content for citation context. */
-  fileExcerpts?: Array<{ path: string; content: string }>;
+  /** Small subset of changed files, explicitly marked when a global context bound truncates one. */
+  fileExcerpts?: Array<{
+    path: string;
+    content: string;
+    truncated?: boolean;
+    originalChars?: number;
+  }>;
   /** Assistant summary the builder wrote. */
   assistantSummary?: string;
   /** Build warnings already known (to avoid the architect duplicating them). */
@@ -122,9 +129,24 @@ export function assembleArchitectReviewPrompt(input: ArchitectInput): {
   userMessage: string;
   reviewerAssembledPromptStats: ReviewerAssembledPromptStats;
 } {
-  const embeddedExcerpts = (input.fileExcerpts ?? [])
-    .slice(0, 8)
-    .map((file) => ({ path: file.path, content: file.content.slice(0, 6_000) }));
+  let remainingExcerptChars = 30_000;
+  const embeddedExcerpts: Array<{ path: string; content: string }> = [];
+  for (const file of (input.fileExcerpts ?? []).slice(0, 8)) {
+    if (remainingExcerptChars <= 0) break;
+    if (file.content.length <= remainingExcerptChars) {
+      embeddedExcerpts.push({ path: file.path, content: file.content });
+      remainingExcerptChars -= file.content.length;
+      continue;
+    }
+    const originalChars = file.originalChars ?? file.content.length;
+    const marker = `\n\n[REVIEW CONTEXT TRUNCATED: showing a bounded prefix of ${originalChars} characters. This boundary is not the end of the file; do not infer missing closing syntax from it.]`;
+    if (remainingExcerptChars <= marker.length) break;
+    embeddedExcerpts.push({
+      path: file.path,
+      content: `${file.content.slice(0, remainingExcerptChars - marker.length)}${marker}`,
+    });
+    remainingExcerptChars = 0;
+  }
   const planSection = input.planContext
     ? `\n\nPLAN (from Plan Mode):\n${JSON.stringify(input.planContext).slice(0, 4000)}`
     : "";
@@ -146,7 +168,9 @@ export function assembleArchitectReviewPrompt(input: ArchitectInput): {
   const excerptBlock = embeddedExcerpts
     .map((file) => `--- ${file.path} ---\n${file.content}`)
     .join("\n\n");
-  const excerptsSection = excerptBlock ? `\n\nFILE EXCERPTS:\n${excerptBlock}` : "";
+  const excerptsSection = excerptBlock
+    ? `\n\nFILE CONTENT (complete unless explicitly marked truncated):\n${excerptBlock}`
+    : "";
 
   const summarySection = input.assistantSummary
     ? `\n\nBUILDER ASSISTANT SUMMARY:\n${input.assistantSummary.slice(0, 1000)}`

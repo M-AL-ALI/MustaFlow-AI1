@@ -261,6 +261,20 @@ function withVendoredRuntimeDependencies(pkg: PackageJson): PackageJson {
   };
 }
 
+function withoutUnusedVendoredRuntimeDependencies(pkg: PackageJson): PackageJson {
+  const dependencies = { ...(pkg.dependencies ?? {}) };
+  const devDependencies = { ...(pkg.devDependencies ?? {}) };
+  if (dependencies.pg === VENDORED_FLY_POSTGRES_VERSION) delete dependencies.pg;
+  if (devDependencies["@types/pg"] === VENDORED_FLY_POSTGRES_TYPES_VERSION) {
+    delete devDependencies["@types/pg"];
+  }
+  return {
+    ...pkg,
+    dependencies,
+    devDependencies,
+  };
+}
+
 export interface PreparedZeroSealedNodeSource {
   files: BuilderFile[];
   dependencyPlan: ZeroGeneratedDependencyPlan;
@@ -321,7 +335,15 @@ export function prepareZeroSealedNodeSource(input: {
   if (pkg.scripts?.build !== "tsc" || pkg.scripts?.start !== "node dist/src/index.js") {
     throw new ZeroSealedSourceContractError(["runtime_scripts"], "package.json");
   }
-  pkg = withVendoredRuntimeDependencies(pkg);
+  const usesRuntimeCapability = [...byPath.values()].some(
+    (file) =>
+      !file.path.startsWith("nabuflow/runtime/") &&
+      (file.content.includes("createNabuFlowDatabase") ||
+        file.content.includes("createNabuFlowPayments")),
+  );
+  pkg = usesRuntimeCapability
+    ? withVendoredRuntimeDependencies(pkg)
+    : withoutUnusedVendoredRuntimeDependencies(pkg);
   byPath.set("package.json", {
     ...packageFile,
     content: `${JSON.stringify(pkg, null, 2)}\n`,
@@ -350,12 +372,6 @@ export function prepareZeroSealedNodeSource(input: {
     );
   }
   const entryReasons: ZeroSealedSourceContractReason[] = [];
-  const usesRuntimeCapability = [...byPath.values()].some(
-    (file) =>
-      !file.path.startsWith("nabuflow/runtime/") &&
-      (file.content.includes("createNabuFlowDatabase") ||
-        file.content.includes("createNabuFlowPayments")),
-  );
   if (
     usesRuntimeCapability &&
     (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
@@ -382,12 +398,17 @@ export function prepareZeroSealedNodeSource(input: {
       }
     }
   }
-  for (const sdkFile of getVendoredRuntimeSdkFiles()) {
-    byPath.set(sdkFile.path, {
-      path: sdkFile.path,
-      content: sdkFile.content,
-      mimeType: "application/typescript",
-    });
+  const runtimeSdkFiles = getVendoredRuntimeSdkFiles();
+  if (usesRuntimeCapability) {
+    for (const sdkFile of runtimeSdkFiles) {
+      byPath.set(sdkFile.path, {
+        path: sdkFile.path,
+        content: sdkFile.content,
+        mimeType: "application/typescript",
+      });
+    }
+  } else {
+    for (const sdkFile of runtimeSdkFiles) byPath.delete(sdkFile.path);
   }
   const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
   return {

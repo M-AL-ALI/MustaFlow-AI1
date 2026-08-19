@@ -17,15 +17,21 @@ export type ReviewerWorkspaceContext = {
     filesModified: string[];
     filesRemoved: string[];
   };
-  fileExcerpts: Array<{ path: string; content: string }>;
+  fileExcerpts: Array<{
+    path: string;
+    content: string;
+    truncated: boolean;
+    originalChars: number;
+  }>;
   missingRequestedPaths: string[];
 };
 
 export type ReviewerDiff = ReviewerWorkspaceContext["diff"];
 
 const REVIEWER_MAX_FILE_EXCERPTS = 8;
-const REVIEWER_MAX_EXCERPT_CHARS = 6_000;
 const REVIEWER_MAX_TOTAL_EXCERPT_CHARS = 30_000;
+const REVIEWER_TRUNCATION_MARKER = (originalChars: number, includedChars: number): string =>
+  `\n\n[REVIEW CONTEXT TRUNCATED: showing ${includedChars} of ${originalChars} characters. This boundary is not the end of the file; do not infer missing closing syntax from it.]`;
 const REVIEWABLE_PATH_PATTERN =
   /(?:^|[\s`"'(:,])((?:\.\/)?(?:[\w@.-]+\/)*[\w@.-]+\.(?:tsx?|jsx?|css|scss|sass|less|html?|vue|svelte|json|mdx?|py|rb|go|rs|java|kt|swift|php|cs))(?=$|[\s`"',.;:)\]])/gi;
 const SOURCE_EXTENSIONS = new Set([
@@ -187,8 +193,30 @@ export function buildReviewerContextFromFiles(input: {
   for (const file of candidates) {
     if (fileExcerpts.length >= REVIEWER_MAX_FILE_EXCERPTS) break;
     if (remainingChars <= 0) break;
-    const content = file.content.slice(0, Math.min(REVIEWER_MAX_EXCERPT_CHARS, remainingChars));
-    fileExcerpts.push({ path: file.path, content });
+    if (file.content.length <= remainingChars) {
+      fileExcerpts.push({
+        path: file.path,
+        content: file.content,
+        truncated: false,
+        originalChars: file.content.length,
+      });
+      remainingChars -= file.content.length;
+      continue;
+    }
+
+    const markerProbe = REVIEWER_TRUNCATION_MARKER(file.content.length, 0);
+    if (remainingChars <= markerProbe.length) break;
+    let includedChars = remainingChars - markerProbe.length;
+    let marker = REVIEWER_TRUNCATION_MARKER(file.content.length, includedChars);
+    includedChars = remainingChars - marker.length;
+    marker = REVIEWER_TRUNCATION_MARKER(file.content.length, includedChars);
+    const content = `${file.content.slice(0, includedChars)}${marker}`;
+    fileExcerpts.push({
+      path: file.path,
+      content,
+      truncated: true,
+      originalChars: file.content.length,
+    });
     remainingChars -= content.length;
   }
 
