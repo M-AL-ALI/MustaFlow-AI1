@@ -122,6 +122,8 @@ describe("AI Builder cohort access", () => {
     expect(routes).toMatch(
       /router\.post\(\s*"\/brainstorm\/chat",\s*attachOptionalClerkUser,\s*brainstormAdmissionLimiter,\s*aiBuilderLimiter,?\s*\);/,
     );
+    expect(routes.match(/"\/brainstorm\/chat"/g)).toHaveLength(1);
+    expect(routes.match(/"\/brainstorm\/resolve"/g)).toHaveLength(1);
   });
 
   it("returns access and live-server capability fields from preferences", () => {

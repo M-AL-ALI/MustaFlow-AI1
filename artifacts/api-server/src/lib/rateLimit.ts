@@ -570,3 +570,16 @@ export const generalLimiter = createLimiter({
   keyPrefix: "general",
   message: "Too many requests. Please slow down.",
 });
+
+// Public pricing renders exactly two catalog reads per page mount. A shared
+// 120/minute socket bucket therefore permits sixty complete reloads per minute
+// while bounding scraper traffic well below the broad 300/minute API envelope.
+export const PUBLIC_PLAN_CATALOG_WINDOW_MS = 60_000;
+export const PUBLIC_PLAN_CATALOG_MAX_REQUESTS = 120;
+export const publicPlanCatalogLimiter = createLimiter({
+  windowMs: PUBLIC_PLAN_CATALOG_WINDOW_MS,
+  max: PUBLIC_PLAN_CATALOG_MAX_REQUESTS,
+  keyPrefix: "public_plan_catalog",
+  limitType: "public_plan_catalog",
+  message: "Plan information is being requested too quickly. Please wait a moment and try again.",
+});

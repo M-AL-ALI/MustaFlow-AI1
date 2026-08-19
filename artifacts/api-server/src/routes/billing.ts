@@ -42,10 +42,12 @@ import type { SubscriptionTier } from "@workspace/db";
 import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
+  stripeAvailableSingleFlight,
   getUncachableStripeClient,
   getStripePublishableKey,
   invalidateStripeCredentialCache,
 } from "../lib/stripeClient";
+import { publicPlanCatalogLimiter } from "../lib/rateLimit";
 import { evictTierCache } from "../lib/public-ai/authed-user";
 import {
   PLAN_TIERS,
@@ -56,11 +58,7 @@ import {
 } from "../lib/plans";
 import { isSuperuser, SUPERUSER_ORA_TIER } from "../lib/superusers";
 import { logger } from "../lib/logger";
-import {
-  NABUFLOW_BUILD_MODE_COSTS,
-  NABUFLOW_PLAN_IDS,
-  NABUFLOW_PLANS,
-} from "../lib/nabuflow-plans";
+import { publicNabuflowPlanCatalog } from "../lib/nabuflow-public-plans";
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
@@ -1185,8 +1183,11 @@ billingWebhookRouter.post("/billing/webhook", handleStripeWebhook);
 // Must stay OUTSIDE the auth wall so signed-out visitors get live server data
 // instead of silently falling back to hardcoded tiers.
 export const billingPublicRouter: IRouter = Router();
-billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> => {
-  const configured = await stripeAvailable();
+const PUBLIC_PLAN_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300";
+
+billingPublicRouter.get("/billing/ora-plans", publicPlanCatalogLimiter, async (_req, res) => {
+  const configured = await stripeAvailableSingleFlight();
+  res.setHeader("Cache-Control", PUBLIC_PLAN_CACHE_CONTROL);
   res.json({
     tiers: ORA_TIERS_META.map((t) => ({
       ...t,
@@ -1196,33 +1197,14 @@ billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> =
 });
 // Public NabuFlow plans metadata — no auth required (pricing page, landing page).
 // Parallel to GET /billing/ora-plans; does NOT leak per-user state.
-billingPublicRouter.get("/billing/nabuflow/plans", (_req, res): void => {
-  res.json({
-    plans: NABUFLOW_PLAN_IDS.map((id: string) => {
-      const plan = NABUFLOW_PLANS[id as keyof typeof NABUFLOW_PLANS];
-      return {
-        id: plan.id,
-        name: plan.name,
-        available: plan.available,
-        priceUsd: plan.priceUsd,
-        includedMonthlyCredits: plan.includedMonthlyCredits,
-        overageUsdPerCredit: plan.overageUsdPerCredit,
-        rolloverCycles: plan.rolloverCycles,
-        rolloverMaxCredits: plan.rolloverMaxCredits,
-        parallelBuildLimit: plan.parallelBuildLimit,
-        queuePriority: plan.queuePriority,
-        defaultSpendCapUsdCents: Math.round(plan.defaultSpendCapUsd * 100),
-        maxSpendCapUsdCents: Math.round(plan.maxSpendCapUsd * 100),
-        ladder: {
-          proBuildsPerCycle: plan.ladder.proBuildsPerCycle,
-          deepBuildsPerCycle: plan.ladder.deepBuildsPerCycle,
-          proDeepCombo: plan.ladder.proDeepCombo,
-        },
-      };
-    }),
-    modeCosts: NABUFLOW_BUILD_MODE_COSTS,
-  });
-});
+billingPublicRouter.get(
+  "/billing/nabuflow/plans",
+  publicPlanCatalogLimiter,
+  async (_req, res): Promise<void> => {
+    res.setHeader("Cache-Control", PUBLIC_PLAN_CACHE_CONTROL);
+    res.json(await publicNabuflowPlanCatalog());
+  },
+);
 
 // ── Auth-required billing router ──────────────────────────────────────────────
 const router: IRouter = Router();

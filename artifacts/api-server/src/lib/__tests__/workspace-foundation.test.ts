@@ -129,7 +129,7 @@ describe("workspace foundation", () => {
     expect(defaultWorkspaceName(null)).toBe("My workspace");
   });
 
-  it("creates signup credits, one default workspace, and one owner membership idempotently", async () => {
+  it("collapses duplicate Clerk user.created delivery into one credits row, workspace, and membership", async () => {
     const first = await ensureUserSignupFoundation({ userId: "user-a", displayName: "Ada" });
     const second = await ensureUserSignupFoundation({ userId: "user-a", displayName: "Renamed" });
 

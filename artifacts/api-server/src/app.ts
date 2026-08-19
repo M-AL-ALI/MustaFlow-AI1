@@ -25,6 +25,8 @@ import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
 import { startStuckRunScheduler } from "./lib/stuck-run-scheduler";
+import { generalLimiter } from "./lib/rateLimit";
+import { clerkSignupAdmissionLimiter } from "./lib/signup-admission";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -103,8 +105,10 @@ app.use(
   }),
 );
 
-// Clerk proxy — must come before body parsers (streams raw bytes)
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+// Clerk proxy — must come before body parsers (streams raw bytes). It does not
+// pass through the /api router, so its broad envelope and durable signup-only
+// admission boundary are mounted explicitly here before upstream dispatch.
+app.use(CLERK_PROXY_PATH, generalLimiter, clerkSignupAdmissionLimiter, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
 
