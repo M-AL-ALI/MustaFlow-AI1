@@ -614,7 +614,7 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
     "rate_limits",
     "Rate limits active",
     "pass",
-    "express-rate-limit: AI 20/min, publish/export 10-15/min, global 300/15min.",
+    "Admission controls active: global 300/min per IP, endpoint limits, account/IP brainstorm ceilings, and plan running-build limits.",
   );
 
   // 10. Terms / Privacy / Help

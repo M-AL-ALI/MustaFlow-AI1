@@ -8,6 +8,8 @@ export type BuilderCompletionKind =
   | "checks_failed"
   | "check_blocked"
   | "rate_limited"
+  | "admission_blocked"
+  | "admission_unavailable"
   | "container_unavailable";
 
 export const STEP_CAP_COMPLETION_MESSAGE =
@@ -34,6 +36,10 @@ export function getBuilderCompletionMessage(
       return "Stopped because required checks could not pass — review the report";
     case "rate_limited":
       return "Stopped because the tool rate limit was reached — try again later";
+    case "admission_blocked":
+      return "This build did not start because the account is already at its running-build limit";
+    case "admission_unavailable":
+      return "This build did not start because capacity checks are temporarily unavailable — try again shortly";
     case "container_unavailable":
       return "Completed with live-server validation unavailable";
     case "finalized":
@@ -67,7 +73,13 @@ export function getBuilderTaskQueueLabel(
   status: string,
   completionKind: string | null | undefined,
 ): string {
-  if (status !== "completed") return status;
+  if (
+    status !== "completed" &&
+    completionKind !== "admission_blocked" &&
+    completionKind !== "admission_unavailable"
+  ) {
+    return status;
+  }
 
   switch (completionKind as BuilderCompletionKind | null | undefined) {
     case "step_cap":
@@ -85,6 +97,10 @@ export function getBuilderTaskQueueLabel(
       return "Blocked";
     case "rate_limited":
       return "Rate limited";
+    case "admission_blocked":
+      return "Not started — capacity reached";
+    case "admission_unavailable":
+      return "Not started — try again";
     case "container_unavailable":
       return "Completed partially";
     case "finalized":

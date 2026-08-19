@@ -30,6 +30,8 @@ export type AgentTaskCompletionKind =
   | "checks_failed"
   | "check_blocked"
   | "rate_limited"
+  | "admission_blocked"
+  | "admission_unavailable"
   | "container_unavailable";
 
 export type TaskReport = {

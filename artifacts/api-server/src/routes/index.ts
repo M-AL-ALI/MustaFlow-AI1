@@ -94,6 +94,7 @@ import tokensRouter from "./tokens";
 import previewEnvRouter from "./preview-env";
 import clerkWebhookRouter from "./clerk-webhook";
 import brainstormRouter from "./brainstorm";
+import { attachOptionalClerkUser, brainstormAdmissionLimiter } from "../lib/brainstorm-admission";
 import apiDocsRouter from "./api-docs";
 import publicAiRouter from "./public-ai/index";
 import oraTranscriptRouter from "./ora-transcript";
@@ -155,8 +156,19 @@ router.use(publicShareRouter); // GET /share/:token (public, no auth)
 router.use(apiDocsRouter); // GET /docs, GET /docs/openapi.yaml (public API reference)
 
 // ── Brainstorm (public, AI-powered, rate-limited) ─────────────────────────────
-router.post("/brainstorm/chat", aiBuilderLimiter);
-router.post("/brainstorm/resolve", attachUser, requireBuilderAccess, aiBuilderLimiter);
+router.post(
+  "/brainstorm/chat",
+  attachOptionalClerkUser,
+  brainstormAdmissionLimiter,
+  aiBuilderLimiter,
+);
+router.post(
+  "/brainstorm/resolve",
+  attachUser,
+  requireBuilderAccess,
+  brainstormAdmissionLimiter,
+  aiBuilderLimiter,
+);
 router.use(brainstormRouter);
 
 // ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────

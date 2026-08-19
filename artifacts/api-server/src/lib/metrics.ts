@@ -79,6 +79,12 @@ export const jobsTotal = new Counter({
   registers: [registry],
 });
 
+export const redisAdmissionBackendAvailable = new Gauge({
+  name: "redis_admission_backend_available",
+  help: "Last observed Redis admission backend state: 1=available, 0=missing or unavailable",
+  registers: [registry],
+});
+
 export const jobDuration = new Histogram({
   name: "job_duration_seconds",
   help: "Duration of builder jobs from queue to completion",

@@ -116,10 +116,12 @@ describe("AI Builder cohort access", () => {
     for (const [method, path] of guardedRoutes) {
       expect(routes).toContain(`router.${method}("${path}", requireBuilderAccess);`);
     }
-    expect(routes).toContain(
-      'router.post("/brainstorm/resolve", attachUser, requireBuilderAccess, aiBuilderLimiter);',
+    expect(routes).toMatch(
+      /router\.post\(\s*"\/brainstorm\/resolve",\s*attachUser,\s*requireBuilderAccess,\s*brainstormAdmissionLimiter,\s*aiBuilderLimiter,?\s*\);/,
     );
-    expect(routes).toContain('router.post("/brainstorm/chat", aiBuilderLimiter);');
+    expect(routes).toMatch(
+      /router\.post\(\s*"\/brainstorm\/chat",\s*attachOptionalClerkUser,\s*brainstormAdmissionLimiter,\s*aiBuilderLimiter,?\s*\);/,
+    );
   });
 
   it("returns access and live-server capability fields from preferences", () => {

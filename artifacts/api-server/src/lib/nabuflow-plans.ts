@@ -69,7 +69,7 @@ export interface NabuflowPlanConfig {
   rolloverCycles: number;
   /** Cap on credits carried into a cycle (defaults to one month's allotment). */
   rolloverMaxCredits: number;
-  /** Concurrent builds allowed (config only — enforced by queue infrastructure). */
+  /** Running builds allowed across the billable owner/org; enforced at durable job claim. */
   parallelBuildLimit: number;
   /** Larger = drained first (config only — consumed by queue infrastructure). */
   queuePriority: number;

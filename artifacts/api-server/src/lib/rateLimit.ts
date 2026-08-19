@@ -47,7 +47,7 @@ interface LimiterOpts {
   upgradeAvailable?: boolean;
 }
 
-function clientIp(req: Request): string {
+export function admissionClientIp(req: Request): string {
   return (
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
     req.socket.remoteAddress ??
@@ -85,7 +85,7 @@ function applyDecision(
 // In-memory fixed-window limiter — the original, fully-synchronous path. Used
 // when Redis is not configured and as the graceful fallback on any Redis error.
 function memoryLimiter(req: Request, res: Response, next: NextFunction, opts: LimiterOpts): void {
-  const key = `${opts.keyPrefix}:${clientIp(req)}`;
+  const key = `${opts.keyPrefix}:${admissionClientIp(req)}`;
   const now = Date.now();
 
   let win = store.get(key);
@@ -108,7 +108,7 @@ async function redisLimiter(
   // Bucket the window so all instances agree on the same counter + expiry.
   const bucket = Math.floor(Date.now() / opts.windowMs);
   const resetAtMs = (bucket + 1) * opts.windowMs;
-  const key = `rl:${opts.keyPrefix}:${clientIp(req)}:${bucket}`;
+  const key = `rl:${opts.keyPrefix}:${admissionClientIp(req)}:${bucket}`;
   try {
     const count = await redisIncrementWindow(key, opts.windowMs);
     applyDecision(res, next, opts, count, resetAtMs);
@@ -263,10 +263,7 @@ function releaseSlot(key: string, reason: ReleaseReason = "finish"): void {
 }
 
 export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction): void => {
-  const ip =
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
-    req.socket.remoteAddress ??
-    "unknown";
+  const ip = admissionClientIp(req);
   const key = `ai_sem:${ip}`;
 
   let entry = semaphoreStore.get(key);
@@ -355,10 +352,7 @@ export const oraLimiter = (req: Request, res: Response, next: NextFunction): voi
     return;
   }
 
-  const ip =
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
-    req.socket.remoteAddress ??
-    "unknown";
+  const ip = admissionClientIp(req);
   const key = `ora_sem:${ip}`;
 
   let entry = semaphoreStore.get(key);

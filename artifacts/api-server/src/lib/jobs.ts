@@ -20,6 +20,7 @@ import {
   projectArtifactsTable,
   projectActivityTable,
   notificationsTable,
+  nabuflowOrgSeatsTable,
   type AgentTaskCompletionKind,
   type TaskReport,
   type FileSnapshotEntry,
@@ -77,6 +78,13 @@ import {
   publishPreviewSyncFailed,
 } from "./preview-events";
 import { EventTypes } from "./event-types";
+import {
+  evaluateParallelBuildAdmission,
+  PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE,
+  resolveParallelBuildAdmissionScope,
+  type ParallelBuildAdmissionDecision,
+  type ParallelBuildAdmissionScope,
+} from "./parallel-build-admission";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
 import { getCheckByName } from "./checks/registry";
@@ -2122,15 +2130,169 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
 // infrastructure. A transaction-scoped, namespaced lock is released by Postgres
 // at COMMIT/ROLLBACK and cannot outlive or escape its claim transaction.
 export const PROJECT_JOB_LOCK_NAMESPACE = 0x4e424a42; // "NBJB"
+export const ACCOUNT_JOB_LOCK_NAMESPACE = 0x4e424143; // "NBAC"
+
+type PersistedAdmissionEvent = {
+  id: number;
+  taskId: number;
+  eventType: string;
+  message: string;
+  filePath: string | null;
+  data: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
+export type ProjectJobClaimResult =
+  | { claimed: true }
+  | { claimed: false; reason: "project_busy_or_not_claimable" }
+  | {
+      claimed: false;
+      reason: "parallel_build_limit_reached";
+      decision: Extract<ParallelBuildAdmissionDecision, { allowed: false }>;
+      event: PersistedAdmissionEvent;
+    };
+
+async function persistParallelBuildAdmissionUnavailable(
+  taskId: number,
+): Promise<PersistedAdmissionEvent | null> {
+  return db.transaction(async (tx) => {
+    const completedAt = new Date();
+    const [terminalTask] = await tx
+      .update(agentTasksTable)
+      .set({
+        status: "failed",
+        completionKind: "admission_unavailable",
+        result: PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE,
+        completedAt,
+      })
+      .where(
+        and(
+          eq(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["queued", "planning"]),
+        ),
+      )
+      .returning({ id: agentTasksTable.id });
+    if (!terminalTask) return null;
+
+    const [event] = await tx
+      .insert(taskEventsTable)
+      .values({
+        taskId,
+        eventType: "failed",
+        message: PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE,
+        data: {
+          code: "parallel_build_admission_unavailable",
+          completionKind: "admission_unavailable",
+          retryable: true,
+        },
+      })
+      .returning();
+    if (!event) throw new Error("Parallel build admission unavailable event was not persisted");
+    return {
+      ...event,
+      data: (event.data as Record<string, unknown> | null) ?? null,
+    };
+  });
+}
+
+async function countRunningBuildsForAdmission(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  scope: ParallelBuildAdmissionScope,
+): Promise<number> {
+  const ownerPredicate =
+    scope.kind === "owner"
+      ? eq(projectsTable.ownerId, scope.ownerId)
+      : eq(nabuflowOrgSeatsTable.orgId, scope.orgId);
+
+  const base = tx
+    .select({ activeBuilds: count() })
+    .from(agentTasksTable)
+    .innerJoin(projectsTable, eq(agentTasksTable.projectId, projectsTable.id));
+
+  const rows =
+    scope.kind === "owner"
+      ? await base.where(and(ownerPredicate, eq(agentTasksTable.status, "building")))
+      : await base
+          .innerJoin(nabuflowOrgSeatsTable, eq(projectsTable.ownerId, nabuflowOrgSeatsTable.userId))
+          .where(and(ownerPredicate, eq(agentTasksTable.status, "building")));
+
+  return Number(rows[0]?.activeBuilds ?? 0);
+}
 
 export async function claimProjectJobExecution(
   taskId: number,
   projectId: number,
-): Promise<boolean> {
+): Promise<ProjectJobClaimResult> {
+  const [projectOwner] = await db
+    .select({ ownerId: projectsTable.ownerId })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .limit(1);
+  if (!projectOwner?.ownerId) return { claimed: false, reason: "project_busy_or_not_claimable" };
+
+  const admissionScope = await resolveParallelBuildAdmissionScope(projectOwner.ownerId);
+
   return db.transaction(async (tx) => {
+    // Lock order is a correctness law: account BEFORE project at every site.
+    // That serializes the cross-project count without weakening the established
+    // per-project blocker semantics below, and prevents inverse-order deadlocks.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${ACCOUNT_JOB_LOCK_NAMESPACE}, ${admissionScope.lockId})`,
+    );
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(${PROJECT_JOB_LOCK_NAMESPACE}, ${projectId})`,
     );
+
+    const activeBuilds = await countRunningBuildsForAdmission(tx, admissionScope);
+    const admission = evaluateParallelBuildAdmission(admissionScope, activeBuilds);
+    if (!admission.allowed) {
+      const completedAt = new Date();
+      const [terminalTask] = await tx
+        .update(agentTasksTable)
+        .set({
+          status: "failed",
+          completionKind: "admission_blocked",
+          result: admission.message,
+          completedAt,
+        })
+        .where(
+          and(
+            eq(agentTasksTable.id, taskId),
+            inArray(agentTasksTable.status, ["queued", "planning"]),
+          ),
+        )
+        .returning({ id: agentTasksTable.id });
+      if (!terminalTask) return { claimed: false, reason: "project_busy_or_not_claimable" };
+
+      const [event] = await tx
+        .insert(taskEventsTable)
+        .values({
+          taskId,
+          eventType: "failed",
+          message: admission.message,
+          filePath: null,
+          data: {
+            code: admission.code,
+            completionKind: "admission_blocked",
+            planId: admission.planId,
+            limit: admission.limit,
+            activeBuilds: admission.activeBuilds,
+            retryable: admission.retryable,
+          },
+        })
+        .returning();
+      if (!event) throw new Error("Parallel build admission terminal event was not persisted");
+
+      return {
+        claimed: false,
+        reason: "parallel_build_limit_reached",
+        decision: admission,
+        event: {
+          ...event,
+          data: (event.data as Record<string, unknown> | null) ?? null,
+        },
+      };
+    }
 
     // Only an executing or staged-review task blocks this claim. Two concurrent
     // planning claimants serialize on the xact lock: the first becomes building;
@@ -2152,7 +2314,7 @@ export async function claimProjectJobExecution(
         .update(agentTasksTable)
         .set({ status: "queued" })
         .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.status, "planning")));
-      return false;
+      return { claimed: false, reason: "project_busy_or_not_claimable" };
     }
 
     const transitioned = await tx
@@ -2166,7 +2328,9 @@ export async function claimProjectJobExecution(
       )
       .returning({ id: agentTasksTable.id });
 
-    return transitioned.length === 1;
+    return transitioned.length === 1
+      ? { claimed: true }
+      : { claimed: false, reason: "project_busy_or_not_claimable" };
   });
 }
 
@@ -2268,9 +2432,75 @@ export async function runJob(input: JobInput): Promise<void> {
   // Atomically claim execution across replicas. The short xact-scoped lock is
   // safe through transaction poolers and cannot survive a dead request/consumer.
   try {
-    const claimed = await claimProjectJobExecution(taskId, projectId);
+    let claim: ProjectJobClaimResult;
+    try {
+      claim = await claimProjectJobExecution(taskId, projectId);
+    } catch (admissionError) {
+      // Admission resolution/count failures are their own typed terminal. They
+      // must never fall through to the generic failure path, which may ask a
+      // model for repair suggestions after a build has already been denied.
+      try {
+        const event = await persistParallelBuildAdmissionUnavailable(taskId);
+        if (event) {
+          publishTaskEvent({
+            id: event.id,
+            taskId: event.taskId,
+            eventType: event.eventType,
+            message: event.message,
+            filePath: event.filePath,
+            data: event.data ?? undefined,
+            createdAt: event.createdAt,
+          });
+        }
+      } catch (terminalError) {
+        logger.error(
+          {
+            taskId,
+            projectId,
+            errorClass:
+              terminalError instanceof Error ? terminalError.constructor.name : "UnknownError",
+          },
+          "Parallel build admission failure terminal could not be persisted",
+        );
+      }
+      logger.warn(
+        {
+          taskId,
+          projectId,
+          errorClass:
+            admissionError instanceof Error ? admissionError.constructor.name : "UnknownError",
+        },
+        "Parallel build admission unavailable before provider dispatch",
+      );
+      return;
+    }
 
-    if (!claimed) {
+    if (!claim.claimed) {
+      if (claim.reason === "parallel_build_limit_reached") {
+        publishTaskEvent({
+          id: claim.event.id,
+          taskId: claim.event.taskId,
+          eventType: claim.event.eventType,
+          message: claim.event.message,
+          filePath: claim.event.filePath,
+          data: claim.event.data ?? undefined,
+          createdAt: claim.event.createdAt,
+        });
+        logger.info(
+          {
+            taskId,
+            projectId,
+            admission: {
+              code: claim.decision.code,
+              planId: claim.decision.planId,
+              limit: claim.decision.limit,
+              activeBuilds: claim.decision.activeBuilds,
+            },
+          },
+          "Parallel build admission blocked task before provider dispatch",
+        );
+        return;
+      }
       logger.info(
         { taskId, projectId },
         "Task was canceled, already claimed, or queued behind another project job - skipping",

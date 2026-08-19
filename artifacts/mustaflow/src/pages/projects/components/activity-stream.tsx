@@ -271,6 +271,9 @@ export function ActivityStream({
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
+  const isAdmissionFailure =
+    isFailed &&
+    (completionKind === "admission_blocked" || completionKind === "admission_unavailable");
   const isNeedsReview = taskStatus === "needs_review" || taskStatus === "needs_fix";
   const completionText = getBuilderCompletionMessage(completionKind);
 
@@ -324,7 +327,9 @@ export function ActivityStream({
     : isDone
       ? completionText
       : isFailed
-        ? "Build failed"
+        ? isAdmissionFailure
+          ? completionText
+          : "Build failed"
         : (lastEvent?.message ?? "Initializing…");
 
   return (
@@ -510,7 +515,7 @@ export function ActivityStream({
       )}
       {expanded && isFailed && (
         <div className="px-3 py-1.5 border-t border-border bg-destructive/5 text-[10px] text-destructive font-medium">
-          Task failed. Check the chat for details.
+          {isAdmissionFailure ? completionText : "Task failed. Check the chat for details."}
         </div>
       )}
     </div>
@@ -533,6 +538,9 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
+  const isAdmissionFailure =
+    isFailed &&
+    (completionKind === "admission_blocked" || completionKind === "admission_unavailable");
   const completionText = getBuilderCompletionMessage(completionKind);
 
   // Auto-scroll pill row right
@@ -624,7 +632,13 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
                 : "text-foreground",
           )}
         >
-          {isDone ? completionText : isFailed ? "Build failed" : (lastEvent?.message ?? "Working…")}
+          {isDone
+            ? completionText
+            : isFailed
+              ? isAdmissionFailure
+                ? completionText
+                : "Build failed"
+              : (lastEvent?.message ?? "Working…")}
         </span>
 
         {/* Action count + current icon */}

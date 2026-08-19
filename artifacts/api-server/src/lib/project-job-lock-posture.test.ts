@@ -12,4 +12,38 @@ describe("project job cross-replica lock posture", () => {
     expect(source).not.toContain("pg_advisory_lock($1::bigint)");
     expect(source).not.toContain("pg_advisory_unlock");
   });
+
+  it("always acquires the account lock before the project lock", () => {
+    const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const accountLock =
+      "pg_advisory_xact_lock(${ACCOUNT_JOB_LOCK_NAMESPACE}, ${admissionScope.lockId})";
+    const projectLock = "pg_advisory_xact_lock(${PROJECT_JOB_LOCK_NAMESPACE}, ${projectId})";
+
+    expect(source).toContain("Lock order is a correctness law: account BEFORE project");
+    expect(source.indexOf(accountLock)).toBeGreaterThan(-1);
+    expect(source.indexOf(projectLock)).toBeGreaterThan(source.indexOf(accountLock));
+  });
+
+  it("counts only running builds while preserving every established project blocker", () => {
+    const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+
+    expect(source).toContain('eq(agentTasksTable.status, "building")');
+    expect(source).toContain('["building", "needs_review", "needs_fix"]');
+    expect(source).toContain('completionKind: "admission_blocked"');
+    expect(source).toContain('eventType: "failed"');
+  });
+
+  it("terminalizes admission infrastructure failure without reaching repair-model dispatch", () => {
+    const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const claimCatchStart = source.indexOf("catch (admissionError)");
+    const claimCatchEnd = source.indexOf("if (!claim.claimed)", claimCatchStart);
+    const claimCatch = source.slice(claimCatchStart, claimCatchEnd);
+
+    expect(claimCatchStart).toBeGreaterThan(-1);
+    expect(claimCatch).toContain("persistParallelBuildAdmissionUnavailable(taskId)");
+    expect(claimCatch).toContain("return;");
+    expect(claimCatch).not.toContain("generateFixSuggestions");
+    expect(claimCatch).not.toContain("runBuildPipeline");
+    expect(source).toContain('code: "parallel_build_admission_unavailable"');
+  });
 });

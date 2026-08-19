@@ -21,6 +21,10 @@ export function builderCompletionMessage(
       return "Stopped because required checks could not pass — review the report.";
     case "rate_limited":
       return "Stopped because the tool rate limit was reached — try again later.";
+    case "admission_blocked":
+      return "This build did not start because the account is already at its running-build limit.";
+    case "admission_unavailable":
+      return "This build did not start because capacity checks are temporarily unavailable. Try again shortly.";
     case "container_unavailable":
       return "Completed with live-server validation unavailable.";
     case "finalized":

@@ -26,6 +26,25 @@ describe("Builder completion messages", () => {
     expect(getBuilderTaskQueueLabel("completed", null)).toBe("completed");
   });
 
+  it("renders capacity admission as a calm failure rather than a completed build", () => {
+    expect(getBuilderCompletionMessage("admission_blocked")).toBe(
+      "This build did not start because the account is already at its running-build limit",
+    );
+    expect(getBuilderTaskQueueLabel("failed", "admission_blocked")).toBe(
+      "Not started — capacity reached",
+    );
+    expect(getBuilderCompletionMessage("admission_blocked")).not.toContain("complete");
+  });
+
+  it("renders an unavailable admission check as retryable failure copy", () => {
+    expect(getBuilderCompletionMessage("admission_unavailable")).toContain(
+      "capacity checks are temporarily unavailable",
+    );
+    expect(getBuilderTaskQueueLabel("failed", "admission_unavailable")).toBe(
+      "Not started — try again",
+    );
+  });
+
   it("replaces a checkpoint's plain completion sentence with the shared step-cap disclosure", () => {
     const label =
       "**Initial React + Vite build**\nInitial build — 17 file(s) generated.\nBuilt 17 files via agentic loop.";
