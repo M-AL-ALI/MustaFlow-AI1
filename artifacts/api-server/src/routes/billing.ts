@@ -42,10 +42,12 @@ import type { SubscriptionTier } from "@workspace/db";
 import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
+  stripeAvailableSingleFlight,
   getUncachableStripeClient,
   getStripePublishableKey,
   invalidateStripeCredentialCache,
 } from "../lib/stripeClient";
+import { publicPlanCatalogLimiter } from "../lib/rateLimit";
 import { evictTierCache } from "../lib/public-ai/authed-user";
 import {
   PLAN_TIERS,
@@ -1185,8 +1187,11 @@ billingWebhookRouter.post("/billing/webhook", handleStripeWebhook);
 // Must stay OUTSIDE the auth wall so signed-out visitors get live server data
 // instead of silently falling back to hardcoded tiers.
 export const billingPublicRouter: IRouter = Router();
-billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> => {
-  const configured = await stripeAvailable();
+const PUBLIC_PLAN_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300";
+
+billingPublicRouter.get("/billing/ora-plans", publicPlanCatalogLimiter, async (_req, res) => {
+  const configured = await stripeAvailableSingleFlight();
+  res.setHeader("Cache-Control", PUBLIC_PLAN_CACHE_CONTROL);
   res.json({
     tiers: ORA_TIERS_META.map((t) => ({
       ...t,
@@ -1196,7 +1201,8 @@ billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> =
 });
 // Public NabuFlow plans metadata — no auth required (pricing page, landing page).
 // Parallel to GET /billing/ora-plans; does NOT leak per-user state.
-billingPublicRouter.get("/billing/nabuflow/plans", (_req, res): void => {
+billingPublicRouter.get("/billing/nabuflow/plans", publicPlanCatalogLimiter, (_req, res): void => {
+  res.setHeader("Cache-Control", PUBLIC_PLAN_CACHE_CONTROL);
   res.json({
     plans: NABUFLOW_PLAN_IDS.map((id: string) => {
       const plan = NABUFLOW_PLANS[id as keyof typeof NABUFLOW_PLANS];

@@ -60,6 +60,26 @@ describe("Clerk user.created workspace foundation", () => {
     });
   });
 
+  it("routes duplicate user.created delivery through the same idempotent foundation identity", async () => {
+    mocks.ensureUserSignupFoundation
+      .mockResolvedValueOnce({ workspace: { id: 71 }, workspaceCreated: true })
+      .mockResolvedValueOnce({ workspace: { id: 71 }, workspaceCreated: false });
+    const event = { id: "clerk-user-repeat", first_name: "Ada" };
+
+    await handleUserCreated(event);
+    await handleUserCreated(event);
+
+    expect(mocks.ensureUserSignupFoundation).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureUserSignupFoundation.mock.calls).toEqual([
+      [{ userId: "clerk-user-repeat", displayName: "Ada" }],
+      [{ userId: "clerk-user-repeat", displayName: "Ada" }],
+    ]);
+    expect(mocks.loggerInfo).toHaveBeenLastCalledWith(
+      { userId: "clerk-user-repeat", workspaceId: 71, workspaceCreated: false },
+      "Clerk user.created — signup foundation established",
+    );
+  });
+
   it("does not create rows for a malformed event without a user id", async () => {
     await handleUserCreated({ first_name: "Nobody" });
 

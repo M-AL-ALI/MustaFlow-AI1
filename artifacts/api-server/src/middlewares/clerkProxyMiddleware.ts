@@ -20,8 +20,9 @@
  */
 
 import { createProxyMiddleware } from "http-proxy-middleware";
-import type { RequestHandler } from "express";
+import type { Request, RequestHandler } from "express";
 import type { IncomingHttpHeaders } from "http";
+import { admissionClientIp } from "../lib/rateLimit";
 
 const CLERK_FAPI = "https://frontend-api.clerk.dev";
 export const CLERK_PROXY_PATH = "/api/__clerk";
@@ -74,11 +75,11 @@ export function clerkProxyMiddleware(): RequestHandler {
         proxyReq.setHeader("Clerk-Proxy-Url", proxyUrl);
         proxyReq.setHeader("Clerk-Secret-Key", secretKey);
 
-        const xff = req.headers["x-forwarded-for"];
-        const clientIp =
-          (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim() ||
-          req.socket?.remoteAddress ||
-          "";
+        // The caller-visible forwarding chain is not an admission authority.
+        // Until the separately parked topology capture proves a provider-owned
+        // end-user header, the accepted immediate socket identity is the only
+        // value allowed to reach Clerk's IP security/rate-limit signal.
+        const clientIp = admissionClientIp(req as Request);
         if (clientIp) {
           proxyReq.setHeader("X-Forwarded-For", clientIp);
         }

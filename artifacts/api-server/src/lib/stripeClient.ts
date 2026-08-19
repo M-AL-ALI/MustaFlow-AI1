@@ -17,6 +17,7 @@ interface StripeCredentials {
 
 let cached: { creds: StripeCredentials; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
+let availabilityInFlight: Promise<boolean> | null = null;
 
 export function resolveEnvStripePublishableKey(env: Record<string, string | undefined>): string {
   for (const value of [
@@ -117,8 +118,26 @@ export async function stripeAvailable(): Promise<boolean> {
   return Boolean(secret);
 }
 
+/** Coalesce concurrent public availability reads across one cold credential-cache miss. */
+export function stripeAvailableSingleFlight(): Promise<boolean> {
+  if (availabilityInFlight) return availabilityInFlight;
+
+  const pending = stripeAvailable();
+  availabilityInFlight = pending;
+  void pending.then(
+    () => {
+      if (availabilityInFlight === pending) availabilityInFlight = null;
+    },
+    () => {
+      if (availabilityInFlight === pending) availabilityInFlight = null;
+    },
+  );
+  return pending;
+}
+
 // Drop the cached credentials. Call this when Stripe returns an auth error so
 // the next request refetches a (possibly rotated) key from the connector.
 export function invalidateStripeCredentialCache(): void {
   cached = null;
+  availabilityInFlight = null;
 }
