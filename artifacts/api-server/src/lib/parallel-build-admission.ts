@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { getNabuflowSubscription, isNabuflowBillingExempt } from "./nabuflow-billing";
+import {
+  getNabuflowSubscription,
+  isNabuflowBillingExempt,
+  isSealedStagingAcceptanceExempt,
+  nabuflowTestBypassActive,
+} from "./nabuflow-billing";
 import { getNabuflowOrgSeatContext } from "./nabuflow-org";
 import { getNabuflowPlan, NABUFLOW_PLANS, type NabuflowPlanId } from "./nabuflow-plans";
 
@@ -70,6 +75,16 @@ export function evaluateParallelBuildAdmission(
 export async function resolveParallelBuildAdmissionScope(
   ownerId: string,
 ): Promise<ParallelBuildAdmissionScope> {
+  if (nabuflowTestBypassActive() || (await isSealedStagingAcceptanceExempt(ownerId))) {
+    return {
+      kind: "owner",
+      ownerId,
+      planId: "bounded-exempt",
+      limit: EXEMPT_PARALLEL_BUILD_LIMIT,
+      lockId: admissionLockId(`owner:${ownerId}`),
+    };
+  }
+
   const orgContext = await getNabuflowOrgSeatContext(ownerId);
   if (orgContext) {
     const limit = NABUFLOW_PLANS.constellation.parallelBuildLimit;

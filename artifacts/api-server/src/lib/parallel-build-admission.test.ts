@@ -3,12 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const billing = vi.hoisted(() => ({
   getSubscription: vi.fn(),
   isExempt: vi.fn(),
+  isStagingAcceptanceExempt: vi.fn(),
+  testBypassActive: vi.fn(),
 }));
 const org = vi.hoisted(() => ({ getSeatContext: vi.fn() }));
 
 vi.mock("./nabuflow-billing", () => ({
   getNabuflowSubscription: billing.getSubscription,
   isNabuflowBillingExempt: billing.isExempt,
+  isSealedStagingAcceptanceExempt: billing.isStagingAcceptanceExempt,
+  nabuflowTestBypassActive: billing.testBypassActive,
 }));
 vi.mock("./nabuflow-org", () => ({
   getNabuflowOrgSeatContext: org.getSeatContext,
@@ -25,6 +29,8 @@ describe("parallel build admission", () => {
     vi.clearAllMocks();
     org.getSeatContext.mockResolvedValue(null);
     billing.isExempt.mockResolvedValue(false);
+    billing.isStagingAcceptanceExempt.mockResolvedValue(false);
+    billing.testBypassActive.mockReturnValue(false);
     billing.getSubscription.mockResolvedValue(null);
   });
 
@@ -88,6 +94,29 @@ describe("parallel build admission", () => {
       limit: EXEMPT_PARALLEL_BUILD_LIMIT,
     });
   });
+
+  it.each(["test bypass", "sealed staging acceptance"] as const)(
+    "keeps a subscribed %s identity explicitly bounded at twelve",
+    async (mode) => {
+      billing.getSubscription.mockResolvedValue({ planId: "orbit" });
+      if (mode === "test bypass") {
+        billing.testBypassActive.mockReturnValue(true);
+      } else {
+        billing.isStagingAcceptanceExempt.mockResolvedValue(true);
+      }
+
+      await expect(
+        resolveParallelBuildAdmissionScope("subscribed-test-owner"),
+      ).resolves.toMatchObject({
+        kind: "owner",
+        ownerId: "subscribed-test-owner",
+        planId: "bounded-exempt",
+        limit: EXEMPT_PARALLEL_BUILD_LIMIT,
+      });
+      expect(org.getSeatContext).not.toHaveBeenCalled();
+      expect(billing.getSubscription).not.toHaveBeenCalled();
+    },
+  );
 
   it("derives a stable account lock while separating owner and organization identities", async () => {
     billing.getSubscription.mockResolvedValue({ planId: "orbit" });
