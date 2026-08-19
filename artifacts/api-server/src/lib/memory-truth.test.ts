@@ -49,7 +49,11 @@ describe("Zero memory truth registry", () => {
       expect(contract.scopes.length).toBeGreaterThan(0);
       expect(contract.currentVersionBinding.length).toBeGreaterThan(0);
       expect(contract.reconciliationCapability).toBe("not-supported");
-      expect(contract.missingProvenance.length).toBeGreaterThan(0);
+      if (contract.currentProvenance === "complete") {
+        expect(contract.missingProvenance).toEqual([]);
+      } else {
+        expect(contract.missingProvenance.length).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -65,19 +69,19 @@ describe("Zero memory truth registry", () => {
       versionBinding: "task-only",
     });
     expect(bySurface["project-summary"]).toMatchObject({
-      provenanceStatus: "missing",
+      provenanceStatus: "complete",
       versionBinding: "current-project",
     });
     expect(bySurface["conversation-summaries"]).toMatchObject({
-      provenanceStatus: "partial",
+      provenanceStatus: "complete",
       versionBinding: "unbound",
     });
     expect(bySurface["knowledge-entries"]).toMatchObject({
-      provenanceStatus: "partial",
+      provenanceStatus: "complete",
       versionBinding: "exact-version",
     });
     expect(bySurface["plan-snapshots"]).toMatchObject({
-      provenanceStatus: "partial",
+      provenanceStatus: "complete",
       versionBinding: "exact-version",
     });
   });

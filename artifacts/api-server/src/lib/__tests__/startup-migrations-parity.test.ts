@@ -30,6 +30,14 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
     await pool.query(
       "DROP TABLE IF EXISTS ora_github_connections, ora_repo_sessions, brand_kits CASCADE",
     );
+    await pool.query("DROP TABLE IF EXISTS knowledge_provenance_events CASCADE");
+    await pool.query(
+      "ALTER TABLE knowledge_entries DROP COLUMN IF EXISTS source_message_start_id, DROP COLUMN IF EXISTS source_message_end_id",
+    );
+    await pool.query(
+      "ALTER TABLE projects DROP COLUMN IF EXISTS last_task_summary_provenance, DROP COLUMN IF EXISTS summary_provenance",
+    );
+    await pool.query("ALTER TABLE project_versions DROP COLUMN IF EXISTS plan_source_message_id");
   });
 
   it("creates ora_github_connections, ora_repo_sessions, and brand_kits with their indexes", async () => {
@@ -37,7 +45,13 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
     const result = await runStartupMigrations();
 
     const ourFailures = result.errors.filter((e) =>
-      ["migrate-ora-github", "migrate-brand-kits"].includes(e.name),
+      [
+        "migrate-ora-github",
+        "migrate-brand-kits",
+        "migrate-knowledge-provenance",
+        "migrate-project-summary-provenance",
+        "migrate-plan-snapshot-provenance",
+      ].includes(e.name),
     );
     expect(ourFailures).toEqual([]);
 
@@ -46,9 +60,29 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
       "ora_repo_sessions",
       "brand_kits",
       "brainstorm_admission_counters",
+      "knowledge_usage_events",
+      "knowledge_provenance_events",
     ]) {
       const { rows } = await pool.query("SELECT to_regclass($1) AS reg", [table]);
       expect(rows[0].reg, `table "${table}" should exist after boot migrations`).not.toBeNull();
+    }
+
+    for (const [table, columns] of Object.entries({
+      knowledge_entries: ["source_message_start_id", "source_message_end_id"],
+      projects: ["last_task_summary_provenance", "summary_provenance"],
+      project_versions: ["plan_source_message_id"],
+    })) {
+      const { rows } = await pool.query<{ column_name: string }>(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = $1`,
+        [table],
+      );
+      expect(
+        columns.every((column) => rows.some((row) => row.column_name === column)),
+        `provenance columns should exist on ${table}`,
+      ).toBe(true);
     }
 
     for (const index of [
@@ -71,7 +105,13 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
     const { runStartupMigrations } = await import("../startup-migrations");
     const result = await runStartupMigrations();
     const ourFailures = result.errors.filter((e) =>
-      ["migrate-ora-github", "migrate-brand-kits"].includes(e.name),
+      [
+        "migrate-ora-github",
+        "migrate-brand-kits",
+        "migrate-knowledge-provenance",
+        "migrate-project-summary-provenance",
+        "migrate-plan-snapshot-provenance",
+      ].includes(e.name),
     );
     expect(ourFailures).toEqual([]);
   });

@@ -81,7 +81,8 @@ describe("explicit knowledge context usage mutation", () => {
       source.indexOf(".update(knowledgeEntriesTable)"),
     );
     expect(source.indexOf(".update(knowledgeEntriesTable)")).toBeLessThan(
-      source.indexOf("INSERT INTO knowledge_usage_events"),
+      source.indexOf(".insert(knowledgeUsageEventsTable)"),
     );
+    expect(source).not.toContain("INSERT INTO knowledge_usage_events");
   });
 });
