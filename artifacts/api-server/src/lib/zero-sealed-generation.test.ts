@@ -374,6 +374,67 @@ describe("Zero sealed generator integration", () => {
     expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("CREATE TABLE IF NOT EXISTS");
   });
 
+  it("does not require the runtime SDK for a plain website without capabilities", () => {
+    const files = generatedFiles().map((file) =>
+      file.path === "src/index.ts"
+        ? {
+            ...file,
+            content: file.content
+              .replace(
+                'import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";\n',
+                "",
+              )
+              .replace(
+                "const app = express(); const db = createNabuFlowDatabase();\n",
+                "const app = express();\n",
+              )
+              .replace(
+                'app.get("/records", async (_request, response) => response.json(await db.query("select 1")));\n',
+                "",
+              ),
+          }
+        : file,
+    );
+
+    expect(() =>
+      prepareZeroSealedNodeSource({
+        files,
+        target: "cloudflare-sealed-v1",
+        skipEligibilityPrecheck: true,
+      }),
+    ).not.toThrow();
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(
+      "A website that uses neither capability does not need a runtime-SDK import",
+    );
+  });
+
+  it("still requires the runtime SDK when generated source uses a capability", () => {
+    const files = generatedFiles().map((file) =>
+      file.path === "src/index.ts"
+        ? {
+            ...file,
+            content: file.content.replace(
+              'import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";\n',
+              "",
+            ),
+          }
+        : file,
+    );
+
+    expect(() =>
+      prepareZeroSealedNodeSource({
+        files,
+        target: "cloudflare-sealed-v1",
+        skipEligibilityPrecheck: true,
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ZeroSealedSourceContractError>>({
+        code: "zero_sealed_source_contract_error",
+        reasons: ["sdk_import"],
+      }),
+    );
+  });
+
   it("memorializes the pre-slice legacy Node prompt bytes", async () => {
     const source = await readFile(new URL("./builder.ts", import.meta.url), "utf8");
     const prefix = "const NODE_API_BUILD_SYSTEM_PROMPT = `";

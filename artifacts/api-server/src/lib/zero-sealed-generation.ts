@@ -28,7 +28,7 @@ import {
 
 export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET:
 - Treat a request for a plain website as a complete Node/Express website: serve its real HTML, CSS, and browser JavaScript from compiler-emitted code while preserving the requested design and content. Do not switch the project back to a browser-only framework.
-- Keep the source provider-neutral by importing createNabuFlowDatabase and createNabuFlowPayments as needed from "../nabuflow/runtime/index.js" in src/*.ts. Never import a database or payments provider SDK. The explicit .js suffix is required for the emitted ESM path when TypeScript uses NodeNext. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
+- Keep the source provider-neutral. When the website uses a database or payments capability, import and use createNabuFlowDatabase or createNabuFlowPayments from "../nabuflow/runtime/index.js" in src/*.ts. A website that uses neither capability does not need a runtime-SDK import. Never import a database or payments provider SDK. The explicit .js suffix is required for the emitted ESM path when TypeScript uses NodeNext. The platform-owned SDK automatically injects its lazy Fly PostgreSQL adapter; application code never configures it.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.
 - Do not read DATABASE_URL, STRIPE_*, credentials, API keys, or secret environment variables in application code. The vendored NabuFlow runtime SDK is the only database path.
 - Do not create .env files in sealed-native projects, including .env.example. Sealed apps receive no tenant credentials or secret configuration.
@@ -350,7 +350,16 @@ export function prepareZeroSealedNodeSource(input: {
     );
   }
   const entryReasons: ZeroSealedSourceContractReason[] = [];
-  if (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
+  const usesRuntimeCapability = [...byPath.values()].some(
+    (file) =>
+      !file.path.startsWith("nabuflow/runtime/") &&
+      (file.content.includes("createNabuFlowDatabase") ||
+        file.content.includes("createNabuFlowPayments")),
+  );
+  if (
+    usesRuntimeCapability &&
+    (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
+  )
     entryReasons.push("sdk_import");
   if (!SEALED_NETWORK_BIND_PATTERN.test(entry.content)) entryReasons.push("network_bind");
   if (!entry.content.includes("process.env.PORT")) entryReasons.push("runtime_port");

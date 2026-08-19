@@ -52,4 +52,30 @@ describe("InlineBuilderError", () => {
     );
     expect(container.textContent).not.toMatch(/sealed|zero|node api|vite|stack|runtime|manifest/iu);
   });
+
+  it("folds a source repair into one button without generic framework suggestions", () => {
+    const repairAndBuild = vi.fn();
+    const { container } = render(
+      <InlineBuilderError
+        message="This website needs one compatibility repair before it can finish building."
+        suggestions={[
+          "Repair the website for the supported production format and finish the build.",
+        ]}
+        recoveryAction={{
+          label: "Repair and build",
+          prompt:
+            "Repair this website for the supported production format without changing its requested design or content, rerun every required check, and finish the build.",
+        }}
+        onTryFix={repairAndBuild}
+      />,
+    );
+
+    expect(screen.queryByText("Try this")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Repair and build" }));
+    expect(repairAndBuild).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toMatch(
+      /sealed|zero|node api|vite|stack|runtime|manifest|sdk|source contract/iu,
+    );
+  });
 });

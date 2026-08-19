@@ -4,6 +4,9 @@ import {
   ZERO_SEALED_PROJECT_TYPE_MESSAGE,
   ZERO_SEALED_PROJECT_TYPE_RECOVERY,
   ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS,
+  ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+  ZERO_SEALED_SOURCE_REPAIR_RECOVERY,
+  ZERO_SEALED_SOURCE_REPAIR_SUGGESTIONS,
   resolveZeroSealedProjectRouting,
 } from "./zero-sealed-project-routing";
 
@@ -82,5 +85,21 @@ describe("sealed production project routing", () => {
         ...ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS,
       ].join(" "),
     ).not.toMatch(/sealed|zero|node api|vite|stack|runtime|manifest/iu);
+  });
+
+  it("keeps source repairs plain, specific, and one-click recoverable", () => {
+    expect(ZERO_SEALED_SOURCE_REPAIR_MESSAGE).toBe(
+      "This website needs one compatibility repair before it can finish building.",
+    );
+    expect(ZERO_SEALED_SOURCE_REPAIR_RECOVERY.label).toBe("Repair and build");
+    expect(ZERO_SEALED_SOURCE_REPAIR_SUGGESTIONS).toHaveLength(1);
+    expect(
+      [
+        ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+        ZERO_SEALED_SOURCE_REPAIR_RECOVERY.label,
+        ZERO_SEALED_SOURCE_REPAIR_RECOVERY.prompt,
+        ...ZERO_SEALED_SOURCE_REPAIR_SUGGESTIONS,
+      ].join(" "),
+    ).not.toMatch(/sealed|zero|node api|vite|stack|runtime|manifest|sdk|source contract/iu);
   });
 });

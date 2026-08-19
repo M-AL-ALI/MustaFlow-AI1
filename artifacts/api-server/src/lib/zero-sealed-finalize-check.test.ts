@@ -39,9 +39,9 @@ app.listen(port);`,
     expect(result).toEqual({
       passed: false,
       code: "zero_sealed_source_contract_error",
-      reasonCodes: ["sdk_import", "network_bind"],
+      reasonCodes: ["network_bind"],
       message:
-        'zero_sealed_source_contract_error: sdk_import, network_bind (src/index.ts). Required repairs: import and use createNabuFlowDatabase/createNabuFlowPayments as needed from "../nabuflow/runtime/index.js" in src/index.ts; do not use provider clients; bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',
+        'zero_sealed_source_contract_error: network_bind (src/index.ts). Required repairs: bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',
     });
   });
 

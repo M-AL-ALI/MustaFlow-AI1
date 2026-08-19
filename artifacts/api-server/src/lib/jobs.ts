@@ -143,6 +143,7 @@ import {
   prepareZeroSealedNodeSource,
   readZeroPantryPublicKeys,
   resolveZeroGenerationTarget,
+  ZeroSealedSourceContractError,
   type PreparedZeroSealedNodeSource,
 } from "./zero-sealed-generation";
 import { runZeroGenerationKitchen, ZeroGenerationKitchenError } from "./zero-generation-kitchen";
@@ -151,6 +152,9 @@ import {
   ZERO_SEALED_PROJECT_TYPE_MESSAGE,
   ZERO_SEALED_PROJECT_TYPE_RECOVERY,
   ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS,
+  ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+  ZERO_SEALED_SOURCE_REPAIR_RECOVERY,
+  ZERO_SEALED_SOURCE_REPAIR_SUGGESTIONS,
   resolveZeroSealedProjectRouting,
 } from "./zero-sealed-project-routing";
 import { supportsZeroGeneration } from "./tenant-runtime-provider";
@@ -6813,7 +6817,17 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const failureEvidence =
         err instanceof ZeroGenerationKitchenError
           ? { code: err.code, message: err.message, evidence: err.evidence }
-          : undefined;
+          : err instanceof ZeroSealedSourceContractError
+            ? {
+                code: err.code,
+                message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+                evidence: {
+                  stage: "source-contract",
+                  reasonCodes: [...err.reasons],
+                  ...(err.path === undefined ? {} : { path: err.path }),
+                },
+              }
+            : undefined;
       const sealedProjectRecovery =
         failureEvidence?.code === ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE
           ? {
@@ -6821,7 +6835,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               suggestions: [...ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS],
               action: { ...ZERO_SEALED_PROJECT_TYPE_RECOVERY },
             }
-          : undefined;
+          : failureEvidence?.code === "zero_sealed_source_contract_error"
+            ? {
+                message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+                suggestions: [...ZERO_SEALED_SOURCE_REPAIR_SUGGESTIONS],
+                action: { ...ZERO_SEALED_SOURCE_REPAIR_RECOVERY },
+              }
+            : undefined;
       const message = sealedProjectRecovery?.message ?? rawMessage;
       if (failureEvidence !== undefined) analyticsErrorCategory = failureEvidence.code;
       await emitEvent(taskId, "failed", message);

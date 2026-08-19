@@ -46,6 +46,13 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).not.toContain("Sealed Zero generation accepts Node API projects only");
   });
 
+  it("keeps source-contract details internal and offers one real repair action", () => {
+    expect(jobs).toContain("err instanceof ZeroSealedSourceContractError");
+    expect(jobs).toContain("ZERO_SEALED_SOURCE_REPAIR_MESSAGE");
+    expect(jobs).toContain("ZERO_SEALED_SOURCE_REPAIR_RECOVERY");
+    expect(jobs).not.toContain("generateFixSuggestions(userPrompt, rawMessage)");
+  });
+
   it("injects only the platform-owned non-secret runtime mode after sealing", () => {
     expect(backend).toContain('[TENANT_RUNTIME_MODE_ENV]: "cloudflare-capability-v1"');
     expect(backend).not.toContain("DATABASE_URL:");

@@ -14,6 +14,19 @@ export const ZERO_SEALED_PROJECT_TYPE_SUGGESTIONS = [
   "Convert the project to the supported production website format and build it again.",
 ] as const;
 
+export const ZERO_SEALED_SOURCE_REPAIR_MESSAGE =
+  "This website needs one compatibility repair before it can finish building.";
+
+export const ZERO_SEALED_SOURCE_REPAIR_RECOVERY = {
+  label: "Repair and build",
+  prompt:
+    "Repair this website for the supported production format without changing its requested design or content, rerun every required check, and finish the build.",
+} as const;
+
+export const ZERO_SEALED_SOURCE_REPAIR_SUGGESTIONS = [
+  "Repair the website for the supported production format and finish the build.",
+] as const;
+
 export type ZeroSealedProjectRoutingReason =
   | "native_node_application"
   | "convertible_website"
