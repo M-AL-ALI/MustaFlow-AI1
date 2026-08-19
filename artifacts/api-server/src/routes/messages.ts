@@ -38,6 +38,7 @@ import { deductCreditsAtomic } from "./credits";
 import { settleCreditsDurably } from "../lib/billing-settlement-outbox";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { fetchAttachmentAsDataUri } from "./images";
 import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
 import {
@@ -1042,24 +1043,36 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
         if (userMsgCount > 0 && userMsgCount % 20 === 0) {
           const allMessages = await db
-            .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
+            .select({
+              id: chatMessagesTable.id,
+              role: chatMessagesTable.role,
+              content: chatMessagesTable.content,
+            })
             .from(chatMessagesTable)
             .where(eq(chatMessagesTable.projectId, project.id))
             .orderBy(asc(chatMessagesTable.createdAt));
 
-          const turns: ConversationTurn[] = allMessages
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+          const conversationMessages = allMessages.filter(
+            (message) => message.role === "user" || message.role === "assistant",
+          );
+          const turns: ConversationTurn[] = conversationMessages.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }));
 
           // Summarise all turns except the last 16 (8 user+assistant pairs)
           // which are already loaded fresh into the prompt.
           const olderTurns = turns.slice(0, -16);
           if (olderTurns.length < 4) return;
+          const sourceMessages = conversationMessages.slice(0, -16);
+          const sourceMessageStartId = sourceMessages.at(0)?.id;
+          const sourceMessageEndId = sourceMessages.at(-1)?.id;
+          if (sourceMessageStartId == null || sourceMessageEndId == null) return;
 
           const summary = await runConversationSummarizePipeline(project.name, olderTurns);
           if (!summary) return;
 
-          await writeKnowledge({
+          const receipt = await writeKnowledge({
             title: `Conversation summary — ${project.name}`,
             content: summary,
             type: "conversation_summary",
@@ -1067,8 +1080,16 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
             severity: "info",
             projectId: project.id,
             userId: project.ownerId ?? undefined,
+            sourceMessageStartId,
+            sourceMessageEndId,
             tags: ["conversation", "context", "summary"],
           });
+          if (receipt) {
+            logger.debug(
+              { projectId: project.id, ...receipt },
+              "Conversation summary knowledge provenance recorded",
+            );
+          }
         }
       } catch (err) {
         logger.warn({ err }, "Background conversation summarization failed — non-fatal");
@@ -1104,6 +1125,13 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     .set({
       updatedAt: sql`now()`,
       lastTaskSummary: content.slice(0, 140),
+      lastTaskSummaryProvenance: projectSummaryProvenance({
+        sourceKind: "message",
+        sourceIdentity: `message:${userMessage.id}`,
+        messageId: userMessage.id,
+        actorUserId: req.userId ?? project.ownerId,
+        content: content.slice(0, 140),
+      }),
       agentMode: mode,
     })
     .where(eq(projectsTable.id, project.id));
@@ -1702,7 +1730,18 @@ router.post(
       // Update project activity timestamp
       await db
         .update(projectsTable)
-        .set({ updatedAt: sql`now()`, lastTaskSummary: content.slice(0, 140), agentMode: mode })
+        .set({
+          updatedAt: sql`now()`,
+          lastTaskSummary: content.slice(0, 140),
+          lastTaskSummaryProvenance: projectSummaryProvenance({
+            sourceKind: "message",
+            sourceIdentity: `message:${userMessageId}`,
+            messageId: userMessageId,
+            actorUserId: req.userId ?? project.ownerId,
+            content: content.slice(0, 140),
+          }),
+          agentMode: mode,
+        })
         .where(eq(projectsTable.id, project.id));
 
       const donePayload = {

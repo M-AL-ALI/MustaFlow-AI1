@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { AgentMode } from "../lib/ai";
 import type { AgentIdentity } from "../lib/jobs";
 import { estimateQueueCreditCost } from "../lib/queue-credit-costs";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 const router: IRouter = Router();
 
@@ -155,6 +156,12 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
     .set({
       updatedAt: sql`now()`,
       lastTaskSummary: messages[0]!.slice(0, 140),
+      lastTaskSummaryProvenance: projectSummaryProvenance({
+        sourceKind: "queue",
+        sourceIdentity: `queue:${batchId}`,
+        actorUserId: req.userId,
+        content: messages[0]!.slice(0, 140),
+      }),
       agentMode: mode,
     })
     .where(eq(projectsTable.id, projectId));

@@ -21,6 +21,162 @@ type MigrationStep = {
   run: (client: import("pg").PoolClient) => Promise<void>;
 };
 
+type MigrationClient = Pick<import("pg").PoolClient, "query">;
+
+export async function ensureKnowledgeUsageEventsSchema(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS knowledge_usage_events (
+      id                      BIGSERIAL   PRIMARY KEY,
+      user_id                 TEXT        NOT NULL,
+      query                   TEXT        NOT NULL,
+      report_type             TEXT        NOT NULL DEFAULT 'knowledge-report',
+      selected_entry_ids      INTEGER[]   NOT NULL DEFAULT '{}',
+      selected_entry_versions INTEGER[]   NOT NULL DEFAULT '{}',
+      entry_count             INTEGER     NOT NULL DEFAULT 0,
+      created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS idx_kue_user_id ON knowledge_usage_events (user_id)`,
+  );
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS idx_kue_created_at ON knowledge_usage_events (created_at)`,
+  );
+  await client.query("COMMIT");
+}
+
+async function addNotValidForeignKey(
+  client: MigrationClient,
+  tableName: string,
+  constraintName: string,
+  definition: string,
+): Promise<void> {
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = '${constraintName}'
+           AND conrelid = '${tableName}'::regclass
+      ) THEN
+        ALTER TABLE ${tableName}
+          ADD CONSTRAINT ${constraintName} ${definition} NOT VALID;
+      END IF;
+    END $$
+  `);
+}
+
+export async function applyKnowledgeProvenanceMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  await client.query(`
+    ALTER TABLE knowledge_entries
+      ADD COLUMN IF NOT EXISTS source_message_start_id INTEGER,
+      ADD COLUMN IF NOT EXISTS source_message_end_id INTEGER
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS knowledge_provenance_events (
+      id                          BIGSERIAL PRIMARY KEY,
+      knowledge_entry_id          INTEGER NOT NULL,
+      outcome                     TEXT NOT NULL CHECK (outcome IN ('inserted', 'reinforced')),
+      project_id                  INTEGER,
+      source_message_start_id     INTEGER,
+      source_message_end_id       INTEGER,
+      source_task_id              INTEGER,
+      source_version_id           INTEGER,
+      semantics                   TEXT NOT NULL DEFAULT 'knowledge-provenance-v1',
+      contributed_content_sha256  TEXT NOT NULL,
+      resulting_content_sha256    TEXT NOT NULL,
+      created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS knowledge_provenance_entry_idx
+      ON knowledge_provenance_events (knowledge_entry_id, created_at)
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS knowledge_provenance_project_idx
+      ON knowledge_provenance_events (project_id, created_at)
+  `);
+  await addNotValidForeignKey(
+    client,
+    "knowledge_entries",
+    "knowledge_entries_source_message_start_fk",
+    "FOREIGN KEY (source_message_start_id) REFERENCES chat_messages(id) ON DELETE SET NULL",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_entries",
+    "knowledge_entries_source_message_end_fk",
+    "FOREIGN KEY (source_message_end_id) REFERENCES chat_messages(id) ON DELETE SET NULL",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_provenance_events",
+    "knowledge_provenance_events_entry_fk",
+    "FOREIGN KEY (knowledge_entry_id) REFERENCES knowledge_entries(id) ON DELETE CASCADE",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_provenance_events",
+    "knowledge_provenance_events_project_fk",
+    "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_provenance_events",
+    "knowledge_provenance_events_message_start_fk",
+    "FOREIGN KEY (source_message_start_id) REFERENCES chat_messages(id) ON DELETE SET NULL",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_provenance_events",
+    "knowledge_provenance_events_message_end_fk",
+    "FOREIGN KEY (source_message_end_id) REFERENCES chat_messages(id) ON DELETE SET NULL",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_provenance_events",
+    "knowledge_provenance_events_task_fk",
+    "FOREIGN KEY (source_task_id) REFERENCES agent_tasks(id) ON DELETE SET NULL",
+  );
+  await addNotValidForeignKey(
+    client,
+    "knowledge_provenance_events",
+    "knowledge_provenance_events_version_fk",
+    "FOREIGN KEY (source_version_id) REFERENCES project_versions(id) ON DELETE SET NULL",
+  );
+  await client.query("COMMIT");
+}
+
+export async function applyProjectSummaryProvenanceMigration(
+  client: MigrationClient,
+): Promise<void> {
+  await client.query("BEGIN");
+  await client.query(`
+    ALTER TABLE projects
+      ADD COLUMN IF NOT EXISTS last_task_summary_provenance JSONB,
+      ADD COLUMN IF NOT EXISTS summary_provenance JSONB
+  `);
+  await client.query("COMMIT");
+}
+
+export async function applyPlanSnapshotProvenanceMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  await client.query(`
+    ALTER TABLE project_versions
+      ADD COLUMN IF NOT EXISTS plan_source_message_id INTEGER
+  `);
+  await addNotValidForeignKey(
+    client,
+    "project_versions",
+    "project_versions_plan_source_message_fk",
+    "FOREIGN KEY (plan_source_message_id) REFERENCES chat_messages(id) ON DELETE SET NULL",
+  );
+  await client.query("COMMIT");
+}
+
 export interface CredentialBackfillResult {
   mcpServersEncrypted: number;
   purchasedDomainsEncrypted: number;
@@ -3541,26 +3697,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
   {
     name: "knowledge_usage_events",
     run: async (client) => {
-      await client.query("BEGIN");
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS knowledge_usage_events (
-          id                      BIGSERIAL   PRIMARY KEY,
-          user_id                 TEXT        NOT NULL,
-          query                   TEXT        NOT NULL,
-          report_type             TEXT        NOT NULL DEFAULT 'knowledge-report',
-          selected_entry_ids      INTEGER[]   NOT NULL DEFAULT '{}',
-          selected_entry_versions INTEGER[]   NOT NULL DEFAULT '{}',
-          entry_count             INTEGER     NOT NULL DEFAULT 0,
-          created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_kue_user_id ON knowledge_usage_events (user_id)`,
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_kue_created_at ON knowledge_usage_events (created_at)`,
-      );
-      await client.query("COMMIT");
+      await ensureKnowledgeUsageEventsSchema(client);
     },
   },
 
@@ -3643,26 +3780,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
   {
     name: "migrate-knowledge-usage-events",
     async run(client) {
-      await client.query("BEGIN");
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS knowledge_usage_events (
-          id                      BIGSERIAL   PRIMARY KEY,
-          user_id                 TEXT        NOT NULL,
-          query                   TEXT        NOT NULL,
-          report_type             TEXT        NOT NULL DEFAULT 'knowledge-report',
-          selected_entry_ids      INTEGER[]   NOT NULL DEFAULT '{}',
-          selected_entry_versions INTEGER[]   NOT NULL DEFAULT '{}',
-          entry_count             INTEGER     NOT NULL DEFAULT 0,
-          created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_kue_user_id ON knowledge_usage_events (user_id)`,
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_kue_created_at ON knowledge_usage_events (created_at)`,
-      );
-      await client.query("COMMIT");
+      await ensureKnowledgeUsageEventsSchema(client);
     },
   },
 
@@ -5674,6 +5792,24 @@ const MIGRATION_STEPS: MigrationStep[] = [
     async run(client) {
       const result = await applyWorkspaceTenancyMigration(client);
       logger.info(result, "startup-migrations: workspace tenancy established");
+    },
+  },
+  {
+    name: "migrate-knowledge-provenance",
+    async run(client) {
+      await applyKnowledgeProvenanceMigration(client);
+    },
+  },
+  {
+    name: "migrate-project-summary-provenance",
+    async run(client) {
+      await applyProjectSummaryProvenanceMigration(client);
+    },
+  },
+  {
+    name: "migrate-plan-snapshot-provenance",
+    async run(client) {
+      await applyPlanSnapshotProvenanceMigration(client);
     },
   },
 ];

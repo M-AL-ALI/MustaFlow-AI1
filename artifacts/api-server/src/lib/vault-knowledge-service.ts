@@ -14,7 +14,7 @@
 //   • Audit events are logged non-fatally.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { db } from "@workspace/db";
+import { db, knowledgeUsageEventsTable } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sanitizeText, detectSensitiveContent } from "./vault-sanitizer";
 import { logger } from "./logger";
@@ -229,24 +229,17 @@ function buildPromptBlock(entries: ApprovedKnowledgeEntry[]): string {
 
 export async function logKnowledgeUsage(event: KnowledgeUsageEvent): Promise<void> {
   try {
-    // Validate integer arrays before sql.raw interpolation
+    // Validate integer arrays before the typed insert.
     const safeEntryIds = event.selectedEntryIds.filter((id) => Number.isInteger(id) && id > 0);
     const safeVersions = event.selectedEntryVersions.filter((v) => Number.isInteger(v) && v >= 0);
-    const idsLiteral = sql.raw(`'{${safeEntryIds.join(",")}}'::integer[]`);
-    const versionsLiteral = sql.raw(`'{${safeVersions.join(",")}}'::integer[]`);
-
-    await db.execute(sql`
-      INSERT INTO knowledge_usage_events
-        (user_id, query, report_type, selected_entry_ids, selected_entry_versions, entry_count)
-      VALUES (
-        ${event.userId},
-        ${event.query.slice(0, 500)},
-        ${event.reportType},
-        ${idsLiteral},
-        ${versionsLiteral},
-        ${event.entryCount}
-      )
-    `);
+    await db.insert(knowledgeUsageEventsTable).values({
+      userId: event.userId,
+      query: event.query.slice(0, 500),
+      reportType: event.reportType,
+      selectedEntryIds: safeEntryIds,
+      selectedEntryVersions: safeVersions,
+      entryCount: event.entryCount,
+    });
   } catch (err) {
     logger.warn({ err }, "vault-knowledge: failed to log usage event (non-fatal)");
   }

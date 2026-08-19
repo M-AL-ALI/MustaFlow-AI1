@@ -5,13 +5,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
+  agentTasksTable,
+  chatMessagesTable,
   db,
   knowledgeEntriesTable,
+  knowledgeProvenanceEventsTable,
   projectBlueprintsTable,
+  projectVersionsTable,
   projectsTable,
   type DiffSummary,
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNotNull, isNull, like, ne, or } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { logger } from "./logger";
 import { buildEmbeddingInput, cosineSimilarity, generateEmbedding } from "./embeddings";
 import { anonymiseContent } from "./knowledge-promotion";
@@ -32,10 +37,17 @@ export interface KnowledgeWriteOpts {
   userId?: string;
   relatedTaskId?: number;
   relatedVersionId?: number;
+  sourceMessageStartId?: number;
+  sourceMessageEndId?: number;
   tags?: string[];
   diffSummary?: DiffSummary;
   approvedForReuse?: boolean;
 }
+
+export type KnowledgeWriteResult = {
+  outcome: "inserted" | "reinforced";
+  entryId: number;
+};
 
 /**
  * Returns a formatted context block containing all installed-blueprint knowledge
@@ -132,7 +144,13 @@ export async function getInstalledBlueprintKnowledge(
 
 const KNOWLEDGE_DEDUP_THRESHOLD = parseFloat(process.env.KNOWLEDGE_DEDUP_THRESHOLD ?? "0.88");
 
-export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
+function contentSha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export async function writeKnowledge(
+  opts: KnowledgeWriteOpts,
+): Promise<KnowledgeWriteResult | null> {
   try {
     const tagsCsv = opts.tags ? opts.tags.join(",") : null;
 
@@ -146,45 +164,74 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
       logger.warn({ err }, "writeKnowledge: embedding generation failed — skipping dedup");
     }
 
-    // ── Step 2: Attempt semantic deduplication when embedding is available ────
-    if (embedding !== null) {
-      // Only consider non-promoted, non-global, non-archived entries of the same
-      // type. Globally-promoted entries must never be used as merge targets to
-      // avoid leaking tenant data into the global pool.
-      const candidates =
-        opts.projectId != null
-          ? await db
-              .select()
-              .from(knowledgeEntriesTable)
-              .where(
-                and(
-                  eq(knowledgeEntriesTable.projectId, opts.projectId),
-                  eq(knowledgeEntriesTable.type, opts.type),
-                  eq(knowledgeEntriesTable.approvedForReuse, false),
-                  ne(knowledgeEntriesTable.scope, "global"),
-                  // ISOLATION: writeKnowledge only ever produces Builder entries,
-                  // so a near-duplicate may only merge into another Builder row —
-                  // never into an Ora memory. (NULL origin is legacy Builder data.)
-                  or(isNull(knowledgeEntriesTable.origin), ne(knowledgeEntriesTable.origin, "ora")),
-                  isNull(knowledgeEntriesTable.archivedAt),
-                  isNotNull(knowledgeEntriesTable.embedding),
-                ),
-              )
-              .orderBy(desc(knowledgeEntriesTable.createdAt))
-              .limit(50)
-          : opts.userId != null
-            ? await db
+    const result = await db.transaction(async (tx) => {
+      const sourceIds = [
+        opts.relatedTaskId,
+        opts.relatedVersionId,
+        opts.sourceMessageStartId,
+        opts.sourceMessageEndId,
+      ].filter((value): value is number => value != null);
+      if (sourceIds.length > 0 && opts.projectId == null) {
+        throw new Error("Knowledge provenance source requires a project");
+      }
+      if (opts.projectId != null) {
+        if (opts.relatedTaskId != null) {
+          const [source] = await tx
+            .select({ projectId: agentTasksTable.projectId })
+            .from(agentTasksTable)
+            .where(eq(agentTasksTable.id, opts.relatedTaskId))
+            .limit(1);
+          if (source?.projectId !== opts.projectId) {
+            throw new Error("Knowledge task provenance does not belong to the project");
+          }
+        }
+        if (opts.relatedVersionId != null) {
+          const [source] = await tx
+            .select({ projectId: projectVersionsTable.projectId })
+            .from(projectVersionsTable)
+            .where(eq(projectVersionsTable.id, opts.relatedVersionId))
+            .limit(1);
+          if (source?.projectId !== opts.projectId) {
+            throw new Error("Knowledge version provenance does not belong to the project");
+          }
+        }
+        const messageIds = [opts.sourceMessageStartId, opts.sourceMessageEndId].filter(
+          (value): value is number => value != null,
+        );
+        if (messageIds.length > 0) {
+          const uniqueMessageIds = [...new Set(messageIds)];
+          const sources = await tx
+            .select({ id: chatMessagesTable.id, projectId: chatMessagesTable.projectId })
+            .from(chatMessagesTable)
+            .where(inArray(chatMessagesTable.id, uniqueMessageIds));
+          if (
+            sources.length !== uniqueMessageIds.length ||
+            sources.some((source) => source.projectId !== opts.projectId)
+          ) {
+            throw new Error("Knowledge message provenance does not belong to the project");
+          }
+        }
+      }
+
+      // ── Step 2: Attempt semantic deduplication when embedding is available ──
+      if (embedding !== null) {
+        // Only consider non-promoted, non-global, non-archived entries of the same
+        // type. Globally-promoted entries must never be used as merge targets to
+        // avoid leaking tenant data into the global pool.
+        const candidates =
+          opts.projectId != null
+            ? await tx
                 .select()
                 .from(knowledgeEntriesTable)
                 .where(
                   and(
-                    eq(knowledgeEntriesTable.userId, opts.userId),
-                    isNull(knowledgeEntriesTable.projectId),
+                    eq(knowledgeEntriesTable.projectId, opts.projectId),
                     eq(knowledgeEntriesTable.type, opts.type),
                     eq(knowledgeEntriesTable.approvedForReuse, false),
                     ne(knowledgeEntriesTable.scope, "global"),
-                    // ISOLATION: a Builder write may only merge into a Builder
-                    // row, never into an Ora memory. (NULL origin = legacy Builder.)
+                    // ISOLATION: writeKnowledge only ever produces Builder entries,
+                    // so a near-duplicate may only merge into another Builder row —
+                    // never into an Ora memory. (NULL origin is legacy Builder data.)
                     or(
                       isNull(knowledgeEntriesTable.origin),
                       ne(knowledgeEntriesTable.origin, "ora"),
@@ -195,71 +242,120 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
                 )
                 .orderBy(desc(knowledgeEntriesTable.createdAt))
                 .limit(50)
-            : [];
+            : opts.userId != null
+              ? await tx
+                  .select()
+                  .from(knowledgeEntriesTable)
+                  .where(
+                    and(
+                      eq(knowledgeEntriesTable.userId, opts.userId),
+                      isNull(knowledgeEntriesTable.projectId),
+                      eq(knowledgeEntriesTable.type, opts.type),
+                      eq(knowledgeEntriesTable.approvedForReuse, false),
+                      ne(knowledgeEntriesTable.scope, "global"),
+                      // ISOLATION: a Builder write may only merge into a Builder
+                      // row, never into an Ora memory. (NULL origin = legacy Builder.)
+                      or(
+                        isNull(knowledgeEntriesTable.origin),
+                        ne(knowledgeEntriesTable.origin, "ora"),
+                      ),
+                      isNull(knowledgeEntriesTable.archivedAt),
+                      isNotNull(knowledgeEntriesTable.embedding),
+                    ),
+                  )
+                  .orderBy(desc(knowledgeEntriesTable.createdAt))
+                  .limit(50)
+              : [];
 
-      // Find the best-matching candidate above the dedup threshold
-      let bestId: number | null = null;
-      let bestSimilarity = 0;
-      let bestContent = "";
-      let bestReinforcedCount = 0;
-      for (const candidate of candidates) {
-        const candidateEmbedding = candidate.embedding;
-        if (!Array.isArray(candidateEmbedding)) continue;
-        const sim = cosineSimilarity(embedding, candidateEmbedding as number[]);
-        if (sim > bestSimilarity) {
-          bestSimilarity = sim;
-          bestId = candidate.id;
-          bestContent = candidate.content;
-          bestReinforcedCount = candidate.reinforcedCount ?? 0;
+        // Find the best-matching candidate above the dedup threshold
+        let bestId: number | null = null;
+        let bestSimilarity = 0;
+        let bestContent = "";
+        let bestReinforcedCount = 0;
+        for (const candidate of candidates) {
+          const candidateEmbedding = candidate.embedding;
+          if (!Array.isArray(candidateEmbedding)) continue;
+          const sim = cosineSimilarity(embedding, candidateEmbedding as number[]);
+          if (sim > bestSimilarity) {
+            bestSimilarity = sim;
+            bestId = candidate.id;
+            bestContent = candidate.content;
+            bestReinforcedCount = candidate.reinforcedCount ?? 0;
+          }
+        }
+
+        if (bestId !== null && bestSimilarity >= KNOWLEDGE_DEDUP_THRESHOLD) {
+          // Merge into existing entry — sanitize new content before appending
+          const safeNew = anonymiseContent(opts.content);
+          const today = new Date().toISOString().slice(0, 10);
+          const resultingContent = `${bestContent}\n\n[Reinforced ${today}]: ${safeNew}`;
+          await tx
+            .update(knowledgeEntriesTable)
+            .set({
+              content: resultingContent,
+              reinforcedCount: bestReinforcedCount + 1,
+              embedding,
+            })
+            .where(eq(knowledgeEntriesTable.id, bestId));
+          await tx.insert(knowledgeProvenanceEventsTable).values({
+            knowledgeEntryId: bestId,
+            outcome: "reinforced",
+            projectId: opts.projectId ?? null,
+            sourceMessageStartId: opts.sourceMessageStartId ?? null,
+            sourceMessageEndId: opts.sourceMessageEndId ?? null,
+            sourceTaskId: opts.relatedTaskId ?? null,
+            sourceVersionId: opts.relatedVersionId ?? null,
+            contributedContentSha256: contentSha256(opts.content),
+            resultingContentSha256: contentSha256(resultingContent),
+          });
+          logger.debug(
+            { id: bestId, similarity: bestSimilarity },
+            "writeKnowledge: merged near-duplicate into existing entry",
+          );
+          return { outcome: "reinforced", entryId: bestId } satisfies KnowledgeWriteResult;
         }
       }
 
-      if (bestId !== null && bestSimilarity >= KNOWLEDGE_DEDUP_THRESHOLD) {
-        // Merge into existing entry — sanitize new content before appending
-        const safeNew = anonymiseContent(opts.content);
-        const today = new Date().toISOString().slice(0, 10);
-        await db
-          .update(knowledgeEntriesTable)
-          .set({
-            content: `${bestContent}\n\n[Reinforced ${today}]: ${safeNew}`,
-            reinforcedCount: bestReinforcedCount + 1,
-            embedding,
-          })
-          .where(eq(knowledgeEntriesTable.id, bestId));
-        logger.debug(
-          { id: bestId, similarity: bestSimilarity },
-          "writeKnowledge: merged near-duplicate into existing entry",
-        );
-        return;
-      }
-    }
-
-    // ── Step 3: No duplicate found (or no embedding) — insert as normal ───────
-    const [row] = await db
-      .insert(knowledgeEntriesTable)
-      .values({
-        title: opts.title,
-        content: opts.content,
-        type: opts.type,
-        category: opts.category ?? "note",
-        severity: opts.severity ?? "info",
+      // ── Step 3: No duplicate found (or no embedding) — insert as normal ─────
+      const [row] = await tx
+        .insert(knowledgeEntriesTable)
+        .values({
+          title: opts.title,
+          content: opts.content,
+          type: opts.type,
+          category: opts.category ?? "note",
+          severity: opts.severity ?? "info",
+          projectId: opts.projectId ?? null,
+          userId: opts.userId ?? null,
+          relatedTaskId: opts.relatedTaskId ?? null,
+          relatedVersionId: opts.relatedVersionId ?? null,
+          sourceMessageStartId: opts.sourceMessageStartId ?? null,
+          sourceMessageEndId: opts.sourceMessageEndId ?? null,
+          tags: tagsCsv,
+          approvedForReuse: opts.approvedForReuse ?? false,
+          diffSummary: opts.diffSummary ?? null,
+          origin: "builder",
+          ...(embedding !== null ? { embedding } : {}),
+        })
+        .returning({ id: knowledgeEntriesTable.id });
+      if (!row) throw new Error("Knowledge insert did not return an entry identity");
+      await tx.insert(knowledgeProvenanceEventsTable).values({
+        knowledgeEntryId: row.id,
+        outcome: "inserted",
         projectId: opts.projectId ?? null,
-        userId: opts.userId ?? null,
-        relatedTaskId: opts.relatedTaskId ?? null,
-        relatedVersionId: opts.relatedVersionId ?? null,
-        tags: tagsCsv,
-        approvedForReuse: opts.approvedForReuse ?? false,
-        diffSummary: opts.diffSummary ?? null,
-        // AI Builder Knowledge Vault provenance — never surfaced by Ora.
-        origin: "builder",
-        // Include the embedding directly if already generated — skip the post-insert async update
-        ...(embedding !== null ? { embedding } : {}),
-      })
-      .returning({ id: knowledgeEntriesTable.id });
+        sourceMessageStartId: opts.sourceMessageStartId ?? null,
+        sourceMessageEndId: opts.sourceMessageEndId ?? null,
+        sourceTaskId: opts.relatedTaskId ?? null,
+        sourceVersionId: opts.relatedVersionId ?? null,
+        contributedContentSha256: contentSha256(opts.content),
+        resultingContentSha256: contentSha256(opts.content),
+      });
+      return { outcome: "inserted", entryId: row.id } satisfies KnowledgeWriteResult;
+    });
 
     // If embedding generation failed above, retry async so we at least get it eventually
-    if (row && embedding === null) {
-      const insertedId = row.id;
+    if (result.outcome === "inserted" && embedding === null) {
+      const insertedId = result.entryId;
       void generateEmbedding(inputText)
         .then(async (vec) => {
           if (!vec) return;
@@ -273,11 +369,13 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
           }
         })
         .catch((err: unknown) => {
-          logger.warn({ err, id: row.id }, "Embedding generation rejected");
+          logger.warn({ err, id: insertedId }, "Embedding generation rejected");
         });
     }
+    return result;
   } catch (err) {
     logger.error({ err }, "Failed to write Knowledge Vault entry — non-fatal");
+    return null;
   }
 }
 

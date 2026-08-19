@@ -16,6 +16,7 @@ import { db, projectsTable, agentTasksTable } from "@workspace/db";
 import { enqueueJob, cancelActiveJob } from "../../lib/jobs";
 import { logger } from "../../lib/logger";
 import { checkV1ProjectAccess, requirePatScope } from "./access";
+import { projectSummaryProvenance } from "../../lib/project-summary-provenance";
 
 const router: IRouter = Router();
 
@@ -198,6 +199,13 @@ router.post(
       .set({
         status: hasActiveBuild ? project.status : "building",
         lastTaskSummary: trimmedPrompt.slice(0, 140),
+        lastTaskSummaryProvenance: projectSummaryProvenance({
+          sourceKind: "task",
+          sourceIdentity: `task:${task.id}`,
+          taskId: task.id,
+          actorUserId: req.userId,
+          content: trimmedPrompt.slice(0, 140),
+        }),
         updatedAt: sql`now()`,
       })
       .where(eq(projectsTable.id, projectId));

@@ -41,6 +41,7 @@ import {
   ProjectWorkspaceUnavailableError,
   resolveProjectWorkspaceId,
 } from "../lib/workspace-tenancy";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -287,6 +288,14 @@ router.post("/projects", async (req, res): Promise<void> => {
           ? "provisioning"
           : "idle",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
+      lastTaskSummaryProvenance: initialPrompt
+        ? projectSummaryProvenance({
+            sourceKind: "system",
+            sourceIdentity: "project-create:initial-prompt",
+            actorUserId: req.userId,
+            content: `Initial idea: ${initialPrompt.slice(0, 120)}`,
+          })
+        : null,
       chipLabel: chipLabel ?? null,
       projectMode: mode ?? "builder",
       requireCommandApproval: true,
