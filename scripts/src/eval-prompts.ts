@@ -374,6 +374,8 @@ function getOpenAI(): OpenAI {
 
 const MODEL = process.env["EVAL_MODEL"] ?? "gpt-5-mini";
 const CONCURRENCY = Math.max(1, Number(process.env["EVAL_CONCURRENCY"] ?? "4"));
+const MAX_GENERATION_TOKENS = 8_000;
+const MAX_JUDGE_TOKENS = 1_000;
 
 async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
   try {
@@ -384,6 +386,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
         { role: "system", content: STAGE_PROMPT[fx.stage] },
         { role: "user", content: fx.user },
       ],
+      max_completion_tokens: MAX_GENERATION_TOKENS,
     });
     const output = gen.choices[0]?.message?.content?.trim() ?? "";
 
@@ -401,6 +404,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
           content: `Rubric: ${fx.rubric}\n\nCandidate response:\n"""\n${output.slice(0, 4000)}\n"""`,
         },
       ],
+      max_completion_tokens: MAX_JUDGE_TOKENS,
     });
     const raw = judge.choices[0]?.message?.content ?? "{}";
     let parsed: { score?: number; reasoning?: string };

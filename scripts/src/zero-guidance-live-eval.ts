@@ -20,6 +20,8 @@ const execFileAsync = promisify(execFile);
 const MODEL = process.env["EVAL_MODEL"] ?? "gpt-5-mini";
 const CONCURRENCY = Math.max(1, Number(process.env["EVAL_CONCURRENCY"] ?? "4"));
 const SOURCE_EXCERPT_CHARS = 12_000;
+const MAX_GENERATION_TOKENS = 8_000;
+const MAX_JUDGE_TOKENS = 1_000;
 const RESULTS_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -87,6 +89,7 @@ async function runCase(
         { role: "system", content: systemPromptForCase(liveCase, contentBySourceId) },
         { role: "user", content: liveCase.user },
       ],
+      max_completion_tokens: MAX_GENERATION_TOKENS,
     });
     const output = generated.choices[0]?.message?.content?.trim() ?? "";
     const judged = await client.chat.completions.create({
@@ -103,6 +106,7 @@ async function runCase(
           content: `Rubric: ${liveCase.rubric}\n\nCandidate:\n${output.slice(0, 6_000)}`,
         },
       ],
+      max_completion_tokens: MAX_JUDGE_TOKENS,
     });
     const judgeText = judged.choices[0]?.message?.content ?? "{}";
     let parsed: { score?: number; reasoning?: string } = {};
