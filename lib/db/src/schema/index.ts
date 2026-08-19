@@ -9,6 +9,8 @@ export * from "./uploads";
 export * from "./secrets";
 export * from "./secret-audit";
 export * from "./knowledge";
+export * from "./knowledge-usage-events";
+export * from "./knowledge-provenance-events";
 export * from "./deployments";
 export * from "./credits";
 export * from "./stripeEvents";

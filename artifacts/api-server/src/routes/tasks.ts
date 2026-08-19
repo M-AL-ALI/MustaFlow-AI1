@@ -37,6 +37,7 @@ import { refundCredits } from "./credits";
 import { logger } from "../lib/logger";
 import { publishTaskEvent } from "../lib/event-bus";
 import { taskCreditSettlementKey } from "../lib/billing-settlement-outbox";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 const TERMINAL_TASK_EVENT_TYPES = ["completed", "failed", "cancelled"];
 
@@ -170,6 +171,13 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     .set({
       status: hasActiveBuild ? project.status : "building",
       lastTaskSummary: parsed.data.title.slice(0, 140),
+      lastTaskSummaryProvenance: projectSummaryProvenance({
+        sourceKind: "task",
+        sourceIdentity: `task:${task.id}`,
+        taskId: task.id,
+        actorUserId: req.userId,
+        content: parsed.data.title.slice(0, 140),
+      }),
       updatedAt: sql`now()`,
     })
     .where(eq(projectsTable.id, project.id));

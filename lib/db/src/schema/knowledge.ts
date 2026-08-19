@@ -8,6 +8,9 @@ import {
   jsonb,
   vector,
 } from "drizzle-orm/pg-core";
+import { chatMessagesTable } from "./messages";
+import { agentTasksTable } from "./tasks";
+import { projectVersionsTable } from "./versions";
 
 /** Dimension of the OpenAI text-embedding-3-small vector. */
 export const KNOWLEDGE_EMBEDDING_DIM = 1536;
@@ -100,8 +103,20 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   // Scope: user (personal preference), project (project-level), org (team), global (cross-user approved)
   scope: text("scope").notNull().default("project"),
   // Links to the task or version that produced this entry
-  relatedTaskId: integer("related_task_id"),
-  relatedVersionId: integer("related_version_id"),
+  relatedTaskId: integer("related_task_id").references(() => agentTasksTable.id, {
+    onDelete: "set null",
+  }),
+  relatedVersionId: integer("related_version_id").references(() => projectVersionsTable.id, {
+    onDelete: "set null",
+  }),
+  // Exact inclusive message range summarized into a conversation_summary row.
+  // Null on legacy rows and on knowledge types that are not conversation summaries.
+  sourceMessageStartId: integer("source_message_start_id").references(() => chatMessagesTable.id, {
+    onDelete: "set null",
+  }),
+  sourceMessageEndId: integer("source_message_end_id").references(() => chatMessagesTable.id, {
+    onDelete: "set null",
+  }),
   // Comma-separated tags, e.g. "towing,landing-page,map"
   tags: text("tags"),
   // How important is this entry?

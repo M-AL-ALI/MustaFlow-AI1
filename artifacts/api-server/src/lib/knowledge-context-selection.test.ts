@@ -18,6 +18,8 @@ function entry(
     scope: "project",
     relatedTaskId: null,
     relatedVersionId: null,
+    sourceMessageStartId: null,
+    sourceMessageEndId: null,
     tags: null,
     severity: "info",
     approvedForReuse: false,

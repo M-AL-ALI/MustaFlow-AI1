@@ -12,6 +12,7 @@ import { enqueueJob } from "../lib/jobs";
 import { logger } from "../lib/logger";
 import { z } from "zod";
 import type { AgentMode } from "../lib/ai";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 const router: IRouter = Router();
 
@@ -138,6 +139,13 @@ router.post(
       .set({
         status: "building",
         lastTaskSummary: suggestion.title.slice(0, 140),
+        lastTaskSummaryProvenance: projectSummaryProvenance({
+          sourceKind: "suggestion",
+          sourceIdentity: `suggestion:${suggestion.id}`,
+          taskId: task.id,
+          actorUserId: req.userId,
+          content: suggestion.title.slice(0, 140),
+        }),
         updatedAt: sql`now()`,
       })
       .where(eq(projectsTable.id, params.data.id));

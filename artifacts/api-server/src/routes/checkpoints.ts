@@ -30,6 +30,7 @@ import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-r
 import { downloadSnapshotBlob } from "../lib/snapshot-storage";
 import { captureProjectDbSnapshot } from "../lib/db-snapshot-capture";
 import { publishProjectFilesChanged } from "../lib/preview-events";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 const router: IRouter = Router();
 
@@ -303,6 +304,7 @@ router.post(
             changelogEntry: `Restored "${target.label}" from Version History.`,
             filesSnapshot: targetSnapshot,
             planSnapshot: target.planSnapshot,
+            planSourceMessageId: target.planSourceMessageId,
             validationStatus: target.validationStatus,
           })
           .returning({ id: projectVersionsTable.id });
@@ -377,6 +379,13 @@ router.post(
         updatedAt: sql`now()`,
         status: "testing",
         lastTaskSummary: `Restored "${target.label}"`,
+        lastTaskSummaryProvenance: projectSummaryProvenance({
+          sourceKind: "checkpoint",
+          sourceIdentity: `checkpoint:${checkpointId}`,
+          versionId: target.id,
+          actorUserId: req.userId,
+          content: `Restored "${target.label}"`,
+        }),
       })
       .where(eq(projectsTable.id, projectId));
 

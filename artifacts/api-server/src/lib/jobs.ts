@@ -68,6 +68,7 @@ import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } fro
 import { generateEmbedding } from "./embeddings";
 import { selectKnowledgeContext, type KnowledgeContextResult } from "./knowledge-context-selection";
 import { recordKnowledgeContextUsage } from "./knowledge-context-usage";
+import { projectSummaryProvenance } from "./project-summary-provenance";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
@@ -1526,10 +1527,13 @@ export async function loadKnowledgeContext(
  * Look up the most recent plan-mode assistant message for this project and return
  * its plan JSON to store as a version annotation (planSnapshot).
  */
-async function loadLatestPlanSnapshot(projectId: number): Promise<Record<string, unknown> | null> {
+async function loadLatestPlanSnapshot(projectId: number): Promise<{
+  plan: Record<string, unknown>;
+  sourceMessageId: number;
+} | null> {
   try {
     const [row] = await db
-      .select({ plan: chatMessagesTable.plan })
+      .select({ id: chatMessagesTable.id, plan: chatMessagesTable.plan })
       .from(chatMessagesTable)
       .where(
         and(
@@ -1543,7 +1547,7 @@ async function loadLatestPlanSnapshot(projectId: number): Promise<Record<string,
     if (!row?.plan || typeof row.plan !== "object") return null;
     // Exclude error plans
     if ((row.plan as Record<string, unknown>).kind === "error") return null;
-    return row.plan as Record<string, unknown>;
+    return { plan: row.plan as Record<string, unknown>, sourceMessageId: row.id };
   } catch {
     return null;
   }
@@ -5165,7 +5169,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             note: checkpointSummary.slice(0, 200),
             changelogEntry: (changelogEntry ?? "").slice(0, 500),
             filesSnapshot: snapshot,
-            planSnapshot: planSnapshot ?? undefined,
+            planSnapshot: planSnapshot?.plan,
+            planSourceMessageId: planSnapshot?.sourceMessageId,
             validationStatus: versionValidationStatus,
           })
           .returning({ id: projectVersionsTable.id });
@@ -6375,7 +6380,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .set({
           status: "testing",
           lastTaskSummary: assistantSummary.slice(0, 140),
+          lastTaskSummaryProvenance: projectSummaryProvenance({
+            sourceKind: "task",
+            sourceIdentity: `task:${taskId}`,
+            taskId,
+            actorUserId: project.ownerId,
+            content: assistantSummary.slice(0, 140),
+          }),
           summary: assistantSummary,
+          summaryProvenance: projectSummaryProvenance({
+            sourceKind: "task",
+            sourceIdentity: `task:${taskId}`,
+            taskId,
+            actorUserId: project.ownerId,
+            content: assistantSummary,
+          }),
           updatedAt: sql`now()`,
         })
         .where(eq(projectsTable.id, projectId));
@@ -8038,7 +8057,8 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         note: (assistantSummary ?? "").slice(0, 200),
         changelogEntry: changelogEntry.slice(0, 500),
         filesSnapshot: snapshot,
-        planSnapshot: planSnapshot ?? undefined,
+        planSnapshot: planSnapshot?.plan,
+        planSourceMessageId: planSnapshot?.sourceMessageId,
       })
       .returning({ id: projectVersionsTable.id });
     version = inserted[0];
@@ -8192,7 +8212,21 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     .set({
       status: "testing",
       lastTaskSummary: assistantSummary.slice(0, 140),
+      lastTaskSummaryProvenance: projectSummaryProvenance({
+        sourceKind: "task",
+        sourceIdentity: `task:${taskId}`,
+        taskId,
+        actorUserId: project.ownerId,
+        content: assistantSummary.slice(0, 140),
+      }),
       summary: assistantSummary,
+      summaryProvenance: projectSummaryProvenance({
+        sourceKind: "task",
+        sourceIdentity: `task:${taskId}`,
+        taskId,
+        actorUserId: project.ownerId,
+        content: assistantSummary,
+      }),
       updatedAt: sql`now()`,
     })
     .where(eq(projectsTable.id, projectId));

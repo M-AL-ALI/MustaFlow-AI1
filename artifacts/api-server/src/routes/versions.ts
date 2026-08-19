@@ -34,6 +34,7 @@ import { publishProjectFilesChanged } from "../lib/preview-events";
 import { writeKnowledge } from "../lib/knowledge";
 import { getProductionSecretMap } from "../lib/container-secrets";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 const router: IRouter = Router();
 
@@ -358,6 +359,7 @@ router.post(
           changelogEntry: `Restored ${snapshot.length} file(s) from version #${version.id}.`,
           filesSnapshot: snapshot,
           planSnapshot: version.planSnapshot ?? undefined,
+          planSourceMessageId: version.planSourceMessageId ?? undefined,
           validationStatus: version.validationStatus,
         })
         .returning({ id: projectVersionsTable.id });
@@ -433,6 +435,14 @@ router.post(
         updatedAt: sql`now()`,
         status: "testing",
         lastTaskSummary: `Rolled back to "${version.label}"`,
+        lastTaskSummaryProvenance: projectSummaryProvenance({
+          sourceKind: "version",
+          sourceIdentity: `version:${version.id}`,
+          taskId,
+          versionId: version.id,
+          actorUserId: req.userId,
+          content: `Rolled back to "${version.label}"`,
+        }),
       })
       .where(eq(projectsTable.id, projectId));
 

@@ -10,6 +10,31 @@ import {
 } from "drizzle-orm/pg-core";
 import { workspacesTable } from "./workspaces";
 
+export const PROJECT_SUMMARY_SOURCE_KINDS = [
+  "task",
+  "message",
+  "version",
+  "checkpoint",
+  "suggestion",
+  "duplicate",
+  "queue",
+  "system",
+] as const;
+export type ProjectSummarySourceKind = (typeof PROJECT_SUMMARY_SOURCE_KINDS)[number];
+
+export type ProjectSummaryProvenance = {
+  semantics: "project-summary-provenance-v1";
+  sourceKind: ProjectSummarySourceKind;
+  sourceIdentity: string;
+  taskId: number | null;
+  versionId: number | null;
+  messageId: number | null;
+  sourceProjectId: number | null;
+  actorUserId: string | null;
+  contentSha256: string;
+  recordedAt: string;
+};
+
 export const projectsTable = pgTable(
   "projects",
   {
@@ -27,7 +52,11 @@ export const projectsTable = pgTable(
     status: text("status").notNull().default("draft"),
     agentMode: text("agent_mode").notNull().default("eco"),
     lastTaskSummary: text("last_task_summary"),
+    lastTaskSummaryProvenance: jsonb(
+      "last_task_summary_provenance",
+    ).$type<ProjectSummaryProvenance>(),
     summary: text("summary"),
+    summaryProvenance: jsonb("summary_provenance").$type<ProjectSummaryProvenance>(),
     // publishedSnapshotId: the project_versions row that is currently live (production).
     // When set, the public route serves files from that snapshot instead of live files.
     // Null = not published. Updated on every publish, cleared on unpublish.

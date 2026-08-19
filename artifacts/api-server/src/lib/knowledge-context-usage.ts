@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { db, knowledgeEntriesTable } from "@workspace/db";
+import { db, knowledgeEntriesTable, knowledgeUsageEventsTable } from "@workspace/db";
 import { inArray, sql } from "drizzle-orm";
 
 export const KNOWLEDGE_CONTEXT_USAGE_SEMANTICS = "builder-context-v1" as const;
@@ -102,19 +102,14 @@ async function recordKnowledgeContextUsageWithDatabase(
       .set({ usageCount: sql`${knowledgeEntriesTable.usageCount} + 1` })
       .where(inArray(knowledgeEntriesTable.id, [...receipt.entryIds]));
 
-    const idsLiteral = sql.raw(`ARRAY[${receipt.entryIds.join(",")}]::integer[]`);
-    await tx.execute(sql`
-      INSERT INTO knowledge_usage_events
-        (user_id, query, report_type, selected_entry_ids, selected_entry_versions, entry_count)
-      VALUES (
-        ${receipt.userId},
-        ${receipt.identitySha256},
-        ${KNOWLEDGE_CONTEXT_USAGE_SEMANTICS},
-        ${idsLiteral},
-        ARRAY[]::integer[],
-        ${receipt.entryIds.length}
-      )
-    `);
+    await tx.insert(knowledgeUsageEventsTable).values({
+      userId: receipt.userId,
+      query: receipt.identitySha256,
+      reportType: KNOWLEDGE_CONTEXT_USAGE_SEMANTICS,
+      selectedEntryIds: [...receipt.entryIds],
+      selectedEntryVersions: [],
+      entryCount: receipt.entryIds.length,
+    });
     return "recorded";
   });
 }

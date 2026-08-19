@@ -54,6 +54,9 @@ export const projectVersionsTable = pgTable("project_versions", {
   changelogEntry: text("changelog_entry"),
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
+  // The physical startup migration owns this nullable FK. Keeping the Drizzle
+  // field non-referential avoids a versions <-> messages module cycle.
+  planSourceMessageId: integer("plan_source_message_id"),
   auditReport: jsonb("audit_report").$type<AuditReport>(),
   // Trusted kitchen acceptance and production promotion records contain identities and
   // attestations only. Artifact bytes remain in the sealed dock.

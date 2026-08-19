@@ -8,6 +8,7 @@ import {
   ProjectWorkspaceUnavailableError,
   resolveProjectWorkspaceId,
 } from "../lib/workspace-tenancy";
+import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 
 const router: IRouter = Router();
 
@@ -54,6 +55,13 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
       status: "draft",
       agentMode: original.agentMode,
       lastTaskSummary: `Duplicated from "${original.name}"`,
+      lastTaskSummaryProvenance: projectSummaryProvenance({
+        sourceKind: "duplicate",
+        sourceIdentity: `project:${original.id}`,
+        sourceProjectId: original.id,
+        actorUserId: req.userId,
+        content: `Duplicated from "${original.name}"`,
+      }),
       // Task #738 — duplicated projects are brand-new infra and must get
       // their own container + Neon DB, not reuse the source project's.
       builderMode: "agentic",
