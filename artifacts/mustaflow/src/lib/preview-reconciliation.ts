@@ -29,6 +29,28 @@ export type PreviewRevisionState = {
   reconcileInFlight: Promise<void> | null;
 };
 
+export type PreviewRevisionSubstrate = "live-runtime" | "webcontainer" | "waiting";
+
+/**
+ * Select the one substrate responsible for acknowledging a preview revision.
+ * A running attached runtime is serving the authoritative backend snapshot and
+ * must never wait for an unrelated browser WebContainer receipt. Historical
+ * builder labels are deliberately excluded: the attached runtime is truth.
+ */
+export function selectPreviewRevisionSubstrate({
+  containerId,
+  containerStatus,
+  webContainerReady,
+}: {
+  containerId: string | null | undefined;
+  containerStatus: string | null | undefined;
+  webContainerReady: boolean;
+}): PreviewRevisionSubstrate {
+  if (containerId && containerStatus === "running") return "live-runtime";
+  if (webContainerReady) return "webcontainer";
+  return "waiting";
+}
+
 export type PreviewTimingPhase =
   | "browser_receipt"
   | "revision_queued"

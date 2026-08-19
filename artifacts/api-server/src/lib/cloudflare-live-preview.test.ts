@@ -6,6 +6,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   resolveCloudflareLivePreviewLaunchUrl,
+  shouldProxyLivePreviewUpgrade,
   shouldRouteToLivePreview,
 } from "./livePreviewProxy";
 
@@ -90,6 +91,33 @@ describe("Cloudflare live preview handoff", () => {
         builderMode: "static-legacy",
         containerId: null,
         containerStatus: "stopped",
+      }),
+    ).toBe(false);
+  });
+
+  it("uses the HTTP live-runtime judgment for direct-container WebSocket upgrades", () => {
+    expect(
+      shouldProxyLivePreviewUpgrade({
+        builderMode: "static-legacy",
+        containerId: "legacy-labeled-running-runtime",
+        containerStatus: "running",
+        containerUrl: "https://direct-runtime.internal",
+      }),
+    ).toBe(true);
+    expect(
+      shouldProxyLivePreviewUpgrade({
+        builderMode: "static-legacy",
+        containerId: "stopped-runtime",
+        containerStatus: "stopped",
+        containerUrl: "https://direct-runtime.internal",
+      }),
+    ).toBe(false);
+    expect(
+      shouldProxyLivePreviewUpgrade({
+        builderMode: "static-legacy",
+        containerId: "private-cloudflare-runtime",
+        containerStatus: "running",
+        containerUrl: null,
       }),
     ).toBe(false);
   });

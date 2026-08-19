@@ -132,6 +132,17 @@ export function shouldRouteToLivePreview(
   return project.builderMode === "agentic" || project.containerStatus === "running";
 }
 
+/** Direct-container WebSocket upgrades use the same live-preview judgment as HTTP. */
+export function shouldProxyLivePreviewUpgrade(
+  project: Pick<PreviewProject, "builderMode" | "containerId" | "containerStatus" | "containerUrl">,
+): boolean {
+  return (
+    shouldRouteToLivePreview(project) &&
+    project.containerStatus === "running" &&
+    Boolean(project.containerUrl)
+  );
+}
+
 export async function loadPreviewProject(projectId: number): Promise<PreviewProject | null> {
   const [project] = await db
     .select({
@@ -509,7 +520,8 @@ function isAllowedUpgradeOrigin(req: IncomingMessage): boolean {
  * Handle a WebSocket upgrade against the preview path.
  *
  * Pre-condition: caller has already matched `matchPreviewPath`. We re-load
- * the project to confirm it is agentic + running before upgrading.
+ * the project and apply the same runtime-truth predicate used by HTTP before
+ * upgrading the direct-container path.
  *
  * Authorisation: published projects are public. For unpublished projects
  * we rely on (a) the Origin check below and (b) the fact that the iframe
@@ -524,12 +536,7 @@ export async function handleLivePreviewUpgrade(
   head: Buffer,
 ): Promise<void> {
   const project = await loadPreviewProject(projectId);
-  if (
-    !project ||
-    project.builderMode !== "agentic" ||
-    project.containerStatus !== "running" ||
-    !project.containerUrl
-  ) {
+  if (!project || !shouldProxyLivePreviewUpgrade(project)) {
     socket.destroy();
     return;
   }

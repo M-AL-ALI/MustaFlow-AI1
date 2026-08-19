@@ -10,6 +10,7 @@ import {
   createPreviewRevisionState,
   markPreviewRevisionApplied,
   reconcilePreviewRevision,
+  selectPreviewRevisionSubstrate,
   type ProjectPreviewState,
 } from "./preview-reconciliation";
 
@@ -66,6 +67,30 @@ function capturedPayload(revision: number): ProjectFilesChangedPayload {
 }
 
 describe("preview revision reconciliation with production task 140 traffic", () => {
+  it("routes Project 52's running legacy-labeled runtime away from WebContainer sync", () => {
+    expect(
+      selectPreviewRevisionSubstrate({
+        containerId: "nrf-ab8e18ef4ebebedd-p52-preview-primary",
+        containerStatus: "running",
+        webContainerReady: false,
+      }),
+    ).toBe("live-runtime");
+    expect(
+      selectPreviewRevisionSubstrate({
+        containerId: null,
+        containerStatus: "stopped",
+        webContainerReady: true,
+      }),
+    ).toBe("webcontainer");
+    expect(
+      selectPreviewRevisionSubstrate({
+        containerId: "stopped-runtime",
+        containerStatus: "stopped",
+        webContainerReady: false,
+      }),
+    ).toBe("waiting");
+  });
+
   it("pins the real 74-frame capture used by the disconnect regression", () => {
     expect(captureSha).toBe("ec751002f7eda3e8c4d1439ae2d2593886513bcbd3517508b6387d2c444d987f");
     expect(captured.capture).toMatchObject({ projectId: 44, taskId: 140, frameCount: 74 });

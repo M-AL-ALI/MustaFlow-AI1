@@ -12,6 +12,49 @@ export interface TaskStreamEvent {
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
+export type TaskStreamReceipt = {
+  event: TaskStreamEvent;
+  terminal: boolean;
+};
+
+/**
+ * A transport open is not proof that a task stream carried task state. Only a
+ * valid, task-matching frame is a receipt. This keeps empty/preflight success
+ * responses from masquerading as a live task after a reconnect.
+ */
+export function parseTaskStreamReceipt(
+  raw: string,
+  expectedTaskId: number,
+): TaskStreamReceipt | null {
+  try {
+    const candidate = JSON.parse(raw) as Partial<TaskStreamEvent>;
+    if (
+      !Number.isInteger(candidate.id) ||
+      (candidate.id ?? -1) < 0 ||
+      candidate.taskId !== expectedTaskId ||
+      typeof candidate.eventType !== "string" ||
+      candidate.eventType.length === 0
+    ) {
+      return null;
+    }
+    const event: TaskStreamEvent = {
+      id: candidate.id!,
+      taskId: candidate.taskId,
+      eventType: candidate.eventType,
+      message: typeof candidate.message === "string" ? candidate.message : "",
+      filePath: typeof candidate.filePath === "string" ? candidate.filePath : null,
+      createdAt:
+        typeof candidate.createdAt === "string" || candidate.createdAt instanceof Date
+          ? candidate.createdAt
+          : "",
+      data: candidate.data,
+    };
+    return { event, terminal: TERMINAL_STATUSES.has(event.eventType) };
+  } catch {
+    return null;
+  }
+}
+
 export interface TaskEventStreamResult {
   events: TaskStreamEvent[];
   lastEventAt: number | null;
@@ -34,9 +77,10 @@ export interface TaskEventStreamResult {
  * `lastEventAt` is a `Date.now()` timestamp updated on every incoming event,
  * used by consumers to detect idle gaps between tool calls.
  *
- * `isConnected` becomes true once the SSE connection is open and false once
- * it closes, allowing callers to suppress redundant polling while the channel
- * is live.
+ * `isConnected` becomes true only after a valid task-matching receipt arrives,
+ * not merely when the transport opens. It becomes false once the stream closes,
+ * allowing callers to suppress redundant polling only while the channel has
+ * proved it is carrying this task.
  */
 export function useTaskEventStream(projectId: number, taskId: number): TaskEventStreamResult {
   const [events, setEvents] = useState<TaskStreamEvent[]>([]);
@@ -52,24 +96,19 @@ export function useTaskEventStream(projectId: number, taskId: number): TaskEvent
 
     const es = new EventSource(`/api/projects/${projectId}/tasks/${taskId}/events/stream`);
 
-    es.onopen = () => {
-      setIsConnected(true);
-    };
+    es.onopen = () => undefined;
 
     es.onmessage = (raw: MessageEvent<string>) => {
-      try {
-        const event = JSON.parse(raw.data) as TaskStreamEvent;
-        if (seenIdsRef.current.has(event.id)) return;
+      const receipt = parseTaskStreamReceipt(raw.data, taskId);
+      if (!receipt) return;
+      setIsConnected(!receipt.terminal);
+      const { event } = receipt;
+      if (!seenIdsRef.current.has(event.id)) {
         seenIdsRef.current.add(event.id);
         setEvents((prev) => [...prev, event]);
         setLastEventAt(Date.now());
-        if (TERMINAL_STATUSES.has(event.eventType)) {
-          setIsConnected(false);
-          es.close();
-        }
-      } catch {
-        // ignore malformed frames
       }
+      if (receipt.terminal) es.close();
     };
 
     es.onerror = () => {

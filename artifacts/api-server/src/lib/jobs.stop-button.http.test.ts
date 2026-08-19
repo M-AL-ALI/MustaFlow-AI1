@@ -26,6 +26,7 @@ import http from "node:http";
 const {
   emittedEventRows,
   insertIdCounter,
+  mutationCallCount,
   updateCallCount,
   routeTaskStatus,
   mockRunBuildPipeline,
@@ -66,11 +67,12 @@ const {
     taskId: number;
     eventType: string;
     message: string;
-    filePath: null;
+    filePath: string | null;
     createdAt: Date;
   }> = [];
 
   const insertIdCounter = { value: 1 };
+  const mutationCallCount = { value: 0 };
   const updateCallCount = { value: 0 };
   const routeTaskStatus = { value: "building" };
 
@@ -266,13 +268,22 @@ const {
       select: (_shape?: unknown) => ({
         from: (table: { __id?: string }) => selectRouter(table),
       }),
-      update: (table: { __id?: string }) => makeUpdateChain(table),
+      update: (table: { __id?: string }) => {
+        mutationCallCount.value += 1;
+        return makeUpdateChain(table);
+      },
       insert: (table: { __id?: string }) => ({
-        values: (vals: unknown) => makeInsertChain(table, vals),
+        values: (vals: unknown) => {
+          mutationCallCount.value += 1;
+          return makeInsertChain(table, vals);
+        },
       }),
-      delete: (_table: unknown) => ({
-        where: (..._args: unknown[]) => Promise.resolve([]),
-      }),
+      delete: (_table: unknown) => {
+        mutationCallCount.value += 1;
+        return {
+          where: (..._args: unknown[]) => Promise.resolve([]),
+        };
+      },
       transaction: transactionMock,
     };
   }
@@ -292,6 +303,7 @@ const {
   return {
     emittedEventRows,
     insertIdCounter,
+    mutationCallCount,
     updateCallCount,
     routeTaskStatus,
     mockRunBuildPipeline,
@@ -629,6 +641,7 @@ afterAll(async () => {
 afterEach(() => {
   emittedEventRows.length = 0;
   insertIdCounter.value = 1;
+  mutationCallCount.value = 0;
   updateCallCount.value = 0;
   routeTaskStatus.value = "building";
 });
@@ -774,4 +787,63 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     expect(resp.status).toBe(200);
     expect(emittedEventRows.filter((row) => row.eventType === "cancelled")).toHaveLength(1);
   }, 5_000);
+});
+
+describe("task event replay receipts", () => {
+  function seedReplay(terminalEventType: "completed" | "failed" | "cancelled"): void {
+    emittedEventRows.push(
+      {
+        id: insertIdCounter.value++,
+        taskId: TASK_ID,
+        eventType: "file_diff",
+        message: "Saved index.html",
+        filePath: "index.html",
+        createdAt: new Date("2026-08-19T18:00:00.000Z"),
+      },
+      {
+        id: insertIdCounter.value++,
+        taskId: TASK_ID,
+        eventType: terminalEventType,
+        message: `Task ${terminalEventType}`,
+        filePath: null,
+        createdAt: new Date("2026-08-19T18:00:01.000Z"),
+      },
+    );
+  }
+
+  it("keeps the persisted event read metadata-only", async () => {
+    seedReplay("completed");
+    const rowsBefore = structuredClone(emittedEventRows);
+
+    const response = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/events`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toHaveLength(2);
+    expect(mutationCallCount.value).toBe(0);
+    expect(emittedEventRows).toEqual(rowsBefore);
+  });
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "replays history before the %s receipt, returns 200, and closes without writes",
+    async (terminalEventType) => {
+      seedReplay(terminalEventType);
+      const rowsBefore = structuredClone(emittedEventRows);
+
+      const response = await fetch(
+        `${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/events/stream`,
+      );
+      const body = await response.text();
+      const frames = body
+        .trim()
+        .split("\n\n")
+        .map((line) => JSON.parse(line.replace(/^data: /, "")) as { eventType: string });
+
+      expect(response.status).toBe(200);
+      expect(response.status).not.toBe(204);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      expect(frames.map((frame) => frame.eventType)).toEqual(["file_diff", terminalEventType]);
+      expect(mutationCallCount.value).toBe(0);
+      expect(emittedEventRows).toEqual(rowsBefore);
+    },
+  );
 });

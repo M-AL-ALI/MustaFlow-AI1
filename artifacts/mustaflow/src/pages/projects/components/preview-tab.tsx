@@ -45,7 +45,7 @@ import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-container";
 import type { ProjectFilesChangedPayload } from "@/lib/event-types";
-import { logPreviewTiming } from "@/lib/preview-reconciliation";
+import { logPreviewTiming, selectPreviewRevisionSubstrate } from "@/lib/preview-reconciliation";
 import { cn } from "@/lib/utils";
 import {
   useListProjectFiles,
@@ -358,6 +358,11 @@ export function PreviewTab({
   const [iframeKey, setIframeKey] = useState(0);
   const activePreviewSyncRef = useRef<Promise<void> | null>(null);
   const syncFromBackend = wc.syncFromBackend;
+  const previewRevisionSubstrate = selectPreviewRevisionSubstrate({
+    containerId: project.containerId,
+    containerStatus,
+    webContainerReady: wc.status === "ready",
+  });
   const syncPreviewPayload = useCallback(
     (payload: ProjectFilesChangedPayload, reloadAfter = false): Promise<void> => {
       const run = async (): Promise<void> => {
@@ -404,13 +409,15 @@ export function PreviewTab({
     }
     if (refreshTrigger !== prevRefreshTriggerRef.current) {
       prevRefreshTriggerRef.current = refreshTrigger;
-      // Sync-first-then-reload: if a payload arrived after the last filesPayloadSeq
-      // effect ran (e.g. final batch arrived simultaneously with "completed"), sync it
-      // into the WebContainer before flipping the iframe key so HMR sees the latest
-      // files. Falls back to immediate reload when WC is not ready or there is no
-      // pending payload.
+      // Sync-first-then-reload: a live runtime already owns the authoritative
+      // backend snapshot, while WebContainer-backed previews must finish their
+      // browser-side file application before acknowledging the revision.
       const remaining = filesPayloadRef?.current ?? null;
-      if (remaining && wc.status === "ready") {
+      if (remaining && previewRevisionSubstrate === "live-runtime") {
+        if (filesPayloadRef) filesPayloadRef.current = null;
+        onPreviewRevisionApplied?.(remaining);
+        setIframeKey((key) => key + 1);
+      } else if (remaining && previewRevisionSubstrate === "webcontainer") {
         if (filesPayloadRef) filesPayloadRef.current = null;
         void syncPreviewPayload(remaining, true);
       } else if (activePreviewSyncRef.current) {
@@ -419,11 +426,17 @@ export function PreviewTab({
         setIframeKey((k) => k + 1);
       }
     }
-  }, [refreshTrigger, filesPayloadRef, syncPreviewPayload, wc.status]);
+  }, [
+    refreshTrigger,
+    filesPayloadRef,
+    onPreviewRevisionApplied,
+    previewRevisionSubstrate,
+    syncPreviewPayload,
+  ]);
 
-  // When a project_files_changed SSE event arrives, sync files into the WebContainer
-  // filesystem so Vite HMR can deliver the update without a full iframe reload.
-  // Only runs for WebContainer-backed projects (when wc.status === 'ready').
+  // When a project_files_changed SSE event arrives, acknowledge it through the
+  // substrate that actually serves this preview. A live runtime needs a reload,
+  // not a WebContainer write; WC-backed projects retain apply/failure receipts.
   // Clears filesPayloadRef.current before the async call to prevent double-apply if
   // the refreshTrigger effect races with a subsequent filesPayloadSeq increment.
   const prevFilesPayloadSeqRef = useRef<number | undefined>(undefined);
@@ -431,12 +444,23 @@ export function PreviewTab({
     if (filesPayloadSeq === undefined) return;
     if (prevFilesPayloadSeqRef.current === filesPayloadSeq) return;
     if (!filesPayloadRef?.current) return;
-    if (wc.status !== "ready") return;
+    if (previewRevisionSubstrate === "waiting") return;
     prevFilesPayloadSeqRef.current = filesPayloadSeq;
     const payload = filesPayloadRef.current;
     filesPayloadRef.current = null; // clear before await — prevents double-apply
+    if (previewRevisionSubstrate === "live-runtime") {
+      onPreviewRevisionApplied?.(payload);
+      setIframeKey((key) => key + 1);
+      return;
+    }
     void syncPreviewPayload(payload);
-  }, [filesPayloadSeq, filesPayloadRef, syncPreviewPayload, wc.status]);
+  }, [
+    filesPayloadSeq,
+    filesPayloadRef,
+    onPreviewRevisionApplied,
+    previewRevisionSubstrate,
+    syncPreviewPayload,
+  ]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);

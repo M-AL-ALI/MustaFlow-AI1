@@ -84,6 +84,7 @@ import {
 import { SuggestionChips } from "./components/suggestion-chips";
 import { QueueComposer } from "./components/queue-composer";
 import { useProjectIssues } from "@/hooks/use-project-issues";
+import { parseTaskStreamReceipt } from "@/hooks/use-task-event-stream";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
 import type { BgTask } from "./components/background-tasks-drawer";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
@@ -1053,6 +1054,8 @@ export default function ProjectWorkspacePage() {
   const [liveRunTerminalEvent, setLiveRunTerminalEvent] = useState<
     "completed" | "failed" | "cancelled" | null
   >(null);
+  const [activeTaskStreamHasReceipt, setActiveTaskStreamHasReceipt] = useState(false);
+  const seenTaskEventIdsRef = useRef<Set<number>>(new Set());
   const liveRunStepIdsRef = useRef<RunStepIdSet>(createRunStepIdSet());
   const [liveRunStepCount, setLiveRunStepCount] = useState(0);
   const [brainstormActivity, setBrainstormActivity] = useState<InlineActivityEntry | null>(null);
@@ -1071,6 +1074,8 @@ export default function ProjectWorkspacePage() {
   const [, setLiveCodeBuffer] = useState("");
   useEffect(() => {
     liveRunStepIdsRef.current = createRunStepIdSet();
+    seenTaskEventIdsRef.current = new Set();
+    setActiveTaskStreamHasReceipt(false);
     setLiveRunStepCount(0);
   }, [activeTaskId]);
   const taskEventSourceRef = useRef<EventSource | null>(null);
@@ -1780,6 +1785,7 @@ export default function ProjectWorkspacePage() {
   // the real workspace busy state until the replayed terminal event arrives.
   const hasRehydratedActiveRun =
     activeTaskId !== null &&
+    activeTaskStreamHasReceipt &&
     liveRunTerminalEvent === null &&
     isRehydratableTaskStatus(activeTaskStatus);
   const isBusy = sendMessage.isPending || isStreaming || hasRehydratedActiveRun;
@@ -2114,17 +2120,17 @@ export default function ProjectWorkspacePage() {
     taskEventSourceRef.current = es;
     es.onmessage = (e: MessageEvent<string>) => {
       try {
-        const event = JSON.parse(e.data) as {
-          id: number;
-          taskId?: number;
-          eventType: string;
-          message?: string;
-          createdAt?: string;
+        const receipt = parseTaskStreamReceipt(e.data, activeTaskId);
+        if (!receipt) return;
+        setActiveTaskStreamHasReceipt(true);
+        const event = receipt.event as typeof receipt.event & {
           data?: {
             changedPaths?: string[];
             kind?: string;
           };
         };
+        if (event.id !== 0 && seenTaskEventIdsRef.current.has(event.id)) return;
+        if (event.id !== 0) seenTaskEventIdsRef.current.add(event.id);
         const nextRunStepCount = addRunStepId(liveRunStepIdsRef.current, event);
         setLiveRunStepCount((current) =>
           current === nextRunStepCount ? current : nextRunStepCount,
@@ -2172,7 +2178,10 @@ export default function ProjectWorkspacePage() {
             taskId: event.taskId ?? activeTaskId ?? 0,
             eventType: event.eventType,
             message: event.message,
-            createdAt: event.createdAt ?? new Date().toISOString(),
+            createdAt:
+              typeof event.createdAt === "string"
+                ? event.createdAt
+                : (event.createdAt?.toISOString() ?? new Date().toISOString()),
           });
           if (generatedImage) {
             const pendingImage = { ...generatedImage, status: "pending" as const };
@@ -2300,6 +2309,8 @@ export default function ProjectWorkspacePage() {
           void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
           void reconcilePreview("task-terminal");
+          es.close();
+          if (taskEventSourceRef.current === es) taskEventSourceRef.current = null;
         }
       } catch {
         // ignore malformed frames
@@ -2308,6 +2319,7 @@ export default function ProjectWorkspacePage() {
     return () => {
       es.close();
       taskEventSourceRef.current = null;
+      setActiveTaskStreamHasReceipt(false);
       setLiveCodeBuffer("");
       if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
     };
