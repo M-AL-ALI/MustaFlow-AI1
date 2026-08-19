@@ -125,7 +125,7 @@ describe("Ora ↔ Builder memory isolation", () => {
       content: ORA_MARKER,
       origin: "ora",
     });
-    await seedKnowledgeRow({
+    const builderId = await seedKnowledgeRow({
       title: "Builder lesson",
       content: BUILDER_MARKER,
       origin: "builder",
@@ -139,6 +139,13 @@ describe("Ora ↔ Builder memory isolation", () => {
     expect(context).not.toContain(ORA_MARKER);
     expect(applied.some((a) => a.title === "Builder lesson")).toBe(true);
     expect(applied.some((a) => a.title === "Ora memory")).toBe(false);
+
+    await loadKnowledgeContext(projectId);
+    const [builderAfterRepeatedReads] = await db
+      .select({ usageCount: knowledgeEntriesTable.usageCount })
+      .from(knowledgeEntriesTable)
+      .where(eq(knowledgeEntriesTable.id, builderId));
+    expect(builderAfterRepeatedReads!.usageCount).toBe(0);
   });
 
   it("GET /api/knowledge never returns the Ora row", async () => {

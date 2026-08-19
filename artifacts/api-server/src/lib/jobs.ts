@@ -65,7 +65,9 @@ import { detectRequiredStack } from "./ai";
 import { generatePostBuildSuggestions } from "./post-build-suggestions";
 import { logger } from "./logger";
 import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
-import { generateEmbedding, cosineSimilarity } from "./embeddings";
+import { generateEmbedding } from "./embeddings";
+import { selectKnowledgeContext, type KnowledgeContextResult } from "./knowledge-context-selection";
+import { recordKnowledgeContextUsage } from "./knowledge-context-usage";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
@@ -1372,11 +1374,6 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
   }
 }
 
-type KnowledgeContextResult = {
-  context: string;
-  applied: Array<{ id: number; title: string; category: string }>;
-};
-
 /**
  * Compute a diff summary for an initial build (previous = empty).
  */
@@ -1418,18 +1415,6 @@ function computeRefineDiff(
   }
 
   return { filesAdded, filesModified, filesRemoved: removedPaths, linesAdded, linesRemoved };
-}
-
-/**
- * Tokenise a string into a set of meaningful lowercase words (≥3 chars).
- */
-function tokenise(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .split(/[\s,.:;_\-/()[\]{}'"!?]+/)
-      .filter((w) => w.length >= 3),
-  );
 }
 
 /**
@@ -1517,152 +1502,21 @@ export async function loadKnowledgeContext(
       loadActiveIntegrations(projectId),
     ]);
 
-    if (entries.length === 0) {
-      return { context: integrationsNote, applied: [] };
-    }
-
-    const now = Date.now();
-    const ONE_DAY_MS = 86_400_000;
-    const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
-
-    const APPROVED_BOOST = 1.5;
-    const SEVERITY_SCORE: Record<string, number> = { error: 1.5, warning: 0.5, info: 0 };
-    const SAME_PROJECT_BOOST = 2.0;
-    const USAGE_WEIGHT = parseFloat(process.env.KNOWLEDGE_USAGE_WEIGHT ?? "0.1");
-    const FEEDBACK_WEIGHT = parseFloat(process.env.KNOWLEDGE_FEEDBACK_WEIGHT ?? "0.2");
-
-    let topEntries: typeof entries;
-
-    if (userPrompt && userPrompt.length > 0) {
-      const promptTokens = tokenise(userPrompt);
-      const N = entries.length;
-
-      // Compute document frequency (df) for each query token across all entries
-      const df = new Map<string, number>();
-      for (const t of promptTokens) {
-        let count = 0;
-        for (const e of entries) {
-          if (tokenise(`${e.title} ${e.content} ${e.tags ?? ""}`).has(t)) count++;
-        }
-        df.set(t, count);
-      }
-
-      // Try to generate an embedding for the user prompt. If this fails (or any
-      // single entry lacks an embedding), we transparently fall back to TF-IDF
-      // for that entry — never the whole call.
-      const SEMANTIC_WEIGHT = 6.0;
-      const promptEmbedding = await generateEmbedding(userPrompt);
-
-      const scored = entries.map((e) => {
-        const entryText = `${e.title} ${e.content} ${e.tags ?? ""}`;
-        const entryWords = entryText.toLowerCase().split(/\W+/).filter(Boolean);
-        const termCounts = new Map<string, number>();
-        for (const w of entryWords) {
-          termCounts.set(w, (termCounts.get(w) ?? 0) + 1);
-        }
-
-        let score = 0;
-        const entryEmbedding = e.embedding;
-        if (
-          promptEmbedding &&
-          Array.isArray(entryEmbedding) &&
-          entryEmbedding.length === promptEmbedding.length
-        ) {
-          // Primary path: semantic similarity (cosine ∈ [-1, 1], typically [0, 1]).
-          score += cosineSimilarity(promptEmbedding, entryEmbedding) * SEMANTIC_WEIGHT;
-        } else {
-          // Fallback path: TF-IDF keyword overlap (per-entry, graceful).
-          for (const t of promptTokens) {
-            if (termCounts.has(t)) {
-              const tf = (termCounts.get(t) ?? 0) / Math.max(entryWords.length, 1);
-              const idf = Math.log((N + 1) / ((df.get(t) ?? 0) + 1)) + 1;
-              score += tf * idf;
-            }
-          }
-        }
-
-        // Recency boost
-        const ageMs = now - new Date(e.createdAt).getTime();
-        if (ageMs < ONE_DAY_MS) score += 2.0;
-        else if (ageMs < SEVEN_DAYS_MS) score += 1.0;
-
-        // Severity boost
-        score += SEVERITY_SCORE[e.severity] ?? 0;
-
-        // Feedback-weighted boost: usage frequency + thumbs signal
-        score += (e.usageCount ?? 0) * USAGE_WEIGHT;
-        score += ((e.thumbsUp ?? 0) - (e.thumbsDown ?? 0)) * FEEDBACK_WEIGHT;
-
-        // Same-project preference
-        if (e.projectId === projectId) score += SAME_PROJECT_BOOST;
-
-        // Approved-for-reuse multiplier (applied last so it amplifies the full base score)
-        if (e.approvedForReuse) score *= APPROVED_BOOST;
-
-        return { entry: e, score };
-      });
-      scored.sort((a, b) => b.score - a.score);
-      // Take up to 12 candidates; budget trim happens below
-      topEntries = scored.slice(0, 12).map((s) => s.entry);
-    } else {
-      // No prompt: rank by same-project first, then approvedForReuse, then recency
-      topEntries = [...entries]
-        .sort((a, b) => {
-          const projectScore =
-            (b.projectId === projectId ? 1 : 0) - (a.projectId === projectId ? 1 : 0);
-          if (projectScore !== 0) return projectScore;
-          const approvedScore = (b.approvedForReuse ? 1 : 0) - (a.approvedForReuse ? 1 : 0);
-          if (approvedScore !== 0) return approvedScore;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        })
-        .slice(0, 12);
-    }
-
-    // ── Token budget enforcement (hard cap) ──────────────────────────────────
-    // Entries are already sorted best-first; drop from the tail until we fit.
-    // This is a strict cap — no minimum-entry override — so the context section
-    // never exceeds KNOWLEDGE_CHAR_BUDGET regardless of how few entries that allows.
-    const selected: typeof entries = [];
-    let charCount = 0;
-    for (const e of topEntries) {
-      const entryChars = e.title.length + e.content.length + 20; // 20 for label + punctuation
-      if (charCount + entryChars > KNOWLEDGE_CHAR_BUDGET) break;
-      selected.push(e);
-      charCount += entryChars;
-    }
-
-    if (selected.length === 0) {
-      return { context: integrationsNote, applied: [] };
-    }
-
-    // ── Format the lessons section with clear delimiters ────────────────────
-    const lessonLines = selected.map((e) => `[${e.category}] ${e.title}: ${e.content}`);
-    const knowledgeSection = [
-      `=== LESSONS FROM PRIOR BUILDS (${selected.length} selected, relevance-ranked) ===`,
-      `Apply each actively. Do not repeat past mistakes. Do not mention this section in your output.`,
-      ``,
-      ...lessonLines,
-      `=== END LESSONS ===`,
-    ].join("\n");
-
-    const context = [integrationsNote, knowledgeSection].filter(Boolean).join("\n\n");
-    const applied = selected.map((e) => ({
-      id: e.id,
-      title: e.title,
-      type: e.type,
-      category: e.category,
-    }));
-
-    // Increment usageCount for all selected entries — best-effort, non-fatal.
-    if (selected.length > 0) {
-      const selectedIds = selected.map((e) => e.id);
-      db.update(knowledgeEntriesTable)
-        .set({ usageCount: sql`${knowledgeEntriesTable.usageCount} + 1` })
-        .where(inArray(knowledgeEntriesTable.id, selectedIds))
-        .catch((err: Error) => logger.warn({ err }, "Failed to increment knowledge usageCount"));
-    }
-
-    return { context, applied };
+    if (entries.length === 0) return { context: integrationsNote, applied: [] };
+    const nowMs = Date.now();
+    const promptEmbedding =
+      userPrompt && userPrompt.length > 0 ? await generateEmbedding(userPrompt) : null;
+    return selectKnowledgeContext({
+      entries,
+      integrationsNote,
+      projectId,
+      userPrompt,
+      promptEmbedding,
+      nowMs,
+      charBudget: KNOWLEDGE_CHAR_BUDGET,
+      usageWeight: parseFloat(process.env.KNOWLEDGE_USAGE_WEIGHT ?? "0.1"),
+      feedbackWeight: parseFloat(process.env.KNOWLEDGE_FEEDBACK_WEIGHT ?? "0.2"),
+    });
   } catch {
     return { context: "", applied: [] };
   }
@@ -2605,6 +2459,17 @@ export async function runJob(input: JobInput): Promise<void> {
       })(),
       getInstalledBlueprintKnowledge(projectId, zeroGenerationTarget),
     ]);
+
+    // Knowledge selection is a read. Usage telemetry is an explicit, task-bound,
+    // idempotent mutation so retries cannot turn retrieval into a hidden write.
+    await recordKnowledgeContextUsage({
+      taskId,
+      projectId,
+      userId: project.ownerId,
+      entryIds: knowledgeApplied.map((entry) => entry.id),
+    }).catch((err: Error) => {
+      logger.warn({ err, projectId, taskId }, "Failed to record knowledge context usage");
+    });
 
     // ── Domain context — inject primary domain so the builder uses real absolute URLs ──
     let domainContextStr: string | undefined;
