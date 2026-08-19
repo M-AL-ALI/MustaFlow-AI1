@@ -1,9 +1,10 @@
 /**
  * Live container preview proxy (Task #740).
  *
- * For `builder_mode = 'agentic'` projects, requests under
- * `/api/projects/:id/preview/*` are reverse-proxied to the project's
- * Fly machine dev-server URL (HTTP + WebSocket upgrades for Vite HMR).
+ * For projects with a real runtime, requests under
+ * `/api/projects/:id/preview/*` are routed to that runtime (HTTP +
+ * WebSocket upgrades for the direct-container path, or a signed browser
+ * handoff for private Cloudflare runtimes).
  *
  * - Cold start: if the container is hibernated / stopped, the proxy
  *   auto-wakes it (best-effort, via the same pipeline `POST /container/start`
@@ -115,6 +116,21 @@ type PreviewProject = {
   stack: string | null;
   runtimePort: number | null;
 };
+
+/**
+ * Decide whether the editor preview must use the live runtime path.
+ *
+ * `builderMode` is a historical creation label, not runtime truth. Sealed
+ * generation can attach a running Cloudflare runtime before older rows have
+ * been reclassified, so a demonstrably running runtime wins. The established
+ * agentic + container path remains intact for stopped/wake behavior.
+ */
+export function shouldRouteToLivePreview(
+  project: Pick<PreviewProject, "builderMode" | "containerId" | "containerStatus">,
+): boolean {
+  if (!project.containerId) return false;
+  return project.builderMode === "agentic" || project.containerStatus === "running";
+}
 
 export async function loadPreviewProject(projectId: number): Promise<PreviewProject | null> {
   const [project] = await db

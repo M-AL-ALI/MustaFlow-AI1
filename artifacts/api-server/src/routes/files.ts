@@ -13,6 +13,7 @@ import { readDiagnostics } from "../lib/agent-senses";
 import {
   handleLivePreviewHttp,
   loadPreviewProject,
+  shouldRouteToLivePreview,
   userCanPreviewProject,
 } from "../lib/livePreviewProxy";
 import { serveProjectFilesPreview } from "../lib/project-files-preview";
@@ -652,11 +653,11 @@ router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<voi
     return;
   }
 
-  // Agentic projects WITH a real container → live container proxy.
-  // Agentic projects without a container (most projects) fall through to the
-  // same DB-row serving as static-legacy — the generated HTML/CSS/JS files
-  // are already in project_files and can be served directly.
-  if (previewProject.builderMode === "agentic" && previewProject.containerId) {
+  // A real runtime routes live. Runtime truth deliberately outranks the
+  // historical builder-mode label for sealed Cloudflare projects; the helper
+  // preserves the established agentic stopped/wake path. Projects without a
+  // runtime still use the DB-backed preview below.
+  if (shouldRouteToLivePreview(previewProject)) {
     await handleLivePreviewHttp(req, res, next, previewProject);
     return;
   }

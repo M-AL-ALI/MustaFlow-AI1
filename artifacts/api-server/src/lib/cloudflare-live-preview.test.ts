@@ -4,7 +4,10 @@ import {
   PREVIEW_GRANT_QUERY_PARAM,
 } from "@workspace/tenant-runtime-contracts";
 import { describe, expect, it, vi } from "vitest";
-import { resolveCloudflareLivePreviewLaunchUrl } from "./livePreviewProxy";
+import {
+  resolveCloudflareLivePreviewLaunchUrl,
+  shouldRouteToLivePreview,
+} from "./livePreviewProxy";
 
 vi.mock("@workspace/db", () => ({}));
 vi.mock("./container-secrets", () => ({ getContainerSecretMap: vi.fn(async () => ({})) }));
@@ -35,7 +38,7 @@ function cloudflareEnvironment(privateKey: string) {
 }
 
 describe("Cloudflare live preview handoff", () => {
-  it("makes a running private descriptor viewable without a container URL", async () => {
+  it("routes Project 52's exact legacy-labeled running descriptor to a signed grant", async () => {
     const pair = generateKeyPairSync("ec", { namedCurve: "P-256" });
     const runtimeId = await deriveRuntimeIdentity({
       namespace: "staging",
@@ -43,14 +46,19 @@ describe("Cloudflare live preview handoff", () => {
       role: "preview",
       slot: "primary",
     });
+    const project52 = {
+      id: 52,
+      builderMode: "static-legacy",
+      containerId: runtimeId,
+      containerStatus: "running",
+      containerUrl: null,
+      runtimePort: 8080,
+      stack: "node-api",
+    };
+
+    expect(shouldRouteToLivePreview(project52)).toBe(true);
     const launchUrl = await resolveCloudflareLivePreviewLaunchUrl(
-      {
-        id: 52,
-        containerId: runtimeId,
-        containerStatus: "running",
-        runtimePort: 8080,
-        stack: "node-api",
-      },
+      project52,
       "/api/projects/52/preview/assets/site.js?t=1",
       cloudflareEnvironment(pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString()),
     );
@@ -60,6 +68,40 @@ describe("Cloudflare live preview handoff", () => {
     expect(parsed.origin).toBe("https://runtime.example.workers.dev");
     expect(parsed.pathname).toBe(`/_nabuflow/preview/v1/${runtimeId}/assets/site.js`);
     expect(parsed.searchParams.get(PREVIEW_GRANT_QUERY_PARAM)).toBeTruthy();
+  });
+
+  it("keeps projects without a runtime and stale stopped legacy rows on DB serving", () => {
+    expect(
+      shouldRouteToLivePreview({
+        builderMode: "agentic",
+        containerId: null,
+        containerStatus: "stopped",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRouteToLivePreview({
+        builderMode: "static-legacy",
+        containerId: "stale-runtime-id",
+        containerStatus: "stopped",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRouteToLivePreview({
+        builderMode: "static-legacy",
+        containerId: null,
+        containerStatus: "stopped",
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves the established agentic container route while it is stopped", () => {
+    expect(
+      shouldRouteToLivePreview({
+        builderMode: "agentic",
+        containerId: "agentic-runtime-id",
+        containerStatus: "stopped",
+      }),
+    ).toBe(true);
   });
 
   it("leaves the established direct-container path unchanged outside Cloudflare", async () => {
