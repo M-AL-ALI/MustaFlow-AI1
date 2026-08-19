@@ -41,7 +41,12 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
     );
     expect(ourFailures).toEqual([]);
 
-    for (const table of ["ora_github_connections", "ora_repo_sessions", "brand_kits"]) {
+    for (const table of [
+      "ora_github_connections",
+      "ora_repo_sessions",
+      "brand_kits",
+      "brainstorm_admission_counters",
+    ]) {
       const { rows } = await pool.query("SELECT to_regclass($1) AS reg", [table]);
       expect(rows[0].reg, `table "${table}" should exist after boot migrations`).not.toBeNull();
     }
@@ -55,6 +60,7 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
       "brand_kits_user_personal_idx",
       "brand_kits_user_project_idx",
       "brand_kits_user_id_idx",
+      "brainstorm_admission_counters_reset_idx",
     ]) {
       const { rows } = await pool.query("SELECT to_regclass($1) AS reg", [index]);
       expect(rows[0].reg, `index "${index}" should exist after boot migrations`).not.toBeNull();

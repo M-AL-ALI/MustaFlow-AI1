@@ -79,9 +79,9 @@ export const jobsTotal = new Counter({
   registers: [registry],
 });
 
-export const redisAdmissionBackendAvailable = new Gauge({
-  name: "redis_admission_backend_available",
-  help: "Last observed Redis admission backend state: 1=available, 0=missing or unavailable",
+export const redisRateLimitBackendAvailable = new Gauge({
+  name: "redis_rate_limit_backend_available",
+  help: "Last observed distributed Redis rate-limit state: 1=available, 0=memory fallback",
   registers: [registry],
 });
 

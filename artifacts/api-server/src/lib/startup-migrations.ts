@@ -487,6 +487,48 @@ export async function refreshNabuflowHelpArticles(
   }
 }
 
+export interface BrainstormAdmissionMigrationResult {
+  tableReady: true;
+  staleRowsRemoved: number;
+  retentionDaysAfterReset: 1;
+}
+
+/** Create the shared admission-counter table and prune buckets outside retention. */
+export async function applyBrainstormAdmissionMigration(
+  client: Pick<import("pg").PoolClient, "query">,
+): Promise<BrainstormAdmissionMigrationResult> {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS brainstorm_admission_counters (
+      admission_key TEXT NOT NULL,
+      bucket_kind TEXT NOT NULL,
+      bucket_start TIMESTAMPTZ NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      reset_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CONSTRAINT brainstorm_admission_counters_pk
+        PRIMARY KEY (admission_key, bucket_kind, bucket_start),
+      CONSTRAINT brainstorm_admission_bucket_kind_check
+        CHECK (bucket_kind IN ('hour', 'day')),
+      CONSTRAINT brainstorm_admission_count_nonnegative_check
+        CHECK (count >= 0)
+    )
+  `);
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS brainstorm_admission_counters_reset_idx
+       ON brainstorm_admission_counters(reset_at)`,
+  );
+  const cleanup = await client.query(
+    `DELETE FROM brainstorm_admission_counters
+      WHERE reset_at < transaction_timestamp() - interval '1 day'`,
+  );
+  return {
+    tableReady: true,
+    staleRowsRemoved: cleanup.rowCount ?? 0,
+    retentionDaysAfterReset: 1,
+  };
+}
+
 const MIGRATION_STEPS: MigrationStep[] = [
   {
     name: "migrate-production-artifact-release-records",
@@ -5597,6 +5639,13 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-project-owner-and-scope-indexes",
     async run(client) {
       await applyProjectOwnerSchemaHardening(client);
+    },
+  },
+  {
+    name: "migrate-brainstorm-admission-counters",
+    async run(client) {
+      const result = await applyBrainstormAdmissionMigration(client);
+      logger.info(result, "startup-migrations: brainstorm admission counters ready");
     },
   },
   {

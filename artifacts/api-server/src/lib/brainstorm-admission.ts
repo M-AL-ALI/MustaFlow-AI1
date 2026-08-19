@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { getAuth } from "@clerk/express";
 import type { NextFunction, Request, Response } from "express";
 import { admissionClientIp } from "./rateLimit";
-import { reserveDualWindowAdmission, type DualWindowAdmissionResult } from "./redisClient";
+import {
+  reserveDualWindowAdmission,
+  type DualWindowAdmissionResult,
+} from "./brainstorm-admission-store";
 import { logger } from "./logger";
 
 function positiveIntegerEnv(name: string, fallback: number): number {

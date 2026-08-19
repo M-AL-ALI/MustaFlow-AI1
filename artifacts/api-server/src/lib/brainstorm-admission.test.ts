@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@clerk/express", () => ({ getAuth: mocks.getAuth }));
 vi.mock("./rateLimit", () => ({ admissionClientIp: mocks.clientIp }));
-vi.mock("./redisClient", () => ({ reserveDualWindowAdmission: mocks.reserve }));
+vi.mock("./brainstorm-admission-store", () => ({ reserveDualWindowAdmission: mocks.reserve }));
 vi.mock("./logger", () => ({ logger: { warn: mocks.warn } }));
 
 import {
