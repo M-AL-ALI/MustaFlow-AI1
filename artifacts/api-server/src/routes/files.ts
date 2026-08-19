@@ -617,10 +617,9 @@ router.get(
 // with the URL can open the generated app.
 // UNPUBLISHED projects require the requesting user to be the project owner.
 //
-// Task #740: for projects with builder_mode = 'agentic', requests are
-// reverse-proxied to the live Fly container's dev server (HTTP + WS for
-// Vite HMR). Projects with builder_mode = 'static-legacy' continue to be
-// served from the project_files rows below.
+// Task #740: projects with a real live runtime use the runtime preview path
+// (direct-container HTTP + WS for Vite HMR, or a signed Cloudflare handoff).
+// Projects without a runtime continue to be served from project_files below.
 router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<void> => {
   const projectId = Number(req.params.id);
   if (!Number.isFinite(projectId)) {
