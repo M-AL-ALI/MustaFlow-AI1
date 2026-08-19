@@ -58,11 +58,7 @@ import {
 } from "../lib/plans";
 import { isSuperuser, SUPERUSER_ORA_TIER } from "../lib/superusers";
 import { logger } from "../lib/logger";
-import {
-  NABUFLOW_BUILD_MODE_COSTS,
-  NABUFLOW_PLAN_IDS,
-  NABUFLOW_PLANS,
-} from "../lib/nabuflow-plans";
+import { publicNabuflowPlanCatalog } from "../lib/nabuflow-public-plans";
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
@@ -1201,34 +1197,14 @@ billingPublicRouter.get("/billing/ora-plans", publicPlanCatalogLimiter, async (_
 });
 // Public NabuFlow plans metadata — no auth required (pricing page, landing page).
 // Parallel to GET /billing/ora-plans; does NOT leak per-user state.
-billingPublicRouter.get("/billing/nabuflow/plans", publicPlanCatalogLimiter, (_req, res): void => {
-  res.setHeader("Cache-Control", PUBLIC_PLAN_CACHE_CONTROL);
-  res.json({
-    plans: NABUFLOW_PLAN_IDS.map((id: string) => {
-      const plan = NABUFLOW_PLANS[id as keyof typeof NABUFLOW_PLANS];
-      return {
-        id: plan.id,
-        name: plan.name,
-        available: plan.available,
-        priceUsd: plan.priceUsd,
-        includedMonthlyCredits: plan.includedMonthlyCredits,
-        overageUsdPerCredit: plan.overageUsdPerCredit,
-        rolloverCycles: plan.rolloverCycles,
-        rolloverMaxCredits: plan.rolloverMaxCredits,
-        parallelBuildLimit: plan.parallelBuildLimit,
-        queuePriority: plan.queuePriority,
-        defaultSpendCapUsdCents: Math.round(plan.defaultSpendCapUsd * 100),
-        maxSpendCapUsdCents: Math.round(plan.maxSpendCapUsd * 100),
-        ladder: {
-          proBuildsPerCycle: plan.ladder.proBuildsPerCycle,
-          deepBuildsPerCycle: plan.ladder.deepBuildsPerCycle,
-          proDeepCombo: plan.ladder.proDeepCombo,
-        },
-      };
-    }),
-    modeCosts: NABUFLOW_BUILD_MODE_COSTS,
-  });
-});
+billingPublicRouter.get(
+  "/billing/nabuflow/plans",
+  publicPlanCatalogLimiter,
+  async (_req, res): Promise<void> => {
+    res.setHeader("Cache-Control", PUBLIC_PLAN_CACHE_CONTROL);
+    res.json(await publicNabuflowPlanCatalog());
+  },
+);
 
 // ── Auth-required billing router ──────────────────────────────────────────────
 const router: IRouter = Router();

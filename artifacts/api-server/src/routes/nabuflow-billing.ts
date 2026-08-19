@@ -25,7 +25,6 @@ import {
   type NabuflowOrgSeat,
 } from "@workspace/db";
 import {
-  NABUFLOW_BUILD_MODE_COSTS,
   NABUFLOW_ORG_BULK_TIERS,
   NABUFLOW_ORG_MIN_PURCHASE_CREDITS,
   NABUFLOW_PLAN_IDS,
@@ -35,8 +34,8 @@ import {
   nabuflowBulkTierFor,
   nabuflowEffectiveSpendCapCents,
   nabuflowOrgDrawRateUsdPerCredit,
-  type NabuflowPlanConfig,
 } from "../lib/nabuflow-plans";
+import { publicNabuflowPlanShape } from "../lib/nabuflow-public-plans";
 import {
   creditsEnforcementEnabled,
   ensureCurrentNabuflowCycle,
@@ -129,58 +128,6 @@ function handleNabuflowError(
   res.status(500).json({ error: fallback });
 }
 
-function publicPlanShape(plan: NabuflowPlanConfig) {
-  return {
-    id: plan.id,
-    name: plan.name,
-    available: plan.available,
-    priceUsd: plan.priceUsd,
-    includedMonthlyCredits: plan.includedMonthlyCredits,
-    overageUsdPerCredit: plan.overageUsdPerCredit,
-    rolloverCycles: plan.rolloverCycles,
-    rolloverMaxCredits: plan.rolloverMaxCredits,
-    parallelBuildLimit: plan.parallelBuildLimit,
-    queuePriority: plan.queuePriority,
-    defaultSpendCapUsdCents: Math.round(plan.defaultSpendCapUsd * 100),
-    maxSpendCapUsdCents: Math.round(plan.maxSpendCapUsd * 100),
-    ladder: {
-      proBuildsPerCycle: plan.ladder.proBuildsPerCycle,
-      deepBuildsPerCycle: plan.ladder.deepBuildsPerCycle,
-      proDeepCombo: plan.ladder.proDeepCombo,
-    },
-  };
-}
-
-// ── GET /billing/nabuflow/plans ───────────────────────────────────────────────
-// Returns plan shapes plus stage-keyed provider-resolved mode costs — the same
-// resolution logic as /billing/nabuflow/credit-costs so every cost-displaying
-// surface (pricing page, plan cards) agrees with the actual charges the build
-// gate applies. `modeCosts.build` uses AI_PROVIDER_BUILD; `modeCosts.refine`
-// uses AI_PROVIDER_REFINE — these may differ if operators configure them
-// separately.
-router.get("/billing/nabuflow/plans", async (_req, res): Promise<void> => {
-  const { creditCostFor, resolveStageProvider } = await import("../lib/ai-providers");
-
-  function resolvedModeCosts(stage: "build" | "refine") {
-    const { provider } = resolveStageProvider(stage, "power");
-    return NABUFLOW_BUILD_MODE_COSTS.map((entry) => ({
-      ...entry,
-      credits: creditCostFor(
-        entry.mode.toLowerCase() as Parameters<typeof creditCostFor>[0],
-        provider,
-      ),
-    }));
-  }
-
-  res.json({
-    plans: NABUFLOW_PLAN_IDS.map((id) => publicPlanShape(NABUFLOW_PLANS[id])),
-    modeCosts: {
-      build: resolvedModeCosts("build"),
-      refine: resolvedModeCosts("refine"),
-    },
-  });
-});
-
 // ── GET /billing/nabuflow/credit-costs ─────────────────────────────────────────
 // PUBLIC — no auth required; returns stage-keyed builder credit cost tables so
 // every UI cost surface can display the exact cost that will be charged.
@@ -250,7 +197,7 @@ router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
         exempt,
         canBuild: gate.allowed,
         blockedReason: gate.allowed ? null : gate.error,
-        plan: publicPlanShape(NABUFLOW_PLANS.constellation),
+        plan: publicNabuflowPlanShape(NABUFLOW_PLANS.constellation),
         subscription: null,
         card: null,
         spendCap: null,
@@ -294,7 +241,7 @@ router.get("/billing/nabuflow/state", async (req, res): Promise<void> => {
       exempt,
       canBuild: gate.allowed,
       blockedReason: gate.allowed ? null : gate.error,
-      plan: plan ? publicPlanShape(plan) : null,
+      plan: plan ? publicNabuflowPlanShape(plan) : null,
       subscription: sub
         ? {
             status: sub.status,
