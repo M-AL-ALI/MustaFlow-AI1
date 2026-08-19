@@ -60,6 +60,7 @@
 - [Stripe period fields on item](stripe-subscription-period-fields.md) / [connector env scoping](stripe-connector-env-scoping.md) — current_period_* live on items.data[0]; price IDs must be env-scoped dev(test)/prod(live).
 - [GitHub push setup](github-push-setup.md) / [wave-commit pattern](github-push-commit-pattern.md) — git writes blocked in bash; push via workflow; rm .git/index.lock BEFORE git add; inline -c user config.
 - [Checkpoint auto-sync](github-checkpoint-autosync.md) / [workspace==GitHub before publish](workspace-github-sync-before-deploy.md) — confirm real remote SHA via forced pull-from-github; publish ships the WORKSPACE, verify HEAD==github/main first.
+- [Publishing receipt lineage](publishing-receipt-lineage.md) — verify a Replit publish through its zero-content receipt and paired agent ledger, binding receipt parent/tree to source plus its build ID.
 - [Uncommitted edits revert](main-agent-uncommitted-changes-revert.md) — working-tree edits can vanish across turn boundaries; push in the same turn, verify via git show.
 - [pull-from-github merge conflict](pull-from-github-merge-conflict.md) / [merge branch via pull workflow](merge-branch-via-pull-workflow.md) — resolve conflicted merges via a background task; PULL_BRANCH='<branch>' merges a named branch.
 - [Pull/push ref-lock race](pull-push-reflock-race.md) — Run button starts both git workflows at once; pull dies on stale refs/remotes/github/main.lock; rm the lock file and rerun.
