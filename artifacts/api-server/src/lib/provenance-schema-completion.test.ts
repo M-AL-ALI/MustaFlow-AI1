@@ -45,7 +45,7 @@ describe("Zero provenance schema completion", () => {
         statements.push(statement.replace(/\s+/g, " ").trim());
         return { rows: [], rowCount: 0 };
       },
-    };
+    } as unknown as Parameters<typeof ensureKnowledgeUsageEventsSchema>[0];
     const run = async () => {
       await ensureKnowledgeUsageEventsSchema(client);
       await applyKnowledgeProvenanceMigration(client);
