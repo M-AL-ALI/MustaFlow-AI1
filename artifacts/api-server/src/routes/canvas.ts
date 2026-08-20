@@ -24,7 +24,6 @@ import {
   db,
   projectsTable,
   projectFilesTable,
-  projectVersionsTable,
   canvasVariantsTable,
   canvasVariantLibraryTable,
   canvasAbTestsTable,
@@ -38,6 +37,7 @@ import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
 import { isBinaryMime } from "../lib/binary-mime";
 import { writeKnowledge } from "../lib/knowledge";
 import { logger } from "../lib/logger";
+import { graduateCanvasVariantAtomically } from "../lib/canvas-variant-graduation";
 import crypto from "node:crypto";
 
 const router: IRouter = Router();
@@ -549,41 +549,12 @@ router.post(
       return;
     }
 
-    const currentRows = await db
-      .select()
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId));
-    const preSnapshot: FileSnapshotEntry[] = currentRows.map((r) => ({
-      path: r.path,
-      content: r.content,
-      mimeType: r.mimeType || guessMime(r.path),
-    }));
-    await db.insert(projectVersionsTable).values({
+    const { inserted, updated } = await graduateCanvasVariantAtomically({
       projectId,
-      label: `Pre-graduation: ${variant.label}`,
-      note: `Snapshot taken before graduating canvas variant #${variant.id}.`,
-      filesSnapshot: preSnapshot,
+      variantId: variant.id,
+      variantLabel: variant.label,
+      files: filesToMerge,
     });
-
-    const existingByPath = new Map(currentRows.map((r) => [r.path, r]));
-    let inserted = 0;
-    let updated = 0;
-    for (const f of filesToMerge) {
-      const mime = f.mimeType || guessMime(f.path);
-      const existing = existingByPath.get(f.path);
-      if (existing) {
-        await db
-          .update(projectFilesTable)
-          .set({ content: f.content, mimeType: mime, updatedAt: new Date() })
-          .where(eq(projectFilesTable.id, existing.id));
-        updated++;
-      } else {
-        await db
-          .insert(projectFilesTable)
-          .values({ projectId, path: f.path, content: f.content, mimeType: mime });
-        inserted++;
-      }
-    }
 
     writeKnowledge({
       projectId,

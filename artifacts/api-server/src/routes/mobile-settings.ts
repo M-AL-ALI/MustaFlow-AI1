@@ -1,17 +1,16 @@
 import { Router, type IRouter } from "express";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   db,
   projectFilesTable,
   projectsTable,
-  projectVersionsTable,
   agentTasksTable,
   taskEventsTable,
 } from "@workspace/db";
-import type { FileSnapshotEntry } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { z } from "zod";
 import { logger } from "../lib/logger";
+import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 
 const router: IRouter = Router();
 
@@ -54,37 +53,6 @@ async function emitEvent(
   } catch (err) {
     logger.warn({ err, taskId, eventType }, "Failed to emit mobile-settings task event");
   }
-}
-
-/** Read all project files and return them as a version snapshot. */
-async function snapshotFiles(projectId: number): Promise<FileSnapshotEntry[]> {
-  const rows = await db
-    .select()
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
-  return rows.map((r) => ({ path: r.path, content: r.content, mimeType: r.mimeType }));
-}
-
-/** Upsert a list of files (delete matching paths, then bulk insert). */
-async function writeFiles(
-  projectId: number,
-  files: Array<{ path: string; content: string; mimeType: string }>,
-): Promise<void> {
-  if (files.length === 0) return;
-  await db.delete(projectFilesTable).where(
-    and(
-      eq(projectFilesTable.projectId, projectId),
-      inArray(
-        projectFilesTable.path,
-        files.map((f) => f.path),
-      ),
-    ),
-  );
-  await db
-    .insert(projectFilesTable)
-    .values(
-      files.map((f) => ({ projectId, path: f.path, content: f.content, mimeType: f.mimeType })),
-    );
 }
 
 /** Read and parse app.json for a project; returns null if absent or invalid. */
@@ -315,17 +283,18 @@ router.post(
         await emitEvent(taskId, "editing_files", `Updating ${f.path}`, f.path);
       }
 
-      // ── Write files ─────────────────────────────────────────────────────────
-      await writeFiles(projectId, filesToWrite);
-
-      // ── Snapshot a version for rollback support ─────────────────────────────
+      // ── Write files and snapshot a version together ─────────────────────────
       await emitEvent(taskId, "saving_version", "Saving rollback snapshot…");
-      const snapshot = await snapshotFiles(projectId);
-      await db.insert(projectVersionsTable).values({
+      await writeProjectFilesAtomically({
         projectId,
-        label: `Settings: ${changedFields.join(", ") || "no changes"}`,
-        note: changeDescription,
-        filesSnapshot: snapshot,
+        scope: { kind: "project" },
+        replaceAll: false,
+        files: filesToWrite,
+        authoritativeVersion: {
+          label: `Settings: ${changedFields.join(", ") || "no changes"}`,
+          note: changeDescription,
+          changelogEntry: changeDescription,
+        },
       });
 
       // ── Complete the task ───────────────────────────────────────────────────
