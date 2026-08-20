@@ -71,11 +71,10 @@ function position(value: unknown, res: Response): number | null {
   return Number(value);
 }
 
-function text(value: unknown, res: Response, operation: "enqueue" | "edit"): string | null {
+function text(value: unknown, res: Response): string | null {
   if (typeof value !== "string" || value.trim().length === 0) {
-    const code = operation === "edit" ? "queue_edit_empty" : "queue_item_not_found";
-    const spec = ZERO_PROMPT_QUEUE_USER_ERRORS[code];
-    res.status(spec.status).json({ code, error: spec.message });
+    const spec = ZERO_PROMPT_QUEUE_USER_ERRORS.queue_edit_empty;
+    res.status(spec.status).json({ code: "queue_edit_empty", error: spec.message });
     return null;
   }
   if ([...value].length > ZERO_PROMPT_QUEUE_MAX_TEXT_CHARS) {
@@ -203,7 +202,7 @@ export function createZeroPromptQueueRouter(
     const id = projectId(req, res);
     const actor = actorId(req, res);
     const nextPosition = position(req.body?.position, res);
-    const currentText = text(req.body?.text, res, "enqueue");
+    const currentText = text(req.body?.text, res);
     const itemReferences = references(req.body?.references, res);
     if (
       id === null ||
@@ -286,7 +285,7 @@ export function createZeroPromptQueueRouter(
       const id = projectId(req, res);
       const actor = actorId(req, res);
       const target = itemId(req.params.itemId, res);
-      const currentText = text(req.body?.text, res, "edit");
+      const currentText = text(req.body?.text, res);
       if (id === null || actor === null || target === null || currentText === null) return;
       try {
         res.json(

@@ -20,7 +20,7 @@ export const ZERO_PROMPT_QUEUE_USER_ERRORS = {
   },
   queue_full: {
     status: 409,
-    message: "This queue already has 50 prompts. Remove or promote one before adding another.",
+    message: "This queue already has 50 prompts. Remove one before adding another.",
   },
   queue_item_text_too_long: {
     status: 400,

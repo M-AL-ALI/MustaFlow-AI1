@@ -1,5 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
 import { getBuilderCompletionMessage, getBuilderDisplayStepCount } from "@/lib/builder-completion";
+import { selectPromptQueueError } from "@/lib/zero-prompt-queue-user-errors";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useListTasks,
@@ -1568,13 +1569,11 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
         setSavedPosition(data.position);
         setTimeout(() => setSavedPosition(null), 5000);
       } else {
-        const msg =
-          typeof data?.error === "string"
-            ? data.error
-            : resp.status === 409
-              ? "Build not accepting hints right now"
-              : "Could not send — try again";
-        setSendError(msg);
+        const fallback =
+          resp.status === 409
+            ? "Build not accepting hints right now"
+            : "Could not send — try again";
+        setSendError(selectPromptQueueError(data, fallback));
         setTimeout(() => setSendError(""), 5000);
       }
     } catch {

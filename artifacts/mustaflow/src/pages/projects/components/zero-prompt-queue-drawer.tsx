@@ -1,5 +1,10 @@
 import { authFetch } from "@/lib/api-fetch";
 import {
+  QUEUE_LOAD_FALLBACK_ERROR,
+  QUEUE_MUTATION_FALLBACK_ERROR,
+  selectPromptQueueError,
+} from "@/lib/zero-prompt-queue-user-errors";
+import {
   ZERO_PROMPT_QUEUE_MAX_ITEMS,
   ZERO_PROMPT_QUEUE_MAX_TEXT_CHARS,
   ZERO_PROMPT_QUEUE_PHASE_RULES,
@@ -9,26 +14,6 @@ import {
 } from "@workspace/ora-contracts";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-const QUEUE_FALLBACK_ERROR = "The queued prompts could not be updated. Please try again.";
-const TECHNICAL_ERROR_PATTERN = /postgres|constraint|sqlstate|stack|23505|internal server/i;
-
-const USER_VISIBLE_QUEUE_ERROR_CODES = new Set([
-  "queue_edit_empty",
-  "queue_active_turn_not_queue_item",
-  "queue_full",
-  "queue_item_text_too_long",
-  "queue_item_not_found",
-  "queue_item_terminal",
-  "queue_position_invalid",
-  "queue_persistence_unavailable",
-  "queue_persistence_contract_invalid",
-  "queue_persistence_write_bound_exceeded",
-  "queue_provenance_missing",
-  "queue_request_invalid",
-  "queue_unauthenticated",
-  "queue_request_failed",
-]);
 
 export type PromptQueueItemView = {
   id: string;
@@ -184,29 +169,18 @@ function promptHistoryTime(occurredAt: string): string {
   return `${elapsedYears} ${elapsedYears === 1 ? "year" : "years"} ago`;
 }
 
-export function selectPromptQueueError(value: unknown): string {
-  if (!isRecord(value)) return QUEUE_FALLBACK_ERROR;
-  const code = typeof value.code === "string" ? value.code : "";
-  const message = typeof value.error === "string" ? value.error : "";
-  if (
-    !USER_VISIBLE_QUEUE_ERROR_CODES.has(code) ||
-    message.length === 0 ||
-    message.length > 240 ||
-    TECHNICAL_ERROR_PATTERN.test(message)
-  ) {
-    return QUEUE_FALLBACK_ERROR;
-  }
-  return message;
-}
-
 class PromptQueueRequestError extends Error {}
 
-async function queueRequest(path: string, init?: RequestInit): Promise<unknown> {
+async function queueRequest(
+  path: string,
+  init?: RequestInit,
+  fallback = QUEUE_MUTATION_FALLBACK_ERROR,
+): Promise<unknown> {
   let response: Response;
   try {
     response = await authFetch(path, init);
   } catch {
-    throw new PromptQueueRequestError(QUEUE_FALLBACK_ERROR);
+    throw new PromptQueueRequestError(fallback);
   }
   let body: unknown = null;
   try {
@@ -214,7 +188,7 @@ async function queueRequest(path: string, init?: RequestInit): Promise<unknown> 
   } catch {
     // A malformed response is never rendered verbatim.
   }
-  if (!response.ok) throw new PromptQueueRequestError(selectPromptQueueError(body));
+  if (!response.ok) throw new PromptQueueRequestError(selectPromptQueueError(body, fallback));
   return body;
 }
 
@@ -247,14 +221,18 @@ export function ZeroPromptQueueDrawer({
 
   const loadQueue = useCallback(async () => {
     try {
-      const body = await queueRequest(`/api/projects/${projectId}/prompt-queue?limit=50`);
+      const body = await queueRequest(
+        `/api/projects/${projectId}/prompt-queue?limit=50`,
+        undefined,
+        QUEUE_LOAD_FALLBACK_ERROR,
+      );
       setQueue(normalizePromptQueuePayload(body));
       setError(null);
     } catch (requestError) {
       setError(
         requestError instanceof PromptQueueRequestError
           ? requestError.message
-          : QUEUE_FALLBACK_ERROR,
+          : QUEUE_LOAD_FALLBACK_ERROR,
       );
     } finally {
       setLoading(false);
@@ -286,7 +264,7 @@ export function ZeroPromptQueueDrawer({
         setError(
           requestError instanceof PromptQueueRequestError
             ? requestError.message
-            : QUEUE_FALLBACK_ERROR,
+            : QUEUE_MUTATION_FALLBACK_ERROR,
         );
         return false;
       } finally {
