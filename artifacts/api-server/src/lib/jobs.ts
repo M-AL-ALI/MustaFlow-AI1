@@ -3160,6 +3160,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 const loopRes = await runAgentLoop({
                   mode: "build",
                   projectId,
+                  queuePromotionActorId: project.ownerId,
                   projectName: project.name,
                   projectKind: project.kind,
                   projectFormat: project.projectFormat ?? null,
@@ -3721,6 +3722,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 const loopRes = await runAgentLoop({
                   mode: "refine",
                   projectId,
+                  queuePromotionActorId: project.ownerId,
                   projectName: project.name,
                   projectKind: project.kind,
                   projectFormat: project.projectFormat ?? null,
@@ -4039,6 +4041,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               const retryLoopRes = await runAgentLoop({
                 mode: "refine",
                 projectId,
+                queuePromotionActorId: project.ownerId,
                 projectName: project.name,
                 projectKind: project.kind,
                 projectFormat: project.projectFormat ?? null,

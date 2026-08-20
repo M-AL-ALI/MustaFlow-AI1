@@ -101,6 +101,7 @@ import {
 } from "./zero-sealed-generation";
 import { checkZeroSealedFinalizeContract } from "./zero-sealed-finalize-check";
 import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
+import { applyZeroSteeringAtBoundary } from "./zero-queue-steering";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -136,6 +137,8 @@ export interface AgentLoopInput {
   policyStrictness?: PolicyStrictness | null;
   /** Owning task id — used to tag audit rows. */
   taskId?: number | null;
+  /** Project owner recorded as the actor when a queued prompt is promoted into this turn. */
+  queuePromotionActorId?: string;
   /**
    * Per-run wall-clock cap (ms). Overrides the global AGENTIC_BUILDER_WALL_CLOCK_MS
    * default — used by background jobs which run longer than foreground ones.
@@ -2392,12 +2395,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }),
     );
 
-    // Inject any mid-run steering hint the user submitted via POST /steer.
-    // Consumed once (deleted after this read) so it only applies to this turn.
+    // Transitional steering boundary: consume the legacy single slot first,
+    // then promote at most one durable queue item. Both travel through the
+    // exact same model-message and user-narration injection path.
     if (input.taskId) {
       const { consumeSteeringHint } = await import("./steering-hints");
-      const hint = await consumeSteeringHint(input.taskId);
-      if (hint) {
+      const inject = async (hint: string) => {
         messages.push({
           role: "system",
           content: `[User steering hint — apply immediately]: ${hint}`,
@@ -2407,6 +2410,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           "narration",
           `Applying your update: "${hint.slice(0, 120)}"`,
         );
+      };
+      if (input.queuePromotionActorId) {
+        await applyZeroSteeringAtBoundary({
+          projectId: input.projectId,
+          taskId: input.taskId,
+          actorId: input.queuePromotionActorId,
+          consumeSlot: () => consumeSteeringHint(input.taskId!),
+          inject,
+        });
+      } else {
+        const hint = await consumeSteeringHint(input.taskId);
+        if (hint) await inject(hint);
       }
     }
 
