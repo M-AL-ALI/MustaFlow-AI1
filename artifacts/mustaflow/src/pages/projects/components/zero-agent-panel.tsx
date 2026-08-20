@@ -14,6 +14,7 @@ import {
   Maximize2,
   Paperclip,
   ImagePlus,
+  ListOrdered,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
@@ -29,6 +30,8 @@ import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { PlanCard, type StructuredPlan } from "./plan-card";
 import { MarkdownMessage } from "./chat-history";
 import { ToolCallGroup } from "./tool-call-card";
+import { ZeroPromptQueueDrawer } from "./zero-prompt-queue-drawer";
+import type { ZeroPromptQueueObservedPhase } from "@workspace/ora-contracts";
 import {
   useListMessages,
   useSendMessage,
@@ -428,6 +431,8 @@ export function ZeroAgentPanel({
   const [pendingStartedAt, setPendingStartedAt] = useState<Date | null>(null);
   const [sseConnected, setSseConnected] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
+  const [showPromptQueue, setShowPromptQueue] = useState(false);
+  const [runPhase, setRunPhase] = useState<ZeroPromptQueueObservedPhase | null>(null);
   const [isDetached, setIsDetached] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [highlightedMsgId, setHighlightedMsgId] = useState<number | null>(null);
@@ -466,6 +471,14 @@ export function ZeroAgentPanel({
   const handleSseConnectionChange = useCallback((connected: boolean) => {
     setSseConnected(connected);
   }, []);
+
+  const handleRunPhaseChange = useCallback((phase: ZeroPromptQueueObservedPhase | null) => {
+    setRunPhase(phase);
+  }, []);
+
+  useEffect(() => {
+    setRunPhase(null);
+  }, [activeTaskId]);
 
   const { data: messages } = useListMessages(projectId, {
     query: {
@@ -1151,6 +1164,7 @@ export function ZeroAgentPanel({
                             startedAt={pendingStartedAt}
                             onDismiss={dismissBubble}
                             onConnectionChange={handleSseConnectionChange}
+                            onRunPhaseChange={handleRunPhaseChange}
                           />
                         </div>
                       )}
@@ -1198,6 +1212,7 @@ export function ZeroAgentPanel({
                 startedAt={pendingStartedAt}
                 onDismiss={dismissBubble}
                 onConnectionChange={handleSseConnectionChange}
+                onRunPhaseChange={handleRunPhaseChange}
               />
             </div>
           )}
@@ -1273,6 +1288,17 @@ export function ZeroAgentPanel({
             >
               <Layers2 className="h-2.5 w-2.5" />
               BG
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowPromptQueue(true)}
+              aria-label="Open queued prompts"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border border-border text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/60 transition-colors"
+              title="Queued prompts"
+            >
+              <ListOrdered className="h-2.5 w-2.5" />
+              Queue
             </button>
 
             <div className="flex-1" />
@@ -1373,6 +1399,15 @@ export function ZeroAgentPanel({
             )}
           </div>
         </div>
+
+        {showPromptQueue && (
+          <ZeroPromptQueueDrawer
+            projectId={projectId}
+            activeTaskId={activeTaskId}
+            phase={runPhase}
+            onClose={() => setShowPromptQueue(false)}
+          />
+        )}
       </div>
     </>
   );

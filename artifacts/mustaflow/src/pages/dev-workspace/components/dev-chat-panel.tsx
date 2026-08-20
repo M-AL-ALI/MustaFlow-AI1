@@ -41,7 +41,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ZeroPromptQueueDrawer } from "./zero-prompt-queue-drawer";
+import { ZeroPromptQueueDrawer } from "@/pages/projects/components/zero-prompt-queue-drawer";
 import type { ZeroPromptQueueObservedPhase } from "@workspace/ora-contracts";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
