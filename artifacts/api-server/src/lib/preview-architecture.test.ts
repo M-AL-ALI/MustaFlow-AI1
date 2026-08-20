@@ -173,8 +173,9 @@ describe("Preview Architecture Fix regression coverage", () => {
 
   it("static previewUpdated is documented as DB-snapshot confirmation", () => {
     expect(jobsSource).toContain(
-      "Static confirmation: writeFiles has durably updated the DB snapshot",
+      "Static confirmation: the atomic project-file transaction has committed the",
     );
+    expect(jobsSource).toContain("mutable rows that back the iframe");
   });
 
   it("draft edits mark test/full preview candidates stale instead of overwriting them", () => {

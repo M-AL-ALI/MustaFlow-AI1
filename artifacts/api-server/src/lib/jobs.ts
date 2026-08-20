@@ -101,6 +101,7 @@ import {
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
+import { writeProjectFilesAtomically } from "./project-file-writer";
 import { healthCheckPathForStack } from "./health-inject";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
 import { sendBuildFailureEmail } from "./emailClient";
@@ -1214,73 +1215,6 @@ async function snapshotFilesForVersion(projectId: number): Promise<FileSnapshotE
     content: r.content,
     mimeType: r.mimeType,
   }));
-}
-
-/**
- * Bulk-safe file writer. For replaceAll (initial build): one DELETE + one bulk INSERT.
- * For refine (replaceAll=false): one DELETE of affected paths + one bulk INSERT.
- * Eliminates the N+1 per-file loop.
- */
-async function writeFiles(
-  projectId: number,
-  files: BuilderFile[],
-  replaceAll: boolean,
-  artifactId?: number | null,
-): Promise<void> {
-  // Resolve which artifact the new file rows should be stamped with (Task #544).
-  // Defaults to the project's primary artifact so legacy callers keep working.
-  const { resolveArtifactId } = await import("./artifacts");
-  const resolvedArtifactId = await resolveArtifactId(projectId, artifactId ?? null);
-
-  if (replaceAll) {
-    if (resolvedArtifactId !== null) {
-      // Scope the wipe to the active artifact so other artifacts in the same
-      // project aren't clobbered by a rebuild of one of them.
-      await db
-        .delete(projectFilesTable)
-        .where(
-          and(
-            eq(projectFilesTable.projectId, projectId),
-            eq(projectFilesTable.artifactId, resolvedArtifactId),
-          ),
-        );
-    } else {
-      await db.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
-    }
-  } else if (files.length > 0) {
-    const baseConds = [
-      eq(projectFilesTable.projectId, projectId),
-      inArray(
-        projectFilesTable.path,
-        files.map((f) => f.path),
-      ),
-    ];
-    if (resolvedArtifactId !== null) {
-      baseConds.push(eq(projectFilesTable.artifactId, resolvedArtifactId));
-    }
-    await db.delete(projectFilesTable).where(and(...baseConds));
-  }
-  if (files.length > 0) {
-    await db.insert(projectFilesTable).values(
-      files.map((f) => ({
-        projectId,
-        artifactId: resolvedArtifactId,
-        path: f.path,
-        content: f.content,
-        mimeType: f.mimeType,
-      })),
-    );
-  }
-}
-
-/**
- * Bulk-safe file deleter — one DELETE with inArray instead of N individual deletes.
- */
-async function deleteFiles(projectId: number, paths: string[]): Promise<void> {
-  if (paths.length === 0) return;
-  await db
-    .delete(projectFilesTable)
-    .where(and(eq(projectFilesTable.projectId, projectId), inArray(projectFilesTable.path, paths)));
 }
 
 /** Map of integration name → required secret key names (subset of the frontend registry). */
@@ -3502,7 +3436,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             (eventType, message) => emitEvent(taskId, eventType, message),
             "project_files_commit",
           );
-          await writeFiles(projectId, filesWithHealth, true);
+          await writeProjectFilesAtomically({
+            projectId,
+            files: filesWithHealth,
+            replaceAll: true,
+          });
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
         diffSummary = computeBuildDiff(result.files);
@@ -4284,22 +4222,22 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               f.path,
             );
           }
-          if (agentIdentity !== "task") {
-            await writeFiles(projectId, result.changedFiles, false);
-          }
         }
         if (result.removedPaths.length > 0) {
           for (const p of result.removedPaths) {
             await emitEvent(taskId, "editing_files", `Removing ${p}`, p);
-          }
-          if (agentIdentity !== "task") {
-            await deleteFiles(projectId, result.removedPaths);
           }
         }
         if (
           agentIdentity !== "task" &&
           (result.changedFiles.length > 0 || result.removedPaths.length > 0)
         ) {
+          await writeProjectFilesAtomically({
+            projectId,
+            files: result.changedFiles,
+            replaceAll: false,
+            removedPaths: result.removedPaths,
+          });
           void staleDraftCandidate(projectId, "refine").catch(() => {});
         }
         if (agentIdentity === "task") {
@@ -4451,7 +4389,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 (eventType, message) => emitEvent(taskId, eventType, message),
                 "project_files_commit",
               );
-              await writeFiles(projectId, repairLoopResult.changedFiles, false);
+              await writeProjectFilesAtomically({
+                projectId,
+                files: repairLoopResult.changedFiles,
+                replaceAll: false,
+              });
               repairChangedPaths.push(...repairLoopResult.changedFiles.map((f) => f.path));
               filesToSmellScan = repairLoopResult.changedFiles;
               for (const f of repairLoopResult.changedFiles) {
@@ -5331,8 +5273,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           report.warnings = [...(report.warnings ?? []), ...runtimePreviewResult.warnings];
         }
       } else {
-        // Static confirmation: writeFiles has durably updated the DB snapshot that
-        // backs the iframe; the task-channel "completed" event triggers reload.
+        // Static confirmation: the atomic project-file transaction has committed the
+        // mutable rows that back the iframe; the task-channel "completed" event triggers reload.
         // We intentionally do NOT emit publishPreviewReady here — that would
         // cause a second setBuildRefreshCount call and a double iframe reload.
         report.previewUpdated = true;
@@ -5522,13 +5464,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   "project_files_commit",
                 );
               }
-              if (appliedChangedFiles.length > 0) {
-                await writeFiles(projectId, appliedChangedFiles, false);
-              }
-              if (appliedRemovedPaths.length > 0) {
-                await deleteFiles(projectId, appliedRemovedPaths);
-              }
               if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
+                await writeProjectFilesAtomically({
+                  projectId,
+                  files: appliedChangedFiles,
+                  replaceAll: false,
+                  removedPaths: appliedRemovedPaths,
+                });
                 for (const file of appliedChangedFiles) {
                   await emitEvent(taskId, "editing_files", `Repairing ${file.path}`, file.path);
                 }
@@ -8056,7 +7998,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (eventType, message) => emitEvent(taskId, eventType, message),
     "project_files_commit",
   );
-  await writeFiles(projectId, builderFiles, true);
+  await writeProjectFilesAtomically({ projectId, files: builderFiles, replaceAll: true });
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
@@ -8957,7 +8899,11 @@ export async function runAppTestingJob(
 
     if (fixedFiles && fixedFiles.length > 0) {
       // Write the patched files to DB (partial update — replaceAll=false)
-      await writeFiles(projectId, fixedFiles, false);
+      await writeProjectFilesAtomically({
+        projectId,
+        files: fixedFiles,
+        replaceAll: false,
+      });
       const fixedSnapshot = await snapshotFilesForVersion(projectId);
       const [fixVersion] = await db
         .insert(projectVersionsTable)
