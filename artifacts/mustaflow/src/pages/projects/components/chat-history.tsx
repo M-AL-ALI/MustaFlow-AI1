@@ -44,7 +44,10 @@ import { ApplyFailureNotice } from "./apply-failure-notice";
 import { EditAndResend, latestUserMessageId } from "./edit-and-resend";
 import { JumpToLatestButton, nextChatFollowState, scrollChatToLatest } from "./smart-auto-scroll";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
-import { getBuilderCompletionMessage } from "@/lib/builder-completion";
+import {
+  getBuilderCompletionMessage,
+  getBuilderWarningCompletionMessage,
+} from "@/lib/builder-completion";
 import { AgentIcon } from "@/components/agent-icon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -2762,6 +2765,8 @@ function RewindToCheckpointButton({
   const queryClient = useQueryClient();
   const restore = useRestoreCheckpoint();
   const [confirming, setConfirming] = useState(false);
+  const rewindDescription =
+    "Restores the saved project files and keeps chat history in place. A linked database snapshot is restored when one exists.";
 
   const onClick = () => {
     if (!confirming) {
@@ -2790,11 +2795,7 @@ function RewindToCheckpointButton({
       type="button"
       onClick={onClick}
       disabled={restore.isPending}
-      title={
-        confirming
-          ? "Click again to confirm — restores code, database, and chat history to this point."
-          : "Rewind to this checkpoint (restores code + database + chat history)"
-      }
+      title={confirming ? `Click again to confirm. ${rewindDescription}` : rewindDescription}
       className={cn(
         "flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded border font-medium shrink-0 transition-colors disabled:opacity-50",
         confirming
@@ -3444,10 +3445,7 @@ function TaskReviewCard({
           <div className="flex items-center gap-2 text-amber-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="text-[10px] font-semibold">
-              {getBuilderCompletionMessage(
-                completionKind,
-                "Build completed with warnings — preview available, validation not clean",
-              )}
+              {getBuilderWarningCompletionMessage(completionKind, report.previewUpdated)}
             </span>
           </div>
           <div className="mt-1 space-y-0.5">

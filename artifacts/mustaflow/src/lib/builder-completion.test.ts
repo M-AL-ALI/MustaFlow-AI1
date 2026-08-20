@@ -4,6 +4,7 @@ import {
   getBuilderCompletionMessage,
   getBuilderDisplayStepCount,
   getBuilderTaskQueueLabel,
+  getBuilderWarningCompletionMessage,
   STEP_CAP_COMPLETION_MESSAGE,
 } from "./builder-completion";
 
@@ -43,6 +44,14 @@ describe("Builder completion messages", () => {
     expect(getBuilderTaskQueueLabel("failed", "admission_unavailable")).toBe(
       "Not started — try again",
     );
+  });
+
+  it("claims preview availability only when the preview actually updated", () => {
+    expect(getBuilderWarningCompletionMessage("finalized", true)).toContain("preview available");
+    expect(getBuilderWarningCompletionMessage("finalized", false)).toBe(
+      "Build completed with warnings — validation not clean",
+    );
+    expect(getBuilderWarningCompletionMessage("finalized", false)).not.toContain("preview");
   });
 
   it("replaces a checkpoint's plain completion sentence with the shared step-cap disclosure", () => {

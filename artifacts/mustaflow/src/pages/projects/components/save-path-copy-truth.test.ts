@@ -66,4 +66,14 @@ describe("save-path copy truth", () => {
     expect(knowledgeSource).toContain("Failed to write Knowledge Vault entry — non-fatal");
     expect(knowledgeSource).toContain("return null;");
   });
+
+  it("states exactly what checkpoint rewind restores and preserves", () => {
+    const source = componentSource("chat-history.tsx");
+
+    expect(source).toContain(
+      "Restores the saved project files and keeps chat history in place. A linked database snapshot is restored when one exists.",
+    );
+    expect(source).not.toContain("restores code, database, and chat history to this point");
+    expect(source).not.toContain("restores code + database + chat history");
+  });
 });
