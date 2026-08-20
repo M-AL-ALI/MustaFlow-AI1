@@ -651,54 +651,6 @@ router.patch(
 );
 
 router.post(
-  "/projects/:id/tasks/:taskId/steer",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const taskId = Number(req.params.taskId);
-    if (!Number.isFinite(projectId) || !Number.isFinite(taskId)) {
-      res.status(400).json({ error: "Invalid params" });
-      return;
-    }
-    const hint = typeof req.body?.hint === "string" ? req.body.hint.trim() : "";
-    if (!hint) {
-      res.status(400).json({ error: "hint is required" });
-      return;
-    }
-    if (hint.length > 2000) {
-      res.status(400).json({ error: "hint too long (max 2000 chars)" });
-      return;
-    }
-
-    const [task] = await db
-      .select({ id: agentTasksTable.id, status: agentTasksTable.status })
-      .from(agentTasksTable)
-      .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
-      .limit(1);
-
-    if (!task) {
-      res.status(404).json({ error: "Task not found" });
-      return;
-    }
-    const isActive = ["building", "planning", "queued", "pending"].includes(task.status);
-    if (!isActive) {
-      res.status(409).json({
-        error:
-          task.status === "completed" || task.status === "failed" || task.status === "canceled"
-            ? "Build has already finished — hints cannot be added to a completed task"
-            : "Task is not currently active",
-      });
-      return;
-    }
-
-    const { setSteeringHint } = await import("../lib/steering-hints");
-    await setSteeringHint(taskId, hint);
-    req.log.info({ projectId, taskId, hintLen: hint.length }, "steering hint queued");
-    res.json({ ok: true });
-  },
-);
-
-router.post(
   "/projects/:id/tasks/:taskId/rerun-tests",
   requireProjectOwnership,
   async (req, res): Promise<void> => {

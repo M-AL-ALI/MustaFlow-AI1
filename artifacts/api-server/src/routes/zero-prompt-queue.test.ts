@@ -15,7 +15,8 @@ import {
   type ZeroPromptQueueSnapshot,
 } from "../lib/zero-prompt-queue-contract";
 import { ZeroPromptQueuePersistenceError } from "../lib/zero-prompt-queue-store";
-import { ZERO_PROMPT_QUEUE_USER_ERRORS, createZeroPromptQueueRouter } from "./zero-prompt-queue";
+import { ZERO_PROMPT_QUEUE_USER_ERRORS } from "../lib/zero-prompt-queue-user-errors";
+import { createZeroPromptQueueRouter } from "./zero-prompt-queue";
 
 const OWNER_ONE = "owner-one";
 const OWNER_TWO = "owner-two";

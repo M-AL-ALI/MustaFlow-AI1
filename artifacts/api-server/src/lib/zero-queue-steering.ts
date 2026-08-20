@@ -30,11 +30,6 @@ export type ZeroQueuePromotionOutcome =
   | { kind: "empty" }
   | { kind: "delayed" };
 
-export type ZeroSteeringBoundaryReceipt = {
-  slotApplied: boolean;
-  queue: ZeroQueuePromotionOutcome;
-};
-
 async function defaultPromoteNext(
   projectId: number,
   mutation: PromoteNextMutation,
@@ -106,26 +101,17 @@ export async function promoteQueuedSteeringAtBoundary(input: {
   }
 }
 
-/**
- * The transition order is deliberate: the legacy slot lands first, then one
- * durable queue item. Both use the caller's single injection callback.
- */
 export async function applyZeroSteeringAtBoundary(input: {
   projectId: number;
   taskId: number;
   actorId: string;
-  consumeSlot: () => Promise<string | null>;
   inject: (text: string) => Promise<void>;
   promoteNext?: ZeroQueuePromoteNext;
   timeoutMs?: number;
   createEventId?: () => string;
   occurredAt?: () => string;
-}): Promise<ZeroSteeringBoundaryReceipt> {
-  const slot = await input.consumeSlot();
-  if (slot) await input.inject(slot);
-
+}): Promise<ZeroQueuePromotionOutcome> {
   const queue = await promoteQueuedSteeringAtBoundary(input);
   if (queue.kind === "promoted") await input.inject(queue.text);
-
-  return { slotApplied: Boolean(slot), queue };
+  return queue;
 }

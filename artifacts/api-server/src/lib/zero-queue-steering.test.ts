@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
@@ -118,7 +118,7 @@ const deterministic = {
 };
 
 describe("queue-backed steering at the declared boundary", () => {
-  it("applies the legacy slot first, then the queue, through one injection callback", async () => {
+  it("applies one queued prompt through the existing injection callback", async () => {
     const order: string[] = [];
     const promoteNext: ZeroQueuePromoteNext = async (_projectId, mutation) => {
       order.push("promote-queue");
@@ -129,10 +129,6 @@ describe("queue-backed steering at the declared boundary", () => {
       projectId: 7,
       taskId: 42,
       actorId: "owner-7",
-      consumeSlot: async () => {
-        order.push("consume-slot");
-        return "Slot update";
-      },
       inject: async (text) => {
         order.push(`inject:${text}`);
       },
@@ -140,20 +136,12 @@ describe("queue-backed steering at the declared boundary", () => {
       ...deterministic,
     });
 
-    expect(order).toEqual([
-      "consume-slot",
-      "inject:Slot update",
-      "promote-queue",
-      "inject:Queue update",
-    ]);
+    expect(order).toEqual(["promote-queue", "inject:Queue update"]);
     expect(receipt).toEqual({
-      slotApplied: true,
-      queue: {
-        kind: "promoted",
-        itemId: "queue-1",
-        text: "Queue update",
-        activeTurnId: "42",
-      },
+      kind: "promoted",
+      itemId: "queue-1",
+      text: "Queue update",
+      activeTurnId: "42",
     });
   });
 
@@ -193,7 +181,6 @@ describe("queue-backed steering at the declared boundary", () => {
       projectId: 7,
       taskId: 42,
       actorId: "owner-7",
-      consumeSlot: async () => null,
       inject,
       promoteNext: async () => {
         throw new ZeroPromptQueueError("queue_item_not_found");
@@ -201,7 +188,7 @@ describe("queue-backed steering at the declared boundary", () => {
       ...deterministic,
     });
 
-    expect(receipt).toEqual({ slotApplied: false, queue: { kind: "empty" } });
+    expect(receipt).toEqual({ kind: "empty" });
     expect(inject).not.toHaveBeenCalled();
   });
 
@@ -278,7 +265,6 @@ describe("queue-backed steering at the declared boundary", () => {
     const serialToolIndex = source.indexOf('"serial_tool_call"');
 
     expect(source.split(boundaryCall)).toHaveLength(2);
-    expect(boundaryIndex).toBeGreaterThan(source.indexOf("consumeSteeringHint"));
     expect(boundaryIndex).toBeLessThan(betweenStepsIndex);
     expect(boundaryIndex).toBeLessThan(parallelBatchIndex);
     expect(boundaryIndex).toBeLessThan(serialToolIndex);
@@ -287,5 +273,23 @@ describe("queue-backed steering at the declared boundary", () => {
   it("passes the non-null project owner into every production loop invocation", () => {
     const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
     expect(source.split("queuePromotionActorId: project.ownerId")).toHaveLength(4);
+  });
+
+  it("has no reachable legacy single-slot store", () => {
+    const legacyStore = new URL("./steering-hints.ts", import.meta.url);
+    const loopSource = readFileSync(new URL("./agent-loop.ts", import.meta.url), "utf8");
+    const routeSource = readFileSync(
+      new URL("../routes/task-steering.ts", import.meta.url),
+      "utf8",
+    );
+    const verificationSource = readFileSync(
+      new URL("../verify-phase2g.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(existsSync(legacyStore)).toBe(false);
+    expect(loopSource).not.toContain("consumeSteeringHint");
+    expect(routeSource).not.toContain("setSteeringHint");
+    expect(verificationSource).not.toContain("steering-hints");
   });
 });
