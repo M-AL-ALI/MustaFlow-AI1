@@ -113,6 +113,7 @@ import oraxRouter from "./orax";
 import oraxDesktopRouter from "./orax-desktop";
 import { oraxDesktopAuthPublicRouter, oraxDesktopAuthRouter } from "./orax-desktop-auth";
 import oraxProjectsRouter from "./orax-projects";
+import zeroPromptQueueRouter from "./zero-prompt-queue";
 import { attachUser } from "../lib/auth";
 import { requireBuilderAccess } from "../lib/builder-access";
 import {
@@ -402,6 +403,7 @@ router.use(oraxRouter); // ORAX coding-agent foundation
 router.use(oraxDesktopRouter); // Orax Desktop host registration, pairing, heartbeat
 router.use(oraxProjectsRouter); // Orax Project Workspace — Phase 2G
 router.use(developerModeRouter); // GET /projects/:id/developer-mode/runtime-status
+router.use(zeroPromptQueueRouter); // Owner-only Zero prompt queue API
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {
