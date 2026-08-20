@@ -7210,10 +7210,6 @@ async function runPostWriteMigrationSync(
   taskId: number,
   files: Array<{ path: string; content: string; mimeType?: string }>,
 ): Promise<{ ok: true; info?: string } | { ok: false; error: string }> {
-  await emitZeroRunLoopPhase(
-    (eventType, message) => emitEvent(taskId, eventType, message),
-    "runPostWriteMigrationSync",
-  );
   const drizzleFiles = files.filter(
     (f) =>
       f.path.startsWith("drizzle/") ||
@@ -7224,6 +7220,11 @@ async function runPostWriteMigrationSync(
   );
 
   if (drizzleFiles.length === 0) return { ok: true };
+
+  await emitZeroRunLoopPhase(
+    (eventType, message) => emitEvent(taskId, eventType, message),
+    "runPostWriteMigrationSync",
+  );
 
   const [containerRow] = await db
     .select({

@@ -11,6 +11,7 @@ import {
   useForceStartTask,
 } from "@workspace/api-client-react";
 import { useTaskEventStream } from "@/hooks/use-task-event-stream";
+import { isUserVisibleZeroTimelineEventType } from "./agent-timeline-event-visibility";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -663,9 +664,9 @@ function groupEventsByNarration(events: StepEvent[]): StepGroup[] {
   let groupIndex = 0;
 
   for (const event of events) {
-    if (event.eventType === "queued") continue;
-    // loop:step events are metadata for the progress bar — not rendered in groups
-    if (event.eventType === "loop:step") continue;
+    if (event.eventType === "queued" || !isUserVisibleZeroTimelineEventType(event.eventType)) {
+      continue;
+    }
 
     if (event.eventType === "narration") {
       if (groups.length > 0) {

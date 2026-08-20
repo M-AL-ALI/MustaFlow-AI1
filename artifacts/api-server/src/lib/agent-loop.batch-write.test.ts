@@ -87,6 +87,17 @@ describe("write_files", () => {
     expect(ctx.workspace.read("package.json")?.content).toContain("vite");
     expect(ctx.workspace.read("src/App.tsx")?.content).toContain("Hello");
     expect(ctx.workspace.read("src/main.tsx")?.content).toBe("import './App'");
+    expect(ctx.input.onEvent).toHaveBeenCalledWith(
+      "loop:phase",
+      JSON.stringify({
+        semantics: "zero-prompt-queue-safe-boundaries-v1",
+        phase: "executeBatchFileWrite",
+      }),
+    );
+    expect(ctx.input.onEvent).not.toHaveBeenCalledWith(
+      "loop:phase",
+      expect.stringContaining('"phase":"executeSingleFileWrite"'),
+    );
   });
 
   it("reports per-file partial failure and continues valid writes", async () => {
