@@ -173,6 +173,7 @@ import {
   ZERO_SEALED_RUNTIME_PORT,
   type ZeroGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
+import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
 
 /**
  * Pre-build gate for agentic projects.
@@ -3496,6 +3497,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const filesWithHealth = isZeroSealedGenerationTarget(zeroGenerationTarget)
             ? result.files
             : injectHealthEndpoint(result.files, project.stack ?? null);
+          await emitZeroRunLoopPhase(
+            (eventType, message) => emitEvent(taskId, eventType, message),
+            "project_files_commit",
+          );
           await writeFiles(projectId, filesWithHealth, true);
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
@@ -4257,6 +4262,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           `AI returned ${result.changedFiles.length} changed file(s).`,
         );
 
+        if (
+          agentIdentity !== "task" &&
+          (result.changedFiles.length > 0 || result.removedPaths.length > 0)
+        ) {
+          await emitZeroRunLoopPhase(
+            (eventType, message) => emitEvent(taskId, eventType, message),
+            "project_files_commit",
+          );
+        }
+
         if (result.changedFiles.length > 0) {
           for (const f of result.changedFiles) {
             await emitEvent(
@@ -4429,6 +4444,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
           if (repairLoopResult) {
             if (repairLoopResult.changedFiles.length > 0) {
+              await emitZeroRunLoopPhase(
+                (eventType, message) => emitEvent(taskId, eventType, message),
+                "project_files_commit",
+              );
               await writeFiles(projectId, repairLoopResult.changedFiles, false);
               repairChangedPaths.push(...repairLoopResult.changedFiles.map((f) => f.path));
               filesToSmellScan = repairLoopResult.changedFiles;
@@ -5494,6 +5513,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 ];
               }
 
+              if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
+                await emitZeroRunLoopPhase(
+                  (eventType, message) => emitEvent(taskId, eventType, message),
+                  "project_files_commit",
+                );
+              }
               if (appliedChangedFiles.length > 0) {
                 await writeFiles(projectId, appliedChangedFiles, false);
               }
@@ -7182,6 +7207,10 @@ async function runPostWriteMigrationSync(
   taskId: number,
   files: Array<{ path: string; content: string; mimeType?: string }>,
 ): Promise<{ ok: true; info?: string } | { ok: false; error: string }> {
+  await emitZeroRunLoopPhase(
+    (eventType, message) => emitEvent(taskId, eventType, message),
+    "runPostWriteMigrationSync",
+  );
   const drizzleFiles = files.filter(
     (f) =>
       f.path.startsWith("drizzle/") ||
@@ -8018,6 +8047,10 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     isRuntimeManifestPath(file.path)
       ? previousContentByPath.get(file.path) !== file.content
       : false,
+  );
+  await emitZeroRunLoopPhase(
+    (eventType, message) => emitEvent(taskId, eventType, message),
+    "project_files_commit",
   );
   await writeFiles(projectId, builderFiles, true);
 

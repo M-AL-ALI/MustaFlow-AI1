@@ -100,6 +100,7 @@ import {
   ZERO_SEALED_NODE_PROMPT_EXTENSION,
 } from "./zero-sealed-generation";
 import { checkZeroSealedFinalizeContract } from "./zero-sealed-finalize-check";
+import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -2409,6 +2410,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
     }
 
+    await emitZeroRunLoopPhase(input.onEvent, "between_steps");
+
     let response;
     try {
       const { createChatCompletion, resolveStageProvider, VISION_MODEL } =
@@ -2442,6 +2445,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // AI response never blocks the loop for more than 3 minutes, regardless
       // of how much wall-clock budget remains.
       const perCallSignal = AbortSignal.any([input.signal, AbortSignal.timeout(3 * 60_000)]);
+      await emitZeroRunLoopPhase(input.onEvent, "createChatCompletion");
       response = await createChatCompletion({
         provider: effectiveProvider,
         model: effectiveModel,
@@ -2818,6 +2822,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
         const parsedBatch = batch.map((c) => parseArgs(c));
         const tBatchStart = Date.now();
+        await emitZeroRunLoopPhase(input.onEvent, "parallel_tool_batch");
         const settled = await Promise.all(
           batch.map((c, idx) =>
             executeTool({
@@ -2887,6 +2892,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const tStart = Date.now();
       let result: Awaited<ReturnType<typeof executeTool>>;
       try {
+        await emitZeroRunLoopPhase(input.onEvent, "serial_tool_call");
         result = await executeTool({
           name,
           args: parsed,
@@ -3104,6 +3110,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
 
         // Run checks now; only terminate if required checks pass.
+        await emitZeroRunLoopPhase(input.onEvent, "finalize_check");
         // Phase 2G — last-chance dependency repair before the finalize gate.
         // If the AI generated files that import packages it forgot to add to
         // package.json, patch it now so the final typecheck/build can pass.
@@ -3212,6 +3219,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // forgot to add to package.json, patch the manifest, and queue a reinstall
       // before checks run so typecheck/build never fail on a "missing module" that
       // the AI itself introduced.
+      await emitZeroRunLoopPhase(input.onEvent, "auto_check");
       if (containerState.id && profile.installCmd?.[0] === "npm") {
         const { detected } = await autoInstallMissingDeps(workspace, containerState, input);
         if (detected.length > 0) {
@@ -3434,6 +3442,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // exactly which required checks failed and why).
   const hitStepCap = terminationReason === "step-cap";
 
+  await emitZeroRunLoopPhase(input.onEvent, "post_loop_check");
   await safeEvent(input.onEvent, "narration", "Running checks…");
   const checkRun = await runCheckProfile(
     profile.checks,
@@ -3545,6 +3554,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       stack === "static-html" ? (workspace.read("index.html")?.content ?? null) : null;
     const previewUrl = input.previewUrl ?? null;
     if (previewUrl || fallbackHtml) {
+      await emitZeroRunLoopPhase(input.onEvent, "e2e_smoke");
       await safeEvent(input.onEvent, "narration", "Running smoke E2E…");
       const smokeStart = Date.now();
       const smokeRun = await runE2eScenarios({
@@ -3591,6 +3601,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             renderE2eObservation(smokeRun).slice(0, MAX_OBSERVATION_CHARS),
         });
         try {
+          await emitZeroRunLoopPhase(input.onEvent, "e2e_auto_fix");
           const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
           const { provider: fixProv, model: fixModel } = resolveStageProvider(
             input.mode === "refine" ? "refine" : "build",
@@ -5106,6 +5117,7 @@ async function executeSingleFileWrite(
   if (content.length > MAX_FILE_BYTES * 4) {
     return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
   }
+  await emitZeroRunLoopPhase(input.onEvent, "executeSingleFileWrite");
   const mime = typeof rawArgs.mime_type === "string" ? rawArgs.mime_type : undefined;
   const prior = workspace.read(path)?.content ?? "";
   workspace.write(path, content, mime);
@@ -5166,6 +5178,8 @@ export async function executeBatchFileWrite(
   if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
     return { ok: false, observation: "ERROR: files must be a non-empty array" };
   }
+
+  await emitZeroRunLoopPhase(ctx.input.onEvent, "executeBatchFileWrite");
 
   const results: BatchWriteResult[] = [];
   const remainingPaths: string[] = [];
