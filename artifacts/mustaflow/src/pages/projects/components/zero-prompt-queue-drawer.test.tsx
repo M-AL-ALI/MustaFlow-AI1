@@ -27,18 +27,40 @@ function response(body: unknown, status = 200): Response {
 }
 
 function queuePayload(
-  items: Array<{ id: string; position: number; currentText: string; state?: string }>,
+  items: Array<{
+    id: string;
+    position: number;
+    currentText: string;
+    state?: string;
+    terminalEvidence?: Record<string, unknown> | null;
+  }>,
   truncated = false,
 ) {
   return {
     semantics: "zero-prompt-queue-v1",
     projectId: "7",
-    items: items.map((item) => ({
-      ...item,
-      state: item.state ?? "queued",
-      references: [],
-      terminalEvidence: null,
-    })),
+    items: items.map((item) => {
+      const state = item.state ?? "queued";
+      const terminalEvidence =
+        item.terminalEvidence !== undefined
+          ? item.terminalEvidence
+          : state === "promoted"
+            ? {
+                kind: "promoted",
+                activeTurnId: `turn-${item.id}`,
+                provenanceEventId: `event-${item.id}`,
+                occurredAt: "2026-08-20T17:00:00.000Z",
+              }
+            : state === "deleted"
+              ? {
+                  kind: "deleted",
+                  deletedBy: "owner-7",
+                  provenanceEventId: `event-${item.id}`,
+                  occurredAt: "2026-08-20T17:00:00.000Z",
+                }
+              : null;
+      return { ...item, state, references: [], terminalEvidence };
+    }),
     returnedItems: items.length,
     truncated,
   };
@@ -144,7 +166,7 @@ describe("Zero prompt queue drawer", () => {
     );
   });
 
-  it("sorts queued items by explicit position and excludes terminal records", async () => {
+  it("sorts queued items and tells what happened to terminal records", async () => {
     mockedAuthFetch.mockResolvedValue(
       response(
         queuePayload([
@@ -165,7 +187,9 @@ describe("Zero prompt queue drawer", () => {
         .getAllByRole("listitem")
         .map((item) => item.textContent),
     ).toEqual([expect.stringContaining("First"), expect.stringContaining("Second")]);
-    expect(screen.queryByText("Removed")).not.toBeInTheDocument();
+    const history = screen.getByRole("list", { name: "Prompt history" });
+    expect(within(history).getByText("Removed")).toBeInTheDocument();
+    expect(within(history).getByText(/Removed by you/)).toBeInTheDocument();
   });
 
   it("supports add, reorder, edit, and delete through the governed routes", async () => {
@@ -262,7 +286,118 @@ describe("Zero prompt queue drawer", () => {
     );
 
     expect(await screen.findByText("Still queued")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Prompt history" })).toHaveTextContent("Already used");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("refreshes on a streamed safe-boundary receipt after a prompt is promoted", async () => {
+    mockedAuthFetch
+      .mockResolvedValueOnce(
+        response(queuePayload([{ id: "next", position: 1, currentText: "Add a flag" }])),
+      )
+      .mockResolvedValueOnce(
+        response(
+          queuePayload([{ id: "next", position: 1, currentText: "Add a flag", state: "promoted" }]),
+        ),
+      );
+
+    const view = render(
+      <ZeroPromptQueueDrawer
+        projectId={7}
+        activeTaskId={41}
+        phase="createChatCompletion"
+        onClose={() => {}}
+      />,
+    );
+    expect(await screen.findByText("Add a flag")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Prompt order" })).toBeInTheDocument();
+
+    view.rerender(
+      <ZeroPromptQueueDrawer
+        projectId={7}
+        activeTaskId={41}
+        phase="between_steps"
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(mockedAuthFetch).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole("list", { name: "Prompt order" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("list", { name: "Prompt history" })).toHaveTextContent("Add a flag");
+    expect(screen.getByText(/Used by Zero/)).toBeInTheDocument();
+  });
+
+  it("keeps the last good queue when an event-driven refresh fails", async () => {
+    mockedAuthFetch
+      .mockResolvedValueOnce(
+        response(queuePayload([{ id: "next", position: 1, currentText: "Keep this" }])),
+      )
+      .mockRejectedValueOnce(new Error("raw transport detail"));
+
+    const view = render(
+      <ZeroPromptQueueDrawer
+        projectId={7}
+        activeTaskId={41}
+        phase="serial_tool_call"
+        onClose={() => {}}
+      />,
+    );
+    expect(await screen.findByText("Keep this")).toBeInTheDocument();
+
+    view.rerender(
+      <ZeroPromptQueueDrawer
+        projectId={7}
+        activeTaskId={41}
+        phase="between_steps"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The queued prompts could not be updated. Please try again.",
+    );
+    expect(screen.getByText("Keep this")).toBeInTheDocument();
+    expect(screen.queryByText(/raw transport detail/i)).not.toBeInTheDocument();
+  });
+
+  it("bounds terminal history and never renders internal evidence identifiers", async () => {
+    const terminalItems = Array.from({ length: 12 }, (_, index) => ({
+      id: `terminal-${index + 1}`,
+      position: index + 1,
+      currentText: `Finished prompt ${index + 1}`,
+      state: index % 2 === 0 ? "promoted" : "deleted",
+      terminalEvidence:
+        index % 2 === 0
+          ? {
+              kind: "promoted",
+              activeTurnId: `private-turn-${index + 1}`,
+              provenanceEventId: `private-event-${index + 1}`,
+              occurredAt: `2026-08-20T17:${String(index).padStart(2, "0")}:00.000Z`,
+            }
+          : {
+              kind: "deleted",
+              deletedBy: `private-user-${index + 1}`,
+              provenanceEventId: `private-event-${index + 1}`,
+              occurredAt: `2026-08-20T17:${String(index).padStart(2, "0")}:00.000Z`,
+            },
+    }));
+    mockedAuthFetch.mockResolvedValue(response(queuePayload(terminalItems)));
+
+    const view = render(
+      <ZeroPromptQueueDrawer projectId={7} activeTaskId={null} phase={null} onClose={() => {}} />,
+    );
+
+    const history = await screen.findByRole("list", { name: "Prompt history" });
+    expect(within(history).getAllByRole("listitem")).toHaveLength(10);
+    expect(history.querySelectorAll("time[datetime]")).toHaveLength(10);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Only the first 10 prompt history entries are shown.",
+    );
+    expect(view.container).not.toHaveTextContent(
+      /private-turn|private-event|private-user|queue\.item|promoted|deleted/i,
+    );
   });
 
   it("shows a one-sentence empty state", async () => {
@@ -345,7 +480,9 @@ describe("Zero prompt queue drawer", () => {
   it("normalizes malformed payloads without displaying response internals", () => {
     expect(normalizePromptQueuePayload({ error: "raw database body" })).toEqual({
       items: [],
+      history: [],
       truncated: false,
+      historyTruncated: false,
     });
   });
 });

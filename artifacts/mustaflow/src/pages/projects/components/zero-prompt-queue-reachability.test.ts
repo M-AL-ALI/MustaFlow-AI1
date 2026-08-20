@@ -15,6 +15,14 @@ const agentThinkingBubbleSource = readFileSync(
   resolve(process.cwd(), "src/components/agent-thinking-bubble.tsx"),
   "utf8",
 );
+const devWorkspaceSource = readFileSync(
+  resolve(process.cwd(), "src/pages/dev-workspace/index.tsx"),
+  "utf8",
+);
+const devChatPanelSource = readFileSync(
+  resolve(process.cwd(), "src/pages/dev-workspace/components/dev-chat-panel.tsx"),
+  "utf8",
+);
 
 describe("Zero prompt queue reachability", () => {
   it("keeps an unbroken route-to-drawer path through the real project workspace", () => {
@@ -33,6 +41,11 @@ describe("Zero prompt queue reachability", () => {
     );
     expect(zeroAgentPanelSource).toContain('aria-label="Open queued prompts"');
     expect(zeroAgentPanelSource).toContain("<ZeroPromptQueueDrawer");
+    expect(devWorkspaceSource).toContain("<DevChatPanel");
+    expect(devChatPanelSource).toContain(
+      'import { ZeroPromptQueueDrawer } from "@/pages/projects/components/zero-prompt-queue-drawer";',
+    );
+    expect(devChatPanelSource).toContain("<ZeroPromptQueueDrawer");
   });
 
   it("feeds the real task phase into the real workspace drawer", () => {
@@ -41,6 +54,8 @@ describe("Zero prompt queue reachability", () => {
     );
     expect(zeroAgentPanelSource).toContain("phase={runPhase}");
     expect(zeroAgentPanelSource).toContain("activeTaskId={activeTaskId}");
+    expect(devChatPanelSource).toContain("phase={runPhase}");
+    expect(devChatPanelSource).toContain("activeTaskId={activeTaskId}");
   });
 
   it("keeps the live steering path mounted and reports only a confirmed queue receipt", () => {

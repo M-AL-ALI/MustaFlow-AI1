@@ -8,7 +8,7 @@ import {
   type ZeroPromptQueueRunPhase,
 } from "@workspace/ora-contracts";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const QUEUE_FALLBACK_ERROR = "The queued prompts could not be updated. Please try again.";
 const TECHNICAL_ERROR_PATTERN = /postgres|constraint|sqlstate|stack|23505|internal server/i;
@@ -36,9 +36,20 @@ export type PromptQueueItemView = {
   currentText: string;
 };
 
+export const ZERO_PROMPT_QUEUE_HISTORY_LIMIT = 10;
+
+export type PromptQueueHistoryItemView = {
+  id: string;
+  currentText: string;
+  outcome: "used" | "removed";
+  occurredAt: string;
+};
+
 export type PromptQueueView = {
   items: readonly PromptQueueItemView[];
+  history: readonly PromptQueueHistoryItemView[];
   truncated: boolean;
+  historyTruncated: boolean;
 };
 
 const PHASE_WAIT_COPY: Record<ZeroPromptQueueRunPhase, string> = {
@@ -94,7 +105,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function normalizePromptQueuePayload(value: unknown): PromptQueueView {
   if (!isRecord(value) || !Array.isArray(value.items)) {
-    return { items: [], truncated: false };
+    return { items: [], history: [], truncated: false, historyTruncated: false };
   }
   const queuedItems = value.items
     .filter(
@@ -114,10 +125,46 @@ export function normalizePromptQueuePayload(value: unknown): PromptQueueView {
     }))
     .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id));
 
+  const historyItems = value.items
+    .filter(
+      (item): item is Record<string, unknown> =>
+        isRecord(item) &&
+        (item.state === "promoted" || item.state === "deleted") &&
+        typeof item.id === "string" &&
+        item.id.length > 0 &&
+        typeof item.currentText === "string" &&
+        isRecord(item.terminalEvidence) &&
+        typeof item.terminalEvidence.occurredAt === "string" &&
+        !Number.isNaN(Date.parse(item.terminalEvidence.occurredAt)) &&
+        ((item.state === "promoted" && item.terminalEvidence.kind === "promoted") ||
+          (item.state === "deleted" && item.terminalEvidence.kind === "deleted")),
+    )
+    .map((item) => ({
+      id: item.id as string,
+      currentText: item.currentText as string,
+      outcome: item.state === "promoted" ? ("used" as const) : ("removed" as const),
+      occurredAt: (item.terminalEvidence as Record<string, unknown>).occurredAt as string,
+    }))
+    .sort(
+      (left, right) =>
+        Date.parse(right.occurredAt) - Date.parse(left.occurredAt) ||
+        left.id.localeCompare(right.id),
+    );
+
   return {
     items: queuedItems.slice(0, ZERO_PROMPT_QUEUE_MAX_ITEMS),
+    history: historyItems.slice(0, ZERO_PROMPT_QUEUE_HISTORY_LIMIT),
     truncated: queuedItems.length > ZERO_PROMPT_QUEUE_MAX_ITEMS,
+    historyTruncated: historyItems.length > ZERO_PROMPT_QUEUE_HISTORY_LIMIT,
   };
+}
+
+function promptHistoryTime(occurredAt: string): string {
+  return `${new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(occurredAt))} UTC`;
 }
 
 export function selectPromptQueueError(value: unknown): string {
@@ -167,13 +214,19 @@ export function ZeroPromptQueueDrawer({
   phase,
   onClose,
 }: ZeroPromptQueueDrawerProps) {
-  const [queue, setQueue] = useState<PromptQueueView>({ items: [], truncated: false });
+  const [queue, setQueue] = useState<PromptQueueView>({
+    items: [],
+    history: [],
+    truncated: false,
+    historyTruncated: false,
+  });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newText, setNewText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const previousPhaseRef = useRef<ZeroPromptQueueObservedPhase | null>(phase);
 
   const loadQueue = useCallback(async () => {
     try {
@@ -195,6 +248,14 @@ export function ZeroPromptQueueDrawer({
     setLoading(true);
     void loadQueue();
   }, [loadQueue]);
+
+  useEffect(() => {
+    const previousPhase = previousPhaseRef.current;
+    previousPhaseRef.current = phase;
+    if (activeTaskId !== null && phase === "between_steps" && previousPhase !== "between_steps") {
+      void loadQueue();
+    }
+  }, [activeTaskId, loadQueue, phase]);
 
   const mutateQueue = useCallback(
     async (path: string, init: RequestInit) => {
@@ -389,6 +450,36 @@ export function ZeroPromptQueueDrawer({
           <p role="status" className="text-[10px] text-amber-300">
             Only the first 50 queued prompts are shown.
           </p>
+        )}
+
+        {queue.history.length > 0 && (
+          <section aria-labelledby="zero-prompt-history-heading" className="pt-3">
+            <h3 id="zero-prompt-history-heading" className="text-xs font-semibold text-foreground">
+              Prompt history
+            </h3>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              What happened to prompts that left the queue.
+            </p>
+            <ul aria-label="Prompt history" className="mt-2 space-y-2">
+              {queue.history.map((item) => (
+                <li key={item.id} className="rounded-lg border border-border bg-muted/10 p-2.5">
+                  <p className="whitespace-pre-wrap break-words text-xs text-foreground">
+                    {item.currentText}
+                  </p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {item.outcome === "used" ? "Used by Zero" : "Removed by you"}
+                    {" · "}
+                    <time dateTime={item.occurredAt}>{promptHistoryTime(item.occurredAt)}</time>
+                  </p>
+                </li>
+              ))}
+            </ul>
+            {queue.historyTruncated && (
+              <p role="status" className="mt-2 text-[10px] text-amber-300">
+                Only the first 10 prompt history entries are shown.
+              </p>
+            )}
+          </section>
         )}
         {error && (
           <p role="alert" className="text-xs text-destructive">
