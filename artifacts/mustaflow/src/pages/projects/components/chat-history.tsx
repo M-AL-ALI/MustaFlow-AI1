@@ -3232,16 +3232,16 @@ function TaskReviewCard({
   // Map narration messages from the backend to step indices.
   const APPLY_STEP_PATTERNS = [
     /syncing\s+\d+\s+file/i, // "Syncing N file(s) to your project…"
+    /saving files and version/i, // "Saving files and version…"
     /running database migrations/i, // "Running database migrations…"
     /database migrations completed/i, // "Database migrations completed successfully."
-    /saving version snapshot|saving apply/i, // snapshot step
   ] as const;
 
   const APPLY_STEP_LABELS = [
     "Syncing files to your project…",
+    "Saving files and version together…",
     "Running database migrations…",
-    "Finalizing database migrations…",
-    "Saving version snapshot…",
+    "Database migrations completed.",
   ];
 
   // Determine the furthest step that has been announced.
