@@ -21,7 +21,7 @@ export type MemoryVersionBinding =
   | "current-project"
   | "unbound";
 export type MemoryDecisionClass = "decision" | "rejection" | "unclassified";
-export type MemoryReconciliationStatus = "not-supported" | "not-run";
+export type MemoryReconciliationStatus = "not-run";
 
 export class MemoryTruthContractError extends Error {
   readonly name = "MemoryTruthContractError";
@@ -48,7 +48,7 @@ export type MemorySurfaceContract = {
   contentSensitivity: "secret-bearing-user-content";
   currentProvenance: MemoryProvenanceStatus;
   currentVersionBinding: readonly MemoryVersionBinding[];
-  reconciliationCapability: "not-supported";
+  reconciliationCapability: "read-only";
   missingProvenance: readonly string[];
 };
 
@@ -64,7 +64,7 @@ export const MEMORY_SURFACE_REGISTRY: readonly MemorySurfaceContract[] = [
     contentSensitivity: "secret-bearing-user-content",
     currentProvenance: "partial",
     currentVersionBinding: ["checkpoint", "unbound"],
-    reconciliationCapability: "not-supported",
+    reconciliationCapability: "read-only",
     missingProvenance: ["authorUserId"],
   },
   {
@@ -78,7 +78,7 @@ export const MEMORY_SURFACE_REGISTRY: readonly MemorySurfaceContract[] = [
     contentSensitivity: "secret-bearing-user-content",
     currentProvenance: "partial",
     currentVersionBinding: ["task-only"],
-    reconciliationCapability: "not-supported",
+    reconciliationCapability: "read-only",
     missingProvenance: ["initiatingUserId", "originatingVersionId"],
   },
   {
@@ -92,7 +92,7 @@ export const MEMORY_SURFACE_REGISTRY: readonly MemorySurfaceContract[] = [
     contentSensitivity: "secret-bearing-user-content",
     currentProvenance: "complete",
     currentVersionBinding: ["current-project"],
-    reconciliationCapability: "not-supported",
+    reconciliationCapability: "read-only",
     missingProvenance: [],
   },
   {
@@ -106,7 +106,7 @@ export const MEMORY_SURFACE_REGISTRY: readonly MemorySurfaceContract[] = [
     contentSensitivity: "secret-bearing-user-content",
     currentProvenance: "complete",
     currentVersionBinding: ["unbound"],
-    reconciliationCapability: "not-supported",
+    reconciliationCapability: "read-only",
     missingProvenance: [],
   },
   {
@@ -120,7 +120,7 @@ export const MEMORY_SURFACE_REGISTRY: readonly MemorySurfaceContract[] = [
     contentSensitivity: "secret-bearing-user-content",
     currentProvenance: "complete",
     currentVersionBinding: ["exact-version", "task-only", "unbound"],
-    reconciliationCapability: "not-supported",
+    reconciliationCapability: "read-only",
     missingProvenance: [],
   },
   {
@@ -134,7 +134,7 @@ export const MEMORY_SURFACE_REGISTRY: readonly MemorySurfaceContract[] = [
     contentSensitivity: "secret-bearing-user-content",
     currentProvenance: "complete",
     currentVersionBinding: ["exact-version"],
-    reconciliationCapability: "not-supported",
+    reconciliationCapability: "read-only",
     missingProvenance: [],
   },
 ] as const;
@@ -266,7 +266,7 @@ export function buildMemoryTruthRecord(input: MemoryTruthRecordInput): MemoryTru
     missingProvenance: contract.missingProvenance,
     versionBinding: versionBindingFor(input),
     decisionClass: input.decisionClass ?? "unclassified",
-    reconciliationStatus: contract.reconciliationCapability,
+    reconciliationStatus: "not-run",
   };
 }
 
