@@ -220,7 +220,7 @@ describe("Zero prompt queue governed API", () => {
       ).status,
     ).toBe(200);
 
-    expect(list).toHaveBeenCalledWith(1);
+    expect(list).toHaveBeenCalledWith(1, 51);
     expect(get).toHaveBeenCalledWith(1, "item-1");
     expect(enqueue.mock.calls[0]?.[0]).toBe(1);
     expect(reorder.mock.calls[0]?.[0]).toBe(1);
@@ -243,7 +243,7 @@ describe("Zero prompt queue governed API", () => {
       .set("x-test-user", OWNER_ONE);
     expect(bounded.status).toBe(200);
     expect(bounded.body.items).toHaveLength(10);
-    expect(bounded.body).toMatchObject({ totalItems: 55, truncated: true });
+    expect(bounded.body).toMatchObject({ returnedItems: 10, truncated: true });
 
     const oversized = await request(app)
       .get("/projects/1/prompt-queue?limit=51")

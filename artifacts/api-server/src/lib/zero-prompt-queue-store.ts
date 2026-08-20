@@ -13,6 +13,7 @@ import {
 import { applyZeroPromptQueueMutation, createZeroPromptQueueSnapshot } from "./zero-prompt-queue";
 
 export const ZERO_PROMPT_QUEUE_MAX_WRITE_STATEMENTS = 4 as const;
+export const ZERO_PROMPT_QUEUE_MAX_READ_ITEMS = 51 as const;
 
 export const ZERO_PROMPT_QUEUE_PERSISTENCE_ERROR_CODES = [
   "queue_persistence_unavailable",
@@ -47,7 +48,7 @@ export interface ZeroPromptQueuePersistenceTransaction {
 }
 
 export interface ZeroPromptQueuePersistenceDriver {
-  readProject(projectId: number): Promise<ZeroPromptQueueSnapshot>;
+  readProject(projectId: number, limit?: number): Promise<ZeroPromptQueueSnapshot>;
   transaction<T>(operation: (tx: ZeroPromptQueuePersistenceTransaction) => Promise<T>): Promise<T>;
 }
 
@@ -72,6 +73,15 @@ type ConnectionFactory = () => Promise<ConnectionClient>;
 
 function positiveProjectId(projectId: number): void {
   if (!Number.isSafeInteger(projectId) || projectId < 1) {
+    throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+  }
+}
+
+function boundedReadLimit(limit: number | undefined): void {
+  if (
+    limit !== undefined &&
+    (!Number.isSafeInteger(limit) || limit < 1 || limit > ZERO_PROMPT_QUEUE_MAX_READ_ITEMS)
+  ) {
     throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
   }
 }
@@ -145,9 +155,12 @@ async function readProjectRows(
   client: QueryClient,
   projectId: number,
   lock: boolean,
+  limit?: number,
 ): Promise<ZeroPromptQueueSnapshot> {
   positiveProjectId(projectId);
+  boundedReadLimit(limit);
   const lockClause = lock ? "FOR UPDATE OF q" : "";
+  const limitClause = limit === undefined ? "" : "LIMIT $2";
   const result = await client.query<QueueRow>(
     `
     SELECT q.id,
@@ -171,8 +184,9 @@ async function readProjectRows(
      WHERE q.project_id = $1
      ORDER BY q.position ASC, q.id ASC
      ${lockClause}
+     ${limitClause}
   `,
-    [projectId],
+    limit === undefined ? [projectId] : [projectId, limit],
   );
   return createZeroPromptQueueSnapshot(String(projectId), result.rows.map(itemFromRow));
 }
@@ -279,9 +293,9 @@ export function createPostgresZeroPromptQueueDriver(
   connect: ConnectionFactory = () => pool.connect(),
 ): ZeroPromptQueuePersistenceDriver {
   return {
-    async readProject(projectId) {
+    async readProject(projectId, limit) {
       try {
-        return await readProjectRows(pool, projectId, false);
+        return await readProjectRows(pool, projectId, false, limit);
       } catch (error) {
         if (
           error instanceof ZeroPromptQueueError ||
@@ -335,9 +349,10 @@ export class ZeroPromptQueueStore {
     private readonly driver: ZeroPromptQueuePersistenceDriver = createPostgresZeroPromptQueueDriver(),
   ) {}
 
-  list(projectId: number): Promise<ZeroPromptQueueSnapshot> {
+  list(projectId: number, limit?: number): Promise<ZeroPromptQueueSnapshot> {
     positiveProjectId(projectId);
-    return this.driver.readProject(projectId);
+    boundedReadLimit(limit);
+    return this.driver.readProject(projectId, limit);
   }
 
   async get(projectId: number, itemId: string): Promise<ZeroPromptQueueItem> {

@@ -224,10 +224,11 @@ function respondWithQueueError(res: Response, error: unknown): void {
 }
 
 function boundedSnapshot(snapshot: ZeroPromptQueueSnapshot, limit: number) {
+  const items = snapshot.items.slice(0, limit);
   return {
     ...snapshot,
-    items: snapshot.items.slice(0, limit),
-    totalItems: snapshot.items.length,
+    items,
+    returnedItems: items.length,
     truncated: snapshot.items.length > limit,
   };
 }
@@ -246,7 +247,7 @@ export function createZeroPromptQueueRouter(
     const limit = listLimit(req.query.limit, res);
     if (id === null || limit === null) return;
     try {
-      res.json(boundedSnapshot(await store.list(id), limit));
+      res.json(boundedSnapshot(await store.list(id, limit + 1), limit));
     } catch (error) {
       respondWithQueueError(res, error);
     }

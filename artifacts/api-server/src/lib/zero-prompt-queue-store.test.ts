@@ -15,6 +15,7 @@ import {
 import { createZeroPromptQueueSnapshot } from "./zero-prompt-queue";
 import {
   ZERO_PROMPT_QUEUE_MAX_WRITE_STATEMENTS,
+  ZERO_PROMPT_QUEUE_MAX_READ_ITEMS,
   ZeroPromptQueuePersistenceError,
   ZeroPromptQueueStore,
   type ZeroPromptQueuePersistenceDriver,
@@ -187,6 +188,18 @@ describe("zero prompt queue persistence", () => {
     expect(driver.events).toEqual([]);
   });
 
+  it("bounds list reads while preserving unbounded transactional snapshots", async () => {
+    const driver = new MemoryQueueDriver();
+    const readProject = vi.spyOn(driver, "readProject");
+    const store = new ZeroPromptQueueStore(driver);
+
+    await store.list(17, ZERO_PROMPT_QUEUE_MAX_READ_ITEMS);
+    expect(readProject).toHaveBeenCalledWith(17, ZERO_PROMPT_QUEUE_MAX_READ_ITEMS);
+    expect(() => store.list(17, ZERO_PROMPT_QUEUE_MAX_READ_ITEMS + 1)).toThrowError(
+      expect.objectContaining({ code: "queue_persistence_contract_invalid" }),
+    );
+  });
+
   it("emits exactly one existing-ledger provenance event for each mutation", async () => {
     const driver = new MemoryQueueDriver();
     const store = new ZeroPromptQueueStore(driver);
@@ -251,6 +264,7 @@ describe("zero prompt queue persistence", () => {
     );
     expect(production).toContain("FROM zero_prompt_queue_items q");
     expect(production).toContain("WHERE q.project_id = $1");
+    expect(production).toContain('const limitClause = limit === undefined ? "" : "LIMIT $2"');
     expect(production).toContain("INSERT INTO project_activity");
     expect(production).not.toContain("zero_prompt_queue_provenance");
     expect(production).toContain("CURRENT_TIMESTAMP");
