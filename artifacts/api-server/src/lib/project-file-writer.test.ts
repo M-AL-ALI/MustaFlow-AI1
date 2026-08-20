@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 
 interface StoredFile {
   projectId: number;
-  artifactId: number;
+  artifactId: number | null;
   path: string;
   content: string;
   mimeType: string;
@@ -66,7 +66,7 @@ vi.mock("@workspace/db", () => {
               working = working.filter(
                 (row) =>
                   row.projectId !== projectId ||
-                  row.artifactId !== artifactId ||
+                  (artifactId !== undefined && row.artifactId !== artifactId) ||
                   (paths !== undefined && !paths.includes(row.path)),
               );
             }),
@@ -133,6 +133,7 @@ describe("atomic project file writes", () => {
   it("replaces only the resolved artifact and commits the new complete file set", async () => {
     await writeProjectFilesAtomically({
       projectId: 51,
+      scope: { kind: "artifact" },
       replaceAll: true,
       files: [
         {
@@ -165,6 +166,7 @@ describe("atomic project file writes", () => {
     await expect(
       writeProjectFilesAtomically({
         projectId: 51,
+        scope: { kind: "artifact" },
         replaceAll: true,
         files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
       }),
@@ -173,12 +175,48 @@ describe("atomic project file writes", () => {
     expect(harness.rows).toEqual(originalRows);
   });
 
+  it("preserves every prior project row when a rollback restore fails after deletion", async () => {
+    harness.insertFailure = new Error("simulated rollback insert failure");
+
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "project" },
+        replaceAll: true,
+        files: [{ path: "index.ts", content: "restored", mimeType: "text/typescript" }],
+      }),
+    ).rejects.toThrow("simulated rollback insert failure");
+
+    expect(harness.transactions).toBe(1);
+    expect(harness.rows).toEqual(originalRows);
+  });
+
+  it("replaces every project row only when project-wide scope is explicitly requested", async () => {
+    await writeProjectFilesAtomically({
+      projectId: 51,
+      scope: { kind: "project" },
+      replaceAll: true,
+      files: [{ path: "index.ts", content: "restored", mimeType: "text/typescript" }],
+    });
+
+    expect(harness.rows).toEqual([
+      {
+        projectId: 51,
+        artifactId: null,
+        path: "index.ts",
+        content: "restored",
+        mimeType: "text/typescript",
+      },
+    ]);
+  });
+
   it("preserves every original row when PostgreSQL cancels a bounded statement", async () => {
     harness.insertFailure = new Error("canceling statement due to statement timeout");
 
     await expect(
       writeProjectFilesAtomically({
         projectId: 51,
+        scope: { kind: "artifact" },
         replaceAll: true,
         files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
       }),
@@ -190,6 +228,7 @@ describe("atomic project file writes", () => {
   it("applies changed and removed paths in one partial transaction", async () => {
     await writeProjectFilesAtomically({
       projectId: 51,
+      scope: { kind: "artifact" },
       replaceAll: false,
       files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
       removedPaths: ["old.ts"],
@@ -212,7 +251,12 @@ describe("atomic project file writes", () => {
     harness.artifactId = null;
 
     await expect(
-      writeProjectFilesAtomically({ projectId: 51, replaceAll: true, files: [] }),
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "artifact" },
+        replaceAll: true,
+        files: [],
+      }),
     ).rejects.toBeInstanceOf(ProjectFileArtifactScopeError);
 
     expect(harness.transactions).toBe(0);
@@ -228,6 +272,34 @@ describe("atomic project file writes", () => {
     expect(source).toContain("removedPaths: result.removedPaths");
     expect(source).toContain("files: appliedChangedFiles");
     expect(source).toContain("removedPaths: appliedRemovedPaths");
+    expect(source.match(/scope: \{ kind: "artifact" \}/g)).toHaveLength(6);
     expect(source).not.toContain("writeFiles has durably updated the DB snapshot");
+  });
+
+  it("routes project-wide version rollback through the same atomic helper", () => {
+    const source = readFileSync(new URL("../routes/versions.ts", import.meta.url), "utf8");
+    const rollbackRoute = source.slice(
+      source.indexOf('"/projects/:id/versions/:versionId/rollback"'),
+      source.indexOf("// ── POST /api/projects/:id/versions/:versionId/approve-testing"),
+    );
+
+    expect(rollbackRoute).toContain("await writeProjectFilesAtomically({");
+    expect(rollbackRoute).toContain('scope: { kind: "project" }');
+    expect(rollbackRoute).toContain("replaceAll: true");
+    expect(rollbackRoute).not.toContain("db.delete(projectFilesTable)");
+    expect(rollbackRoute).not.toContain("db.insert(projectFilesTable)");
+  });
+
+  it("keeps checkpoint file replacement and restored-version recording in one transaction", () => {
+    const source = readFileSync(new URL("../routes/checkpoints.ts", import.meta.url), "utf8");
+    const restoreTransaction = source.slice(
+      source.indexOf("// 3) Restore files and append the restored state"),
+      source.indexOf("if (!restoredCheckpointId)"),
+    );
+
+    expect(restoreTransaction).toContain("await db.transaction(async (tx) => {");
+    expect(restoreTransaction).toContain("await tx.delete(projectFilesTable)");
+    expect(restoreTransaction).toContain("await tx.insert(projectFilesTable)");
+    expect(restoreTransaction).toContain(".insert(projectVersionsTable)");
   });
 });

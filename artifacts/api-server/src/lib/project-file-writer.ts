@@ -15,27 +15,44 @@ export class ProjectFileArtifactScopeError extends Error {
   }
 }
 
+export type ProjectFileWriteScope =
+  | { kind: "artifact"; artifactId?: number | null }
+  | { kind: "project" };
+
 export interface ProjectFileMutation {
   projectId: number;
   files: BuilderFile[];
   replaceAll: boolean;
-  artifactId?: number | null;
+  scope: ProjectFileWriteScope;
   removedPaths?: string[];
 }
 
 /**
- * Replace or patch one artifact's mutable file set in a single bounded transaction.
+ * Replace or patch one explicitly requested mutable file scope in a bounded transaction.
  * A failed delete, insert, or timeout leaves the previously committed rows unchanged.
  */
 export async function writeProjectFilesAtomically(input: ProjectFileMutation): Promise<void> {
-  const resolvedArtifactId = await resolveArtifactId(input.projectId, input.artifactId ?? null);
-  if (resolvedArtifactId === null) {
-    throw new ProjectFileArtifactScopeError();
-  }
+  const resolvedScope: { kind: "artifact"; artifactId: number } | { kind: "project" } =
+    await (async () => {
+      if (input.scope.kind === "project") return { kind: "project" };
+
+      const artifactId = await resolveArtifactId(input.projectId, input.scope.artifactId ?? null);
+      if (artifactId === null) {
+        throw new ProjectFileArtifactScopeError();
+      }
+      return { kind: "artifact", artifactId };
+    })();
 
   const affectedPaths = [
     ...new Set([...input.files.map((file) => file.path), ...(input.removedPaths ?? [])]),
   ];
+  const fileScope =
+    resolvedScope.kind === "project"
+      ? eq(projectFilesTable.projectId, input.projectId)
+      : and(
+          eq(projectFilesTable.projectId, input.projectId),
+          eq(projectFilesTable.artifactId, resolvedScope.artifactId),
+        );
 
   await db.transaction(async (tx) => {
     await tx.execute(
@@ -46,31 +63,18 @@ export async function writeProjectFilesAtomically(input: ProjectFileMutation): P
     );
 
     if (input.replaceAll) {
-      await tx
-        .delete(projectFilesTable)
-        .where(
-          and(
-            eq(projectFilesTable.projectId, input.projectId),
-            eq(projectFilesTable.artifactId, resolvedArtifactId),
-          ),
-        );
+      await tx.delete(projectFilesTable).where(fileScope);
     } else if (affectedPaths.length > 0) {
       await tx
         .delete(projectFilesTable)
-        .where(
-          and(
-            eq(projectFilesTable.projectId, input.projectId),
-            eq(projectFilesTable.artifactId, resolvedArtifactId),
-            inArray(projectFilesTable.path, affectedPaths),
-          ),
-        );
+        .where(and(fileScope, inArray(projectFilesTable.path, affectedPaths)));
     }
 
     if (input.files.length > 0) {
       await tx.insert(projectFilesTable).values(
         input.files.map((file) => ({
           projectId: input.projectId,
-          artifactId: resolvedArtifactId,
+          artifactId: resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
           path: file.path,
           content: file.content,
           mimeType: file.mimeType,

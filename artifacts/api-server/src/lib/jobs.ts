@@ -3438,6 +3438,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
           await writeProjectFilesAtomically({
             projectId,
+            scope: { kind: "artifact" },
             files: filesWithHealth,
             replaceAll: true,
           });
@@ -4234,6 +4235,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         ) {
           await writeProjectFilesAtomically({
             projectId,
+            scope: { kind: "artifact" },
             files: result.changedFiles,
             replaceAll: false,
             removedPaths: result.removedPaths,
@@ -4391,6 +4393,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               );
               await writeProjectFilesAtomically({
                 projectId,
+                scope: { kind: "artifact" },
                 files: repairLoopResult.changedFiles,
                 replaceAll: false,
               });
@@ -5467,6 +5470,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
                 await writeProjectFilesAtomically({
                   projectId,
+                  scope: { kind: "artifact" },
                   files: appliedChangedFiles,
                   replaceAll: false,
                   removedPaths: appliedRemovedPaths,
@@ -7998,7 +8002,12 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (eventType, message) => emitEvent(taskId, eventType, message),
     "project_files_commit",
   );
-  await writeProjectFilesAtomically({ projectId, files: builderFiles, replaceAll: true });
+  await writeProjectFilesAtomically({
+    projectId,
+    scope: { kind: "artifact" },
+    files: builderFiles,
+    replaceAll: true,
+  });
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
@@ -8901,6 +8910,7 @@ export async function runAppTestingJob(
       // Write the patched files to DB (partial update — replaceAll=false)
       await writeProjectFilesAtomically({
         projectId,
+        scope: { kind: "artifact" },
         files: fixedFiles,
         replaceAll: false,
       });
