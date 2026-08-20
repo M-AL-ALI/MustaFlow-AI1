@@ -1,21 +1,14 @@
 import type { ZeroPromptQueueItem } from "./zero-prompt-queue-contract";
 import {
   ZERO_PROMPT_QUEUE_BOUNDARY_SEMANTICS,
-  ZERO_PROMPT_QUEUE_RUN_PHASES,
+  ZERO_PROMPT_QUEUE_PHASE_RULES,
   ZeroPromptQueueBoundaryError,
   type ZeroPromptQueueBoundaryRule,
   type ZeroPromptQueueLanding,
   type ZeroPromptQueueRunPhase,
 } from "./zero-prompt-queue-boundary-contract";
 
-const SAFE_BOUNDARY = "between_steps" as const;
-
-export const ZERO_PROMPT_QUEUE_PHASE_RULES: readonly ZeroPromptQueueBoundaryRule[] =
-  ZERO_PROMPT_QUEUE_RUN_PHASES.map((phase) => ({
-    phase,
-    safeLanding: phase === SAFE_BOUNDARY,
-    nextSafeBoundary: SAFE_BOUNDARY,
-  }));
+export { ZERO_PROMPT_QUEUE_PHASE_RULES } from "./zero-prompt-queue-boundary-contract";
 
 const RULE_BY_PHASE: ReadonlyMap<ZeroPromptQueueRunPhase, ZeroPromptQueueBoundaryRule> = new Map(
   ZERO_PROMPT_QUEUE_PHASE_RULES.map((rule) => [rule.phase, rule]),

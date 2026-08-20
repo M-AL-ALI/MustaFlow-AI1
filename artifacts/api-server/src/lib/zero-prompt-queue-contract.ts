@@ -1,6 +1,10 @@
+import {
+  ZERO_PROMPT_QUEUE_MAX_ITEMS,
+  ZERO_PROMPT_QUEUE_MAX_TEXT_CHARS,
+} from "@workspace/ora-contracts";
+
 export const ZERO_PROMPT_QUEUE_SEMANTICS = "zero-prompt-queue-v1" as const;
-export const ZERO_PROMPT_QUEUE_MAX_ITEMS = 50 as const;
-export const ZERO_PROMPT_QUEUE_MAX_TEXT_CHARS = 10_000 as const;
+export { ZERO_PROMPT_QUEUE_MAX_ITEMS, ZERO_PROMPT_QUEUE_MAX_TEXT_CHARS };
 
 export const ZERO_PROMPT_QUEUE_ITEM_STATES = ["queued", "promoted", "deleted"] as const;
 export const ZERO_PROMPT_QUEUE_MUTATIONS = [

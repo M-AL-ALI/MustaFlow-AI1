@@ -14,6 +14,7 @@ import {
   Zap,
   Layers2,
   Brain,
+  ListOrdered,
   MousePointer2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ZeroPromptQueueDrawer } from "@/pages/projects/components/zero-prompt-queue-drawer";
+import type { ZeroPromptQueueObservedPhase } from "@workspace/ora-contracts";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -244,6 +247,8 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const [pendingStartedAt, setPendingStartedAt] = useState<Date | null>(null);
   const [sseConnected, setSseConnected] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
+  const [showPromptQueue, setShowPromptQueue] = useState(false);
+  const [runPhase, setRunPhase] = useState<ZeroPromptQueueObservedPhase | null>(null);
   const [images, setImages] = useState<PendingImage[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
 
@@ -289,6 +294,14 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const handleSseConnectionChange = useCallback((connected: boolean) => {
     setSseConnected(connected);
   }, []);
+
+  const handleRunPhaseChange = useCallback((phase: ZeroPromptQueueObservedPhase | null) => {
+    setRunPhase(phase);
+  }, []);
+
+  useEffect(() => {
+    setRunPhase(null);
+  }, [activeTaskId]);
 
   const { data: messages } = useListMessages(projectId, {
     query: {
@@ -651,7 +664,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const currentMode = agentModes.find((m) => m.value === agentMode) ?? agentModes[2]!;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 min-w-0 overflow-hidden">
+    <div className="relative flex flex-col h-full bg-zinc-950 min-w-0 overflow-hidden">
       {/* ── Thread ─────────────────────────────────────────────────────────── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         {/* Empty state */}
@@ -807,6 +820,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                                 isAtBottom={true}
                                 onDismiss={() => setActiveTaskId(null)}
                                 onConnectionChange={handleSseConnectionChange}
+                                onRunPhaseChange={handleRunPhaseChange}
                               />
                             </div>
                           )}
@@ -878,6 +892,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
               isAtBottom={true}
               onDismiss={() => setActiveTaskId(null)}
               onConnectionChange={handleSseConnectionChange}
+              onRunPhaseChange={handleRunPhaseChange}
             />
           </div>
         )}
@@ -1019,6 +1034,21 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                   <TooltipContent>Show a plan before building</TooltipContent>
                 </Tooltip>
 
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setShowPromptQueue(true)}
+                      aria-label="Open queued prompts"
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                    >
+                      <ListOrdered className="h-3 w-3" />
+                      Queue
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Queued prompts</TooltipContent>
+                </Tooltip>
+
                 {/* Select element */}
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1121,6 +1151,15 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
           ⌘↩ send · paste screenshots directly · voice input
         </p>
       </div>
+
+      {showPromptQueue && (
+        <ZeroPromptQueueDrawer
+          projectId={projectId}
+          activeTaskId={activeTaskId}
+          phase={runPhase}
+          onClose={() => setShowPromptQueue(false)}
+        />
+      )}
 
       {/* Hidden file inputs */}
       <input
