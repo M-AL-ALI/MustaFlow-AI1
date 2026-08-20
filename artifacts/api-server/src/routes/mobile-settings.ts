@@ -11,6 +11,7 @@ import { requireProjectOwnership } from "../lib/auth";
 import { z } from "zod";
 import { logger } from "../lib/logger";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
+import { emitTaskEventBounded } from "../lib/task-event-emission";
 
 const router: IRouter = Router();
 
@@ -43,16 +44,21 @@ async function emitEvent(
   message: string,
   filePath?: string,
 ): Promise<void> {
-  try {
-    await db.insert(taskEventsTable).values({
-      taskId,
-      eventType,
-      message,
-      filePath: filePath ?? null,
-    });
-  } catch (err) {
-    logger.warn({ err, taskId, eventType }, "Failed to emit mobile-settings task event");
-  }
+  await emitTaskEventBounded({
+    persist: async () => {
+      await db.insert(taskEventsTable).values({
+        taskId,
+        eventType,
+        message,
+        filePath: filePath ?? null,
+      });
+      return null;
+    },
+    publish: () => undefined,
+    recordDrop: (drop) => {
+      logger.warn({ taskId, eventType, drop }, "Mobile-settings task event observation dropped");
+    },
+  });
 }
 
 /** Read and parse app.json for a project; returns null if absent or invalid. */

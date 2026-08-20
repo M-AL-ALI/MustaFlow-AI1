@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db, projectFilesTable, projectsTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
@@ -17,6 +17,7 @@ import {
   userCanPreviewProject,
 } from "../lib/livePreviewProxy";
 import { serveProjectFilesPreview } from "../lib/project-files-preview";
+import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 
 const router: IRouter = Router();
 
@@ -694,7 +695,10 @@ router.post(
     const normalizedPath = filePath.trim();
 
     const [existing] = await db
-      .select({ id: projectFilesTable.id, content: projectFilesTable.content })
+      .select({
+        artifactId: projectFilesTable.artifactId,
+        content: projectFilesTable.content,
+      })
       .from(projectFilesTable)
       .where(
         and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalizedPath)),
@@ -707,33 +711,20 @@ router.post(
 
     const mimeType = guessMime(normalizedPath);
 
-    // Snapshot current state BEFORE the write so the user has a rollback target
-    const currentFiles = await db
-      .select({
-        path: projectFilesTable.path,
-        content: projectFilesTable.content,
-        mimeType: projectFilesTable.mimeType,
-      })
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId));
-
-    await db.insert(projectVersionsTable).values({
+    await writeProjectFilesAtomically({
       projectId,
-      label: `Assistant edit: ${normalizedPath}`,
-      note: "Snapshot taken before applying an Assistant suggestion.",
-      filesSnapshot: currentFiles,
+      scope:
+        existing?.artifactId != null
+          ? { kind: "artifact", artifactId: existing.artifactId }
+          : { kind: "project" },
+      replaceAll: false,
+      files: [{ path: normalizedPath, content, mimeType }],
+      authoritativeVersion: {
+        label: `Assistant edit: ${normalizedPath}`,
+        note: "Saved after applying an Assistant suggestion.",
+        changelogEntry: `Updated ${normalizedPath}`,
+      },
     });
-
-    if (existing) {
-      await db
-        .update(projectFilesTable)
-        .set({ content, mimeType, updatedAt: sql`now()` })
-        .where(eq(projectFilesTable.id, existing.id));
-    } else {
-      await db
-        .insert(projectFilesTable)
-        .values({ projectId, path: normalizedPath, content, mimeType });
-    }
 
     res.json({ applied: true, filePath: normalizedPath });
   },

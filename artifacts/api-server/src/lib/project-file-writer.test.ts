@@ -500,6 +500,48 @@ describe("atomic project file writes", () => {
     expect(source).not.toContain("async function snapshotFiles(");
   });
 
+  it("leaves neither a file change nor an extra version when one suggested-file write fails", async () => {
+    const priorRows = harness.rows.map((row) => ({ ...row }));
+    harness.insertFailure = new Error("simulated suggested-file insert failure");
+
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "artifact", artifactId: 7 },
+        replaceAll: false,
+        files: [
+          {
+            path: "index.ts",
+            content: "suggested index",
+            mimeType: "text/typescript",
+          },
+        ],
+        authoritativeVersion: {
+          label: "Assistant edit: index.ts",
+          note: "Saved after applying an Assistant suggestion.",
+          changelogEntry: "Updated index.ts",
+        },
+      }),
+    ).rejects.toBeInstanceOf(ProjectFileWriteError);
+
+    expect(harness.rows).toEqual(priorRows);
+    expect(harness.versions).toEqual([]);
+  });
+
+  it("routes a single suggested-file write and its version through one atomic call", () => {
+    const source = readFileSync(new URL("../routes/files.ts", import.meta.url), "utf8");
+    const applySuggestionRoute = source.slice(
+      source.indexOf('"/projects/:id/files/apply-suggestion"'),
+      source.indexOf("export default router"),
+    );
+
+    expect(applySuggestionRoute).toContain("await writeProjectFilesAtomically({");
+    expect(applySuggestionRoute).toContain("authoritativeVersion: {");
+    expect(applySuggestionRoute).not.toContain("Snapshot current state BEFORE the write");
+    expect(applySuggestionRoute).not.toContain("db.insert(projectVersionsTable)");
+    expect(applySuggestionRoute).not.toContain("db.update(projectFilesTable)");
+  });
+
   it("keeps checkpoint file replacement and restored-version recording in one transaction", () => {
     const source = readFileSync(new URL("../routes/checkpoints.ts", import.meta.url), "utf8");
     const restoreTransaction = source.slice(
