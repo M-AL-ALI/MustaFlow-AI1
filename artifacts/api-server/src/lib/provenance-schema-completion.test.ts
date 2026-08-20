@@ -24,7 +24,7 @@ function typescriptFiles(root: string): string[] {
 describe("Zero provenance schema completion", () => {
   it("adds exactly three named boot steps and keeps both historical usage step names", () => {
     const migration = source("./startup-migrations.ts");
-    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(142);
+    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(143);
     expect(migration).toContain('name: "knowledge_usage_events"');
     expect(migration).toContain('name: "migrate-knowledge-usage-events"');
     expect(migration).toContain('name: "migrate-knowledge-provenance"');
@@ -37,6 +37,7 @@ describe("Zero provenance schema completion", () => {
       applyKnowledgeProvenanceMigration,
       applyPlanSnapshotProvenanceMigration,
       applyProjectSummaryProvenanceMigration,
+      applyZeroPromptQueuePersistenceMigration,
       ensureKnowledgeUsageEventsSchema,
     } = await import("./startup-migrations");
     const statements: string[] = [];
@@ -51,6 +52,7 @@ describe("Zero provenance schema completion", () => {
       await applyKnowledgeProvenanceMigration(client);
       await applyProjectSummaryProvenanceMigration(client);
       await applyPlanSnapshotProvenanceMigration(client);
+      await applyZeroPromptQueuePersistenceMigration(client);
     };
     await run();
     const first = [...statements];
@@ -59,6 +61,8 @@ describe("Zero provenance schema completion", () => {
     expect(statements).toEqual(first);
     expect(first.join("\n")).not.toMatch(/UPDATE\s+(knowledge|projects|project_versions)/i);
     expect(first.join("\n")).not.toContain("VALIDATE CONSTRAINT");
+    expect(first.join("\n")).toContain("CREATE TABLE IF NOT EXISTS zero_prompt_queue_items");
+    expect(first.join("\n")).not.toMatch(/(DROP|TRUNCATE)\s/i);
   });
 
   it("records every project-summary writer beside the content mutation", () => {

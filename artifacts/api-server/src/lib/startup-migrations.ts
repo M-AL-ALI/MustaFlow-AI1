@@ -685,6 +685,48 @@ export async function applyBrainstormAdmissionMigration(
   };
 }
 
+/** Add the project-scoped prompt queue without rewriting existing project data. */
+export async function applyZeroPromptQueuePersistenceMigration(
+  client: MigrationClient,
+): Promise<void> {
+  await client.query("BEGIN");
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS zero_prompt_queue_items (
+      id TEXT PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      current_text TEXT NOT NULL,
+      state TEXT NOT NULL,
+      promoted_turn_id TEXT,
+      deleted_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT zero_prompt_queue_items_position_check CHECK (position > 0),
+      CONSTRAINT zero_prompt_queue_items_text_check
+        CHECK (char_length(current_text) BETWEEN 1 AND 10000),
+      CONSTRAINT zero_prompt_queue_items_state_check
+        CHECK (state IN ('queued', 'promoted', 'deleted')),
+      CONSTRAINT zero_prompt_queue_items_terminal_check CHECK (
+        (state = 'queued' AND promoted_turn_id IS NULL AND deleted_by IS NULL)
+        OR (state = 'promoted' AND promoted_turn_id IS NOT NULL AND deleted_by IS NULL)
+        OR (state = 'deleted' AND promoted_turn_id IS NULL AND deleted_by IS NOT NULL)
+      ),
+      CONSTRAINT zero_prompt_queue_items_project_position_unique
+        UNIQUE (project_id, position)
+    )
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS zero_prompt_queue_items_project_state_idx
+      ON zero_prompt_queue_items(project_id, state, position)
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS project_activity_queue_item_idx
+      ON project_activity(project_id, ((metadata ->> 'itemId')), created_at DESC)
+      WHERE event_type LIKE 'queue.item.%'
+  `);
+  await client.query("COMMIT");
+}
+
 const MIGRATION_STEPS: MigrationStep[] = [
   {
     name: "migrate-production-artifact-release-records",
@@ -5810,6 +5852,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-plan-snapshot-provenance",
     async run(client) {
       await applyPlanSnapshotProvenanceMigration(client);
+    },
+  },
+  {
+    name: "migrate-zero-prompt-queue-items",
+    async run(client) {
+      await applyZeroPromptQueuePersistenceMigration(client);
     },
   },
 ];
