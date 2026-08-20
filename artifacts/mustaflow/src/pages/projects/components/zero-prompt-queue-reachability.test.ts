@@ -75,6 +75,11 @@ describe("Zero prompt queue reachability", () => {
       "Prompt saved in position {savedPosition}. Zero will apply it at the next safe pause.",
     );
     expect(agentThinkingBubbleSource).toContain("{sendError}</span>");
+    expect(agentThinkingBubbleSource).toContain(
+      'import { selectPromptQueueError } from "@/lib/zero-prompt-queue-user-errors";',
+    );
+    expect(agentThinkingBubbleSource).toContain("selectPromptQueueError(data, fallback)");
+    expect(agentThinkingBubbleSource).not.toContain('typeof data?.error === "string"');
     expect(agentThinkingBubbleSource).not.toContain(
       "Hint queued — the agent will apply it on the next step.",
     );

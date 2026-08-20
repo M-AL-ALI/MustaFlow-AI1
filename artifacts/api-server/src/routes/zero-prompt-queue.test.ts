@@ -265,8 +265,25 @@ describe("Zero prompt queue governed API", () => {
     expect(response.status).toBe(409);
     expect(response.body).toEqual({
       code: "queue_full",
-      error: "This queue already has 50 prompts. Remove or promote one before adding another.",
+      error: "This queue already has 50 prompts. Remove one before adding another.",
     });
+  });
+
+  it("uses the existing empty-prompt refusal when a new prompt has no text", async () => {
+    const { app, store } = buildApp();
+    const enqueue = vi.spyOn(store, "enqueue");
+
+    const response = await request(app)
+      .post("/projects/1/prompt-queue")
+      .set("x-test-user", OWNER_ONE)
+      .send({ position: 1, text: "   " });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      code: "queue_edit_empty",
+      error: "A queued prompt cannot be empty. Add some text and try again.",
+    });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("turns the 10,000-character cap into a gentle refusal before persistence", async () => {
@@ -339,7 +356,7 @@ describe("Zero prompt queue governed API", () => {
       },
       queue_full: {
         status: 409,
-        message: "This queue already has 50 prompts. Remove or promote one before adding another.",
+        message: "This queue already has 50 prompts. Remove one before adding another.",
       },
       queue_item_text_too_long: {
         status: 400,

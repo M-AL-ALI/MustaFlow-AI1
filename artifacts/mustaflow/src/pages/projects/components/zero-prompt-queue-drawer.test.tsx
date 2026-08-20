@@ -9,10 +9,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authFetch } from "@/lib/api-fetch";
 import {
+  QUEUE_LOAD_FALLBACK_ERROR,
+  QUEUE_MUTATION_FALLBACK_ERROR,
+  selectPromptQueueError,
+} from "@/lib/zero-prompt-queue-user-errors";
+import {
   ZeroPromptQueueDrawer,
   normalizePromptQueuePayload,
   promptQueueLandingMessage,
-  selectPromptQueueError,
 } from "./zero-prompt-queue-drawer";
 
 vi.mock("@/lib/api-fetch", () => ({ authFetch: vi.fn() }));
@@ -359,7 +363,7 @@ describe("Zero prompt queue drawer", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The queued prompts could not be updated. Please try again.",
+      "The queued prompts could not be loaded. Please try again.",
     );
     expect(screen.getByText("Keep this")).toBeInTheDocument();
     expect(screen.queryByText(/raw transport detail/i)).not.toBeInTheDocument();
@@ -475,21 +479,30 @@ describe("Zero prompt queue drawer", () => {
     expect(
       selectPromptQueueError({
         code: "queue_full",
-        error: "This queue already has 50 prompts. Remove or promote one before adding another.",
+        error: "This queue already has 50 prompts. Remove one before adding another.",
       }),
-    ).toBe("This queue already has 50 prompts. Remove or promote one before adding another.");
+    ).toBe("This queue already has 50 prompts. Remove one before adding another.");
     expect(
       selectPromptQueueError({
         code: "23505",
         error: "duplicate key violates postgres constraint zero_prompt_queue_items_position",
       }),
-    ).toBe("The queued prompts could not be updated. Please try again.");
+    ).toBe(QUEUE_MUTATION_FALLBACK_ERROR);
     expect(
       selectPromptQueueError({
         code: "queue_full",
         error: "postgres constraint details",
       }),
-    ).toBe("The queued prompts could not be updated. Please try again.");
+    ).toBe(QUEUE_MUTATION_FALLBACK_ERROR);
+    expect(selectPromptQueueError({ error: "Unauthenticated" }, "Could not send — try again")).toBe(
+      "Could not send — try again",
+    );
+    expect(
+      selectPromptQueueError(
+        { code: "queue_full", error: "x".repeat(241) },
+        "Could not send — try again",
+      ),
+    ).toBe("Could not send — try again");
   });
 
   it("renders a governed API refusal verbatim", async () => {
@@ -497,7 +510,7 @@ describe("Zero prompt queue drawer", () => {
       response(
         {
           code: "queue_full",
-          error: "This queue already has 50 prompts. Remove or promote one before adding another.",
+          error: "This queue already has 50 prompts. Remove one before adding another.",
         },
         409,
       ),
@@ -512,8 +525,26 @@ describe("Zero prompt queue drawer", () => {
     await user.click(screen.getByRole("button", { name: "Add to queue" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This queue already has 50 prompts. Remove or promote one before adding another.",
+      "This queue already has 50 prompts. Remove one before adding another.",
     );
+  });
+
+  it("uses the mutation fallback only after a failed write", async () => {
+    mockedAuthFetch
+      .mockResolvedValueOnce(response(queuePayload([])))
+      .mockResolvedValueOnce(response({ error: "Unauthenticated" }, 401));
+    const user = userEvent.setup();
+
+    render(
+      <ZeroPromptQueueDrawer projectId={7} activeTaskId={null} phase={null} onClose={() => {}} />,
+    );
+    await screen.findByText("No prompts are queued. Add one to line up Zero's next task.");
+    await user.type(screen.getByRole("textbox", { name: "New queued prompt" }), "Next");
+    await user.click(screen.getByRole("button", { name: "Add to queue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(QUEUE_MUTATION_FALLBACK_ERROR);
+    expect(alert).not.toHaveTextContent(/unauthenticated/i);
   });
 
   it("does not render raw technical response detail", async () => {
@@ -532,7 +563,7 @@ describe("Zero prompt queue drawer", () => {
     );
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("The queued prompts could not be updated. Please try again.");
+    expect(alert).toHaveTextContent(QUEUE_LOAD_FALLBACK_ERROR);
     expect(alert).not.toHaveTextContent(/postgres|constraint|23505/i);
   });
 
