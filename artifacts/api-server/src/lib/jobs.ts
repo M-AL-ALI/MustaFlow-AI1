@@ -102,6 +102,7 @@ import {
 import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
 import { ProjectFileVersionHandoffError, writeProjectFilesAtomically } from "./project-file-writer";
+import { emitTaskEventBounded } from "./task-event-emission";
 import { healthCheckPathForStack } from "./health-inject";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
 import { sendBuildFailureEmail } from "./emailClient";
@@ -876,18 +877,22 @@ async function emitEvent(
   filePath?: string,
   data?: Record<string, unknown>,
 ): Promise<void> {
-  try {
-    const [row] = await db
-      .insert(taskEventsTable)
-      .values({
-        taskId,
-        eventType,
-        message,
-        filePath: filePath ?? null,
-        data: data ?? null,
-      })
-      .returning();
-    if (row) {
+  await emitTaskEventBounded({
+    persist: async () => {
+      const [row] = await db
+        .insert(taskEventsTable)
+        .values({
+          taskId,
+          eventType,
+          message,
+          filePath: filePath ?? null,
+          data: data ?? null,
+        })
+        .returning();
+      return row ?? null;
+    },
+    publish: (row) => {
+      if (!row) return;
       publishTaskEvent({
         id: row.id,
         taskId: row.taskId,
@@ -897,10 +902,11 @@ async function emitEvent(
         data: (row.data as Record<string, unknown> | undefined) ?? undefined,
         createdAt: row.createdAt,
       });
-    }
-  } catch (err) {
-    logger.warn({ err, taskId, eventType }, "Failed to emit task event");
-  }
+    },
+    recordDrop: (drop) => {
+      logger.warn({ taskId, eventType, drop }, "Task event observation dropped");
+    },
+  });
 }
 
 async function finalizeAgentTaskWithEvent(input: {

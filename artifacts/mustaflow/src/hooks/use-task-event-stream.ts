@@ -65,8 +65,8 @@ export interface TaskEventStreamResult {
  * Connects to the SSE stream for a task and accumulates events in real time.
  *
  * The server pushes each event the instant it is created — no polling delay.
- * On connect, the server replays the full DB history so the hook is safe to
- * mount at any point during a build (no missed events).
+ * On connect, the server replays every persisted DB event, so reconnecting does
+ * not miss rows that reached storage. Best-effort events dropped before persistence are absent.
  *
  * Deduplication is handled client-side via a seenIds Set so reconnects
  * (EventSource auto-reconnects on network drops) don't produce duplicates.
