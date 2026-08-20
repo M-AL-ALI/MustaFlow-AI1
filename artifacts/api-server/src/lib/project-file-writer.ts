@@ -27,6 +27,18 @@ export class ProjectFileVersionHandoffError extends Error {
   }
 }
 
+export class ProjectFileWriteError extends Error {
+  readonly code = "project_file_write_failed";
+
+  constructor(options?: ErrorOptions) {
+    super(
+      "Your project changes could not be saved. Nothing was changed; please try again.",
+      options,
+    );
+    this.name = "ProjectFileWriteError";
+  }
+}
+
 export type ProjectFileWriteScope =
   | { kind: "artifact"; artifactId?: number | null }
   | { kind: "project" };
@@ -57,8 +69,11 @@ export interface ProjectFileWriteReceipt {
 export async function writeProjectFilesAtomically(
   input: ProjectFileMutation,
 ): Promise<ProjectFileWriteReceipt> {
-  const resolvedScope: { kind: "artifact"; artifactId: number } | { kind: "project" } =
-    await (async () => {
+  let resolvedScope: { kind: "artifact"; artifactId: number } | { kind: "project" };
+  try {
+    resolvedScope = await (async (): Promise<
+      { kind: "artifact"; artifactId: number } | { kind: "project" }
+    > => {
       if (input.scope.kind === "project") return { kind: "project" };
 
       const artifactId = await resolveArtifactId(input.projectId, input.scope.artifactId ?? null);
@@ -67,6 +82,10 @@ export async function writeProjectFilesAtomically(
       }
       return { kind: "artifact", artifactId };
     })();
+  } catch (error) {
+    if (error instanceof ProjectFileArtifactScopeError) throw error;
+    throw new ProjectFileWriteError({ cause: error });
+  }
 
   const affectedPaths = [
     ...new Set([...input.files.map((file) => file.path), ...(input.removedPaths ?? [])]),
@@ -79,64 +98,70 @@ export async function writeProjectFilesAtomically(
           eq(projectFilesTable.artifactId, resolvedScope.artifactId),
         );
 
-  const authoritativeVersion = await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select set_config('lock_timeout', ${`${PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS}ms`}, true)`,
-    );
-    await tx.execute(
-      sql`select set_config('statement_timeout', ${`${PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS}ms`}, true)`,
-    );
-
-    if (input.replaceAll) {
-      await tx.delete(projectFilesTable).where(fileScope);
-    } else if (affectedPaths.length > 0) {
-      await tx
-        .delete(projectFilesTable)
-        .where(and(fileScope, inArray(projectFilesTable.path, affectedPaths)));
-    }
-
-    if (input.files.length > 0) {
-      await tx.insert(projectFilesTable).values(
-        input.files.map((file) => ({
-          projectId: input.projectId,
-          artifactId: resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
-          path: file.path,
-          content: file.content,
-          mimeType: file.mimeType,
-        })),
+  let authoritativeVersion: { id: number; filesSnapshot: FileSnapshotEntry[] } | null;
+  try {
+    authoritativeVersion = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('lock_timeout', ${`${PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS}ms`}, true)`,
       );
-    }
+      await tx.execute(
+        sql`select set_config('statement_timeout', ${`${PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS}ms`}, true)`,
+      );
 
-    if (!input.authoritativeVersion) return null;
+      if (input.replaceAll) {
+        await tx.delete(projectFilesTable).where(fileScope);
+      } else if (affectedPaths.length > 0) {
+        await tx
+          .delete(projectFilesTable)
+          .where(and(fileScope, inArray(projectFilesTable.path, affectedPaths)));
+      }
 
-    try {
-      const snapshot = await tx
-        .select({
-          path: projectFilesTable.path,
-          content: projectFilesTable.content,
-          mimeType: projectFilesTable.mimeType,
-        })
-        .from(projectFilesTable)
-        .where(eq(projectFilesTable.projectId, input.projectId));
-      const [version] = await tx
-        .insert(projectVersionsTable)
-        .values({
-          projectId: input.projectId,
-          label: input.authoritativeVersion.label,
-          note: input.authoritativeVersion.note,
-          changelogEntry: input.authoritativeVersion.changelogEntry,
-          filesSnapshot: snapshot,
-          planSnapshot: input.authoritativeVersion.planSnapshot,
-          planSourceMessageId: input.authoritativeVersion.planSourceMessageId,
-        })
-        .returning({ id: projectVersionsTable.id });
-      if (!version) throw new ProjectFileVersionHandoffError();
-      return { id: version.id, filesSnapshot: snapshot };
-    } catch (error) {
-      if (error instanceof ProjectFileVersionHandoffError) throw error;
-      throw new ProjectFileVersionHandoffError({ cause: error });
-    }
-  });
+      if (input.files.length > 0) {
+        await tx.insert(projectFilesTable).values(
+          input.files.map((file) => ({
+            projectId: input.projectId,
+            artifactId: resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
+            path: file.path,
+            content: file.content,
+            mimeType: file.mimeType,
+          })),
+        );
+      }
+
+      if (!input.authoritativeVersion) return null;
+
+      try {
+        const snapshot = await tx
+          .select({
+            path: projectFilesTable.path,
+            content: projectFilesTable.content,
+            mimeType: projectFilesTable.mimeType,
+          })
+          .from(projectFilesTable)
+          .where(eq(projectFilesTable.projectId, input.projectId));
+        const [version] = await tx
+          .insert(projectVersionsTable)
+          .values({
+            projectId: input.projectId,
+            label: input.authoritativeVersion.label,
+            note: input.authoritativeVersion.note,
+            changelogEntry: input.authoritativeVersion.changelogEntry,
+            filesSnapshot: snapshot,
+            planSnapshot: input.authoritativeVersion.planSnapshot,
+            planSourceMessageId: input.authoritativeVersion.planSourceMessageId,
+          })
+          .returning({ id: projectVersionsTable.id });
+        if (!version) throw new ProjectFileVersionHandoffError();
+        return { id: version.id, filesSnapshot: snapshot };
+      } catch (error) {
+        if (error instanceof ProjectFileVersionHandoffError) throw error;
+        throw new ProjectFileVersionHandoffError({ cause: error });
+      }
+    });
+  } catch (error) {
+    if (error instanceof ProjectFileVersionHandoffError) throw error;
+    throw new ProjectFileWriteError({ cause: error });
+  }
 
   return { authoritativeVersion };
 }

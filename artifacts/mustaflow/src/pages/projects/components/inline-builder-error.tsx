@@ -1,4 +1,5 @@
 import { AlertTriangle, CreditCard, ExternalLink, RotateCcw, Wrench } from "lucide-react";
+import { selectBuildFailureError } from "@/lib/user-visible-errors";
 
 export function InlineBuilderError({
   title = "I couldn't finish this step.",
@@ -13,7 +14,8 @@ export function InlineBuilderError({
   recoveryAction?: { label: string; prompt: string };
   onTryFix?: (text: string) => void;
 }) {
-  const isInsufficientCredits = message.startsWith("Insufficient credits");
+  const visibleMessage = selectBuildFailureError(message);
+  const isInsufficientCredits = visibleMessage.startsWith("Insufficient credits");
 
   return (
     <div
@@ -25,7 +27,7 @@ export function InlineBuilderError({
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
           <p className="font-medium text-foreground">{title}</p>
-          <p className="mt-0.5 leading-relaxed text-muted-foreground">{message}</p>
+          <p className="mt-0.5 leading-relaxed text-muted-foreground">{visibleMessage}</p>
         </div>
       </div>
 

@@ -40,6 +40,7 @@ import { InlineBuildResults } from "./inline-build-results";
 import { ZeroAvatar } from "./zero-avatar";
 import { PersistedRunReplay } from "./inline-run-group";
 import { InlineBuilderError } from "./inline-builder-error";
+import { ApplyFailureNotice } from "./apply-failure-notice";
 import { EditAndResend, latestUserMessageId } from "./edit-and-resend";
 import { JumpToLatestButton, nextChatFollowState, scrollChatToLatest } from "./smart-auto-scroll";
 import { BuilderModeIcon, isBuilderAgentMode } from "@/components/builder-mode-icon";
@@ -3185,6 +3186,7 @@ function TaskReviewCard({
   const [discarded, setDiscarded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
+  const [applyFailure, setApplyFailure] = useState<unknown | null>(null);
   const completionKind = report.agentLoop?.completionKind;
   // Apply step index driven by backend narration events (not a timer).
   const [applyStartedAt, setApplyStartedAt] = useState<number | null>(null);
@@ -3762,6 +3764,7 @@ function TaskReviewCard({
           ))}
         </div>
       )}
+      {applyFailure !== null && !securityGate && <ApplyFailureNotice error={applyFailure} />}
       {/* Actions */}
       <div className="flex items-center gap-2 px-2.5 py-2 border-t border-border/40 bg-muted/20">
         {/* When checks are blocking, replace Apply with Fix with AI */}
@@ -3785,11 +3788,14 @@ function TaskReviewCard({
         ) : (
           <button
             onClick={() => {
+              setApplyFailure(null);
+              setSecurityGate(null);
               setApplyStartedAt(Date.now());
               applyStaging.mutate(
                 { id: projectId, taskId },
                 {
                   onSuccess: () => {
+                    setApplyFailure(null);
                     setApplied(true);
                     void queryClient.invalidateQueries({
                       queryKey: getListMessagesQueryKey(projectId),
@@ -3804,7 +3810,8 @@ function TaskReviewCard({
                       queryKey: getListVersionsQueryKey(projectId),
                     });
                   },
-                  onError: () => {
+                  onError: (error) => {
+                    setApplyFailure(error);
                     setApplyStartedAt(null);
                     // Refetch the task so we can read the structured result JSON
                     // from the failed SAST / npm-audit gate.
