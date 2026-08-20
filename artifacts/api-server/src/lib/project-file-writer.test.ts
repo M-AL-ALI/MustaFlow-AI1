@@ -417,6 +417,62 @@ describe("atomic project file writes", () => {
     expect(rollbackRoute).not.toContain("db.insert(projectFilesTable)");
   });
 
+  it("preserves every mobile-settings row when insertion fails after replacement starts", async () => {
+    harness.rows = [
+      {
+        projectId: 51,
+        artifactId: null,
+        path: "app.json",
+        content: "old settings",
+        mimeType: "application/json",
+      },
+      {
+        projectId: 51,
+        artifactId: null,
+        path: "assets/icon.png",
+        content: "old icon",
+        mimeType: "image/png",
+      },
+    ];
+    const priorRows = harness.rows.map((row) => ({ ...row }));
+    harness.insertFailure = new Error("simulated mobile settings insert failure");
+
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "project" },
+        replaceAll: false,
+        files: [
+          { path: "app.json", content: "new settings", mimeType: "application/json" },
+          { path: "assets/icon.png", content: "new icon", mimeType: "image/png" },
+        ],
+        authoritativeVersion: {
+          label: "Settings: app name",
+          note: "App settings updated: app name",
+          changelogEntry: "App settings updated: app name",
+        },
+      }),
+    ).rejects.toThrow("simulated mobile settings insert failure");
+
+    expect(harness.rows).toEqual(priorRows);
+    expect(harness.versions).toEqual([]);
+  });
+
+  it("routes mobile settings files and their rollback snapshot through one atomic call", () => {
+    const source = readFileSync(new URL("../routes/mobile-settings.ts", import.meta.url), "utf8");
+    const writeFlow = source.slice(
+      source.indexOf("// ── Write files and snapshot a version together"),
+      source.indexOf("// ── Complete the task"),
+    );
+
+    expect(writeFlow).toContain("await writeProjectFilesAtomically({");
+    expect(writeFlow).toContain('scope: { kind: "project" }');
+    expect(writeFlow).toContain("replaceAll: false");
+    expect(writeFlow).toContain("authoritativeVersion: {");
+    expect(source).not.toContain("async function writeFiles(");
+    expect(source).not.toContain("async function snapshotFiles(");
+  });
+
   it("keeps checkpoint file replacement and restored-version recording in one transaction", () => {
     const source = readFileSync(new URL("../routes/checkpoints.ts", import.meta.url), "utf8");
     const restoreTransaction = source.slice(
