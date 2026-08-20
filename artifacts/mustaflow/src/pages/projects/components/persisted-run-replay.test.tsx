@@ -29,6 +29,7 @@ vi.mock("@workspace/api-client-react", () => ({
 }));
 
 import { buildRunReplayModel, PersistedRunReplay } from "./inline-run-group";
+import { activityLabelForDisplay } from "./inline-activity-stream";
 
 function loadProductionTask140(): CapturedTaskEvent[] {
   const fixturePath = resolve(
@@ -83,7 +84,7 @@ describe("PersistedRunReplay with captured production traffic", () => {
     fireEvent.click(screen.getByTestId("inline-run-toggle"));
     expect(
       screen.getAllByTestId("inline-activity-row").map((row) => row.textContent?.trim()),
-    ).toEqual(replay.activities.map((event) => event.resolvedLabel ?? event.label));
+    ).toEqual(replay.activities.map(activityLabelForDisplay));
     expect(
       screen.getAllByTestId("inline-narration-line").map((row) => row.textContent?.trim()),
     ).toEqual(replay.narrations.map((event) => event.text));

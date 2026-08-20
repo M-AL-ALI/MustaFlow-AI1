@@ -33,6 +33,10 @@ export type InlineActivityEntry = {
   kind: InlineActivityKind;
   label: string;
   resolvedLabel?: string;
+  sourceEventType?: string;
+  completionEvidence?:
+    | { source: "task-event"; eventType: string }
+    | { source: "surface-status"; status: "completed" };
   terminal?: boolean;
 };
 
@@ -97,6 +101,7 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
     kind: "writing",
     label: "Saving changes",
     resolvedLabel: "Saved the changes",
+    completionEvidence: { source: "task-event", eventType: "project_files_changed" },
   },
   validating_output: {
     kind: "checking",
@@ -117,6 +122,7 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
     kind: "checking",
     label: "Finishing browser checks",
     resolvedLabel: "Browser checks finished",
+    completionEvidence: { source: "task-event", eventType: "qa_done" },
   },
   command_output: {
     kind: "checking",
@@ -127,11 +133,13 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
     kind: "checking",
     label: "Choosing available checks",
     resolvedLabel: "Chose available checks",
+    completionEvidence: { source: "task-event", eventType: "check_deferred" },
   },
   check_result: {
     kind: "checking",
     label: "Checking the work",
     resolvedLabel: "Checked the work",
+    completionEvidence: { source: "task-event", eventType: "check_result" },
   },
   review_context: {
     kind: "checking",
@@ -142,21 +150,25 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
     kind: "checking",
     label: "Checking TypeScript",
     resolvedLabel: "Checked TypeScript",
+    completionEvidence: { source: "task-event", eventType: "typecheck_result" },
   },
   build_result: {
     kind: "checking",
     label: "Checking the build",
     resolvedLabel: "Checked the build",
+    completionEvidence: { source: "task-event", eventType: "build_result" },
   },
   test_result: {
     kind: "checking",
     label: "Running tests",
     resolvedLabel: "Ran the tests",
+    completionEvidence: { source: "task-event", eventType: "test_result" },
   },
   health_check_result: {
     kind: "checking",
     label: "Checking the preview",
     resolvedLabel: "Checked the preview",
+    completionEvidence: { source: "task-event", eventType: "health_check_result" },
   },
   saving_version: {
     kind: "checkpoint",
@@ -172,6 +184,7 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
     kind: "preview",
     label: "Finishing the preview",
     resolvedLabel: "Preview ready",
+    completionEvidence: { source: "task-event", eventType: "preview_ready" },
   },
   finalized: { kind: "done", label: "Done", terminal: true },
   completed: { kind: "done", label: "Done", terminal: true },
@@ -292,14 +305,36 @@ export function taskActivityForEvent(
       kind: "writing",
       label: "Adapting the fix",
       resolvedLabel: "Adapted the fix",
+      sourceEventType: normalizedEventType,
     };
   }
   if (normalizedEventType === "tool_call" || normalizedEventType === "loop:step") {
     const toolActivity = activityForStructuredToolEvent(normalizedEventType, message);
-    if (toolActivity) return { id, ...toolActivity };
+    if (toolActivity) return { id, ...toolActivity, sourceEventType: normalizedEventType };
   }
   const definition = EVENT_ACTIVITY[normalizedEventType];
-  return definition ? { id, ...definition } : null;
+  if (!definition) return null;
+  if (normalizedEventType === "command_output" && message.startsWith("{")) {
+    try {
+      const payload: unknown = JSON.parse(message);
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "status" in payload &&
+        payload.status === "final"
+      ) {
+        return {
+          id,
+          ...definition,
+          sourceEventType: normalizedEventType,
+          completionEvidence: { source: "task-event", eventType: "command_output:final" },
+        };
+      }
+    } catch {
+      // The event still describes a running check, but cannot prove that it finished.
+    }
+  }
+  return { id, ...definition, sourceEventType: normalizedEventType };
 }
 
 export function surfaceActivityEntry(
@@ -310,21 +345,48 @@ export function surfaceActivityEntry(
   if (update.status === "failed") {
     return { id, kind: "error", label: update.label, terminal: true };
   }
+  const completionEvidence: InlineActivityEntry["completionEvidence"] =
+    update.status === "completed" ? { source: "surface-status", status: "completed" } : undefined;
   return {
     id,
     kind,
     label: update.label,
     resolvedLabel: update.label,
+    completionEvidence,
     terminal: update.status === "completed",
   };
 }
+
+const CONFIRMED_PREDECESSOR_EVENTS: Readonly<Record<string, readonly string[]>> = {
+  project_files_changed: [
+    "generating_code",
+    "editing_files",
+    "file_diff",
+    "saving_files",
+    "saving_version",
+  ],
+  check_result: ["validating_output", "review_context"],
+  qa_done: ["testing", "qa_step"],
+  preview_ready: ["updating_preview"],
+};
 
 export function appendActivityEntry(
   current: InlineActivityEntry[],
   next: InlineActivityEntry,
 ): InlineActivityEntry[] {
   if (current.some((entry) => entry.id === next.id)) return current;
-  const last = current.at(-1);
+  const confirmedPredecessors = next.sourceEventType
+    ? CONFIRMED_PREDECESSOR_EVENTS[next.sourceEventType]
+    : undefined;
+  const evidencedCurrent =
+    confirmedPredecessors && next.completionEvidence
+      ? current.map((entry) =>
+          entry.sourceEventType && confirmedPredecessors.includes(entry.sourceEventType)
+            ? { ...entry, completionEvidence: entry.completionEvidence ?? next.completionEvidence }
+            : entry,
+        )
+      : current;
+  const last = evidencedCurrent.at(-1);
   if (
     last &&
     !next.terminal &&
@@ -332,9 +394,15 @@ export function appendActivityEntry(
     last.label === next.label &&
     !last.terminal
   ) {
-    return [...current.slice(0, -1), next].slice(-MAX_ACTIVITY_ROWS);
+    return [...evidencedCurrent.slice(0, -1), next].slice(-MAX_ACTIVITY_ROWS);
   }
-  return [...current, next].sort((left, right) => left.id - right.id).slice(-MAX_ACTIVITY_ROWS);
+  return [...evidencedCurrent, next]
+    .sort((left, right) => left.id - right.id)
+    .slice(-MAX_ACTIVITY_ROWS);
+}
+
+export function activityLabelForDisplay(entry: InlineActivityEntry): string {
+  return entry.completionEvidence ? (entry.resolvedLabel ?? entry.label) : entry.label;
 }
 
 type InlineActivityStreamProps = {
@@ -367,10 +435,11 @@ export function InlineActivityStream({
       {showAvatar && <ZeroAvatar active={live && !lastEntry?.terminal} className="mt-0.5" />}
       <div className="min-w-0 flex-1 space-y-0.5 pt-0.5 text-xs">
         {visibleThreadEntries(entries, density).map((entry) => {
-          const active = live && entry.id === lastEntry?.id && !entry.terminal;
+          const confirmed = entry.completionEvidence !== undefined;
+          const active = live && entry.id === lastEntry?.id && !entry.terminal && !confirmed;
           const failed = entry.kind === "error";
           const Icon = active ? ACTIVITY_ICON[entry.kind] : failed ? AlertTriangle : Check;
-          const label = active ? entry.label : (entry.resolvedLabel ?? entry.label);
+          const label = activityLabelForDisplay(entry);
 
           return (
             <div
