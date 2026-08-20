@@ -42,30 +42,30 @@ export type PromptQueueView = {
 };
 
 const PHASE_WAIT_COPY: Record<ZeroPromptQueueRunPhase, string> = {
-  between_steps: "Zero is between steps. The next queued prompt can join now.",
+  between_steps: "Zero is between steps. Your prompts are saved for the next safe pause.",
   createChatCompletion:
-    "Zero is preparing the next response. Queued prompts will join at the next between-step pause.",
+    "Zero is preparing the next response. Your prompts are saved for the next safe pause.",
   parallel_tool_batch:
-    "Zero is running a group of tools. Queued prompts will join after that group finishes.",
-  serial_tool_call: "Zero is using a tool. Queued prompts will join after that tool finishes.",
+    "Zero is working through a group of actions. Your prompts are saved for the next safe pause.",
+  serial_tool_call: "Zero is working on an action. Your prompts are saved for the next safe pause.",
   executeSingleFileWrite:
-    "Zero is saving one file. Queued prompts will join after that file is safely written.",
+    "Zero is saving one file. Your prompts are saved for the next safe pause.",
   executeBatchFileWrite:
-    "Zero is saving a group of files. Queued prompts will join after the whole group is safely written.",
-  finalize_check:
-    "Zero is reviewing the result. Queued prompts will join after this review finishes.",
-  auto_check: "Zero is checking the work. Queued prompts will join after this check finishes.",
+    "Zero is saving a group of files. Your prompts are saved for the next safe pause.",
+  finalize_check: "Zero is reviewing the result. Your prompts are saved for the next safe pause.",
+  auto_check: "Zero is checking the work. Your prompts are saved for the next safe pause.",
   post_loop_check:
-    "Zero is completing the final checks. Queued prompts will join when those checks finish.",
-  e2e_smoke: "Zero is testing the finished app. Queued prompts will join after this test finishes.",
+    "Zero is completing the final checks. Your prompts are saved and will wait for the next run.",
+  e2e_smoke:
+    "Zero is testing the finished app. Your prompts are saved and will wait for the next run.",
   e2e_auto_fix:
-    "Zero is repairing a test result. Queued prompts will join after the repair finishes.",
+    "Zero is repairing a test result. Your prompts are saved and will wait for the next run.",
   project_files_commit:
-    "Zero is saving the project version. Queued prompts will join after that save finishes.",
+    "Zero is saving the project version. Your prompts are saved and will wait for the next run.",
   runPostWriteMigrationSync:
-    "Zero is updating the project's database setup. Queued prompts will join after that update finishes.",
+    "Zero is updating the project's database setup. Your prompts are saved and will wait for the next run.",
   production_publish:
-    "Zero is publishing the app. Queued prompts will join after publishing reaches a safe pause.",
+    "Zero is publishing the app. Your prompts are saved and will wait for the next run.",
 };
 
 export function promptQueueLandingMessage(
@@ -76,14 +76,14 @@ export function promptQueueLandingMessage(
     return "Zero is not running right now. Queued prompts will wait for the next run.";
   }
   if (phase === null) {
-    return "Zero's current step is unavailable because a phase update has not arrived. Queued prompts will wait for the next known safe point.";
+    return "Zero is working, but its current step is not available yet. Your prompts are saved for the next safe pause.";
   }
   if (phase === ZERO_PROMPT_QUEUE_UNKNOWN_PHASE) {
-    return "Zero reported a step this version does not recognize. Queued prompts will wait for the next known safe point.";
+    return "Zero is working in a step this screen does not recognize yet. Your prompts are saved for the next safe pause.";
   }
   const rule = ZERO_PROMPT_QUEUE_PHASE_RULES.find((candidate) => candidate.phase === phase);
   if (!rule) {
-    return "Zero reported a step this version does not recognize. Queued prompts will wait for the next known safe point.";
+    return "Zero is working in a step this screen does not recognize yet. Your prompts are saved for the next safe pause.";
   }
   return PHASE_WAIT_COPY[phase];
 }
@@ -96,7 +96,7 @@ export function normalizePromptQueuePayload(value: unknown): PromptQueueView {
   if (!isRecord(value) || !Array.isArray(value.items)) {
     return { items: [], truncated: false };
   }
-  const items = value.items
+  const queuedItems = value.items
     .filter(
       (item): item is Record<string, unknown> =>
         isRecord(item) &&
@@ -115,8 +115,8 @@ export function normalizePromptQueuePayload(value: unknown): PromptQueueView {
     .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id));
 
   return {
-    items: items.slice(0, ZERO_PROMPT_QUEUE_MAX_ITEMS),
-    truncated: value.truncated === true || value.items.length > ZERO_PROMPT_QUEUE_MAX_ITEMS,
+    items: queuedItems.slice(0, ZERO_PROMPT_QUEUE_MAX_ITEMS),
+    truncated: queuedItems.length > ZERO_PROMPT_QUEUE_MAX_ITEMS,
   };
 }
 
@@ -387,7 +387,7 @@ export function ZeroPromptQueueDrawer({
 
         {queue.truncated && (
           <p role="status" className="text-[10px] text-amber-300">
-            Only the first 50 queue records are shown.
+            Only the first 50 queued prompts are shown.
           </p>
         )}
         {error && (

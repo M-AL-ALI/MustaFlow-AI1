@@ -110,4 +110,20 @@ describe("Zero run-loop phase emission", () => {
     expect(quotedOccurrenceCount(source, "runPostWriteMigrationSync")).toBe(1);
     expect(quotedOccurrenceCount(source, "production_publish")).toBe(0);
   });
+
+  it("does not announce migration work when there are no migration files", () => {
+    const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const functionStart = source.indexOf("async function runPostWriteMigrationSync(");
+    const fileSelection = source.indexOf("const drizzleFiles = files.filter(", functionStart);
+    const noWorkReturn = source.indexOf(
+      "if (drizzleFiles.length === 0) return { ok: true };",
+      functionStart,
+    );
+    const phaseEmission = source.indexOf('"runPostWriteMigrationSync"', functionStart);
+
+    expect(functionStart).toBeGreaterThanOrEqual(0);
+    expect(fileSelection).toBeGreaterThan(functionStart);
+    expect(noWorkReturn).toBeGreaterThan(fileSelection);
+    expect(phaseEmission).toBeGreaterThan(noWorkReturn);
+  });
 });

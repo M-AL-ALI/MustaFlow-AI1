@@ -5106,6 +5106,7 @@ function maybeChargeSenseBatch(ctx: ToolCtx): void {
 async function executeSingleFileWrite(
   ctx: ToolCtx,
   rawArgs: Record<string, unknown>,
+  options: { emitPhase?: boolean } = {},
 ): Promise<ToolExecutionResult> {
   const { workspace, input, containerState } = ctx;
   const path = sanitizePath(rawArgs.path);
@@ -5123,7 +5124,9 @@ async function executeSingleFileWrite(
   if (content.length > MAX_FILE_BYTES * 4) {
     return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
   }
-  await emitZeroRunLoopPhase(input.onEvent, "executeSingleFileWrite");
+  if (options.emitPhase !== false) {
+    await emitZeroRunLoopPhase(input.onEvent, "executeSingleFileWrite");
+  }
   const mime = typeof rawArgs.mime_type === "string" ? rawArgs.mime_type : undefined;
   const prior = workspace.read(path)?.content ?? "";
   workspace.write(path, content, mime);
@@ -5220,7 +5223,7 @@ export async function executeBatchFileWrite(
 
     processed += 1;
     usedBytes += bytes;
-    const result = await executeSingleFileWrite(ctx, entry);
+    const result = await executeSingleFileWrite(ctx, entry, { emitPhase: false });
     results.push({
       path: displayPath,
       ok: result.ok,
