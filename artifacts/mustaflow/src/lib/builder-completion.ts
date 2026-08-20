@@ -50,6 +50,18 @@ export function getBuilderCompletionMessage(
   }
 }
 
+export function getBuilderWarningCompletionMessage(
+  completionKind: string | null | undefined,
+  previewUpdated: boolean,
+): string {
+  return getBuilderCompletionMessage(
+    completionKind,
+    previewUpdated
+      ? "Build completed with warnings — preview available, validation not clean"
+      : "Build completed with warnings — validation not clean",
+  );
+}
+
 export function getBuilderCheckpointLabel(
   label: string,
   completionKind: string | null | undefined,
