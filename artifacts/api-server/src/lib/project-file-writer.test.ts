@@ -9,6 +9,17 @@ interface StoredFile {
   mimeType: string;
 }
 
+interface StoredVersion {
+  id: number;
+  projectId: number;
+  label: string;
+  note: string;
+  changelogEntry: string;
+  filesSnapshot: Array<{ path: string; content: string; mimeType: string }>;
+  planSnapshot?: Record<string, unknown>;
+  planSourceMessageId?: number;
+}
+
 interface Predicate {
   kind: "eq" | "in" | "and";
   column?: string;
@@ -19,8 +30,11 @@ interface Predicate {
 
 const harness = vi.hoisted(() => ({
   rows: [] as StoredFile[],
+  versions: [] as StoredVersion[],
   artifactId: 7 as number | null,
   insertFailure: null as Error | null,
+  versionInsertFailure: null as Error | null,
+  nextVersionId: 41,
   transactions: 0,
   executeValues: [] as unknown[][],
 }));
@@ -46,14 +60,21 @@ vi.mock("@workspace/db", () => {
     projectId: "projectId",
     artifactId: "artifactId",
     path: "path",
+    content: "content",
+    mimeType: "mimeType",
+  };
+  const projectVersionsTable = {
+    id: "versionId",
   };
 
   return {
     projectFilesTable,
+    projectVersionsTable,
     db: {
-      transaction: vi.fn(async (callback: (tx: unknown) => Promise<void>) => {
+      transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         harness.transactions += 1;
         let working = harness.rows.map((row) => ({ ...row }));
+        const workingVersions = harness.versions.map((version) => ({ ...version }));
         const tx = {
           execute: vi.fn(async (query: { values?: unknown[] }) => {
             harness.executeValues.push(query.values ?? []);
@@ -71,16 +92,43 @@ vi.mock("@workspace/db", () => {
               );
             }),
           })),
-          insert: vi.fn(() => ({
-            values: vi.fn(async (values: StoredFile[]) => {
-              if (harness.insertFailure) throw harness.insertFailure;
-              working.push(...values.map((value) => ({ ...value })));
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(async (predicate: Predicate) => {
+                const projectId = findPredicate(predicate, "eq", "projectId")?.value;
+                return working
+                  .filter((row) => row.projectId === projectId)
+                  .map(({ path, content, mimeType }) => ({ path, content, mimeType }));
+              }),
+            })),
+          })),
+          insert: vi.fn((table: unknown) => ({
+            values: vi.fn((values: StoredFile[] | Omit<StoredVersion, "id">) => {
+              if (table === projectFilesTable) {
+                return (async () => {
+                  if (harness.insertFailure) throw harness.insertFailure;
+                  working.push(...(values as StoredFile[]).map((value) => ({ ...value })));
+                })();
+              }
+              return {
+                returning: vi.fn(async () => {
+                  if (harness.versionInsertFailure) throw harness.versionInsertFailure;
+                  const version = {
+                    ...(values as Omit<StoredVersion, "id">),
+                    id: harness.nextVersionId,
+                  };
+                  workingVersions.push(version);
+                  return [{ id: version.id }];
+                }),
+              };
             }),
           })),
         };
 
-        await callback(tx);
+        const result = await callback(tx);
         harness.rows = working;
+        harness.versions = workingVersions;
+        return result;
       }),
     },
   };
@@ -94,6 +142,7 @@ import {
   PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS,
   PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS,
   ProjectFileArtifactScopeError,
+  ProjectFileVersionHandoffError,
   writeProjectFilesAtomically,
 } from "./project-file-writer";
 
@@ -124,8 +173,11 @@ const originalRows: StoredFile[] = [
 describe("atomic project file writes", () => {
   beforeEach(() => {
     harness.rows = originalRows.map((row) => ({ ...row }));
+    harness.versions = [];
     harness.artifactId = 7;
     harness.insertFailure = null;
+    harness.versionInsertFailure = null;
+    harness.nextVersionId = 41;
     harness.transactions = 0;
     harness.executeValues = [];
   });
@@ -247,6 +299,68 @@ describe("atomic project file writes", () => {
     ]);
   });
 
+  it("commits the complete project snapshot and authoritative version with the file set", async () => {
+    const receipt = await writeProjectFilesAtomically({
+      projectId: 51,
+      scope: { kind: "artifact" },
+      replaceAll: true,
+      files: [{ path: "index.ts", content: "new index", mimeType: "text/typescript" }],
+      authoritativeVersion: {
+        label: "Apply Task #99",
+        note: "Updated the page",
+        changelogEntry: "Applied the staged review",
+        planSnapshot: { steps: [] },
+        planSourceMessageId: 88,
+      },
+    });
+
+    expect(receipt.authoritativeVersion).toEqual({
+      id: 41,
+      filesSnapshot: [
+        { path: "sibling.ts", content: "sibling", mimeType: "text/typescript" },
+        { path: "index.ts", content: "new index", mimeType: "text/typescript" },
+      ],
+    });
+    expect(harness.versions).toEqual([
+      {
+        id: 41,
+        projectId: 51,
+        label: "Apply Task #99",
+        note: "Updated the page",
+        changelogEntry: "Applied the staged review",
+        filesSnapshot: receipt.authoritativeVersion?.filesSnapshot,
+        planSnapshot: { steps: [] },
+        planSourceMessageId: 88,
+      },
+    ]);
+  });
+
+  it("rolls the files back and returns a recoverable typed refusal when version insertion fails", async () => {
+    harness.versionInsertFailure = new Error("simulated database detail");
+
+    const operation = writeProjectFilesAtomically({
+      projectId: 51,
+      scope: { kind: "artifact" },
+      replaceAll: true,
+      files: [{ path: "index.ts", content: "new index", mimeType: "text/typescript" }],
+      authoritativeVersion: {
+        label: "Apply Task #99",
+        note: "Updated the page",
+        changelogEntry: "Applied the staged review",
+      },
+    });
+
+    await expect(operation).rejects.toMatchObject({
+      name: "ProjectFileVersionHandoffError",
+      code: "project_file_version_handoff_failed",
+      message:
+        "Your files and version could not be saved together. Nothing was changed; please try again.",
+    });
+    await expect(operation).rejects.toBeInstanceOf(ProjectFileVersionHandoffError);
+    expect(harness.rows).toEqual(originalRows);
+    expect(harness.versions).toEqual([]);
+  });
+
   it("refuses a missing artifact scope before opening a transaction or deleting rows", async () => {
     harness.artifactId = null;
 
@@ -274,6 +388,19 @@ describe("atomic project file writes", () => {
     expect(source).toContain("removedPaths: appliedRemovedPaths");
     expect(source.match(/scope: \{ kind: "artifact" \}/g)).toHaveLength(6);
     expect(source).not.toContain("writeFiles has durably updated the DB snapshot");
+  });
+
+  it("binds staged Apply files to the authoritative version in the same atomic call", () => {
+    const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const applyFlow = source.slice(
+      source.indexOf("export async function applyTaskAgentStaging"),
+      source.indexOf("export async function discardTaskAgentStaging"),
+    );
+
+    expect(applyFlow).toContain("authoritativeVersion: {");
+    expect(applyFlow).toContain("const version = fileWriteReceipt.authoritativeVersion;");
+    expect(applyFlow).not.toContain("Failed to save apply-stage version snapshot");
+    expect(applyFlow).not.toContain("revision: version?.id ?? null");
   });
 
   it("routes project-wide version rollback through the same atomic helper", () => {

@@ -101,7 +101,7 @@ import {
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
-import { writeProjectFilesAtomically } from "./project-file-writer";
+import { ProjectFileVersionHandoffError, writeProjectFilesAtomically } from "./project-file-writer";
 import { healthCheckPathForStack } from "./health-inject";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
 import { sendBuildFailureEmail } from "./emailClient";
@@ -8002,12 +8002,30 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (eventType, message) => emitEvent(taskId, eventType, message),
     "project_files_commit",
   );
-  await writeProjectFilesAtomically({
+  void emitEvent(taskId, "narration", "Saving files and version…");
+  const planSnapshot = await loadLatestPlanSnapshot(projectId);
+  const changelogTitle = autoMergedBackgroundPlanStep
+    ? "Background Plan Step Merge"
+    : "Staged Review Apply";
+  const changelogEntry = `**${changelogTitle}**\n${(assistantSummary ?? "").slice(0, 180)}`;
+  const fileWriteReceipt = await writeProjectFilesAtomically({
     projectId,
     scope: { kind: "artifact" },
     files: builderFiles,
     replaceAll: true,
+    authoritativeVersion: {
+      label: `${autoMergedBackgroundPlanStep ? "Merge" : "Apply"} Task #${taskId}`.slice(0, 200),
+      note: (assistantSummary ?? "").slice(0, 200),
+      changelogEntry: changelogEntry.slice(0, 500),
+      planSnapshot: planSnapshot?.plan,
+      planSourceMessageId: planSnapshot?.sourceMessageId,
+    },
   });
+  const version = fileWriteReceipt.authoritativeVersion;
+  if (!version) {
+    throw new ProjectFileVersionHandoffError();
+  }
+  const snapshot = version.filesSnapshot;
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
@@ -8026,41 +8044,10 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     }
   }
 
-  // Commit the promoted file set before emitting any preview payload. This id
-  // is the authoritative monotonic revision used by live delivery and replay.
-  void emitEvent(taskId, "narration", "Saving version snapshot…");
-  const snapshot = await snapshotFilesForVersion(projectId);
-  const planSnapshot = await loadLatestPlanSnapshot(projectId);
-  const changelogTitle = autoMergedBackgroundPlanStep
-    ? "Background Plan Step Merge"
-    : "Staged Review Apply";
-  const changelogEntry = `**${changelogTitle}**\n${(assistantSummary ?? "").slice(0, 180)}`;
-  let version: { id: number } | undefined;
-  try {
-    const inserted = await db
-      .insert(projectVersionsTable)
-      .values({
-        projectId,
-        label: `${autoMergedBackgroundPlanStep ? "Merge" : "Apply"} Task #${taskId}`.slice(0, 200),
-        note: (assistantSummary ?? "").slice(0, 200),
-        changelogEntry: changelogEntry.slice(0, 500),
-        filesSnapshot: snapshot,
-        planSnapshot: planSnapshot?.plan,
-        planSourceMessageId: planSnapshot?.sourceMessageId,
-      })
-      .returning({ id: projectVersionsTable.id });
-    version = inserted[0];
-  } catch (snapErr) {
-    logger.warn(
-      { err: snapErr, projectId, taskId },
-      "Failed to save apply-stage version snapshot (non-fatal — files already persisted)",
-    );
-  }
-
   const applyPreviewResult = await syncAgenticPreviewRuntime({
     projectId,
     taskId,
-    revision: version?.id ?? null,
+    revision: version.id,
     publishLifecycleEvents: false,
     containerId: project.containerId,
     containerStatus: project.containerStatus,
@@ -8072,33 +8059,29 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     packageManifestChanged,
   });
 
-  if (version?.id) {
-    emitFilesChangedEvent(taskId, projectId, version.id, builderFiles, removedPaths, "apply");
-    if (applyPreviewResult.previewUpdated) {
-      publishPreviewReady(projectId, version.id);
-    } else if (applyPreviewResult.previewSyncFailed) {
-      publishPreviewSyncFailed(
-        projectId,
-        version.id,
-        applyPreviewResult.warnings[0] ?? "Preview runtime sync did not reach a ready state.",
-      );
-    }
+  emitFilesChangedEvent(taskId, projectId, version.id, builderFiles, removedPaths, "apply");
+  if (applyPreviewResult.previewUpdated) {
+    publishPreviewReady(projectId, version.id);
+  } else if (applyPreviewResult.previewSyncFailed) {
+    publishPreviewSyncFailed(
+      projectId,
+      version.id,
+      applyPreviewResult.warnings[0] ?? "Preview runtime sync did not reach a ready state.",
+    );
   }
 
   // Task #538 — Unified Checkpoints: capture DB snapshot tied to apply version.
-  if (version) {
-    const versionIdForSnapshot = version.id;
-    setImmediate(() => {
-      void (async () => {
-        const { captureProjectDbSnapshot } = await import("./db-snapshot-capture");
-        await captureProjectDbSnapshot(
-          projectId,
-          versionIdForSnapshot,
-          `Checkpoint: Apply Task #${taskId}`,
-        );
-      })();
-    });
-  }
+  const versionIdForSnapshot = version.id;
+  setImmediate(() => {
+    void (async () => {
+      const { captureProjectDbSnapshot } = await import("./db-snapshot-capture");
+      await captureProjectDbSnapshot(
+        projectId,
+        versionIdForSnapshot,
+        `Checkpoint: Apply Task #${taskId}`,
+      );
+    })();
+  });
 
   const finalReport: TaskReport = {
     ...(report ?? {
@@ -8120,7 +8103,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       ...postWriteWarnings,
       ...applyPreviewResult.warnings,
     ],
-    versionId: version?.id ?? null,
+    versionId: version.id,
   };
 
   // Mark task completed + clear staging snapshot + stamp appliedAt (Task #509).
@@ -8161,19 +8144,18 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       applied: true,
       ...(autoMergedBackgroundPlanStep ? { backgroundPlanStep: true, autoMerged: true } : {}),
     } as unknown as Record<string, unknown>,
-    checkpointId: version?.id ?? null,
+    checkpointId: version.id,
   });
   if (mergedStatus) {
     await emitEvent(taskId, "completed", mergedStatus);
   }
 
-  if (version?.id) {
-    try {
-      await db
-        .update(chatMessagesTable)
-        .set({ checkpointId: version.id })
-        .where(
-          sql`id = (
+  try {
+    await db
+      .update(chatMessagesTable)
+      .set({ checkpointId: version.id })
+      .where(
+        sql`id = (
             SELECT id FROM chat_messages
             WHERE project_id = ${projectId}
               AND role = 'user'
@@ -8185,13 +8167,12 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
             ORDER BY created_at DESC
             LIMIT 1
           )`,
-        );
-    } catch (err) {
-      logger.warn(
-        { err, projectId, versionId: version.id },
-        "Failed to link apply triggering message to checkpoint",
       );
-    }
+  } catch (err) {
+    logger.warn(
+      { err, projectId, versionId: version.id },
+      "Failed to link apply triggering message to checkpoint",
+    );
   }
 
   // Update project status
@@ -8238,33 +8219,31 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   }
 
   // Post-build hooks — quality audit (fire-and-forget)
-  if (version) {
-    const versionIdForAudit = version.id;
-    const taskIdForAudit = taskId;
-    setImmediate(() => {
-      void (async () => {
-        try {
-          const auditReport = runAudit(builderFiles);
-          await db
-            .update(projectVersionsTable)
-            .set({ auditReport })
-            .where(eq(projectVersionsTable.id, versionIdForAudit));
-          const [latestTask] = await db
-            .select({ report: agentTasksTable.report })
-            .from(agentTasksTable)
-            .where(eq(agentTasksTable.id, taskIdForAudit))
-            .limit(1);
-          const latestReport = latestTask?.report ?? finalReport;
-          await db
-            .update(agentTasksTable)
-            .set({ report: { ...latestReport, auditReport } })
-            .where(eq(agentTasksTable.id, taskIdForAudit));
-        } catch (err) {
-          logger.warn({ err, projectId }, "Quality audit failed after apply (non-fatal)");
-        }
-      })();
-    });
-  }
+  const versionIdForAudit = version.id;
+  const taskIdForAudit = taskId;
+  setImmediate(() => {
+    void (async () => {
+      try {
+        const auditReport = runAudit(builderFiles);
+        await db
+          .update(projectVersionsTable)
+          .set({ auditReport })
+          .where(eq(projectVersionsTable.id, versionIdForAudit));
+        const [latestTask] = await db
+          .select({ report: agentTasksTable.report })
+          .from(agentTasksTable)
+          .where(eq(agentTasksTable.id, taskIdForAudit))
+          .limit(1);
+        const latestReport = latestTask?.report ?? finalReport;
+        await db
+          .update(agentTasksTable)
+          .set({ report: { ...latestReport, auditReport } })
+          .where(eq(agentTasksTable.id, taskIdForAudit));
+      } catch (err) {
+        logger.warn({ err, projectId }, "Quality audit failed after apply (non-fatal)");
+      }
+    })();
+  });
 
   // Post-build suggestions
   setImmediate(() => {
