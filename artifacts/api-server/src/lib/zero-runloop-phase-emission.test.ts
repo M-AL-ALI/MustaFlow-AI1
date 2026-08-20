@@ -4,6 +4,7 @@ import { ZERO_PROMPT_QUEUE_BOUNDARY_SEMANTICS } from "./zero-prompt-queue-bounda
 import {
   emitZeroRunLoopPhase,
   ZERO_RUN_LOOP_EMITTABLE_PHASES,
+  ZERO_RUN_LOOP_PHASE_EMIT_TIMEOUT_MS,
   ZERO_RUN_LOOP_PHASE_EVENT_TYPE,
 } from "./zero-runloop-phase-emission";
 
@@ -67,6 +68,29 @@ describe("Zero run-loop phase emission", () => {
         "between_steps",
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it("drops a hanging observation at the bounded deadline without retaining a timer", async () => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const emission = emitZeroRunLoopPhase(
+        () => new Promise<void>(() => undefined),
+        "between_steps",
+      ).then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(ZERO_RUN_LOOP_PHASE_EMIT_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(emission).resolves.toBeUndefined();
+      expect(settled).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("wires every in-loop phase once at its declared source point", () => {

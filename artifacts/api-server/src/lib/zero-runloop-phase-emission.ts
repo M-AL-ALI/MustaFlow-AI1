@@ -6,6 +6,13 @@ import {
 
 export const ZERO_RUN_LOOP_PHASE_EVENT_TYPE = "loop:phase" as const;
 
+/**
+ * Phase observations normally persist in a single local database call. A 250 ms
+ * ceiling preserves ordering in that normal case while keeping eighteen stalled
+ * observations below five seconds of cumulative delay in the pathological case.
+ */
+export const ZERO_RUN_LOOP_PHASE_EMIT_TIMEOUT_MS = 250;
+
 export type ZeroRunLoopEmittablePhase = Exclude<ZeroPromptQueueRunPhase, "production_publish">;
 
 export const ZERO_RUN_LOOP_EMITTABLE_PHASES = ZERO_PROMPT_QUEUE_RUN_PHASES.filter(
@@ -34,9 +41,20 @@ export async function emitZeroRunLoopPhase(
   sink: ZeroRunLoopPhaseEventSink,
   phase: ZeroRunLoopEmittablePhase,
 ): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    await sink(ZERO_RUN_LOOP_PHASE_EVENT_TYPE, serializeZeroRunLoopPhase(phase));
+    const delivery = Promise.resolve(
+      sink(ZERO_RUN_LOOP_PHASE_EVENT_TYPE, serializeZeroRunLoopPhase(phase)),
+    );
+    const deadline = new Promise<void>((resolve) => {
+      timeout = setTimeout(resolve, ZERO_RUN_LOOP_PHASE_EMIT_TIMEOUT_MS);
+      if (typeof timeout === "object" && "unref" in timeout) timeout.unref();
+    });
+
+    await Promise.race([delivery, deadline]);
   } catch {
     // Existing task execution remains authoritative if observation delivery fails.
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
