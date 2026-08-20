@@ -35,6 +35,7 @@ import { writeKnowledge } from "../lib/knowledge";
 import { getProductionSecretMap } from "../lib/container-secrets";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 
 const router: IRouter = Router();
 
@@ -335,18 +336,15 @@ router.post(
       .map((r) => r.path)
       .filter((p) => !snapshotPathSet.has(p));
 
-    // Bulk delete current files and re-insert snapshot
-    await db.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
-    if (snapshot.length > 0) {
-      await db.insert(projectFilesTable).values(
-        snapshot.map((f) => ({
-          projectId,
-          path: f.path,
-          content: f.content,
-          mimeType: f.mimeType,
-        })),
-      );
-    }
+    // Version snapshots are project-wide and predate artifact identity. Keep that
+    // established scope explicit while using the same bounded atomic writer as
+    // builder commits, so a failed restore leaves every prior row intact.
+    await writeProjectFilesAtomically({
+      projectId,
+      scope: { kind: "project" },
+      replaceAll: true,
+      files: snapshot,
+    });
 
     let rollbackRevisionId: number | null = null;
     try {
