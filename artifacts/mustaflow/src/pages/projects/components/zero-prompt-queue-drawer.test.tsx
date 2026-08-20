@@ -103,7 +103,10 @@ const NEXT_RUN_PHASES = [
 
 describe("Zero prompt queue drawer", () => {
   beforeEach(() => mockedAuthFetch.mockReset());
-  afterEach(cleanup);
+  afterEach(() => {
+    vi.restoreAllMocks();
+    cleanup();
+  });
 
   it("uses the shared semantics and validates real phase events without guessing", () => {
     expect(
@@ -398,6 +401,62 @@ describe("Zero prompt queue drawer", () => {
     expect(view.container).not.toHaveTextContent(
       /private-turn|private-event|private-user|queue\.item|promoted|deleted/i,
     );
+  });
+
+  it("uses deterministic relative time without a timezone acronym", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-20T17:02:30.000Z"));
+    mockedAuthFetch.mockResolvedValue(
+      response(
+        queuePayload([
+          {
+            id: "fresh",
+            position: 1,
+            currentText: "Fresh prompt",
+            state: "promoted",
+            terminalEvidence: {
+              kind: "promoted",
+              activeTurnId: "turn-fresh",
+              provenanceEventId: "event-fresh",
+              occurredAt: "2026-08-20T17:02:15.000Z",
+            },
+          },
+          {
+            id: "minutes",
+            position: 2,
+            currentText: "Earlier prompt",
+            state: "promoted",
+            terminalEvidence: {
+              kind: "promoted",
+              activeTurnId: "turn-minutes",
+              provenanceEventId: "event-minutes",
+              occurredAt: "2026-08-20T17:00:30.000Z",
+            },
+          },
+          {
+            id: "yesterday",
+            position: 3,
+            currentText: "Yesterday prompt",
+            state: "deleted",
+            terminalEvidence: {
+              kind: "deleted",
+              deletedBy: "owner-7",
+              provenanceEventId: "event-yesterday",
+              occurredAt: "2026-08-19T16:02:30.000Z",
+            },
+          },
+        ]),
+      ),
+    );
+
+    const view = render(
+      <ZeroPromptQueueDrawer projectId={7} activeTaskId={null} phase={null} onClose={() => {}} />,
+    );
+
+    const history = await screen.findByRole("list", { name: "Prompt history" });
+    expect(within(history).getByText("just now")).toBeInTheDocument();
+    expect(within(history).getByText("2 minutes ago")).toBeInTheDocument();
+    expect(within(history).getByText("yesterday")).toBeInTheDocument();
+    expect(view.container).not.toHaveTextContent(/UTC/i);
   });
 
   it("shows a one-sentence empty state", async () => {

@@ -160,11 +160,28 @@ export function normalizePromptQueuePayload(value: unknown): PromptQueueView {
 }
 
 function promptHistoryTime(occurredAt: string): string {
-  return `${new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(occurredAt))} UTC`;
+  const elapsedMinutes = Math.floor(Math.max(0, Date.now() - Date.parse(occurredAt)) / 60_000);
+  if (elapsedMinutes < 1) return "just now";
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} ${elapsedMinutes === 1 ? "minute" : "minutes"} ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours} ${elapsedHours === 1 ? "hour" : "hours"} ago`;
+  }
+  if (elapsedHours < 48) return "yesterday";
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 30) return `${elapsedDays} days ago`;
+
+  if (elapsedDays < 365) {
+    const elapsedMonths = Math.floor(elapsedDays / 30);
+    return `${elapsedMonths} ${elapsedMonths === 1 ? "month" : "months"} ago`;
+  }
+
+  const elapsedYears = Math.floor(elapsedDays / 365);
+  return `${elapsedYears} ${elapsedYears === 1 ? "year" : "years"} ago`;
 }
 
 export function selectPromptQueueError(value: unknown): string {
