@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { BUILD_FAILURE_FALLBACK_ERROR, PROJECT_FILE_SCOPE_ERROR } from "@/lib/user-visible-errors";
 import { InlineBuilderError } from "./inline-builder-error";
 
 describe("InlineBuilderError", () => {
@@ -77,5 +78,22 @@ describe("InlineBuilderError", () => {
     expect(container.textContent).not.toMatch(
       /sealed|zero|node api|vite|stack|runtime|manifest|sdk|source contract/iu,
     );
+  });
+
+  it("keeps the project-scope refusal visible and readable", () => {
+    render(<InlineBuilderError message={PROJECT_FILE_SCOPE_ERROR} />);
+
+    expect(screen.getByText(PROJECT_FILE_SCOPE_ERROR)).toBeVisible();
+  });
+
+  it.each([
+    "duplicate key value violates postgres constraint project_files_path",
+    "canceling statement due to lock timeout",
+    "canceling statement due to statement timeout",
+  ])("does not render raw storage failure text: %s", (rawMessage) => {
+    render(<InlineBuilderError message={rawMessage} />);
+
+    expect(screen.getByText(BUILD_FAILURE_FALLBACK_ERROR)).toBeVisible();
+    expect(screen.queryByText(rawMessage)).not.toBeInTheDocument();
   });
 });

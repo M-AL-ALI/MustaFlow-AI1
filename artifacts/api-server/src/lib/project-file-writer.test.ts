@@ -33,6 +33,7 @@ const harness = vi.hoisted(() => ({
   versions: [] as StoredVersion[],
   artifactId: 7 as number | null,
   insertFailure: null as Error | null,
+  executeFailure: null as Error | null,
   versionInsertFailure: null as Error | null,
   nextVersionId: 41,
   transactions: 0,
@@ -77,6 +78,7 @@ vi.mock("@workspace/db", () => {
         const workingVersions = harness.versions.map((version) => ({ ...version }));
         const tx = {
           execute: vi.fn(async (query: { values?: unknown[] }) => {
+            if (harness.executeFailure) throw harness.executeFailure;
             harness.executeValues.push(query.values ?? []);
           }),
           delete: vi.fn(() => ({
@@ -143,6 +145,7 @@ import {
   PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS,
   ProjectFileArtifactScopeError,
   ProjectFileVersionHandoffError,
+  ProjectFileWriteError,
   writeProjectFilesAtomically,
 } from "./project-file-writer";
 
@@ -176,6 +179,7 @@ describe("atomic project file writes", () => {
     harness.versions = [];
     harness.artifactId = 7;
     harness.insertFailure = null;
+    harness.executeFailure = null;
     harness.versionInsertFailure = null;
     harness.nextVersionId = 41;
     harness.transactions = 0;
@@ -222,7 +226,11 @@ describe("atomic project file writes", () => {
         replaceAll: true,
         files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
       }),
-    ).rejects.toThrow("simulated insert failure");
+    ).rejects.toMatchObject({
+      name: "ProjectFileWriteError",
+      code: "project_file_write_failed",
+      message: "Your project changes could not be saved. Nothing was changed; please try again.",
+    });
 
     expect(harness.rows).toEqual(originalRows);
   });
@@ -237,7 +245,7 @@ describe("atomic project file writes", () => {
         replaceAll: true,
         files: [{ path: "index.ts", content: "restored", mimeType: "text/typescript" }],
       }),
-    ).rejects.toThrow("simulated rollback insert failure");
+    ).rejects.toBeInstanceOf(ProjectFileWriteError);
 
     expect(harness.transactions).toBe(1);
     expect(harness.rows).toEqual(originalRows);
@@ -272,7 +280,26 @@ describe("atomic project file writes", () => {
         replaceAll: true,
         files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
       }),
-    ).rejects.toThrow("statement timeout");
+    ).rejects.toBeInstanceOf(ProjectFileWriteError);
+
+    expect(harness.rows).toEqual(originalRows);
+  });
+
+  it("returns the same readable rollback refusal when PostgreSQL times out on the lock", async () => {
+    harness.executeFailure = new Error("canceling statement due to lock timeout");
+
+    const operation = writeProjectFilesAtomically({
+      projectId: 51,
+      scope: { kind: "artifact" },
+      replaceAll: true,
+      files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
+    });
+
+    await expect(operation).rejects.toMatchObject({
+      name: "ProjectFileWriteError",
+      code: "project_file_write_failed",
+      message: "Your project changes could not be saved. Nothing was changed; please try again.",
+    });
 
     expect(harness.rows).toEqual(originalRows);
   });
@@ -452,7 +479,7 @@ describe("atomic project file writes", () => {
           changelogEntry: "App settings updated: app name",
         },
       }),
-    ).rejects.toThrow("simulated mobile settings insert failure");
+    ).rejects.toBeInstanceOf(ProjectFileWriteError);
 
     expect(harness.rows).toEqual(priorRows);
     expect(harness.versions).toEqual([]);
