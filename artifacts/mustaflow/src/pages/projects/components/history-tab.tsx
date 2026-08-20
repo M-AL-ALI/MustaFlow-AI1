@@ -776,7 +776,8 @@ export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }:
             <div className="text-center">
               <div className="text-xs font-medium text-foreground/60">No history yet</div>
               <div className="text-[10px] opacity-50 mt-0.5">
-                Events are recorded automatically as you build
+                This history shows build notes and lessons that were saved. A completed build may
+                not appear if its history entry was not saved.
               </div>
             </div>
           </div>
