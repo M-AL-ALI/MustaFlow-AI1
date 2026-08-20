@@ -49,7 +49,10 @@ export interface ZeroPromptQueuePersistenceTransaction {
 
 export interface ZeroPromptQueuePersistenceDriver {
   readProject(projectId: number, limit?: number): Promise<ZeroPromptQueueSnapshot>;
-  transaction<T>(operation: (tx: ZeroPromptQueuePersistenceTransaction) => Promise<T>): Promise<T>;
+  transaction<T>(
+    operation: (tx: ZeroPromptQueuePersistenceTransaction) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T>;
 }
 
 type QueueRow = {
@@ -306,30 +309,60 @@ export function createPostgresZeroPromptQueueDriver(
         throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
       }
     },
-    async transaction(operation) {
+    async transaction(operation, signal) {
       const client = await connect().catch(() => {
         throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
       });
+      let released = false;
+      const release = (destroy = false) => {
+        if (released) return;
+        released = true;
+        client.release(destroy);
+      };
+      const abort = () => release(true);
+      const assertActive = () => {
+        if (signal?.aborted) {
+          throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
+        }
+      };
+      if (signal?.aborted) {
+        release(true);
+        throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
+      }
+      signal?.addEventListener("abort", abort, { once: true });
       try {
+        assertActive();
         await client.query("BEGIN");
+        assertActive();
         const tx: ZeroPromptQueuePersistenceTransaction = {
           async readProject(projectId) {
+            assertActive();
             positiveProjectId(projectId);
             await client.query("SELECT pg_advisory_xact_lock($1)", [projectId]);
-            return readProjectRows(client, projectId, true);
+            assertActive();
+            const snapshot = await readProjectRows(client, projectId, true);
+            assertActive();
+            return snapshot;
           },
-          persistMutation(projectId, mutation, result) {
-            return persistSnapshot(client, projectId, mutation, result);
+          async persistMutation(projectId, mutation, result) {
+            assertActive();
+            const writes = await persistSnapshot(client, projectId, mutation, result);
+            assertActive();
+            return writes;
           },
-          appendProvenance(projectId, event, references) {
-            return appendQueueProvenance(client, projectId, event, references);
+          async appendProvenance(projectId, event, references) {
+            assertActive();
+            const writes = await appendQueueProvenance(client, projectId, event, references);
+            assertActive();
+            return writes;
           },
         };
         const value = await operation(tx);
+        assertActive();
         await client.query("COMMIT");
         return value;
       } catch (error) {
-        await client.query("ROLLBACK").catch(() => undefined);
+        if (!released) await client.query("ROLLBACK").catch(() => undefined);
         if (
           error instanceof ZeroPromptQueueError ||
           error instanceof ZeroPromptQueuePersistenceError
@@ -338,7 +371,8 @@ export function createPostgresZeroPromptQueueDriver(
         }
         throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
       } finally {
-        client.release();
+        signal?.removeEventListener("abort", abort);
+        release();
       }
     },
   };
@@ -393,13 +427,15 @@ export class ZeroPromptQueueStore {
   promoteNext(
     projectId: number,
     mutation: Extract<ZeroPromptQueueMutation, { kind: "promote-next" }>,
+    signal?: AbortSignal,
   ): Promise<ZeroPromptQueueMutationResult> {
-    return this.mutate(projectId, mutation);
+    return this.mutate(projectId, mutation, signal);
   }
 
   private async mutate(
     projectId: number,
     mutation: ZeroPromptQueueMutation,
+    signal?: AbortSignal,
   ): Promise<ZeroPromptQueueMutationResult> {
     positiveProjectId(projectId);
     return this.driver.transaction(async (tx) => {
@@ -419,6 +455,6 @@ export class ZeroPromptQueueStore {
         throw new ZeroPromptQueuePersistenceError("queue_persistence_write_bound_exceeded");
       }
       return result;
-    });
+    }, signal);
   }
 }
