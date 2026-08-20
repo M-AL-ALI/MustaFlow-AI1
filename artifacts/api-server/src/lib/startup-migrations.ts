@@ -121,7 +121,7 @@ export async function applyKnowledgeProvenanceMigration(client: MigrationClient)
     client,
     "knowledge_provenance_events",
     "knowledge_provenance_events_project_fk",
-    "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+    "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL",
   );
   await addNotValidForeignKey(
     client,

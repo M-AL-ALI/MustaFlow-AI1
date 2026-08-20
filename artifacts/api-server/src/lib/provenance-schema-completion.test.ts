@@ -125,8 +125,15 @@ describe("Zero provenance schema completion", () => {
     const migration = source("./startup-migrations.ts");
     expect(migration).toContain("knowledge_provenance_events_entry_fk");
     expect(migration).toContain("knowledge_provenance_events_project_fk");
-    expect(migration.match(/ON DELETE CASCADE/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    expect(migration.match(/ON DELETE SET NULL/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
+    expect(migration).toContain(
+      "FOREIGN KEY (knowledge_entry_id) REFERENCES knowledge_entries(id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL",
+    );
+    expect(source("../../../../lib/db/src/schema/knowledge-provenance-events.ts")).toContain(
+      'onDelete: "set null"',
+    );
     expect(migration).not.toContain("VALIDATE CONSTRAINT");
   });
 });

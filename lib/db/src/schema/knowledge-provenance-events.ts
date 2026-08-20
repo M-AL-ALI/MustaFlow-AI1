@@ -20,7 +20,7 @@ export const knowledgeProvenanceEventsTable = pgTable(
       .references(() => knowledgeEntriesTable.id, { onDelete: "cascade" }),
     outcome: text("outcome").$type<"inserted" | "reinforced">().notNull(),
     projectId: integer("project_id").references(() => projectsTable.id, {
-      onDelete: "cascade",
+      onDelete: "set null",
     }),
     sourceMessageStartId: integer("source_message_start_id").references(
       () => chatMessagesTable.id,
