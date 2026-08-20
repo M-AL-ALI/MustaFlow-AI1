@@ -48,7 +48,7 @@ describe("Zero memory truth registry", () => {
       expect(contract.consumers.length).toBeGreaterThan(0);
       expect(contract.scopes.length).toBeGreaterThan(0);
       expect(contract.currentVersionBinding.length).toBeGreaterThan(0);
-      expect(contract.reconciliationCapability).toBe("not-supported");
+      expect(contract.reconciliationCapability).toBe("read-only");
       if (contract.currentProvenance === "complete") {
         expect(contract.missingProvenance).toEqual([]);
       } else {
@@ -84,6 +84,9 @@ describe("Zero memory truth registry", () => {
       provenanceStatus: "complete",
       versionBinding: "exact-version",
     });
+    expect(inventory.every(({ reconciliationStatus }) => reconciliationStatus === "not-run")).toBe(
+      true,
+    );
   });
 
   it("is order-independent and changes identity when public metadata changes", () => {
