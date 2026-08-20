@@ -7,6 +7,7 @@ import {
   taskActivityForEvent,
   type InlineActivityEntry,
 } from "./inline-activity-stream";
+import { InlineNarrationStream } from "./inline-narration-stream";
 
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -93,7 +94,7 @@ describe("taskActivityForEvent", () => {
 });
 
 describe("InlineActivityStream", () => {
-  it("pulses the real active state and turns resolved states into checks", () => {
+  it("pulses the real active state without inventing past-tense labels", () => {
     const entries = [
       taskActivityForEvent(1, "reading_files"),
       taskActivityForEvent(2, "planning"),
@@ -104,14 +105,113 @@ describe("InlineActivityStream", () => {
 
     const rows = screen.getAllByTestId("inline-activity-row");
     expect(rows[0]).toHaveAttribute("data-active", "false");
-    expect(rows[0]).toHaveTextContent("Read your project");
-    expect(rows[1]).toHaveTextContent("Planned the change");
+    expect(rows[0]).toHaveTextContent("Reading your project");
+    expect(rows[1]).toHaveTextContent("Planning");
     expect(rows[2]).toHaveAttribute("data-active", "true");
     expect(rows[2]).toHaveTextContent("Writing code");
     expect(screen.getAllByTestId("resolved-activity-icon")).toHaveLength(2);
     expect(screen.getByTestId("active-activity-icon")).toHaveClass("motion-safe:animate-pulse");
     expect(screen.getByTestId("zero-avatar")).toHaveAttribute("aria-label", "Zero");
     expect(screen.getByTestId("zero-avatar")).toHaveAttribute("role", "img");
+  });
+
+  it("uses a persisted result event as completion evidence", () => {
+    const editing = taskActivityForEvent(1, "editing_files");
+    const checkpoint = taskActivityForEvent(2, "saving_version");
+    const committed = taskActivityForEvent(3, "project_files_changed");
+    if (!editing || !checkpoint || !committed) throw new Error("Expected file activity entries");
+    let entries: InlineActivityEntry[] = [];
+    entries = appendActivityEntry(entries, editing);
+    entries = appendActivityEntry(entries, checkpoint);
+    entries = appendActivityEntry(entries, committed);
+
+    render(<InlineActivityStream entries={entries} live />);
+
+    expect(screen.getByText("Wrote the code")).toBeVisible();
+    expect(screen.getByText("Checkpoint saved")).toBeVisible();
+    expect(screen.getByText("Saved the changes")).toBeVisible();
+    expect(entries[0]?.completionEvidence).toEqual({
+      source: "task-event",
+      eventType: "project_files_changed",
+    });
+    expect(entries[1]?.completionEvidence).toEqual({
+      source: "task-event",
+      eventType: "project_files_changed",
+    });
+  });
+
+  it("requires the final command observation before saying a check ran", () => {
+    const running = taskActivityForEvent(
+      1,
+      "command_output",
+      JSON.stringify({ status: "running", runId: "run-1" }),
+    );
+    const finished = taskActivityForEvent(
+      2,
+      "command_output",
+      JSON.stringify({ status: "final", runId: "run-1", exitCode: 1 }),
+    );
+    if (!running || !finished) throw new Error("Expected command activity entries");
+
+    const { rerender } = render(<InlineActivityStream entries={[running]} live />);
+    expect(screen.getByText("Running a check")).toBeVisible();
+    expect(screen.queryByText("Ran the check")).not.toBeInTheDocument();
+
+    rerender(<InlineActivityStream entries={[finished]} live />);
+    expect(screen.getByText("Ran the check")).toBeVisible();
+  });
+
+  it("never claims code was written when the atomic write rolls back", () => {
+    const entries = [
+      taskActivityForEvent(1, "editing_files"),
+      taskActivityForEvent(2, "failed"),
+    ].filter((entry): entry is InlineActivityEntry => entry !== null);
+
+    render(<InlineActivityStream entries={entries} live />);
+
+    expect(screen.getByText("Writing code")).toBeVisible();
+    expect(screen.queryByText("Wrote the code")).not.toBeInTheDocument();
+    expect(screen.getByText("Something needs attention")).toBeVisible();
+  });
+
+  it("never pairs a false checkpoint confirmation with the failure narration", () => {
+    const entries = [
+      taskActivityForEvent(1, "saving_version"),
+      taskActivityForEvent(3, "completed"),
+    ].filter((entry): entry is InlineActivityEntry => entry !== null);
+
+    render(
+      <>
+        <InlineActivityStream entries={entries} live />
+        <InlineNarrationStream
+          entries={[
+            {
+              id: 2,
+              text: "Couldn't save rollback checkpoint — your changes are still applied.",
+            },
+          ]}
+        />
+      </>,
+    );
+
+    expect(screen.getByText("Saving a checkpoint")).toBeVisible();
+    expect(screen.queryByText("Checkpoint saved")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Couldn't save rollback checkpoint — your changes are still applied."),
+    ).toBeVisible();
+  });
+
+  it("does not treat a later terminal as a dropped write confirmation", () => {
+    const entries = [
+      taskActivityForEvent(1, "editing_files"),
+      taskActivityForEvent(3, "completed"),
+    ].filter((entry): entry is InlineActivityEntry => entry !== null);
+
+    render(<InlineActivityStream entries={entries} live />);
+
+    expect(screen.getByText("Writing code")).toBeVisible();
+    expect(screen.queryByText("Wrote the code")).not.toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeVisible();
   });
 
   it("replaces repeated phases and renders terminal completion as a static check", () => {
