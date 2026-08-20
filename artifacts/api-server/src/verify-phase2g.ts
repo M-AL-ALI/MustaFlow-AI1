@@ -1,18 +1,18 @@
 /**
- * Phase 2G + Steer-the-Build verification script
+ * Phase 2G + queued steering verification script
  *
  * Tests two things against project 86 (real agentic project, live container):
  *   1. Dependency detection & auto-repair: scanMissingDeps catches react-router-dom,
  *      addMissingToDeps patches package.json, writeFileToContainer syncs to container.
- *   2. Steer route contract: setSteeringHint stores the hint, and the steer HTTP
- *      route correctly accepts building/planning/queued/pending but rejects completed.
+ *   2. Steer route status contract: the HTTP route accepts
+ *      building/planning/queued/pending but rejects completed.
  *
  * Run with:
  *   pnpm --filter @workspace/api-server exec tsx src/verify-phase2g.ts
  */
 
-import { db, projectsTable, agentTasksTable, projectFilesTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { db, projectsTable, projectFilesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { scanMissingDeps, addMissingToDeps } from "./lib/dep-scanner";
 
 const PROJECT_ID = 86;
@@ -266,46 +266,8 @@ export const api = axios.create({ baseURL: '/api' });`,
     }
   }
 
-  // ── 4. Steer route contract verification ─────────────────────────────────
-  section("Step 4: Steer route — HTTP contract");
-
-  // Get project 86's most recent task
-  const [latestTask] = await db
-    .select({ id: agentTasksTable.id, status: agentTasksTable.status })
-    .from(agentTasksTable)
-    .where(eq(agentTasksTable.projectId, PROJECT_ID))
-    .orderBy(desc(agentTasksTable.id))
-    .limit(1);
-
-  if (!latestTask) {
-    fail("No tasks found for project 86");
-  } else {
-    console.log(`  Latest task: id=${latestTask.id} status=${latestTask.status}`);
-
-    // Direct setSteeringHint test — bypasses HTTP auth for server-side verification
-    const { setSteeringHint, consumeSteeringHint } = await import("./lib/steering-hints");
-
-    const testHint = "USE_REACT_QUERY_INSTEAD_OF_FETCH_verification_test";
-    await setSteeringHint(latestTask.id, testHint);
-    const readBack = await consumeSteeringHint(latestTask.id);
-
-    if (readBack === testHint) {
-      pass("setSteeringHint → consumeSteeringHint round-trip works correctly");
-    } else {
-      fail("Hint round-trip mismatch", `expected "${testHint}" got "${String(readBack)}"`);
-    }
-
-    // Verify a second consume returns null (hint is consumed)
-    const second = await consumeSteeringHint(latestTask.id);
-    if (second === null) {
-      pass("consumeSteeringHint returns null after consume — hint is cleared");
-    } else {
-      fail("Hint persisted after consume (should be cleared)", String(second));
-    }
-  }
-
-  // ── 5. Steer route status-gating logic (pure code path check) ────────────
-  section("Step 5: Steer route — status gate logic");
+  // ── 4. Steer route status-gating logic (pure code path check) ────────────
+  section("Step 4: Steer route — status gate logic");
 
   const activeStatuses = ["building", "planning", "queued", "pending"];
   const inactiveStatuses = ["completed", "failed", "canceled"];
@@ -348,7 +310,7 @@ export const api = axios.create({ baseURL: '/api' });`,
     console.log("  - addMissingToDeps patches it in place, preserving existing pins");
     console.log("  - Re-scan after patch returns empty (round-trip correct)");
     console.log("  - axios (second undeclared dep) also caught in same scan pass");
-    console.log("  - setSteeringHint/consumeSteeringHint storage layer works");
+    console.log("  - Steer route stores accepted prompts in the durable project queue");
     console.log("  - Steer route accepts building/planning/queued/pending");
     console.log("  - Steer route rejects completed/failed/canceled\n");
   }

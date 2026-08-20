@@ -11,6 +11,10 @@ const zeroAgentPanelSource = readFileSync(
   resolve(process.cwd(), "src/pages/projects/components/zero-agent-panel.tsx"),
   "utf8",
 );
+const agentThinkingBubbleSource = readFileSync(
+  resolve(process.cwd(), "src/components/agent-thinking-bubble.tsx"),
+  "utf8",
+);
 
 describe("Zero prompt queue reachability", () => {
   it("keeps an unbroken route-to-drawer path through the real project workspace", () => {
@@ -37,5 +41,27 @@ describe("Zero prompt queue reachability", () => {
     );
     expect(zeroAgentPanelSource).toContain("phase={runPhase}");
     expect(zeroAgentPanelSource).toContain("activeTaskId={activeTaskId}");
+  });
+
+  it("keeps the live steering path mounted and reports only a confirmed queue receipt", () => {
+    expect(zeroAgentPanelSource).toContain(
+      'import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";',
+    );
+    expect(zeroAgentPanelSource.match(/<AgentThinkingBubble/g)).toHaveLength(2);
+    expect(agentThinkingBubbleSource).toContain(
+      "<SteeringInput projectId={projectId} taskId={taskId} />",
+    );
+    expect(agentThinkingBubbleSource).toContain(
+      "`/api/projects/${projectId}/tasks/${taskId}/steer`",
+    );
+    expect(agentThinkingBubbleSource).toContain('typeof data?.itemId !== "string"');
+    expect(agentThinkingBubbleSource).toContain("!Number.isSafeInteger(data?.position)");
+    expect(agentThinkingBubbleSource).toContain(
+      "Prompt saved in position {savedPosition}. Zero will apply it at the next safe pause.",
+    );
+    expect(agentThinkingBubbleSource).toContain("{sendError}</span>");
+    expect(agentThinkingBubbleSource).not.toContain(
+      "Hint queued — the agent will apply it on the next step.",
+    );
   });
 });

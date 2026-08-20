@@ -1536,7 +1536,7 @@ function LoopProgressBar({
 function SteeringInput({ projectId, taskId }: { projectId: number; taskId: number }) {
   const [hint, setHint] = useState("");
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [savedPosition, setSavedPosition] = useState<number | null>(null);
   const [sendError, setSendError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1551,12 +1551,22 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hint: trimmed }),
       });
+      const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
+        if (
+          typeof data?.itemId !== "string" ||
+          data.itemId.length === 0 ||
+          !Number.isSafeInteger(data?.position) ||
+          data.position < 1
+        ) {
+          setSendError("The prompt could not be confirmed as saved. Please try again.");
+          setTimeout(() => setSendError(""), 5000);
+          return;
+        }
         setHint("");
-        setSent(true);
-        setTimeout(() => setSent(false), 3000);
+        setSavedPosition(data.position);
+        setTimeout(() => setSavedPosition(null), 5000);
       } else {
-        const data = await resp.json().catch(() => ({}));
         const msg =
           typeof data?.error === "string"
             ? data.error
@@ -1610,10 +1620,10 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
           )}
         </button>
       </div>
-      {sent && (
+      {savedPosition !== null && (
         <div className="px-2 pb-1.5">
           <span className="text-[10px] text-green-400">
-            Hint queued — the agent will apply it on the next step.
+            Prompt saved in position {savedPosition}. Zero will apply it at the next safe pause.
           </span>
         </div>
       )}

@@ -2395,11 +2395,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }),
     );
 
-    // Transitional steering boundary: consume the legacy single slot first,
-    // then promote at most one durable queue item. Both travel through the
-    // exact same model-message and user-narration injection path.
-    if (input.taskId) {
-      const { consumeSteeringHint } = await import("./steering-hints");
+    // Promote at most one durable queued prompt at the declared safe boundary.
+    if (input.taskId && input.queuePromotionActorId) {
       const inject = async (hint: string) => {
         messages.push({
           role: "system",
@@ -2411,18 +2408,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           `Applying your update: "${hint.slice(0, 120)}"`,
         );
       };
-      if (input.queuePromotionActorId) {
-        await applyZeroSteeringAtBoundary({
-          projectId: input.projectId,
-          taskId: input.taskId,
-          actorId: input.queuePromotionActorId,
-          consumeSlot: () => consumeSteeringHint(input.taskId!),
-          inject,
-        });
-      } else {
-        const hint = await consumeSteeringHint(input.taskId);
-        if (hint) await inject(hint);
-      }
+      await applyZeroSteeringAtBoundary({
+        projectId: input.projectId,
+        taskId: input.taskId,
+        actorId: input.queuePromotionActorId,
+        inject,
+      });
     }
 
     await emitZeroRunLoopPhase(input.onEvent, "between_steps");
