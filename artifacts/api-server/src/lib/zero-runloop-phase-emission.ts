@@ -1,10 +1,11 @@
 import {
   ZERO_PROMPT_QUEUE_BOUNDARY_SEMANTICS,
   ZERO_PROMPT_QUEUE_RUN_PHASES,
+  ZERO_RUN_LOOP_PHASE_EVENT_TYPE,
   type ZeroPromptQueueRunPhase,
 } from "./zero-prompt-queue-boundary-contract";
 
-export const ZERO_RUN_LOOP_PHASE_EVENT_TYPE = "loop:phase" as const;
+export { ZERO_RUN_LOOP_PHASE_EVENT_TYPE } from "./zero-prompt-queue-boundary-contract";
 
 /**
  * Phase observations normally persist in a single local database call. A 250 ms

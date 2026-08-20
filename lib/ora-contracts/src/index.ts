@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./zero-prompt-queue-boundary";
+
 /* ── Legal sections ─────────────────────────────────────────────────────────
  * Single source of truth for the "Legal & Privacy" disclosure shown on both
  * the mobile app (LegalPrivacyModal) and the web app (Settings → Privacy tab).

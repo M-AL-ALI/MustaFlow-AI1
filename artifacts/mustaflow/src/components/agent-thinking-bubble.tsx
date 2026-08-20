@@ -54,6 +54,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { collapseQATapeEvents, parseQACardEvent, type QACardPayload } from "@/lib/qa-video-tape";
+import {
+  ZERO_RUN_LOOP_PHASE_EVENT_TYPE,
+  parseZeroRunLoopPhaseEvent,
+  type ZeroPromptQueueObservedPhase,
+} from "@workspace/ora-contracts";
 
 type StepEvent = {
   id: number;
@@ -1870,6 +1875,7 @@ interface Props {
   onDismiss: () => void;
   onViewHistory?: (versionId: number) => void;
   onConnectionChange?: (connected: boolean) => void;
+  onRunPhaseChange?: (phase: ZeroPromptQueueObservedPhase | null) => void;
   /** When false, suppress the auto-scroll triggered by new events so the user
    *  can read earlier messages without the view jumping back down. */
   isAtBottom?: boolean;
@@ -1882,6 +1888,7 @@ export function AgentThinkingBubble({
   onDismiss,
   onViewHistory,
   onConnectionChange,
+  onRunPhaseChange,
   isAtBottom = true,
 }: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -1898,6 +1905,18 @@ export function AgentThinkingBubble({
   const forceStartTask = useForceStartTask();
 
   const { events, lastEventAt, isConnected } = useTaskEventStream(projectId, taskId);
+
+  useEffect(() => {
+    let observed: ZeroPromptQueueObservedPhase | null = null;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.eventType === ZERO_RUN_LOOP_PHASE_EVENT_TYPE) {
+        observed = parseZeroRunLoopPhaseEvent(event.message);
+        break;
+      }
+    }
+    onRunPhaseChange?.(observed);
+  }, [events, onRunPhaseChange]);
 
   const onConnectionChangeRef = useRef(onConnectionChange);
   onConnectionChangeRef.current = onConnectionChange;
