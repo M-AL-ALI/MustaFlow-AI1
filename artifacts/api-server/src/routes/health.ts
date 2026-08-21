@@ -22,16 +22,13 @@ router.get("/healthz", (_req, res) => {
         ? "ok"
         : "error";
   const data = HealthCheckResponse.parse({
-    status: runtimeConfiguration.status === "partial-config" ? "partial-config" : "ok",
+    status: runtimeConfiguration.status === "partial-config" ? "degraded" : "ok",
     containerSubsystem: subsystem ?? "unknown",
     encryptionKey: getEncryptionKeyStatus(),
     startupMigrations: startup.migrations,
     queueSchemaContract: queueSchemaContractStatus,
-    ...(runtimeConfiguration.status === "partial-config"
-      ? { missingRuntimeBindings: runtimeConfiguration.missingBindings }
-      : {}),
   });
-  res.status(runtimeConfiguration.status === "partial-config" ? 503 : 200).json(data);
+  res.status(200).json(data);
 });
 
 export default router;
