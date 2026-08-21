@@ -11,7 +11,7 @@ describe("authorization lockdown: v1 project access", () => {
   });
 
   it("rechecks a project-scoped PAT owner's live access on every call", async () => {
-    mocks.checkProjectAccess.mockResolvedValueOnce("granted").mockResolvedValueOnce("denied");
+    mocks.checkProjectAccess.mockResolvedValueOnce("granted").mockResolvedValueOnce("not_member");
     const { checkV1ProjectAccess } = await import("../access");
     const req = {
       userId: "pat-owner",

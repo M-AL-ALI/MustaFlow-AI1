@@ -229,7 +229,7 @@ function roleMeets(actual: string, minimum: ProjectRole): boolean {
   return actualRank >= ROLE_RANK[minimum];
 }
 
-export type ProjectAccessDecision = "granted" | "not_found" | "denied";
+export type ProjectAccessDecision = "granted" | "not_found" | "not_member" | "insufficient_role";
 
 /**
  * Canonical project-access predicate for routes whose project id is not named
@@ -249,25 +249,24 @@ export async function checkProjectAccess(
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
+  if (project?.ownerId === userId) return "granted";
+
+  const organizationId = project?.organizationId ?? -1;
+  const [member] = await db
+    .select({ role: orgMembersTable.role })
+    .from(orgMembersTable)
+    .innerJoin(organizationsTable, eq(organizationsTable.id, orgMembersTable.organizationId))
+    .where(
+      and(
+        eq(orgMembersTable.organizationId, organizationId),
+        eq(orgMembersTable.userId, userId),
+        isNull(organizationsTable.deletedAt),
+      ),
+    );
+
   if (!project) return "not_found";
-  if (project.ownerId === userId) return "granted";
-
-  if (project.organizationId != null) {
-    const [member] = await db
-      .select({ role: orgMembersTable.role })
-      .from(orgMembersTable)
-      .innerJoin(organizationsTable, eq(organizationsTable.id, orgMembersTable.organizationId))
-      .where(
-        and(
-          eq(orgMembersTable.organizationId, project.organizationId),
-          eq(orgMembersTable.userId, userId),
-          isNull(organizationsTable.deletedAt),
-        ),
-      );
-    if (member && roleMeets(member.role, minRole)) return "granted";
-  }
-
-  return "denied";
+  if (!member) return "not_member";
+  return roleMeets(member.role, minRole) ? "granted" : "insufficient_role";
 }
 
 /** Return every active project the user may access at the requested role. */
@@ -311,7 +310,7 @@ export function requireProjectAccess(minRole: ProjectRole = "viewer"): RequestHa
       return;
     }
     const decision = await checkProjectAccess(req.userId, projectId, minRole);
-    if (decision === "not_found") {
+    if (decision === "not_found" || decision === "not_member") {
       res.status(404).json({ error: "Project not found" });
       return;
     }
@@ -319,6 +318,8 @@ export function requireProjectAccess(minRole: ProjectRole = "viewer"): RequestHa
       next();
       return;
     }
-    res.status(403).json({ error: "You do not have access to this project" });
+    res
+      .status(403)
+      .json({ error: "Your role does not allow this action. Ask a project admin for access." });
   };
 }

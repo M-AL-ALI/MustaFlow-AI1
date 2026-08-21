@@ -47,7 +47,7 @@ describe("authorization lockdown: data routes reject hostile resource identifier
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectedRows = [];
-    mocks.checkProjectAccess.mockResolvedValue("denied");
+    mocks.checkProjectAccess.mockResolvedValue("not_member");
     mocks.listAccessibleProjectIds.mockResolvedValue([]);
   });
 
