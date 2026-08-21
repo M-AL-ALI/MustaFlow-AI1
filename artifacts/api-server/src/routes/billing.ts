@@ -39,6 +39,7 @@ import {
   TIER_ORA_REALTIME_LIMIT_SECONDS,
 } from "@workspace/db";
 import type { SubscriptionTier } from "@workspace/db";
+import { billingProviderErrorMessage } from "@workspace/ora-contracts";
 import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
@@ -1459,8 +1460,7 @@ router.post("/billing/cancel-subscription", async (req, res): Promise<void> => {
       .where(eq(userSubscriptionsTable.userId, userId));
     res.json({ ok: true, cancelAtPeriodEnd: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unexpected error";
-    res.status(502).json({ error: `Stripe error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 
@@ -1496,8 +1496,7 @@ router.post("/billing/portal", async (req, res): Promise<void> => {
     });
     res.json({ url: session.url });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unexpected error";
-    res.status(502).json({ error: `Stripe error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 
@@ -1619,7 +1618,7 @@ router.post("/billing/payment-method/setup", async (req, res): Promise<void> => 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
     if (/api key|authentication/i.test(msg)) invalidateStripeCredentialCache();
-    res.status(502).json({ error: `Stripe error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 
@@ -1886,7 +1885,7 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
     if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
-    res.status(502).json({ error: `Stripe API error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 
@@ -2036,7 +2035,7 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unexpected error";
       if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
-      res.status(502).json({ error: `Stripe API error: ${msg}` });
+      res.status(502).json({ error: billingProviderErrorMessage(err) });
     }
     return;
   }
@@ -2183,7 +2182,7 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     if (/api key|authentication|invalid_api_key/i.test(msg)) {
       invalidateStripeCredentialCache();
     }
-    res.status(502).json({ error: `Stripe API error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 // POST /api/billing/subscription/portal — create a Stripe Billing Portal session
@@ -2267,7 +2266,7 @@ router.post("/billing/subscription/portal", async (req, res): Promise<void> => {
     if (/api key|authentication|invalid_api_key/i.test(msg)) {
       invalidateStripeCredentialCache();
     }
-    res.status(502).json({ error: `Stripe API error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 

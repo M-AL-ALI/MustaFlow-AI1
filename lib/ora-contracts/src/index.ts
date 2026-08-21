@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./zero-prompt-queue-boundary";
+export * from "./billing-user-errors";
 
 /* ── Legal sections ─────────────────────────────────────────────────────────
  * Single source of truth for the "Legal & Privacy" disclosure shown on both

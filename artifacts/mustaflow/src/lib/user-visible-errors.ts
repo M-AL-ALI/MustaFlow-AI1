@@ -1,3 +1,8 @@
+import {
+  BILLING_USER_ERROR_FALLBACK,
+  BILLING_USER_VISIBLE_MESSAGES,
+} from "@workspace/ora-contracts";
+
 export const BUILD_FAILURE_FALLBACK_ERROR = "I couldn't finish this step. Please try again.";
 export const APPLY_FAILURE_FALLBACK_ERROR =
   "Your changes could not be applied. Nothing was changed; please try again.";
@@ -29,6 +34,8 @@ const USER_VISIBLE_BUILD_PREFIXES: readonly string[] = [
   "Lint check exited with code ",
   "Build check exited with code ",
 ];
+
+const USER_VISIBLE_BILLING_MESSAGES = new Set<string>(BILLING_USER_VISIBLE_MESSAGES);
 
 type UserVisibleErrorPolicy = {
   fallback: string;
@@ -80,5 +87,15 @@ export function selectBuildFailureError(
     fallback,
     allowedMessages: USER_VISIBLE_BUILD_MESSAGES,
     allowedPrefixes: USER_VISIBLE_BUILD_PREFIXES,
+  });
+}
+
+export function selectBillingFailureError(
+  value: unknown,
+  fallback = BILLING_USER_ERROR_FALLBACK,
+): string {
+  return selectUserVisibleError(value, {
+    fallback,
+    allowedMessages: USER_VISIBLE_BILLING_MESSAGES,
   });
 }

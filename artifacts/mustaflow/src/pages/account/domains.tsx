@@ -45,6 +45,7 @@ import {
   type DomainSearchResult,
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { selectBillingFailureError } from "@/lib/user-visible-errors";
 
 type DomainStatus =
   | "active"
@@ -62,6 +63,11 @@ function errorMessage(err: unknown, fallback: string): string {
   }
   if (err instanceof Error) return err.message;
   return fallback;
+}
+
+function billingErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return selectBillingFailureError(err.data, fallback);
+  return selectBillingFailureError(err, fallback);
 }
 
 function statusBadge(status: DomainStatus | string) {
@@ -162,7 +168,7 @@ function DomainSearchPanel({ onPurchased }: { onPurchased: () => void }) {
     } catch (err) {
       toast({
         title: "Purchase failed",
-        description: errorMessage(err, "Could not initiate checkout."),
+        description: billingErrorMessage(err, "Could not initiate checkout."),
         variant: "destructive",
       });
     } finally {
@@ -311,7 +317,7 @@ function TransferInPanel({ onTransferred }: { onTransferred: () => void }) {
     } catch (err) {
       toast({
         title: "Transfer failed",
-        description: errorMessage(err, "Could not initiate transfer."),
+        description: billingErrorMessage(err, "Could not initiate transfer."),
         variant: "destructive",
       });
     }
@@ -524,7 +530,7 @@ function DomainRow({ domain, onRefresh }: { domain: PurchasedDomain; onRefresh: 
     } catch (err) {
       toast({
         title: "Renewal failed",
-        description: errorMessage(err, ""),
+        description: billingErrorMessage(err, "Could not initiate renewal."),
         variant: "destructive",
       });
     }
@@ -881,7 +887,7 @@ export default function MyDomainsPage() {
         .catch((err: unknown) => {
           toast({
             title: "Registration issue",
-            description: errorMessage(err, "Your domain has been registered."),
+            description: billingErrorMessage(err, "Could not confirm the domain purchase."),
             variant: "destructive",
           });
         });
@@ -931,7 +937,7 @@ export default function MyDomainsPage() {
         .catch((err: unknown) => {
           toast({
             title: "Transfer issue",
-            description: errorMessage(err, "Domain transfer is in progress."),
+            description: billingErrorMessage(err, "Could not confirm the domain transfer."),
             variant: "destructive",
           });
         });
