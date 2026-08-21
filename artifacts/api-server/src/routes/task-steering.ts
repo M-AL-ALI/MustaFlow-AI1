@@ -48,7 +48,7 @@ function acceptedItem(
   const item = result.snapshot.items.find(
     (candidate) => candidate.id === itemId && candidate.state === "queued",
   );
-  if (!item) {
+  if (!item || item.position === null) {
     throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
   }
   return { itemId: item.id, position: item.position };
