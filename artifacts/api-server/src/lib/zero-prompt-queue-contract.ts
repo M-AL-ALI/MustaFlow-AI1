@@ -59,15 +59,29 @@ export type ZeroPromptQueueTerminalEvidence =
       occurredAt: string;
     };
 
-export type ZeroPromptQueueItem = {
+type ZeroPromptQueueItemBase = {
   id: string;
   projectId: string;
-  position: number;
   currentText: string;
-  state: ZeroPromptQueueItemState;
   references: readonly ZeroPromptQueueReference[];
-  terminalEvidence: ZeroPromptQueueTerminalEvidence | null;
 };
+
+export type ZeroPromptQueueItem =
+  | (ZeroPromptQueueItemBase & {
+      position: number;
+      state: "queued";
+      terminalEvidence: null;
+    })
+  | (ZeroPromptQueueItemBase & {
+      position: number | null;
+      state: "promoted";
+      terminalEvidence: Extract<ZeroPromptQueueTerminalEvidence, { kind: "promoted" }>;
+    })
+  | (ZeroPromptQueueItemBase & {
+      position: number | null;
+      state: "deleted";
+      terminalEvidence: Extract<ZeroPromptQueueTerminalEvidence, { kind: "deleted" }>;
+    });
 
 export type ZeroPromptQueueSnapshot = {
   semantics: typeof ZERO_PROMPT_QUEUE_SEMANTICS;

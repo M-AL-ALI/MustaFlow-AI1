@@ -120,7 +120,16 @@ describe("zero prompt queue safe boundaries", () => {
   });
 
   it("rejects terminal items and invalid positions with typed errors", () => {
-    const terminal = { ...queued("item-1", 1), state: "deleted" as const };
+    const terminal: ZeroPromptQueueItem = {
+      ...queued("item-1", 1),
+      state: "deleted",
+      terminalEvidence: {
+        kind: "deleted",
+        deletedBy: "owner-user",
+        provenanceEventId: "event-1",
+        occurredAt: "2026-08-20T00:00:00.000Z",
+      },
+    };
     expect(() =>
       planPromptQueueLandings({ currentPhase: "between_steps", items: [terminal] }),
     ).toThrowError(expect.objectContaining({ code: "queue_boundary_item_not_queued" }));
