@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { extractRouteHandler } from "./source-ast-test-helper";
 
 interface StoredFile {
   id: number;
@@ -244,9 +245,10 @@ describe("atomic canvas variant graduation", () => {
 
   it("routes the canvas graduation caller through the bounded transaction", () => {
     const source = readFileSync(new URL("../routes/canvas.ts", import.meta.url), "utf8");
-    const graduationRoute = source.slice(
-      source.indexOf('"/projects/:id/canvas/variants/:vid/graduate"'),
-      source.indexOf("// ── POST /api/projects/:id/canvas/extract"),
+    const graduationRoute = extractRouteHandler(
+      source,
+      "post",
+      "/projects/:id/canvas/variants/:vid/graduate",
     );
 
     expect(graduationRoute).toContain("await graduateCanvasVariantAtomically({");
