@@ -26,6 +26,7 @@ import {
   isPreviewSubdomainHost,
 } from "./middlewares/previewSubdomainGateway";
 import { runStartupMigrations } from "./lib/startup-migrations";
+import { startupHealthState } from "./lib/startup-health-state";
 import { isOraSecretConfigured } from "./lib/public-ai/session";
 import { initSpendLedger } from "./lib/public-ai/ora-spend-cap";
 import { startWorkspaceSweeper } from "./lib/public-ai/repo-workspace";
@@ -305,8 +306,12 @@ server.listen(port, (err?: Error) => {
 // Task #1194 — After migrations, run the container subsystem self-check to
 // verify Fly.io exec connectivity.
 void runStartupMigrations()
+  .then((result) => {
+    startupHealthState.recordMigrations(result.failed === 0 ? "ok" : "error");
+  })
   .catch((err) => {
     // Non-fatal: log and continue — a partial schema is better than no server.
+    startupHealthState.recordMigrations("error");
     logger.error({ err }, "startup-migrations: unexpected error (continuing)");
   })
   .then(async () => {

@@ -13,8 +13,10 @@ import * as zod from 'zod';
  */
 export const HealthCheckResponse = zod.object({
   "status": zod.string(),
-  "containerSubsystem": zod.enum(['ok', 'unconfigured', 'error']).optional().describe('Status of the Fly.io container subsystem. \"ok\" = token is configured and API is reachable. \"unconfigured\" = FLY_API_TOKEN is not set (feature disabled, not an error). \"error\" = token is set but API call failed at startup.\n'),
-  "encryptionKey": zod.enum(['ok', 'missing', 'invalid']).optional().describe('Encryption key health. \"ok\" = key is present and AES-256-GCM round-trip passes. \"missing\" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). \"invalid\" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).\n')
+  "containerSubsystem": zod.enum(['unknown', 'ok', 'unconfigured', 'error']).describe('Status of the Fly.io container subsystem. \"unknown\" = the startup check has not completed yet. \"ok\" = token is configured and API is reachable. \"unconfigured\" = FLY_API_TOKEN is not set (feature disabled, not an error). \"error\" = token is set but API call failed at startup.\n'),
+  "encryptionKey": zod.enum(['ok', 'missing', 'invalid']).describe('Encryption key health. \"ok\" = key is present and AES-256-GCM round-trip passes. \"missing\" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). \"invalid\" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).\n'),
+  "startupMigrations": zod.enum(['unknown', 'ok', 'error']).describe('Cached startup-migration state. \"unknown\" = migrations have not completed yet. \"ok\" = every migration passed. \"error\" = one or more migrations failed.\n'),
+  "queueSchemaContract": zod.enum(['unknown', 'ok', 'error']).describe('Cached Zero prompt queue schema-contract state. \"unknown\" = the first verification has not completed yet. \"ok\" = the contract is ready. \"error\" = the contract is unready.\n')
 })
 
 
