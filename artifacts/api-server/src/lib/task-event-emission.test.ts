@@ -107,4 +107,17 @@ describe("bounded task-event emission", () => {
     expect(emitEventSource).toContain('"Task event observation dropped"');
     expect(emitEventSource).not.toContain('"Failed to emit task event"');
   });
+
+  it("routes mobile-settings observations through the same bounded helper", () => {
+    const source = readFileSync(new URL("../routes/mobile-settings.ts", import.meta.url), "utf8");
+    const emitEventSource = source.slice(
+      source.indexOf("async function emitEvent("),
+      source.indexOf("/** Read and parse app.json"),
+    );
+
+    expect(emitEventSource).toContain("await emitTaskEventBounded({");
+    expect(emitEventSource).toContain("persist: async () =>");
+    expect(emitEventSource).toContain('"Mobile-settings task event observation dropped"');
+    expect(emitEventSource).not.toContain('"Failed to emit mobile-settings task event"');
+  });
 });
