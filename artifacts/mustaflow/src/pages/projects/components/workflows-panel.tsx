@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Play, Terminal, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { selectWorkflowFailureError } from "@/lib/user-visible-errors";
 
 interface WorkflowEntry {
   name: string;
@@ -52,7 +53,7 @@ export function WorkflowsPanel({ projectId }: { projectId: number }) {
       );
       const body = (await r.json()) as RunResp | { error: string };
       if (!r.ok || "error" in body) {
-        toast.error("error" in body ? body.error : "Workflow run failed");
+        toast.error(selectWorkflowFailureError(body));
         return;
       }
       setLastResult(body);
@@ -60,7 +61,7 @@ export function WorkflowsPanel({ projectId }: { projectId: number }) {
         `Workflow "${name}" ${body.ok ? "succeeded" : "exited with errors"}`,
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Workflow run failed");
+      toast.error(selectWorkflowFailureError(err));
     } finally {
       setRunning(null);
     }

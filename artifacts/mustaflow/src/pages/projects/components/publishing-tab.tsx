@@ -57,6 +57,7 @@ import { DomainPurchaseWidget } from "./domain-purchase-widget";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
 import { SupportReportLink } from "@/components/support-report-link";
+import { selectGithubFailureError } from "@/lib/user-visible-errors";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -2863,7 +2864,7 @@ function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
       });
       const data = (await res.json()) as { connected?: boolean; error?: string };
       if (!res.ok) {
-        setConnectError(data.error ?? "Connection failed");
+        setConnectError(selectGithubFailureError(data));
       } else {
         setToken("");
         await fetchStatus();

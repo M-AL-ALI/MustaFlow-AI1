@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
+import { selectBlueprintFailureError } from "@/lib/user-visible-errors";
+import { isBlueprintInstallFailureMessage } from "@workspace/ora-contracts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -459,6 +461,10 @@ export function ActivityStream({
             const Icon = meta.icon;
             const isLast = idx === events.length - 1;
             const isActive = isLast && !isTerminal;
+            const message =
+              event.eventType === "failed" && isBlueprintInstallFailureMessage(event.message)
+                ? selectBlueprintFailureError(event.message)
+                : event.message;
             return (
               <div
                 key={event.id}
@@ -481,7 +487,7 @@ export function ActivityStream({
                       isActive ? "text-foreground font-medium" : "text-muted-foreground",
                     )}
                   >
-                    {event.message}
+                    {message}
                   </span>
                   {event.filePath && (
                     <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/50 truncate">
