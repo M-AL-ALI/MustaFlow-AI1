@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
@@ -16,6 +17,7 @@ import { createZeroPromptQueueSnapshot } from "./zero-prompt-queue";
 import {
   ZERO_PROMPT_QUEUE_MAX_WRITE_STATEMENTS,
   ZERO_PROMPT_QUEUE_MAX_READ_ITEMS,
+  createPostgresZeroPromptQueueDriver,
   ZeroPromptQueuePersistenceError,
   ZeroPromptQueueStore,
   type ZeroPromptQueuePersistenceDriver,
@@ -28,12 +30,18 @@ class MemoryQueueDriver implements ZeroPromptQueuePersistenceDriver {
   readonly snapshots = new Map<number, ZeroPromptQueueSnapshot>();
   readonly events: QueueEvent[] = [];
   readCount = 0;
+  pointReadCount = 0;
   writeStatements = 0;
   nextPersistenceStatements = 1;
 
   async readProject(projectId: number): Promise<ZeroPromptQueueSnapshot> {
     this.readCount += 1;
     return this.snapshots.get(projectId) ?? createZeroPromptQueueSnapshot(String(projectId));
+  }
+
+  async readItem(projectId: number, itemId: string) {
+    this.pointReadCount += 1;
+    return this.snapshots.get(projectId)?.items.find((item) => item.id === itemId) ?? null;
   }
 
   async transaction<T>(
@@ -183,9 +191,50 @@ describe("zero prompt queue persistence", () => {
     );
     expect((await store.get(17, "a")).currentText).toBe("Read only");
     expect((await store.list(17)).items).toHaveLength(1);
-    expect(driver.readCount).toBe(2);
+    expect(driver.readCount).toBe(1);
+    expect(driver.pointReadCount).toBe(1);
     expect(driver.writeStatements).toBe(0);
     expect(driver.events).toEqual([]);
+  });
+
+  it("uses one project-and-item point query and preserves terminal provenance", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "terminal-a",
+          project_id: 17,
+          position: 1,
+          current_text: "Completed prompt",
+          state: "promoted",
+          promoted_turn_id: "turn-17",
+          deleted_by: null,
+          provenance_metadata: {
+            semantics: "zero-prompt-queue-v1",
+            eventId: "event-terminal-a",
+            itemId: "terminal-a",
+            occurredAt: "2026-08-20T00:00:00.000Z",
+            type: "queue.item.promoted",
+          },
+        },
+      ],
+    });
+    const driver = createPostgresZeroPromptQueueDriver(undefined, {
+      query: query as unknown as PoolClient["query"],
+    });
+
+    await expect(new ZeroPromptQueueStore(driver).get(17, "terminal-a")).resolves.toMatchObject({
+      id: "terminal-a",
+      terminalEvidence: {
+        kind: "promoted",
+        activeTurnId: "turn-17",
+        provenanceEventId: "event-terminal-a",
+      },
+    });
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [statement, values] = query.mock.calls[0] as [string, readonly unknown[]];
+    expect(statement).toMatch(/WHERE q\.project_id = \$1\s+AND q\.id = \$2\s+LIMIT 1/u);
+    expect(values).toEqual([17, "terminal-a"]);
   });
 
   it("bounds list reads while preserving unbounded transactional snapshots", async () => {
@@ -264,6 +313,7 @@ describe("zero prompt queue persistence", () => {
     );
     expect(production).toContain("FROM zero_prompt_queue_items q");
     expect(production).toContain("WHERE q.project_id = $1");
+    expect(production).toContain("AND q.id = $2");
     expect(production).toContain('const limitClause = limit === undefined ? "" : "LIMIT $2"');
     expect(production).toContain("INSERT INTO project_activity");
     expect(production).not.toContain("zero_prompt_queue_provenance");

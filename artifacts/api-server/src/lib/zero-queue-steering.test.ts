@@ -80,6 +80,10 @@ class RollbackMemoryDriver implements ZeroPromptQueuePersistenceDriver {
     return this.snapshot;
   }
 
+  async readItem() {
+    return null;
+  }
+
   async transaction<T>(
     operation: (tx: ZeroPromptQueuePersistenceTransaction) => Promise<T>,
     signal?: AbortSignal,

@@ -49,6 +49,7 @@ export interface ZeroPromptQueuePersistenceTransaction {
 
 export interface ZeroPromptQueuePersistenceDriver {
   readProject(projectId: number, limit?: number): Promise<ZeroPromptQueueSnapshot>;
+  readItem(projectId: number, itemId: string): Promise<ZeroPromptQueueItem | null>;
   transaction<T>(
     operation: (tx: ZeroPromptQueuePersistenceTransaction) => Promise<T>,
     signal?: AbortSignal,
@@ -194,6 +195,42 @@ async function readProjectRows(
   return createZeroPromptQueueSnapshot(String(projectId), result.rows.map(itemFromRow));
 }
 
+async function readItemRow(
+  client: QueryClient,
+  projectId: number,
+  itemId: string,
+): Promise<ZeroPromptQueueItem | null> {
+  positiveProjectId(projectId);
+  const result = await client.query<QueueRow>(
+    `
+    SELECT q.id,
+           q.project_id,
+           q.position,
+           q.current_text,
+           q.state,
+           q.promoted_turn_id,
+           q.deleted_by,
+           activity.metadata AS provenance_metadata
+      FROM zero_prompt_queue_items q
+      LEFT JOIN LATERAL (
+        SELECT pa.metadata
+          FROM project_activity pa
+         WHERE pa.project_id = q.project_id
+           AND pa.event_type LIKE 'queue.item.%'
+           AND pa.metadata ->> 'itemId' = q.id
+         ORDER BY pa.created_at DESC, pa.id DESC
+         LIMIT 1
+      ) activity ON TRUE
+     WHERE q.project_id = $1
+       AND q.id = $2
+     LIMIT 1
+  `,
+    [projectId, itemId],
+  );
+  const row = result.rows[0];
+  return row ? itemFromRow(row) : null;
+}
+
 function terminalColumns(item: ZeroPromptQueueItem): {
   promotedTurnId: string | null;
   deletedBy: string | null;
@@ -294,11 +331,25 @@ async function appendQueueProvenance(
 
 export function createPostgresZeroPromptQueueDriver(
   connect: ConnectionFactory = () => pool.connect(),
+  queryClient: QueryClient = pool,
 ): ZeroPromptQueuePersistenceDriver {
   return {
     async readProject(projectId, limit) {
       try {
-        return await readProjectRows(pool, projectId, false, limit);
+        return await readProjectRows(queryClient, projectId, false, limit);
+      } catch (error) {
+        if (
+          error instanceof ZeroPromptQueueError ||
+          error instanceof ZeroPromptQueuePersistenceError
+        ) {
+          throw error;
+        }
+        throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
+      }
+    },
+    async readItem(projectId, itemId) {
+      try {
+        return await readItemRow(queryClient, projectId, itemId);
       } catch (error) {
         if (
           error instanceof ZeroPromptQueueError ||
@@ -390,8 +441,8 @@ export class ZeroPromptQueueStore {
   }
 
   async get(projectId: number, itemId: string): Promise<ZeroPromptQueueItem> {
-    const snapshot = await this.list(projectId);
-    const item = snapshot.items.find((candidate) => candidate.id === itemId);
+    positiveProjectId(projectId);
+    const item = await this.driver.readItem(projectId, itemId);
     if (!item) throw new ZeroPromptQueueError("queue_item_not_found");
     return item;
   }
