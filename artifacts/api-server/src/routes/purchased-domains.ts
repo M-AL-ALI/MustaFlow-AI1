@@ -17,6 +17,7 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { db, purchasedDomainsTable, projectDomainsTable, projectsTable } from "@workspace/db";
+import { billingProviderErrorMessage } from "@workspace/ora-contracts";
 import { isNull } from "drizzle-orm";
 import {
   namecheapEnabled,
@@ -407,7 +408,7 @@ router.post("/domains/purchase", async (req, res): Promise<void> => {
     if (/api key|authentication|invalid_api_key/i.test(msg)) {
       invalidateStripeCredentialCache();
     }
-    res.status(502).json({ error: `Payment error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 
@@ -524,8 +525,7 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
       pricePaidUsd = String(pi.amount / 100);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown";
-    res.status(502).json({ error: `Stripe error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
     return;
   }
 
@@ -838,7 +838,7 @@ router.post("/domains/transfer-in", async (req, res): Promise<void> => {
     if (/api key|authentication|invalid_api_key/i.test(msg)) {
       invalidateStripeCredentialCache();
     }
-    res.status(502).json({ error: `Payment error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 
@@ -956,8 +956,7 @@ router.post("/domains/transfer-in/confirm", async (req, res): Promise<void> => {
       pricePaidUsd = String(pi.amount / 100);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown";
-    res.status(502).json({ error: `Stripe error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
     return;
   }
 
@@ -1230,7 +1229,7 @@ router.post("/domains/purchased/:id/renew", async (req, res): Promise<void> => {
     if (/api key|authentication|invalid_api_key/i.test(msg)) {
       invalidateStripeCredentialCache();
     }
-    res.status(502).json({ error: `Payment error: ${msg}` });
+    res.status(502).json({ error: billingProviderErrorMessage(err) });
   }
 });
 

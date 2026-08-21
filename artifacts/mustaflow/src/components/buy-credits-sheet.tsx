@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
+import { selectBillingFailureError } from "@/lib/user-visible-errors";
 import {
   BUILDER_AGENT_MODES,
   BuilderModeIcon,
@@ -103,7 +104,7 @@ export function BuyCreditsSheet({
       } else if (data.error) {
         toast({
           title: "Checkout error",
-          description: data.error,
+          description: selectBillingFailureError(data),
           variant: "destructive",
         });
       }

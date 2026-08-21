@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { Link, useSearch } from "wouter";
 import { BuilderCreditCostList } from "@/components/billing/builder-credit-cost-list";
 import { SupportErrorMessage } from "@/components/support-report-link";
+import { selectBillingFailureError } from "@/lib/user-visible-errors";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -251,7 +252,7 @@ export default function BillingPage() {
       } else if (data.error) {
         toast({
           title: "Could not open billing portal",
-          description: data.error,
+          description: selectBillingFailureError(data),
           variant: "destructive",
         });
       }
@@ -312,7 +313,11 @@ export default function BillingPage() {
       }
       if (data.checkoutUrl) window.location.href = data.checkoutUrl;
       else if (data.error)
-        toast({ title: "Checkout error", description: data.error, variant: "destructive" });
+        toast({
+          title: "Checkout error",
+          description: selectBillingFailureError(data),
+          variant: "destructive",
+        });
     } catch {
       toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });
     } finally {
@@ -341,14 +346,18 @@ export default function BillingPage() {
       if (data.setupRequired) {
         toast({
           title: "Subscriptions not configured",
-          description: data.message ?? data.error ?? "Contact your administrator.",
+          description: data.message ?? "Contact your administrator.",
           variant: "destructive",
         });
         return;
       }
       if (data.checkoutUrl) window.location.href = data.checkoutUrl;
       else if (data.error)
-        toast({ title: "Subscribe error", description: data.error, variant: "destructive" });
+        toast({
+          title: "Subscribe error",
+          description: selectBillingFailureError(data),
+          variant: "destructive",
+        });
     } catch {
       toast({
         title: "Subscribe failed",
@@ -378,7 +387,7 @@ export default function BillingPage() {
         const d = (await res.json()) as { error?: string };
         toast({
           title: "Error",
-          description: d.error ?? "Failed to cancel",
+          description: selectBillingFailureError(d, "Failed to cancel"),
           variant: "destructive",
         });
       }
@@ -403,7 +412,9 @@ export default function BillingPage() {
         toast({
           title: "Portal unavailable",
           description: (
-            <SupportErrorMessage message={data.error ?? "The billing portal is unavailable."} />
+            <SupportErrorMessage
+              message={selectBillingFailureError(data, "The billing portal is unavailable.")}
+            />
           ),
           variant: "destructive",
         });
@@ -659,7 +670,7 @@ function SuperuserPlanSwitcher({ workspaceId }: { workspaceId?: number }) {
       } else {
         toast({
           title: "Could not switch plan",
-          description: data.error ?? "Please try again.",
+          description: selectBillingFailureError(data, "Please try again."),
           variant: "destructive",
         });
       }

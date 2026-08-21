@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from "@/lib/auth-state-context";
 import { MobileAppBanner } from "@/components/mobile-app-banner";
 import { nabuflowLadderLines } from "@/lib/nabuflow-billing";
+import { selectBillingFailureError } from "@/lib/user-visible-errors";
 
 // Ora-only plan tier (mirrors the server's ORA_TIERS_META / OpenAPI OraTierMeta).
 // Contains ONLY Ora features — never AI Builder credits, concurrent builds,
@@ -446,7 +447,11 @@ export default function PricingPage() {
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else if (data.error) {
-        toast({ title: "Checkout error", description: data.error, variant: "destructive" });
+        toast({
+          title: "Checkout error",
+          description: selectBillingFailureError(data),
+          variant: "destructive",
+        });
       }
     } catch {
       toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });

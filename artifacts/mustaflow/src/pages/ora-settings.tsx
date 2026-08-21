@@ -67,6 +67,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { cn } from "@/lib/utils";
 import { authFetch } from "@/lib/api-fetch";
+import { selectBillingFailureError } from "@/lib/user-visible-errors";
 
 function SectionCard({
   icon: Icon,
@@ -1468,7 +1469,9 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
       }
       toast({
         title: data.setupRequired ? "Ora plans are not configured" : "Could not open checkout",
-        description: data.message ?? data.error ?? "Please try again.",
+        description: data.setupRequired
+          ? (data.message ?? "Please try again.")
+          : selectBillingFailureError(data, "Please try again."),
         variant: "destructive",
       });
     } catch {
@@ -1501,7 +1504,7 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
       }
       toast({
         title: data.setupRequired ? "Ora plans are not configured" : "Could not open plan portal",
-        description: data.error ?? "Please try again.",
+        description: selectBillingFailureError(data, "Please try again."),
         variant: "destructive",
       });
     } catch {
@@ -1534,7 +1537,7 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
       }
       toast({
         title: data.setupRequired ? "Payments are not configured" : "Could not start card setup",
-        description: data.error ?? "Please try again.",
+        description: selectBillingFailureError(data, "Please try again."),
         variant: "destructive",
       });
     } catch {
