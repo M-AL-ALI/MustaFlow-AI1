@@ -221,7 +221,7 @@ router.get(
 );
 
 // Serve a file from a specific version snapshot — used by the variant comparison iframes.
-// Auth-checked: caller must own the project.
+// Auth-checked: caller must have viewer access to the project.
 router.get(
   "/projects/:id/versions/:versionId/preview/{*splat}",
   requireProjectAccess("viewer"),

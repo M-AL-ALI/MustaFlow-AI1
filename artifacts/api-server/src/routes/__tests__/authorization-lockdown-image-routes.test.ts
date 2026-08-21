@@ -45,7 +45,7 @@ function appFor(router: express.Router) {
 describe("authorization lockdown: image project association", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.checkProjectAccess.mockResolvedValue("denied");
+    mocks.checkProjectAccess.mockResolvedValue("not_member");
   });
 
   it("denies POST /images/generate for another user's project", async () => {

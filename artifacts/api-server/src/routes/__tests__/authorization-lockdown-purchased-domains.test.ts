@@ -47,7 +47,7 @@ function appFor(router: express.Router) {
 describe("authorization lockdown: purchased-domain project association", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.checkProjectAccess.mockResolvedValue("denied");
+    mocks.checkProjectAccess.mockResolvedValue("not_member");
   });
 
   it.each([
