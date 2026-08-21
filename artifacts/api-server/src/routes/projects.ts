@@ -1341,7 +1341,7 @@ export default function HomeScreen() {
 // independent from the much larger full-project response.
 router.get(
   "/projects/:id/provision/status",
-  requireProjectAccess,
+  requireProjectAccess("viewer"),
   async (req: import("express").Request, res: import("express").Response): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
