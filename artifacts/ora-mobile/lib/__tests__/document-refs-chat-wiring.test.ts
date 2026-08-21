@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractCallContainingIdentifier,
+  extractNamedDeclaration,
+  extractNamedFunction,
+  extractNamedInterface,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Normalize CRLF so source-string assertions pass on Windows checkouts too
@@ -23,26 +29,19 @@ describe("Mobile Ora — documentRefs ride on every chat path", () => {
   const api = read("../api.ts");
   const types = read("../types.ts");
 
-  // Slice sendMessage's body so assertions target the send paths specifically.
-  const sendStart = index.indexOf("const sendMessage = useCallback(");
-  const sendEnd = index.indexOf("const handleSend = useCallback(");
-  const sendMessageBody = index.slice(sendStart, sendEnd);
+  const sendMessageBody = extractNamedDeclaration(index, "sendMessage", "tsx");
 
   it("ChatRequest declares an optional documentRefs field", () => {
-    const reqStart = types.indexOf("export interface ChatRequest {");
-    expect(reqStart).toBeGreaterThan(-1);
-    const reqEnd = types.indexOf("\n}", reqStart);
-    const reqBody = types.slice(reqStart, reqEnd);
+    const reqBody = extractNamedInterface(types, "ChatRequest");
+    expect(reqBody).toContain("interface ChatRequest");
     expect(reqBody).toContain("documentRefs?: string[]");
   });
 
   it("normal chat request includes documentRefs after an upload", () => {
-    expect(sendStart).toBeGreaterThan(-1);
-    expect(sendEnd).toBeGreaterThan(sendStart);
-    const chatReqStart = sendMessageBody.indexOf("const chatReq: ChatRequest = {");
-    expect(chatReqStart).toBeGreaterThan(-1);
-    const chatReqEnd = sendMessageBody.indexOf("};", chatReqStart);
-    const chatReqBody = sendMessageBody.slice(chatReqStart, chatReqEnd);
+    expect(sendMessageBody).toContain("sendMessage = useCallback");
+    expect(sendMessageBody).not.toContain("handleSend = useCallback");
+    const chatReqBody = extractNamedDeclaration(sendMessageBody, "chatReq", "tsx");
+    expect(chatReqBody).toContain("chatReq: ChatRequest");
     expect(chatReqBody).toContain("documentRefsRef.current.length > 0");
     expect(chatReqBody).toContain("documentRefs: documentRefsRef.current");
   });
@@ -59,31 +58,24 @@ describe("Mobile Ora — documentRefs ride on every chat path", () => {
   });
 
   it("regenerate replays through sendMessage, so refs ride retries too", () => {
-    const regenStart = index.indexOf("const handleRegenerate = useCallback(");
-    expect(regenStart).toBeGreaterThan(-1);
-    const regenEnd = index.indexOf("\n  );", regenStart);
-    const regenBody = index.slice(regenStart, regenEnd);
+    const regenBody = extractNamedDeclaration(index, "handleRegenerate", "tsx");
+    expect(regenBody).toContain("handleRegenerate = useCallback");
     expect(regenBody).toContain("void sendMessage(");
   });
 
   it("explicit file generation sends the stored refs", () => {
-    const genStart = index.indexOf("const handleGenerateFile = useCallback(");
-    expect(genStart).toBeGreaterThan(-1);
-    const genEnd = index.indexOf("\n  );", genStart);
-    const genBody = index.slice(genStart, genEnd);
+    const genBody = extractNamedDeclaration(index, "handleGenerateFile", "tsx");
+    expect(genBody).toContain("handleGenerateFile = useCallback");
     expect(genBody).toContain("documentRefs: documentRefsRef.current");
   });
 
   it("sendChat and streamChatNative serialize the full request body", () => {
     // sendChat POSTs the request object wholesale.
-    const sendChatStart = api.indexOf("export function sendChat(");
-    const sendChatEnd = api.indexOf("\nexport ", sendChatStart + 1);
-    const sendChatBody = api.slice(sendChatStart, sendChatEnd);
+    const sendChatBody = extractNamedFunction(api, "sendChat");
     expect(sendChatBody).toContain("JSON.stringify(req)");
     // streamChatNative serializes the same ChatRequest for the SSE endpoint.
-    const streamStart = api.indexOf("export async function streamChatNative(");
-    expect(streamStart).toBeGreaterThan(-1);
-    const streamBody = api.slice(streamStart, streamStart + 4000);
+    const streamBody = extractNamedFunction(api, "streamChatNative");
+    expect(streamBody).toContain("function streamChatNative");
     expect(streamBody).toContain("req: ChatRequest");
     expect(streamBody).toContain("JSON.stringify(req)");
   });
@@ -99,24 +91,17 @@ describe("Mobile Ora — documentRefs ride on every chat path", () => {
     const clears = index.split("documentRefsRef.current = [];").length - 1;
     expect(clears).toBe(3);
 
-    const fnBody = (anchor: string, endAnchor: string) => {
-      const start = index.indexOf(anchor);
-      expect(start).toBeGreaterThan(-1);
-      const end = index.indexOf(endAnchor, start);
-      expect(end).toBeGreaterThan(start);
-      return index.slice(start, end);
+    const fnBody = (name: string) => {
+      const body = extractNamedDeclaration(index, name, "tsx");
+      expect(body).toContain(`${name} = useCallback`);
+      expect(body).toContain("useCallback");
+      return body;
     };
-    expect(
-      fnBody("const newChat = useCallback(", "const toggleTemporary = useCallback("),
-    ).toContain("documentRefsRef.current = [];");
-    expect(
-      fnBody("const toggleTemporary = useCallback(", "const toggleVoiceResponses = useCallback("),
-    ).toContain("documentRefsRef.current = [];");
-    const loadConvStart = index.indexOf("const loadConversation = useCallback(");
-    expect(loadConvStart).toBeGreaterThan(-1);
-    expect(index.slice(loadConvStart, loadConvStart + 2000)).toContain(
-      "documentRefsRef.current = [];",
-    );
+    expect(fnBody("newChat")).toContain("documentRefsRef.current = [];");
+    expect(fnBody("toggleTemporary")).toContain("documentRefsRef.current = [];");
+    const loadConversation = extractNamedDeclaration(index, "loadConversation", "tsx");
+    expect(loadConversation).toContain("loadConversation = useCallback");
+    expect(loadConversation).toContain("documentRefsRef.current = [];");
 
     // Sending a message must never clear the refs — follow-up turns like
     // "now add a Risk Notes section" still need them.
@@ -146,27 +131,23 @@ describe("Mobile Ora — upload refs persist across app restarts", () => {
   });
 
   it("upload mirrors refs to the persistent cache, skipped in temporary mode", () => {
-    const upStart = index.indexOf("const doUpload = useCallback(");
-    expect(upStart).toBeGreaterThan(-1);
-    const upEnd = index.indexOf("const handleCameraCapture = useCallback(", upStart);
-    const upBody = index.slice(upStart, upEnd);
+    const upBody = extractNamedDeclaration(index, "doUpload", "tsx");
+    expect(upBody).toContain("doUpload = useCallback");
     expect(upBody).toContain("if (!temporaryRef.current) {");
     expect(upBody).toContain("docRefsKey(conversationIdRef.current)");
     expect(upBody).toContain("storeDocumentRefs(");
   });
 
   it("creating a conversation migrates standalone refs to its key", () => {
-    const pStart = index.indexOf("const persist = useCallback(");
-    expect(pStart).toBeGreaterThan(-1);
-    const pBody = index.slice(pStart, pStart + 2500);
+    const pBody = extractNamedDeclaration(index, "persist", "tsx");
+    expect(pBody).toContain("persist = useCallback");
     expect(pBody).toContain("storeDocumentRefs(docRefsKey(convId), documentRefsRef.current);");
     expect(pBody).toContain("storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);");
   });
 
   it("loadConversation hydrates the store and restores that thread's refs", () => {
-    const lcStart = index.indexOf("const loadConversation = useCallback(");
-    expect(lcStart).toBeGreaterThan(-1);
-    const lcBody = index.slice(lcStart, lcStart + 3000);
+    const lcBody = extractNamedDeclaration(index, "loadConversation", "tsx");
+    expect(lcBody).toContain("loadConversation = useCallback");
     // Hydration must complete before the restore read (first read after a
     // cold app start would otherwise see an empty in-memory map).
     expect(lcBody).toContain("loadDocumentRefsStore()");
@@ -174,27 +155,26 @@ describe("Mobile Ora — upload refs persist across app restarts", () => {
   });
 
   it("newChat resets the standalone cache so a blank chat inherits nothing", () => {
-    const ncStart = index.indexOf("const newChat = useCallback(");
-    expect(ncStart).toBeGreaterThan(-1);
-    const ncEnd = index.indexOf("const toggleTemporary = useCallback(", ncStart);
-    const ncBody = index.slice(ncStart, ncEnd);
+    const ncBody = extractNamedDeclaration(index, "newChat", "tsx");
+    expect(ncBody).toContain("newChat = useCallback");
     expect(ncBody).toContain("storeDocumentRefs(DOC_REFS_STANDALONE_KEY, []);");
   });
 
   it("toggleTemporary clears the live refs but never writes the store", () => {
-    const ttStart = index.indexOf("const toggleTemporary = useCallback(");
-    expect(ttStart).toBeGreaterThan(-1);
-    const ttEnd = index.indexOf("const toggleVoiceResponses = useCallback(", ttStart);
-    const ttBody = index.slice(ttStart, ttEnd);
+    const ttBody = extractNamedDeclaration(index, "toggleTemporary", "tsx");
+    expect(ttBody).toContain("toggleTemporary = useCallback");
     expect(ttBody).toContain("documentRefsRef.current = [];");
     expect(ttBody).not.toContain("storeDocumentRefs(");
   });
 
   it("launch effect hydrates the cache and restores standalone refs", () => {
-    const anchor = "Hydrate the persistent upload-ref cache once on launch";
-    const hStart = index.indexOf(anchor);
-    expect(hStart).toBeGreaterThan(-1);
-    const hBody = index.slice(hStart, hStart + 1200);
+    const hBody = extractCallContainingIdentifier(
+      index,
+      "useEffect",
+      "loadDocumentRefsStore",
+      "tsx",
+    );
+    expect(hBody).toContain("useEffect");
     // Phase 4 widened the launch hydration to also load the pending-
     // clarification cache; both stores hydrate before the standalone restore.
     expect(hBody).toContain(

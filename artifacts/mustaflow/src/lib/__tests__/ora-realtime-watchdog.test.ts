@@ -33,6 +33,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractNamedDeclaration,
+  extractSwitchCase,
+} from "../../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -125,10 +129,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // When response.done is dropped, the debounce is the only path that exits
       // "speaking". Without this refresh, the focus window goes stale and the
       // next user utterance is rejected by the focus filter → looks stuck in thinking.
-      const debounceCallbackStart = src.indexOf("outputStopDebounceRef.current = setTimeout");
-      expect(debounceCallbackStart).toBeGreaterThan(-1);
-      const debounceCallbackEnd = src.indexOf("OUTPUT_STOP_DEBOUNCE_MS);", debounceCallbackStart);
-      const debounceBody = src.slice(debounceCallbackStart, debounceCallbackEnd);
+      const debounceBody = extractSwitchCase(src, "output_audio_buffer.stopped");
+      expect(debounceBody).toContain('case "output_audio_buffer.stopped"');
       expect(debounceBody).toContain("lastAcceptedUserTurnAtRef.current = Date.now()");
     });
 
@@ -181,13 +183,10 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
     it("includes handleConnectionDrop in handleServerEvent useCallback deps", () => {
       // The speaking/thinking watchdog callbacks inside handleServerEvent call
       // handleConnectionDrop, so it must be in the deps array.
-      const handleIdx = src.indexOf("const handleServerEvent = useCallback");
-      expect(handleIdx).toBeGreaterThan(-1);
-      const depsIdx = src.indexOf("[", handleIdx);
-      expect(depsIdx).toBeGreaterThan(-1);
-      const depsEndIdx = src.indexOf("],", depsIdx);
-      expect(depsEndIdx).toBeGreaterThan(depsIdx);
-      const deps = src.slice(depsIdx, depsEndIdx);
+      const deps = extractNamedDeclaration(src, "handleServerEvent");
+      expect(deps).toContain("handleServerEvent = useCallback");
+      expect(deps).toContain("[");
+      expect(deps).toContain("]");
       expect(deps).toContain("confirmBargeIn");
       expect(deps).toContain("cancelPendingBargeIn");
       expect(deps).toContain("clearBargeInTimer");
@@ -244,18 +243,14 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
 
     it("arms the silent-start watchdog on the SILENT_AUDIO_START_MS deadline", () => {
       expect(src).toContain("armSilentAudioWatchdog()");
-      const armStart = src.indexOf("const armSilentAudioWatchdog = useCallback");
-      expect(armStart).toBeGreaterThan(-1);
-      const armEnd = src.indexOf("= useCallback", armStart + 50);
-      const armBody = src.slice(armStart, armEnd > armStart ? armEnd : armStart + 700);
+      const armBody = extractNamedDeclaration(src, "armSilentAudioWatchdog");
+      expect(armBody).toContain("armSilentAudioWatchdog = useCallback");
       expect(armBody).toContain("SILENT_AUDIO_START_MS");
     });
 
     it("guards the silent-start watchdog by the response id it was armed for", () => {
-      const armStart = src.indexOf("const armSilentAudioWatchdog = useCallback");
-      expect(armStart).toBeGreaterThan(-1);
-      const armEnd = src.indexOf("= useCallback", armStart + 50);
-      const armBody = src.slice(armStart, armEnd > armStart ? armEnd : armStart + 700);
+      const armBody = extractNamedDeclaration(src, "armSilentAudioWatchdog");
+      expect(armBody).toContain("armSilentAudioWatchdog = useCallback");
       expect(armBody).toContain("armedResponseId");
       expect(armBody).toContain("activeResponseIdRef.current !== armedResponseId");
     });
@@ -276,10 +271,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // ended locally (return to listening). recoverSilentAudio must NOT call the
       // reconnect ladder, so a single silent reply can never end the session before
       // its per-plan time budget is spent.
-      const recStart = src.indexOf("const recoverSilentAudio = useCallback");
-      expect(recStart).toBeGreaterThan(-1);
-      const recEnd = src.indexOf("= useCallback", recStart + 50);
-      const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 1200);
+      const recBody = extractNamedDeclaration(src, "recoverSilentAudio");
+      expect(recBody).toContain("recoverSilentAudio = useCallback");
       expect(recBody).toContain("MAX_SILENT_AUDIO_FAILURES");
       expect(recBody).toContain("silent_audio_recovered_local");
       expect(recBody).not.toContain("handleConnectionDrop");
@@ -288,10 +281,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
     it("routes a genuinely dead audio track to the reconnect ladder from the stall poll", () => {
       // A muted/ended remote track is a real transport failure (not a benign
       // silence), so the stall poll — not recoverSilentAudio — escalates it.
-      const pollStart = src.indexOf("const startAudioStallPoll = useCallback");
-      expect(pollStart).toBeGreaterThan(-1);
-      const pollEnd = src.indexOf("= useCallback", pollStart + 50);
-      const pollBody = src.slice(pollStart, pollEnd > pollStart ? pollEnd : pollStart + 1600);
+      const pollBody = extractNamedDeclaration(src, "startAudioStallPoll");
+      expect(pollBody).toContain("startAudioStallPoll = useCallback");
       expect(pollBody).toContain('handleConnectionDrop("audio_track_dead")');
       expect(pollBody).toContain('recoverSilentAudio("audio_stall")');
     });
@@ -308,9 +299,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // response.done makes the reconnect escalation unreachable for the exact
       // reported symptom (response.done arrives while audio is silent), because
       // every silent turn's incident is wiped before the next turn can accumulate.
-      const blockStart = src.indexOf("Audio-liveness verdict for this turn");
-      expect(blockStart).toBeGreaterThan(-1);
-      const block = src.slice(blockStart, blockStart + 1700);
+      const block = extractSwitchCase(src, "response.done");
+      expect(block).toContain('case "response.done"');
       // The verdict is derived from whether audible audio actually started.
       expect(block).toContain("audioDeliveredThisResponse = audioStartedForResponseRef.current");
       // A response.done with no audible audio counts as a silent-audio failure.
@@ -349,11 +339,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
     });
 
     it("includes the audio-liveness callbacks in handleServerEvent deps", () => {
-      const handleIdx = src.indexOf("const handleServerEvent = useCallback");
-      expect(handleIdx).toBeGreaterThan(-1);
-      const depsIdx = src.indexOf("[", handleIdx);
-      const depsEndIdx = src.indexOf("],", depsIdx);
-      const deps = src.slice(depsIdx, depsEndIdx);
+      const deps = extractNamedDeclaration(src, "handleServerEvent");
+      expect(deps).toContain("handleServerEvent = useCallback");
       expect(deps).toContain("recoverSilentAudio");
       expect(deps).toContain("armSilentAudioWatchdog");
       expect(deps).toContain("startAudioLivenessTracking");
@@ -397,9 +384,7 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
 
     it("both hooks refresh lastAcceptedUserTurnAtRef in the output-stop debounce", () => {
       for (const [_label, src] of hooks) {
-        const debounceCallbackStart = src.indexOf("outputStopDebounceRef.current = setTimeout");
-        const debounceCallbackEnd = src.indexOf("OUTPUT_STOP_DEBOUNCE_MS);", debounceCallbackStart);
-        const debounceBody = src.slice(debounceCallbackStart, debounceCallbackEnd);
+        const debounceBody = extractSwitchCase(src, "output_audio_buffer.stopped");
         expect(debounceBody).toContain("lastAcceptedUserTurnAtRef.current = Date.now()");
       }
     });
@@ -436,19 +421,15 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
 
     it("both hooks recover silent audio locally and escalate only a dead track", () => {
       for (const [_label, src] of hooks) {
-        const recStart = src.indexOf("const recoverSilentAudio = useCallback");
-        expect(recStart).toBeGreaterThan(-1);
-        const recEnd = src.indexOf("= useCallback", recStart + 50);
-        const recBody = src.slice(recStart, recEnd > recStart ? recEnd : recStart + 1200);
+        const recBody = extractNamedDeclaration(src, "recoverSilentAudio");
+        expect(recBody).toContain("recoverSilentAudio = useCallback");
         // Local recovery, never a teardown.
         expect(recBody).toContain("MAX_SILENT_AUDIO_FAILURES");
         expect(recBody).toContain("silent_audio_recovered_local");
         expect(recBody).not.toContain("handleConnectionDrop");
         // The dead-track escalation lives in the stall poll on both surfaces.
-        const pollStart = src.indexOf("const startAudioStallPoll = useCallback");
-        expect(pollStart).toBeGreaterThan(-1);
-        const pollEnd = src.indexOf("= useCallback", pollStart + 50);
-        const pollBody = src.slice(pollStart, pollEnd > pollStart ? pollEnd : pollStart + 1600);
+        const pollBody = extractNamedDeclaration(src, "startAudioStallPoll");
+        expect(pollBody).toContain("startAudioStallPoll = useCallback");
         expect(pollBody).toContain('handleConnectionDrop("audio_track_dead")');
         expect(pollBody).toContain('recoverSilentAudio("audio_stall")');
       }
@@ -456,9 +437,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
 
     it("both hooks count a silent response.done and guard the counter reset", () => {
       for (const [_label, src] of hooks) {
-        const blockStart = src.indexOf("Audio-liveness verdict for this turn");
-        expect(blockStart).toBeGreaterThan(-1);
-        const block = src.slice(blockStart, blockStart + 1700);
+        const block = extractSwitchCase(src, "response.done");
+        expect(block).toContain('case "response.done"');
         expect(block).toContain('recoverSilentAudio("response_done_no_audio")');
         const elseIfIdx = block.indexOf("else if (audioDeliveredThisResponse");
         const resetIdx = block.indexOf("consecutiveSilentAudioRef.current = 0");
@@ -469,9 +449,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
 
     it("both hooks skip the audio-liveness verdict for cancelled/failed responses", () => {
       for (const [_label, src] of hooks) {
-        const blockStart = src.indexOf("Audio-liveness verdict for this turn");
-        expect(blockStart).toBeGreaterThan(-1);
-        const block = src.slice(blockStart, blockStart + 1700);
+        const block = extractSwitchCase(src, "response.done");
+        expect(block).toContain('case "response.done"');
         // Read the server-reported response status and gate the verdict on it.
         expect(block).toContain("const responseStatus = (evt.response");
         expect(block).toContain('responseStatus !== "cancelled"');

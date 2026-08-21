@@ -8,6 +8,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
+  extractIfStatementByCondition,
+  extractInnermostIfContainingText,
+  extractNamedDeclaration,
+  extractNamedFunction,
+} from "../../../api-server/src/lib/source-ast-test-helper";
+import {
   ORA_ACTIVITY_TEXT,
   oraActivityStep,
   oraActivityText,
@@ -63,17 +69,13 @@ describe("Mobile Ora — api.ts forwards activity events", () => {
   const api = read("../api.ts");
 
   it("streamChatNative accepts the onActivity callback", () => {
-    const sig = api.slice(
-      api.indexOf("export async function streamChatNative("),
-      api.indexOf("): Promise<StreamChatNativeResult>"),
-    );
+    const sig = extractNamedFunction(api, "streamChatNative");
     expect(sig).toContain("onActivity?: (step: OraActivityStep) => void");
   });
 
   it("parses the SSE activity event and forwards the validated step", () => {
-    const idx = api.indexOf('} else if (type === "activity") {');
-    expect(idx).toBeGreaterThan(-1);
-    const body = api.slice(idx, idx + 300);
+    const body = extractIfStatementByCondition(api, 'type === "activity"');
+    expect(body).toContain('type === "activity"');
     expect(body).toContain("parseOraActivityStep(parsed)");
     expect(body).toContain("if (step) onActivity?.(step);");
   });
@@ -105,12 +107,8 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
   });
 
   it("clears the trace on the first real answer token via deferred scheduleClear", () => {
-    const idx = index.indexOf("if (streamedContent.length === 0) {");
-    expect(idx).toBeGreaterThan(-1);
-    // The clear is now deferred through scheduleClear so an activity step that
-    // arrives in the same XHR burst has ACTIVITY_MIN_SHOW_MS to paint before
-    // being cleared. Expand the slice window to cover the full deferred call.
-    const body = index.slice(idx, idx + 700);
+    const body = extractInnermostIfContainingText(index, "scheduleClear(", "tsx");
+    expect(body).toContain("streamedContent.length === 0");
     expect(body).toContain("setStreamStatus(null);");
     expect(body).toContain("scheduleClear(");
   });
@@ -120,11 +118,9 @@ describe("Mobile Ora — home screen feeds the thinking row", () => {
     expect(index).toContain("oraAnalyzingDatasetText(attch.filename)");
     expect(index).toContain("oraReadingFileText(attch.filename)");
     const datasetHelper = "oraAnalyzingDatasetText(attch.filename)";
-    const datasetIndex = index.indexOf(datasetHelper);
-    expect(datasetIndex).toBeGreaterThan(-1);
-    expect(index.slice(datasetIndex - 120, datasetIndex + datasetHelper.length)).toContain(
-      '"dataset-analysis"',
-    );
+    const datasetBranch = extractIfStatementByCondition(index, 'attch.kind === "dataset"', "tsx");
+    expect(datasetBranch).toContain(datasetHelper);
+    expect(datasetBranch).toContain('"dataset-analysis"');
     expect(index).toContain('oraActivityStep("dataset-analysis", "ok")');
   });
 
@@ -231,19 +227,16 @@ describe("Mobile Ora — first-token SSE ordering contract (source assertions)",
   const index = read("../../app/(home)/index.tsx");
 
   it("uses scheduleClear (not a direct setStreamActivity null) on the first token", () => {
-    // Finds the FIRST occurrence of the condition, which is the token-path guard.
-    const idx = index.indexOf("if (streamedContent.length === 0) {");
-    expect(idx).toBeGreaterThan(-1);
-    const body = index.slice(idx, idx + 700);
+    const body = extractInnermostIfContainingText(index, "scheduleClear(", "tsx");
+    expect(body).toContain("streamedContent.length === 0");
     expect(body).toContain("scheduleClear(");
     // The raw direct call must not appear within the first-token branch.
     expect(body).not.toContain("setStreamActivity(null);\n");
   });
 
   it("pushActivity calls notifyVisible before updating state", () => {
-    const pushIdx = index.indexOf("const pushActivity = useCallback(");
-    expect(pushIdx).toBeGreaterThan(-1);
-    const body = index.slice(pushIdx, pushIdx + 400);
+    const body = extractNamedDeclaration(index, "pushActivity", "tsx");
+    expect(body).toContain("pushActivity = useCallback");
     expect(body).toContain("notifyVisible()");
     // Ordering check: notifyVisible must precede the setStreamActivity updater.
     const notifyPos = body.indexOf("notifyVisible()");

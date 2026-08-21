@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractIfStatementByCondition,
+  extractNamedDeclaration,
+  extractNamedFunction,
+  extractObjectLiteralByStringProperty,
+  extractUniqueJsxElementByName,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Normalize CRLF so source-string assertions pass on Windows checkouts too
@@ -20,10 +27,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("generateFile() POSTs message, messages, format, language?, and documentRefs[]", () => {
-    const fnStart = api.indexOf("export function generateFile(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const nextExport = api.indexOf("\nexport ", fnStart + 1);
-    const fnBody = nextExport > fnStart ? api.slice(fnStart, nextExport) : api.slice(fnStart);
+    const fnBody = extractNamedFunction(api, "generateFile");
+    expect(fnBody).toContain("function generateFile");
     expect(fnBody).toContain('method: "POST"');
     expect(fnBody).toContain("message: req.message");
     expect(fnBody).toContain("messages: req.messages");
@@ -34,10 +39,7 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("generate-file is an auth-guarded route (signed-in user fails closed, anon still works)", () => {
-    const pathRequiresAuthFn = api.slice(
-      api.indexOf("function pathRequiresAuth("),
-      api.indexOf("function pathRequiresAuth(") + 1200,
-    );
+    const pathRequiresAuthFn = extractNamedFunction(api, "pathRequiresAuth");
     expect(pathRequiresAuthFn).toContain('"/api/public-ai/generate-file"');
   });
 
@@ -48,10 +50,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("keeps PlusMenu scoped to attachment and file creation, not response mode", () => {
-    const menuStart = index.indexOf("function PlusMenu({");
-    expect(menuStart).toBeGreaterThan(-1);
-    const menuEnd = index.indexOf("\nfunction OraHeaderMenu", menuStart);
-    const menuBody = index.slice(menuStart, menuEnd);
+    const menuBody = extractNamedFunction(index, "PlusMenu", "tsx");
+    expect(menuBody).toContain("function PlusMenu");
 
     expect(index).toContain('accessibilityLabel="Add attachment or create file"');
     expect(menuBody).toContain('SheetSectionLabel label="Attach"');
@@ -85,10 +85,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("handleGenerateFile calls generateFile and renders a downloadable card via buildChatExtras", () => {
-    const fnStart = index.indexOf("const handleGenerateFile = useCallback(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnEnd = index.indexOf("\n  );", fnStart);
-    const fnBody = index.slice(fnStart, fnEnd);
+    const fnBody = extractNamedDeclaration(index, "handleGenerateFile", "tsx");
+    expect(fnBody).toContain("handleGenerateFile = useCallback");
     expect(fnBody).toContain("await generateFile(");
     expect(fnBody).toContain("documentRefs: documentRefsRef.current");
     // The settled assistant turn must spread buildChatExtras so the generated
@@ -138,10 +136,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     // View button only for non-image files, wired to handleViewFile.
     expect(index).toContain('accessibilityLabel="View generated file"');
     expect(index).toContain("onPress={handleViewFile}");
-    const viewFnStart = index.indexOf("const handleViewFile = useCallback(");
-    expect(viewFnStart).toBeGreaterThan(-1);
-    const viewFnEnd = index.indexOf("\n  );", viewFnStart);
-    const viewFnBody = index.slice(viewFnStart, viewFnEnd);
+    const viewFnBody = extractNamedDeclaration(index, "handleViewFile", "tsx");
+    expect(viewFnBody).toContain("handleViewFile = useCallback");
     // Every platform materializes the file; web then opens rather than downloads it.
     expect(viewFnBody).toContain('Platform.OS === "web"');
     expect(viewFnBody).toContain("await materializeGeneratedFileToCache(file)");
@@ -157,10 +153,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("opens normal Create-file requests with an empty draft", () => {
-    const plusStart = index.indexOf("<PlusMenu");
-    expect(plusStart).toBeGreaterThan(-1);
-    const sheetStart = index.indexOf("<GenerateFileSheet", plusStart);
-    const between = index.slice(plusStart, sheetStart);
+    const between = extractUniqueJsxElementByName(index, "PlusMenu");
+    expect(between).toContain("<PlusMenu");
     expect(between).toContain("setGenerateFileDraft(null)");
     expect(between).toContain("setShowGenerateFile(true)");
   });
@@ -189,9 +183,8 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
   });
 
   it("preserves full dataset-analysis results and renders analyst workflow cues", () => {
-    const datasetBranchStart = index.indexOf('} else if (attch.kind === "dataset")');
-    expect(datasetBranchStart).toBeGreaterThan(-1);
-    const datasetBranch = index.slice(datasetBranchStart, datasetBranchStart + 1600);
+    const datasetBranch = extractIfStatementByCondition(index, 'attch.kind === "dataset"', "tsx");
+    expect(datasetBranch).toContain('attch.kind === "dataset"');
 
     expect(datasetBranch).toContain("...result");
     expect(datasetBranch).toContain("datasetResult:");
@@ -216,16 +209,14 @@ describe("Mobile Ora — Create file (generate-file) parity", () => {
     expect(index).toContain('"## Repeatable Calculations"');
     expect(index).toContain('"## Downloadable Reports"');
 
-    const markdownStart = index.indexOf("function messageMarkdown(");
-    const markdownBody = index.slice(markdownStart, markdownStart + 1800);
+    const markdownBody = extractNamedFunction(index, "messageMarkdown", "tsx");
     expect(markdownBody).toContain("datasetGeneratedChartsMarkdown(message.datasetResult)");
     expect(markdownBody).toContain("datasetWorkflowMarkdown(message.datasetResult)");
     expect(markdownBody).toContain("includeDatasetJson !== false");
 
     for (const format of ["docx", "xlsx", "pptx", "pdf"]) {
-      const formatIdx = index.indexOf(`format: "${format}"`);
-      expect(formatIdx).toBeGreaterThan(-1);
-      const block = index.slice(formatIdx, formatIdx + 360);
+      const block = extractObjectLiteralByStringProperty(index, "format", format, "tsx");
+      expect(block).toContain(`format: "${format}"`);
       expect(block).toContain("messageMarkdown(message, { includeDatasetJson: false })");
     }
   });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { extractNamedFunction } from "../../../api-server/src/lib/source-ast-test-helper";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -26,9 +27,8 @@ describe("Mobile Ora — file version history parity (Phase 2)", () => {
   });
 
   it("versions/restore paths get a bearer token via the /api/ora/ auth prefix", () => {
-    const fnStart = api.indexOf("function pathRequiresAuth(path: string): boolean {");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = api.slice(fnStart, api.indexOf("}", fnStart + 1));
+    const fnBody = extractNamedFunction(api, "pathRequiresAuth");
+    expect(fnBody).toContain("function pathRequiresAuth");
     expect(fnBody).toContain('path.startsWith("/api/ora/")');
   });
 

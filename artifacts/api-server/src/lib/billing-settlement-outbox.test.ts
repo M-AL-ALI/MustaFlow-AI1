@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import {
+  extractNamedFunction,
+  extractTryStatementContainingIdentifier,
+} from "./source-ast-test-helper";
 
 const h = vi.hoisted(() => ({
   poolQuery: vi.fn(),
@@ -149,14 +153,8 @@ describe("durable billing settlement", () => {
 
   it("includes architect review and keys staged-review apply to the same pipeline settlement", () => {
     const jobs = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    const architectCharge = jobs.slice(
-      jobs.indexOf("let creditsCharged = 0"),
-      jobs.indexOf("// Decide auto-fix."),
-    );
-    const stagedReviewCharge = jobs.slice(
-      jobs.indexOf("// Background jobs (Task #509) reserved credits"),
-      jobs.indexOf('"Staged review applied");'),
-    );
+    const architectCharge = extractTryStatementContainingIdentifier(jobs, "dispatchResult");
+    const stagedReviewCharge = extractNamedFunction(jobs, "applyTaskAgentStaging");
 
     expect(architectCharge).not.toContain("await settleCreditsDurably");
     expect(architectCharge).not.toContain("await deductCreditsAtomic");

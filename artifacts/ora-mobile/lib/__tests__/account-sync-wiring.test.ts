@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractCallContainingIdentifier,
+  extractInnermostJsxContainingText,
+  extractNamedDeclaration,
+  extractNamedFunction,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) => readFileSync(path.join(__dirname, rel), "utf8");
@@ -77,9 +83,8 @@ describe("Mobile Settings — Account sync wiring", () => {
     expect(settings).toContain("acctSessionAuthenticated");
     // In the acctWarnMessage ternary, the acctLocalSessionMismatch branch must
     // come before the acctTierMismatch branch so startup-race bugs surface first.
-    const warnMessageStart = settings.indexOf("const acctWarnMessage =");
-    expect(warnMessageStart).toBeGreaterThan(-1);
-    const warnMessageBlock = settings.slice(warnMessageStart, warnMessageStart + 900);
+    const warnMessageBlock = extractNamedDeclaration(settings, "acctWarnMessage", "tsx");
+    expect(warnMessageBlock).toContain("acctWarnMessage =");
     const localMismatchInWarn = warnMessageBlock.indexOf("acctLocalSessionMismatch");
     const tierMismatchInWarn = warnMessageBlock.indexOf("acctTierMismatch");
     expect(localMismatchInWarn).toBeGreaterThan(-1);
@@ -88,12 +93,8 @@ describe("Mobile Settings — Account sync wiring", () => {
   });
 
   it("Account sync runAccountCheck resets probe state and syncs store on each run", () => {
-    const fnStart = settings.indexOf("const runAccountCheck = useCallback(async ()");
-    expect(fnStart).toBeGreaterThan(-1);
-    // Slice to the next const/function declaration so the full callback is captured
-    // regardless of body length — avoids brittle fixed-char-count truncation.
-    const nextDecl = settings.indexOf("\n  const ", fnStart + 1);
-    const fnBody = nextDecl > fnStart ? settings.slice(fnStart, nextDecl) : settings.slice(fnStart);
+    const fnBody = extractNamedDeclaration(settings, "runAccountCheck", "tsx");
+    expect(fnBody).toContain("runAccountCheck = useCallback");
     // Probe nulls must appear before any await so they reflect the check start state.
     expect(fnBody).toContain("setAcctPublicSessionTier(null)");
     expect(fnBody).toContain("setAcctPublicSessionIsPaid(null)");
@@ -108,9 +109,8 @@ describe("Mobile Settings — Account sync wiring", () => {
     expect(settings).toContain("subscriptionError");
     expect(settings).toContain("setSubscriptionError");
     // Must have an explicit error branch, not just a fallback to planLabel("free").
-    const errorIdx = settings.indexOf("subscriptionError ?");
-    expect(errorIdx).toBeGreaterThan(-1);
-    const planCardBody = settings.slice(errorIdx, errorIdx + 1200);
+    const planCardBody = extractInnermostJsxContainingText(settings, "subscriptionError ?");
+    expect(planCardBody).toContain("subscriptionError ?");
     expect(planCardBody).toContain("Retry");
   });
 });
@@ -134,10 +134,7 @@ describe("Mobile auth-stability guard", () => {
     expect(authClient).toContain("async function waitForAuthLoaded(");
     expect(authClient).toContain("_authIsLoaded");
     // Must await load before checking _authIsSignedIn to prevent race.
-    const fnBody = authClient.slice(
-      authClient.indexOf("export async function requireAuthToken()"),
-      authClient.indexOf("export async function requireAuthToken()") + 400,
-    );
+    const fnBody = extractNamedFunction(authClient, "requireAuthToken");
     expect(fnBody).toContain("waitForAuthLoaded");
     expect(fnBody).toContain("throw new TokenUnavailableError()");
   });
@@ -166,10 +163,7 @@ describe("Mobile auth-stability guard", () => {
   });
 
   it("/api/public-ai/session is in pathRequiresAuth so a signed-in user cannot silently get an anonymous session", () => {
-    const pathRequiresAuthFn = api.slice(
-      api.indexOf("function pathRequiresAuth("),
-      api.indexOf("function pathRequiresAuth(") + 600,
-    );
+    const pathRequiresAuthFn = extractNamedFunction(api, "pathRequiresAuth");
     expect(pathRequiresAuthFn).toContain('"/api/public-ai/session"');
     expect(pathRequiresAuthFn).not.toContain('"/api/public-ai/session" // excluded');
   });
@@ -179,10 +173,7 @@ describe("Mobile auth-stability guard", () => {
   });
 
   it("pathRequiresAuth covers every Ora file create/read/analysis route", () => {
-    const pathRequiresAuthFn = api.slice(
-      api.indexOf("function pathRequiresAuth("),
-      api.indexOf("function pathRequiresAuth(") + 1200,
-    );
+    const pathRequiresAuthFn = extractNamedFunction(api, "pathRequiresAuth");
     // A signed-in user must fail closed (bearer attached or TokenUnavailableError),
     // never silently upload/analyze/export as anonymous. Anonymous users still work
     // because requireAuthToken() returns null when signed out.
@@ -197,22 +188,15 @@ describe("Mobile auth-stability guard", () => {
   it("uploadFile (multipart, bypasses jsonRequest) uses authHeadersRequired", () => {
     // Non-async since the session-recovery wrapper landed: uploadFile returns
     // withOraSessionRecovery(async () => { ... }) directly.
-    const fnStart = api.indexOf("export function uploadFile(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const nextExport = api.indexOf("\nexport ", fnStart + 1);
-    const fnBody = nextExport > fnStart ? api.slice(fnStart, nextExport) : api.slice(fnStart);
+    const fnBody = extractNamedFunction(api, "uploadFile");
+    expect(fnBody).toContain("function uploadFile");
     expect(fnBody).toContain("authHeadersRequired");
     expect(fnBody).not.toMatch(/await authHeaders\(/);
   });
 
   it("streamChatNative uses authHeadersRequired (not plain authHeaders)", () => {
-    const streamFnStart = api.indexOf("export async function streamChatNative(");
-    expect(streamFnStart).toBeGreaterThan(-1);
-    // Slice to the next exported declaration so the full function body is captured
-    // regardless of function length — avoids brittle fixed-char-count truncation.
-    const nextExport = api.indexOf("\nexport ", streamFnStart + 1);
-    const streamFnBody =
-      nextExport > streamFnStart ? api.slice(streamFnStart, nextExport) : api.slice(streamFnStart);
+    const streamFnBody = extractNamedFunction(api, "streamChatNative");
+    expect(streamFnBody).toContain("function streamChatNative");
     expect(streamFnBody).toContain("authHeadersRequired");
     expect(streamFnBody).not.toMatch(/await authHeaders\(/);
   });
@@ -241,10 +225,7 @@ describe("Mobile auth-stability guard", () => {
   it("index.tsx gates getOraSession() on isLoaded to prevent auth race on startup", () => {
     expect(index).toContain("isLoaded");
     // isLoaded must be destructured from useAuth
-    const useAuthLine = index.slice(
-      index.indexOf("const { isSignedIn"),
-      index.indexOf("const { isSignedIn") + 80,
-    );
+    const useAuthLine = extractNamedFunction(index, "OraChatScreen", "tsx");
     expect(useAuthLine).toContain("isLoaded");
     // The session effect must early-return when !isLoaded
     expect(index).toContain("if (!isLoaded) return");
@@ -253,9 +234,13 @@ describe("Mobile auth-stability guard", () => {
   it("index.tsx calls setCurrentSessionTier after a successful getOraSession()", () => {
     expect(index).toContain("setCurrentSessionTier");
     // Must be called with the session tier, not just null
-    const sessionEffectStart = index.indexOf("getOraSession()");
-    expect(sessionEffectStart).toBeGreaterThan(-1);
-    const sessionEffectBody = index.slice(sessionEffectStart, sessionEffectStart + 300);
+    const sessionEffectBody = extractCallContainingIdentifier(
+      index,
+      "useEffect",
+      "getOraSession",
+      "tsx",
+    );
+    expect(sessionEffectBody).toContain("getOraSession()");
     expect(sessionEffectBody).toContain("setCurrentSessionTier(s.tier");
   });
 
@@ -264,10 +249,6 @@ describe("Mobile auth-stability guard", () => {
     expect(index).toContain("setSessionSyncError");
     // When the error is TokenUnavailableError, must NOT call setSession(null) — that
     // would create an anonymous session object. The catch branch must distinguish.
-    const catchBlock = index.slice(
-      index.indexOf("catch ((err) => {"),
-      index.indexOf("catch ((err) => {") + 300,
-    );
     expect(index).toContain("err instanceof TokenUnavailableError");
     expect(index).toContain('setSessionSyncError("token_unavailable")');
   });
@@ -275,8 +256,10 @@ describe("Mobile auth-stability guard", () => {
   it("index.tsx renders a re-sync banner when sessionSyncError is token_unavailable", () => {
     expect(index).toContain('sessionSyncError === "token_unavailable"');
     // Must show an error color and a retry affordance
-    const bannerIdx = index.indexOf('sessionSyncError === "token_unavailable"');
-    const bannerBody = index.slice(bannerIdx, bannerIdx + 2000);
+    const bannerBody = extractInnermostJsxContainingText(
+      index,
+      'sessionSyncError === "token_unavailable"',
+    );
     expect(bannerBody).toContain("#f87171");
     // Must render the RefreshCw retry icon and re-call getOraSession on press.
     expect(bannerBody).toContain("RefreshCw");
@@ -297,9 +280,8 @@ describe("Mobile auth-stability guard", () => {
     // child-before-parent effect ordering.
     expect(index).toContain("import { setAuthState, TokenUnavailableError }");
     // setAuthState must appear in the session effect body, before getOraSession().
-    const effectStart = index.indexOf("if (!isLoaded) return;");
-    expect(effectStart).toBeGreaterThan(-1);
-    const effectBody = index.slice(effectStart, effectStart + 400);
+    const effectBody = extractCallContainingIdentifier(index, "useEffect", "setAuthState", "tsx");
+    expect(effectBody).toContain("if (!isLoaded) return;");
     const setAuthStatePos = effectBody.indexOf("setAuthState(isLoaded, !!isSignedIn)");
     const getOraSessionPos = effectBody.indexOf("getOraSession()");
     expect(setAuthStatePos).toBeGreaterThan(-1);

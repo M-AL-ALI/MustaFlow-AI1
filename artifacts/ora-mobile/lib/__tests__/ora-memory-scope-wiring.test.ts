@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { extractNamedFunction } from "../../../api-server/src/lib/source-ast-test-helper";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -53,9 +54,8 @@ describe("Mobile Memory screen — all-scopes listing + scope filter (Phase 7)",
   });
 
   it("per-project tab keeps its single-project listing (no scope badge)", () => {
-    const tabStart = screen.indexOf("function ProjectMemoriesTab(");
-    expect(tabStart).toBeGreaterThan(-1);
-    const tabBody = screen.slice(tabStart);
+    const tabBody = extractNamedFunction(screen, "ProjectMemoriesTab", "tsx");
+    expect(tabBody).toContain("function ProjectMemoriesTab");
     expect(tabBody).toContain("listMemories(projectId)");
     expect(tabBody).not.toContain("scopeLabel=");
   });

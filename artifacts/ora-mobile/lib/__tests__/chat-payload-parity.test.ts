@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  extractNamedDeclaration,
+  extractNamedFunction,
+  extractNamedInterface,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -23,25 +28,18 @@ describe("Mobile Ora — chat payload parity with the website hook", () => {
   const api = read("../api.ts");
   const types = read("../types.ts");
 
-  const reqStart = types.indexOf("export interface ChatRequest {");
-  const reqEnd = types.indexOf("\n}", reqStart);
-  const chatRequestBody = types.slice(reqStart, reqEnd);
-
-  const sendStart = index.indexOf("const sendMessage = useCallback(");
-  const sendEnd = index.indexOf("const handleSend = useCallback(");
-  const sendMessageBody = index.slice(sendStart, sendEnd);
-  const chatReqStart = sendMessageBody.indexOf("const chatReq: ChatRequest = {");
-  const chatReqEnd = sendMessageBody.indexOf("};", chatReqStart);
-  const chatReqBody = sendMessageBody.slice(chatReqStart, chatReqEnd);
+  const chatRequestBody = extractNamedInterface(types, "ChatRequest");
+  const sendMessageBody = extractNamedDeclaration(index, "sendMessage", "tsx");
+  const chatReqBody = extractNamedDeclaration(sendMessageBody, "chatReq", "tsx");
 
   it("ChatRequest declares the parity fields", () => {
-    expect(reqStart).toBeGreaterThan(-1);
+    expect(chatRequestBody).toContain("interface ChatRequest");
     expect(chatRequestBody).toContain("languageHint?: string");
     expect(chatRequestBody).toContain("conversationId?: number | null");
   });
 
   it("the shared chatReq sends the device locale hint on every turn", () => {
-    expect(chatReqStart).toBeGreaterThan(-1);
+    expect(chatReqBody).toContain("chatReq: ChatRequest");
     expect(chatReqBody).toContain("languageHint: clientLanguageHint()");
   });
 
@@ -51,9 +49,8 @@ describe("Mobile Ora — chat payload parity with the website hook", () => {
   });
 
   it("clientLanguageHint resolves the BCP-47 locale defensively", () => {
-    const fnStart = api.indexOf("export function clientLanguageHint(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = api.slice(fnStart, fnStart + 400);
+    const fnBody = extractNamedFunction(api, "clientLanguageHint");
+    expect(fnBody).toContain("function clientLanguageHint");
     expect(fnBody).toContain("Intl.DateTimeFormat().resolvedOptions().locale");
     // Hermes' Intl can throw or be absent — the helper must degrade to
     // undefined instead of crashing the send path.

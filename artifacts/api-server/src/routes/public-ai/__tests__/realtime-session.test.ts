@@ -28,6 +28,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
+import { extractNamedDeclaration, extractSwitchCase } from "../../../lib/source-ast-test-helper";
 import { ORA_REALTIME_TOOL_NAMES } from "@workspace/ora-contracts";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
@@ -1158,24 +1159,18 @@ describe("Talk to Ora realtime — route wiring", () => {
 
   it("web realtime barge-in is confirmation-guarded; speech-start never hard-stops directly", () => {
     const src = readMustaflow("hooks/use-ora-realtime-voice.ts");
-    const helperStart = src.indexOf("const stopAssistantOutput = useCallback");
-    const helperEnd = src.indexOf("const confirmBargeIn = useCallback", helperStart);
-    const helper = src.slice(helperStart, helperEnd);
+    const helper = extractNamedDeclaration(src, "stopAssistantOutput");
     expect(helper).toContain('sendEvent({ type: "response.cancel" })');
     expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
     expect(helper).toContain("audioEl.pause()");
 
     // Confirmed barge-in is the ONLY path that actually stops Ora's audio.
-    const confirmStart = src.indexOf("const confirmBargeIn = useCallback");
-    const confirmEnd = src.indexOf("const cancelPendingBargeIn = useCallback", confirmStart);
-    const confirmBlock = src.slice(confirmStart, confirmEnd);
+    const confirmBlock = extractNamedDeclaration(src, "confirmBargeIn");
     expect(confirmBlock).toContain("stopAssistantOutput()");
 
     // speech_started must NOT cancel immediately; it arms a confirmation timer and
     // waits for sustained speech (or a real transcription delta) before confirming.
-    const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
-    const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
-    const speechStartBlock = src.slice(speechStart, speechStartEnd);
+    const speechStartBlock = extractSwitchCase(src, "input_audio_buffer.speech_started");
     expect(speechStartBlock).toContain("pendingBargeInRef.current = true");
     expect(speechStartBlock).toContain("BARGE_IN_CONFIRM_MS");
     expect(speechStartBlock).toContain("confirmBargeIn(");
@@ -1185,38 +1180,28 @@ describe("Talk to Ora realtime — route wiring", () => {
 
     // Echo guard must compare against what Ora is speaking RIGHT NOW, so the echo
     // buffer is updated on every assistant transcript delta (not only on done).
-    const deltaStart = src.indexOf('case "response.audio_transcript.delta"');
-    const deltaEnd = src.indexOf('case "response.audio_transcript.done"', deltaStart);
-    const deltaBlock = src.slice(deltaStart, deltaEnd);
+    const deltaBlock = extractSwitchCase(src, "response.audio_transcript.delta");
     expect(deltaBlock).toContain("recentAssistantSpeechRef.current = assistantTextRef.current");
 
     // ...and the cancel path must NOT wipe that buffer, or an echo arriving right
     // after a confirmed barge-in would no longer match Ora's just-spoken words.
-    const cancelStart = src.indexOf("const stopAssistantOutput = useCallback");
-    const cancelEnd = src.indexOf("const confirmBargeIn = useCallback", cancelStart);
-    const cancelBlock = src.slice(cancelStart, cancelEnd);
+    const cancelBlock = extractNamedDeclaration(src, "stopAssistantOutput");
     expect(cancelBlock).not.toContain('recentAssistantSpeechRef.current = ""');
   });
 
   it("mobile realtime barge-in is confirmation-guarded; speech-start never hard-stops directly", () => {
     const src = readOraMobile("hooks/useOraRealtimeVoiceNative.ts");
-    const helperStart = src.indexOf("const stopAssistantOutput = useCallback");
-    const helperEnd = src.indexOf("const confirmBargeIn = useCallback", helperStart);
-    const helper = src.slice(helperStart, helperEnd);
+    const helper = extractNamedDeclaration(src, "stopAssistantOutput");
     expect(helper).toContain('sendEvent({ type: "response.cancel" })');
     expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
     expect(helper).toContain("remoteTrackRef.current");
     expect(helper).toContain("track.enabled = false");
 
     // Confirmed barge-in is the ONLY path that actually stops Ora's audio.
-    const confirmStart = src.indexOf("const confirmBargeIn = useCallback");
-    const confirmEnd = src.indexOf("const cancelPendingBargeIn = useCallback", confirmStart);
-    const confirmBlock = src.slice(confirmStart, confirmEnd);
+    const confirmBlock = extractNamedDeclaration(src, "confirmBargeIn");
     expect(confirmBlock).toContain("stopAssistantOutput()");
 
-    const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
-    const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
-    const speechStartBlock = src.slice(speechStart, speechStartEnd);
+    const speechStartBlock = extractSwitchCase(src, "input_audio_buffer.speech_started");
     expect(speechStartBlock).toContain("pendingBargeInRef.current = true");
     expect(speechStartBlock).toContain("BARGE_IN_CONFIRM_MS");
     expect(speechStartBlock).toContain("confirmBargeIn(");
@@ -1225,22 +1210,16 @@ describe("Talk to Ora realtime — route wiring", () => {
     expect(speechStartBlock).not.toContain("stopAssistantOutput()");
 
     // Echo guard parity with web: the echo buffer tracks live assistant deltas...
-    const deltaStart = src.indexOf('case "response.audio_transcript.delta"');
-    const deltaEnd = src.indexOf('case "response.audio_transcript.done"', deltaStart);
-    const deltaBlock = src.slice(deltaStart, deltaEnd);
+    const deltaBlock = extractSwitchCase(src, "response.audio_transcript.delta");
     expect(deltaBlock).toContain("recentAssistantSpeechRef.current = assistantTextRef.current");
 
     // ...and the cancel path must NOT wipe it.
-    const cancelStart = src.indexOf("const stopAssistantOutput = useCallback");
-    const cancelEnd = src.indexOf("const confirmBargeIn = useCallback", cancelStart);
-    const cancelBlock = src.slice(cancelStart, cancelEnd);
+    const cancelBlock = extractNamedDeclaration(src, "stopAssistantOutput");
     expect(cancelBlock).not.toContain('recentAssistantSpeechRef.current = ""');
 
     // The remote track must still be re-enabled (respecting mute) when Ora speaks,
     // otherwise mobile playback stays silent after a barge-in cleared it.
-    const outputStarted = src.indexOf('case "output_audio_buffer.started"');
-    const outputStartedEnd = src.indexOf('case "output_audio_buffer.stopped"', outputStarted);
-    const outputStartedBlock = src.slice(outputStarted, outputStartedEnd);
+    const outputStartedBlock = extractSwitchCase(src, "output_audio_buffer.started");
     expect(outputStartedBlock).toContain("remoteTrackRef.current.enabled = !mutedRef.current");
   });
 
@@ -1269,6 +1248,9 @@ describe("Talk to Ora realtime — route wiring", () => {
 // this fails and the unit coverage can no longer be trusted for mobile.
 
 describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
+  // Deliberately remains marker-anchored: the contract is byte-for-byte parity
+  // across several sibling declarations, so widening it to one AST node would
+  // drop part of the guarded region. Coverage preservation outranks anchor purity.
   // Stable comment markers delimit the mirrored regions in BOTH hooks so the
   // parity slice survives reformatting (Prettier reflow, comment edits, etc.).
   // We compare the region strictly BETWEEN the markers (exclusive), so the

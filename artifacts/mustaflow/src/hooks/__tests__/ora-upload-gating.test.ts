@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractIfStatementByCondition,
+  extractNamedDeclaration,
+} from "../../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,32 +23,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 describe("use-ora-chat uploadFile gating", () => {
   const src = readFileSync(path.join(__dirname, "../use-ora-chat.ts"), "utf8");
 
-  // Isolate the uploadFile implementation so we only assert on its gating.
-  const uploadFn = (() => {
-    const start = src.indexOf("const uploadFile");
-    expect(start).toBeGreaterThan(-1);
-    return src.slice(start, start + 3000);
-  })();
+  const uploadFn = extractNamedDeclaration(src, "uploadFile", "tsx");
+  expect(uploadFn).toContain("uploadFile = useCallback");
 
   it("gates the per-session image count cap on anonymous visitors only", () => {
-    const imageCapIdx = uploadFn.indexOf("session.imageCount");
-    expect(imageCapIdx).toBeGreaterThan(-1);
-    const window = uploadFn.slice(imageCapIdx - 120, imageCapIdx);
-    expect(window).toContain("!isSignedIn");
+    const guard = extractIfStatementByCondition(
+      uploadFn,
+      "!isSignedIn && session && (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)",
+      "tsx",
+    );
+    expect(guard).toContain("session.imageCount");
+    expect(guard).toContain("!isSignedIn");
   });
 
   it("gates the per-session file count cap on anonymous visitors only", () => {
-    const fileCapIdx = uploadFn.indexOf("session.fileCount");
-    expect(fileCapIdx).toBeGreaterThan(-1);
-    const window = uploadFn.slice(fileCapIdx - 60, fileCapIdx);
-    expect(window).toContain("!isSignedIn");
+    const guard = extractIfStatementByCondition(
+      uploadFn,
+      "!isSignedIn && session && session.fileCount >= session.fileLimit",
+      "tsx",
+    );
+    expect(guard).toContain("session.fileCount");
+    expect(guard).toContain("!isSignedIn");
   });
 
   it("still enforces the file size cap for everyone (not gated on auth)", () => {
-    const sizeCapIdx = uploadFn.indexOf("file.size > MAX_FILE_SIZE");
-    expect(sizeCapIdx).toBeGreaterThan(-1);
-    // The size-cap guard line itself must not be auth-gated.
-    const line = uploadFn.slice(uploadFn.lastIndexOf("if", sizeCapIdx), sizeCapIdx + 30);
-    expect(line).not.toContain("isSignedIn");
+    const guard = extractIfStatementByCondition(uploadFn, "file.size > MAX_FILE_SIZE", "tsx");
+    expect(guard).toContain("file.size > MAX_FILE_SIZE");
+    expect(guard).not.toContain("isSignedIn");
   });
 });

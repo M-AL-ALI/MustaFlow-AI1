@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractCallContainingIdentifier,
+  extractIfStatementByCondition,
+  extractNamedDeclaration,
+  extractNamedFunction,
+  extractNamedInterface,
+  extractUniqueJsxElementByName,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) =>
@@ -19,60 +27,52 @@ describe("Ora mobile parity — memory API functions", () => {
   });
 
   it("listMemories(projectId) appends ?oraProjectId= to the URL", () => {
-    const fnStart = api.indexOf("export async function listMemories(");
-    const fnBody = api.slice(fnStart, fnStart + 300);
+    const fnBody = extractNamedFunction(api, "listMemories");
     expect(fnBody).toContain("oraProjectId=${scope}");
     expect(fnBody).toContain('typeof scope === "number"');
   });
 
   it("listMemories() without project id fetches /api/ora/memories (user-level only)", () => {
-    const fnStart = api.indexOf("export async function listMemories(");
-    const fnBody = api.slice(fnStart, fnStart + 300);
+    const fnBody = extractNamedFunction(api, "listMemories");
     expect(fnBody).toContain('"/api/ora/memories"');
   });
 
   it("createMemory() accepts an optional oraProjectId parameter", () => {
-    const fnStart = api.indexOf("export function createMemory(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = api.slice(fnStart, fnStart + 400);
+    const fnBody = extractNamedFunction(api, "createMemory");
+    expect(fnBody).toContain("function createMemory");
     expect(fnBody).toContain("title: string");
     expect(fnBody).toContain("content: string");
     expect(fnBody).toContain("oraProjectId?: number | null");
   });
 
   it("createMemory() with oraProjectId spreads it into the request body", () => {
-    const fnStart = api.indexOf("export function createMemory(");
-    const fnBody = api.slice(fnStart, fnStart + 350);
+    const fnBody = extractNamedFunction(api, "createMemory");
     expect(fnBody).toContain("oraProjectId != null ? { oraProjectId } : {}");
   });
 
   it("saveOraMemory() accepts an optional oraProjectId parameter", () => {
     expect(api).toContain("export async function saveOraMemory(");
-    const fnStart = api.indexOf("export async function saveOraMemory(");
-    const fnSig = api.slice(fnStart, fnStart + 120);
+    const fnSig = extractNamedFunction(api, "saveOraMemory");
     expect(fnSig).toContain("fact: string");
     expect(fnSig).toContain("oraProjectId?: number | null");
   });
 
   it("saveOraMemory() with oraProjectId spreads it into the POST body", () => {
-    const fnStart = api.indexOf("export async function saveOraMemory(");
-    const fnBody = api.slice(fnStart, fnStart + 500);
+    const fnBody = extractNamedFunction(api, "saveOraMemory");
     expect(fnBody).toContain("oraProjectId != null ? { oraProjectId } : {}");
     expect(fnBody).toContain("deriveMemoryTitle(content)");
   });
 
   it("clearAllMemories() sends DELETE to /api/ora/memories", () => {
     expect(api).toContain("export function clearAllMemories()");
-    const fnStart = api.indexOf("export function clearAllMemories()");
-    const fnBody = api.slice(fnStart, fnStart + 120);
+    const fnBody = extractNamedFunction(api, "clearAllMemories");
     expect(fnBody).toContain('"/api/ora/memories"');
     expect(fnBody).toContain('"DELETE"');
   });
 
   it("getMemoryUsage() fetches /api/ora/memories/usage", () => {
     expect(api).toContain("export function getMemoryUsage()");
-    const fnStart = api.indexOf("export function getMemoryUsage()");
-    const fnBody = api.slice(fnStart, fnStart + 120);
+    const fnBody = extractNamedFunction(api, "getMemoryUsage");
     expect(fnBody).toContain('"/api/ora/memories/usage"');
   });
 
@@ -81,25 +81,22 @@ describe("Ora mobile parity — memory API functions", () => {
   });
 
   it("OraMemory type has oraProjectId and supersededBy fields", () => {
-    const ifaceStart = types.indexOf("export interface OraMemory {");
-    expect(ifaceStart).toBeGreaterThan(-1);
-    const ifaceBody = types.slice(ifaceStart, ifaceStart + 300);
+    const ifaceBody = extractNamedInterface(types, "OraMemory");
+    expect(ifaceBody).toContain("interface OraMemory");
     expect(ifaceBody).toContain("oraProjectId: number | null");
     expect(ifaceBody).toContain("supersededBy: number | null");
   });
 
   it("MemoryUsage type has count and limit fields", () => {
-    const ifaceStart = types.indexOf("export interface MemoryUsage {");
-    expect(ifaceStart).toBeGreaterThan(-1);
-    const ifaceBody = types.slice(ifaceStart, ifaceStart + 120);
+    const ifaceBody = extractNamedInterface(types, "MemoryUsage");
+    expect(ifaceBody).toContain("interface MemoryUsage");
     expect(ifaceBody).toContain("count: number");
     expect(ifaceBody).toContain("limit: number");
   });
 
   it("restoreMemory() sends POST to /api/ora/memories/:id/restore", () => {
     expect(api).toContain("export function restoreMemory(");
-    const fnStart = api.indexOf("export function restoreMemory(");
-    const fnBody = api.slice(fnStart, fnStart + 200);
+    const fnBody = extractNamedFunction(api, "restoreMemory");
     expect(fnBody).toContain("/api/ora/memories/");
     expect(fnBody).toContain("/restore");
     expect(fnBody).toContain('method: "POST"');
@@ -133,14 +130,12 @@ describe("Ora mobile parity — memory screen project support", () => {
   });
 
   it("ProjectMemoriesTab fetches listMemories(projectId)", () => {
-    const compStart = screen.indexOf("function ProjectMemoriesTab(");
-    const compBody = screen.slice(compStart, compStart + 800);
+    const compBody = extractNamedFunction(screen, "ProjectMemoriesTab", "tsx");
     expect(compBody).toContain("listMemories(projectId)");
   });
 
   it("ProjectMemoriesTab creates memories with oraProjectId scoped to the project", () => {
-    const compStart = screen.indexOf("function ProjectMemoriesTab(");
-    const compBody = screen.slice(compStart, compStart + 1200);
+    const compBody = extractNamedFunction(screen, "ProjectMemoriesTab", "tsx");
     expect(compBody).toContain("createMemory(title.trim(), content.trim(), projectId)");
   });
 
@@ -176,8 +171,7 @@ describe("Ora mobile parity — memory screen project support", () => {
   it("memory screen fetches memories, usage, and project names in parallel on mount", () => {
     // Phase 7: MemoriesTab loads ALL scopes plus project names for badges;
     // the project fetch is non-fatal so a failure degrades to badge-less view.
-    const tabStart = screen.indexOf("function MemoriesTab(");
-    const tabBody = screen.slice(tabStart, tabStart + 3000);
+    const tabBody = extractNamedFunction(screen, "MemoriesTab", "tsx");
     expect(tabBody).toContain('listMemories("all")');
     expect(tabBody).toContain("getMemoryUsage()");
     expect(tabBody).toContain("listProjects(true).catch(() => [] as OraProjectSummary[])");
@@ -200,11 +194,12 @@ describe("Ora mobile parity — chat sends oraProjectId for project memory injec
   });
 
   it("index.tsx chatReq (non-streaming path) includes oraProjectId from the active project ref", () => {
-    const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
-    expect(chatReqStart).toBeGreaterThan(-1);
-    // Use closing }; as the end marker rather than a fixed char count so new fields don't break this
-    const chatReqEnd = index.indexOf("};", chatReqStart);
-    const chatReqBody = index.slice(chatReqStart, chatReqEnd + 2);
+    const chatReqBody = extractNamedDeclaration(
+      extractNamedDeclaration(index, "sendMessage", "tsx"),
+      "chatReq",
+      "tsx",
+    );
+    expect(chatReqBody).toContain("chatReq: ChatRequest");
     expect(chatReqBody).toContain("oraProjectId: activeProjectIdRef.current");
   });
 
@@ -238,12 +233,8 @@ describe("Ora mobile parity — ActiveProjectContext wiring", () => {
     expect(layout).toContain("<ActiveProjectProvider>");
     expect(layout).toContain("</ActiveProjectProvider>");
     // Provider must wrap the Drawer; verify the provider body contains a Drawer element
-    const providerStart = layout.indexOf("<ActiveProjectProvider>");
-    expect(providerStart).toBeGreaterThan(-1);
-    const providerBody = layout.slice(
-      providerStart,
-      layout.indexOf("</ActiveProjectProvider>") + 24,
-    );
+    const providerBody = extractUniqueJsxElementByName(layout, "ActiveProjectProvider");
+    expect(providerBody).toContain("<ActiveProjectProvider>");
     // The Drawer component (not DrawerContentScrollView) is inside the provider
     expect(providerBody).toContain("drawerContent=");
     expect(providerBody).toContain("</Drawer>");
@@ -257,33 +248,39 @@ describe("Ora mobile parity — temporary chat does not save or reference memori
   const index = read("../../app/(home)/index.tsx");
 
   it("temporary flag sets referenceSavedMemories to false", () => {
-    const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
-    const chatReqEnd = index.indexOf("};", chatReqStart);
-    const chatReqBody = index.slice(chatReqStart, chatReqEnd + 2);
+    const chatReqBody = extractNamedDeclaration(
+      extractNamedDeclaration(index, "sendMessage", "tsx"),
+      "chatReq",
+      "tsx",
+    );
     // Wired through getReferenceSavedMemories() preference AND isSignedIn AND !temporary
     expect(chatReqBody).toContain("getReferenceSavedMemories()");
     expect(chatReqBody).toContain("!!isSignedIn && !temporary");
   });
 
   it("temporary flag sets referenceChatHistory to false", () => {
-    const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
-    const chatReqEnd = index.indexOf("};", chatReqStart);
-    const chatReqBody = index.slice(chatReqStart, chatReqEnd + 2);
+    const chatReqBody = extractNamedDeclaration(
+      extractNamedDeclaration(index, "sendMessage", "tsx"),
+      "chatReq",
+      "tsx",
+    );
     // Wired through getReferenceChatHistory() preference AND isSignedIn AND !temporary
     expect(chatReqBody).toContain("getReferenceChatHistory()");
     expect(chatReqBody).toContain("!!isSignedIn && !temporary");
   });
 
   it("temporary flag is forwarded to server so it skips memory saves and summaries", () => {
-    const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
-    const chatReqBody = index.slice(chatReqStart, chatReqStart + 400);
+    const chatReqBody = extractNamedDeclaration(
+      extractNamedDeclaration(index, "sendMessage", "tsx"),
+      "chatReq",
+      "tsx",
+    );
     expect(chatReqBody).toContain("temporary,");
   });
 
   it("saveOraMemory is guarded against anonymous or temporary sessions", () => {
-    const handleStart = index.indexOf("const handleSaveMemory = useCallback(async (message:");
-    expect(handleStart).toBeGreaterThan(-1);
-    const handleBody = index.slice(handleStart, handleStart + 300);
+    const handleBody = extractNamedDeclaration(index, "handleSaveMemory", "tsx");
+    expect(handleBody).toContain("handleSaveMemory = useCallback");
     expect(handleBody).toContain("temporaryRef.current");
     expect(handleBody).toContain("isSignedInRef.current");
   });
@@ -298,9 +295,13 @@ describe("Ora mobile parity — temporary chat does not save or reference memori
   });
 
   it("auto-save only persists high-confidence non-sensitive candidates", () => {
-    const effectStart = index.indexOf("high-confidence, non-sensitive candidates can save");
-    expect(effectStart).toBeGreaterThan(-1);
-    const effectBody = index.slice(effectStart, effectStart + 1200);
+    const effectBody = extractCallContainingIdentifier(
+      index,
+      "useEffect",
+      "memorySaveCandidateConfidence",
+      "tsx",
+    );
+    expect(effectBody).toContain("memorySaveCandidateConfidence");
 
     expect(effectBody).toContain("getAutoSaveMemories()");
     expect(effectBody).toContain("getReferenceSavedMemories()");
@@ -325,11 +326,8 @@ describe("Ora mobile parity — streamChatNative gate matches website behaviour"
   const api = read("../api.ts");
 
   it("streaming gate is opt-out (=== false) not opt-in (!== true)", () => {
-    const fnStart = api.indexOf("export async function streamChatNative(");
-    expect(fnStart).toBeGreaterThan(-1);
-    // Use 3000 chars so the diagnostics init block doesn't push the kill-switch
-    // check past the window (the diag struct is ~400 chars before the gate).
-    const fnBody = api.slice(fnStart, fnStart + 3000);
+    const fnBody = extractNamedFunction(api, "streamChatNative");
+    expect(fnBody).toContain("function streamChatNative");
     // New gate: kill switch fires only when explicitly "false"
     expect(fnBody).toContain('EXPO_PUBLIC_ORA_STREAMING_ENABLED === "false"');
     // Old opt-in gate must NOT appear
@@ -337,8 +335,7 @@ describe("Ora mobile parity — streamChatNative gate matches website behaviour"
   });
 
   it("onToken signature accepts async callbacks (void | Promise<void>)", () => {
-    const fnStart = api.indexOf("export async function streamChatNative(");
-    const signatureBody = api.slice(fnStart, fnStart + 200);
+    const signatureBody = extractNamedFunction(api, "streamChatNative");
     expect(signatureBody).toContain("void | Promise<void>");
   });
 
@@ -376,16 +373,14 @@ describe("Ora mobile parity — project conversation sync", () => {
 
   it("createConversation() sends projectId in the request body", () => {
     expect(api).toContain("export function createConversation(");
-    const fnStart = api.indexOf("export function createConversation(");
-    const fnBody = api.slice(fnStart, fnStart + 300);
+    const fnBody = extractNamedFunction(api, "createConversation");
     expect(fnBody).toContain("projectId");
     expect(fnBody).toContain("JSON.stringify({ title, projectId })");
   });
 
   it("moveConversation() sends projectId in a PATCH request body", () => {
     expect(api).toContain("export function moveConversation(");
-    const fnStart = api.indexOf("export function moveConversation(");
-    const fnBody = api.slice(fnStart, fnStart + 200);
+    const fnBody = extractNamedFunction(api, "moveConversation");
     expect(fnBody).toContain("PATCH");
     expect(fnBody).toContain("projectId");
   });
@@ -428,9 +423,12 @@ describe("Ora mobile parity — Retry live search (forceSearch)", () => {
     // The stream route bounces the search tool back with a streamingFallback
     // signal, so a forced live search must use the non-streaming sendChat path
     // (mirrors use-ora-chat.ts on the website).
-    const branchStart = index.indexOf("if (opts?.forceSearch) {");
-    expect(branchStart).toBeGreaterThan(-1);
-    const branchBody = index.slice(branchStart, branchStart + 700);
+    const branchBody = extractIfStatementByCondition(
+      extractNamedDeclaration(index, "sendMessage", "tsx"),
+      "opts?.forceSearch",
+      "tsx",
+    );
+    expect(branchBody).toContain("opts?.forceSearch");
     expect(branchBody).toContain("const res = await sendChat(chatReq);");
   });
 
@@ -444,8 +442,7 @@ describe("Ora mobile parity — Retry live search (forceSearch)", () => {
 
   it("handleRetrySearch replays the user turn with forceSearch:true", () => {
     expect(index).toContain("const handleRetrySearch = useCallback(");
-    const fnStart = index.indexOf("const handleRetrySearch = useCallback(");
-    const fnBody = index.slice(fnStart, fnStart + 700);
+    const fnBody = extractNamedDeclaration(index, "handleRetrySearch", "tsx");
     expect(fnBody).toContain("{ truncateTo: userIdx, forceSearch: true }");
   });
 

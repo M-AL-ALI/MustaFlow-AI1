@@ -3,6 +3,7 @@ import request from "supertest";
 import * as http from "http";
 import express from "express";
 import cookieParser from "cookie-parser";
+import { extractIfStatementByCondition } from "../../../lib/source-ast-test-helper";
 
 process.env.DATABASE_URL ??= "postgres://ora-streaming-test:ora-streaming-test@localhost:5432/ora";
 
@@ -680,9 +681,8 @@ describe("POST /public-ai/chat/stream", () => {
     const fs = await import("fs");
     const path = await import("path");
     const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
-    const errorBlockStart = src.indexOf("if (streamFailed || !streamedReply.trim())");
-    expect(errorBlockStart).toBeGreaterThan(0);
-    const errorBlock = src.slice(errorBlockStart, errorBlockStart + 600);
+    const errorBlock = extractIfStatementByCondition(src, "streamFailed || !streamedReply.trim()");
+    expect(errorBlock).toContain("streamFailed || !streamedReply.trim()");
     // The !firstTokenSent guard must exist inside the error block…
     expect(errorBlock).toContain("!firstTokenSent");
     // …and it must appear BEFORE the refund call.

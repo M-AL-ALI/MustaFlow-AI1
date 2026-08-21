@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { extractTryStatementContainingIdentifier } from "../lib/source-ast-test-helper";
 
 const mocks = vi.hoisted(() => ({
   isSuperuser: vi.fn(),
@@ -327,10 +328,7 @@ describe("deductCreditsAtomic actual charge reporting", () => {
   it("records zero for build-scoped architect review because it is included", () => {
     const jobsSource = readFileSync(new URL("../lib/jobs.ts", import.meta.url), "utf8");
 
-    const architectSection = jobsSource.slice(
-      jobsSource.indexOf("const { dispatchReviewerStandalone }"),
-      jobsSource.indexOf("// Decide auto-fix."),
-    );
+    const architectSection = extractTryStatementContainingIdentifier(jobsSource, "dispatchResult");
     expect(architectSection).toContain("const creditsCharged = 0");
     expect(architectSection).not.toContain("settleCreditsDurably");
   });

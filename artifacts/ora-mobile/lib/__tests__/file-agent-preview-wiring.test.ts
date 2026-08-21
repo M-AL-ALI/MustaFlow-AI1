@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractImportDeclaration,
+  extractNamedDeclaration,
+  extractNamedFunction,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) =>
@@ -15,10 +20,7 @@ describe("Mobile Ora - Phase 9A file/data agent preview parity", () => {
 
   it("imports the shared preview type from ora-contracts", () => {
     expect(types).toContain("OraFileAgentPreview");
-    const importBlock = types.slice(
-      types.indexOf("import type {"),
-      types.indexOf('} from "@workspace/ora-contracts";', types.indexOf("import type {")),
-    );
+    const importBlock = extractImportDeclaration(types, "@workspace/ora-contracts");
     expect(importBlock).toContain("OraFileAgentPreview");
   });
 
@@ -98,24 +100,14 @@ describe("Phase 9F — mobile file card View+Download parity audit", () => {
   });
 
   it("contentChanges to-text renders with accent color (highlighted new text)", () => {
-    const contentChangesStart = extras.indexOf(
-      "preview.contentChanges && preview.contentChanges.length > 0",
-    );
-    const contentChangesEnd = extras.indexOf(
-      'preview.status === "needs_confirmation"',
-      contentChangesStart,
-    );
-    const contentChangesBlock = extras.slice(contentChangesStart, contentChangesEnd);
+    const contentChangesBlock = extractNamedFunction(extras, "OraFileAgentPreviewIndicator", "tsx");
     expect(contentChangesBlock).toContain("change.to");
     expect(contentChangesBlock).toContain("tone");
     expect(contentChangesBlock).toContain("backgroundColor");
   });
 
   it("previewTone returns green for applied, amber for failed_safe, gray for unchanged, blue for default", () => {
-    const toneFn = extras.slice(
-      extras.indexOf("function previewTone("),
-      extras.indexOf("function OraFileAgentPreviewIndicator("),
-    );
+    const toneFn = extractNamedFunction(extras, "previewTone", "tsx");
     expect(toneFn).toContain('"#10b981"');
     expect(toneFn).toContain('"#f59e0b"');
     expect(toneFn).toContain('"#94a3b8"');
@@ -123,9 +115,8 @@ describe("Phase 9F — mobile file card View+Download parity audit", () => {
   });
 
   it("OraFileAgentPreviewIndicator bullets include outputSections (website parity)", () => {
-    const bulletStart = extras.indexOf("const bullets = [");
-    const bulletEnd = extras.indexOf("].slice(0, 5)", bulletStart);
-    const bulletBlock = extras.slice(bulletStart, bulletEnd);
+    const indicator = extractNamedFunction(extras, "OraFileAgentPreviewIndicator", "tsx");
+    const bulletBlock = extractNamedDeclaration(indicator, "bullets", "tsx");
     expect(bulletBlock).toContain("preview.outputSections");
     expect(bulletBlock).toContain("preview.detectedInputs");
     expect(bulletBlock).toContain("preview.plannedActions");
@@ -134,9 +125,7 @@ describe("Phase 9F — mobile file card View+Download parity audit", () => {
   });
 
   it("tone color is applied to border and background of the indicator card", () => {
-    const indicatorStart = extras.indexOf("function OraFileAgentPreviewIndicator(");
-    const indicatorEnd = extras.indexOf("\nfunction ", indicatorStart + 1);
-    const indicatorBody = extras.slice(indicatorStart, indicatorEnd);
+    const indicatorBody = extractNamedFunction(extras, "OraFileAgentPreviewIndicator", "tsx");
     expect(indicatorBody).toContain('tone + "40"');
     expect(indicatorBody).toContain('tone + "0D"');
   });

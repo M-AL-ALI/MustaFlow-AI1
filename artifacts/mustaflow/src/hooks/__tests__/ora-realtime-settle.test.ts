@@ -27,6 +27,7 @@ import { join } from "path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useOraRealtimeVoice, type RealtimeStartContext } from "../use-ora-realtime-voice";
+import { extractNamedDeclaration } from "../../../../api-server/src/lib/source-ast-test-helper";
 
 // ─── Source paths (for mobile parity source-string assertions) ─────────────────
 
@@ -387,13 +388,12 @@ describe("useOraRealtimeVoiceNative — settle window parity (source-string)", (
   it("web and mobile share a byte-identical scheduleSettledResponse body", () => {
     const web = readHook("web").replace(/\r\n/g, "\n");
     const mobile = readHook("mobile").replace(/\r\n/g, "\n");
-    const slice = (src: string): string => {
-      const start = src.indexOf("const scheduleSettledResponse = useCallback(() => {");
-      expect(start).toBeGreaterThan(-1);
-      const end = src.indexOf("}, [sendEvent, handleConnectionDrop]);", start);
-      expect(end).toBeGreaterThan(start);
-      return src.slice(start, end);
+    const declaration = (src: string): string => {
+      const block = extractNamedDeclaration(src, "scheduleSettledResponse", "tsx");
+      expect(block).toContain("scheduleSettledResponse = useCallback");
+      expect(block).toContain("useCallback");
+      return block;
     };
-    expect(slice(mobile)).toBe(slice(web));
+    expect(declaration(mobile)).toBe(declaration(web));
   });
 });

@@ -9,6 +9,10 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
+import {
+  extractCallContainingIdentifier,
+  extractNamedDeclaration,
+} from "../../../lib/source-ast-test-helper";
 
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..", "..");
 const FE_SRC = join(REPO_ROOT, "artifacts", "mustaflow", "src");
@@ -128,9 +132,11 @@ describe("Talk to Ora voice-session wiring", () => {
       expect(src).toContain("handleToggleVoiceConvTtsMute");
       expect(src).toContain("voiceRef.current.stopSpeaking()");
       expect(src).toContain("startWhisperRecording({ autoStop: true })");
-      const autoSpeakSection = src.slice(
-        src.indexOf("Auto-TTS: speak each new Ora reply"),
-        src.indexOf("Conversation cycling: track when Ora finishes speaking"),
+      const autoSpeakSection = extractCallContainingIdentifier(
+        src,
+        "useEffect",
+        "playbackKey",
+        "tsx",
       );
       expect(autoSpeakSection).not.toContain("isSpeechSynthesisSupported");
       expect(autoSpeakSection).not.toContain("isLoading");
@@ -166,18 +172,14 @@ describe("Talk to Ora voice-session wiring", () => {
 
   it("keeps mobile Talk to Ora exit from auto-sending a stale recording transcript", () => {
     const mobileHome = readMobile("app/(home)/index.tsx");
-    const toggleStart = mobileHome.indexOf("const toggleTalkMode = useCallback");
-    const toggleEnd = mobileHome.indexOf("const openConversations = useCallback", toggleStart);
-    const toggleBlock = mobileHome.slice(toggleStart, toggleEnd);
+    const toggleBlock = extractNamedDeclaration(mobileHome, "toggleTalkMode", "tsx");
 
     expect(toggleBlock).toContain("const next = !talkMode");
     expect(toggleBlock).toContain("setTalkMode(next)");
     expect(toggleBlock).toContain("talkModeRef.current = next");
     expect(toggleBlock).toContain("void stopRecordingRef.current()");
 
-    const stopRecordingStart = mobileHome.indexOf("const stopRecording = useCallback");
-    const stopRecordingEnd = mobileHome.indexOf("const speak = useCallback", stopRecordingStart);
-    const stopRecordingBlock = mobileHome.slice(stopRecordingStart, stopRecordingEnd);
+    const stopRecordingBlock = extractNamedDeclaration(mobileHome, "stopRecording", "tsx");
     expect(stopRecordingBlock).toContain("if (talkModeRef.current)");
     expect(stopRecordingBlock).toContain("void sendMessageRef.current(clean, null)");
   });
