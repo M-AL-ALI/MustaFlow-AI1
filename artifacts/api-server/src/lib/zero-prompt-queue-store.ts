@@ -11,6 +11,7 @@ import {
   type ZeroPromptQueueSnapshot,
 } from "./zero-prompt-queue-contract";
 import { applyZeroPromptQueueMutation, createZeroPromptQueueSnapshot } from "./zero-prompt-queue";
+import { zeroPromptQueueSchemaContractState } from "./schema-contract-state";
 
 export const ZERO_PROMPT_QUEUE_MAX_WRITE_STATEMENTS = 4 as const;
 export const ZERO_PROMPT_QUEUE_MAX_READ_ITEMS = 51 as const;
@@ -361,9 +362,16 @@ async function appendQueueProvenance(
 export function createPostgresZeroPromptQueueDriver(
   connect: ConnectionFactory = () => pool.connect(),
   queryClient: QueryClient = pool,
+  isSchemaContractReady: () => boolean = () => zeroPromptQueueSchemaContractState.isReady(),
 ): ZeroPromptQueuePersistenceDriver {
+  const assertSchemaContractReady = () => {
+    if (!isSchemaContractReady()) {
+      throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
+    }
+  };
   return {
     async readProject(projectId, limit) {
+      assertSchemaContractReady();
       try {
         return await readProjectRows(queryClient, projectId, false, limit);
       } catch (error) {
@@ -377,6 +385,7 @@ export function createPostgresZeroPromptQueueDriver(
       }
     },
     async readItem(projectId, itemId) {
+      assertSchemaContractReady();
       try {
         return await readItemRow(queryClient, projectId, itemId);
       } catch (error) {
@@ -390,6 +399,7 @@ export function createPostgresZeroPromptQueueDriver(
       }
     },
     async transaction(operation, signal) {
+      assertSchemaContractReady();
       const client = await connect().catch(() => {
         throw new ZeroPromptQueuePersistenceError("queue_persistence_unavailable");
       });

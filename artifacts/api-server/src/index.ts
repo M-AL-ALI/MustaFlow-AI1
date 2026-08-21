@@ -32,6 +32,10 @@ import { startWorkspaceSweeper } from "./lib/public-ai/repo-workspace";
 import { pool } from "@workspace/db";
 import { auditImageProviderConfig } from "./lib/image-provider";
 import { startBillingSettlementSweeper } from "./lib/billing-settlement-outbox";
+import {
+  startSchemaContractVerificationCadence,
+  zeroPromptQueueSchemaContractState,
+} from "./lib/schema-contract-state";
 
 const execFileAsync = promisify(execFile);
 
@@ -305,7 +309,18 @@ void runStartupMigrations()
     // Non-fatal: log and continue — a partial schema is better than no server.
     logger.error({ err }, "startup-migrations: unexpected error (continuing)");
   })
-  .then(() => {
+  .then(async () => {
+    const queueSchemaContract = await zeroPromptQueueSchemaContractState.verify(pool);
+    logger.info(
+      {
+        contractId: queueSchemaContract.contractId,
+        status: queueSchemaContract.status,
+        durationMs: queueSchemaContract.durationMs,
+        violations: queueSchemaContract.violations,
+      },
+      "schema contract verification complete",
+    );
+    startSchemaContractVerificationCadence(pool);
     startBillingSettlementSweeper();
     return runContainerSelfCheck().catch((err: unknown) => {
       // Non-fatal: log and continue — a degraded container subsystem is better

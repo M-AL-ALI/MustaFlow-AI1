@@ -197,6 +197,29 @@ describe("zero prompt queue persistence", () => {
     expect(driver.events).toEqual([]);
   });
 
+  it("refuses every Postgres queue operation before SQL when its schema contract is unready", async () => {
+    const connect = vi.fn();
+    const query = vi.fn();
+    const driver = createPostgresZeroPromptQueueDriver(
+      connect as unknown as Parameters<typeof createPostgresZeroPromptQueueDriver>[0],
+      { query: query as unknown as PoolClient["query"] },
+      () => false,
+    );
+
+    for (const operation of [
+      () => driver.readProject(17),
+      () => driver.readItem(17, "queued-a"),
+      () => driver.transaction(async () => "unreachable"),
+    ]) {
+      await expect(operation()).rejects.toMatchObject({
+        code: "queue_persistence_unavailable",
+      });
+    }
+
+    expect(connect).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("uses one project-and-item point query and preserves terminal provenance", async () => {
     const query = vi.fn().mockResolvedValue({
       rows: [
@@ -218,9 +241,13 @@ describe("zero prompt queue persistence", () => {
         },
       ],
     });
-    const driver = createPostgresZeroPromptQueueDriver(undefined, {
-      query: query as unknown as PoolClient["query"],
-    });
+    const driver = createPostgresZeroPromptQueueDriver(
+      undefined,
+      {
+        query: query as unknown as PoolClient["query"],
+      },
+      () => true,
+    );
 
     await expect(new ZeroPromptQueueStore(driver).get(17, "terminal-a")).resolves.toMatchObject({
       id: "terminal-a",
@@ -274,9 +301,13 @@ describe("zero prompt queue persistence", () => {
         },
       ],
     });
-    const driver = createPostgresZeroPromptQueueDriver(undefined, {
-      query: query as unknown as PoolClient["query"],
-    });
+    const driver = createPostgresZeroPromptQueueDriver(
+      undefined,
+      {
+        query: query as unknown as PoolClient["query"],
+      },
+      () => true,
+    );
 
     const snapshot = await driver.readProject(17);
 
@@ -308,9 +339,13 @@ describe("zero prompt queue persistence", () => {
         },
       ],
     });
-    const driver = createPostgresZeroPromptQueueDriver(undefined, {
-      query: query as unknown as PoolClient["query"],
-    });
+    const driver = createPostgresZeroPromptQueueDriver(
+      undefined,
+      {
+        query: query as unknown as PoolClient["query"],
+      },
+      () => true,
+    );
 
     await expect(
       new ZeroPromptQueueStore(driver).get(17, "future-terminal"),
@@ -332,9 +367,13 @@ describe("zero prompt queue persistence", () => {
         },
       ],
     });
-    const driver = createPostgresZeroPromptQueueDriver(undefined, {
-      query: query as unknown as PoolClient["query"],
-    });
+    const driver = createPostgresZeroPromptQueueDriver(
+      undefined,
+      {
+        query: query as unknown as PoolClient["query"],
+      },
+      () => true,
+    );
 
     await expect(new ZeroPromptQueueStore(driver).get(17, "invalid-queued")).rejects.toMatchObject({
       code: "queue_persistence_contract_invalid",
