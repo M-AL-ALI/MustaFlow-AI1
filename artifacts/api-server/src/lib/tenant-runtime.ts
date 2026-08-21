@@ -10,6 +10,7 @@
 import { FlyRuntimeProvider } from "./fly-runtime-provider";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { parseTenantRuntimeConfig } from "@workspace/tenant-runtime-contracts";
+import { PartialConfigRuntimeProvider } from "./partial-config-runtime-provider";
 import type {
   RuntimeFile,
   RuntimeInstallOptions,
@@ -22,6 +23,9 @@ export function createTenantRuntimeProvider(
   environment: Record<string, string | undefined> = process.env,
 ) {
   const config = parseTenantRuntimeConfig(environment);
+  if (config.partialCloudflare) {
+    return new PartialConfigRuntimeProvider(config.partialCloudflare.missingBindings);
+  }
   return config.provider === "cloudflare"
     ? new CloudflareRuntimeProvider(config.cloudflare!)
     : new FlyRuntimeProvider();
@@ -34,6 +38,13 @@ export const isContainerLayerConfigured = (): Promise<boolean> =>
   tenantRuntimeProvider.isAvailable();
 export const runContainerSelfCheck = () => tenantRuntimeProvider.runSelfCheck();
 export const getContainerSubsystemStatus = () => tenantRuntimeProvider.getSubsystemStatus();
+export const getTenantRuntimeConfigurationStatus = () =>
+  tenantRuntimeProvider instanceof PartialConfigRuntimeProvider
+    ? {
+        status: "partial-config" as const,
+        missingBindings: [...tenantRuntimeProvider.missingBindings],
+      }
+    : { status: "complete" as const, missingBindings: [] };
 export const ensureFlyApp = (): Promise<void> => tenantRuntimeProvider.ensureInfrastructure();
 
 export async function createContainer(

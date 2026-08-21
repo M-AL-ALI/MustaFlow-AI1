@@ -7,7 +7,7 @@
  */
 
 /**
- * Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "error" = token is set but API call failed at startup.
+ * Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "partial-config" = Cloudflare runtime configuration is incomplete. "error" = token is set but API call failed at startup.
 
  */
 export type HealthStatusContainerSubsystem = typeof HealthStatusContainerSubsystem[keyof typeof HealthStatusContainerSubsystem];
@@ -17,5 +17,6 @@ export const HealthStatusContainerSubsystem = {
   unknown: 'unknown',
   ok: 'ok',
   unconfigured: 'unconfigured',
+  'partial-config': 'partial-config',
   error: 'error',
 } as const;

@@ -17,7 +17,7 @@ import type {
 
 export type RuntimeStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
-export type RuntimeSubsystemStatus = "ok" | "unconfigured" | "error";
+export type RuntimeSubsystemStatus = "ok" | "unconfigured" | "partial-config" | "error";
 
 export interface RuntimeInfo {
   runtimeId: string;

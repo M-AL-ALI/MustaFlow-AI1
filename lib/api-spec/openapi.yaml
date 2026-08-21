@@ -7749,12 +7749,13 @@ components:
         status: { type: string }
         containerSubsystem:
           type: string
-          enum: [unknown, ok, unconfigured, error]
+          enum: [unknown, ok, unconfigured, partial-config, error]
           description: >
             Status of the Fly.io container subsystem.
             "unknown" = the startup check has not completed yet.
             "ok" = token is configured and API is reachable.
             "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error).
+            "partial-config" = Cloudflare runtime configuration is incomplete.
             "error" = token is set but API call failed at startup.
         encryptionKey:
           type: string
@@ -7775,6 +7776,17 @@ components:
           description: >
             Cached Zero prompt queue schema-contract state. "unknown" = the first verification
             has not completed yet. "ok" = the contract is ready. "error" = the contract is unready.
+        missingRuntimeBindings:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          description: Required runtime binding names absent from a partial Cloudflare configuration.
+          items:
+            type: string
+            enum:
+              - CLOUDFLARE_RUNTIME_CONTROL_URL
+              - CLOUDFLARE_RUNTIME_CONTROL_TOKEN
+              - CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE
       required: [status, containerSubsystem, encryptionKey, startupMigrations, queueSchemaContract]
 
     ApiError:
