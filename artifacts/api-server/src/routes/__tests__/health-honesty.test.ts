@@ -123,4 +123,31 @@ describe("health startup honesty", () => {
       expect(JSON.stringify(response.body)).not.toContain(presentValue);
     }
   });
+
+  it("returns the same names-only 503 shape for every partial Fly combination", async () => {
+    const presentValue = "fly-configuration-value-never-returned";
+    const bindingNames = ["FLY_APP_NAME", "FLY_ORG_SLUG", "FLY_REGION"] as const;
+    for (let presentMask = 0; presentMask < 7; presentMask += 1) {
+      const missingBindings = bindingNames.filter(
+        (_name, index) => (presentMask & (1 << index)) === 0,
+      );
+      mocks.containerSubsystem.mockReturnValue("partial-config");
+      mocks.runtimeConfiguration.mockReturnValue({ status: "partial-config", missingBindings });
+      mocks.startup.mockReturnValue({ migrations: "unknown" });
+      mocks.queueSchemaContract.mockReturnValue({ status: "starting" });
+
+      const response = await request(app()).get("/api/healthz");
+
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({
+        status: "partial-config",
+        containerSubsystem: "partial-config",
+        encryptionKey: "ok",
+        startupMigrations: "unknown",
+        queueSchemaContract: "unknown",
+        missingRuntimeBindings: missingBindings,
+      });
+      expect(JSON.stringify(response.body)).not.toContain(presentValue);
+    }
+  });
 });

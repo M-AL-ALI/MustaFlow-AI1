@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CLOUDFLARE_RUNTIME_BINDING_NAMES } from "@workspace/tenant-runtime-contracts";
+import {
+  CLOUDFLARE_RUNTIME_BINDING_NAMES,
+  FLY_RUNTIME_BINDING_NAMES,
+} from "@workspace/tenant-runtime-contracts";
 
 const mocks = vi.hoisted(() => ({
   createContainer: vi.fn(),
@@ -15,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   updateContainerEnv: vi.fn(),
   ensureContainerLogTailer: vi.fn(),
   recordContainerLog: vi.fn(),
+  ensureFlyApp: vi.fn(async () => undefined),
+  resumeContainerLogTailersOnBoot: vi.fn(async () => undefined),
 }));
 
 vi.mock("./container", () => ({
@@ -22,7 +27,7 @@ vi.mock("./container", () => ({
   isContainerLayerConfigured: vi.fn(async () => true),
   runContainerSelfCheck: vi.fn(async () => "ok"),
   getContainerSubsystemStatus: vi.fn(() => "ok"),
-  ensureFlyApp: vi.fn(async () => undefined),
+  ensureFlyApp: mocks.ensureFlyApp,
   createContainer: mocks.createContainer,
   startContainer: mocks.startContainer,
   stopContainer: mocks.stopContainer,
@@ -50,7 +55,7 @@ vi.mock("./container-logs", () => ({
   ensureContainerLogTailer: mocks.ensureContainerLogTailer,
   recordContainerLog: mocks.recordContainerLog,
   stopContainerLogTailer: vi.fn(),
-  resumeContainerLogTailersOnBoot: vi.fn(),
+  resumeContainerLogTailersOnBoot: mocks.resumeContainerLogTailersOnBoot,
 }));
 
 vi.mock("./logger", () => ({
@@ -194,6 +199,88 @@ describe("TenantRuntimeProvider Fly adapter", () => {
     ).toBeInstanceOf(CloudflareRuntimeProvider);
   });
 
+  it("keeps complete Fly configuration on the existing provider path", async () => {
+    const { createTenantRuntimeProvider } = await import("./tenant-runtime");
+    const complete = createTenantRuntimeProvider({
+      TENANT_RUNTIME_PROVIDER: "fly",
+      FLY_API_TOKEN: "runtime-token-value",
+      FLY_APP_NAME: "mustaflow-containers",
+      FLY_ORG_SLUG: "nabuflow-acceptance-staging",
+      FLY_REGION: "iad",
+    });
+
+    expect(complete).toBeInstanceOf(FlyRuntimeProvider);
+    await expect(complete.ensureInfrastructure()).resolves.toBeUndefined();
+    expect(mocks.ensureFlyApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes Fly infrastructure creation unreachable for every partial token-present config", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const {
+      createTenantRuntimeProvider,
+      ensureTenantRuntimeInfrastructure,
+      resumeTenantRuntimeLogStreamsOnBoot,
+    } = await import("./tenant-runtime");
+    const completeEnvironment = {
+      FLY_API_TOKEN: "runtime-token-value",
+      FLY_APP_NAME: "mustaflow-containers",
+      FLY_ORG_SLUG: "nabuflow-acceptance-staging",
+      FLY_REGION: "iad",
+    };
+    const requiredAfterToken = FLY_RUNTIME_BINDING_NAMES.filter((name) => name !== "FLY_API_TOKEN");
+
+    for (let presentMask = 0; presentMask < 7; presentMask += 1) {
+      const environment: Record<string, string> = {
+        TENANT_RUNTIME_PROVIDER: "fly",
+        FLY_API_TOKEN: completeEnvironment.FLY_API_TOKEN,
+      };
+      requiredAfterToken.forEach((name, index) => {
+        if ((presentMask & (1 << index)) !== 0) environment[name] = completeEnvironment[name];
+      });
+      const partial = createTenantRuntimeProvider(environment);
+
+      expect(partial).toBeInstanceOf(PartialConfigRuntimeProvider);
+      expect(partial.providerId).toBe("fly");
+      expect(partial.hasCredentials()).toBe(false);
+      await expect(ensureTenantRuntimeInfrastructure(partial)).resolves.toBeUndefined();
+      await expect(resumeTenantRuntimeLogStreamsOnBoot(partial)).resolves.toBeUndefined();
+      await expect(partial.ensureInfrastructure()).rejects.toMatchObject({
+        code: "runtime_provider_capability_unavailable",
+        providerId: "fly",
+      });
+    }
+
+    expect(mocks.ensureFlyApp).not.toHaveBeenCalled();
+    expect(mocks.resumeContainerLogTailersOnBoot).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mocks.createContainer).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it.each([
+    { FLY_APP_NAME: "MustaFlow-containers" },
+    { FLY_APP_NAME: "mustaflow containers" },
+    { FLY_ORG_SLUG: "../personal" },
+    { FLY_REGION: "IAD" },
+  ])("rejects malformed complete Fly config before provider access", async (override) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { createTenantRuntimeProvider } = await import("./tenant-runtime");
+
+    expect(() =>
+      createTenantRuntimeProvider({
+        TENANT_RUNTIME_PROVIDER: "fly",
+        FLY_API_TOKEN: "runtime-token-value",
+        FLY_APP_NAME: "mustaflow-containers",
+        FLY_ORG_SLUG: "nabuflow-acceptance-staging",
+        FLY_REGION: "iad",
+        ...override,
+      }),
+    ).toThrow();
+    expect(mocks.ensureFlyApp).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it("boots every partial combination without reaching Fly or Cloudflare", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const { createTenantRuntimeProvider } = await import("./tenant-runtime");
@@ -229,7 +316,7 @@ describe("TenantRuntimeProvider Fly adapter", () => {
 
   it("fails every partial-provider operation through the existing typed unavailable error", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const partial = new PartialConfigRuntimeProvider([
+    const partial = new PartialConfigRuntimeProvider("cloudflare", [
       "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
       "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE",
     ]);

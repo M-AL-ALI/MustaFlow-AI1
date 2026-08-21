@@ -13,7 +13,7 @@ import type { HealthStatusStartupMigrations } from './healthStatusStartupMigrati
 
 export interface HealthStatus {
   status: string;
-  /** Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "partial-config" = Cloudflare runtime configuration is incomplete. "error" = token is set but API call failed at startup.
+  /** Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "partial-config" = the selected runtime provider configuration is incomplete. "error" = token is set but API call failed at startup.
    */
   containerSubsystem: HealthStatusContainerSubsystem;
   /** Encryption key health. "ok" = key is present and AES-256-GCM round-trip passes. "missing" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). "invalid" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).
@@ -26,8 +26,8 @@ export interface HealthStatus {
    */
   queueSchemaContract: HealthStatusQueueSchemaContract;
   /**
-     * Required runtime binding names absent from a partial Cloudflare configuration.
-     * @maxItems 3
+     * Required runtime binding names absent from a partial provider configuration.
+     * @maxItems 4
      */
   missingRuntimeBindings?: HealthStatusMissingRuntimeBindingsItem[];
 }
