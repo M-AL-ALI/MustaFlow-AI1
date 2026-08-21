@@ -93,7 +93,7 @@ describe("health startup honesty", () => {
     });
   });
 
-  it("returns a synchronous names-only 503 for every partial configuration combination", async () => {
+  it("keeps partial Cloudflare configuration live so deployment cannot deadlock", async () => {
     const presentValue = "present-configuration-value-never-returned";
     const bindingNames = [
       "CLOUDFLARE_RUNTIME_CONTROL_URL",
@@ -111,20 +111,23 @@ describe("health startup honesty", () => {
 
       const response = await request(app()).get("/api/healthz");
 
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(200);
       expect(response.body).toEqual({
-        status: "partial-config",
+        status: "degraded",
         containerSubsystem: "partial-config",
         encryptionKey: "ok",
         startupMigrations: "unknown",
         queueSchemaContract: "unknown",
-        missingRuntimeBindings: missingBindings,
       });
+      expect(response.body.containerSubsystem).not.toBe("ok");
+      for (const bindingName of bindingNames) {
+        expect(JSON.stringify(response.body)).not.toContain(bindingName);
+      }
       expect(JSON.stringify(response.body)).not.toContain(presentValue);
     }
   });
 
-  it("returns the same names-only 503 shape for every partial Fly combination", async () => {
+  it("keeps partial Fly configuration live without reporting the subsystem as ok", async () => {
     const presentValue = "fly-configuration-value-never-returned";
     const bindingNames = ["FLY_APP_NAME", "FLY_ORG_SLUG", "FLY_REGION"] as const;
     for (let presentMask = 0; presentMask < 7; presentMask += 1) {
@@ -138,15 +141,18 @@ describe("health startup honesty", () => {
 
       const response = await request(app()).get("/api/healthz");
 
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(200);
       expect(response.body).toEqual({
-        status: "partial-config",
+        status: "degraded",
         containerSubsystem: "partial-config",
         encryptionKey: "ok",
         startupMigrations: "unknown",
         queueSchemaContract: "unknown",
-        missingRuntimeBindings: missingBindings,
       });
+      expect(response.body.containerSubsystem).not.toBe("ok");
+      for (const bindingName of bindingNames) {
+        expect(JSON.stringify(response.body)).not.toContain(bindingName);
+      }
       expect(JSON.stringify(response.body)).not.toContain(presentValue);
     }
   });

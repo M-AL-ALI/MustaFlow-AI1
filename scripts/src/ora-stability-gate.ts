@@ -707,9 +707,9 @@ const MOBILE_LIB_CRITICAL = [
 const CHECKS: GateCheck[] = [
   {
     id: "libs-build",
-    title: "Workspace lib type outputs (tsc --build)",
+    title: "Workspace lib type outputs (tsc --build --force)",
     area: "build",
-    command: "pnpm run typecheck:libs",
+    command: "pnpm exec tsc --build --force",
     profiles: ["fast"],
     critical: true,
     why: "Fresh checkouts have no lib/* dist outputs; every downstream typecheck fails with TS6305 until these are built.",

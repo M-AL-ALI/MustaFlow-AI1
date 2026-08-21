@@ -10,6 +10,7 @@ import { createSupportAlertsServer } from "./lib/support-alerts";
 import { createDebugServer } from "./routes/debug";
 import {
   ensureFlyApp,
+  getTenantRuntimeConfigurationStatus,
   resumeContainerLogTailersOnBoot,
   runContainerSelfCheck,
 } from "./lib/tenant-runtime";
@@ -72,6 +73,19 @@ if (isOraSecretConfigured()) {
   logger.warn(
     "ORA_SESSION_SECRET is not set — Ora public-AI endpoints will return 503. Set this secret to enable them.",
   );
+}
+
+// Partial runtime configuration is operational detail, not process liveness.
+// Keep binding names in boot logs only; health responses expose only the
+// names-free subsystem category and never configuration values.
+{
+  const runtimeConfiguration = getTenantRuntimeConfigurationStatus();
+  if (runtimeConfiguration.status === "partial-config") {
+    logger.warn(
+      { missingRuntimeBindings: runtimeConfiguration.missingBindings },
+      "tenant runtime provider configuration is incomplete",
+    );
+  }
 }
 
 // Log image provider configuration at startup (presence only — no values).
