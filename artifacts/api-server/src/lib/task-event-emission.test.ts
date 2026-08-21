@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { emitTaskEventBounded, TASK_EVENT_EMIT_TIMEOUT_MS } from "./task-event-emission";
+import { extractNamedFunction } from "./source-ast-test-helper";
 
 describe("bounded task-event emission", () => {
   it("persists and publishes a normal event exactly once", async () => {
@@ -110,10 +111,7 @@ describe("bounded task-event emission", () => {
 
   it("routes mobile-settings observations through the same bounded helper", () => {
     const source = readFileSync(new URL("../routes/mobile-settings.ts", import.meta.url), "utf8");
-    const emitEventSource = source.slice(
-      source.indexOf("async function emitEvent("),
-      source.indexOf("/** Read and parse app.json"),
-    );
+    const emitEventSource = extractNamedFunction(source, "emitEvent");
 
     expect(emitEventSource).toContain("await emitTaskEventBounded({");
     expect(emitEventSource).toContain("persist: async () =>");

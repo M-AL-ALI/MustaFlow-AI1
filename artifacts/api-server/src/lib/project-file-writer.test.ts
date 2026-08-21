@@ -1,23 +1,6 @@
 import { readFileSync } from "node:fs";
-import { createSourceFile, forEachChild, isFunctionDeclaration, ScriptTarget } from "typescript";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-
-function extractNamedFunction(source: string, functionName: string): string {
-  const sourceFile = createSourceFile("source.ts", source, ScriptTarget.Latest, true);
-  let match: string | undefined;
-
-  function visit(node: Parameters<typeof forEachChild>[0]): void {
-    if (isFunctionDeclaration(node) && node.name?.text === functionName) {
-      match = node.getText(sourceFile);
-      return;
-    }
-    forEachChild(node, visit);
-  }
-
-  forEachChild(sourceFile, visit);
-  if (!match) throw new Error(`Named function not found: ${functionName}`);
-  return match;
-}
+import { extractNamedFunction, extractRouteHandler } from "./source-ast-test-helper";
 
 interface StoredFile {
   projectId: number;
@@ -450,9 +433,10 @@ describe("atomic project file writes", () => {
 
   it("routes project-wide version rollback through the same atomic helper", () => {
     const source = readFileSync(new URL("../routes/versions.ts", import.meta.url), "utf8");
-    const rollbackRoute = source.slice(
-      source.indexOf('"/projects/:id/versions/:versionId/rollback"'),
-      source.indexOf("// ── POST /api/projects/:id/versions/:versionId/approve-testing"),
+    const rollbackRoute = extractRouteHandler(
+      source,
+      "post",
+      "/projects/:id/versions/:versionId/rollback",
     );
 
     expect(rollbackRoute).toContain("await writeProjectFilesAtomically({");
@@ -559,9 +543,10 @@ describe("atomic project file writes", () => {
 
   it("keeps checkpoint file replacement and restored-version recording in one transaction", () => {
     const source = readFileSync(new URL("../routes/checkpoints.ts", import.meta.url), "utf8");
-    const restoreTransaction = source.slice(
-      source.indexOf("// 3) Restore files and append the restored state"),
-      source.indexOf("if (!restoredCheckpointId)"),
+    const restoreTransaction = extractRouteHandler(
+      source,
+      "post",
+      "/projects/:id/checkpoints/:checkpointId/restore",
     );
 
     expect(restoreTransaction).toContain("await db.transaction(async (tx) => {");
