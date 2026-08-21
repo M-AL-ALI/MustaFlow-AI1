@@ -17,14 +17,18 @@ import type {
   RuntimeLogLevel,
   RuntimeProductionOptions,
   RuntimeServiceOptions,
+  TenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
 export function createTenantRuntimeProvider(
   environment: Record<string, string | undefined> = process.env,
 ) {
   const config = parseTenantRuntimeConfig(environment);
+  if (config.partialFly) {
+    return new PartialConfigRuntimeProvider("fly", config.partialFly.missingBindings);
+  }
   if (config.partialCloudflare) {
-    return new PartialConfigRuntimeProvider(config.partialCloudflare.missingBindings);
+    return new PartialConfigRuntimeProvider("cloudflare", config.partialCloudflare.missingBindings);
   }
   return config.provider === "cloudflare"
     ? new CloudflareRuntimeProvider(config.cloudflare!)
@@ -45,7 +49,14 @@ export const getTenantRuntimeConfigurationStatus = () =>
         missingBindings: [...tenantRuntimeProvider.missingBindings],
       }
     : { status: "complete" as const, missingBindings: [] };
-export const ensureFlyApp = (): Promise<void> => tenantRuntimeProvider.ensureInfrastructure();
+export const ensureTenantRuntimeInfrastructure = (
+  provider: TenantRuntimeProvider,
+): Promise<void> =>
+  provider instanceof PartialConfigRuntimeProvider
+    ? Promise.resolve()
+    : provider.ensureInfrastructure();
+export const ensureFlyApp = (): Promise<void> =>
+  ensureTenantRuntimeInfrastructure(tenantRuntimeProvider);
 
 export async function createContainer(
   projectId: number,
@@ -222,4 +233,11 @@ export const ensureContainerLogTailer = (projectId: number, runtimeId: string): 
   tenantRuntimeProvider.startLogStream(projectId, runtimeId);
 export const stopContainerLogTailer = (projectId: number): void =>
   tenantRuntimeProvider.stopLogStream(projectId);
-export const resumeContainerLogTailersOnBoot = () => tenantRuntimeProvider.resumeLogStreamsOnBoot();
+export const resumeTenantRuntimeLogStreamsOnBoot = (
+  provider: TenantRuntimeProvider,
+): Promise<void> =>
+  provider instanceof PartialConfigRuntimeProvider
+    ? Promise.resolve()
+    : provider.resumeLogStreamsOnBoot();
+export const resumeContainerLogTailersOnBoot = (): Promise<void> =>
+  resumeTenantRuntimeLogStreamsOnBoot(tenantRuntimeProvider);

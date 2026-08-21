@@ -1,4 +1,7 @@
-import type { CloudflareRuntimeBindingName } from "@workspace/tenant-runtime-contracts";
+import type {
+  TenantRuntimeBindingName,
+  TenantRuntimeProviderId,
+} from "@workspace/tenant-runtime-contracts";
 import {
   RuntimeProviderUnavailableError,
   type RuntimeCreateResult,
@@ -16,18 +19,22 @@ import {
 } from "./tenant-runtime-provider";
 
 /**
- * Fail-closed runtime provider used when Cloudflare configuration is incomplete.
- * Only binding names are stored or emitted. Before this provider is selected,
- * the config parser checks a present control token's length as a sanity floor.
- * Therefore an unauthenticated health caller can distinguish an absent token
- * (names-only 503) from a too-short token (startup config rejection); no value,
- * prefix, fragment, or measured length is exposed.
+ * Fail-closed runtime provider used when a selected provider's configuration is incomplete.
+ * Only binding names are stored or emitted. Before this provider is selected, the
+ * Cloudflare parser checks a present control token's length as a sanity floor, and
+ * both parsers reject malformed complete configuration at startup. Therefore an
+ * unauthenticated health caller can distinguish a names-only partial-config 503 from
+ * startup rejection; no value, prefix, fragment, or measured length is exposed.
  */
 export class PartialConfigRuntimeProvider implements TenantRuntimeProvider {
-  readonly providerId = "cloudflare";
-  readonly missingBindings: readonly CloudflareRuntimeBindingName[];
+  readonly providerId: TenantRuntimeProviderId;
+  readonly missingBindings: readonly TenantRuntimeBindingName[];
 
-  constructor(missingBindings: readonly CloudflareRuntimeBindingName[]) {
+  constructor(
+    providerId: TenantRuntimeProviderId,
+    missingBindings: readonly TenantRuntimeBindingName[],
+  ) {
+    this.providerId = providerId;
     this.missingBindings = [...missingBindings];
   }
 
