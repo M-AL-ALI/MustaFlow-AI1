@@ -16,6 +16,10 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
+import {
+  extractNamedDeclaration,
+  extractNamedFunction,
+} from "../../../../api-server/src/lib/source-ast-test-helper";
 
 const ARTIFACTS = join(__dirname, "../../../../");
 
@@ -36,9 +40,7 @@ describe("Blocker 1 — server session rate limiter auth bypass", () => {
 
   it("sessionRateLimiter skips oraSessionLimiter when getAuth(req).userId is present", () => {
     const src = readFile(SESSION_ROUTE);
-    const fnStart = src.indexOf("function sessionRateLimiter");
-    const fnEnd = src.indexOf("\n}", fnStart) + 2;
-    const fn = src.slice(fnStart, fnEnd);
+    const fn = extractNamedFunction(src, "sessionRateLimiter");
     // Must guard with getAuth(req).userId
     expect(fn).toContain("getAuth(req).userId");
     // Must have early next() return before oraSessionLimiter
@@ -57,11 +59,9 @@ describe("Blocker 1 — mobile diagnostics session step uses GET-first", () => {
 
   it("session step tries GET before POST", () => {
     const src = readFile(SETTINGS);
-    const sessionBlockStart = src.indexOf('updateStep("session", { status: "running" }');
-    const sessionBlockEnd = src.indexOf('updateStep("chat", { status: "running" }');
-    expect(sessionBlockStart).toBeGreaterThan(-1);
-    expect(sessionBlockEnd).toBeGreaterThan(sessionBlockStart);
-    const sessionBlock = src.slice(sessionBlockStart, sessionBlockEnd);
+    const sessionBlock = extractNamedDeclaration(src, "runDiagnostics", "tsx");
+    expect(sessionBlock).toContain('updateStep("session", { status: "running" }');
+    expect(sessionBlock).toContain('updateStep("chat", { status: "running" }');
     const getPos = sessionBlock.indexOf('"GET"');
     const postPos = sessionBlock.indexOf('"POST"');
     expect(getPos).toBeGreaterThan(-1);
@@ -71,9 +71,7 @@ describe("Blocker 1 — mobile diagnostics session step uses GET-first", () => {
 
   it("session step falls back to POST only on 401", () => {
     const src = readFile(SETTINGS);
-    const sessionBlockStart = src.indexOf('updateStep("session", { status: "running" }');
-    const sessionBlockEnd = src.indexOf('updateStep("chat", { status: "running" }');
-    const sessionBlock = src.slice(sessionBlockStart, sessionBlockEnd);
+    const sessionBlock = extractNamedDeclaration(src, "runDiagnostics", "tsx");
     expect(sessionBlock).toContain("r.status === 401");
     expect(sessionBlock).toContain('"POST"');
   });
@@ -107,12 +105,9 @@ describe("Blocker 2 — mobile diagnostics has realtime transport step", () => {
 
   it("runDiagnostics() realtime block checks WebRTC native module and server config", () => {
     const src = readFile(SETTINGS);
-    // Slice out just the realtime block inside runDiagnostics
-    const rtBlockStart = src.indexOf('updateStep("realtime", { status: "running" }');
-    const rtBlockEnd = src.indexOf('updateStep("transport", { status: "running" }');
-    expect(rtBlockStart).toBeGreaterThan(-1);
-    expect(rtBlockEnd).toBeGreaterThan(rtBlockStart);
-    const rtBlock = src.slice(rtBlockStart, rtBlockEnd);
+    const rtBlock = extractNamedDeclaration(src, "runDiagnostics", "tsx");
+    expect(rtBlock).toContain('updateStep("realtime", { status: "running" }');
+    expect(rtBlock).toContain('updateStep("transport", { status: "running" }');
     expect(rtBlock).toContain("isRealtimeVoiceNativeAvailable()");
     expect(rtBlock).toContain("getRealtimeDiagnostics()");
   });

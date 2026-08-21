@@ -13,6 +13,7 @@ import {
 import { buildDraftPatchPrompt, parseDraftPatchJson } from "../orax-draft-patch";
 import { extensionToLanguage, summarizeGithubTree } from "../orax-github";
 import { runOraxSandboxValidation } from "../orax-sandbox";
+import { extractNamedFunction } from "../source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -633,10 +634,7 @@ describe("ORAX plan mode runner gate", () => {
   });
 
   it("does not mention Ora, AI Builder, or bypass isolation boundaries", () => {
-    const planPromptFn = routeSource.slice(
-      routeSource.indexOf("function buildOraxPlanSummaryPrompt"),
-      routeSource.indexOf("async function generateOraxRunnerPlanSummary"),
-    );
+    const planPromptFn = extractNamedFunction(routeSource, "buildOraxPlanSummaryPrompt");
     expect(planPromptFn).toContain("do not mention Ora or AI Builder");
     expect(planPromptFn).not.toContain("/public-ai/chat");
     expect(planPromptFn).not.toContain("deductCredits");

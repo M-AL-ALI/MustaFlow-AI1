@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { extractNamedFunction } from "../../../api-server/src/lib/source-ast-test-helper";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -56,9 +57,8 @@ describe("Mobile Ora — web source date parity with the website", () => {
   const index = read("../../app/(home)/index.tsx");
 
   it("formatSourceDate guards against non-dates and absurd years like the website helper", () => {
-    const start = index.indexOf("function formatSourceDate(");
-    expect(start).toBeGreaterThan(-1);
-    const body = index.slice(start, start + 700);
+    const body = extractNamedFunction(index, "formatSourceDate", "tsx");
+    expect(body).toContain("function formatSourceDate");
     expect(body).toContain("Number.isNaN(parsed.getTime())");
     expect(body).toContain("year < 1990 || year > 2100");
     expect(body).toContain("trimmed.length > 40");

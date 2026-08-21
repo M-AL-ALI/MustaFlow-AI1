@@ -9,6 +9,10 @@ import { db, oraAssetsTable, oraFileContextsTable } from "@workspace/db";
 import oraAssetsRouter from "../ora-assets";
 import { persistOraAsset, getNextVersionLineage } from "../../lib/ora-assets";
 import { relinkFileContextAfterRestore } from "../../lib/public-ai/file-context-store";
+import {
+  extractIfStatementByCondition,
+  extractNamedFunction,
+} from "../../lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -204,22 +208,19 @@ describe("chat.ts persists generated outputs to the asset library", () => {
   const chatSrc = readFileSync(path.join(__dirname, "../public-ai/chat.ts"), "utf8");
 
   it("the file_generation branch persists generated files", () => {
-    // Anchor on the handler branch itself (`&& decision.fileFormat`) — the
-    // bare `decision.tool === "file_generation"` string also appears earlier
-    // in the multi-file toolOverride remap, which is not the branch.
-    const branch = chatSrc.slice(
-      chatSrc.indexOf('decision.tool === "file_generation" && decision.fileFormat'),
+    const fileBranch = extractIfStatementByCondition(
+      chatSrc,
+      'decision.tool === "file_generation" && decision.fileFormat',
     );
-    const next = branch.indexOf('decision.tool === "image_generation"');
-    const fileBranch = next > 0 ? branch.slice(0, next) : branch;
     expect(fileBranch).toContain("persistOraAsset");
     expect(fileBranch).toContain('kind: "file"');
   });
 
   it("the image_generation branch persists generated images", () => {
-    const branch = chatSrc.slice(chatSrc.indexOf('decision.tool === "image_generation"'));
-    const next = branch.indexOf('decision.tool === "search"');
-    const imageBranch = next > 0 ? branch.slice(0, next) : branch;
+    const imageBranch = extractIfStatementByCondition(
+      chatSrc,
+      'decision.tool === "image_generation"',
+    );
     expect(imageBranch).toContain("persistOraAsset");
     expect(imageBranch).toContain('kind: "image"');
   });
@@ -241,8 +242,7 @@ describe("image-generation-jobs.ts persists Ora-edited images to the asset libra
   const jobsSrc = readFileSync(path.join(__dirname, "../../lib/image-generation-jobs.ts"), "utf8");
 
   it("the edit-success path persists Ora edits to the library", () => {
-    const editFn = jobsSrc.slice(jobsSrc.indexOf("async function runImageEditJob"));
-    const body = editFn.slice(0, editFn.indexOf("async function runImageJob"));
+    const body = extractNamedFunction(jobsSrc, "runImageEditJob");
     expect(body).toContain('opts.billingMode === "ora"');
     expect(body).toContain("persistOraAsset");
     expect(body).toContain('kind: "image"');

@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractImportDeclaration,
+  extractNamedFunction,
+  extractNamedInterface,
+  extractNearestBlockContainingExactDeclaration,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Normalize CRLF so source-string assertions pass on Windows checkouts too
@@ -14,35 +20,28 @@ describe("Mobile Ora — file edit-quality card parity (Phase A)", () => {
   const index = read("../../app/(home)/index.tsx");
 
   it("ChatResponse carries the optional editQuality payload from the wire", () => {
-    const chatResponseStart = types.indexOf("export interface ChatResponse {");
-    expect(chatResponseStart).toBeGreaterThan(-1);
-    const chatResponseEnd = types.indexOf("\nexport ", chatResponseStart + 1);
-    const chatResponseBody = types.slice(chatResponseStart, chatResponseEnd);
+    const chatResponseBody = extractNamedInterface(types, "ChatResponse");
+    expect(chatResponseBody).toContain("interface ChatResponse");
     expect(chatResponseBody).toContain("editQuality?: OraFileEditQuality;");
   });
 
   it("editQuality type is imported type-only from the shared ora-contracts wire types", () => {
     // Type-only import keeps the zod runtime out of the Metro bundle.
     expect(types).toContain("OraFileEditQuality");
-    const importBlock = types.slice(
-      types.indexOf("import type {"),
-      types.indexOf('} from "@workspace/ora-contracts";', types.indexOf("import type {")),
-    );
+    const importBlock = extractImportDeclaration(types, "@workspace/ora-contracts");
     expect(importBlock).toContain("OraFileEditQuality");
   });
 
   it("buildGeneratedFile picks editQuality off the response and carries it onto the message", () => {
-    const fnStart = index.indexOf("function buildGeneratedFile(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = index.slice(fnStart, fnStart + 1200);
+    const fnBody = extractNamedFunction(index, "buildGeneratedFile", "tsx");
+    expect(fnBody).toContain("function buildGeneratedFile");
     expect(fnBody).toContain('"editQuality"');
     expect(fnBody).toContain("...(res.editQuality ? { editQuality: res.editQuality } : {})");
   });
 
   it("describeEditQuality maps all four edit modes to honest user-facing labels", () => {
-    const fnStart = index.indexOf("function describeEditQuality(");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = index.slice(fnStart, index.indexOf("\nfunction ", fnStart + 1));
+    const fnBody = extractNamedFunction(index, "describeEditQuality", "tsx");
+    expect(fnBody).toContain("function describeEditQuality");
     expect(fnBody).toContain('case "original_edited":');
     expect(fnBody).toContain('case "unchanged":');
     expect(fnBody).toContain('case "redesigned":');
@@ -61,9 +60,13 @@ describe("Mobile Ora — file edit-quality card parity (Phase A)", () => {
   });
 
   it("surfaces the server warning and caps visible change lines at three", () => {
-    const cardStart = index.indexOf("const quality = message.generatedFile?.editQuality;");
-    expect(cardStart).toBeGreaterThan(-1);
-    const cardBody = index.slice(cardStart, cardStart + 4500);
+    const cardBody = extractNearestBlockContainingExactDeclaration(
+      index,
+      "quality",
+      "message.generatedFile?.editQuality",
+      "tsx",
+    );
+    expect(cardBody).toContain("const quality = message.generatedFile?.editQuality");
     expect(cardBody).toContain("quality.warning");
     expect(cardBody).toContain("changes.slice(0, 3)");
     expect(cardBody).toContain("hiddenCount");

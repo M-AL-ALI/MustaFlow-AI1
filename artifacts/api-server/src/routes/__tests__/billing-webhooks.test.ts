@@ -18,6 +18,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { extractRouteHandler } from "../../lib/source-ast-test-helper";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -196,18 +197,12 @@ describe("Ora subscription display freshness", () => {
     expect(billingSource).toContain("currentPeriodEnd: period.end");
     expect(billingSource).toContain("cancelAtPeriodEnd");
 
-    const subscriptionRoute = billingSource.slice(
-      billingSource.indexOf('router.get("/billing/subscription"'),
-      billingSource.indexOf('router.get("/billing/payment-method"'),
-    );
+    const subscriptionRoute = extractRouteHandler(billingSource, "get", "/billing/subscription");
     expect(subscriptionRoute).toContain(
       "refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId))",
     );
 
-    const paymentRoute = billingSource.slice(
-      billingSource.indexOf('router.get("/billing/payment-method"'),
-      billingSource.indexOf('router.post("/billing/payment-method/setup"'),
-    );
+    const paymentRoute = extractRouteHandler(billingSource, "get", "/billing/payment-method");
     expect(paymentRoute).toContain(
       "refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId))",
     );

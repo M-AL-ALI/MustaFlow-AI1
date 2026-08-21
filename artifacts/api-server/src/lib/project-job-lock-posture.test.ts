@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { extractCatchClauseByParameter } from "./source-ast-test-helper";
 
 describe("project job cross-replica lock posture", () => {
   it("uses a namespaced transaction-scoped lock and no session-scoped project lock", () => {
@@ -35,11 +36,9 @@ describe("project job cross-replica lock posture", () => {
 
   it("terminalizes admission infrastructure failure without reaching repair-model dispatch", () => {
     const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    const claimCatchStart = source.indexOf("catch (admissionError)");
-    const claimCatchEnd = source.indexOf("if (!claim.claimed)", claimCatchStart);
-    const claimCatch = source.slice(claimCatchStart, claimCatchEnd);
+    const claimCatch = extractCatchClauseByParameter(source, "admissionError");
 
-    expect(claimCatchStart).toBeGreaterThan(-1);
+    expect(claimCatch).toContain("catch (admissionError)");
     expect(claimCatch).toContain("persistParallelBuildAdmissionUnavailable(taskId)");
     expect(claimCatch).toContain("return;");
     expect(claimCatch).not.toContain("generateFixSuggestions");

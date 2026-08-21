@@ -11,6 +11,7 @@ import {
   recordKnowledgeContextUsage,
   type KnowledgeContextUsageMutationRunner,
 } from "./knowledge-context-usage";
+import { extractNamedFunction } from "./source-ast-test-helper";
 
 describe("explicit knowledge context usage mutation", () => {
   it("derives one canonical identity from sorted unique entry ids", () => {
@@ -66,9 +67,7 @@ describe("explicit knowledge context usage mutation", () => {
 
   it("keeps retrieval free of usage-count writes", () => {
     const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    const start = source.indexOf("export async function loadKnowledgeContext(");
-    const end = source.indexOf("async function loadLatestPlanSnapshot", start);
-    const retrieval = source.slice(start, end);
+    const retrieval = extractNamedFunction(source, "loadKnowledgeContext");
     expect(retrieval).toContain("selectKnowledgeContext");
     expect(retrieval).not.toContain("usageCount:");
     expect(retrieval).not.toContain(".update(");

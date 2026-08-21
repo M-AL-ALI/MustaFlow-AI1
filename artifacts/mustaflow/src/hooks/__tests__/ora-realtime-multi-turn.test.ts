@@ -35,6 +35,7 @@ import { join } from "path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useOraRealtimeVoice, type RealtimeStartContext } from "../use-ora-realtime-voice";
+import { extractSwitchCase } from "../../../../api-server/src/lib/source-ast-test-helper";
 
 // ─── Source paths (for mobile parity source-string assertions) ─────────────────
 
@@ -547,12 +548,9 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
     // so the NEXT speech_started is never treated as a barge-in.
     const src = readHook("mobile");
 
-    // Locate the response.done case and extract the block up to the next case.
-    const doneStart = src.indexOf('case "response.done"');
-    expect(doneStart, "response.done case not found in mobile hook").toBeGreaterThan(-1);
-    const nextCase = src.indexOf("\n        case ", doneStart + 1);
-    const doneBlock = src.slice(doneStart, nextCase > doneStart ? nextCase : doneStart + 2000);
+    const doneBlock = extractSwitchCase(src, "response.done", "tsx");
 
+    expect(doneBlock).toContain('case "response.done"');
     expect(doneBlock).toContain("assistantResponseActiveRef.current = false");
     expect(doneBlock).toContain("assistantSpeakingRef.current = false");
   });
@@ -561,9 +559,7 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
     // Root cause A guard: after Ora finishes speaking, the follow-up window must
     // be reset so the user's next utterance is accepted without a wake word.
     const src = readHook("mobile");
-    const doneStart = src.indexOf('case "response.done"');
-    const nextCase = src.indexOf("\n        case ", doneStart + 1);
-    const doneBlock = src.slice(doneStart, nextCase > doneStart ? nextCase : doneStart + 2000);
+    const doneBlock = extractSwitchCase(src, "response.done", "tsx");
 
     expect(doneBlock).toContain("lastAcceptedUserTurnAtRef.current = Date.now()");
   });
@@ -574,17 +570,7 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
     // speech_started in the gap window is never treated as a barge-in.
     const src = readHook("mobile");
 
-    // The mobile hook combines two labels: `case "output_audio_buffer.stopped":
-    // case "output_audio_buffer.cleared":`. We must search all the way to the
-    // NEXT distinct case (`response.done`) to capture the full block body —
-    // looking for just the nearest `case "` immediately finds the companion
-    // `cleared` label on the very next line, yielding an empty snippet.
-    const stoppedStart = src.indexOf('case "output_audio_buffer.stopped"');
-    const responseDoneStart = src.indexOf('case "response.done"', stoppedStart);
-    const stoppedBlock = src.slice(
-      stoppedStart,
-      responseDoneStart > stoppedStart ? responseDoneStart : stoppedStart + 3000,
-    );
+    const stoppedBlock = extractSwitchCase(src, "output_audio_buffer.stopped", "tsx");
 
     // The debounce callback must set assistantResponseActiveRef = false.
     expect(stoppedBlock).toContain("assistantResponseActiveRef.current = false");
@@ -596,9 +582,7 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
     // speech_started must gate the barge-in timer on the active/speaking refs
     // being true. If both are false (Ora is done), no barge-in is armed.
     const src = readHook("mobile");
-    const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
-    const speechEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
-    const speechBlock = src.slice(speechStart, speechEnd);
+    const speechBlock = extractSwitchCase(src, "input_audio_buffer.speech_started", "tsx");
 
     // The gate must check assistantResponseActiveRef OR assistantSpeakingRef.
     expect(speechBlock).toContain(
@@ -620,9 +604,7 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
       ["web", webSrc],
       ["mobile", mobileSrc],
     ] as const) {
-      const doneStart = src.indexOf('case "response.done"');
-      const nextCase = src.indexOf("\n        case ", doneStart + 1);
-      const doneBlock = src.slice(doneStart, nextCase > doneStart ? nextCase : doneStart + 2000);
+      const doneBlock = extractSwitchCase(src, "response.done", "tsx");
 
       expect(doneBlock, `${label} response.done must clear assistantResponseActiveRef`).toContain(
         "assistantResponseActiveRef.current = false",

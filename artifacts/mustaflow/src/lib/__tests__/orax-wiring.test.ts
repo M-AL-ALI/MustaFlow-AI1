@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractIfStatementByCondition,
+  extractNamedFunction,
+  extractNamedInterface,
+  extractNamedMethod,
+} from "../../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) => readFileSync(path.join(__dirname, rel), "utf8");
@@ -952,8 +958,22 @@ describe("ORAX product-surface wiring", () => {
   it("Phase 2D: Orax device management code has no Ora/public-ai/credits/project-chat references", () => {
     const devicesPage = read("../../pages/orax-devices.tsx");
     const mobileApi = read("../../../../ora-mobile/lib/api.ts");
-    // The new host/pairing additions must not touch Ora surfaces
-    const hostSection = mobileApi.slice(mobileApi.indexOf("Orax Desktop host and pairing"));
+    const hostSection = [
+      "listOraxHosts",
+      "getOraxHost",
+      "updateOraxHost",
+      "revokeOraxHost",
+      "createOraxPairingCode",
+      "cancelOraxPairingCode",
+      "redeemOraxPairingCode",
+      "createDesktopAction",
+      "getDesktopActions",
+      "requestDesktopCommandApproval",
+      "resolveDesktopCommandApproval",
+      "getDesktopApproval",
+    ]
+      .map((name) => extractNamedFunction(mobileApi, name))
+      .join("\n");
     expect(hostSection).not.toContain("/api/public-ai");
     expect(hostSection).not.toContain("deductCredits");
     expect(hostSection).not.toContain("handoffCta");
@@ -980,7 +1000,7 @@ describe("ORAX product-surface wiring", () => {
     expect(modeSelect).toContain('"revoked"');
 
     // "active" must NOT appear in OraxHostSummary or host filter logic
-    const oraxHostSection = mobileTypes.slice(mobileTypes.indexOf("OraxHostSummary"));
+    const oraxHostSection = extractNamedInterface(mobileTypes, "OraxHostSummary");
     expect(oraxHostSection).not.toContain('status: "active"');
     expect(devicesPage).not.toContain('status: "active"');
     expect(modeSelect).not.toContain('status: "active"');
@@ -2221,8 +2241,10 @@ describe("ORAX product-surface wiring", () => {
 
   it("Phase 2L: relay-client apply_project_patch has no exec, spawn, or shell:true", () => {
     const src = read("../../../../orax-desktop/src/main/relay-client.ts");
-    const applyIdx = src.indexOf("apply_project_patch");
-    const applySection = src.slice(applyIdx, applyIdx + 2000);
+    const applySection = extractIfStatementByCondition(
+      extractNamedMethod(src, "executeAction"),
+      'action.type === "apply_project_patch"',
+    );
     expect(applySection).not.toContain("exec(");
     expect(applySection).not.toContain("spawn(");
     expect(applySection).not.toContain("shell: true");
@@ -2252,8 +2274,7 @@ describe("ORAX product-surface wiring", () => {
 
   it("Phase 2L: backend AI patch generator has no exec, spawn, shell:true, or process.cwd", () => {
     const src = read("../../../../api-server/src/routes/orax-desktop.ts");
-    const genIdx = src.indexOf("generateAiPatches");
-    const genSection = src.slice(genIdx, genIdx + 3000);
+    const genSection = extractNamedFunction(src, "generateAiPatches");
     expect(genSection).not.toContain("exec(");
     expect(genSection).not.toContain("spawn(");
     expect(genSection).not.toContain("shell: true");
@@ -2347,8 +2368,10 @@ describe("ORAX product-surface wiring", () => {
 
   it("Phase 2M: relay-client verify_project_patch has no exec or shell invocations", () => {
     const src = read("../../../../orax-desktop/src/main/relay-client.ts");
-    const verifyIdx = src.indexOf('"verify_project_patch"');
-    const verifySection = src.slice(verifyIdx, verifyIdx + 3000);
+    const verifySection = extractIfStatementByCondition(
+      extractNamedMethod(src, "executeAction"),
+      'action.type === "verify_project_patch"',
+    );
     expect(verifySection).not.toContain("shell: true");
     expect(verifySection).not.toContain("exec(");
   });
@@ -2458,8 +2481,10 @@ describe("ORAX product-surface wiring", () => {
 
   it("Phase 2N: relay-client.ts draft_project_fix section has no exec or shell invocations", () => {
     const src = read("../../../../orax-desktop/src/main/relay-client.ts");
-    // Only check the fix section — run_safe_command legitimately uses shell
-    const fixSection = src.slice(src.indexOf('"draft_project_fix"'));
+    const fixSection = extractIfStatementByCondition(
+      extractNamedMethod(src, "executeAction"),
+      'action.type === "draft_project_fix"',
+    );
     expect(fixSection).not.toContain("execSync(");
     expect(fixSection).not.toContain("spawnSync(");
     expect(fixSection).not.toContain("shell: true");

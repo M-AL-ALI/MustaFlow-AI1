@@ -16,6 +16,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, it, expect } from "vitest";
+import { extractIfStatementByCondition } from "../../../lib/source-ast-test-helper";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,9 +110,10 @@ describe("Phase 4 — Voice-A: use-ora-voice hook", () => {
   it("treats no-speech and aborted silently (returns to idle, not error state)", () => {
     expect(hookSrc).toContain('"no-speech"');
     expect(hookSrc).toContain('"aborted"');
-    const noSpeechSection = hookSrc.slice(
-      hookSrc.indexOf('"no-speech"') - 10,
-      hookSrc.indexOf('"no-speech"') + 200,
+    const noSpeechSection = extractIfStatementByCondition(
+      hookSrc,
+      'code === "no-speech" || code === "aborted"',
+      "tsx",
     );
     expect(noSpeechSection).toContain("idle");
   });

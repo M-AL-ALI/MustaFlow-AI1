@@ -6,6 +6,7 @@ import {
   resolveSealedTestingHandoff,
   selectAcceptedSealedReleaseForSnapshot,
 } from "./sealed-testing-candidate";
+import { extractRouteHandler } from "./source-ast-test-helper";
 
 const sha = (digit: string) => digit.repeat(64);
 const files = [
@@ -98,14 +99,11 @@ describe("staging -> sealed test approval -> production promotion", () => {
 
   it("uses the artifact-native provider for staging promotion, not the legacy KV-only path", () => {
     const source = readFileSync(new URL("../routes/publish.ts", import.meta.url), "utf8");
-    const publishRoute = source.slice(
-      source.indexOf('router.post("/projects/:id/publish"'),
-      source.indexOf('router.post("/projects/:id/promote"'),
-    );
+    const publishRoute = extractRouteHandler(source, "post", "/projects/:id/publish");
     expect(publishRoute).toContain("selectAcceptedSealedReleaseForSnapshot({");
     expect(publishRoute).toContain("sealedRelease: artifactNativeDeployment");
     expect(publishRoute).toContain("sealedReleaseSourceVersionId");
-    const promotionRoute = source.slice(source.indexOf('router.post("/projects/:id/promote"'));
+    const promotionRoute = extractRouteHandler(source, "post", "/projects/:id/promote");
     expect(promotionRoute).toContain("promoteAcceptedArtifact({");
     expect(promotionRoute).toContain("sourceVersionId: stagingVersionForPromotion.id");
     expect(promotionRoute).toContain("sealedRelease: projectVersionsTable.sealedRelease");

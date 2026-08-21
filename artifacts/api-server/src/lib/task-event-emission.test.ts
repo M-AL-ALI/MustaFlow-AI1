@@ -98,10 +98,7 @@ describe("bounded task-event emission", () => {
 
   it("wires the task event insert and drop logger through the bounded helper", () => {
     const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    const emitEventSource = source.slice(
-      source.indexOf("async function emitEvent("),
-      source.indexOf("async function finalizeAgentTaskWithEvent("),
-    );
+    const emitEventSource = extractNamedFunction(source, "emitEvent");
 
     expect(emitEventSource).toContain("await emitTaskEventBounded({");
     expect(emitEventSource).toContain("persist: async () =>");

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { mapOraStreamDiagnostics } from "../use-ora-chat";
+import { extractInnermostIfContainingText } from "../../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -80,9 +81,12 @@ describe("use-ora-chat diagnostics capture wiring", () => {
   });
 
   it("records a fallback diagnostic on the non-streaming /chat path", () => {
-    const fallbackIdx = src.indexOf('apiPost<ChatResponseData>("/api/public-ai/chat"');
-    expect(fallbackIdx).toBeGreaterThan(-1);
-    const after = src.slice(fallbackIdx, fallbackIdx + 600);
+    const after = extractInnermostIfContainingText(
+      src,
+      'apiPost<ChatResponseData>("/api/public-ai/chat", body)',
+      "tsx",
+    );
+    expect(after).toContain('apiPost<ChatResponseData>("/api/public-ai/chat"');
     expect(after).toContain("viaFallback: true");
     expect(after).toContain("setLastOraStreamDiagnostics");
   });

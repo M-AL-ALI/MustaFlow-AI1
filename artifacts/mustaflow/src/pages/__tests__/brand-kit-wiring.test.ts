@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractCallContainingIdentifier,
+  extractNamedDeclaration,
+  extractNamedInterface,
+} from "../../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) =>
@@ -11,9 +16,8 @@ describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   const src = read("../ora-settings.tsx");
 
   it("BrandKitApiResponse exposes only `kit` at the top level", () => {
-    const ifaceStart = src.indexOf("interface BrandKitApiResponse");
-    expect(ifaceStart).toBeGreaterThan(-1);
-    const iface = src.slice(ifaceStart, src.indexOf("\n}", ifaceStart) + 2);
+    const iface = extractNamedInterface(src, "BrandKitApiResponse", "tsx");
+    expect(iface).toContain("interface BrandKitApiResponse");
     const topLevelKeys = [...iface.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1]);
     expect(topLevelKeys).toEqual(["kit"]);
     expect(iface).toMatch(/^ {4}primaryColor\?:/m);
@@ -22,11 +26,9 @@ describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   });
 
   it("useEffect reads colors/fonts/logo from d.kit (not flat d)", () => {
-    const effectStart = src.indexOf('void authFetch("/api/ora/brand-kit")');
-    expect(effectStart).toBeGreaterThan(-1);
-    const effectEnd = src.indexOf(".finally(", effectStart);
-    const effectBody = src.slice(effectStart, effectEnd);
+    const effectBody = extractCallContainingIdentifier(src, "useEffect", "logoPreviewUrl", "tsx");
 
+    expect(effectBody).toContain('authFetch("/api/ora/brand-kit")');
     expect(effectBody).toContain("d.kit");
     expect(effectBody).toContain("kit.primaryColor");
     expect(effectBody).toContain("kit.accentColor");
@@ -38,11 +40,9 @@ describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   });
 
   it("handleLogoUpload sends JSON (not FormData) with base64 data", () => {
-    const fnStart = src.indexOf("const handleLogoUpload = async");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnEnd = src.indexOf("\n  };", fnStart);
-    const fnBody = src.slice(fnStart, fnEnd);
+    const fnBody = extractNamedDeclaration(src, "handleLogoUpload", "tsx");
 
+    expect(fnBody).toContain("handleLogoUpload = async");
     expect(fnBody).not.toContain("new FormData()");
     expect(fnBody).not.toContain("form.append");
     expect(fnBody).toContain("FileReader");
@@ -54,21 +54,17 @@ describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   });
 
   it("handleLogoUpload reads previewUrl from the response (not logoUrl)", () => {
-    const fnStart = src.indexOf("const handleLogoUpload = async");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnEnd = src.indexOf("\n  };", fnStart);
-    const fnBody = src.slice(fnStart, fnEnd);
+    const fnBody = extractNamedDeclaration(src, "handleLogoUpload", "tsx");
 
+    expect(fnBody).toContain("handleLogoUpload = async");
     expect(fnBody).toContain("previewUrl");
     expect(fnBody).not.toContain("d.logoUrl");
   });
 
   it("handleLogoUpload validates PNG/JPEG only — rejects other types", () => {
-    const fnStart = src.indexOf("const handleLogoUpload = async");
-    expect(fnStart).toBeGreaterThan(-1);
-    const fnEnd = src.indexOf("\n  };", fnStart);
-    const fnBody = src.slice(fnStart, fnEnd);
+    const fnBody = extractNamedDeclaration(src, "handleLogoUpload", "tsx");
 
+    expect(fnBody).toContain("handleLogoUpload = async");
     expect(fnBody).toContain('"image/png"');
     expect(fnBody).toContain('"image/jpeg"');
     expect(fnBody).toContain("PNG or JPEG");
@@ -90,11 +86,9 @@ describe("Brand Kit website wiring (ora-settings.tsx)", () => {
   });
 
   it("SAFE_FONTS_WEB does not include Tahoma", () => {
-    const fontsStart = src.indexOf("const SAFE_FONTS_WEB = [");
-    expect(fontsStart).toBeGreaterThan(-1);
-    const fontsEnd = src.indexOf("] as const;", fontsStart);
-    const fontsBlock = src.slice(fontsStart, fontsEnd + 11);
+    const fontsBlock = extractNamedDeclaration(src, "SAFE_FONTS_WEB", "tsx");
 
+    expect(fontsBlock).toContain("SAFE_FONTS_WEB = [");
     expect(fontsBlock).not.toContain("Tahoma");
     expect(fontsBlock).toContain('"Calibri"');
     expect(fontsBlock).toContain('"Arial"');

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  extractNamedDeclaration,
+  extractNamedFunction,
+  extractNamedInterface,
+} from "../../../api-server/src/lib/source-ast-test-helper";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Normalize CRLF so source-string assertions pass on Windows checkouts too.
@@ -22,20 +27,10 @@ describe("Mobile Ora — clarifying-questions parity with the website hook", () 
   const types = read("../types.ts");
   const store = read("../pending-clarification-store.ts");
 
-  const reqStart = types.indexOf("export interface ChatRequest {");
-  const reqEnd = types.indexOf("\n}", reqStart);
-  const chatRequestBody = types.slice(reqStart, reqEnd);
-
-  const resStart = types.indexOf("export interface ChatResponse {");
-  const resEnd = types.indexOf("\n}", resStart);
-  const chatResponseBody = types.slice(resStart, resEnd);
-
-  const sendStart = index.indexOf("const sendMessage = useCallback(");
-  const sendEnd = index.indexOf("const handleSend = useCallback(");
-  const sendMessageBody = index.slice(sendStart, sendEnd);
-  const chatReqStart = sendMessageBody.indexOf("const chatReq: ChatRequest = {");
-  const chatReqEnd = sendMessageBody.indexOf("};", chatReqStart);
-  const chatReqBody = sendMessageBody.slice(chatReqStart, chatReqEnd);
+  const chatRequestBody = extractNamedInterface(types, "ChatRequest");
+  const chatResponseBody = extractNamedInterface(types, "ChatResponse");
+  const sendMessageBody = extractNamedDeclaration(index, "sendMessage", "tsx");
+  const chatReqBody = extractNamedDeclaration(sendMessageBody, "chatReq", "tsx");
 
   it("ChatRequest/ChatResponse declare the clarification contract fields", () => {
     expect(chatRequestBody).toContain("pendingClarification?: OraPendingClarification");
@@ -50,9 +45,8 @@ describe("Mobile Ora — clarifying-questions parity with the website hook", () 
   });
 
   it("arms/clears one-shot from each reply, never persisting in temporary mode", () => {
-    const applyIdx = sendMessageBody.indexOf("const applyPendingClarification =");
-    expect(applyIdx).toBeGreaterThan(-1);
-    const applyBody = sendMessageBody.slice(applyIdx, applyIdx + 600);
+    const applyBody = extractNamedDeclaration(sendMessageBody, "applyPendingClarification", "tsx");
+    expect(applyBody).toContain("applyPendingClarification =");
     expect(applyBody).toContain(
       "res?.needsClarification && res.pendingTaskContext ? res.pendingTaskContext : null",
     );
@@ -71,19 +65,16 @@ describe("Mobile Ora — clarifying-questions parity with the website hook", () 
   });
 
   it("new chat and temporary toggle drop the pending context", () => {
-    const newChatStart = index.indexOf("const newChat = useCallback(");
-    const newChatBody = index.slice(newChatStart, index.indexOf("}, [", newChatStart));
+    const newChatBody = extractNamedDeclaration(index, "newChat", "tsx");
     expect(newChatBody).toContain("pendingClarificationRef.current = null");
     expect(newChatBody).toContain("storePendingClarification(DOC_REFS_STANDALONE_KEY, null)");
 
-    const toggleStart = index.indexOf("const toggleTemporary = useCallback(");
-    const toggleBody = index.slice(toggleStart, index.indexOf("}, [", toggleStart));
+    const toggleBody = extractNamedDeclaration(index, "toggleTemporary", "tsx");
     expect(toggleBody).toContain("pendingClarificationRef.current = null");
   });
 
   it("opening a saved conversation restores THAT thread's pending context", () => {
-    const loadStart = index.indexOf("const loadConversation = useCallback(");
-    const loadBody = index.slice(loadStart, index.indexOf("const removeConversation", loadStart));
+    const loadBody = extractNamedDeclaration(index, "loadConversation", "tsx");
     expect(loadBody).toContain("loadPendingClarificationStore()");
     expect(loadBody).toContain(
       "pendingClarificationRef.current = getStoredPendingClarification(docRefsKey(id))",
@@ -97,16 +88,14 @@ describe("Mobile Ora — clarifying-questions parity with the website hook", () 
   });
 
   it("first save moves a standalone pending context under the conversation key", () => {
-    const persistIdx = index.indexOf("// Same move for a clarification asked before");
-    expect(persistIdx).toBeGreaterThan(-1);
-    const moveWindow = index.slice(persistIdx, persistIdx + 400);
-    expect(moveWindow).toContain("storePendingClarification(docRefsKey(convId)");
-    expect(moveWindow).toContain("storePendingClarification(DOC_REFS_STANDALONE_KEY, null)");
+    const persist = extractNamedDeclaration(index, "persist", "tsx");
+    expect(persist).toContain("persist = useCallback");
+    expect(persist).toContain("storePendingClarification(docRefsKey(convId)");
+    expect(persist).toContain("storePendingClarification(DOC_REFS_STANDALONE_KEY, null)");
   });
 
   it("buildChatExtras maps the clarification flags onto the assistant message", () => {
-    const extrasStart = index.indexOf("function buildChatExtras(");
-    const extrasBody = index.slice(extrasStart, index.indexOf("\n}", extrasStart));
+    const extrasBody = extractNamedFunction(index, "buildChatExtras", "tsx");
     expect(extrasBody).toContain("...(res.needsClarification ? { needsClarification: true } : {})");
     expect(extrasBody).toContain(
       "...(res.clarificationKind ? { clarificationKind: res.clarificationKind } : {})",
