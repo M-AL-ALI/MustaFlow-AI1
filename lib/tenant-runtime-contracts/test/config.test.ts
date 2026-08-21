@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTenantRuntimeConfig } from "../src/config";
+import { CLOUDFLARE_RUNTIME_BINDING_NAMES, parseTenantRuntimeConfig } from "../src/config";
 
 const cloudflareEnvironment = {
   TENANT_RUNTIME_PROVIDER: "cloudflare",
@@ -40,13 +40,29 @@ describe("tenant runtime configuration", () => {
     },
   );
 
-  it("requires all Cloudflare fields together", () => {
-    expect(() =>
-      parseTenantRuntimeConfig({
-        TENANT_RUNTIME_PROVIDER: "cloudflare",
-        CLOUDFLARE_RUNTIME_CONTROL_URL: cloudflareEnvironment.CLOUDFLARE_RUNTIME_CONTROL_URL,
-      }),
-    ).toThrow("requires control URL, token, and namespace");
+  it("returns a names-only partial state for every incomplete Cloudflare combination", () => {
+    for (let mask = 0; mask < 7; mask += 1) {
+      const environment: Record<string, string> = { TENANT_RUNTIME_PROVIDER: "cloudflare" };
+      CLOUDFLARE_RUNTIME_BINDING_NAMES.forEach((name, index) => {
+        if ((mask & (1 << index)) !== 0) environment[name] = cloudflareEnvironment[name];
+      });
+      const missingBindings = CLOUDFLARE_RUNTIME_BINDING_NAMES.filter(
+        (_name, index) => (mask & (1 << index)) === 0,
+      );
+
+      const result = parseTenantRuntimeConfig(environment);
+
+      expect(result).toEqual({
+        provider: "cloudflare",
+        partialCloudflare: { status: "partial-config", missingBindings },
+      });
+      const serialized = JSON.stringify(result);
+      for (const value of CLOUDFLARE_RUNTIME_BINDING_NAMES.map(
+        (name) => cloudflareEnvironment[name],
+      )) {
+        expect(serialized).not.toContain(value);
+      }
+    }
   });
 
   it("validates supplied Cloudflare settings even while Fly remains selected", () => {

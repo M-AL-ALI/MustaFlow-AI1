@@ -288,6 +288,7 @@ export * from './grantAdminRole200';
 export * from './healthStatus';
 export * from './healthStatusContainerSubsystem';
 export * from './healthStatusEncryptionKey';
+export * from './healthStatusMissingRuntimeBindingsItem';
 export * from './healthStatusQueueSchemaContract';
 export * from './healthStatusStartupMigrations';
 export * from './helpArticle';

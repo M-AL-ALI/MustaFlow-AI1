@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CLOUDFLARE_RUNTIME_BINDING_NAMES } from "@workspace/tenant-runtime-contracts";
 
 const mocks = vi.hoisted(() => ({
   createContainer: vi.fn(),
@@ -58,7 +59,9 @@ vi.mock("./logger", () => ({
 
 import { FlyRuntimeProvider } from "./fly-runtime-provider";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
+import { PartialConfigRuntimeProvider } from "./partial-config-runtime-provider";
 import {
+  RuntimeProviderUnavailableError,
   supportsArtifactDeployment,
   supportsLayeredArtifactDeployment,
   supportsZeroGeneration,
@@ -189,6 +192,95 @@ describe("TenantRuntimeProvider Fly adapter", () => {
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
       }),
     ).toBeInstanceOf(CloudflareRuntimeProvider);
+  });
+
+  it("boots every partial combination without reaching Fly or Cloudflare", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { createTenantRuntimeProvider } = await import("./tenant-runtime");
+    const completeEnvironment = {
+      CLOUDFLARE_RUNTIME_CONTROL_URL: "https://runtime.example.test",
+      CLOUDFLARE_RUNTIME_CONTROL_TOKEN: "control-token-with-at-least-thirty-two-characters",
+      CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+    };
+
+    for (let presentMask = 0; presentMask < 7; presentMask += 1) {
+      const environment: Record<string, string> = { TENANT_RUNTIME_PROVIDER: "cloudflare" };
+      CLOUDFLARE_RUNTIME_BINDING_NAMES.forEach((name, index) => {
+        if ((presentMask & (1 << index)) !== 0) environment[name] = completeEnvironment[name];
+      });
+      const partial = createTenantRuntimeProvider(environment);
+
+      expect(partial).toBeInstanceOf(PartialConfigRuntimeProvider);
+      expect(partial.hasCredentials()).toBe(false);
+      await expect(partial.isAvailable()).resolves.toBe(false);
+      await expect(partial.runSelfCheck()).resolves.toBe("partial-config");
+      expect(partial.getSubsystemStatus()).toBe("partial-config");
+      await expect(partial.create(42, "node-api")).rejects.toBeInstanceOf(
+        RuntimeProviderUnavailableError,
+      );
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mocks.createContainer).not.toHaveBeenCalled();
+    expect(mocks.startContainer).not.toHaveBeenCalled();
+    expect(mocks.stopContainer).not.toHaveBeenCalled();
+    expect(mocks.destroyContainer).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("fails every partial-provider operation through the existing typed unavailable error", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const partial = new PartialConfigRuntimeProvider([
+      "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
+      "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE",
+    ]);
+    const file = [{ path: "index.js", content: "safe source" }];
+    const asyncOperations: Array<() => Promise<unknown>> = [
+      () => partial.ensureInfrastructure(),
+      () => partial.start("runtime", 1),
+      () => partial.stop("runtime", 1),
+      () => partial.destroy("runtime", 1),
+      () => partial.status("runtime"),
+      () => partial.exec("runtime", ["node", "--version"], 1),
+      () => partial.installDependencies("runtime", 1),
+      () => partial.writeFile("runtime", "index.js", "safe source", 1),
+      () => partial.syncFiles("runtime", 1, file),
+      () => partial.restoreFiles("runtime", 1, file),
+      () => partial.updateEnvironment("runtime", 1, {}),
+      () => partial.restartWithProjectEnvironment(1, {}),
+      () => partial.ensureAwake("runtime", 1, null),
+      () => partial.provision(1, file),
+      () => partial.hibernate(1),
+      () => partial.createProduction(1, {}),
+      () => partial.deployProduction(1, null, file, {}),
+      () => partial.configureIdleBehavior("runtime", 1, "stop"),
+      () => partial.startHealthService("runtime", 1),
+      () => partial.stopHealthService("runtime", 1),
+      () => partial.health("https://runtime.example.test", 1),
+      () => partial.isGatewayReachable(),
+      () => partial.recordLog(1, "system", "message"),
+      () => partial.resumeLogStreamsOnBoot(),
+    ];
+
+    for (const operation of asyncOperations) {
+      await expect(operation()).rejects.toMatchObject({
+        code: "runtime_provider_capability_unavailable",
+        providerId: "cloudflare",
+      });
+    }
+    for (const operation of [
+      () => partial.startKeepalive("https://runtime.example.test", 1),
+      () => partial.resolveEndpoint("runtime"),
+      () => partial.getGatewayHostname(),
+      () => partial.getGatewayLabel(),
+      () => partial.mapErrorToMessage("error"),
+      () => partial.startLogStream(1, "runtime"),
+      () => partial.stopLogStream(1),
+    ]) {
+      expect(operation).toThrow(RuntimeProviderUnavailableError);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mocks.createContainer).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it("keeps production consumers behind the tenant runtime seam", () => {

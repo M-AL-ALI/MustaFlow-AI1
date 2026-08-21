@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 /**
- * Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "error" = token is set but API call failed at startup.
+ * Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "partial-config" = Cloudflare runtime configuration is incomplete. "error" = token is set but API call failed at startup.
 
  */
 export type HealthStatusContainerSubsystem = typeof HealthStatusContainerSubsystem[keyof typeof HealthStatusContainerSubsystem];
@@ -16,6 +16,7 @@ export const HealthStatusContainerSubsystem = {
   unknown: 'unknown',
   ok: 'ok',
   unconfigured: 'unconfigured',
+  'partial-config': 'partial-config',
   error: 'error',
 } as const;
 
@@ -58,9 +59,18 @@ export const HealthStatusQueueSchemaContract = {
   error: 'error',
 } as const;
 
+export type HealthStatusMissingRuntimeBindingsItem = typeof HealthStatusMissingRuntimeBindingsItem[keyof typeof HealthStatusMissingRuntimeBindingsItem];
+
+
+export const HealthStatusMissingRuntimeBindingsItem = {
+  CLOUDFLARE_RUNTIME_CONTROL_URL: 'CLOUDFLARE_RUNTIME_CONTROL_URL',
+  CLOUDFLARE_RUNTIME_CONTROL_TOKEN: 'CLOUDFLARE_RUNTIME_CONTROL_TOKEN',
+  CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: 'CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE',
+} as const;
+
 export interface HealthStatus {
   status: string;
-  /** Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "error" = token is set but API call failed at startup.
+  /** Status of the Fly.io container subsystem. "unknown" = the startup check has not completed yet. "ok" = token is configured and API is reachable. "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error). "partial-config" = Cloudflare runtime configuration is incomplete. "error" = token is set but API call failed at startup.
    */
   containerSubsystem: HealthStatusContainerSubsystem;
   /** Encryption key health. "ok" = key is present and AES-256-GCM round-trip passes. "missing" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). "invalid" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).
@@ -72,6 +82,11 @@ export interface HealthStatus {
   /** Cached Zero prompt queue schema-contract state. "unknown" = the first verification has not completed yet. "ok" = the contract is ready. "error" = the contract is unready.
    */
   queueSchemaContract: HealthStatusQueueSchemaContract;
+  /**
+     * Required runtime binding names absent from a partial Cloudflare configuration.
+     * @maxItems 3
+     */
+  missingRuntimeBindings?: HealthStatusMissingRuntimeBindingsItem[];
 }
 
 export interface ApiError {

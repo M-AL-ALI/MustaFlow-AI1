@@ -4,6 +4,13 @@ import { validateDeploymentNamespace } from "./runtime-identity";
 export const TENANT_RUNTIME_PROVIDERS = ["fly", "cloudflare"] as const;
 export type TenantRuntimeProviderId = (typeof TENANT_RUNTIME_PROVIDERS)[number];
 
+export const CLOUDFLARE_RUNTIME_BINDING_NAMES = [
+  "CLOUDFLARE_RUNTIME_CONTROL_URL",
+  "CLOUDFLARE_RUNTIME_CONTROL_TOKEN",
+  "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE",
+] as const;
+export type CloudflareRuntimeBindingName = (typeof CLOUDFLARE_RUNTIME_BINDING_NAMES)[number];
+
 const optionalNonemptyString = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.string().min(1).optional(),
@@ -24,6 +31,10 @@ export interface TenantRuntimeConfig {
     controlUrl: string;
     controlToken: string;
     deploymentNamespace: string;
+  };
+  partialCloudflare?: {
+    status: "partial-config";
+    missingBindings: CloudflareRuntimeBindingName[];
   };
 }
 
@@ -65,15 +76,24 @@ export function parseTenantRuntimeConfig(
 
   if (provider === "fly" && !anyCloudflareValue) return { provider: "fly" };
 
-  if (
-    !parsed.CLOUDFLARE_RUNTIME_CONTROL_URL ||
-    !parsed.CLOUDFLARE_RUNTIME_CONTROL_TOKEN ||
-    !parsed.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE
-  ) {
-    throw new Error("Cloudflare runtime configuration requires control URL, token, and namespace");
+  const missingBindings = CLOUDFLARE_RUNTIME_BINDING_NAMES.filter(
+    (name) => parsed[name] === undefined,
+  );
+  if (missingBindings.length > 0) {
+    return {
+      provider: provider as TenantRuntimeProviderId,
+      partialCloudflare: { status: "partial-config", missingBindings },
+    };
   }
 
-  const controlUrl = new URL(parsed.CLOUDFLARE_RUNTIME_CONTROL_URL);
+  const controlUrlValue = parsed.CLOUDFLARE_RUNTIME_CONTROL_URL;
+  const controlToken = parsed.CLOUDFLARE_RUNTIME_CONTROL_TOKEN;
+  const deploymentNamespace = parsed.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE;
+  if (!controlUrlValue || !controlToken || !deploymentNamespace) {
+    throw new Error("Cloudflare runtime configuration completeness check failed");
+  }
+
+  const controlUrl = new URL(controlUrlValue);
   if (controlUrl.protocol !== "https:") {
     throw new Error("CLOUDFLARE_RUNTIME_CONTROL_URL must use HTTPS");
   }
@@ -82,7 +102,7 @@ export function parseTenantRuntimeConfig(
       "CLOUDFLARE_RUNTIME_CONTROL_URL cannot contain credentials, a query, or a fragment",
     );
   }
-  if (parsed.CLOUDFLARE_RUNTIME_CONTROL_TOKEN.length < 32) {
+  if (controlToken.length < 32) {
     throw new Error("CLOUDFLARE_RUNTIME_CONTROL_TOKEN must contain at least 32 characters");
   }
 
@@ -90,10 +110,8 @@ export function parseTenantRuntimeConfig(
     provider: provider as TenantRuntimeProviderId,
     cloudflare: {
       controlUrl: controlUrl.toString().replace(/\/$/, ""),
-      controlToken: parsed.CLOUDFLARE_RUNTIME_CONTROL_TOKEN,
-      deploymentNamespace: validateDeploymentNamespace(
-        parsed.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
-      ),
+      controlToken,
+      deploymentNamespace: validateDeploymentNamespace(deploymentNamespace),
     },
   };
 }
