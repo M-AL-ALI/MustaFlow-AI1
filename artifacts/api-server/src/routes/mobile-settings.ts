@@ -12,6 +12,7 @@ import { z } from "zod";
 import { logger } from "../lib/logger";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 import { emitTaskEventBounded } from "../lib/task-event-emission";
+import { saveMobileSettingsWithMetadata } from "../lib/mobile-settings-outcome";
 
 const router: IRouter = Router();
 
@@ -289,39 +290,62 @@ router.post(
         await emitEvent(taskId, "editing_files", `Updating ${f.path}`, f.path);
       }
 
-      // ── Write files and snapshot a version together ─────────────────────────
+      // ── Write files and a version together; metadata cannot reverse that outcome ──
       await emitEvent(taskId, "saving_version", "Saving rollback snapshot…");
-      await writeProjectFilesAtomically({
-        projectId,
-        scope: { kind: "project" },
-        replaceAll: false,
-        files: filesToWrite,
-        authoritativeVersion: {
-          label: `Settings: ${changedFields.join(", ") || "no changes"}`,
-          note: changeDescription,
-          changelogEntry: changeDescription,
+      const updatedSettings = expoToSettings(expo, projectId);
+
+      async function commitFilesAndVersion() {
+        await writeProjectFilesAtomically({
+          projectId,
+          scope: { kind: "project" },
+          replaceAll: false,
+          files: filesToWrite,
+          authoritativeVersion: {
+            label: `Settings: ${changedFields.join(", ") || "no changes"}`,
+            note: changeDescription,
+            changelogEntry: changeDescription,
+          },
+        });
+        return updatedSettings;
+      }
+
+      const savedSettings = await saveMobileSettingsWithMetadata({
+        commitFilesAndVersion,
+        metadata: [
+          {
+            stage: "task_completion",
+            write: () =>
+              db
+                .update(agentTasksTable)
+                .set({
+                  status: "completed",
+                  result: changeDescription,
+                  completedAt: sql`now()`,
+                })
+                .where(eq(agentTasksTable.id, taskId)),
+          },
+          {
+            stage: "project_touch",
+            write: () =>
+              db
+                .update(projectsTable)
+                .set({ updatedAt: sql`now()` })
+                .where(eq(projectsTable.id, projectId)),
+          },
+          {
+            stage: "completion_event",
+            write: () => emitEvent(taskId, "completed", "App settings saved."),
+          },
+        ],
+        recordFailure: (failure) => {
+          logger.warn(
+            { projectId, taskId, failure },
+            "Mobile-settings post-commit metadata degraded",
+          );
         },
       });
 
-      // ── Complete the task ───────────────────────────────────────────────────
-      await db
-        .update(agentTasksTable)
-        .set({
-          status: "completed",
-          result: changeDescription,
-          completedAt: sql`now()`,
-        })
-        .where(eq(agentTasksTable.id, taskId));
-
-      await db
-        .update(projectsTable)
-        .set({ updatedAt: sql`now()` })
-        .where(eq(projectsTable.id, projectId));
-
-      await emitEvent(taskId, "completed", "App settings saved.");
-
-      const updatedSettings = expoToSettings(expo, projectId);
-      res.json({ ...updatedSettings, taskId });
+      res.json({ ...savedSettings, taskId });
     } catch (err) {
       logger.error({ err, projectId, taskId }, "Failed to apply mobile settings");
       await emitEvent(taskId, "failed", err instanceof Error ? err.message : "Unknown error");
