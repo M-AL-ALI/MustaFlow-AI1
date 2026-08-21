@@ -288,6 +288,8 @@ export * from './grantAdminRole200';
 export * from './healthStatus';
 export * from './healthStatusContainerSubsystem';
 export * from './healthStatusEncryptionKey';
+export * from './healthStatusQueueSchemaContract';
+export * from './healthStatusStartupMigrations';
 export * from './helpArticle';
 export * from './helpArticlesOutput';
 export * from './imageEditRequest';
