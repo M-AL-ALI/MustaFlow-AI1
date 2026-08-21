@@ -237,6 +237,153 @@ describe("zero prompt queue persistence", () => {
     expect(values).toEqual([17, "terminal-a"]);
   });
 
+  it("reads legacy positive and future absent terminal positions without inventing zero", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "legacy-terminal",
+          project_id: 17,
+          position: 1,
+          current_text: "Legacy completion",
+          state: "promoted",
+          promoted_turn_id: "turn-legacy",
+          deleted_by: null,
+          provenance_metadata: {
+            semantics: "zero-prompt-queue-v1",
+            eventId: "event-legacy",
+            itemId: "legacy-terminal",
+            occurredAt: "2026-08-20T00:00:00.000Z",
+            type: "queue.item.promoted",
+          },
+        },
+        {
+          id: "future-terminal",
+          project_id: 17,
+          position: null,
+          current_text: "Future completion",
+          state: "deleted",
+          promoted_turn_id: null,
+          deleted_by: "owner-user",
+          provenance_metadata: {
+            semantics: "zero-prompt-queue-v1",
+            eventId: "event-future",
+            itemId: "future-terminal",
+            occurredAt: "2026-08-20T00:00:01.000Z",
+            type: "queue.item.deleted",
+          },
+        },
+      ],
+    });
+    const driver = createPostgresZeroPromptQueueDriver(undefined, {
+      query: query as unknown as PoolClient["query"],
+    });
+
+    const snapshot = await driver.readProject(17);
+
+    expect(snapshot.items.map(({ id, position }) => ({ id, position }))).toEqual([
+      { id: "legacy-terminal", position: 1 },
+      { id: "future-terminal", position: null },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain('"position":0');
+  });
+
+  it("returns an absent terminal position honestly on point reads", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "future-terminal",
+          project_id: 17,
+          position: null,
+          current_text: "Future completion",
+          state: "deleted",
+          promoted_turn_id: null,
+          deleted_by: "owner-user",
+          provenance_metadata: {
+            semantics: "zero-prompt-queue-v1",
+            eventId: "event-future",
+            itemId: "future-terminal",
+            occurredAt: "2026-08-20T00:00:01.000Z",
+            type: "queue.item.deleted",
+          },
+        },
+      ],
+    });
+    const driver = createPostgresZeroPromptQueueDriver(undefined, {
+      query: query as unknown as PoolClient["query"],
+    });
+
+    await expect(
+      new ZeroPromptQueueStore(driver).get(17, "future-terminal"),
+    ).resolves.toMatchObject({ position: null });
+  });
+
+  it("fails a queued row with no active position instead of fabricating one", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "invalid-queued",
+          project_id: 17,
+          position: null,
+          current_text: "Missing priority",
+          state: "queued",
+          promoted_turn_id: null,
+          deleted_by: null,
+          provenance_metadata: null,
+        },
+      ],
+    });
+    const driver = createPostgresZeroPromptQueueDriver(undefined, {
+      query: query as unknown as PoolClient["query"],
+    });
+
+    await expect(new ZeroPromptQueueStore(driver).get(17, "invalid-queued")).rejects.toMatchObject({
+      code: "queue_persistence_contract_invalid",
+    });
+  });
+
+  it("keeps v1 positive terminal positions on mutation writes", async () => {
+    const driver = new MemoryQueueDriver();
+    driver.snapshots.set(
+      17,
+      createZeroPromptQueueSnapshot("17", [
+        {
+          id: "queued-a",
+          projectId: "17",
+          position: 1,
+          currentText: "Queued",
+          state: "queued",
+          references: [],
+          terminalEvidence: null,
+        },
+        {
+          id: "future-terminal",
+          projectId: "17",
+          position: null,
+          currentText: "Completed",
+          state: "deleted",
+          references: [],
+          terminalEvidence: {
+            kind: "deleted",
+            deletedBy: "owner-user",
+            provenanceEventId: "event-terminal",
+            occurredAt: "2026-08-20T00:00:00.000Z",
+          },
+        },
+      ]),
+    );
+
+    const result = await new ZeroPromptQueueStore(driver).edit(17, {
+      kind: "edit",
+      order: 2,
+      target: { kind: "queue-item", itemId: "queued-a" },
+      text: "Queued, edited",
+      provenance: provenance(2),
+    });
+
+    expect(result.snapshot.items.map((item) => item.position)).toEqual([1, 2]);
+    expect(driver.snapshots.get(17)?.items.map((item) => item.position)).toEqual([1, 2]);
+  });
+
   it("bounds list reads while preserving unbounded transactional snapshots", async () => {
     const driver = new MemoryQueueDriver();
     const readProject = vi.spyOn(driver, "readProject");
@@ -317,6 +464,7 @@ describe("zero prompt queue persistence", () => {
     expect(production).toContain('const limitClause = limit === undefined ? "" : "LIMIT $2"');
     expect(production).toContain("INSERT INTO project_activity");
     expect(production).not.toContain("zero_prompt_queue_provenance");
+    expect(production).not.toContain("Number(row.position)");
     expect(production).toContain("CURRENT_TIMESTAMP");
     expect(production).not.toContain("Date.now(");
   });

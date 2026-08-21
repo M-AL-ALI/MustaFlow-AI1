@@ -23,8 +23,11 @@ function requirePhase(phase: unknown): ZeroPromptQueueBoundaryRule {
   return rule;
 }
 
-function orderedQueuedItems(items: readonly ZeroPromptQueueItem[]): readonly ZeroPromptQueueItem[] {
+function orderedQueuedItems(
+  items: readonly ZeroPromptQueueItem[],
+): readonly Extract<ZeroPromptQueueItem, { state: "queued" }>[] {
   const seenPositions = new Set<number>();
+  const queuedItems: Extract<ZeroPromptQueueItem, { state: "queued" }>[] = [];
   for (const item of items) {
     if (item.state !== "queued") {
       throw new ZeroPromptQueueBoundaryError("queue_boundary_item_not_queued");
@@ -33,8 +36,9 @@ function orderedQueuedItems(items: readonly ZeroPromptQueueItem[]): readonly Zer
       throw new ZeroPromptQueueBoundaryError("queue_boundary_position_invalid");
     }
     seenPositions.add(item.position);
+    queuedItems.push(item);
   }
-  return [...items].sort(
+  return queuedItems.sort(
     (left, right) => left.position - right.position || left.id.localeCompare(right.id),
   );
 }

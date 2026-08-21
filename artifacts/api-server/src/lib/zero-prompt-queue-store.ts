@@ -59,7 +59,7 @@ export interface ZeroPromptQueuePersistenceDriver {
 type QueueRow = {
   id: string;
   project_id: number;
-  position: number;
+  position: number | null;
   current_text: string;
   state: "queued" | "promoted" | "deleted";
   promoted_turn_id: string | null;
@@ -116,23 +116,43 @@ function referencesFrom(metadata: QueueEventMetadata | null): readonly ZeroPromp
   );
 }
 
+function positionFromRow(row: QueueRow): number | null {
+  if (row.position === null) {
+    if (row.state === "queued") {
+      throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+    }
+    return null;
+  }
+  const position = row.position;
+  if (!Number.isSafeInteger(position) || position < 1) {
+    throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+  }
+  return position;
+}
+
 function itemFromRow(row: QueueRow): ZeroPromptQueueItem {
   const metadata = queueMetadata(row.provenance_metadata);
   const base = {
     id: row.id,
     projectId: String(row.project_id),
-    position: Number(row.position),
     currentText: row.current_text,
-    state: row.state,
     references: referencesFrom(metadata),
   } as const;
-  if (row.state === "queued") return { ...base, terminalEvidence: null };
+  const position = positionFromRow(row);
+  if (row.state === "queued") {
+    if (position === null) {
+      throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+    }
+    return { ...base, position, state: "queued", terminalEvidence: null };
+  }
   if (!metadata) {
     throw new ZeroPromptQueuePersistenceError("queue_provenance_missing");
   }
   if (row.state === "promoted" && metadata.type === "queue.item.promoted" && row.promoted_turn_id) {
     return {
       ...base,
+      position,
+      state: "promoted",
       terminalEvidence: {
         kind: "promoted",
         activeTurnId: row.promoted_turn_id,
@@ -144,6 +164,8 @@ function itemFromRow(row: QueueRow): ZeroPromptQueueItem {
   if (row.state === "deleted" && metadata.type === "queue.item.deleted" && row.deleted_by) {
     return {
       ...base,
+      position,
+      state: "deleted",
       terminalEvidence: {
         kind: "deleted",
         deletedBy: row.deleted_by,
@@ -186,7 +208,7 @@ async function readProjectRows(
          LIMIT 1
       ) activity ON TRUE
      WHERE q.project_id = $1
-     ORDER BY q.position ASC, q.id ASC
+     ORDER BY q.position ASC NULLS LAST, q.id ASC
      ${lockClause}
      ${limitClause}
   `,
@@ -244,6 +266,13 @@ function terminalColumns(item: ZeroPromptQueueItem): {
   return { promotedTurnId: null, deletedBy: null };
 }
 
+function v1WritePosition(item: ZeroPromptQueueItem): number {
+  if (item.position === null || !Number.isSafeInteger(item.position) || item.position < 1) {
+    throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+  }
+  return item.position;
+}
+
 async function persistSnapshot(
   client: QueryClient,
   projectId: number,
@@ -284,7 +313,7 @@ async function persistSnapshot(
       [
         projectId,
         existing.map((item) => item.id),
-        existing.map((item) => item.position),
+        existing.map(v1WritePosition),
         existing.map((item) => item.currentText),
         existing.map((item) => item.state),
         existing.map((item) => terminalColumns(item).promotedTurnId),
@@ -304,7 +333,7 @@ async function persistSnapshot(
         (id, project_id, position, current_text, state, promoted_turn_id, deleted_by,
          created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [item.id, projectId, item.position, item.currentText, item.state],
+      [item.id, projectId, v1WritePosition(item), item.currentText, item.state],
     );
     statements += 1;
   }

@@ -41,14 +41,28 @@ function canonicalReferences(item: ZeroPromptQueueItem): ZeroPromptQueueItem["re
   });
 }
 
+function compareItems(left: ZeroPromptQueueItem, right: ZeroPromptQueueItem): number {
+  if (left.state === "queued" && right.state !== "queued") return -1;
+  if (left.state !== "queued" && right.state === "queued") return 1;
+  if (left.position !== null && right.position !== null) {
+    return left.position - right.position || left.id.localeCompare(right.id);
+  }
+  if (left.position !== null) return -1;
+  if (right.position !== null) return 1;
+  return (
+    (left.terminalEvidence?.occurredAt ?? "").localeCompare(
+      right.terminalEvidence?.occurredAt ?? "",
+    ) || left.id.localeCompare(right.id)
+  );
+}
+
 function validateAndCanonicalize(snapshot: ZeroPromptQueueSnapshot): ZeroPromptQueueSnapshot {
   if (snapshot.semantics !== ZERO_PROMPT_QUEUE_SEMANTICS || !snapshot.projectId) {
     throw new ZeroPromptQueueError("queue_position_invalid");
   }
-  const items = [...snapshot.items].sort(
-    (left, right) => left.position - right.position || left.id.localeCompare(right.id),
-  );
+  const items = [...snapshot.items].sort(compareItems);
   const ids = new Set<string>();
+  const occupiedPositions = new Set<number>();
   const queuedCount = items.filter((item) => item.state === "queued").length;
   if (queuedCount > ZERO_PROMPT_QUEUE_MAX_ITEMS) {
     throw new ZeroPromptQueueError("queue_full");
@@ -59,10 +73,14 @@ function validateAndCanonicalize(snapshot: ZeroPromptQueueSnapshot): ZeroPromptQ
       !item.id ||
       ids.has(item.id) ||
       item.projectId !== snapshot.projectId ||
-      item.position !== index + 1 ||
-      !Number.isInteger(item.position) ||
-      (item.state === "queued" && item.position > queuedCount) ||
-      (item.state !== "queued" && item.position <= queuedCount)
+      (item.state === "queued" &&
+        (item.position !== index + 1 || !Number.isSafeInteger(item.position))) ||
+      (item.state !== "queued" &&
+        item.position !== null &&
+        (!Number.isSafeInteger(item.position) ||
+          item.position <= queuedCount ||
+          item.position > items.length ||
+          occupiedPositions.has(item.position)))
     ) {
       throw new ZeroPromptQueueError("queue_position_invalid");
     }
@@ -74,6 +92,7 @@ function validateAndCanonicalize(snapshot: ZeroPromptQueueSnapshot): ZeroPromptQ
     ) {
       throw new ZeroPromptQueueError("queue_item_terminal");
     }
+    if (item.position !== null) occupiedPositions.add(item.position);
     ids.add(item.id);
   }
   return {
@@ -87,6 +106,10 @@ function reposition(items: readonly ZeroPromptQueueItem[]): readonly ZeroPromptQ
   return items.map((item, index) => ({ ...item, position: index + 1 }));
 }
 
+function withV1WritePositions(snapshot: ZeroPromptQueueSnapshot): ZeroPromptQueueSnapshot {
+  return validateAndCanonicalize({ ...snapshot, items: reposition(snapshot.items) });
+}
+
 function queuedCount(snapshot: ZeroPromptQueueSnapshot): number {
   return snapshot.items.filter((item) => item.state === "queued").length;
 }
@@ -94,7 +117,7 @@ function queuedCount(snapshot: ZeroPromptQueueSnapshot): number {
 function resolveQueuedItem(
   snapshot: ZeroPromptQueueSnapshot,
   target: ZeroPromptQueueItemAddress,
-): ZeroPromptQueueItem {
+): Extract<ZeroPromptQueueItem, { state: "queued" }> {
   if (target.kind === "active-turn") {
     throw new ZeroPromptQueueError("queue_active_turn_not_queue_item");
   }
@@ -130,7 +153,7 @@ export function applyZeroPromptQueueMutation(
   input: ZeroPromptQueueSnapshot,
   operation: ZeroPromptQueueMutation,
 ): ZeroPromptQueueMutationResult {
-  const snapshot = validateAndCanonicalize(input);
+  const snapshot = withV1WritePositions(validateAndCanonicalize(input));
   let nextItems: readonly ZeroPromptQueueItem[];
   let event: ZeroPromptQueueEvent;
   let warnings: readonly ZeroPromptQueueWarning[] = [];
