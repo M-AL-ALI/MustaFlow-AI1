@@ -1,5 +1,23 @@
 import { readFileSync } from "node:fs";
+import { createSourceFile, forEachChild, isFunctionDeclaration, ScriptTarget } from "typescript";
 import { describe, expect, it, beforeEach, vi } from "vitest";
+
+function extractNamedFunction(source: string, functionName: string): string {
+  const sourceFile = createSourceFile("source.ts", source, ScriptTarget.Latest, true);
+  let match: string | undefined;
+
+  function visit(node: Parameters<typeof forEachChild>[0]): void {
+    if (isFunctionDeclaration(node) && node.name?.text === functionName) {
+      match = node.getText(sourceFile);
+      return;
+    }
+    forEachChild(node, visit);
+  }
+
+  forEachChild(sourceFile, visit);
+  if (!match) throw new Error(`Named function not found: ${functionName}`);
+  return match;
+}
 
 interface StoredFile {
   projectId: number;
@@ -487,10 +505,7 @@ describe("atomic project file writes", () => {
 
   it("routes mobile settings files and their rollback snapshot through one atomic call", () => {
     const source = readFileSync(new URL("../routes/mobile-settings.ts", import.meta.url), "utf8");
-    const writeFlow = source.slice(
-      source.indexOf("// ── Write files and snapshot a version together"),
-      source.indexOf("// ── Complete the task"),
-    );
+    const writeFlow = extractNamedFunction(source, "commitFilesAndVersion");
 
     expect(writeFlow).toContain("await writeProjectFilesAtomically({");
     expect(writeFlow).toContain('scope: { kind: "project" }');
