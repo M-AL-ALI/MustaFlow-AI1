@@ -45,6 +45,7 @@ import {
 import { Link } from "wouter";
 import type { GithubConnection, GithubRepository } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { selectGithubFailureError } from "@/lib/user-visible-errors";
 
 function timeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return "Never";
@@ -98,7 +99,7 @@ function ConnectPanel({
       setToken("");
       onConnected();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Connection failed.");
+      setError(selectGithubFailureError(err));
     }
   }, [token, connect, projectId, onConnected]);
 
@@ -486,7 +487,7 @@ function ConnectedPanel({
       setShowCodex(true);
       await queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey(projectId) });
     } catch (err) {
-      setPushError(err instanceof Error ? err.message : "Push failed.");
+      setPushError(selectGithubFailureError(err));
     }
   }, [push, projectId, commitMessage, queryClient]);
 
@@ -506,7 +507,7 @@ function ConnectedPanel({
       setNewBranch("");
       await queryClient.invalidateQueries({ queryKey: getListGithubBranchesQueryKey(projectId) });
     } catch (err) {
-      setBranchError(err instanceof Error ? err.message : "Failed to create branch.");
+      setBranchError(selectGithubFailureError(err));
     }
   }, [newBranch, createBranch, projectId, queryClient]);
 
@@ -524,7 +525,7 @@ function ConnectedPanel({
       });
       setPrResult({ prUrl: result.prUrl, prNumber: result.prNumber });
     } catch (err) {
-      setPrError(err instanceof Error ? err.message : "Failed to open pull request.");
+      setPrError(selectGithubFailureError(err));
     }
   }, [prTitle, prHead, prBody, openPr, projectId]);
 
@@ -1007,7 +1008,7 @@ export function GithubTab({ projectId }: { projectId: number }) {
     } else if (github === "error") {
       setOauthBanner({
         kind: "error",
-        message: params.get("reason") ?? "GitHub OAuth failed. Please try again.",
+        message: selectGithubFailureError(params.get("reason")),
       });
     }
     params.delete("github");

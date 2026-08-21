@@ -32,6 +32,7 @@ import {
 } from "@workspace/api-client-react";
 import type { DbSnapshotListItem } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { selectDatabaseFailureError } from "@/lib/user-visible-errors";
 
 interface DatabaseTabProps {
   projectId: number;
@@ -275,7 +276,7 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
           });
         },
         onError: (err) => {
-          setQueryError((err as Error).message ?? "Query failed");
+          setQueryError(selectDatabaseFailureError(err));
         },
       },
     );
@@ -291,7 +292,7 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
           void queryClient.invalidateQueries({ queryKey: getListDbSnapshotsQueryKey(projectId) });
         },
         onError: (err) => {
-          setSnapshotError((err as Error).message ?? "Snapshot failed");
+          setSnapshotError(selectDatabaseFailureError(err));
         },
       },
     );

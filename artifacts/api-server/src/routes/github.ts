@@ -4,6 +4,7 @@ import { db, projectsTable, projectFilesTable, projectGithubConnectionsTable } f
 import { requireProjectOwnership } from "../lib/auth";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
+import { githubProviderErrorMessage } from "@workspace/ora-contracts";
 import {
   buildAuthorizeUrl,
   buildCallbackUrl,
@@ -161,9 +162,8 @@ router.post(
       logger.info({ projectId, login: user.login }, "GitHub connected");
       res.json({ connected: true, githubAccountName: user.login });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "GitHub connect failed";
       logger.warn({ err, projectId }, "GitHub connect failed");
-      res.status(400).json({ error: message });
+      res.status(400).json({ error: githubProviderErrorMessage(err) });
     }
   },
 );
@@ -386,9 +386,14 @@ router.get("/projects/:id/github/oauth/callback", async (req, res): Promise<void
     logger.info({ projectId, login: userJson.login }, "GitHub connected via OAuth");
     res.redirect(302, frontendReturnUrl(req, projectId, { github: "connected" }));
   } catch (err) {
-    const message = err instanceof Error ? err.message : "GitHub OAuth callback failed";
     logger.warn({ err, projectId }, "GitHub OAuth callback failed");
-    res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: message }));
+    res.redirect(
+      302,
+      frontendReturnUrl(req, projectId, {
+        github: "error",
+        reason: githubProviderErrorMessage(err),
+      }),
+    );
   }
 });
 
@@ -651,13 +656,12 @@ router.post(
         created: repoCreated,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "GitHub push failed";
       logger.error({ err, projectId }, "GitHub push failed");
       await db
         .update(projectGithubConnectionsTable)
         .set({ syncStatus: "error", updatedAt: new Date() })
         .where(eq(projectGithubConnectionsTable.projectId, projectId));
-      res.status(400).json({ error: message });
+      res.status(400).json({ error: githubProviderErrorMessage(err) });
     }
   },
 );
@@ -714,8 +718,7 @@ router.post(
       logger.info({ projectId, owner, repo, newBranch, baseBranch }, "Branch created");
       res.json({ branchName: newBranch, sha });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to create branch";
-      res.status(400).json({ error: message });
+      res.status(400).json({ error: githubProviderErrorMessage(err) });
     }
   },
 );
@@ -775,8 +778,7 @@ router.post(
       logger.info({ projectId, owner, repo, pr: pr.number }, "PR opened");
       res.json({ prUrl: pr.html_url, prNumber: pr.number, title: pr.title });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to open pull request";
-      res.status(400).json({ error: message });
+      res.status(400).json({ error: githubProviderErrorMessage(err) });
     }
   },
 );

@@ -57,6 +57,7 @@ import { DebuggerPanel } from "./debugger-panel";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { SNIPPETS, SNIPPET_CATEGORIES, type SnippetCategory } from "@/lib/snippets";
+import { selectGithubFailureError } from "@/lib/user-visible-errors";
 
 function getLanguage(path: string): string {
   if (path.endsWith(".html") || path.endsWith(".htm")) return "html";
@@ -612,7 +613,7 @@ function GitPushPanel({ projectId }: { projectId: number }) {
         error?: string;
       };
       if (!res.ok) {
-        setError(data.error ?? "Push failed");
+        setError(selectGithubFailureError(data));
       } else {
         setResult({
           repoUrl: data.repoUrl!,
@@ -624,8 +625,7 @@ function GitPushPanel({ projectId }: { projectId: number }) {
         toast({ title: "Pushed to GitHub", description: `${data.filesCount} files pushed` });
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Push failed";
-      setError(msg);
+      setError(selectGithubFailureError(err));
     } finally {
       setPushing(false);
     }

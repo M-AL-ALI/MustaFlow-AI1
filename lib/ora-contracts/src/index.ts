@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export * from "./zero-prompt-queue-boundary";
 export * from "./billing-user-errors";
+export * from "./user-visible-errors";
 
 /* ── Legal sections ─────────────────────────────────────────────────────────
  * Single source of truth for the "Legal & Privacy" disclosure shown on both

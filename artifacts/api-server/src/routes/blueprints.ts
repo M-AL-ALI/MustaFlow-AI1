@@ -41,6 +41,7 @@ import { encryptionService } from "../lib/encryption";
 import { execInContainer } from "../lib/tenant-runtime";
 import { publishTaskEvent } from "../lib/event-bus";
 import { z } from "zod";
+import { BLUEPRINT_INSTALL_USER_ERROR } from "@workspace/ora-contracts";
 
 // ─── Async npm install helper ─────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
           "/app",
         );
         if (!r.ok) {
-          await emit("failed", `Package install failed: ${r.stderr.slice(0, 500)}`);
+          await emit("failed", BLUEPRINT_INSTALL_USER_ERROR);
           await finishTask("failed");
           return;
         }
@@ -156,7 +157,7 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
           "/app",
         );
         if (!r.ok) {
-          await emit("failed", `Dev package install failed: ${r.stderr.slice(0, 500)}`);
+          await emit("failed", BLUEPRINT_INSTALL_USER_ERROR);
           await finishTask("failed");
           return;
         }
@@ -165,9 +166,8 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
       await emit("completed", `Blueprint packages for ${blueprintName} installed successfully.`);
       await finishTask("completed");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
       logger.warn({ err, blueprintId, projectId }, "blueprint npm install threw unexpectedly");
-      await emit("failed", `Package install error: ${msg}`);
+      await emit("failed", BLUEPRINT_INSTALL_USER_ERROR);
       await finishTask("failed");
     }
   })();

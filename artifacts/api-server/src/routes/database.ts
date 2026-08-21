@@ -24,6 +24,7 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
 import { logger } from "../lib/logger";
+import { databaseProviderErrorMessage } from "@workspace/ora-contracts";
 import { execInContainer } from "../lib/tenant-runtime";
 import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
 import {
@@ -527,9 +528,8 @@ router.post(
         executionMs,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Query failed";
       logger.warn({ err, projectId }, "Database query failed");
-      res.status(400).json({ error: message });
+      res.status(400).json({ error: databaseProviderErrorMessage(err) });
     }
   },
 );
@@ -738,9 +738,8 @@ router.post(
 
       res.status(201).json(snapshot);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Snapshot capture failed";
       logger.error({ err, projectId }, "Database snapshot capture failed");
-      res.status(500).json({ error: message });
+      res.status(500).json({ error: databaseProviderErrorMessage(err) });
     }
   },
 );

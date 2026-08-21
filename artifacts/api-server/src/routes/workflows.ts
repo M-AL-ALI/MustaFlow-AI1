@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { loadProjectWorkflows, findWorkflow } from "../lib/workflows";
+import { workflowProviderErrorMessage } from "@workspace/ora-contracts";
 
 const router: IRouter = Router();
 
@@ -74,7 +75,7 @@ router.post(
     } catch (err) {
       req.log.error({ err, projectId, name }, "Workflow run failed");
       res.status(500).json({
-        error: `Failed to run workflow: ${err instanceof Error ? err.message : "Unknown error"}`,
+        error: workflowProviderErrorMessage(err),
       });
     }
   },
