@@ -194,12 +194,9 @@ export async function requireProjectOwnership(
     .select()
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-  if (!project) {
+  const projectOwnerId = project?.ownerId ?? null;
+  if (projectOwnerId !== req.userId) {
     res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  if (project.ownerId !== req.userId) {
-    res.status(403).json({ error: "You do not have access to this project" });
     return;
   }
   next();

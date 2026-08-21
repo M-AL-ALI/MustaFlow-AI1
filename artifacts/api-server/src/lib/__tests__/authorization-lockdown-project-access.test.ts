@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { NextFunction, Request, Response } from "express";
 
 const mocks = vi.hoisted(() => ({
   testDatabaseUrl: (process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test"),
@@ -62,5 +63,62 @@ describe("authorization lockdown: canonical project access", () => {
     const { listAccessibleProjectIds } = await import("../auth");
 
     await expect(listAccessibleProjectIds("collaborator", "viewer")).resolves.toEqual([1405, 1406]);
+  });
+
+  it("gives an unauthorized caller the same project response for existing and missing ids", async () => {
+    const { requireProjectOwnership } = await import("../auth");
+
+    const invoke = async (rows: unknown[]) => {
+      mocks.selectResults = [rows];
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
+      const next = vi.fn();
+      const req = {
+        userId: "requester",
+        params: { id: "1407" },
+      } as unknown as Request;
+      const selectCallsBefore = mocks.select.mock.calls.length;
+
+      await requireProjectOwnership(
+        req,
+        { status } as unknown as Response,
+        next as unknown as NextFunction,
+      );
+
+      return {
+        status: status.mock.calls,
+        body: json.mock.calls,
+        nextCalls: next.mock.calls.length,
+        selectCalls: mocks.select.mock.calls.length - selectCallsBefore,
+      };
+    };
+
+    const existingOtherOwner = await invoke([{ ownerId: "different-owner" }]);
+    const nonexistent = await invoke([]);
+
+    expect(existingOtherOwner).toEqual(nonexistent);
+    expect(existingOtherOwner).toEqual({
+      status: [[404]],
+      body: [[{ error: "Project not found" }]],
+      nextCalls: 0,
+      selectCalls: 1,
+    });
+  });
+
+  it("keeps owner access on the same single-query path", async () => {
+    mocks.selectResults = [[{ ownerId: "owner" }]];
+    const { requireProjectOwnership } = await import("../auth");
+    const status = vi.fn();
+    const next = vi.fn();
+
+    await requireProjectOwnership(
+      { userId: "owner", params: { id: "1408" } } as unknown as Request,
+      { status } as unknown as Response,
+      next as unknown as NextFunction,
+    );
+
+    expect(mocks.select).toHaveBeenCalledTimes(1);
+    expect(status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
   });
 });
