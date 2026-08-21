@@ -39,6 +39,12 @@ function orderedQueuedItems(items: readonly ZeroPromptQueueItem[]): readonly Zer
   );
 }
 
+/**
+ * @dormantExport
+ * No production consumer exists as of the inert-export registry anchor. This becomes reachable
+ * when run-loop or UI control flow asks this planner for per-item landing decisions instead of
+ * reading the phase rules directly.
+ */
 export function planPromptQueueLandings(input: {
   currentPhase: unknown;
   items: readonly ZeroPromptQueueItem[];

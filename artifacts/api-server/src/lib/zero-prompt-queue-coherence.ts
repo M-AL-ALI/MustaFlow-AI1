@@ -32,6 +32,12 @@ function warningKey(warning: ZeroPromptQueueWarning): string {
   ].join("|");
 }
 
+/**
+ * @dormantExport
+ * No user-facing production consumer exists as of the inert-export registry anchor. This becomes
+ * reachable only when a first-party producer records structured prompt references and a product
+ * surface consumes the returned warnings.
+ */
 export function assessPromptQueueCoherence(
   before: ZeroPromptQueueSnapshot,
   after: ZeroPromptQueueSnapshot,

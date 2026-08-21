@@ -1,0 +1,27 @@
+[
+  {
+    "path": "artifacts/api-server/src/lib/zero-prompt-queue-coherence.ts",
+    "symbol": "assessPromptQueueCoherence",
+    "reachableWhen": "A first-party producer records structured prompt references and a product surface consumes mutation warnings."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/zero-prompt-queue-safe-boundaries.ts",
+    "symbol": "planPromptQueueLandings",
+    "reachableWhen": "Run-loop or UI control flow requests per-item landing decisions from the planner."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/zero-prompt-queue.ts",
+    "symbol": "applyZeroPromptQueueOperations",
+    "reachableWhen": "A governed production path accepts an ordered batch of queue mutations."
+  },
+  {
+    "path": "artifacts/mustaflow/src/components/agent-timeline-event-visibility.ts",
+    "symbol": "filterUserVisibleZeroTimelineEvents",
+    "reachableWhen": "A timeline surface filters a complete event collection through the shared helper."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/zero-runloop-phase-emission.ts",
+    "symbol": "ZERO_RUN_LOOP_EMITTABLE_PHASES",
+    "reachableWhen": "Production code enumerates the phases that may be emitted."
+  }
+]

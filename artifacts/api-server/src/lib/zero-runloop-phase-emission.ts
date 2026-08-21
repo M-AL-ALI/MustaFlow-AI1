@@ -16,6 +16,12 @@ export const ZERO_RUN_LOOP_PHASE_EMIT_TIMEOUT_MS = 250;
 
 export type ZeroRunLoopEmittablePhase = Exclude<ZeroPromptQueueRunPhase, "production_publish">;
 
+/**
+ * @dormantExport
+ * No production consumer exists as of the inert-export registry anchor. This becomes reachable
+ * when production code enumerates the phases that may be emitted; current callers emit named
+ * phases directly.
+ */
 export const ZERO_RUN_LOOP_EMITTABLE_PHASES = ZERO_PROMPT_QUEUE_RUN_PHASES.filter(
   (phase): phase is ZeroRunLoopEmittablePhase => phase !== "production_publish",
 );

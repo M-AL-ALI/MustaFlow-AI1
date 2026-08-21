@@ -268,6 +268,12 @@ export function applyZeroPromptQueueMutation(
   return { snapshot: next, event, warnings };
 }
 
+/**
+ * @dormantExport
+ * No production consumer exists as of the inert-export registry anchor. This becomes reachable
+ * when a governed production path accepts an ordered batch of queue mutations; current paths
+ * persist one mutation at a time.
+ */
 export function applyZeroPromptQueueOperations(
   input: ZeroPromptQueueSnapshot,
   operations: readonly ZeroPromptQueueMutation[],
