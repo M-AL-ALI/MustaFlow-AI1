@@ -17,7 +17,11 @@ import {
 
 /**
  * Fail-closed runtime provider used when Cloudflare configuration is incomplete.
- * It stores binding names only and never retains or inspects a present value.
+ * Only binding names are stored or emitted. Before this provider is selected,
+ * the config parser checks a present control token's length as a sanity floor.
+ * Therefore an unauthenticated health caller can distinguish an absent token
+ * (names-only 503) from a too-short token (startup config rejection); no value,
+ * prefix, fragment, or measured length is exposed.
  */
 export class PartialConfigRuntimeProvider implements TenantRuntimeProvider {
   readonly providerId = "cloudflare";
