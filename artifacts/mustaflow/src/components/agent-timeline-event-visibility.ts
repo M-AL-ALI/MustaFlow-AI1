@@ -11,6 +11,12 @@ export function isUserVisibleZeroTimelineEventType(eventType: string): boolean {
   return !HIDDEN_EVENT_TYPES.has(eventType);
 }
 
+/**
+ * @dormantExport
+ * No production consumer exists as of the inert-export registry anchor. This becomes reachable
+ * when a timeline surface filters a complete event collection through the shared helper; current
+ * rendering calls the singular predicate for each event.
+ */
 export function filterUserVisibleZeroTimelineEvents<T extends { eventType: string }>(
   events: readonly T[],
 ): T[] {
