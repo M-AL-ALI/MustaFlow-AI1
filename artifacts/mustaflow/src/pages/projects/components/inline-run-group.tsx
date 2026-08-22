@@ -6,6 +6,7 @@ import {
   useListTasks,
 } from "@workspace/api-client-react";
 import { ChevronDown, ChevronRight, Square } from "lucide-react";
+import type { TaskReplayEvent } from "@/hooks/use-task-event-stream";
 import { cn } from "@/lib/utils";
 import { extractQATapeSteps, type QATapeEvent } from "@/lib/qa-video-tape";
 import {
@@ -39,11 +40,6 @@ import {
 } from "./inline-run-recovery";
 import { buildRunStepIdSet } from "./run-step-count";
 
-type ReplayEvent = QATapeEvent & {
-  taskId?: number;
-  createdAt?: string;
-};
-
 export type RunReplayModel = {
   activities: InlineActivityEntry[];
   narrations: InlineNarrationEntry[];
@@ -52,7 +48,7 @@ export type RunReplayModel = {
   stepCount: number;
 };
 
-export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
+export function buildRunReplayModel(events: TaskReplayEvent[]): RunReplayModel {
   let activities: InlineActivityEntry[] = [];
   let narrations: InlineNarrationEntry[] = [];
   let recoverySteps: InlineRecoveryStep[] = [];
@@ -60,12 +56,7 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
   const chronologicalEvents = [...events].sort((left, right) => left.id - right.id);
 
   for (const event of chronologicalEvents) {
-    const activity = taskActivityForEvent(
-      event.id,
-      event.eventType,
-      event.message,
-      (event as typeof event & { terminal?: unknown }).terminal,
-    );
+    const activity = taskActivityForEvent(event.id, event.eventType, event.message, event.terminal);
     if (activity) {
       activities = appendActivityEntry(activities, activity);
     }
@@ -224,9 +215,12 @@ export function PersistedRunReplay({
       },
     },
   });
-  const replay = useMemo(() => buildRunReplayModel(events as unknown as ReplayEvent[]), [events]);
+  const replay = useMemo(
+    () => buildRunReplayModel(events as unknown as TaskReplayEvent[]),
+    [events],
+  );
   const commandFailures = useMemo(
-    () => commandFailuresForEvents(events as unknown as ReplayEvent[]),
+    () => commandFailuresForEvents(events as unknown as TaskReplayEvent[]),
     [events],
   );
   const recoveryTasks = tasks as unknown as RecoveryTask[];

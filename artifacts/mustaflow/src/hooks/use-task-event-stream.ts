@@ -5,16 +5,19 @@ import {
   ZERO_TERMINAL_UNKNOWN,
   type ZeroTerminalPresentation,
 } from "@workspace/ora-contracts";
-export interface TaskStreamEvent {
+export interface TaskReplayEvent {
   id: number;
-  taskId: number;
   eventType: string;
   message: string;
-  filePath: string | null;
-  createdAt: string | Date;
   /** Structured data for events such as project_files_changed and qa_step. */
   data?: unknown;
   terminal?: unknown;
+}
+
+export interface TaskStreamEvent extends TaskReplayEvent {
+  taskId: number;
+  filePath: string | null;
+  createdAt: string | Date;
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
