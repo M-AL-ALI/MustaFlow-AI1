@@ -13,8 +13,10 @@ import {
   Ban,
   PauseCircle,
   CreditCard,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 type TaskReport = {
   versionId?: number | null;
@@ -40,6 +42,7 @@ export type BgTask = {
   report: Record<string, unknown> | null;
   createdAt: string;
   completedAt: string | null;
+  terminal?: unknown;
 };
 
 const ACTIVE_STATUSES = new Set([
@@ -111,12 +114,15 @@ function TaskCard({
   onRollback: (versionId: number) => void;
   onViewCode: () => void;
 }) {
-  const isActive = ACTIVE_STATUSES.has(task.status);
-  const isQueued = task.status === "queued";
-  const isCompleted = task.status === "completed";
-  const isFailed = task.status === "failed";
-  const isCanceled = task.status === "canceled";
-  const isPaused = task.status === PAUSED_STATUS;
+  const terminal = terminalPresentationFor(task);
+  const status = terminalTaskStatus(task, task.status);
+  const isActive = ACTIVE_STATUSES.has(status);
+  const isQueued = status === "queued";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
+  const isCanceled = status === "canceled";
+  const isPaused = status === PAUSED_STATUS;
+  const isWarning = terminal?.tone === "warning" || terminal?.tone === "unknown";
 
   const report = task.report as TaskReport | null;
   const versionId = report?.versionId;
@@ -131,21 +137,25 @@ function TaskCard({
     <div
       className={cn(
         "rounded-lg border p-3 text-xs space-y-1.5 transition-colors",
-        isCompleted
-          ? "border-green-500/20 bg-green-500/5"
-          : isFailed
-            ? "border-destructive/20 bg-destructive/5"
-            : isActive
-              ? "border-primary/20 bg-primary/5"
-              : isPaused
-                ? "border-amber-500/20 bg-amber-500/5"
-                : isCanceled
-                  ? "border-border/30 bg-muted/10"
-                  : "border-border bg-muted/30",
+        isWarning
+          ? "border-amber-500/20 bg-amber-500/5"
+          : isCompleted
+            ? "border-green-500/20 bg-green-500/5"
+            : isFailed
+              ? "border-destructive/20 bg-destructive/5"
+              : isActive
+                ? "border-primary/20 bg-primary/5"
+                : isPaused
+                  ? "border-amber-500/20 bg-amber-500/5"
+                  : isCanceled
+                    ? "border-border/30 bg-muted/10"
+                    : "border-border bg-muted/30",
       )}
     >
       <div className="flex items-start gap-2">
-        {isCompleted ? (
+        {isWarning ? (
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+        ) : isCompleted ? (
           <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />
         ) : isFailed ? (
           <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
@@ -168,12 +178,12 @@ function TaskCard({
                 : isPaused
                   ? "Paused — needs credits"
                   : isCompleted
-                    ? `Done${fileCount > 0 ? ` · ${fileCount} file${fileCount !== 1 ? "s" : ""}` : ""}`
+                    ? `${terminal?.title ?? "Done"}${fileCount > 0 ? ` · ${fileCount} file${fileCount !== 1 ? "s" : ""}` : ""}`
                     : isFailed
                       ? "Failed"
                       : isCanceled
                         ? "Canceled"
-                        : task.status}
+                        : status}
           </div>
         </div>
       </div>
@@ -182,7 +192,9 @@ function TaskCard({
 
       {isCompleted && (
         <div className="flex items-center gap-1.5 pt-1.5 border-t border-border/40 mt-1">
-          <p className="text-[10px] text-muted-foreground/70 flex-1 min-w-0">Changes applied.</p>
+          <p className="text-[10px] text-muted-foreground/70 flex-1 min-w-0">
+            {terminal?.message ?? "Changes applied."}
+          </p>
           <button
             onClick={onViewCode}
             className="flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors shrink-0"
@@ -202,9 +214,9 @@ function TaskCard({
         </div>
       )}
 
-      {isFailed && task.result && (
+      {isFailed && (terminal?.message ?? task.result) && (
         <p className="text-[10px] text-destructive/80 leading-relaxed pt-1 border-t border-destructive/20">
-          {task.result.slice(0, 120)}
+          {(terminal?.message ?? task.result ?? "").slice(0, 120)}
         </p>
       )}
     </div>
@@ -230,8 +242,12 @@ export function BackgroundTasksDrawer({
   onViewCode,
   children,
 }: BackgroundTasksDrawerProps) {
-  const activeCount = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status)).length;
-  const pausedCount = tasks.filter((t) => t.status === PAUSED_STATUS).length;
+  const activeCount = tasks.filter(
+    (task) => !TERMINAL_STATUSES.has(terminalTaskStatus(task, task.status)),
+  ).length;
+  const pausedCount = tasks.filter(
+    (task) => terminalTaskStatus(task, task.status) === PAUSED_STATUS,
+  ).length;
 
   return (
     <>

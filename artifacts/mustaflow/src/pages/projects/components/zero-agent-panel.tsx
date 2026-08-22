@@ -47,6 +47,7 @@ import {
   getListTaskEventsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 type AgentMode = BuilderAgentMode;
 
@@ -58,6 +59,7 @@ type ZeroTask = {
   completionKind?: string | null;
   userRequest: string;
   createdAt: string;
+  terminal?: unknown;
 };
 
 type ZeroVersion = {
@@ -504,7 +506,14 @@ export function ZeroAgentPanel({
     },
   });
 
-  const tasksArr = useMemo(() => (tasks as ZeroTask[] | undefined) ?? [], [tasks]);
+  const tasksArr = useMemo(
+    () =>
+      ((tasks as ZeroTask[] | undefined) ?? []).map((task) => ({
+        ...task,
+        status: terminalTaskStatus(task, task.status),
+      })),
+    [tasks],
+  );
   const versionsArr = useMemo(() => (versions as ZeroVersion[] | undefined) ?? [], [versions]);
   const messagesArr = useMemo(() => (messages as ZeroMessage[] | undefined) ?? [], [messages]);
 
@@ -1112,7 +1121,9 @@ export function ZeroAgentPanel({
                       ? (planPayload.taskId as number | undefined)
                       : undefined;
                   const task = taskId ? taskById.get(taskId) : undefined;
-                  const completionText = getBuilderCompletionMessage(task?.completionKind);
+                  const completionText =
+                    (task ? terminalPresentationFor(task)?.message : null) ??
+                    getBuilderCompletionMessage(task?.completionKind);
 
                   return (
                     <div

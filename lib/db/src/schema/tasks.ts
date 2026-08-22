@@ -12,6 +12,7 @@ import {
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 import { zeroIntentReceiptsTable } from "./zero-intent-receipts";
+import type { ZeroTerminalV1 } from "@workspace/ora-contracts";
 
 export type TestResult = {
   name: string;
@@ -465,6 +466,10 @@ export const agentTasksTable = pgTable(
     // First-class agent-loop outcome. Nullable for legacy rows and non-agentic
     // tasks; null means unknown and must never be interpreted as finalized.
     completionKind: text("completion_kind").$type<AgentTaskCompletionKind>(),
+    // Durable terminal truth. Nullable for every pre-B3 writer and historical
+    // row; readers must preserve their legacy behavior until a typed terminal
+    // exists, and must parse a present value before trusting it.
+    terminal: jsonb("terminal").$type<ZeroTerminalV1>(),
     // agentIdentity: visible executor for this task.
     // "planning" = Planner, "main" = Main Agent. "task" is retained only for
     // legacy staging rows so old apply/discard flows remain readable.

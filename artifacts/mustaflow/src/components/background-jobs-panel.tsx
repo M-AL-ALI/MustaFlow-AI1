@@ -9,6 +9,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { cn } from "@/lib/utils";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 const ACTIVE = new Set(["queued", "answering", "planning", "building", "needs_review"]);
 
@@ -128,7 +129,10 @@ export function BackgroundJobsPanel() {
           ) : (
             <ul className="divide-y divide-border">
               {jobs.map((j) => {
-                const isActive = ACTIVE.has(j.status);
+                const carrier = j as typeof j & { terminal?: unknown };
+                const terminal = terminalPresentationFor(carrier);
+                const status = terminalTaskStatus(carrier, j.status);
+                const isActive = ACTIVE.has(status);
                 return (
                   <li key={j.id} className="group">
                     <div className="px-3 py-2.5 hover:bg-muted/60 transition-colors flex items-start gap-2">
@@ -141,10 +145,12 @@ export function BackgroundJobsPanel() {
                             <span
                               className={cn(
                                 "text-[10px] font-semibold uppercase tracking-wide shrink-0",
-                                statusClass(j.status),
+                                terminal?.tone === "warning" || terminal?.tone === "unknown"
+                                  ? "text-amber-400"
+                                  : statusClass(status),
                               )}
                             >
-                              {statusLabel(j.status)}
+                              {terminal?.title ?? statusLabel(status)}
                             </span>
                           </div>
                           <div className="text-[11px] text-muted-foreground truncate mt-0.5">
@@ -158,7 +164,7 @@ export function BackgroundJobsPanel() {
                           )}
                         </div>
                       </Link>
-                      {isActive && j.status !== "needs_review" && (
+                      {isActive && status !== "needs_review" && (
                         <button
                           type="button"
                           onClick={(e) => {

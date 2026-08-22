@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  presentPersistedZeroTerminal,
+  type ZeroTerminalPresentation,
+} from "@workspace/ora-contracts";
 export interface TaskStreamEvent {
   id: number;
   taskId: number;
@@ -8,6 +12,7 @@ export interface TaskStreamEvent {
   createdAt: string | Date;
   /** Structured data for events such as project_files_changed and qa_step. */
   data?: unknown;
+  terminal?: unknown;
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -15,6 +20,7 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 export type TaskStreamReceipt = {
   event: TaskStreamEvent;
   terminal: boolean;
+  terminalPresentation: ZeroTerminalPresentation | null;
 };
 
 /**
@@ -37,19 +43,33 @@ export function parseTaskStreamReceipt(
     ) {
       return null;
     }
+    const terminalPresentation = presentPersistedZeroTerminal(candidate.terminal);
+    const legacyEventType = candidate.eventType;
+    const eventType = terminalPresentation
+      ? terminalPresentation.taskStatus === "canceled"
+        ? "cancelled"
+        : terminalPresentation.taskStatus
+      : legacyEventType;
     const event: TaskStreamEvent = {
       id: candidate.id!,
       taskId: candidate.taskId,
-      eventType: candidate.eventType,
-      message: typeof candidate.message === "string" ? candidate.message : "",
+      eventType,
+      message:
+        terminalPresentation?.message ??
+        (typeof candidate.message === "string" ? candidate.message : ""),
       filePath: typeof candidate.filePath === "string" ? candidate.filePath : null,
       createdAt:
         typeof candidate.createdAt === "string" || candidate.createdAt instanceof Date
           ? candidate.createdAt
           : "",
       data: candidate.data,
+      terminal: candidate.terminal,
     };
-    return { event, terminal: TERMINAL_STATUSES.has(event.eventType) };
+    return {
+      event,
+      terminal: terminalPresentation !== null || TERMINAL_STATUSES.has(event.eventType),
+      terminalPresentation,
+    };
   } catch {
     return null;
   }

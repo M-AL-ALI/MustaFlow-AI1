@@ -33,7 +33,7 @@ router.get(
 
     // Verify the task exists AND belongs to this project (prevents IDOR)
     const [task] = await db
-      .select({ id: agentTasksTable.id })
+      .select({ id: agentTasksTable.id, terminal: agentTasksTable.terminal })
       .from(agentTasksTable)
       .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)));
 
@@ -57,6 +57,9 @@ router.get(
         filePath: e.filePath ?? null,
         data: (e.data as Record<string, unknown> | null) ?? null,
         createdAt: e.createdAt,
+        ...(TERMINAL_EVENT_TYPES.has(e.eventType) && task.terminal !== null
+          ? { terminal: task.terminal }
+          : {}),
       })),
     );
   },
@@ -86,7 +89,7 @@ router.get(
 
     // Verify the task exists AND belongs to this project (prevents IDOR)
     const [task] = await db
-      .select({ id: agentTasksTable.id })
+      .select({ id: agentTasksTable.id, terminal: agentTasksTable.terminal })
       .from(agentTasksTable)
       .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)));
 
@@ -110,16 +113,53 @@ router.get(
     let replayDone = false;
     let streamClosed = false;
 
+    const withCurrentTerminal = async (
+      payload: TaskEventPayload,
+    ): Promise<TaskEventPayload & { terminal?: unknown }> => {
+      if (!TERMINAL_EVENT_TYPES.has(payload.eventType)) return payload;
+      try {
+        const [current] = await db
+          .select({ terminal: agentTasksTable.terminal })
+          .from(agentTasksTable)
+          .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
+          .limit(1);
+        return current?.terminal !== null && current?.terminal !== undefined
+          ? { ...payload, terminal: current.terminal }
+          : payload;
+      } catch {
+        return payload;
+      }
+    };
+
+    const writeLive = (payload: TaskEventPayload): void => {
+      if (!TERMINAL_EVENT_TYPES.has(payload.eventType)) {
+        write(payload);
+        return;
+      }
+      void withCurrentTerminal(payload)
+        .then((currentPayload) => {
+          if (streamClosed) return;
+          write(currentPayload);
+          streamClosed = true;
+          res.end();
+        })
+        .catch(() => {
+          if (streamClosed) return;
+          write(payload);
+          streamClosed = true;
+          res.end();
+        });
+    };
+
     const unsubscribe = subscribeTaskEvents(taskId, (payload) => {
       if (streamClosed) return;
       if (!replayDone) {
         liveBuffer.push(payload);
         return;
       }
-      write(payload);
+      writeLive(payload);
       if (TERMINAL_EVENT_TYPES.has(payload.eventType)) {
-        streamClosed = true;
-        res.end();
+        return;
       }
     });
 
@@ -142,6 +182,9 @@ router.get(
         filePath: e.filePath ?? null,
         data: (e.data as Record<string, unknown> | null) ?? null,
         createdAt: e.createdAt,
+        ...(TERMINAL_EVENT_TYPES.has(e.eventType) && task.terminal !== null
+          ? { terminal: task.terminal }
+          : {}),
       });
       if (e.id > lastReplayedId) lastReplayedId = e.id;
       if (TERMINAL_EVENT_TYPES.has(e.eventType)) sawTerminal = true;
@@ -155,7 +198,7 @@ router.get(
       // is never replayed and must always be forwarded to the client.
       if (payload.id !== 0 && payload.id <= lastReplayedId) continue; // already replayed
       if (streamClosed) break;
-      write(payload);
+      write(await withCurrentTerminal(payload));
       if (TERMINAL_EVENT_TYPES.has(payload.eventType)) {
         sawTerminal = true;
       }

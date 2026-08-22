@@ -87,6 +87,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { terminalPresentationFor } from "@/lib/zero-terminal";
 
 type TaskReport = {
   userRequest: string;
@@ -1098,6 +1099,7 @@ function InlineReportCard({
     <div className="mt-2 space-y-1 text-xs">
       <InlineBuildResults
         report={report}
+        terminal={(liveTask as (typeof liveTask & { terminal?: unknown }) | undefined)?.terminal}
         onViewFile={onViewFile}
         onOpenCheckpoint={onOpenCheckpoint}
         onSendMessage={onSendMessage}
@@ -3276,9 +3278,11 @@ function TaskReviewCard({
         stagingSnapshot?: Array<{ path: string; content: string; mimeType: string }> | null;
         result?: string | null;
         status?: string | null;
+        terminal?: unknown;
       }
     | undefined;
   const staging = liveTask?.stagingSnapshot ?? null;
+  const terminal = liveTask ? terminalPresentationFor(liveTask) : null;
   const stagingByPath = new Map<string, string>((staging ?? []).map((f) => [f.path, f.content]));
 
   // Parse security gate findings from the live task result whenever the task
@@ -3316,7 +3320,7 @@ function TaskReviewCard({
     return (
       <div className="mt-2 bg-green-500/10 border border-green-500/20 rounded-lg p-2.5 text-[11px] flex items-center gap-2 text-green-400">
         <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-        Changes applied — project updated
+        {terminal?.message ?? "Changes applied — project updated"}
       </div>
     );
   }
@@ -3445,7 +3449,8 @@ function TaskReviewCard({
           <div className="flex items-center gap-2 text-amber-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="text-[10px] font-semibold">
-              {getBuilderWarningCompletionMessage(completionKind, report.previewUpdated)}
+              {terminal?.message ??
+                getBuilderWarningCompletionMessage(completionKind, report.previewUpdated)}
             </span>
           </div>
           <div className="mt-1 space-y-0.5">
@@ -3466,10 +3471,11 @@ function TaskReviewCard({
         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-amber-500/10 border-b border-amber-500/30 text-amber-400">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           <span className="text-[10px] font-semibold">
-            {getBuilderCompletionMessage(
-              completionKind,
-              "Build complete — TypeScript errors remain",
-            )}
+            {terminal?.message ??
+              getBuilderCompletionMessage(
+                completionKind,
+                "Build complete — TypeScript errors remain",
+              )}
           </span>
           {report.repairLoop && (
             <span className="text-[9px] text-amber-400/70 ml-1">

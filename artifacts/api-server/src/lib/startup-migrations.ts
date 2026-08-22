@@ -23,6 +23,23 @@ type MigrationStep = {
 
 type MigrationClient = Pick<import("pg").PoolClient, "query">;
 
+export async function applyZeroTerminalMigration(client: MigrationClient): Promise<void> {
+  await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS terminal JSONB`);
+  const verification = await client.query<{ terminal_ready: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1
+        FROM information_schema.columns
+       WHERE table_schema = current_schema()
+         AND table_name = 'agent_tasks'
+         AND column_name = 'terminal'
+         AND data_type = 'jsonb'
+    ) AS terminal_ready
+  `);
+  if (verification.rows[0]?.terminal_ready !== true) {
+    throw new Error("zero_terminal_schema_incomplete");
+  }
+}
+
 export async function ensureKnowledgeUsageEventsSchema(client: MigrationClient): Promise<void> {
   await client.query("BEGIN");
   await client.query(`
@@ -5980,6 +5997,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-zero-intent-receipts",
     async run(client) {
       await applyZeroIntentReceiptMigration(client);
+    },
+  },
+  {
+    name: "migrate-zero-terminal-v1",
+    async run(client) {
+      await applyZeroTerminalMigration(client);
     },
   },
 ];

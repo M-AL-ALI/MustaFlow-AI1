@@ -31,6 +31,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 type SecurityFindings = {
   kind: "sast" | "npm_audit";
@@ -411,13 +412,17 @@ function TaskRow({
     completedAt?: string | null;
     hasBrainstormContext?: boolean | null;
     brainstormTurnCount?: number | null;
+    terminal?: unknown;
   };
   projectId: number;
   onTryFix: (text: string) => void;
   highlight?: boolean;
   highlightCmd?: string;
 }) {
-  const [expanded, setExpanded] = useState(task.status === "failed" || !!highlight);
+  const terminal = terminalPresentationFor(task);
+  const status = terminalTaskStatus(task, task.status);
+  const isWarning = terminal?.tone === "warning" || terminal?.tone === "unknown";
+  const [expanded, setExpanded] = useState(status === "failed" || !!highlight);
   // Task #733 (code-review pass): when deep-linked from the AI Builder
   // chat's "View full log", auto-expand and scroll the matching task into
   // view so the user lands directly on the relevant run.
@@ -452,11 +457,13 @@ function TaskRow({
         "rounded-xl border overflow-hidden transition-colors",
         highlight
           ? "border-primary/50 ring-1 ring-primary/30 bg-primary/5"
-          : task.status === "failed"
-            ? "border-destructive/30 bg-destructive/5"
-            : task.status === "completed"
-              ? "border-border bg-card"
-              : "border-border bg-card/50",
+          : isWarning
+            ? "border-amber-500/30 bg-amber-500/5"
+            : status === "failed"
+              ? "border-destructive/30 bg-destructive/5"
+              : status === "completed"
+                ? "border-border bg-card"
+                : "border-border bg-card/50",
       )}
     >
       {showCmdBanner && (
@@ -469,12 +476,16 @@ function TaskRow({
         onClick={() => setExpanded((v) => !v)}
       >
         <div className="mt-0.5 shrink-0">
-          {task.status === "completed" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-          {task.status === "failed" && <XCircle className="h-4 w-4 text-destructive" />}
-          {["answering", "building", "planning", "testing"].includes(task.status) && (
+          {isWarning ? (
+            <AlertTriangle className="h-4 w-4 text-amber-400" />
+          ) : (
+            status === "completed" && <CheckCircle2 className="h-4 w-4 text-green-500" />
+          )}
+          {!isWarning && status === "failed" && <XCircle className="h-4 w-4 text-destructive" />}
+          {!isWarning && ["answering", "building", "planning", "testing"].includes(status) && (
             <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
           )}
-          {["queued", "canceled"].includes(task.status) && (
+          {!isWarning && ["queued", "canceled"].includes(status) && (
             <Clock className="h-4 w-4 text-muted-foreground" />
           )}
         </div>
@@ -482,7 +493,10 @@ function TaskRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-foreground truncate">{task.title}</span>
-            <StatusBadge status={task.status} />
+            <StatusBadge status={status} />
+            {terminal && (
+              <span className="text-[10px] text-muted-foreground">{terminal.title}</span>
+            )}
             {task.hasBrainstormContext && (
               <span
                 className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-full shrink-0"
@@ -506,7 +520,7 @@ function TaskRow({
           <div className="text-[11px] text-muted-foreground mt-0.5">
             {new Date(task.createdAt).toLocaleString()} · {task.kind}
           </div>
-          {task.status === "failed" && !expanded && suggestions.length > 0 && (
+          {status === "failed" && !expanded && suggestions.length > 0 && (
             <div className="text-[11px] text-destructive/80 mt-1 flex items-center gap-1">
               <Wrench className="h-3 w-3" />
               {suggestions.length} fix suggestion{suggestions.length !== 1 ? "s" : ""} available
@@ -526,11 +540,13 @@ function TaskRow({
 
       {expanded && (
         <div className="border-t border-border px-3 pb-3 pt-2 space-y-3">
-          {task.status === "failed" && task.result && !report?.securityFindings && (
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-2.5 text-xs text-destructive/90 font-mono leading-relaxed">
-              {task.result}
-            </div>
-          )}
+          {status === "failed" &&
+            (terminal?.message ?? task.result) &&
+            !report?.securityFindings && (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-2.5 text-xs text-destructive/90 font-mono leading-relaxed">
+                {terminal?.message ?? task.result}
+              </div>
+            )}
 
           {report?.securityFindings && (
             <SecurityFindingsPanel findings={report.securityFindings} onTryFix={onTryFix} />
@@ -616,7 +632,7 @@ function TaskRow({
               </div>
             </div>
           )}
-          {task.status === "completed" &&
+          {status === "completed" &&
             report?.knowledgeApplied &&
             report.knowledgeApplied.length > 0 && (
               <div className="space-y-1.5">
@@ -640,13 +656,13 @@ function TaskRow({
               </div>
             )}
 
-          {task.status === "completed" && report?.nextRecommendation && (
+          {status === "completed" && report?.nextRecommendation && (
             <div className="text-[11px] text-muted-foreground italic border-t border-border pt-2">
               {report.nextRecommendation}
             </div>
           )}
 
-          {task.status === "failed" && task.prompt && (
+          {status === "failed" && task.prompt && (
             <button
               onClick={() => onTryFix(task.prompt!)}
               className="flex items-center gap-1.5 text-xs font-medium text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-xl transition-colors"
@@ -1530,8 +1546,12 @@ export function LogsTab({
     return () => clearInterval(timer);
   }, [mobileBuilds, fetchMobileBuilds]);
 
-  const failed = (tasks ?? []).filter((t) => t.status === "failed").length;
-  const completed = (tasks ?? []).filter((t) => t.status === "completed").length;
+  const failed = (tasks ?? []).filter(
+    (t) => terminalTaskStatus(t as typeof t & { terminal?: unknown }, t.status) === "failed",
+  ).length;
+  const completed = (tasks ?? []).filter(
+    (t) => terminalTaskStatus(t as typeof t & { terminal?: unknown }, t.status) === "completed",
+  ).length;
   const activeBuilds = mobileBuilds.filter((b) =>
     ["queued", "building", "submitting"].includes(b.status),
   ).length;

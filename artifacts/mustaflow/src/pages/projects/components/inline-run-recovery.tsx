@@ -1,6 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import { InlineBuilderError } from "./inline-builder-error";
 import { InlineRecoveryLoop, type InlineRecoveryStep } from "./inline-recovery-loop";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 export type CommandFailure = {
   id: number;
@@ -31,6 +32,7 @@ export type RecoveryTask = {
   completionKind?: string | null;
   result?: string | null;
   report?: RecoveryReport;
+  terminal?: unknown;
 };
 
 export type TaskQueuedSignal =
@@ -205,19 +207,21 @@ function completionReason(completionKind?: string | null): string {
 
 function recoveryTaskStep(task: RecoveryTask): InlineRecoveryStep {
   const title = plainRecoveryTitle(task.title);
-  if (task.status === "completed") {
+  const terminal = terminalPresentationFor(task);
+  const status = terminalTaskStatus(task, task.status);
+  if (status === "completed") {
     return {
       id: task.id,
       phase: "adapt",
-      message: `The ${title} fix completed.`,
-      status: "passed",
+      message: terminal?.message ?? `The ${title} fix completed.`,
+      status: terminal?.tone === "warning" ? "failed" : "passed",
     };
   }
-  if (["failed", "canceled", "discarded"].includes(task.status)) {
+  if (["failed", "canceled", "discarded"].includes(status)) {
     return {
       id: task.id,
       phase: "adapt",
-      message: `The ${title} fix could not finish.`,
+      message: terminal?.message ?? `The ${title} fix could not finish.`,
       status: "failed",
     };
   }
@@ -225,7 +229,7 @@ function recoveryTaskStep(task: RecoveryTask): InlineRecoveryStep {
     id: task.id,
     phase: "adapt",
     message:
-      task.status === "queued"
+      status === "queued"
         ? `A fix for the ${title} is queued.`
         : `Zero is fixing the ${title} in the background.`,
     status: "running",
@@ -279,14 +283,15 @@ export function InlineRunRecoveryStory({
             status: "failed",
           },
   ];
+  const linkedTaskStatus = linkedTask ? terminalTaskStatus(linkedTask, linkedTask.status) : null;
   const linkedTaskLive =
     linkedTask !== null &&
     linkedTask !== undefined &&
-    !["completed", "failed", "canceled", "discarded"].includes(linkedTask.status);
+    !["completed", "failed", "canceled", "discarded"].includes(linkedTaskStatus ?? "");
   const linkedTaskFailed =
     linkedTask !== null &&
     linkedTask !== undefined &&
-    ["failed", "canceled", "discarded"].includes(linkedTask.status);
+    ["failed", "canceled", "discarded"].includes(linkedTaskStatus ?? "");
 
   return (
     <section

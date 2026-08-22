@@ -9,9 +9,11 @@ import {
   ChevronUp,
   RotateCcw,
   Ban,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getBuilderTaskQueueLabel } from "@/lib/builder-completion";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 type TaskStatus =
   | "queued"
@@ -36,6 +38,7 @@ interface BatchTask {
   prompt: string | null;
   queueIndex: number | null;
   completionKind?: string | null;
+  terminal?: unknown;
 }
 
 interface BatchState {
@@ -66,7 +69,10 @@ const ACTIVE_STATUSES: Set<string> = new Set([
   "needs_fix",
 ]);
 
-function TaskStepIcon({ status }: { status: TaskStatus }) {
+function TaskStepIcon({ status, warning }: { status: TaskStatus; warning: boolean }) {
+  if (warning) {
+    return <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />;
+  }
   if (status === "completed") {
     return <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />;
   }
@@ -99,7 +105,20 @@ export function QueueProgressStrip({
         credentials: "include",
       });
       if (!res.ok) return;
-      const data = (await res.json()) as BatchState;
+      const received = (await res.json()) as BatchState;
+      const tasks = received.tasks.map((task) => ({
+        ...task,
+        status: terminalTaskStatus(task, task.status) as TaskStatus,
+      }));
+      const data = {
+        ...received,
+        tasks,
+        completedCount: tasks.filter((task) => task.status === "completed").length,
+        failedCount: tasks.filter((task) => task.status === "failed").length,
+        cancelledCount: tasks.filter((task) =>
+          ["canceled", "cancelled", "discarded"].includes(task.status),
+        ).length,
+      };
       setBatch(data);
 
       const allDone = data.tasks.every((t) => !ACTIVE_STATUSES.has(t.status));
@@ -221,48 +240,56 @@ export function QueueProgressStrip({
 
       {!collapsed && (
         <div className="px-3 pb-2 flex flex-col gap-1">
-          {batch.tasks.map((task, idx) => (
-            <div
-              key={task.id}
-              className={cn(
-                "flex items-center gap-2 px-2 py-1 rounded-lg transition-colors",
-                task.status === "failed" && "bg-destructive/5",
-                ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "bg-primary/5",
-              )}
-            >
-              <TaskStepIcon status={task.status} />
-              <span className="text-[9px] font-bold text-muted-foreground/50 w-3 shrink-0">
-                {idx + 1}
-              </span>
-              <span
+          {batch.tasks.map((task, idx) => {
+            const terminal = terminalPresentationFor(task);
+            const warning = terminal?.tone === "warning" || terminal?.tone === "unknown";
+            return (
+              <div
+                key={task.id}
                 className={cn(
-                  "flex-1 text-[11px] truncate",
-                  task.status === "completed" && "text-muted-foreground",
-                  task.status === "failed" && "text-destructive",
-                  task.status === "canceled" && "text-muted-foreground/40 line-through",
-                  ACTIVE_STATUSES.has(task.status) &&
-                    task.status !== "queued" &&
-                    "text-foreground font-medium",
+                  "flex items-center gap-2 px-2 py-1 rounded-lg transition-colors",
+                  warning && "bg-amber-500/5",
+                  task.status === "failed" && "bg-destructive/5",
+                  ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "bg-primary/5",
                 )}
               >
-                {task.prompt ?? task.title}
-              </span>
-              <span
-                className={cn(
-                  "text-[9px] shrink-0 capitalize font-medium",
-                  task.status === "completed" && "text-green-400",
-                  task.status === "failed" && "text-destructive",
-                  task.status === "canceled" && "text-muted-foreground/40",
-                  task.status === "queued" && "text-muted-foreground/50",
-                  ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "text-primary",
-                )}
-              >
-                {task.status === "building" || task.status === "planning"
-                  ? "running"
-                  : getBuilderTaskQueueLabel(task.status, task.completionKind)}
-              </span>
-            </div>
-          ))}
+                <TaskStepIcon status={task.status} warning={warning} />
+                <span className="text-[9px] font-bold text-muted-foreground/50 w-3 shrink-0">
+                  {idx + 1}
+                </span>
+                <span
+                  className={cn(
+                    "flex-1 text-[11px] truncate",
+                    warning && "text-amber-300",
+                    !warning && task.status === "completed" && "text-muted-foreground",
+                    task.status === "failed" && "text-destructive",
+                    task.status === "canceled" && "text-muted-foreground/40 line-through",
+                    ACTIVE_STATUSES.has(task.status) &&
+                      task.status !== "queued" &&
+                      "text-foreground font-medium",
+                  )}
+                >
+                  {task.prompt ?? task.title}
+                </span>
+                <span
+                  className={cn(
+                    "text-[9px] shrink-0 capitalize font-medium",
+                    warning && "text-amber-400",
+                    !warning && task.status === "completed" && "text-green-400",
+                    task.status === "failed" && "text-destructive",
+                    task.status === "canceled" && "text-muted-foreground/40",
+                    task.status === "queued" && "text-muted-foreground/50",
+                    ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "text-primary",
+                  )}
+                >
+                  {terminal?.title ??
+                    (task.status === "building" || task.status === "planning"
+                      ? "running"
+                      : getBuilderTaskQueueLabel(task.status, task.completionKind))}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

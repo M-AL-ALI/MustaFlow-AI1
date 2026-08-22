@@ -39,6 +39,7 @@ router.get("/background-jobs", async (req, res): Promise<void> => {
         createdAt: agentTasksTable.createdAt,
         startedAt: agentTasksTable.startedAt,
         completedAt: agentTasksTable.completedAt,
+        terminal: agentTasksTable.terminal,
       })
       .from(agentTasksTable)
       .innerJoin(projectsTable, eq(projectsTable.id, agentTasksTable.projectId))
@@ -73,8 +74,16 @@ router.get("/background-jobs", async (req, res): Promise<void> => {
       })),
     };
 
-    // Validate before sending (uses generated Zod schema with date coercion).
-    res.json(ListBackgroundJobsResponse.parse(payload));
+    // Validate the legacy fields before sending; typed terminal truth is an
+    // additive staged reader field until the public schema flips in B3c.
+    const parsed = ListBackgroundJobsResponse.parse(payload);
+    res.json({
+      ...parsed,
+      jobs: parsed.jobs.map((job, index) => {
+        const terminal = rows[index]?.terminal;
+        return terminal === null || terminal === undefined ? job : { ...job, terminal };
+      }),
+    });
   } catch (err) {
     logger.error({ err, userId }, "Failed to list background jobs");
     res.status(500).json({ error: "Failed to list background jobs" });

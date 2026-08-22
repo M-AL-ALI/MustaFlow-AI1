@@ -26,11 +26,13 @@ import {
   Navigation,
   Layers,
   WifiOff,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getBuilderCompletionMessage } from "@/lib/builder-completion";
 import { selectBlueprintFailureError } from "@/lib/user-visible-errors";
 import { isBlueprintInstallFailureMessage } from "@workspace/ora-contracts";
+import { terminalPresentationFor } from "@/lib/zero-terminal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -277,7 +279,9 @@ export function ActivityStream({
     isFailed &&
     (completionKind === "admission_blocked" || completionKind === "admission_unavailable");
   const isNeedsReview = taskStatus === "needs_review" || taskStatus === "needs_fix";
-  const completionText = getBuilderCompletionMessage(completionKind);
+  const terminal = lastEvent ? terminalPresentationFor(lastEvent) : null;
+  const isWarning = terminal?.tone === "warning" || terminal?.tone === "unknown";
+  const completionText = terminal?.message ?? getBuilderCompletionMessage(completionKind);
 
   // Auto-scroll pill row to the right as new events arrive
   useEffect(() => {
@@ -370,7 +374,9 @@ export function ActivityStream({
                   ageOpacity,
                 )}
               >
-                {p.isActive && !isTerminal ? (
+                {isWarning && p.isLast ? (
+                  <AlertTriangle className="h-2.5 w-2.5 text-amber-400" />
+                ) : p.isActive && !isTerminal ? (
                   <Loader2 className="h-2.5 w-2.5 animate-spin" />
                 ) : (
                   <Icon className="h-2.5 w-2.5" />
@@ -389,11 +395,13 @@ export function ActivityStream({
         <span
           className={cn(
             "text-[11px] font-medium truncate flex-1 min-w-0",
-            isDone && !isNeedsReview
-              ? "text-green-400"
-              : isFailed
-                ? "text-destructive"
-                : "text-foreground",
+            isWarning
+              ? "text-amber-400"
+              : isDone && !isNeedsReview
+                ? "text-green-400"
+                : isFailed
+                  ? "text-destructive"
+                  : "text-foreground",
           )}
         >
           {statusText}
@@ -509,7 +517,12 @@ export function ActivityStream({
 
       {/* ── Footer banners ── */}
       {expanded && isDone && !isNeedsReview && (
-        <div className="px-3 py-1.5 border-t border-border bg-green-500/5 text-[10px] text-green-400 font-medium">
+        <div
+          className={cn(
+            "px-3 py-1.5 border-t border-border text-[10px] font-medium",
+            isWarning ? "bg-amber-500/5 text-amber-400" : "bg-green-500/5 text-green-400",
+          )}
+        >
           Auto-dismissing in a few seconds — or click X to close now.
         </div>
       )}
@@ -547,7 +560,9 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
   const isAdmissionFailure =
     isFailed &&
     (completionKind === "admission_blocked" || completionKind === "admission_unavailable");
-  const completionText = getBuilderCompletionMessage(completionKind);
+  const terminal = lastEvent ? terminalPresentationFor(lastEvent) : null;
+  const isWarning = terminal?.tone === "warning" || terminal?.tone === "unknown";
+  const completionText = terminal?.message ?? getBuilderCompletionMessage(completionKind);
 
   // Auto-scroll pill row right
   useEffect(() => {
@@ -610,7 +625,9 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
                   ageOpacity,
                 )}
               >
-                {isActive && !isTerminal ? (
+                {isWarning && isLast ? (
+                  <AlertTriangle className="h-2.5 w-2.5 text-amber-400" />
+                ) : isActive && !isTerminal ? (
                   <Loader2 className="h-2.5 w-2.5 animate-spin" />
                 ) : isDone && isLast ? (
                   <CheckCircle2 className="h-2.5 w-2.5 text-green-400" />
@@ -631,11 +648,13 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
         <span
           className={cn(
             "text-xs truncate flex-1 min-w-0",
-            isDone
-              ? "text-green-400 font-medium"
-              : isFailed
-                ? "text-destructive font-medium"
-                : "text-foreground",
+            isWarning
+              ? "text-amber-400 font-medium"
+              : isDone
+                ? "text-green-400 font-medium"
+                : isFailed
+                  ? "text-destructive font-medium"
+                  : "text-foreground",
           )}
         >
           {isDone
@@ -651,7 +670,11 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
         <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
           {events.length}
         </span>
-        <CurrentIcon className={cn("h-3 w-3 shrink-0 opacity-50", currentMeta.color)} />
+        {isWarning ? (
+          <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />
+        ) : (
+          <CurrentIcon className={cn("h-3 w-3 shrink-0 opacity-50", currentMeta.color)} />
+        )}
       </div>
     </div>
   );

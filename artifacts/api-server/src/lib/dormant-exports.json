@@ -23,5 +23,10 @@
     "path": "artifacts/api-server/src/lib/zero-runloop-phase-emission.ts",
     "symbol": "ZERO_RUN_LOOP_EMITTABLE_PHASES",
     "reachableWhen": "Production code enumerates the phases that may be emitted."
+  },
+  {
+    "path": "artifacts/mustaflow/src/lib/zero-terminal.ts",
+    "symbol": "terminalTaskMessage",
+    "reachableWhen": "B3b wires durable terminal writers into the canonical reader path."
   }
 ]

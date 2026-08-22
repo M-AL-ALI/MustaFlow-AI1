@@ -10,6 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  AlertTriangle,
   Loader2,
   Square,
   Trash2,
@@ -23,6 +24,7 @@ import { getBuilderTaskQueueLabel } from "@/lib/builder-completion";
 import { selectLingeringCompletedTask } from "@/lib/builder-task-queue";
 import { parseNabuflowGateError, type NabuflowGateError } from "@/lib/nabuflow-billing";
 import { cn } from "@/lib/utils";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 
 interface TaskQueuePanelProps {
   projectId: number;
@@ -52,6 +54,13 @@ export function TaskQueuePanel({ projectId, onStop, onBillingBlock }: TaskQueueP
       queryKey: getListTasksQueryKey(projectId),
     },
   });
+  const terminalAwareTasks = tasks.map((task) => ({
+    ...task,
+    status: terminalTaskStatus(
+      task as typeof task & { terminal?: unknown },
+      task.status,
+    ) as typeof task.status,
+  }));
 
   const cancelTask = useCancelTask();
   const forceStartTask = useForceStartTask();
@@ -83,11 +92,21 @@ export function TaskQueuePanel({ projectId, onStop, onBillingBlock }: TaskQueueP
       });
   }, [projectId, invalidate, onBillingBlock]);
 
-  const activeTask = tasks.find((t) => (ACTIVE_STATUSES as readonly string[]).includes(t.status));
+  const activeTask = terminalAwareTasks.find((t) =>
+    (ACTIVE_STATUSES as readonly string[]).includes(t.status),
+  );
   const activeTaskIsWaiting = activeTask ? WAITING_STATUSES.has(activeTask.status) : false;
-  const rawQueuedTasks = tasks.filter((t) => t.status === "queued");
-  const pausedTasks = tasks.filter((t) => (t.status as string) === PAUSED_STATUS);
-  const lingeringCompletedTask = selectLingeringCompletedTask(tasks, activeTask != null);
+  const rawQueuedTasks = terminalAwareTasks.filter((t) => t.status === "queued");
+  const pausedTasks = terminalAwareTasks.filter((t) => (t.status as string) === PAUSED_STATUS);
+  const lingeringCompletedTask = selectLingeringCompletedTask(
+    terminalAwareTasks,
+    activeTask != null,
+  );
+  const lingeringTerminal = lingeringCompletedTask
+    ? terminalPresentationFor(
+        lingeringCompletedTask as typeof lingeringCompletedTask & { terminal?: unknown },
+      )
+    : null;
 
   // Apply local ordering optimistically; fall back to server order when localOrder is stale
   const queuedTaskIds = rawQueuedTasks.map((t) => t.id);
@@ -207,15 +226,27 @@ export function TaskQueuePanel({ projectId, onStop, onBillingBlock }: TaskQueueP
 
         {lingeringCompletedTask && (
           <div className="px-3 py-2 flex items-center gap-2">
-            <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+            {lingeringTerminal?.tone === "warning" || lingeringTerminal?.tone === "unknown" ? (
+              <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+            )}
             <span className="flex-1 text-[11px] text-foreground truncate min-w-0">
               {lingeringCompletedTask.title}
             </span>
-            <span className="h-5 px-1.5 rounded-md flex items-center text-[10px] font-medium bg-green-500/10 text-green-400 shrink-0">
-              {getBuilderTaskQueueLabel(
-                lingeringCompletedTask.status,
-                lingeringCompletedTask.completionKind,
+            <span
+              className={cn(
+                "h-5 px-1.5 rounded-md flex items-center text-[10px] font-medium shrink-0",
+                lingeringTerminal?.tone === "warning" || lingeringTerminal?.tone === "unknown"
+                  ? "bg-amber-500/10 text-amber-400"
+                  : "bg-green-500/10 text-green-400",
               )}
+            >
+              {lingeringTerminal?.title ??
+                getBuilderTaskQueueLabel(
+                  lingeringCompletedTask.status,
+                  lingeringCompletedTask.completionKind,
+                )}
             </span>
           </div>
         )}

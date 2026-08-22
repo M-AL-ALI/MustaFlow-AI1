@@ -1,8 +1,19 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
-import { Bell, X, Check, CheckCheck, MessageSquare, Users, Rocket, Zap } from "lucide-react";
+import {
+  AlertTriangle,
+  Bell,
+  X,
+  Check,
+  CheckCheck,
+  MessageSquare,
+  Users,
+  Rocket,
+  Zap,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { terminalPresentationFor } from "@/lib/zero-terminal";
 
 interface Notification {
   id: number;
@@ -202,7 +213,19 @@ export function NotificationsBell() {
                 </div>
               )}
               {data?.notifications.map((n) => {
-                const Icon = typeIcon(n.type);
+                const terminal = terminalPresentationFor({ terminal: n.metadata?.terminal });
+                const effectiveType = terminal
+                  ? terminal.taskStatus === "failed"
+                    ? "build_failed"
+                    : "build_complete"
+                  : n.type;
+                const Icon = terminal
+                  ? terminal.tone === "success"
+                    ? Check
+                    : terminal.tone === "failure"
+                      ? X
+                      : AlertTriangle
+                  : typeIcon(effectiveType);
                 const href = getNotificationHref(n);
                 return (
                   <div
@@ -223,10 +246,12 @@ export function NotificationsBell() {
                       <Icon className="h-3.5 w-3.5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className={cn("text-sm", !n.read && "font-medium")}>{n.title}</p>
-                      {n.body && (
+                      <p className={cn("text-sm", !n.read && "font-medium")}>
+                        {terminal?.title ?? n.title}
+                      </p>
+                      {(terminal?.message ?? n.body) && (
                         <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                          {n.body}
+                          {terminal?.message ?? n.body}
                         </p>
                       )}
                       <p className="mt-1 text-[11px] text-muted-foreground">

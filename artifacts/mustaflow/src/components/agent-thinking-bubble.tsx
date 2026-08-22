@@ -14,6 +14,7 @@ import {
 import { useTaskEventStream } from "@/hooks/use-task-event-stream";
 import { isUserVisibleZeroTimelineEventType } from "./agent-timeline-event-visibility";
 import { useQueryClient } from "@tanstack/react-query";
+import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
 import {
   Brain,
   BookOpen,
@@ -2002,9 +2003,23 @@ export function AgentThinkingBubble({
   const completedTask = tasks?.find((t) => t.id === taskId);
   // If we have no events yet but the task in DB is already failed/cancelled/done,
   // treat the bubble as terminal so it doesn't sit at "Starting up…" forever.
-  const taskStatus = completedTask?.status as string | undefined;
+  const completedTaskCarrier = completedTask as
+    | (typeof completedTask & { terminal?: unknown })
+    | undefined;
+  const terminalPresentation =
+    (completedTaskCarrier ? terminalPresentationFor(completedTaskCarrier) : null) ??
+    (lastEvent ? terminalPresentationFor(lastEvent) : null);
+  const taskStatus = completedTask
+    ? terminalTaskStatus(
+        completedTask as typeof completedTask & { terminal?: unknown },
+        completedTask.status,
+      )
+    : undefined;
   const taskTerminalFromDb =
-    taskStatus === "failed" || taskStatus === "cancelled" || taskStatus === "completed";
+    taskStatus === "failed" ||
+    taskStatus === "canceled" ||
+    taskStatus === "cancelled" ||
+    taskStatus === "completed";
   const stalled = events.length === 0 && taskTerminalFromDb;
 
   // Auto-dismiss if the bubble is stuck at "Starting up…" with no events
@@ -2038,10 +2053,12 @@ export function AgentThinkingBubble({
     | undefined;
   const versionId = completedReport?.versionId ?? null;
   const knowledgeApplied = completedReport?.knowledgeApplied ?? [];
-  const completionText = getBuilderCompletionMessage(
-    completedTask?.completionKind,
-    completedReport?.completedWithErrors ? "Build complete — errors found" : "Build complete",
-  );
+  const completionText =
+    terminalPresentation?.message ??
+    getBuilderCompletionMessage(
+      completedTask?.completionKind,
+      completedReport?.completedWithErrors ? "Build complete — errors found" : "Build complete",
+    );
 
   const { data: versions } = useListVersions(projectId, {
     query: {
@@ -2159,7 +2176,7 @@ export function AgentThinkingBubble({
         <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
           {isTerminal ? (
             isDone ? (
-              completedReport?.completedWithErrors ? (
+              completedReport?.completedWithErrors || terminalPresentation?.tone === "warning" ? (
                 <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
               ) : (
                 <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />

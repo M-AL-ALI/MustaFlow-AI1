@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CheckpointHistoryAction, type OpenCheckpointHistory } from "./checkpoint-history-action";
+import { terminalPresentationFor } from "@/lib/zero-terminal";
 
 type KnowledgeLesson = {
   id: number;
@@ -44,6 +45,7 @@ type InlineBuildResultsProps = {
   onSendMessage?: (text: string) => void;
   showCheckpoint?: boolean;
   className?: string;
+  terminal?: unknown;
 };
 
 type ResultRowProps = {
@@ -91,7 +93,9 @@ export function partialValidationMessage(report: InlineBuildResultsReport): stri
   );
 }
 
-function resultSummary(report: InlineBuildResultsReport) {
+function resultSummary(report: InlineBuildResultsReport, terminal?: unknown) {
+  const presentation = terminalPresentationFor({ terminal });
+  if (presentation) return presentation.message;
   const changed =
     report.filesCreated.length + report.filesChanged.length + report.filesRemoved.length;
   if (changed === 0) return "Finished without changing project files.";
@@ -169,7 +173,9 @@ export function InlineBuildResults({
   onSendMessage,
   showCheckpoint = true,
   className,
+  terminal,
 }: InlineBuildResultsProps) {
+  const terminalPresentation = terminalPresentationFor({ terminal });
   const lessons = report.knowledgeApplied ?? [];
   const checks = report.checkRunsSummary;
   const failedOrWarned = [...(checks?.failedChecks ?? []), ...(checks?.warnChecks ?? [])];
@@ -188,8 +194,12 @@ export function InlineBuildResults({
         className="flex items-center gap-2 pb-1.5 text-[11px] leading-relaxed text-foreground"
         data-testid="inline-build-summary"
       >
-        <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        {resultSummary(report)}
+        {terminalPresentation && terminalPresentation.tone !== "success" ? (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden="true" />
+        ) : (
+          <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        )}
+        {resultSummary(report, terminal)}
       </p>
 
       <ResultRow

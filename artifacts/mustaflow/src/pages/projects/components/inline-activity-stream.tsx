@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ZeroAvatar } from "./zero-avatar";
 import { type ThreadDensity, visibleThreadEntries } from "./thread-density";
+import { terminalPresentationFor } from "@/lib/zero-terminal";
 
 export type InlineActivityKind =
   | "thinking"
@@ -297,7 +298,23 @@ export function taskActivityForEvent(
   id: number,
   eventType: string,
   message = "",
+  terminal?: unknown,
 ): InlineActivityEntry | null {
+  const terminalPresentation = terminalPresentationFor({ terminal });
+  if (terminalPresentation) {
+    return {
+      id,
+      kind:
+        terminalPresentation.tone === "success"
+          ? "done"
+          : terminalPresentation.tone === "warning"
+            ? "checking"
+            : "error",
+      label: terminalPresentation.message,
+      sourceEventType: eventType.toLowerCase(),
+      terminal: true,
+    };
+  }
   const normalizedEventType = eventType.toLowerCase();
   if (normalizedEventType === "editing_files" && /^repairing\b/i.test(message.trim())) {
     return {

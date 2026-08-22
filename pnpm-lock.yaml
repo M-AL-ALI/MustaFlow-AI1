@@ -1232,6 +1232,9 @@ importers:
 
   lib/db:
     dependencies:
+      '@workspace/ora-contracts':
+        specifier: workspace:*
+        version: link:../ora-contracts
       '@workspace/tenant-runtime-contracts':
         specifier: workspace:*
         version: link:../tenant-runtime-contracts

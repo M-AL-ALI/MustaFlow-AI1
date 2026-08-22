@@ -24,7 +24,7 @@ function typescriptFiles(root: string): string[] {
 describe("Zero provenance schema completion", () => {
   it("adds exactly three named boot steps and keeps both historical usage step names", () => {
     const migration = source("./startup-migrations.ts");
-    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(144);
+    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(145);
     expect(migration).toContain('name: "knowledge_usage_events"');
     expect(migration).toContain('name: "migrate-knowledge-usage-events"');
     expect(migration).toContain('name: "migrate-knowledge-provenance"');

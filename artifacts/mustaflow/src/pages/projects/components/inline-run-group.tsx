@@ -60,7 +60,12 @@ export function buildRunReplayModel(events: ReplayEvent[]): RunReplayModel {
   const chronologicalEvents = [...events].sort((left, right) => left.id - right.id);
 
   for (const event of chronologicalEvents) {
-    const activity = taskActivityForEvent(event.id, event.eventType, event.message);
+    const activity = taskActivityForEvent(
+      event.id,
+      event.eventType,
+      event.message,
+      (event as typeof event & { terminal?: unknown }).terminal,
+    );
     if (activity) {
       activities = appendActivityEntry(activities, activity);
     }

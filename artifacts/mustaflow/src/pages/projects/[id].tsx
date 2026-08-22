@@ -2177,7 +2177,12 @@ export default function ProjectWorkspacePage() {
         }
         const loopProgress = parseRunLoopProgress(event.eventType, event.message);
         if (loopProgress) setLiveRunProgress(loopProgress);
-        const activity = taskActivityForEvent(event.id, event.eventType, event.message);
+        const activity = taskActivityForEvent(
+          event.id,
+          event.eventType,
+          event.message,
+          event.terminal,
+        );
         if (activity) {
           setLiveActivityEvents((current) => appendActivityEntry(current, activity));
         }
@@ -2292,8 +2297,10 @@ export default function ProjectWorkspacePage() {
           setAgentPrompts([]);
           setLiveCodeBuffer("");
           // Reload the preview iframe so the freshly-built files are visible.
+          const shouldRefreshPreview =
+            receipt.terminalPresentation?.shouldRefreshPreview ?? event.eventType === "completed";
           if (event.eventType === "completed") {
-            setBuildRefreshCount((n) => n + 1);
+            if (shouldRefreshPreview) setBuildRefreshCount((n) => n + 1);
             setPreflightBanner(null);
             setLiveProjectImages((current) =>
               current.map((image) =>
@@ -2325,7 +2332,7 @@ export default function ProjectWorkspacePage() {
           }
           void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-          void reconcilePreview("task-terminal");
+          if (shouldRefreshPreview) void reconcilePreview("task-terminal");
           es.close();
           if (taskEventSourceRef.current === es) taskEventSourceRef.current = null;
         }

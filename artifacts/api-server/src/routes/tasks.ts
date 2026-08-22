@@ -77,7 +77,14 @@ router.get("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pro
   // Use safeParse so a schema mismatch in any field (e.g. stagingSnapshot stored
   // as an array instead of object) never causes a 500 — just return the raw rows.
   const parsed = ListTasksResponse.safeParse(rowsWithElapsed);
-  res.json(parsed.success ? parsed.data : rowsWithElapsed);
+  res.json(
+    parsed.success
+      ? parsed.data.map((row, index) => {
+          const terminal = rowsWithElapsed[index]?.terminal;
+          return terminal === null || terminal === undefined ? row : { ...row, terminal };
+        })
+      : rowsWithElapsed,
+  );
 });
 
 router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Promise<void> => {
