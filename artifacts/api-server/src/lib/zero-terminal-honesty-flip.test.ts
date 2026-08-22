@@ -184,6 +184,7 @@ describe("B3b terminal honesty flip", () => {
     );
     expect(snapshot).toContain("terminalRef: zeroTerminalRef(terminal)");
     expect(jobs).toContain("report.terminalRef = zeroTerminalRef(terminal)");
+    expect(jobs.match(/outcome: analyticsOutcomeForTerminal\(/g)).toHaveLength(3);
     expect(jobs).toContain("persistInterruptedZeroTerminal({");
     expect(drawer).toContain('terminalTaskMessage(task, task.result ?? "")');
     expect(dormant).not.toContain("terminalTaskMessage");

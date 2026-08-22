@@ -934,6 +934,12 @@ function terminalPreview(report: TaskReport, versionId: number): ZeroTerminalPre
   return { promised: false, state: "not_promised" };
 }
 
+function analyticsOutcomeForTerminal(terminal: ZeroTerminalV1): "success" | "failed" {
+  return terminal.outcome === "mutation_succeeded" || terminal.outcome === "changed_with_issues"
+    ? "success"
+    : "failed";
+}
+
 /**
  * Publishes a canonical, safe PROJECT_FILES_CHANGED payload to both the
  * project-wide preview stream and, when taskId is present, the task stream.
@@ -6666,7 +6672,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             durationMs: Date.now() - jobStartTime,
             correctionPasses: analyticsCorrectionPasses,
             escalated: wasEscalated,
-            outcome: "failed",
+            outcome: analyticsOutcomeForTerminal(terminal),
             primaryErrorCategory: terminal.cause.code,
           })
           .catch((analyticsErr) =>
@@ -6986,7 +6992,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           durationMs: Date.now() - jobStartTime,
           correctionPasses: analyticsCorrectionPasses,
           escalated: wasEscalated,
-          outcome: "success" as const,
+          outcome: analyticsOutcomeForTerminal(terminal),
           primaryErrorCategory: analyticsErrorCategory,
         })
         .catch((err) =>
@@ -7155,7 +7161,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           durationMs: Date.now() - jobStartTime,
           correctionPasses: analyticsCorrectionPasses,
           escalated: wasEscalated,
-          outcome: "failed",
+          outcome: analyticsOutcomeForTerminal(failureTerminal),
           primaryErrorCategory: analyticsErrorCategory,
         })
         .catch((analyticsErr) =>
