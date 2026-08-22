@@ -58,6 +58,10 @@ export const ZERO_INTENT_RECEIPT_ERROR_CODES = [
   "intent_receipt_not_found",
   "intent_receipt_already_consumed",
   "intent_receipt_persistence_failed",
+  "intent_receipt_admission_mismatch",
+  "intent_receipt_mutation_required",
+  "intent_receipt_task_conflict",
+  "intent_receipt_grandfather_invalid",
 ] as const;
 export type IntentReceiptErrorCode = (typeof ZERO_INTENT_RECEIPT_ERROR_CODES)[number];
 

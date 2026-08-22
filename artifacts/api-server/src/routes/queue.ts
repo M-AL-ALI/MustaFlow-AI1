@@ -9,6 +9,7 @@ import type { AgentMode } from "../lib/ai";
 import type { AgentIdentity } from "../lib/jobs";
 import { estimateQueueCreditCost } from "../lib/queue-credit-costs";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 const router: IRouter = Router();
 
@@ -119,6 +120,14 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
     }
 
     taskIds.push(task.id);
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId,
+      taskId: task.id,
+      requestId: `queue:${batchId}:${i}`,
+      mutationCapable: true,
+      source: "queue_promoted",
+    });
 
     if (i === 0) {
       const recentMessages = await db
@@ -147,6 +156,7 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
         deepReasoning,
         agentIdentity: batchAgentIdentity,
         conversationHistory,
+        intentReceiptId: admission.receiptId,
       });
     }
   }

@@ -29,7 +29,12 @@ export interface IntentReceiptPersistenceDriver {
     decision: IntentReceiptDecision,
   ): Promise<IntentReceipt>;
   linkMessage(receiptId: number, messageId: number): Promise<void>;
-  consumeForTask(receiptId: number, taskId: number): Promise<IntentReceipt>;
+  linkTask(receiptId: number, taskId: number, projectId: number): Promise<void>;
+  consumeForTask(input: {
+    receiptId: number;
+    taskId: number;
+    projectId: number;
+  }): Promise<IntentReceipt>;
 }
 
 function iso(value: Date | string): string {
@@ -91,8 +96,26 @@ export class IntentReceiptStore {
     return this.driver.linkMessage(receiptId, messageId);
   }
 
-  consumeForTask(receiptId: number, taskId: number): Promise<IntentReceipt> {
-    return this.driver.consumeForTask(receiptId, taskId);
+  linkTask(receiptId: number, taskId: number, projectId: number): Promise<void> {
+    if (
+      !Number.isSafeInteger(receiptId) ||
+      receiptId < 1 ||
+      !Number.isSafeInteger(taskId) ||
+      taskId < 1 ||
+      !Number.isSafeInteger(projectId) ||
+      projectId < 1
+    ) {
+      return Promise.reject(new IntentReceiptError("intent_receipt_task_conflict"));
+    }
+    return this.driver.linkTask(receiptId, taskId, projectId);
+  }
+
+  consumeForTask(input: {
+    receiptId: number;
+    taskId: number;
+    projectId: number;
+  }): Promise<IntentReceipt> {
+    return this.driver.consumeForTask(input);
   }
 }
 
@@ -190,33 +213,118 @@ export function createPostgresIntentReceiptDriver(
       }
     },
 
-    async consumeForTask(receiptId, taskId) {
+    async linkTask(receiptId, taskId, projectId) {
       const client = await connect();
       try {
         await client.query("BEGIN");
-        const consumed = await client.query<IntentReceiptRow>(
-          `UPDATE zero_intent_receipts
-              SET consumed_at = CURRENT_TIMESTAMP
-            WHERE id = $1 AND consumed_at IS NULL
-          RETURNING id, request_id, project_id, source_message_id, intent, deciding_source,
-                    confidence, reason_code, decided_at, consumed_at`,
+        const receipt = await client.query<{ project_id: number; consumed_at: Date | null }>(
+          `SELECT project_id, consumed_at
+             FROM zero_intent_receipts
+            WHERE id = $1
+            FOR UPDATE`,
           [receiptId],
         );
-        if (!consumed.rows[0]) {
-          const found = await client.query(`SELECT 1 FROM zero_intent_receipts WHERE id = $1`, [
-            receiptId,
-          ]);
-          throw new IntentReceiptError(
-            found.rowCount === 1 ? "intent_receipt_already_consumed" : "intent_receipt_not_found",
-          );
+        if (receipt.rows.length !== 1) {
+          throw new IntentReceiptError("intent_receipt_not_found");
+        }
+        if (receipt.rows[0]?.project_id !== projectId) {
+          throw new IntentReceiptError("intent_receipt_admission_mismatch");
+        }
+        if (receipt.rows[0]?.consumed_at !== null) {
+          throw new IntentReceiptError("intent_receipt_already_consumed");
+        }
+        const taskLinks = await client.query<{ id: number }>(
+          `SELECT id
+             FROM agent_tasks
+            WHERE intent_receipt_id = $1
+            FOR UPDATE`,
+          [receiptId],
+        );
+        if (taskLinks.rows.some((row) => row.id !== taskId)) {
+          throw new IntentReceiptError("intent_receipt_task_conflict");
         }
         const task = await client.query(
           `UPDATE agent_tasks
               SET intent_receipt_id = $1
-            WHERE id = $2 AND (intent_receipt_id IS NULL OR intent_receipt_id = $1)`,
-          [receiptId, taskId],
+            WHERE id = $2
+              AND project_id = $3
+              AND (intent_receipt_id IS NULL OR intent_receipt_id = $1)`,
+          [receiptId, taskId, projectId],
         );
-        if (task.rowCount !== 1) throw new IntentReceiptError("intent_receipt_conflict");
+        if (task.rowCount !== 1) {
+          throw new IntentReceiptError("intent_receipt_task_conflict");
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async consumeForTask({ receiptId, taskId, projectId }) {
+      const client = await connect();
+      try {
+        await client.query("BEGIN");
+        const receiptResult = await client.query<IntentReceiptRow>(
+          `SELECT id, request_id, project_id, source_message_id, intent, deciding_source,
+                  confidence, reason_code, decided_at, consumed_at
+             FROM zero_intent_receipts
+            WHERE id = $1
+            FOR UPDATE`,
+          [receiptId],
+        );
+        const receiptRow = receiptResult.rows[0];
+        if (!receiptRow) throw new IntentReceiptError("intent_receipt_not_found");
+        if (receiptRow.project_id !== projectId) {
+          throw new IntentReceiptError("intent_receipt_admission_mismatch");
+        }
+        if (receiptRow.intent !== "mutate") {
+          throw new IntentReceiptError("intent_receipt_mutation_required");
+        }
+
+        const taskLinks = await client.query<{ id: number; project_id: number }>(
+          `SELECT id, project_id
+             FROM agent_tasks
+            WHERE intent_receipt_id = $1
+            ORDER BY id
+            FOR UPDATE`,
+          [receiptId],
+        );
+        if (
+          taskLinks.rows.length !== 1 ||
+          taskLinks.rows[0]?.id !== taskId ||
+          taskLinks.rows[0]?.project_id !== projectId
+        ) {
+          throw new IntentReceiptError("intent_receipt_task_conflict");
+        }
+
+        if (receiptRow.consumed_at !== null) {
+          await client.query("COMMIT");
+          return receiptFromRow(receiptRow);
+        }
+
+        const consumed = await client.query<IntentReceiptRow>(
+          `UPDATE zero_intent_receipts
+              SET consumed_at = CURRENT_TIMESTAMP
+            WHERE id = $1 AND project_id = $2 AND intent = 'mutate' AND consumed_at IS NULL
+          RETURNING id, request_id, project_id, source_message_id, intent, deciding_source,
+                    confidence, reason_code, decided_at, consumed_at`,
+          [receiptId, projectId],
+        );
+        if (!consumed.rows[0]) throw new IntentReceiptError("intent_receipt_already_consumed");
+        const task = await client.query(
+          `UPDATE agent_tasks
+              SET intent_receipt_id = $1
+            WHERE id = $2
+              AND project_id = $3
+              AND intent_receipt_id = $1`,
+          [receiptId, taskId, projectId],
+        );
+        if (task.rowCount !== 1) {
+          throw new IntentReceiptError("intent_receipt_task_conflict");
+        }
         await client.query("COMMIT");
         return receiptFromRow(consumed.rows[0]);
       } catch (error) {

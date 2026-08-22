@@ -42,6 +42,7 @@ import {
   resolveProjectWorkspaceId,
 } from "../lib/workspace-tenancy";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1292,6 +1293,14 @@ export default function HomeScreen() {
       .returning();
 
     if (initialTask) {
+      const admission = await governIntentAdmission({
+        phase: "creator",
+        projectId: project.id,
+        taskId: initialTask.id,
+        requestId: `system:initial-project-build:${initialTask.id}`,
+        mutationCapable: true,
+        source: "system_action",
+      });
       // Dispatch the build job asynchronously so the HTTP response returns
       // immediately while the build runs in the background queue.
       enqueueJob({
@@ -1302,6 +1311,7 @@ export default function HomeScreen() {
         agentMode: "eco",
         agentIdentity: resolvedIdentity,
         conversationHistory: [],
+        intentReceiptId: admission.receiptId,
       });
 
       // Optimistic assistant message so the chat shows activity right away.

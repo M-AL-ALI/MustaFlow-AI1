@@ -16,6 +16,7 @@ class MemoryIntentDriver implements IntentReceiptPersistenceDriver {
   readonly byKey = new Map<string, IntentReceipt>();
   readonly messages = new Map<number, number>();
   readonly tasks = new Map<number, number>();
+  readonly taskProjects = new Map<number, number>();
 
   async find(projectId: number, requestId: string) {
     return this.byKey.get(`${projectId}:${requestId}`) ?? null;
@@ -46,12 +47,52 @@ class MemoryIntentDriver implements IntentReceiptPersistenceDriver {
     this.messages.set(messageId, receiptId);
   }
 
-  async consumeForTask(receiptId: number, taskId: number) {
+  async linkTask(receiptId: number, taskId: number, projectId: number) {
     const receipt = [...this.byKey.values()].find((candidate) => candidate.receiptId === receiptId);
     if (!receipt) throw new IntentReceiptError("intent_receipt_not_found");
-    if (receipt.consumedAt) throw new IntentReceiptError("intent_receipt_already_consumed");
-    receipt.consumedAt = "2026-08-21T00:00:01.000Z";
+    if (receipt.projectId !== projectId) {
+      throw new IntentReceiptError("intent_receipt_admission_mismatch");
+    }
+    if (receipt.consumedAt !== null) {
+      throw new IntentReceiptError("intent_receipt_already_consumed");
+    }
+    const existing = this.tasks.get(taskId);
+    if (existing !== undefined && existing !== receiptId) {
+      throw new IntentReceiptError("intent_receipt_task_conflict");
+    }
+    if (
+      [...this.tasks.entries()].some(
+        ([linkedTaskId, linkedReceipt]) => linkedTaskId !== taskId && linkedReceipt === receiptId,
+      )
+    ) {
+      throw new IntentReceiptError("intent_receipt_task_conflict");
+    }
     this.tasks.set(taskId, receiptId);
+    this.taskProjects.set(taskId, projectId);
+  }
+
+  async consumeForTask(input: { receiptId: number; taskId: number; projectId: number }) {
+    const receipt = [...this.byKey.values()].find(
+      (candidate) => candidate.receiptId === input.receiptId,
+    );
+    if (!receipt) throw new IntentReceiptError("intent_receipt_not_found");
+    if (receipt.projectId !== input.projectId) {
+      throw new IntentReceiptError("intent_receipt_admission_mismatch");
+    }
+    if (receipt.intent !== "mutate") {
+      throw new IntentReceiptError("intent_receipt_mutation_required");
+    }
+    if (
+      this.tasks.get(input.taskId) !== input.receiptId ||
+      this.taskProjects.get(input.taskId) !== input.projectId ||
+      [...this.tasks.entries()].some(
+        ([taskId, linkedReceipt]) => taskId !== input.taskId && linkedReceipt === input.receiptId,
+      )
+    ) {
+      throw new IntentReceiptError("intent_receipt_task_conflict");
+    }
+    if (receipt.consumedAt) return receipt;
+    receipt.consumedAt = "2026-08-21T00:00:01.000Z";
     return receipt;
   }
 }
@@ -70,6 +111,7 @@ describe("zero intent receipt persistence contract", () => {
       find: vi.fn(),
       persist,
       linkMessage: vi.fn(),
+      linkTask: vi.fn(),
       consumeForTask: vi.fn(),
     });
     await expect(
@@ -115,14 +157,32 @@ describe("zero intent receipt persistence contract", () => {
   it("links one source message and consumes a receipt for at most one task", async () => {
     const driver = new MemoryIntentDriver();
     const store = new IntentReceiptStore(driver);
-    const receipt = await store.persist(17, "request-a", answer);
+    const receipt = await store.persist(17, "request-a", {
+      intent: "mutate",
+      decidingSource: "user_explicit",
+      confidence: null,
+      reasonCode: "change_request",
+    });
     await store.linkMessage(receipt.receiptId, 81);
     expect(receipt.sourceMessageId).toBe(81);
-    await expect(store.consumeForTask(receipt.receiptId, 91)).resolves.toMatchObject({
+    await store.linkTask(receipt.receiptId, 91, 17);
+    await expect(store.linkTask(receipt.receiptId, 92, 17)).rejects.toMatchObject({
+      code: "intent_receipt_task_conflict",
+    });
+    await expect(
+      store.consumeForTask({ receiptId: receipt.receiptId, taskId: 91, projectId: 17 }),
+    ).resolves.toMatchObject({
       consumedAt: "2026-08-21T00:00:01.000Z",
     });
-    await expect(store.consumeForTask(receipt.receiptId, 92)).rejects.toMatchObject({
-      code: "intent_receipt_already_consumed",
+    await expect(
+      store.consumeForTask({ receiptId: receipt.receiptId, taskId: 91, projectId: 17 }),
+    ).resolves.toMatchObject({
+      consumedAt: "2026-08-21T00:00:01.000Z",
+    });
+    await expect(
+      store.consumeForTask({ receiptId: receipt.receiptId, taskId: 92, projectId: 17 }),
+    ).rejects.toMatchObject({
+      code: "intent_receipt_task_conflict",
     });
     expect(driver.tasks).toEqual(new Map([[91, receipt.receiptId]]));
   });

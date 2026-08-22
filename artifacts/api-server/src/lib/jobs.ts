@@ -137,6 +137,8 @@ import {
   builderPersistedCompletionSummary,
   builderValidationAwareCompletionSummary,
 } from "./builder-task-completion";
+import { governIntentAdmission } from "./zero-intent-admission";
+import { IntentReceiptError, type IntentReceiptErrorCode } from "@workspace/ora-contracts";
 
 import {
   buildPreviewRepairObservation,
@@ -825,6 +827,8 @@ export type AgentIdentity = "planning" | "task" | "main";
 export interface JobInput {
   taskId: number;
   projectId: number;
+  /** Durable authoritative intent receipt required before mutation-capable execution. */
+  intentReceiptId?: number | null;
   kind: JobKind;
   userPrompt: string;
   agentMode: AgentMode;
@@ -1647,6 +1651,7 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
   enqueueJob({
     taskId: nextTask.id,
     projectId: completedTask.projectId,
+    intentReceiptId: nextTask.intentReceiptId,
     kind: "refine",
     userPrompt: nextTask.prompt ?? "",
     // Use the mode frozen at enqueue time; fall back to the project-level setting for
@@ -1770,6 +1775,7 @@ export async function drainNextProjectTask(
   enqueueJob({
     taskId: nextTask.id,
     projectId,
+    intentReceiptId: nextTask.intentReceiptId,
     kind: hasFiles ? "refine" : "build",
     userPrompt: nextTask.prompt ?? "",
     agentMode:
@@ -1994,6 +2000,49 @@ async function persistParallelBuildAdmissionUnavailable(
   });
 }
 
+const INTENT_RECEIPT_ADMISSION_MESSAGE =
+  "This task could not start because its intent approval was unavailable.";
+
+async function persistIntentReceiptAdmissionRejected(
+  taskId: number,
+  code: IntentReceiptErrorCode,
+): Promise<PersistedAdmissionEvent | null> {
+  return db.transaction(async (tx) => {
+    const completedAt = new Date();
+    const [terminalTask] = await tx
+      .update(agentTasksTable)
+      .set({
+        status: "failed",
+        completionKind: "admission_unavailable",
+        result: INTENT_RECEIPT_ADMISSION_MESSAGE,
+        completedAt,
+      })
+      .where(
+        and(
+          eq(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["queued", "planning"]),
+        ),
+      )
+      .returning({ id: agentTasksTable.id });
+    if (!terminalTask) return null;
+
+    const [event] = await tx
+      .insert(taskEventsTable)
+      .values({
+        taskId,
+        eventType: "failed",
+        message: INTENT_RECEIPT_ADMISSION_MESSAGE,
+        data: { code, completionKind: "admission_unavailable", retryable: false },
+      })
+      .returning();
+    if (!event) throw new Error("Intent receipt admission event was not persisted");
+    return {
+      ...event,
+      data: (event.data as Record<string, unknown> | null) ?? null,
+    };
+  });
+}
+
 async function countRunningBuildsForAdmission(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   scope: ParallelBuildAdmissionScope,
@@ -2144,6 +2193,31 @@ export async function runJob(input: JobInput): Promise<void> {
     queueIndex,
     queueTotalCount,
   } = input;
+  try {
+    await governIntentAdmission({
+      phase: "execution",
+      taskId,
+      projectId,
+      intentReceiptId: input.intentReceiptId,
+    });
+  } catch (error) {
+    const code: IntentReceiptErrorCode =
+      error instanceof IntentReceiptError ? error.code : "intent_receipt_persistence_failed";
+    const event = await persistIntentReceiptAdmissionRejected(taskId, code);
+    if (event) {
+      publishTaskEvent({
+        id: event.id,
+        taskId: event.taskId,
+        eventType: event.eventType,
+        message: event.message,
+        filePath: event.filePath,
+        data: event.data ?? undefined,
+        createdAt: event.createdAt,
+      });
+    }
+    logger.warn({ taskId, projectId, code }, "Intent receipt admission rejected task");
+    return;
+  }
   let { userPrompt, agentMode } = input;
   const agentIdentity: AgentIdentity = input.agentIdentity ?? "main";
   const autoMergeBackgroundPlanStep = shouldAutoMergeBackgroundPlanStep({
@@ -5891,6 +5965,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 );
                 const followUp = autoFixResult.rows[0];
                 if (followUp) {
+                  const admission = await governIntentAdmission({
+                    phase: "creator",
+                    projectId,
+                    taskId: followUp.id,
+                    requestId: `system:architect-auto-fix:${followUp.id}`,
+                    mutationCapable: true,
+                    source: "system_action",
+                  });
                   autoFixQueued = true;
                   autoFixTaskId = followUp.id;
                   await db.insert(chatMessagesTable).values({
@@ -5908,6 +5990,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   enqueueJob({
                     taskId: followUp.id,
                     projectId,
+                    intentReceiptId: admission.receiptId,
                     kind: "refine",
                     userPrompt: fixPrompt,
                     agentMode,
@@ -6294,6 +6377,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     } else {
                       const followUpTask = autoFixResult.rows[0];
                       if (followUpTask) {
+                        const admission = await governIntentAdmission({
+                          phase: "creator",
+                          projectId,
+                          taskId: followUpTask.id,
+                          requestId: `system:check-auto-fix:${followUpTask.id}`,
+                          mutationCapable: true,
+                          source: "system_action",
+                        });
                         await db.insert(chatMessagesTable).values([
                           {
                             projectId,
@@ -6319,6 +6410,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         enqueueJob({
                           taskId: followUpTask.id,
                           projectId,
+                          intentReceiptId: admission.receiptId,
                           kind: "refine",
                           userPrompt: autoFixPrompt,
                           agentMode,
@@ -6793,6 +6885,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               );
               return;
             }
+            const admission = await governIntentAdmission({
+              phase: "creator",
+              projectId,
+              taskId: followUpTask.id,
+              requestId: `system:moment-auto-fix:${followUpTask.id}`,
+              mutationCapable: true,
+              source: "system_action",
+            });
             await db.insert(chatMessagesTable).values([
               {
                 projectId,
@@ -6818,6 +6918,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             enqueueJob({
               taskId: followUpTask.id,
               projectId,
+              intentReceiptId: admission.receiptId,
               kind: "refine",
               userPrompt: MOMENT_REPLACE_PROMPT,
               agentMode,
@@ -8423,6 +8524,7 @@ function serializeJobInput(input: JobInput): Record<string, unknown> {
   return {
     taskId: input.taskId,
     projectId: input.projectId,
+    intentReceiptId: input.intentReceiptId ?? null,
     kind: input.kind,
     userPrompt: input.userPrompt,
     agentMode: input.agentMode,

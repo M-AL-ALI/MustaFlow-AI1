@@ -53,6 +53,7 @@ import {
   type ZeroIntentExplicitControl,
 } from "../lib/zero-intent-judge";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 import type { IntentReceipt } from "@workspace/ora-contracts";
 
 const router: IRouter = Router();
@@ -523,6 +524,17 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       })
       .returning();
 
+    if (converseTask) {
+      await governIntentAdmission({
+        phase: "creator",
+        projectId: project.id,
+        taskId: converseTask.id,
+        requestId: intentReceipt.requestId,
+        mutationCapable: false,
+        receipt: intentReceipt,
+      });
+    }
+
     const taskId = converseTask?.id ?? 0;
 
     try {
@@ -668,6 +680,17 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         origin: messageOrigin,
       })
       .returning();
+
+    if (planTask) {
+      await governIntentAdmission({
+        phase: "creator",
+        projectId: project.id,
+        taskId: planTask.id,
+        requestId: intentReceipt.requestId,
+        mutationCapable: false,
+        receipt: intentReceipt,
+      });
+    }
 
     const taskId = planTask?.id ?? 0;
 
@@ -920,6 +943,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       res.status(500).json({ error: "Failed to enqueue task" });
       return;
     }
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId: project.id,
+      taskId: task.id,
+      requestId: intentReceipt.requestId,
+      mutationCapable: true,
+      receipt: intentReceipt,
+    });
 
     // Background work reserves the same flat pipeline price as foreground work,
     // but only after the task exists so every debit has an idempotent task key.
@@ -996,6 +1027,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         imageAttachments: jobImageAttachments,
         runMode: "background",
         wallClockCapMs: wallClockCapMs ?? undefined,
+        intentReceiptId: admission.receiptId,
       });
       assistantContent = stagedBackgroundPlanStep
         ? backgroundPlanStepStatus(task.id, "queued")
@@ -1013,6 +1045,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         origin: messageOrigin,
         conversationHistory,
         imageAttachments: jobImageAttachments,
+        intentReceiptId: admission.receiptId,
       });
       const [refreshed] = await db
         .select()
@@ -1604,6 +1637,17 @@ router.post(
           : null,
       })
       .returning();
+
+    if (converseTask) {
+      await governIntentAdmission({
+        phase: "creator",
+        projectId: project.id,
+        taskId: converseTask.id,
+        requestId: intentReceipt.requestId,
+        mutationCapable: false,
+        receipt: intentReceipt,
+      });
+    }
 
     const taskId = converseTask?.id ?? 0;
 

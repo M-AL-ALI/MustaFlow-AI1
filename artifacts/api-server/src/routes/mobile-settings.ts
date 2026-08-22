@@ -13,6 +13,7 @@ import { logger } from "../lib/logger";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 import { emitTaskEventBounded } from "../lib/task-event-emission";
 import { saveMobileSettingsWithMetadata } from "../lib/mobile-settings-outcome";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 const router: IRouter = Router();
 
@@ -209,6 +210,24 @@ router.post(
       .returning();
 
     const taskId = task?.id ?? 0;
+    if (!task) {
+      res.status(500).json({ error: "Failed to create task" });
+      return;
+    }
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId,
+      taskId,
+      requestId: `system:mobile-settings:${taskId}`,
+      mutationCapable: true,
+      source: "system_action",
+    });
+    await governIntentAdmission({
+      phase: "execution",
+      projectId,
+      taskId,
+      intentReceiptId: admission.receiptId,
+    });
 
     try {
       await emitEvent(taskId, "queued", "Applying mobile app settings…");

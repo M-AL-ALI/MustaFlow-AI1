@@ -17,6 +17,7 @@ import { enqueueJob, cancelActiveJob } from "../../lib/jobs";
 import { logger } from "../../lib/logger";
 import { checkV1ProjectAccess, requirePatScope } from "./access";
 import { projectSummaryProvenance } from "../../lib/project-summary-provenance";
+import { governIntentAdmission } from "../../lib/zero-intent-admission";
 
 const router: IRouter = Router();
 
@@ -99,7 +100,6 @@ router.get(
       res.status(404).json({ error: "Build not found." });
       return;
     }
-
     res.json({ build: formatBuild(task) });
   },
 );
@@ -193,6 +193,14 @@ router.post(
       res.status(500).json({ error: "Failed to create build." });
       return;
     }
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId: project.id,
+      taskId: task.id,
+      requestId: `system:v1-build:${task.id}`,
+      mutationCapable: true,
+      source: "system_action",
+    });
 
     await db
       .update(projectsTable)
@@ -223,6 +231,7 @@ router.post(
         kind: jobKind,
         userPrompt: trimmedPrompt,
         agentMode: project.agentMode as "lite" | "eco" | "power" | "pro",
+        intentReceiptId: admission.receiptId,
       });
     }
 

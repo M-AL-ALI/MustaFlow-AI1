@@ -43,6 +43,7 @@ import { publishDomainEvent, subscribeDomainProjectEvents } from "../lib/event-b
 import { enqueueJob, DOMAIN_REWRITE_SENTINEL } from "../lib/jobs";
 import { writeKnowledge } from "../lib/knowledge";
 import { logger } from "../lib/logger";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 const router: IRouter = Router();
 
@@ -253,6 +254,15 @@ async function enqueueDomainRewriteJob(
 
     if (!task) return;
 
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId,
+      taskId: task.id,
+      requestId: `system:domain-rewrite:${task.id}`,
+      mutationCapable: true,
+      source: "system_action",
+    });
+
     await db.insert(chatMessagesTable).values({
       projectId,
       role: "assistant",
@@ -269,6 +279,7 @@ async function enqueueDomainRewriteJob(
       userPrompt: prompt,
       agentMode: "eco",
       agentIdentity: "task",
+      intentReceiptId: admission.receiptId,
     });
 
     // Write a Knowledge Vault entry so future builds know the project's domain

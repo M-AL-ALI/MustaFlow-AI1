@@ -36,6 +36,7 @@ import { writeKnowledge } from "./knowledge";
 import { parseCron, nextCronTick } from "./cron-eval";
 import { enqueueJob } from "./jobs";
 import { resolveDefaultSender } from "./support-contact";
+import { governIntentAdmission } from "./zero-intent-admission";
 
 const SWEEP_INTERVAL_MS = 60_000;
 const UPTIME_INTERVAL_MS = 5 * 60_000;
@@ -81,6 +82,14 @@ async function fireSchedule(scheduleId: number): Promise<void> {
           })
           .returning({ id: agentTasksTable.id });
         if (task) {
+          const admission = await governIntentAdmission({
+            phase: "creator",
+            projectId: row.projectId,
+            taskId: task.id,
+            requestId: `schedule:${row.id}:${task.id}`,
+            mutationCapable: true,
+            source: "scheduled_action",
+          });
           enqueueJob({
             taskId: task.id,
             projectId: row.projectId,
@@ -89,6 +98,7 @@ async function fireSchedule(scheduleId: number): Promise<void> {
             agentMode: "eco",
             agentIdentity: "task",
             runMode: "background",
+            intentReceiptId: admission.receiptId,
           });
           message = `enqueued task #${task.id}`;
         } else {

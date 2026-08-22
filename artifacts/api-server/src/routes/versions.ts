@@ -36,6 +36,7 @@ import { getProductionSecretMap } from "../lib/container-secrets";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 const router: IRouter = Router();
 
@@ -317,6 +318,24 @@ router.post(
       })
       .returning();
     const taskId = rollbackTask?.id ?? 0;
+    if (!rollbackTask) {
+      res.status(500).json({ error: "Failed to create rollback task" });
+      return;
+    }
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId,
+      taskId,
+      requestId: `system:version-rollback:${taskId}`,
+      mutationCapable: true,
+      source: "system_action",
+    });
+    await governIntentAdmission({
+      phase: "execution",
+      projectId,
+      taskId,
+      intentReceiptId: admission.receiptId,
+    });
 
     await emitRollbackEvent(taskId, "queued", "Rollback initiated…");
     await emitRollbackEvent(

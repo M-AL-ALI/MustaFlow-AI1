@@ -42,6 +42,7 @@ import { execInContainer } from "../lib/tenant-runtime";
 import { publishTaskEvent } from "../lib/event-bus";
 import { z } from "zod";
 import { BLUEPRINT_INSTALL_USER_ERROR } from "@workspace/ora-contracts";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 // ─── Async npm install helper ─────────────────────────────────────────────────
 
@@ -94,6 +95,21 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
     );
     return null;
   }
+
+  const admission = await governIntentAdmission({
+    phase: "creator",
+    projectId,
+    taskId,
+    requestId: `system:blueprint-install:${taskId}`,
+    mutationCapable: true,
+    source: "system_action",
+  });
+  await governIntentAdmission({
+    phase: "execution",
+    projectId,
+    taskId,
+    intentReceiptId: admission.receiptId,
+  });
 
   const emit = async (eventType: string, message: string): Promise<void> => {
     try {

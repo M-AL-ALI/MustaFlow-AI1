@@ -13,6 +13,7 @@ import { logger } from "../lib/logger";
 import { z } from "zod";
 import type { AgentMode } from "../lib/ai";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 const router: IRouter = Router();
 
@@ -133,6 +134,14 @@ router.post(
       res.status(500).json({ error: "Failed to create task" });
       return;
     }
+    const admission = await governIntentAdmission({
+      phase: "creator",
+      projectId: params.data.id,
+      taskId: task.id,
+      requestId: `system:suggestion-build:${task.id}`,
+      mutationCapable: true,
+      source: "system_action",
+    });
 
     await db
       .update(projectsTable)
@@ -156,6 +165,7 @@ router.post(
       kind: "refine",
       userPrompt: effectivePrompt,
       agentMode: project.agentMode as AgentMode,
+      intentReceiptId: admission.receiptId,
     });
 
     logger.info(

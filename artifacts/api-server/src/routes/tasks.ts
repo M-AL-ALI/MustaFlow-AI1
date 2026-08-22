@@ -38,6 +38,7 @@ import { logger } from "../lib/logger";
 import { publishTaskEvent } from "../lib/event-bus";
 import { taskCreditSettlementKey } from "../lib/billing-settlement-outbox";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { governIntentAdmission } from "../lib/zero-intent-admission";
 
 const TERMINAL_TASK_EVENT_TYPES = ["completed", "failed", "cancelled"];
 
@@ -165,6 +166,14 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     res.status(500).json({ error: "Failed to create task" });
     return;
   }
+  const admission = await governIntentAdmission({
+    phase: "creator",
+    projectId: project.id,
+    taskId: task.id,
+    requestId: `system:task-create:${task.id}`,
+    mutationCapable: true,
+    source: "system_action",
+  });
 
   await db
     .update(projectsTable)
@@ -200,6 +209,7 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     kind: jobKind,
     userPrompt: prompt,
     agentMode: project.agentMode as "lite" | "eco" | "power" | "pro",
+    intentReceiptId: admission.receiptId,
   });
 
   res.status(201).json({ ...task, queued: false });
