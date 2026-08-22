@@ -105,6 +105,11 @@ import {
 } from "@/lib/preview-reconciliation";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
+import {
+  requestSnapshotObservation,
+  type SnapshotObserveRequest,
+  type SnapshotObserveResult,
+} from "@/lib/snapshot-observe";
 import { IntegrationSetupCard } from "./components/integration-setup-card";
 import type { BrowserQAResult } from "./components/checks-tab";
 import {
@@ -1953,6 +1958,21 @@ export default function ProjectWorkspacePage() {
       });
     },
     [saveCurrentScroll],
+  );
+
+  const handleSnapshotObserve = useCallback(
+    async (snapshot: SnapshotObserveRequest): Promise<SnapshotObserveResult> => {
+      const result = await requestSnapshotObservation(projectId, snapshot);
+      if (!result.ok) return result;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) }),
+      ]);
+      switchLeftPanel("chat");
+      if (windowWidth < 768) setChatDrawerOpen(true);
+      return result;
+    },
+    [projectId, queryClient, switchLeftPanel, windowWidth],
   );
 
   // Keep leftPanelTabRef in sync whenever state changes via direct setLeftPanelTab
@@ -5243,6 +5263,7 @@ export default function ProjectWorkspacePage() {
                     if (isMobileLayout) setChatDrawerOpen(true);
                     send(text);
                   }}
+                  onSnapshotObserve={handleSnapshotObserve}
                   onOpenFileInEditor={(fileId) => {
                     setSelectedCodeFileId(fileId);
                     setSelectedCodeFileLine(null);

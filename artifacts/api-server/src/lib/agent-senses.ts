@@ -290,6 +290,12 @@ export interface ScreenshotInput {
   signal: AbortSignal;
   /** Optional inline HTML to render instead of fetching the URL (static-html). */
   inlineHtml?: string;
+  /**
+   * Session cookies for a first-party capture. They are installed as host-only
+   * cookies for this exact origin and stripped from every cross-origin request.
+   */
+  exactOriginCookies?: Array<{ name: string; value: string }>;
+  exactCookieOrigin?: string;
 }
 
 export interface ScreenshotResult {
@@ -300,7 +306,27 @@ export interface ScreenshotResult {
   bytes?: number;
   width?: number;
   height?: number;
+  status?: number;
+  finalUrl?: string;
   error?: string;
+}
+
+export function screenshotRequestHeaders(
+  requestUrl: string,
+  headers: Record<string, string>,
+  exactCookieOrigin?: string,
+): Record<string, string> {
+  if (!exactCookieOrigin) return headers;
+  try {
+    if (new URL(requestUrl).origin === exactCookieOrigin) return headers;
+  } catch {
+    // An invalid request URL is never eligible to receive the origin cookie.
+  }
+  const withoutCookie = { ...headers };
+  for (const name of Object.keys(withoutCookie)) {
+    if (name.toLowerCase() === "cookie") delete withoutCookie[name];
+  }
+  return withoutCookie;
 }
 
 const CHROMIUM_PATHS = [
@@ -358,6 +384,18 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
       // since per-request interception (below) enforces the same allow-list.
       javaScriptEnabled: !input.inlineHtml,
     });
+    if (input.exactOriginCookies?.length) {
+      if (!input.exactCookieOrigin || new URL(input.url).origin !== input.exactCookieOrigin) {
+        return { ok: false, error: "exact cookie origin does not match the capture URL" };
+      }
+      await ctx.addCookies(
+        input.exactOriginCookies.map((cookie) => ({
+          name: cookie.name,
+          value: cookie.value,
+          url: input.exactCookieOrigin!,
+        })),
+      );
+    }
     // SSRF guard: intercept every subresource/redirect the page tries to load
     // (images, fonts, fetch, redirects, iframes, etc.) and abort any request
     // whose resolved address is private/internal. Applies to BOTH inline HTML
@@ -372,18 +410,44 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
       if (!(await isSafeResolvedUrl(reqUrl))) {
         return route.abort("blockedbyclient");
       }
-      return route.continue();
+      const headers = screenshotRequestHeaders(
+        reqUrl,
+        await route.request().allHeaders(),
+        input.exactCookieOrigin,
+      );
+      return route.continue({ headers });
     });
+    let status = 200;
     if (input.inlineHtml) {
       await page.setContent(input.inlineHtml, { waitUntil: "load", timeout: 15_000 });
     } else {
-      await page.goto(input.url, { waitUntil: "load", timeout: 20_000 });
+      const response = await page.goto(input.url, { waitUntil: "load", timeout: 20_000 });
+      status = response?.status() ?? 0;
+      if (status < 200 || status >= 300) {
+        return { ok: false, status, finalUrl: page.url(), error: "capture target unavailable" };
+      }
+      if (input.exactCookieOrigin && new URL(page.url()).origin !== input.exactCookieOrigin) {
+        return {
+          ok: false,
+          status,
+          finalUrl: page.url(),
+          error: "capture redirect left the approved origin",
+        };
+      }
     }
     // Settle a moment for CSS/fonts
     await page.waitForTimeout(300);
     const buf = await page.screenshot({ type: "png", fullPage: !!input.fullPage });
     const base64 = Buffer.from(buf).toString("base64");
-    return { ok: true, base64, bytes: buf.length, width: w, height: h };
+    return {
+      ok: true,
+      base64,
+      bytes: buf.length,
+      width: w,
+      height: h,
+      status,
+      finalUrl: page.url(),
+    };
   } catch (err) {
     return { ok: false, error: String((err as Error).message ?? err) };
   } finally {

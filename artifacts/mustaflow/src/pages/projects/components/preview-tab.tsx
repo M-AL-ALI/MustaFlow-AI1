@@ -47,6 +47,7 @@ import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-conta
 import type { ProjectFilesChangedPayload } from "@/lib/event-types";
 import { logPreviewTiming, selectPreviewRevisionSubstrate } from "@/lib/preview-reconciliation";
 import { cn } from "@/lib/utils";
+import type { SnapshotObserveRequest, SnapshotObserveResult } from "@/lib/snapshot-observe";
 import {
   useListProjectFiles,
   getListProjectFilesQueryKey,
@@ -141,6 +142,7 @@ type PreviewTabProps = {
   nativeFeatures?: string[];
   onFixPrompt?: (text: string) => void;
   onAutoSendPrompt?: (text: string) => void;
+  onSnapshotObserve?: (request: SnapshotObserveRequest) => Promise<SnapshotObserveResult>;
   onOpenFileInEditor?: (fileId: number) => void;
   /** Server-side container status (Phase C). When provided, shows a waking/starting overlay. */
   containerStatus?: ContainerStatus;
@@ -205,6 +207,7 @@ export function PreviewTab({
   nativeFeatures = [],
   onFixPrompt,
   onAutoSendPrompt,
+  onSnapshotObserve,
   onOpenFileInEditor,
   containerStatus,
   containerUrl,
@@ -223,6 +226,12 @@ export function PreviewTab({
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
+  const [snapshotObserveState, setSnapshotObserveState] = useState<
+    | { kind: "idle" }
+    | { kind: "sending" }
+    | { kind: "success"; message: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
   const [readinessExpanded, setReadinessExpanded] = useState(false);
   const [testEnvironmentStatus, setTestEnvironmentStatus] = useState<TestEnvironmentStatus | null>(
     null,
@@ -1062,30 +1071,30 @@ export function PreviewTab({
   const errorCount = consoleEntries.filter((e) => e.level === "error").length;
   const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
 
-  // Snapshot → AI: drop a structured note into the chat composer for the next AI turn.
-  const snapshotToAi = useCallback(() => {
-    const target = onFixPrompt ?? onAutoSendPrompt;
-    if (!target) return;
-    const consoleSummary =
-      errorCount > 0
-        ? ` There ${errorCount === 1 ? "is" : "are"} ${errorCount} console error${errorCount === 1 ? "" : "s"}.`
-        : warnCount > 0
-          ? ` There ${warnCount === 1 ? "is" : "are"} ${warnCount} console warning${warnCount === 1 ? "" : "s"}.`
-          : "";
-    const deviceSummary = `${DEVICE_LABELS[device]}${isMobile ? ` (${platform === "ios" ? "iOS" : "Android"} frame)` : ""}`;
-    target(
-      `Look at the current preview state and help me improve it.\n\n- Path: ${currentPath}\n- Device: ${deviceSummary}${consoleSummary}\n\nPlease describe what you'd change next or fix specific issues.`,
-    );
-  }, [
-    onFixPrompt,
-    onAutoSendPrompt,
-    errorCount,
-    warnCount,
-    device,
-    isMobile,
-    platform,
-    currentPath,
-  ]);
+  const snapshotToAi = useCallback(async () => {
+    if (!onSnapshotObserve || snapshotObserveState.kind === "sending") return;
+    const bounds = iframeRef.current?.getBoundingClientRect();
+    const width = Math.min(1920, Math.max(320, Math.round(bounds?.width ?? 1280)));
+    const height = Math.min(1200, Math.max(240, Math.round(bounds?.height ?? 800)));
+    setSnapshotObserveState({ kind: "sending" });
+    try {
+      const result = await onSnapshotObserve({
+        path: currentPath,
+        previewSource: webContainerLive ? "webcontainer" : "server",
+        viewport: { width, height },
+      });
+      setSnapshotObserveState(
+        result.ok
+          ? { kind: "success", message: "Zero observed this preview in Chat." }
+          : { kind: "error", message: result.message },
+      );
+    } catch {
+      setSnapshotObserveState({
+        kind: "error",
+        message: "I couldn't capture this preview safely. Please try again.",
+      });
+    }
+  }, [currentPath, onSnapshotObserve, snapshotObserveState.kind, webContainerLive]);
 
   // Shared iframe renderer.
   // For react-vite projects with a live WebContainer dev server, the iframe points
@@ -2031,16 +2040,32 @@ export function PreviewTab({
 
         {/* ── Share / Snapshot / Focus cluster ── */}
         <div className="flex items-center gap-1 shrink-0">
-          {hasFiles && (onFixPrompt || onAutoSendPrompt) && (
+          {hasFiles && onSnapshotObserve && (
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7"
               onClick={snapshotToAi}
-              title="Snapshot to AI — drop current path + console state into the chat composer"
+              disabled={snapshotObserveState.kind === "sending"}
+              title="Ask Zero to observe this preview"
             >
-              <Camera className="h-3.5 w-3.5" />
+              {snapshotObserveState.kind === "sending" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Camera className="h-3.5 w-3.5" />
+              )}
             </Button>
+          )}
+          {(snapshotObserveState.kind === "success" || snapshotObserveState.kind === "error") && (
+            <span
+              role={snapshotObserveState.kind === "error" ? "alert" : "status"}
+              className={cn(
+                "max-w-56 text-[10px]",
+                snapshotObserveState.kind === "error" ? "text-destructive" : "text-emerald-500",
+              )}
+            >
+              {snapshotObserveState.message}
+            </span>
           )}
           {hasFiles && (
             <Button
