@@ -11,6 +11,7 @@ import * as zod from 'zod';
 /**
  * @summary Health check
  */
+export const healthCheckResponseBuildCommitRegExp = new RegExp('^(unknown|[0-9a-f]{40})$');
 export const healthCheckResponseMissingRuntimeBindingsMax = 4;
 
 
@@ -21,8 +22,25 @@ export const HealthCheckResponse = zod.object({
   "encryptionKey": zod.enum(['ok', 'missing', 'invalid']).describe('Encryption key health. \"ok\" = key is present and AES-256-GCM round-trip passes. \"missing\" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). \"invalid\" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).\n'),
   "startupMigrations": zod.enum(['unknown', 'ok', 'error']).describe('Cached startup-migration state. \"unknown\" = migrations have not completed yet. \"ok\" = every migration passed. \"error\" = one or more migrations failed.\n'),
   "queueSchemaContract": zod.enum(['unknown', 'ok', 'error']).describe('Cached Zero prompt queue schema-contract state. \"unknown\" = the first verification has not completed yet. \"ok\" = the contract is ready. \"error\" = the contract is unready.\n'),
+  "buildCommit": zod.string().regex(healthCheckResponseBuildCommitRegExp).describe('Exact commit of the serving API build, or \"unknown\" when build-info is unavailable.'),
   "missingRuntimeBindings": zod.array(zod.enum(['CLOUDFLARE_RUNTIME_CONTROL_URL', 'CLOUDFLARE_RUNTIME_CONTROL_TOKEN', 'CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE', 'FLY_API_TOKEN', 'FLY_APP_NAME', 'FLY_ORG_SLUG', 'FLY_REGION'])).max(healthCheckResponseMissingRuntimeBindingsMax).optional().describe('Required runtime binding names absent from a partial provider configuration.')
 })
+
+
+/**
+ * @summary Identity of the exact API build serving this request
+ */
+export const getServedBuildIdentityResponseOneCommitRegExp = new RegExp('^[0-9a-f]{40}$');
+export const getServedBuildIdentityResponseOneTreeRegExp = new RegExp('^[0-9a-f]{40}$');
+
+
+export const GetServedBuildIdentityResponse = zod.union([zod.object({
+  "commit": zod.string().regex(getServedBuildIdentityResponseOneCommitRegExp),
+  "tree": zod.string().regex(getServedBuildIdentityResponseOneTreeRegExp),
+  "builtAt": zod.coerce.date()
+}),zod.object({
+  "identity": zod.enum(['unknown'])
+})])
 
 
 /**

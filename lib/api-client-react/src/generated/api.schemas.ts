@@ -87,11 +87,26 @@ export interface HealthStatus {
    */
   queueSchemaContract: HealthStatusQueueSchemaContract;
   /**
+     * Exact commit of the serving API build, or "unknown" when build-info is unavailable.
+     * @pattern ^(unknown|[0-9a-f]{40})$
+     */
+  buildCommit: string;
+  /**
      * Required runtime binding names absent from a partial provider configuration.
      * @maxItems 4
      */
   missingRuntimeBindings?: HealthStatusMissingRuntimeBindingsItem[];
 }
+
+export type ServedBuildIdentity = {
+  /** @pattern ^[0-9a-f]{40}$ */
+  commit: string;
+  /** @pattern ^[0-9a-f]{40}$ */
+  tree: string;
+  builtAt: string;
+} | {
+  identity: 'unknown';
+};
 
 export interface ApiError {
   error: string;

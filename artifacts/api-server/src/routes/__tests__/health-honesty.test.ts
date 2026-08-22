@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   encryptionKey: vi.fn(),
   startup: vi.fn(),
   queueSchemaContract: vi.fn(),
+  buildIdentity: vi.fn(),
+  buildCommit: vi.fn(),
 }));
 
 vi.mock("../../lib/tenant-runtime", () => ({
@@ -27,6 +29,11 @@ vi.mock("../../lib/schema-contract-state", () => ({
   zeroPromptQueueSchemaContractState: { read: mocks.queueSchemaContract },
 }));
 
+vi.mock("../../lib/build-info", () => ({
+  getServedBuildIdentity: mocks.buildIdentity,
+  getServedBuildCommit: mocks.buildCommit,
+}));
+
 import healthRouter from "../health";
 
 function app() {
@@ -40,6 +47,8 @@ describe("health startup honesty", () => {
     vi.clearAllMocks();
     mocks.encryptionKey.mockReturnValue("ok");
     mocks.runtimeConfiguration.mockReturnValue({ status: "complete", missingBindings: [] });
+    mocks.buildIdentity.mockReturnValue({ identity: "unknown" });
+    mocks.buildCommit.mockReturnValue("unknown");
   });
 
   it("returns a machine-decidable startup-window shape without changing HTTP status", async () => {
@@ -56,6 +65,7 @@ describe("health startup honesty", () => {
       encryptionKey: "ok",
       startupMigrations: "unknown",
       queueSchemaContract: "unknown",
+      buildCommit: "unknown",
     });
   });
 
@@ -73,6 +83,7 @@ describe("health startup honesty", () => {
       encryptionKey: "ok",
       startupMigrations: "ok",
       queueSchemaContract: "ok",
+      buildCommit: "unknown",
     });
   });
 
@@ -90,6 +101,7 @@ describe("health startup honesty", () => {
       encryptionKey: "ok",
       startupMigrations: "error",
       queueSchemaContract: "error",
+      buildCommit: "unknown",
     });
   });
 
@@ -118,6 +130,7 @@ describe("health startup honesty", () => {
         encryptionKey: "ok",
         startupMigrations: "unknown",
         queueSchemaContract: "unknown",
+        buildCommit: "unknown",
       });
       expect(response.body.containerSubsystem).not.toBe("ok");
       for (const bindingName of bindingNames) {
@@ -148,6 +161,7 @@ describe("health startup honesty", () => {
         encryptionKey: "ok",
         startupMigrations: "unknown",
         queueSchemaContract: "unknown",
+        buildCommit: "unknown",
       });
       expect(response.body.containerSubsystem).not.toBe("ok");
       for (const bindingName of bindingNames) {
@@ -155,5 +169,44 @@ describe("health startup honesty", () => {
       }
       expect(JSON.stringify(response.body)).not.toContain(presentValue);
     }
+  });
+
+  it("serves the exact build artifact and uses the same commit in health", async () => {
+    const identity = {
+      commit: "1".repeat(40),
+      tree: "2".repeat(40),
+      builtAt: "2026-08-22T12:34:56.000Z",
+    };
+    mocks.buildIdentity.mockReturnValue(identity);
+    mocks.buildCommit.mockReturnValue(identity.commit);
+    mocks.containerSubsystem.mockReturnValue("ok");
+    mocks.startup.mockReturnValue({ migrations: "ok" });
+    mocks.queueSchemaContract.mockReturnValue({ status: "ready" });
+
+    const [version, health] = await Promise.all([
+      request(app()).get("/api/version"),
+      request(app()).get("/api/healthz"),
+    ]);
+
+    expect(version.status).toBe(200);
+    expect(version.body).toEqual(identity);
+    expect(health.status).toBe(200);
+    expect(health.body.buildCommit).toBe(identity.commit);
+  });
+
+  it("reports unknown on both public read surfaces when build-info is absent", async () => {
+    mocks.containerSubsystem.mockReturnValue("ok");
+    mocks.startup.mockReturnValue({ migrations: "ok" });
+    mocks.queueSchemaContract.mockReturnValue({ status: "ready" });
+
+    const [version, health] = await Promise.all([
+      request(app()).get("/api/version"),
+      request(app()).get("/api/healthz"),
+    ]);
+
+    expect(version.status).toBe(200);
+    expect(version.body).toEqual({ identity: "unknown" });
+    expect(health.status).toBe(200);
+    expect(health.body.buildCommit).toBe("unknown");
   });
 });

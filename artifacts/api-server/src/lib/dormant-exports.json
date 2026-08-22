@@ -23,5 +23,10 @@
     "path": "artifacts/api-server/src/lib/zero-runloop-phase-emission.ts",
     "symbol": "ZERO_RUN_LOOP_EMITTABLE_PHASES",
     "reachableWhen": "Production code enumerates the phases that may be emitted."
+  },
+  {
+    "path": "lib/api-client-react/src/generated/api.ts",
+    "symbol": "useGetServedBuildIdentity",
+    "reachableWhen": "A first-party status surface reads the serving build identity through the generated React query hook."
   }
 ]

@@ -300,6 +300,7 @@ import type {
   SecurityBadgeCountsByProject,
   SecurityFinding,
   SelectGithubRepository200,
+  ServedBuildIdentity,
   SetProjectDomainPrimary200,
   SetProjectDomainWwwRedirect200,
   SetProjectDomainWwwRedirectBody,
@@ -477,6 +478,84 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetServedBuildIdentityUrl = () => {
+
+
+
+
+  return `/api/version`
+}
+
+/**
+ * @summary Identity of the exact API build serving this request
+ */
+export const getServedBuildIdentity = async ( options?: RequestInit): Promise<ServedBuildIdentity> => {
+
+  return customFetch<ServedBuildIdentity>(getGetServedBuildIdentityUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetServedBuildIdentityQueryKey = () => {
+    return [
+    `/api/version`
+    ] as const;
+    }
+
+
+export const getGetServedBuildIdentityQueryOptions = <TData = Awaited<ReturnType<typeof getServedBuildIdentity>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getServedBuildIdentity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetServedBuildIdentityQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getServedBuildIdentity>>> = ({ signal }) => getServedBuildIdentity({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getServedBuildIdentity>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetServedBuildIdentityQueryResult = NonNullable<Awaited<ReturnType<typeof getServedBuildIdentity>>>
+export type GetServedBuildIdentityQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Identity of the exact API build serving this request
+ * @dormantExport Consumed when a first-party status surface reads the serving build identity through the generated hook.
+ */
+
+export function useGetServedBuildIdentity<TData = Awaited<ReturnType<typeof getServedBuildIdentity>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getServedBuildIdentity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetServedBuildIdentityQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -23041,4 +23120,3 @@ export const useEscalateSupport = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getEscalateSupportMutationOptions(options));
     }
-

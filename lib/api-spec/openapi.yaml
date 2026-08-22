@@ -68,6 +68,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  /version:
+    get:
+      operationId: getServedBuildIdentity
+      tags: [health]
+      summary: Identity of the exact API build serving this request
+      responses:
+        "200":
+          description: Build identity, or an honest unknown result when the build artifact is absent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServedBuildIdentity"
+
   # POST /api/transcribe accepts a raw audio body (application/octet-stream) and
   # returns { text }. It is intentionally NOT declared in this OpenAPI spec because
   # Orval's generated client serialises bodies as JSON and would corrupt the audio.
@@ -7776,6 +7789,10 @@ components:
           description: >
             Cached Zero prompt queue schema-contract state. "unknown" = the first verification
             has not completed yet. "ok" = the contract is ready. "error" = the contract is unready.
+        buildCommit:
+          type: string
+          pattern: "^(unknown|[0-9a-f]{40})$"
+          description: Exact commit of the serving API build, or "unknown" when build-info is unavailable.
         missingRuntimeBindings:
           type: array
           maxItems: 4
@@ -7791,7 +7808,30 @@ components:
               - FLY_APP_NAME
               - FLY_ORG_SLUG
               - FLY_REGION
-      required: [status, containerSubsystem, encryptionKey, startupMigrations, queueSchemaContract]
+      required:
+        [
+          status,
+          containerSubsystem,
+          encryptionKey,
+          startupMigrations,
+          queueSchemaContract,
+          buildCommit,
+        ]
+
+    ServedBuildIdentity:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            commit: { type: string, pattern: "^[0-9a-f]{40}$" }
+            tree: { type: string, pattern: "^[0-9a-f]{40}$" }
+            builtAt: { type: string, format: date-time }
+          required: [commit, tree, builtAt]
+        - type: object
+          additionalProperties: false
+          properties:
+            identity: { type: string, enum: [unknown] }
+          required: [identity]
 
     ApiError:
       type: object

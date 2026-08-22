@@ -1,9 +1,11 @@
 import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -11,6 +13,29 @@ globalThis.require = createRequire(import.meta.url);
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 const repositoryDir = path.resolve(artifactDir, "..", "..");
 const eligibilityAssetDirectory = "zero-eligibility-assets";
+const execFileAsync = promisify(execFile);
+const gitObjectId = /^[0-9a-f]{40}$/;
+
+async function readGitObjectId(revision) {
+  const { stdout } = await execFileAsync("git", ["rev-parse", revision], {
+    cwd: repositoryDir,
+    timeout: 10_000,
+    maxBuffer: 64 * 1024,
+  });
+  const objectId = stdout.trim();
+  if (!gitObjectId.test(objectId)) {
+    throw new Error(`git rev-parse ${revision} did not return a full object id`);
+  }
+  return objectId;
+}
+
+async function createBuildInfo() {
+  const [commit, tree] = await Promise.all([
+    readGitObjectId("HEAD"),
+    readGitObjectId("HEAD^{tree}"),
+  ]);
+  return { commit, tree, builtAt: new Date().toISOString() };
+}
 
 async function copyEligibilityAssets(distDir) {
   const assetRoot = path.join(distDir, eligibilityAssetDirectory);
@@ -37,6 +62,7 @@ async function copyEligibilityAssets(distDir) {
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
+  const buildInfo = await createBuildInfo();
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
@@ -165,6 +191,7 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     },
   });
   await copyEligibilityAssets(distDir);
+  await writeFile(path.join(distDir, "build-info.json"), `${JSON.stringify(buildInfo)}\n`, "utf8");
 }
 
 buildAll().catch((err) => {

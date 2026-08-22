@@ -554,6 +554,7 @@ export * from './securityFindingSeverity';
 export * from './securityFindingsSummary';
 export * from './securityFindingStatus';
 export * from './selectGithubRepository200';
+export * from './servedBuildIdentity';
 export * from './setProjectDomainPrimary200';
 export * from './setProjectDomainWwwRedirect200';
 export * from './setProjectDomainWwwRedirectBody';
