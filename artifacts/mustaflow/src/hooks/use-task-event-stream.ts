@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  presentZeroTerminalV1,
   presentPersistedZeroTerminal,
+  ZERO_TERMINAL_UNKNOWN,
   type ZeroTerminalPresentation,
 } from "@workspace/ora-contracts";
 export interface TaskStreamEvent {
@@ -43,8 +45,11 @@ export function parseTaskStreamReceipt(
     ) {
       return null;
     }
-    const terminalPresentation = presentPersistedZeroTerminal(candidate.terminal);
     const legacyEventType = candidate.eventType;
+    const isLegacyTerminal = TERMINAL_STATUSES.has(legacyEventType);
+    const terminalPresentation =
+      presentPersistedZeroTerminal(candidate.terminal) ??
+      (isLegacyTerminal ? presentZeroTerminalV1(ZERO_TERMINAL_UNKNOWN) : null);
     const eventType = terminalPresentation
       ? terminalPresentation.taskStatus === "canceled"
         ? "cancelled"

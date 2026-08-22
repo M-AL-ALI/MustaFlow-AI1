@@ -21,10 +21,24 @@ const terminal = mutationSucceededTerminal({
 });
 
 describe("staged terminal readers", () => {
-  it("preserves legacy status and copy byte-for-byte when terminal is null", () => {
-    expect(terminalTaskStatus({ terminal: null }, "completed")).toBe("completed");
-    expect(terminalTaskMessage({ terminal: null }, "Changes applied.")).toBe("Changes applied.");
-    expect(terminalPresentationFor({ terminal: null })).toBeNull();
+  it.each(["completed", "failed", "canceled", "cancelled", "discarded"])(
+    "renders a null %s terminal as an older-run unknown without inventing success",
+    (status) => {
+      expect(terminalTaskStatus({ terminal: null, status }, status)).toBe(status);
+      expect(terminalTaskMessage({ terminal: null, status }, "Changes applied.")).toBe(
+        "Outcome unavailable for this older run",
+      );
+      expect(terminalPresentationFor({ terminal: null, status })).toMatchObject({
+        outcome: "unknown",
+        tone: "unknown",
+        message: "Outcome unavailable for this older run",
+      });
+    },
+  );
+
+  it("does not turn an active null-terminal task into a terminal", () => {
+    expect(terminalPresentationFor({ terminal: null, status: "building" })).toBeNull();
+    expect(terminalTaskStatus({ terminal: null, status: "building" }, "building")).toBe("building");
   });
 
   it("prefers a present typed terminal and treats malformed persistence as unknown", () => {
@@ -78,6 +92,31 @@ describe("staged terminal readers", () => {
     for (const [relative, anchor] of Object.entries(readers)) {
       const source = readFileSync(join(process.cwd(), "src", relative), "utf8");
       expect(source, relative).toContain(anchor);
+    }
+
+    const drawer = readFileSync(
+      join(process.cwd(), "src/pages/projects/components/background-tasks-drawer.tsx"),
+      "utf8",
+    );
+    expect(drawer).not.toContain('terminal?.message ?? "Changes applied."');
+
+    const strictNullGuards: Record<string, string> = {
+      "components/agent-thinking-bubble.tsx": "terminalNeedsAttention",
+      "components/notifications-bell.tsx": 'n.type === "build_complete"',
+      "pages/projects/components/activity-stream.tsx": "const statusText = isWarning",
+      "pages/projects/components/chat-history.tsx": "const outcomeUnavailable",
+      "pages/projects/components/inline-build-results.tsx": 'status: "completed"',
+      "pages/projects/components/inline-run-recovery.tsx":
+        'terminal?.tone === "warning" || terminal?.tone === "unknown"',
+      "pages/projects/components/logs-tab.tsx":
+        'const unavailable = taskTerminals.filter((terminal) => terminal?.tone === "unknown")',
+      "pages/projects/components/queue-progress-strip.tsx":
+        "Queue finished — some outcomes are unavailable",
+      "pages/projects/components/task-queue-panel.tsx": "1 outcome unavailable",
+    };
+    for (const [relative, guard] of Object.entries(strictNullGuards)) {
+      const source = readFileSync(join(process.cwd(), "src", relative), "utf8");
+      expect(source, relative).toContain(guard);
     }
   });
 });

@@ -49,6 +49,7 @@ interface BatchState {
   completedCount: number;
   failedCount: number;
   cancelledCount: number;
+  unknownCount?: number;
 }
 
 interface QueueProgressStripProps {
@@ -118,6 +119,8 @@ export function QueueProgressStrip({
         cancelledCount: tasks.filter((task) =>
           ["canceled", "cancelled", "discarded"].includes(task.status),
         ).length,
+        unknownCount: tasks.filter((task) => terminalPresentationFor(task)?.tone === "unknown")
+          .length,
       };
       setBatch(data);
 
@@ -176,6 +179,7 @@ export function QueueProgressStrip({
     (t) => ACTIVE_STATUSES.has(t.status) && t.status !== "queued",
   );
   const hasFailure = batch.failedCount > 0;
+  const hasUnknown = (batch.unknownCount ?? 0) > 0;
   const allDone = batch.tasks.every((t) => !ACTIVE_STATUSES.has(t.status));
   const hasQueued = batch.tasks.some((t) => t.status === "queued");
 
@@ -191,13 +195,20 @@ export function QueueProgressStrip({
           {!allDone && !hasFailure && (
             <Loader2 className="h-3 w-3 text-primary animate-spin shrink-0" />
           )}
-          {allDone && !hasFailure && <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />}
+          {allDone && !hasFailure && !hasUnknown && (
+            <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+          )}
+          {allDone && !hasFailure && hasUnknown && (
+            <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+          )}
           {hasFailure && <XCircle className="h-3 w-3 text-destructive shrink-0" />}
           <span className="text-[11px] font-semibold text-foreground truncate">
             {allDone
               ? hasFailure
                 ? `Queue paused — task failed`
-                : `Queue complete — ${batch.completedCount} task${batch.completedCount !== 1 ? "s" : ""} done`
+                : hasUnknown
+                  ? "Queue finished — some outcomes are unavailable"
+                  : `Queue complete — ${batch.completedCount} task${batch.completedCount !== 1 ? "s" : ""} done`
               : runningTask
                 ? `Running task ${(runningTask.queueIndex ?? 0) + 1} of ${batch.totalCount}…`
                 : `Queue: ${batch.completedCount} of ${batch.totalCount} done`}

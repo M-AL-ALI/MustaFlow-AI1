@@ -15,11 +15,17 @@ function frame(overrides: Record<string, unknown> = {}): string {
 
 describe("task stream receipts", () => {
   it.each(["completed", "failed", "cancelled"])(
-    "recognizes a replayed %s terminal receipt",
+    "renders a replayed legacy %s receipt as unknown rather than synthesized success",
     (eventType) => {
       expect(parseTaskStreamReceipt(frame({ eventType }), 255)).toMatchObject({
-        event: { id: 19, taskId: 255, eventType },
+        event: {
+          id: 19,
+          taskId: 255,
+          eventType: "failed",
+          message: "Outcome unavailable for this older run",
+        },
         terminal: true,
+        terminalPresentation: { outcome: "unknown", tone: "unknown" },
       });
     },
   );

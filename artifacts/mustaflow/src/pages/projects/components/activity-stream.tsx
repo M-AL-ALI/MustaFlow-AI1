@@ -328,15 +328,17 @@ export function ActivityStream({
     visiblePills = [...head, ...tail];
   }
 
-  const statusText = isNeedsReview
-    ? "Review required"
-    : isDone
-      ? completionText
-      : isFailed
-        ? isAdmissionFailure
-          ? completionText
-          : "Build failed"
-        : (lastEvent?.message ?? "Initializing…");
+  const statusText = isWarning
+    ? completionText
+    : isNeedsReview
+      ? "Review required"
+      : isDone
+        ? completionText
+        : isFailed
+          ? isAdmissionFailure
+            ? completionText
+            : "Build failed"
+          : (lastEvent?.message ?? "Initializing…");
 
   return (
     <div
@@ -534,7 +536,11 @@ export function ActivityStream({
       )}
       {expanded && isFailed && (
         <div className="px-3 py-1.5 border-t border-border bg-destructive/5 text-[10px] text-destructive font-medium">
-          {isAdmissionFailure ? completionText : "Task failed. Check the chat for details."}
+          {isWarning
+            ? completionText
+            : isAdmissionFailure
+              ? completionText
+              : "Task failed. Check the chat for details."}
         </div>
       )}
     </div>
@@ -657,13 +663,15 @@ export function InlineLiveActivity({ projectId, taskId, completionKind, onDismis
                   : "text-foreground",
           )}
         >
-          {isDone
+          {isWarning
             ? completionText
-            : isFailed
-              ? isAdmissionFailure
-                ? completionText
-                : "Build failed"
-              : (lastEvent?.message ?? "Working…")}
+            : isDone
+              ? completionText
+              : isFailed
+                ? isAdmissionFailure
+                  ? completionText
+                  : "Build failed"
+                : (lastEvent?.message ?? "Working…")}
         </span>
 
         {/* Action count + current icon */}

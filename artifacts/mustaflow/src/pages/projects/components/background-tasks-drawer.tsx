@@ -197,7 +197,7 @@ function TaskCard({
       {isCompleted && (
         <div className="flex items-center gap-1.5 pt-1.5 border-t border-border/40 mt-1">
           <p className="text-[10px] text-muted-foreground/70 flex-1 min-w-0">
-            {terminal?.message ?? "Changes applied."}
+            {terminalTaskMessage(task, task.result ?? "")}
           </p>
           <button
             onClick={onViewCode}

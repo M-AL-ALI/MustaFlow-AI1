@@ -214,7 +214,7 @@ function recoveryTaskStep(task: RecoveryTask): InlineRecoveryStep {
       id: task.id,
       phase: "adapt",
       message: terminal?.message ?? `The ${title} fix completed.`,
-      status: terminal?.tone === "warning" ? "failed" : "passed",
+      status: terminal?.tone === "warning" || terminal?.tone === "unknown" ? "failed" : "passed",
     };
   }
   if (["failed", "canceled", "discarded"].includes(status)) {

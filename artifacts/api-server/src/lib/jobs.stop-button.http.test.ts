@@ -29,6 +29,7 @@ const {
   mutationCallCount,
   updateCallCount,
   routeTaskStatus,
+  routeTaskTerminal,
   mockRunBuildPipeline,
   makeSelectChain: _makeSelectChain,
   makeUpdateChain: _makeUpdateChain,
@@ -75,6 +76,7 @@ const {
   const mutationCallCount = { value: 0 };
   const updateCallCount = { value: 0 };
   const routeTaskStatus = { value: "building" };
+  const routeTaskTerminal = { value: null as unknown };
 
   const mockProject = {
     id: PROJECT_ID,
@@ -150,6 +152,7 @@ const {
           {
             id: TASK_ID,
             status: routeTaskStatus.value,
+            terminal: routeTaskTerminal.value,
             creditsReserved: null,
             queueBatchId: null,
             kind: "main",
@@ -238,6 +241,7 @@ const {
                       id: TASK_ID,
                       status: routeTaskStatus.value,
                       creditsReserved: null,
+                      terminal: routeTaskTerminal.value,
                     },
                   ]),
         }),
@@ -253,6 +257,9 @@ const {
                   return Promise.resolve([]);
                 }
                 if (status) routeTaskStatus.value = status;
+                if ("terminal" in (vals as Record<string, unknown>)) {
+                  routeTaskTerminal.value = (vals as Record<string, unknown>).terminal;
+                }
                 return Promise.resolve([
                   {
                     id: TASK_ID,
@@ -314,6 +321,7 @@ const {
     mutationCallCount,
     updateCallCount,
     routeTaskStatus,
+    routeTaskTerminal,
     mockRunBuildPipeline,
     makeSelectChain,
     makeUpdateChain,
@@ -652,6 +660,7 @@ afterEach(() => {
   mutationCallCount.value = 0;
   updateCallCount.value = 0;
   routeTaskStatus.value = "building";
+  routeTaskTerminal.value = null;
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -677,10 +686,11 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     // event can slip through between the cancel call and stream open.
     const sseUrl = `${baseUrl}/projects/${PROJECT_ID}` + `/tasks/${TASK_ID}/events/stream`;
 
-    const cancelledEventPromise = waitForSseEvent<{ eventType: string; taskId: number }>(
-      sseUrl,
-      (e) => e.eventType === "cancelled",
-    );
+    const cancelledEventPromise = waitForSseEvent<{
+      eventType: string;
+      taskId: number;
+      terminal?: unknown;
+    }>(sseUrl, (e) => e.eventType === "cancelled");
 
     // ── 3. Call the real production cancel endpoint via HTTP ──────────────
     const cancelResp = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/cancel`, {
@@ -699,6 +709,12 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     expect(sseEvent).toMatchObject({
       taskId: TASK_ID,
       eventType: "cancelled",
+      terminal: {
+        schema: "zero-terminal-v1",
+        outcome: "interrupted",
+        runStatus: "interrupted",
+        cause: "user_stop",
+      },
     });
 
     // Wait for runJob to finish its catch/finally path
@@ -788,7 +804,20 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
 });
 
 describe("task event replay receipts", () => {
+  const persistedTerminal = {
+    schema: "zero-terminal-v1",
+    outcome: "interrupted",
+    runStatus: "interrupted",
+    taskId: TASK_ID,
+    intent: "mutate",
+    intentReceiptId: 71,
+    completedAt: "2026-08-19T18:00:01.000Z",
+    cause: "user_stop",
+    evidence: { lastPhase: "agent_loop", changedPaths: [] },
+  };
+
   function seedReplay(terminalEventType: "completed" | "failed" | "cancelled"): void {
+    routeTaskTerminal.value = persistedTerminal;
     emittedEventRows.push(
       {
         id: insertIdCounter.value++,
@@ -816,7 +845,10 @@ describe("task event replay receipts", () => {
     const response = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/events`);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toHaveLength(2);
+    const body = (await response.json()) as Array<{ terminal?: unknown }>;
+    expect(body).toHaveLength(2);
+    expect(body[0]?.terminal).toBeUndefined();
+    expect(body[1]?.terminal).toEqual(persistedTerminal);
     expect(mutationCallCount.value).toBe(0);
     expect(emittedEventRows).toEqual(rowsBefore);
   });
@@ -834,12 +866,20 @@ describe("task event replay receipts", () => {
       const frames = body
         .trim()
         .split("\n\n")
-        .map((line) => JSON.parse(line.replace(/^data: /, "")) as { eventType: string });
+        .map(
+          (line) =>
+            JSON.parse(line.replace(/^data: /, "")) as {
+              eventType: string;
+              terminal?: unknown;
+            },
+        );
 
       expect(response.status).toBe(200);
       expect(response.status).not.toBe(204);
       expect(response.headers.get("content-type")).toContain("text/event-stream");
       expect(frames.map((frame) => frame.eventType)).toEqual(["file_diff", terminalEventType]);
+      expect(frames[0]?.terminal).toBeUndefined();
+      expect(frames[1]?.terminal).toEqual(persistedTerminal);
       expect(mutationCallCount.value).toBe(0);
       expect(emittedEventRows).toEqual(rowsBefore);
     },

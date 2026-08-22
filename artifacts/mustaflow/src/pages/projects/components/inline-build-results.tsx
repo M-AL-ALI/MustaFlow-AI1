@@ -94,7 +94,7 @@ export function partialValidationMessage(report: InlineBuildResultsReport): stri
 }
 
 function resultSummary(report: InlineBuildResultsReport, terminal?: unknown) {
-  const presentation = terminalPresentationFor({ terminal });
+  const presentation = terminalPresentationFor({ terminal, status: "completed" });
   if (presentation) return presentation.message;
   const changed =
     report.filesCreated.length + report.filesChanged.length + report.filesRemoved.length;
@@ -175,7 +175,7 @@ export function InlineBuildResults({
   className,
   terminal,
 }: InlineBuildResultsProps) {
-  const terminalPresentation = terminalPresentationFor({ terminal });
+  const terminalPresentation = terminalPresentationFor({ terminal, status: "completed" });
   const lessons = report.knowledgeApplied ?? [];
   const checks = report.checkRunsSummary;
   const failedOrWarned = [...(checks?.failedChecks ?? []), ...(checks?.warnChecks ?? [])];

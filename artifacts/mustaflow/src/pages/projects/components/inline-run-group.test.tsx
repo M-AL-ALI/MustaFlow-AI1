@@ -1,11 +1,27 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { mutationSucceededTerminal } from "@workspace/ora-contracts";
 import { buildRunReplayModel, InlineRunGroup } from "./inline-run-group";
+
+const completedTerminal = mutationSucceededTerminal({
+  schema: "zero-terminal-v1",
+  outcome: "mutation_succeeded",
+  runStatus: "completed",
+  taskId: 14,
+  intent: "mutate",
+  intentReceiptId: 22,
+  completedAt: "2026-08-22T12:00:00.000Z",
+  evidence: {
+    versionId: 3,
+    diffRef: { kind: "task_report", taskId: 14, revision: 1 },
+    preview: { promised: true, state: "ready", receiptId: "preview:14:3" },
+  },
+});
 
 describe("buildRunReplayModel", () => {
   it("reconstructs ordered activity, narration, and QA from existing events", () => {
     const replay = buildRunReplayModel([
-      { id: 4, eventType: "completed", message: "Done" },
+      { id: 4, eventType: "completed", message: "Done", terminal: completedTerminal },
       { id: 2, eventType: "narration", message: "I found the subtitle." },
       { id: 1, eventType: "reading_files", message: "Reading files" },
       {

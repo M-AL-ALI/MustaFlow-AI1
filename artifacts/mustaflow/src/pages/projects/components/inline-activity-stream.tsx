@@ -300,7 +300,7 @@ export function taskActivityForEvent(
   message = "",
   terminal?: unknown,
 ): InlineActivityEntry | null {
-  const terminalPresentation = terminalPresentationFor({ terminal });
+  const terminalPresentation = terminalPresentationFor({ terminal, status: eventType });
   if (terminalPresentation) {
     return {
       id,

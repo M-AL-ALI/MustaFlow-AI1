@@ -213,7 +213,15 @@ export function NotificationsBell() {
                 </div>
               )}
               {data?.notifications.map((n) => {
-                const terminal = terminalPresentationFor({ terminal: n.metadata?.terminal });
+                const terminal = terminalPresentationFor({
+                  terminal: n.metadata?.terminal,
+                  status:
+                    n.type === "build_complete"
+                      ? "completed"
+                      : n.type === "build_failed"
+                        ? "failed"
+                        : undefined,
+                });
                 const effectiveType = terminal
                   ? terminal.taskStatus === "failed"
                     ? "build_failed"

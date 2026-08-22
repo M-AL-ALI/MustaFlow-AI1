@@ -92,7 +92,20 @@ type MobileBuildRow = {
   createdAt: string;
 };
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({
+  status,
+  attentionLabel,
+}: {
+  status: string;
+  attentionLabel?: string | null;
+}) {
+  if (attentionLabel) {
+    return (
+      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20">
+        {attentionLabel}
+      </span>
+    );
+  }
   const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
     completed: {
       label: "Completed",
@@ -493,7 +506,7 @@ function TaskRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-foreground truncate">{task.title}</span>
-            <StatusBadge status={status} />
+            <StatusBadge status={status} attentionLabel={isWarning ? terminal?.title : null} />
             {terminal && (
               <span className="text-[10px] text-muted-foreground">{terminal.title}</span>
             )}
@@ -1546,12 +1559,15 @@ export function LogsTab({
     return () => clearInterval(timer);
   }, [mobileBuilds, fetchMobileBuilds]);
 
-  const failed = (tasks ?? []).filter(
-    (t) => terminalTaskStatus(t as typeof t & { terminal?: unknown }, t.status) === "failed",
+  const taskTerminals = (tasks ?? []).map((task) =>
+    terminalPresentationFor(task as typeof task & { terminal?: unknown }),
+  );
+  const failed = taskTerminals.filter(
+    (terminal) => terminal?.taskStatus === "failed" && terminal.tone !== "unknown",
   ).length;
-  const completed = (tasks ?? []).filter(
-    (t) => terminalTaskStatus(t as typeof t & { terminal?: unknown }, t.status) === "completed",
-  ).length;
+  const completed = taskTerminals.filter((terminal) => terminal?.tone === "success").length;
+  const unavailable = taskTerminals.filter((terminal) => terminal?.tone === "unknown").length;
+  const attention = taskTerminals.filter((terminal) => terminal?.tone === "warning").length;
   const activeBuilds = mobileBuilds.filter((b) =>
     ["queued", "building", "submitting"].includes(b.status),
   ).length;
@@ -1605,6 +1621,17 @@ export function LogsTab({
           {completed > 0 && (
             <span className="flex items-center gap-1 text-green-400">
               <CheckCircle2 className="h-3 w-3" /> {completed} succeeded
+            </span>
+          )}
+          {unavailable > 0 && (
+            <span className="flex items-center gap-1 text-amber-400">
+              <AlertTriangle className="h-3 w-3" /> {unavailable} outcome
+              {unavailable !== 1 ? "s" : ""} unavailable
+            </span>
+          )}
+          {attention > 0 && (
+            <span className="flex items-center gap-1 text-amber-400">
+              <AlertTriangle className="h-3 w-3" /> {attention} need attention
             </span>
           )}
           {failed > 0 && (
@@ -1686,7 +1713,14 @@ export function LogsTab({
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {/* ── Failed Jobs section ───────────────────────────────────────────── */}
           {(() => {
-            const failedTasks = (tasks ?? []).filter((t) => t.status === "failed").slice(0, 10);
+            const failedTasks = (tasks ?? [])
+              .filter((task) => {
+                const terminal = terminalPresentationFor(
+                  task as typeof task & { terminal?: unknown },
+                );
+                return terminal?.taskStatus === "failed" && terminal.tone !== "unknown";
+              })
+              .slice(0, 10);
             if (failedTasks.length === 0) return null;
             return (
               <FailedJobsSection

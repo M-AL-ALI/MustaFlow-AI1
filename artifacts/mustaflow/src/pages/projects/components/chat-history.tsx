@@ -3317,9 +3317,21 @@ function TaskReviewCard({
   ];
 
   if (applied) {
+    const outcomeUnavailable = terminal?.tone === "unknown";
     return (
-      <div className="mt-2 bg-green-500/10 border border-green-500/20 rounded-lg p-2.5 text-[11px] flex items-center gap-2 text-green-400">
-        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+      <div
+        className={cn(
+          "mt-2 rounded-lg p-2.5 text-[11px] flex items-center gap-2",
+          outcomeUnavailable
+            ? "bg-amber-500/10 border border-amber-500/20 text-amber-400"
+            : "bg-green-500/10 border border-green-500/20 text-green-400",
+        )}
+      >
+        {outcomeUnavailable ? (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+        )}
         {terminal?.message ?? "Changes applied — project updated"}
       </div>
     );

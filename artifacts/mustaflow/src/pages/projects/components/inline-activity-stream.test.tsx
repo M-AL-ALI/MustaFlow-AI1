@@ -8,6 +8,34 @@ import {
   type InlineActivityEntry,
 } from "./inline-activity-stream";
 import { InlineNarrationStream } from "./inline-narration-stream";
+import { failedTerminal, mutationSucceededTerminal } from "@workspace/ora-contracts";
+
+const completedTerminal = mutationSucceededTerminal({
+  schema: "zero-terminal-v1",
+  outcome: "mutation_succeeded",
+  runStatus: "completed",
+  taskId: 3,
+  intent: "mutate",
+  intentReceiptId: 8,
+  completedAt: "2026-08-22T12:00:00.000Z",
+  evidence: {
+    versionId: 12,
+    diffRef: { kind: "task_report", taskId: 3, revision: 1 },
+    preview: { promised: false, state: "not_promised" },
+  },
+});
+
+const failedRunTerminal = failedTerminal({
+  schema: "zero-terminal-v1",
+  outcome: "failed",
+  runStatus: "failed",
+  taskId: 3,
+  intent: "mutate",
+  intentReceiptId: 9,
+  completedAt: "2026-08-22T12:00:01.000Z",
+  cause: { code: "checks_failed", stage: "validation" },
+  evidence: { summary: "Something needs attention" },
+});
 
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -31,11 +59,33 @@ describe("taskActivityForEvent", () => {
     ["qa_step", "checking", "Testing what I built"],
     ["saving_version", "checkpoint", "Saving a checkpoint"],
     ["updating_preview", "preview", "Refreshing the preview"],
-    ["completed", "done", "Done"],
-    ["failed", "error", "Something needs attention"],
   ])("maps the real %s event to %s", (eventType, kind, label) => {
     expect(taskActivityForEvent(3, eventType)).toMatchObject({ id: 3, kind, label });
   });
+
+  it("maps receipt-backed terminal events from their persisted terminal truth", () => {
+    expect(taskActivityForEvent(3, "completed", "", completedTerminal)).toMatchObject({
+      id: 3,
+      kind: "done",
+      label: "Changes applied. Preview was not promised.",
+    });
+    expect(taskActivityForEvent(3, "failed", "", failedRunTerminal)).toMatchObject({
+      id: 3,
+      kind: "error",
+      label: "Something needs attention",
+    });
+  });
+
+  it.each(["completed", "failed"])(
+    "renders a legacy %s event without a receipt as outcome unavailable",
+    (eventType) => {
+      expect(taskActivityForEvent(3, eventType)).toMatchObject({
+        id: 3,
+        kind: "error",
+        label: "Outcome unavailable for this older run",
+      });
+    },
+  );
 
   it("ignores events that do not represent an activity state", () => {
     expect(taskActivityForEvent(4, "narration")).toBeNull();
@@ -171,7 +221,7 @@ describe("InlineActivityStream", () => {
 
     expect(screen.getByText("Writing code")).toBeVisible();
     expect(screen.queryByText("Wrote the code")).not.toBeInTheDocument();
-    expect(screen.getByText("Something needs attention")).toBeVisible();
+    expect(screen.getByText("Outcome unavailable for this older run")).toBeVisible();
   });
 
   it("never pairs a false checkpoint confirmation with the failure narration", () => {
@@ -211,7 +261,7 @@ describe("InlineActivityStream", () => {
 
     expect(screen.getByText("Writing code")).toBeVisible();
     expect(screen.queryByText("Wrote the code")).not.toBeInTheDocument();
-    expect(screen.getByText("Done")).toBeVisible();
+    expect(screen.getByText("Outcome unavailable for this older run")).toBeVisible();
   });
 
   it("replaces repeated phases and renders terminal completion as a static check", () => {
@@ -225,7 +275,7 @@ describe("InlineActivityStream", () => {
     expect(entries).toHaveLength(2);
     expect(screen.queryByTestId("active-activity-icon")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("resolved-activity-icon")).toHaveLength(2);
-    expect(screen.getByText("Done")).toBeVisible();
+    expect(screen.getByText("Outcome unavailable for this older run")).toBeVisible();
   });
 
   it("uses real surface-operation state for brainstorm and publish activity", () => {

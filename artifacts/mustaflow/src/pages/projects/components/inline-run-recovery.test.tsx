@@ -106,6 +106,7 @@ describe("Wave D.3.6 captured task 147/148 recovery", () => {
       />,
     );
 
-    expect(screen.getByText("The TypeScript check fix completed.")).toBeVisible();
+    expect(screen.getByText("Outcome unavailable for this older run")).toBeVisible();
+    expect(screen.queryByText("The TypeScript check fix completed.")).not.toBeInTheDocument();
   });
 });

@@ -14,6 +14,20 @@ const stream = vi.hoisted(() => ({
         code: "parallel_build_limit_reached",
         completionKind: "admission_blocked",
       },
+      terminal: {
+        schema: "zero-terminal-v1",
+        outcome: "failed",
+        runStatus: "failed",
+        taskId: 44,
+        intent: "mutate",
+        intentReceiptId: 81,
+        completedAt: "2026-08-19T12:00:00.000Z",
+        cause: { code: "parallel_build_limit_reached", stage: "admission" },
+        evidence: {
+          summary:
+            "This build did not start because the account is already at its running-build limit",
+        },
+      },
     },
   ],
 }));

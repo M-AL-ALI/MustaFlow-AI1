@@ -36,8 +36,9 @@ describe("InlineBuildResults", () => {
     render(<InlineBuildResults report={report} onOpenCheckpoint={vi.fn()} />);
 
     expect(screen.getByTestId("inline-build-summary")).toHaveTextContent(
-      "Updated 3 project files.",
+      "Outcome unavailable for this older run",
     );
+    expect(screen.getByTestId("inline-build-summary")).not.toHaveTextContent("Updated");
     expect(screen.queryByText("Builder report")).not.toBeInTheDocument();
     expect(screen.getByTestId("inline-build-files")).not.toHaveAttribute("open");
     expect(screen.getByTestId("inline-build-checks")).not.toHaveAttribute("open");

@@ -2009,6 +2009,8 @@ export function AgentThinkingBubble({
   const terminalPresentation =
     (completedTaskCarrier ? terminalPresentationFor(completedTaskCarrier) : null) ??
     (lastEvent ? terminalPresentationFor(lastEvent) : null);
+  const terminalNeedsAttention =
+    terminalPresentation?.tone === "warning" || terminalPresentation?.tone === "unknown";
   const taskStatus = completedTask
     ? terminalTaskStatus(
         completedTask as typeof completedTask & { terminal?: unknown },
@@ -2169,18 +2171,24 @@ export function AgentThinkingBubble({
       <div
         className={cn(
           "max-w-[92%] rounded-xl rounded-bl-sm border text-xs overflow-hidden transition-colors duration-300",
-          isFailed ? "bg-destructive/10 border-destructive/30" : "bg-muted border-border",
+          terminalNeedsAttention
+            ? "bg-amber-500/5 border-amber-500/30"
+            : isFailed
+              ? "bg-destructive/10 border-destructive/30"
+              : "bg-muted border-border",
         )}
       >
         {/* Header pulse */}
         <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
           {isTerminal ? (
             isDone ? (
-              completedReport?.completedWithErrors || terminalPresentation?.tone === "warning" ? (
+              completedReport?.completedWithErrors || terminalNeedsAttention ? (
                 <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
               ) : (
                 <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
               )
+            ) : terminalNeedsAttention ? (
+              <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
             ) : isCancelled ? (
               <Square className="h-3 w-3 text-muted-foreground shrink-0" />
             ) : (
@@ -2197,28 +2205,32 @@ export function AgentThinkingBubble({
           <span
             className={cn(
               "text-[11px] font-semibold flex-1",
-              isDone
-                ? "text-green-400"
-                : isCancelled
-                  ? "text-muted-foreground"
-                  : isFailed
-                    ? "text-destructive"
-                    : isQueued
-                      ? "text-muted-foreground"
-                      : "text-primary",
+              terminalNeedsAttention
+                ? "text-amber-400"
+                : isDone
+                  ? "text-green-400"
+                  : isCancelled
+                    ? "text-muted-foreground"
+                    : isFailed
+                      ? "text-destructive"
+                      : isQueued
+                        ? "text-muted-foreground"
+                        : "text-primary",
             )}
           >
-            {isDone
+            {terminalNeedsAttention
               ? completionText
-              : isCancelled
-                ? "Cancelled"
-                : isFailed
-                  ? "Build failed"
-                  : cancelling
-                    ? "Cancelling…"
-                    : isQueued
-                      ? "Queued"
-                      : "Building"}
+              : isDone
+                ? completionText
+                : isCancelled
+                  ? "Cancelled"
+                  : isFailed
+                    ? "Build failed"
+                    : cancelling
+                      ? "Cancelling…"
+                      : isQueued
+                        ? "Queued"
+                        : "Building"}
           </span>
           {!isQueued && (
             <button

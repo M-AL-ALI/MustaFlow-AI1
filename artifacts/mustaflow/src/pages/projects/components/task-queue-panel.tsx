@@ -124,7 +124,11 @@ export function TaskQueuePanel({ projectId, onStop, onBillingBlock }: TaskQueueP
 
   const summaryParts = [
     activeTask ? (activeTaskIsWaiting ? "1 waiting" : "1 active") : null,
-    lingeringCompletedTask ? "1 completed" : null,
+    lingeringCompletedTask
+      ? lingeringTerminal?.tone === "unknown"
+        ? "1 outcome unavailable"
+        : "1 completed"
+      : null,
     rawQueuedTasks.length > 0 ? `${rawQueuedTasks.length} queued` : null,
     pausedTasks.length > 0 ? `${pausedTasks.length} paused` : null,
   ].filter(Boolean);
