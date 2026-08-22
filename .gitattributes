@@ -1,0 +1,5 @@
+docs/evidence/**/*.json -text
+docs/evidence/**/*.jsonl -text
+docs/evidence/**/*.sse.jsonl -text
+docs/evidence/**/*.txt -text
+docs/evidence/**/*.gz binary

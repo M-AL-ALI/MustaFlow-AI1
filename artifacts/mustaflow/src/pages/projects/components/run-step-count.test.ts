@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { loadEvidenceFixture } from "../../../lib/__tests__/evidence-fixture";
 import { buildRunReplayModel } from "./inline-run-group";
 import { addRunStepId, buildRunStepIdSet, createRunStepIdSet } from "./run-step-count";
 
@@ -25,13 +24,12 @@ const TASK_140_CAPTURE_SHA256 = "b6113f0ad80f9caea42e4e2d7a1802cc83917b822fe29d7
 function loadProductionTask164(): {
   events: CapturedTaskEvent[];
   frameCount: number;
-  sha256: string;
 } {
   const fixturePath = resolve(
     process.cwd(),
     "../../docs/evidence/wave-d37/production-task-164.sse.jsonl",
   );
-  const raw = readFileSync(fixturePath);
+  const raw = loadEvidenceFixture(fixturePath, TASK_164_CAPTURE_SHA256);
   const frames = raw
     .toString("utf8")
     .split(/\r?\n/)
@@ -41,20 +39,18 @@ function loadProductionTask164(): {
   return {
     events: frames.map((frame) => JSON.parse(frame.data) as CapturedTaskEvent),
     frameCount: frames.length,
-    sha256: createHash("sha256").update(raw).digest("hex"),
   };
 }
 
 function loadProductionTask140(): {
   events: CapturedTaskEvent[];
   frameCount: number;
-  sha256: string;
 } {
   const fixturePath = resolve(
     process.cwd(),
     "../../docs/evidence/wave-d33/production-task-140.sse.gz",
   );
-  const compressed = readFileSync(fixturePath);
+  const compressed = loadEvidenceFixture(fixturePath, TASK_140_CAPTURE_SHA256);
   const events = gunzipSync(compressed)
     .toString("utf8")
     .split(/\r?\n/)
@@ -64,7 +60,6 @@ function loadProductionTask140(): {
   return {
     events,
     frameCount: events.length,
-    sha256: createHash("sha256").update(compressed).digest("hex"),
   };
 }
 
@@ -73,7 +68,6 @@ describe("run step count with captured production traffic", () => {
     const capture = loadProductionTask164();
 
     expect(capture.frameCount).toBe(199);
-    expect(capture.sha256).toBe(TASK_164_CAPTURE_SHA256);
 
     const liveStepIds = createRunStepIdSet();
     const liveCounts = capture.events.map((event) => addRunStepId(liveStepIds, event));
@@ -95,7 +89,6 @@ describe("run step count with captured production traffic", () => {
     const capture = loadProductionTask140();
 
     expect(capture.frameCount).toBe(74);
-    expect(capture.sha256).toBe(TASK_140_CAPTURE_SHA256);
     expect(buildRunStepIdSet(capture.events).size).toBe(25);
     expect(buildRunReplayModel(capture.events).stepCount).toBe(25);
   });

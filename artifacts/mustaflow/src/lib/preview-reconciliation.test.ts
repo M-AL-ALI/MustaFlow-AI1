@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { WebContainerSyncController } from "../hooks/web-container-sync";
+import { loadEvidenceFixture } from "./__tests__/evidence-fixture";
 import type { ProjectFilesChangedPayload } from "./event-types";
 import {
   acceptPreviewPayload,
@@ -19,8 +18,10 @@ const capturePath = resolve(
   here,
   "../../../../docs/evidence/wave-d33/production-task-140-inventory.json",
 );
-const captureBytes = readFileSync(capturePath);
-const captureSha = createHash("sha256").update(captureBytes).digest("hex");
+const captureBytes = loadEvidenceFixture(
+  capturePath,
+  "abe274dad9fc997a659f81cd78b8a6deb500b38adf9c76539f7f8d4d3b23cae6",
+);
 const captured = JSON.parse(captureBytes.toString("utf8")) as {
   capture: { projectId: number; taskId: number; frameCount: number };
   ordered: Array<{ id: number; eventType: string; createdAt: string; ordinal: number }>;
@@ -92,7 +93,6 @@ describe("preview revision reconciliation with production task 140 traffic", () 
   });
 
   it("pins the real 74-frame capture used by the disconnect regression", () => {
-    expect(captureSha).toBe("ec751002f7eda3e8c4d1439ae2d2593886513bcbd3517508b6387d2c444d987f");
     expect(captured.capture).toMatchObject({ projectId: 44, taskId: 140, frameCount: 74 });
     expect(captured.ordered.at(-1)).toMatchObject({
       eventType: "completed",

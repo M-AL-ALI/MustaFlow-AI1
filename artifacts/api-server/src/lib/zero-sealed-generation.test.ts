@@ -481,13 +481,19 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
   it("memorializes the pre-slice legacy Node prompt bytes", async () => {
     const source = await readFile(new URL("./builder.ts", import.meta.url), "utf8");
     const prefix = "const NODE_API_BUILD_SYSTEM_PROMPT = `";
-    const start = source.indexOf(prefix);
-    const end = source.indexOf("`;\n\nconst NODE_API_REFINE_SYSTEM_PROMPT", start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    const prompt = source.slice(start + prefix.length, end);
-    expect(createHash("sha256").update(prompt).digest("hex")).toBe(
-      "e7aaf4f30a4e9852da473c8c073f4f9e748fe8802965c819b5b0a1cc7a42e269",
-    );
+    const promptSha256 = (candidate: string) => {
+      const normalizedSource = candidate.replace(/\r\n?/g, "\n");
+      const start = normalizedSource.indexOf(prefix);
+      const end = normalizedSource.indexOf("`;\n\nconst NODE_API_REFINE_SYSTEM_PROMPT", start);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      return createHash("sha256")
+        .update(normalizedSource.slice(start + prefix.length, end))
+        .digest("hex");
+    };
+    const expectedSha256 = "e7aaf4f30a4e9852da473c8c073f4f9e748fe8802965c819b5b0a1cc7a42e269";
+
+    expect(promptSha256(source)).toBe(expectedSha256);
+    expect(promptSha256(source.replace(/\n/g, "\r\n"))).toBe(expectedSha256);
   });
 });
