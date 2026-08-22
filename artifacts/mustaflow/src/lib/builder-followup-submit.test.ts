@@ -20,25 +20,31 @@ describe("Deep Reasoning pricing", () => {
 });
 
 describe("mapIntentToSendOptions", () => {
-  it("forwards a text-only build intent to the task-creating send path", () => {
+  it("maps legacy mutation controls to the closed receipt intent", () => {
     expect(mapIntentToSendOptions({ intent: "build", hasImages: false })).toEqual({
-      agentIntent: "build",
+      agentIntent: "mutate",
+    });
+    expect(mapIntentToSendOptions({ intent: "debug", hasImages: false })).toEqual({
+      agentIntent: "observe",
+    });
+    expect(mapIntentToSendOptions({ intent: "explain", hasImages: false })).toEqual({
+      agentIntent: "answer",
     });
   });
 
-  it("preserves plan mode and forces image messages through build", () => {
+  it("preserves plan mode without allowing an image to override intent", () => {
     expect(mapIntentToSendOptions({ intent: "plan", hasImages: false })).toEqual({
       planMode: true,
       agentIntent: "plan",
     });
     expect(mapIntentToSendOptions({ intent: "converse", hasImages: true })).toEqual({
-      agentIntent: "build",
+      agentIntent: "answer",
     });
   });
 });
 
 describe("resolveBuilderComposerIntent", () => {
-  it("routes a Main Agent follow-up after a completed task through the build mutation", () => {
+  it("does not let a completed task override a new undecided request", () => {
     expect(
       resolveBuilderComposerIntent({
         activeIntent: null,
@@ -46,7 +52,7 @@ describe("resolveBuilderComposerIntent", () => {
         hasCompletedTask: true,
         routingAgentIdentity: "main",
       }),
-    ).toBe("build");
+    ).toBeUndefined();
   });
 
   it("preserves explicit local intent and does not force an initial message into build", () => {
@@ -57,7 +63,7 @@ describe("resolveBuilderComposerIntent", () => {
         hasCompletedTask: true,
         routingAgentIdentity: "main",
       }),
-    ).toBe("converse");
+    ).toBe("answer");
     expect(
       resolveBuilderComposerIntent({
         activeIntent: null,

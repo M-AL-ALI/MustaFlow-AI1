@@ -8955,6 +8955,10 @@ components:
           type: string
           enum:
             [
+              answer,
+              clarify,
+              mutate,
+              observe,
               converse,
               plan,
               build,
@@ -8966,7 +8970,7 @@ components:
               fix_types,
               fix_lint,
             ]
-          description: "Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean."
+          description: "Optional explicit intent override. New callers use the closed answer/clarify/plan/mutate/observe contract. Legacy controls remain accepted and map into that contract."
         attachments:
           type: array
           items: { $ref: "#/components/schemas/ChatAttachment" }
@@ -9000,6 +9004,10 @@ components:
           type: string
           enum:
             [
+              answer,
+              clarify,
+              mutate,
+              observe,
               converse,
               plan,
               build,
@@ -9012,7 +9020,7 @@ components:
               review,
               explain,
             ]
-          description: "The intent auto-detected or explicitly provided for this exchange."
+          description: "The authoritative persisted intent for this exchange. New responses use answer, clarify, plan, mutate, or observe; older values remain listed for compatibility."
 
     ToolCallEventPayload:
       type: object
@@ -9112,6 +9120,7 @@ components:
           enum:
             [
               queued,
+              answering,
               planning,
               building,
               testing,
@@ -9319,6 +9328,7 @@ components:
           enum:
             [
               queued,
+              answering,
               planning,
               building,
               testing,

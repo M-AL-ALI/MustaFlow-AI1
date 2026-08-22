@@ -22,6 +22,7 @@ type IntentReceiptRow = {
 };
 
 export interface IntentReceiptPersistenceDriver {
+  find(projectId: number, requestId: string): Promise<IntentReceipt | null>;
   persist(
     projectId: number,
     requestId: string,
@@ -62,6 +63,13 @@ function sameDecision(receipt: IntentReceipt, decision: IntentReceiptDecision): 
 
 export class IntentReceiptStore {
   constructor(private readonly driver: IntentReceiptPersistenceDriver) {}
+
+  find(projectId: number, requestId: string): Promise<IntentReceipt | null> {
+    if (!Number.isSafeInteger(projectId) || projectId < 1 || requestId.trim().length === 0) {
+      return Promise.resolve(null);
+    }
+    return this.driver.find(projectId, requestId);
+  }
 
   async persist(
     projectId: number,
@@ -113,6 +121,23 @@ export function createPostgresIntentReceiptDriver(
   connect: Connect = () => pool.connect(),
 ): IntentReceiptPersistenceDriver {
   return {
+    async find(projectId, requestId) {
+      const client = await connect();
+      try {
+        const result = await client.query<IntentReceiptRow>(
+          `SELECT id, request_id, project_id, source_message_id, intent, deciding_source,
+                  confidence, reason_code, decided_at, consumed_at
+             FROM zero_intent_receipts
+            WHERE project_id = $1 AND request_id = $2
+            LIMIT 1`,
+          [projectId, requestId],
+        );
+        return result.rows[0] ? receiptFromRow(result.rows[0]) : null;
+      } finally {
+        client.release();
+      }
+    },
+
     async persist(projectId, requestId, decision) {
       const client = await connect();
       try {

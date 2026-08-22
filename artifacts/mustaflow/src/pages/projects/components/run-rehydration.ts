@@ -6,6 +6,7 @@ export type RehydratableTask = {
 
 const REHYDRATABLE_TASK_STATUSES = new Set([
   "queued",
+  "answering",
   "planning",
   "building",
   "running",

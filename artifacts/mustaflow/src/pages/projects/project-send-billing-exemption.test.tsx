@@ -390,7 +390,7 @@ describe("project send — no confirmation dialog", () => {
       data: {
         content: "Migrate the shared status API across the project",
         agentMode: "power",
-        agentIntent: "build",
+        agentIntent: "mutate",
       },
     });
     expect(testState.clearComposer).toHaveBeenCalledTimes(1);

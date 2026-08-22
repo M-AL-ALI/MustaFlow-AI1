@@ -6,7 +6,14 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-const ACTIVE_STATUSES = ["queued", "planning", "building", "needs_review", "needs_fix"] as const;
+const ACTIVE_STATUSES = [
+  "queued",
+  "answering",
+  "planning",
+  "building",
+  "needs_review",
+  "needs_fix",
+] as const;
 
 router.get("/background-jobs", async (req, res): Promise<void> => {
   const userId = req.userId;

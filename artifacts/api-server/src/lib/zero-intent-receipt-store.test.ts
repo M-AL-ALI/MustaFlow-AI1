@@ -17,6 +17,10 @@ class MemoryIntentDriver implements IntentReceiptPersistenceDriver {
   readonly messages = new Map<number, number>();
   readonly tasks = new Map<number, number>();
 
+  async find(projectId: number, requestId: string) {
+    return this.byKey.get(`${projectId}:${requestId}`) ?? null;
+  }
+
   async persist(projectId: number, requestId: string, decision: IntentReceiptDecision) {
     const key = `${projectId}:${requestId}`;
     const existing = this.byKey.get(key);
@@ -63,6 +67,7 @@ describe("zero intent receipt persistence contract", () => {
   it("rejects illegal source-intent pairs and confidence ownership before persistence", async () => {
     const persist = vi.fn();
     const store = new IntentReceiptStore({
+      find: vi.fn(),
       persist,
       linkMessage: vi.fn(),
       consumeForTask: vi.fn(),
@@ -97,6 +102,14 @@ describe("zero intent receipt persistence contract", () => {
       store.persist(17, "request-a", { ...answer, intent: "mutate", reasonCode: "change_request" }),
     ).rejects.toMatchObject({ code: "intent_receipt_conflict" });
     await expect(store.persist(18, "request-a", answer)).resolves.toMatchObject({ projectId: 18 });
+  });
+
+  it("finds the authoritative receipt before a second route dispatch", async () => {
+    const driver = new MemoryIntentDriver();
+    const store = new IntentReceiptStore(driver);
+    const receipt = await store.persist(17, "request-a", answer);
+    await expect(store.find(17, "request-a")).resolves.toBe(receipt);
+    await expect(store.find(18, "request-a")).resolves.toBeNull();
   });
 
   it("links one source message and consumes a receipt for at most one task", async () => {

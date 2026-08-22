@@ -7,12 +7,16 @@
  */
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.
+ * Optional explicit intent override. New callers use the closed answer/clarify/plan/mutate/observe contract. Legacy controls remain accepted and map into that contract.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
 
 export const ChatMessageInputAgentIntent = {
+  answer: 'answer',
+  clarify: 'clarify',
+  mutate: 'mutate',
+  observe: 'observe',
   converse: 'converse',
   plan: 'plan',
   build: 'build',

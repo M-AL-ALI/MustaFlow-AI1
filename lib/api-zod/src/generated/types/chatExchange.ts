@@ -11,6 +11,6 @@ import type { ChatMessage } from './chatMessage';
 export interface ChatExchange {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
-  /** The intent auto-detected or explicitly provided for this exchange. */
+  /** The authoritative persisted intent for this exchange. New responses use answer, clarify, plan, mutate, or observe; older values remain listed for compatibility. */
   detectedIntent?: ChatExchangeDetectedIntent;
 }

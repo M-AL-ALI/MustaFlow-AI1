@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { updateResults, insertedEvents, drainNextProjectTask } = vi.hoisted(() => ({
+const { updateResults, insertedEvents, drainNextProjectTask, inArray } = vi.hoisted(() => ({
   updateResults: [] as Array<Array<{ id: number; projectId: number }>>,
   insertedEvents: [] as Array<Record<string, unknown>>,
   drainNextProjectTask: vi.fn().mockResolvedValue(undefined),
+  inArray: vi.fn(() => ({})),
 }));
 
 vi.mock("drizzle-orm", () => ({
   and: vi.fn(() => ({})),
   eq: vi.fn(() => ({})),
+  inArray,
   sql: vi.fn(() => ({})),
 }));
 
@@ -55,6 +57,15 @@ describe("stuck-run scheduler planning adoption", () => {
     updateResults.length = 0;
     insertedEvents.length = 0;
     drainNextProjectTask.mockClear();
+    inArray.mockClear();
+  });
+
+  it("sweeps both mutation and answer tasks without treating answering as a build lock", async () => {
+    updateResults.push([], []);
+
+    await sweepStuckRuns();
+
+    expect(inArray).toHaveBeenCalledWith("status", ["building", "answering"]);
   });
 
   it("atomically adopts a stale never-started planning task and nudges it once", async () => {

@@ -5420,8 +5420,8 @@ components:
           description: "Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically."
         agentIntent:
           type: string
-          enum: [converse, plan, build]
-          description: "Optional explicit intent override. If provided, skips server-side intent detection."
+          enum: [answer, clarify, plan, mutate, observe, converse, build]
+          description: "Optional explicit intent override. New callers use answer/clarify/plan/mutate/observe; legacy controls remain accepted."
         attachments:
           type: array
           items: { $ref: "#/components/schemas/ChatAttachment" }
@@ -5435,8 +5435,8 @@ components:
         assistantMessage: { $ref: "#/components/schemas/ChatMessage" }
         detectedIntent:
           type: string
-          enum: [converse, plan, build]
-          description: "The intent auto-detected or explicitly provided for this exchange."
+          enum: [answer, clarify, plan, mutate, observe, converse, build]
+          description: "The authoritative persisted intent for this exchange; legacy response values remain listed for compatibility."
 
     TaskEvent:
       type: object
@@ -5480,6 +5480,7 @@ components:
           enum:
             [
               queued,
+              answering,
               planning,
               building,
               testing,
@@ -5571,6 +5572,7 @@ components:
           enum:
             [
               queued,
+              answering,
               planning,
               building,
               testing,

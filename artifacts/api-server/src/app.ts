@@ -63,7 +63,7 @@ startDomainRenewalScheduler();
 startKnowledgePromotionScheduler();
 
 // Stuck-run sweeper (Task #1182).
-// Every 2 min: marks agent_tasks rows stuck in "building" without a heartbeat as "failed".
+// Every 2 min: marks executing agent_tasks rows stuck without a heartbeat as "failed".
 startStuckRunScheduler();
 
 const app: Express = express();

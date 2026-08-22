@@ -1,17 +1,17 @@
 /**
  * Stuck-run scheduler (Task #1182).
  *
- * Every 2 minutes, finds agent_tasks rows that are in status "building" but
+ * Every 2 minutes, finds agent_tasks rows that are executing but
  * have not received a heartbeat in the last 5 minutes, and marks them as
  * "failed" with a failure_reason of "stuck-run-timeout". This prevents builds
- * that crashed without writing a final status from staying in "building" forever.
+ * that crashed without writing a final status from staying active forever.
  *
  * The scheduler uses setInterval(...).unref() so it never blocks graceful
  * shutdown. All errors are swallowed so one bad sweep never crashes the server.
  */
 
 import { db, agentTasksTable, taskEventsTable } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { drainNextProjectTask } from "./jobs";
 
@@ -62,7 +62,7 @@ export async function sweepStuckRuns(): Promise<void> {
     const message =
       "Task timed out because Agent Zero stopped sending progress heartbeats. Please retry or inspect the last task events.";
 
-    // Tasks that are still "building" but whose heartbeat is older than the
+    // Tasks that are still executing (building or answering) but whose heartbeat is older than the
     // timeout window (or never sent a heartbeat and started before the cutoff).
     const result = await db
       .update(agentTasksTable)
@@ -74,7 +74,7 @@ export async function sweepStuckRuns(): Promise<void> {
       })
       .where(
         and(
-          eq(agentTasksTable.status, "building"),
+          inArray(agentTasksTable.status, ["building", "answering"]),
           sql`(
             (${agentTasksTable.lastHeartbeatAt} IS NOT NULL AND ${agentTasksTable.lastHeartbeatAt} < ${cutoff})
             OR

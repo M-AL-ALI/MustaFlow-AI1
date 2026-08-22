@@ -42,7 +42,14 @@ export type BgTask = {
   completedAt: string | null;
 };
 
-const ACTIVE_STATUSES = new Set(["planning", "building", "testing", "needs_review", "needs_fix"]);
+const ACTIVE_STATUSES = new Set([
+  "answering",
+  "planning",
+  "building",
+  "testing",
+  "needs_review",
+  "needs_fix",
+]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "canceled", "cancelled", "discarded"]);
 const PAUSED_STATUS = "paused-insufficient-credits";
 

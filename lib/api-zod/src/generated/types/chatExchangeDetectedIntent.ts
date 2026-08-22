@@ -7,12 +7,16 @@
  */
 
 /**
- * The intent auto-detected or explicitly provided for this exchange.
+ * The authoritative persisted intent for this exchange. New responses use answer, clarify, plan, mutate, or observe; older values remain listed for compatibility.
  */
 export type ChatExchangeDetectedIntent = typeof ChatExchangeDetectedIntent[keyof typeof ChatExchangeDetectedIntent];
 
 
 export const ChatExchangeDetectedIntent = {
+  answer: 'answer',
+  clarify: 'clarify',
+  mutate: 'mutate',
+  observe: 'observe',
   converse: 'converse',
   plan: 'plan',
   build: 'build',

@@ -11,6 +11,7 @@ export type AgentTaskStatus = typeof AgentTaskStatus[keyof typeof AgentTaskStatu
 
 export const AgentTaskStatus = {
   queued: 'queued',
+  answering: 'answering',
   planning: 'planning',
   building: 'building',
   testing: 'testing',

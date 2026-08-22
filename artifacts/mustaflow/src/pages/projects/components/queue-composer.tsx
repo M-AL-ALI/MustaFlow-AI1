@@ -190,17 +190,7 @@ interface QueueComposerProps {
   onQueueBehind?: (content: string) => void;
   onSingleSend: (
     content: string,
-    agentIntent?:
-      | "converse"
-      | "plan"
-      | "build"
-      | "debug"
-      | "refactor"
-      | "review"
-      | "explain"
-      | "fix_tests"
-      | "fix_types"
-      | "fix_lint",
+    agentIntent?: BuilderComposerIntent,
     attachments?: ComposerAttachment[],
     brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>,
     clearComposer?: () => void,
@@ -1227,7 +1217,7 @@ export function QueueComposer({
     }
 
     if (messages.length <= 1 && (messages.length === 1 || hasImageAttachment)) {
-      // Image-only send: text is empty string; server injects the default screenshot prompt.
+      // Image-only send: the attachment is evidence; it never chooses the request's intent.
       const text = messages[0] ?? "";
       const pending = attachments;
       // Only inline image attachments go on the message payload. File uploads

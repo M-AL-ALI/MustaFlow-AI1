@@ -75,8 +75,9 @@ import {
   HeartPulse,
   Cpu,
   Loader2,
-  Bug,
-  CheckSquare,
+  HelpCircle,
+  ClipboardList,
+  Search,
   WifiOff,
   RefreshCw,
   ImagePlus,
@@ -146,8 +147,12 @@ import { cn } from "@/lib/utils";
 import {
   getCreditCost,
   mapIntentToSendOptions,
+  toBuilderReceiptIntent,
   useBuilderCreditCosts,
+  type BuilderComposerIntent,
+  type BuilderReceiptIntent,
 } from "@/lib/builder-followup-submit";
+import { builderIntentChipLabel } from "@/lib/builder-intent-chip";
 import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builder-mode-persistence";
 import {
   calmPhaseForTaskEvent,
@@ -931,7 +936,9 @@ export default function ProjectWorkspacePage() {
         enabled:
           !!projectId &&
           tasksForFeed.some((task) =>
-            ["queued", "planning", "building", "running", "in_progress"].includes(task.status),
+            ["queued", "answering", "planning", "building", "running", "in_progress"].includes(
+              task.status,
+            ),
           ),
         queryKey: getListSuggestionsQueryKey(projectId, {}),
         refetchInterval: 30000,
@@ -1765,17 +1772,7 @@ export default function ProjectWorkspacePage() {
       planMode?: boolean;
       background?: boolean;
       agentMode?: AgentMode;
-      agentIntent?:
-        | "converse"
-        | "plan"
-        | "build"
-        | "debug"
-        | "refactor"
-        | "review"
-        | "explain"
-        | "fix_tests"
-        | "fix_types"
-        | "fix_lint";
+      agentIntent?: BuilderComposerIntent;
       attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
     };
   } | null>(null);
@@ -2443,17 +2440,7 @@ export default function ProjectWorkspacePage() {
         planMode?: boolean;
         background?: boolean;
         agentMode?: AgentMode;
-        agentIntent?:
-          | "converse"
-          | "plan"
-          | "build"
-          | "debug"
-          | "refactor"
-          | "review"
-          | "explain"
-          | "fix_tests"
-          | "fix_types"
-          | "fix_lint";
+        agentIntent?: BuilderComposerIntent;
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
         agentIdentity?: "planning" | "main";
         idempotencyKey?: string;
@@ -2462,7 +2449,9 @@ export default function ProjectWorkspacePage() {
     ) => {
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectivePlanMode = opts?.planMode ?? planMode;
-      const effectiveAgentIntent = opts?.agentIntent;
+      const effectiveAgentIntent = opts?.agentIntent
+        ? toBuilderReceiptIntent(opts.agentIntent)
+        : undefined;
       sendMessage.mutate(
         {
           id: projectId,
@@ -2550,17 +2539,7 @@ export default function ProjectWorkspacePage() {
         planMode?: boolean;
         background?: boolean;
         agentMode?: AgentMode;
-        agentIntent?:
-          | "converse"
-          | "plan"
-          | "build"
-          | "debug"
-          | "refactor"
-          | "review"
-          | "explain"
-          | "fix_tests"
-          | "fix_types"
-          | "fix_lint";
+        agentIntent?: BuilderComposerIntent;
         /** Override visible executor for explicit plan/main handoffs. */
         agentIdentity?: "planning" | "main";
         attachments?: Array<{
@@ -2589,18 +2568,13 @@ export default function ProjectWorkspacePage() {
       const effectiveDeepReasoning = effectiveMode === "lite" ? false : deepReasoning;
       const effectivePlanMode = opts?.planMode ?? planMode;
       const effectiveBackground = opts?.background ?? runInBackground;
-      const effectiveAgentIntent = opts?.agentIntent;
-      // Local heuristic for display: show conversational indicator when content looks like a
-      // question or explicit agentIntent=converse. Does NOT affect server classification.
-      const converseKeywords =
-        /^(what|how|why|when|where|who|can you|tell me|explain|does|is there|will|should|could|help me|is it|are there|what is|what are|what does)/i;
+      const effectiveAgentIntent = opts?.agentIntent
+        ? toBuilderReceiptIntent(opts.agentIntent)
+        : undefined;
       const isLikelyConverse =
-        effectiveAgentIntent === "converse" ||
-        effectiveAgentIntent === "debug" ||
-        effectiveAgentIntent === "refactor" ||
-        effectiveAgentIntent === "review" ||
-        effectiveAgentIntent === "explain" ||
-        (converseKeywords.test(content.trim()) && !effectivePlanMode);
+        effectiveAgentIntent === "answer" ||
+        effectiveAgentIntent === "clarify" ||
+        effectiveAgentIntent === "observe";
       // Build-start invariant: no synchronous Stripe call on send. Credits are
       // authorized instantly by the gate (resolveNabuflowBuildGate) and any
       // overage charge is settled as a pending invoice item in the background
@@ -2640,7 +2614,7 @@ export default function ProjectWorkspacePage() {
         effectivePlanMode ||
         effectiveBackground ||
         effectiveAgentIntent === "plan" ||
-        effectiveAgentIntent === "build"
+        effectiveAgentIntent === "mutate"
       ) {
         sendRegular(content, { ...opts, idempotencyKey });
         return;
@@ -2812,6 +2786,23 @@ export default function ProjectWorkspacePage() {
                 if (event.type === "session") {
                   // Store session ID for potential resume on reconnect.
                   activeSessionId = (event.streamSessionId as string) ?? null;
+                } else if (event.type === "intent") {
+                  const receiptIntent = event.intent as BuilderReceiptIntent;
+                  const receiptIsConverse =
+                    receiptIntent === "answer" ||
+                    receiptIntent === "clarify" ||
+                    receiptIntent === "observe";
+                  pendingIsPlanRef.current = receiptIntent === "plan";
+                  setPendingIsPlan(receiptIntent === "plan");
+                  pendingIsConverseRef.current = receiptIsConverse;
+                  setPendingIsConverse(receiptIsConverse);
+                  setCalmPhase(
+                    receiptIsConverse
+                      ? "answering"
+                      : receiptIntent === "plan"
+                        ? "planning"
+                        : "building",
+                  );
                 } else if (event.type === "token") {
                   tokenCount++;
                   accText += (event.content as string) ?? "";
@@ -2838,15 +2829,7 @@ export default function ProjectWorkspacePage() {
                   setIsStreaming(false);
                   setStreamingText("");
                   setStreamReconnectAttempt(0);
-                  const fallbackIntent = event.intent as
-                    | "build"
-                    | "plan"
-                    | "debug"
-                    | "refactor"
-                    | "review"
-                    | "explain"
-                    | "fix_tests"
-                    | undefined;
+                  const fallbackIntent = event.intent as BuilderReceiptIntent | undefined;
                   sendRegular(content, {
                     ...opts,
                     agentMode: effectiveMode,
@@ -4081,45 +4064,42 @@ export default function ProjectWorkspacePage() {
                                       );
                                     })()}
                                   {msg.role === "assistant" &&
-                                    !isReport &&
-                                    !isError &&
-                                    payloadKind === "converse" &&
                                     moreTabsExpanded &&
                                     (() => {
-                                      const intentLabel = (
+                                      const receiptIntent = (
                                         planPayload as { intent?: string } | null | undefined
                                       )?.intent;
-                                      if (!intentLabel) return null;
+                                      const label = builderIntentChipLabel(receiptIntent);
+                                      if (!label) return null;
                                       const INTENT_CHIP_CONFIG: Record<
                                         string,
                                         {
-                                          label: string;
                                           icon: React.ElementType;
                                           cls: string;
                                         }
                                       > = {
-                                        debug: {
-                                          label: "Debug",
-                                          icon: Bug,
-                                          cls: "border-red-500/30 bg-red-500/8 text-red-400",
+                                        answer: {
+                                          icon: MessageSquare,
+                                          cls: "border-primary/25 bg-primary/8 text-primary",
                                         },
-                                        refactor: {
-                                          label: "Refactor",
-                                          icon: Wrench,
+                                        clarify: {
+                                          icon: HelpCircle,
                                           cls: "border-yellow-500/30 bg-yellow-500/8 text-yellow-400",
                                         },
-                                        review: {
-                                          label: "Review",
-                                          icon: CheckSquare,
+                                        plan: {
+                                          icon: ClipboardList,
                                           cls: "border-blue-500/30 bg-blue-500/8 text-blue-400",
                                         },
-                                        explain: {
-                                          label: "Explain",
-                                          icon: BookOpen,
+                                        mutate: {
+                                          icon: Wrench,
+                                          cls: "border-green-500/30 bg-green-500/8 text-green-400",
+                                        },
+                                        observe: {
+                                          icon: Search,
                                           cls: "border-violet-500/30 bg-violet-500/8 text-violet-400",
                                         },
                                       };
-                                      const cfg = INTENT_CHIP_CONFIG[intentLabel];
+                                      const cfg = INTENT_CHIP_CONFIG[receiptIntent ?? ""];
                                       if (!cfg) return null;
                                       const ChipIcon = cfg.icon;
                                       return (
@@ -4131,7 +4111,7 @@ export default function ProjectWorkspacePage() {
                                             )}
                                           >
                                             <ChipIcon className="h-2.5 w-2.5" />
-                                            {cfg.label}
+                                            {label}
                                           </span>
                                         </div>
                                       );

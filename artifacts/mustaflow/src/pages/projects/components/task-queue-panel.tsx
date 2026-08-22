@@ -31,7 +31,14 @@ interface TaskQueuePanelProps {
   onBillingBlock?: (gate: NabuflowGateError) => void;
 }
 
-const ACTIVE_STATUSES = ["planning", "building", "testing", "needs_review", "needs_fix"] as const;
+const ACTIVE_STATUSES = [
+  "answering",
+  "planning",
+  "building",
+  "testing",
+  "needs_review",
+  "needs_fix",
+] as const;
 const WAITING_STATUSES = new Set(["needs_review", "needs_fix"]);
 const PAUSED_STATUS = "paused-insufficient-credits";
 

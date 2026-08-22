@@ -1,7 +1,12 @@
-import type { IntentReceiptDecision, ZeroIntentReasonCode } from "@workspace/ora-contracts";
+import type {
+  IntentReceiptDecision,
+  ZeroIntent,
+  ZeroIntentReasonCode,
+} from "@workspace/ora-contracts";
 import type { IntentResult } from "./builder";
 
 export type ZeroIntentExplicitControl =
+  | ZeroIntent
   | "converse"
   | "plan"
   | "build"
@@ -23,12 +28,20 @@ export interface ZeroIntentJudgeInput {
 }
 
 function explicitDecision(control: ZeroIntentExplicitControl): IntentReceiptDecision {
-  if (control === "converse" || control === "explain") {
+  if (control === "answer" || control === "converse" || control === "explain") {
     return {
       intent: "answer",
       decidingSource: "user_explicit",
       confidence: null,
       reasonCode: "explicit_control",
+    };
+  }
+  if (control === "clarify") {
+    return {
+      intent: "clarify",
+      decidingSource: "user_explicit",
+      confidence: null,
+      reasonCode: "ambiguous_request",
     };
   }
   if (control === "plan") {
@@ -39,7 +52,7 @@ function explicitDecision(control: ZeroIntentExplicitControl): IntentReceiptDeci
       reasonCode: "explicit_control",
     };
   }
-  if (control === "debug" || control === "review") {
+  if (control === "observe" || control === "debug" || control === "review") {
     return {
       intent: "observe",
       decidingSource: "user_explicit",
@@ -57,8 +70,9 @@ function explicitDecision(control: ZeroIntentExplicitControl): IntentReceiptDeci
 
 function classifierReason(intent: IntentResult["intent"]): ZeroIntentReasonCode {
   if (intent === "plan") return "plan_request";
-  if (intent === "debug" || intent === "review") return "diagnostic_request";
-  if (intent === "build" || intent === "refactor") return "change_request";
+  if (intent === "observe") return "diagnostic_request";
+  if (intent === "mutate") return "change_request";
+  if (intent === "clarify") return "ambiguous_request";
   return "question";
 }
 
@@ -92,7 +106,17 @@ export async function judgeZeroIntent(input: ZeroIntentJudgeInput): Promise<Inte
     };
   }
 
-  const classified = await input.classify();
+  let classified: IntentResult;
+  try {
+    classified = await input.classify();
+  } catch {
+    return {
+      intent: "clarify",
+      decidingSource: "classifier_fallback",
+      confidence: null,
+      reasonCode: "classifier_unavailable",
+    };
+  }
   if (classified.decisionSource === "classifier_fallback") {
     return {
       intent: "clarify",
@@ -110,16 +134,8 @@ export async function judgeZeroIntent(input: ZeroIntentJudgeInput): Promise<Inte
     };
   }
 
-  const intent =
-    classified.intent === "plan"
-      ? "plan"
-      : classified.intent === "debug" || classified.intent === "review"
-        ? "observe"
-        : classified.intent === "build" || classified.intent === "refactor"
-          ? "mutate"
-          : "answer";
   return {
-    intent,
+    intent: classified.intent,
     decidingSource: classified.decisionSource,
     confidence: classified.confidence,
     reasonCode: classifierReason(classified.intent),
@@ -130,42 +146,4 @@ export function intentReceiptEnforcementRequested(
   value: string | undefined = process.env.ZERO_INTENT_RECEIPT_ENFORCEMENT,
 ): boolean {
   return value?.trim().toLowerCase() === "true";
-}
-
-export type IntentShadowOutcome<TLegacy, TReceipt> =
-  | {
-      legacyIntent: TLegacy;
-      decision: IntentReceiptDecision;
-      receipt: TReceipt;
-      errorType: null;
-    }
-  | {
-      legacyIntent: TLegacy;
-      decision: null;
-      receipt: null;
-      errorType: string;
-    };
-
-/** Observe and persist a shadow decision while returning the legacy decision unchanged. */
-export async function runIntentShadow<TLegacy, TReceipt>(
-  legacyIntent: TLegacy,
-  input: ZeroIntentJudgeInput,
-  persist: (decision: IntentReceiptDecision) => Promise<TReceipt>,
-): Promise<IntentShadowOutcome<TLegacy, TReceipt>> {
-  try {
-    const decision = await judgeZeroIntent(input);
-    return {
-      legacyIntent,
-      decision,
-      receipt: await persist(decision),
-      errorType: null,
-    };
-  } catch (error) {
-    return {
-      legacyIntent,
-      decision: null,
-      receipt: null,
-      errorType: error instanceof Error ? error.name : "UnknownError",
-    };
-  }
 }

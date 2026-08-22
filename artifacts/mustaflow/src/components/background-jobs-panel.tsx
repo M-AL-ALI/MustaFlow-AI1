@@ -10,10 +10,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { cn } from "@/lib/utils";
 
-const ACTIVE = new Set(["queued", "planning", "building", "needs_review"]);
+const ACTIVE = new Set(["queued", "answering", "planning", "building", "needs_review"]);
 
 function statusLabel(status: string): string {
   switch (status) {
+    case "answering":
+      return "Answering";
     case "planning":
       return "Planning";
     case "building":

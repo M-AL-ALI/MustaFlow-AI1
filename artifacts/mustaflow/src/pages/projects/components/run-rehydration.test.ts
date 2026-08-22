@@ -18,6 +18,7 @@ describe("run refresh rehydration", () => {
   });
 
   it("rehydrates a task paused for an existing inline question", () => {
+    expect(isRehydratableTaskStatus("answering")).toBe(true);
     expect(isRehydratableTaskStatus("needs_approval")).toBe(true);
     expect(isRehydratableTaskStatus("needs_review")).toBe(true);
     expect(isRehydratableTaskStatus("canceled")).toBe(false);

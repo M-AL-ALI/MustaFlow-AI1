@@ -1490,12 +1490,16 @@ export const ChatMessageInputAgentIdentity = {
 } as const;
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.
+ * Optional explicit intent override. New callers use the closed answer/clarify/plan/mutate/observe contract. Legacy controls remain accepted and map into that contract.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
 
 export const ChatMessageInputAgentIntent = {
+  answer: 'answer',
+  clarify: 'clarify',
+  mutate: 'mutate',
+  observe: 'observe',
   converse: 'converse',
   plan: 'plan',
   build: 'build',
@@ -1531,7 +1535,7 @@ export interface ChatMessageInput {
   background?: boolean;
   /** Optional visible executor override. New work should use planning or main; task is legacy compatibility only. */
   agentIdentity?: ChatMessageInputAgentIdentity;
-  /** Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean. */
+  /** Optional explicit intent override. New callers use the closed answer/clarify/plan/mutate/observe contract. Legacy controls remain accepted and map into that contract. */
   agentIntent?: ChatMessageInputAgentIntent;
   /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
   attachments?: ChatAttachment[];
@@ -1544,12 +1548,16 @@ export interface ChatMessageInput {
 }
 
 /**
- * The intent auto-detected or explicitly provided for this exchange.
+ * The authoritative persisted intent for this exchange. New responses use answer, clarify, plan, mutate, or observe; older values remain listed for compatibility.
  */
 export type ChatExchangeDetectedIntent = typeof ChatExchangeDetectedIntent[keyof typeof ChatExchangeDetectedIntent];
 
 
 export const ChatExchangeDetectedIntent = {
+  answer: 'answer',
+  clarify: 'clarify',
+  mutate: 'mutate',
+  observe: 'observe',
   converse: 'converse',
   plan: 'plan',
   build: 'build',
@@ -1566,7 +1574,7 @@ export const ChatExchangeDetectedIntent = {
 export interface ChatExchange {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
-  /** The intent auto-detected or explicitly provided for this exchange. */
+  /** The authoritative persisted intent for this exchange. New responses use answer, clarify, plan, mutate, or observe; older values remain listed for compatibility. */
   detectedIntent?: ChatExchangeDetectedIntent;
 }
 
@@ -1659,6 +1667,7 @@ export type AgentTaskStatus = typeof AgentTaskStatus[keyof typeof AgentTaskStatu
 
 export const AgentTaskStatus = {
   queued: 'queued',
+  answering: 'answering',
   planning: 'planning',
   building: 'building',
   testing: 'testing',
@@ -1901,6 +1910,7 @@ export type BackgroundJobStatus = typeof BackgroundJobStatus[keyof typeof Backgr
 
 export const BackgroundJobStatus = {
   queued: 'queued',
+  answering: 'answering',
   planning: 'planning',
   building: 'building',
   testing: 'testing',

@@ -11,6 +11,7 @@ export type BackgroundJobStatus = typeof BackgroundJobStatus[keyof typeof Backgr
 
 export const BackgroundJobStatus = {
   queued: 'queued',
+  answering: 'answering',
   planning: 'planning',
   building: 'building',
   testing: 'testing',

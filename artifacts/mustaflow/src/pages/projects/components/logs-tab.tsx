@@ -471,7 +471,7 @@ function TaskRow({
         <div className="mt-0.5 shrink-0">
           {task.status === "completed" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
           {task.status === "failed" && <XCircle className="h-4 w-4 text-destructive" />}
-          {["building", "planning", "testing"].includes(task.status) && (
+          {["answering", "building", "planning", "testing"].includes(task.status) && (
             <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
           )}
           {["queued", "canceled"].includes(task.status) && (

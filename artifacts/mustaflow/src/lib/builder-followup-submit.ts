@@ -2,6 +2,10 @@ import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/api-fetch";
 
 export type BuilderComposerIntent =
+  | "answer"
+  | "clarify"
+  | "mutate"
+  | "observe"
   | "converse"
   | "plan"
   | "build"
@@ -13,12 +17,22 @@ export type BuilderComposerIntent =
   | "fix_types"
   | "fix_lint";
 
+export type BuilderReceiptIntent = "answer" | "clarify" | "plan" | "mutate" | "observe";
+
 type LocalComposerIntent = "converse" | "plan" | "build" | null;
 
 export type BuilderSendIntentOptions = {
   planMode?: true;
-  agentIntent?: BuilderComposerIntent;
+  agentIntent?: BuilderReceiptIntent;
 };
+
+export function toBuilderReceiptIntent(intent: BuilderComposerIntent): BuilderReceiptIntent {
+  if (intent === "answer" || intent === "converse" || intent === "explain") return "answer";
+  if (intent === "clarify") return "clarify";
+  if (intent === "plan") return "plan";
+  if (intent === "observe" || intent === "debug" || intent === "review") return "observe";
+  return "mutate";
+}
 
 // ─── Credit cost types ────────────────────────────────────────────────────────
 
@@ -140,15 +154,16 @@ export function useBuilderCreditCosts(): BuilderCreditCosts {
  */
 export function mapIntentToSendOptions({
   intent,
-  hasImages,
+  hasImages: _hasImages,
 }: {
   intent: BuilderComposerIntent | undefined;
   hasImages: boolean;
 }): BuilderSendIntentOptions {
-  if (hasImages) return { agentIntent: "build" };
+  void _hasImages;
   if (!intent) return {};
-  if (intent === "plan") return { planMode: true, agentIntent: "plan" };
-  return { agentIntent: intent };
+  const receiptIntent = toBuilderReceiptIntent(intent);
+  if (receiptIntent === "plan") return { planMode: true, agentIntent: "plan" };
+  return { agentIntent: receiptIntent };
 }
 
 /**
@@ -167,11 +182,12 @@ export function resolveBuilderComposerIntent({
   localIntent: LocalComposerIntent;
   hasCompletedTask: boolean;
   routingAgentIdentity?: string | null;
-}): BuilderComposerIntent | undefined {
-  if (activeIntent) return activeIntent;
+}): BuilderReceiptIntent | undefined {
+  if (activeIntent) return toBuilderReceiptIntent(activeIntent);
   if (localIntent === "converse" || localIntent === "plan" || localIntent === "build") {
-    return localIntent;
+    return toBuilderReceiptIntent(localIntent);
   }
-  if (hasCompletedTask && routingAgentIdentity === "main") return "build";
+  void hasCompletedTask;
+  void routingAgentIdentity;
   return undefined;
 }

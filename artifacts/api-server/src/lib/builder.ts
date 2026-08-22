@@ -7754,33 +7754,37 @@ export async function runPythonRefinePipeline(args: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Intent classification — fast single-shot to detect converse / plan / build
+// Intent classification — one closed answer / clarify / plan / mutate / observe contract
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type IntentResult = {
-  intent: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+  intent: "answer" | "clarify" | "plan" | "mutate" | "observe";
+  /** What the pre-receipt router would have done, retained only for comparison logging. */
+  legacyIntent: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
   confidence: number;
   decisionSource: "deterministic_rule" | "classifier" | "classifier_fallback";
 };
 
 export const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder chat. Read the user's latest message in the context of the recent conversation and classify their true intent into exactly one of:
 
-- "converse": The user is asking a question, requesting an explanation, asking for advice, reacting to a previous result, pushing back on something you said, repeating or rephrasing an earlier question, expressing frustration or confusion, or just chatting about their app. This includes meta-conversation about how you behave ("why did you do that?", "you should understand me, not just keywords", "I asked the same thing"). Examples: "How does my auth flow work?", "What's the difference between X and Y?", "Explain the file structure", "So what happened?", "Why did that fail?", "What do you mean?", "Is this safe?", "Hmm", "ok", "thanks", "what's next?", "is it ready?", "no I meant…", "same question again", "you misunderstood".
+- "answer": The user is asking a question, requesting an explanation or advice, reacting to a previous result, or chatting about their app. No mutation is requested.
+- "clarify": The request is genuinely ambiguous and exactly one focused question is needed before any action can be chosen safely.
 - "plan": The user wants a structured plan, architecture overview, or design spec BEFORE building. Examples: "Plan me a dashboard", "Design the data model", "What should I build first?", "Create an architecture plan for..."
-- "build": The user is unambiguously instructing you to change the code right now — to create, modify, add, remove, fix, or refactor something concrete in the app. The message must contain a clear action directed at the app's code. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar", "Make it mobile-friendly", "Change the header color to blue".
+- "observe": The user asks to inspect, diagnose, review, test, verify, or explain observed project state without asking for a change.
+- "mutate": The user unambiguously instructs you to change code or project state now. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar".
 
 Reasoning principles (apply in order, BEFORE judging):
-1. If the message is a question (ends with "?", or starts with what/why/how/when/who/where/which/can/could/should/would/is/are/do/does/did) AND does not contain an explicit imperative to change the code → "converse".
-2. Short reactions, acknowledgments, emotions, or meta-comments about the conversation ("ok", "thanks", "hmm", "wait", "no", "that's wrong", "you didn't understand", "try again with explanation") → "converse" unless they also contain an explicit code-change instruction.
-3. Asking about a previous error, task result, or your behavior ("what happened?", "why did it fail?", "why did you build instead of answer?") → "converse". Do NOT treat this as "fix the last error" or "redo the build" unless the user explicitly says "fix it", "rebuild it", or "try again".
-4. **Repeat / rephrase detection**: If the user's current message is the same as, or a rephrasing of, something they already said and you responded to — especially if your previous response was a build report and they now seem to want an explanation instead — treat it as "converse". The user is course-correcting, not asking for another build.
-5. **Discussion mode**: If the message describes, theorizes, complains, philosophizes, or asks you to behave differently ("you should understand intent, not just keywords") → "converse".
-6. **Bug reports, problem descriptions, AND diagnostic requests are all "build"**: If the user describes a symptom OR asks the agent to investigate — "the app is not running", "it's broken", "find the issue", "open the logs", "check what's wrong", "look at the errors", "read the code", "investigate the crash", "debug this", "what's causing the problem", "examine the files" — classify as "build". The agent must read the actual files, identify the root cause, and fix it. It must not respond conversationally with guesses.
-7. **Run / test / execute / verify requests are always "build"**: If the user asks the agent to run, execute, perform, launch, verify, or validate something — "run a full test", "run the checks", "test the app", "run end-to-end tests", "verify everything works", "execute the tests", "run all checks", "validate the build", "run a full end-to-end test", "perform a test", "run it" — classify as "build". The agent must actually perform the action, not explain what would need to happen.
-8. "build" generally requires an explicit action verb (add/remove/change/fix/build/create/make/update/run/test/verify/execute/etc.) OR a problem description as described in rule 6. Being on-topic about the app without either is not enough.
-9. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
+1. A question or explanation request with no explicit change instruction is "answer".
+2. Short reactions and meta-comments are "answer" unless they contain an explicit change instruction.
+3. Asking about a previous error, result, or agent behavior is "answer" unless the user explicitly asks for a repair.
+4. A repeat or rephrase is "answer": the user is course-correcting, not requesting another build.
+5. Discussion about the product or the agent is "answer".
+6. Bug reports and diagnostic requests are "observe" unless the user explicitly asks to fix or change something.
+7. Run, test, inspect, and verify requests are "observe" when they ask for evidence only; they are "mutate" only when they explicitly request a repair or change.
+8. "mutate" requires an explicit change instruction. Being on-topic about the app is not enough.
+9. When genuinely torn between two intents, choose "clarify".
 
-Respond with ONLY valid JSON: {"intent": "converse"|"plan"|"build", "confidence": 0.0-1.0}
+Respond with ONLY valid JSON: {"intent": "answer"|"clarify"|"plan"|"mutate"|"observe", "confidence": 0.0-1.0}
 
 confidence should reflect how certain you are. Use < 0.7 only when the request is genuinely ambiguous between two intents.`;
 
@@ -7817,13 +7821,15 @@ const SHORT_REACTIONS = new Set([
 // build action verb — questions like "why isn't this fixed?" or "nothing is
 // fixed, why?" use the same vocabulary but are NOT imperatives.
 const STARTS_WITH_BUILD_IMPERATIVE =
-  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again|find|look\s+at|look\s+into|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|analyse|review|trace|test|run|execute|perform|verify|validate|launch|start|apply|confirm|ensure|complete|finish)\b/i;
+  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again|launch|start|apply|confirm|ensure|complete|finish)\b/i;
+const STARTS_WITH_OBSERVE_IMPERATIVE =
+  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(find|look\s+at|look\s+into|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|analyse|review|trace|test|run|execute|perform|verify|validate)\b/i;
+const STARTS_WITH_PLAN_IMPERATIVE =
+  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(plan|outline|architect|draft\s+(?:a\s+)?plan)\b/i;
 
-// Detect problem / bug reports AND diagnostic requests that are implicit fix
-// requests even without an explicit action verb. "The app is not running",
-// "it's broken", "find the issue", "open the logs" all mean "investigate the
-// files and fix this" — they must route to build so the agent has full file
-// access and runs a real read-fix loop rather than a conversational guess.
+// Detect problem / bug reports and diagnostic requests without an explicit
+// repair instruction. They route to observation so the agent can establish
+// evidence without silently turning the report into a mutation.
 const PROBLEM_REPORT_PATTERNS =
   /\b(not\s+(?:working|running|loading|opening|showing|displaying|rendering|responding|found)|doesn'?t\s+(?:work|load|open|run|show|display|respond|function)|isn'?t\s+(?:working|loading|running|opening|showing)|(?:app|page|site|button|form|link|feature|screen|component)\s+(?:is\s+)?(?:not\s+working|broken|blank|empty|crashed?|down|failing|bugged?)|(?:broken|crashed?|glitchy|bugged?)\s*(?:app|page|site)?|white\s+screen|blank\s+(?:screen|page)|nothing\s+(?:works?|happens?|loads?|shows?|displays?)|something(?:\s+is)?\s+(?:wrong|broken|off|not\s+right)|not\s+(?:able\s+to|working\s+at\s+all)|(?:there(?:\s+is|'s)\s+(?:a\s+)?(?:an\s+)?(?:error|bug|issue|problem|glitch))|(?:error|bug|issue|problem|glitch)\s+(?:in|with|on)\s+(?:the\s+)?(?:app|page|site|code)|(?:app|it)\s+(?:is\s+)?(?:not\s+)?(?:running|working)|(?:keeps?\s+(?:crashing|failing|breaking))|(?:can'?t|cannot)\s+(?:open|load|use|access|see|view|click)|(?:stuck|freezing|frozen|hangs?|hanged?)|(?:find|look\s+(?:at|into|for)|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|review|trace)\s+(?:the\s+)?(?:logs?|errors?|issues?|bugs?|problems?|console|output|crash|stacktrace|stack\s+trace|exception|warnings?|failures?|files?|code|cause|reason)|(?:the\s+)?(?:logs?|console)\s+(?:show|has|have|says?|shows?|contains?|reports?)|need\s+to\s+(?:find|fix|resolve|debug|diagnose|check|investigate)\s+(?:the\s+)?(?:issue|bug|error|problem|cause|reason)|what(?:'s|\s+is)\s+(?:wrong|the\s+(?:issue|problem|error|bug|cause)))\b/i;
 
@@ -7856,7 +7862,12 @@ function fastClassify(
 
   const normalized = trimmed.toLowerCase().replace(/[.!?…]+$/g, "");
   if (SHORT_REACTIONS.has(normalized)) {
-    return { intent: "converse", confidence: 0.95, decisionSource: "deterministic_rule" };
+    return {
+      intent: "answer",
+      legacyIntent: "converse",
+      confidence: 0.95,
+      decisionSource: "deterministic_rule",
+    };
   }
 
   // Developer-specific intents — check early so they take precedence over generic
@@ -7864,27 +7875,70 @@ function fastClassify(
   // descriptions) that don't look like direct code-change commands.
   if (!STARTS_WITH_BUILD_IMPERATIVE.test(trimmed) || trimmed.endsWith("?")) {
     if (hasFiles && DEBUG_PATTERNS.test(trimmed)) {
-      return { intent: "debug", confidence: 0.9, decisionSource: "deterministic_rule" };
+      return {
+        intent: "observe",
+        legacyIntent: "debug",
+        confidence: 0.9,
+        decisionSource: "deterministic_rule",
+      };
     }
     if (REFACTOR_PATTERNS.test(trimmed)) {
-      return { intent: "refactor", confidence: 0.9, decisionSource: "deterministic_rule" };
+      return {
+        intent: "mutate",
+        legacyIntent: "refactor",
+        confidence: 0.9,
+        decisionSource: "deterministic_rule",
+      };
     }
     if (REVIEW_PATTERNS.test(trimmed)) {
-      return { intent: "review", confidence: 0.9, decisionSource: "deterministic_rule" };
+      return {
+        intent: "observe",
+        legacyIntent: "review",
+        confidence: 0.9,
+        decisionSource: "deterministic_rule",
+      };
     }
     if (EXPLAIN_PATTERNS.test(trimmed)) {
-      return { intent: "explain", confidence: 0.9, decisionSource: "deterministic_rule" };
+      return {
+        intent: "answer",
+        legacyIntent: "explain",
+        confidence: 0.9,
+        decisionSource: "deterministic_rule",
+      };
     }
   }
 
   const isImperative = STARTS_WITH_BUILD_IMPERATIVE.test(trimmed);
+
+  if (STARTS_WITH_PLAN_IMPERATIVE.test(trimmed)) {
+    return {
+      intent: "plan",
+      legacyIntent: "plan",
+      confidence: 0.95,
+      decisionSource: "deterministic_rule",
+    };
+  }
+
+  if (STARTS_WITH_OBSERVE_IMPERATIVE.test(trimmed) && !BUILD_ACTION_VERBS.test(trimmed)) {
+    return {
+      intent: "observe",
+      legacyIntent: "build",
+      confidence: 0.95,
+      decisionSource: "deterministic_rule",
+    };
+  }
 
   // Strong build imperative ("Create the app please", "Add login", "Build it") —
   // route directly to the builder. The agentic loop owns the file work; there
   // is no reason to send "please create the app" through the LLM classifier
   // and risk a converse misroute that tells the user to start a new project.
   if (isImperative && !trimmed.endsWith("?")) {
-    return { intent: "build", confidence: 0.95, decisionSource: "deterministic_rule" };
+    return {
+      intent: "mutate",
+      legacyIntent: "build",
+      confidence: 0.95,
+      decisionSource: "deterministic_rule",
+    };
   }
 
   // Strong signal: any message ending in "?" that is not a direct imperative
@@ -7892,12 +7946,16 @@ function fastClassify(
   // inside it. ("Why isn't it fixed?", "Nothing changed, why?", "How do I
   // make this work?") all → converse.
   if (trimmed.endsWith("?") && !isImperative) {
-    return { intent: "converse", confidence: 0.95, decisionSource: "deterministic_rule" };
+    return {
+      intent: "answer",
+      legacyIntent: "converse",
+      confidence: 0.95,
+      decisionSource: "deterministic_rule",
+    };
   }
 
-  // Implicit fix request: the message describes a problem/bug/error without
-  // using an explicit action verb. These are never conversation — the user
-  // wants the agent to investigate the files and fix the issue.
+  // Problem report: investigate and establish evidence. Mutation requires a
+  // separate explicit repair instruction.
   // Only applies when there are already files (hasFiles) so we don't fire on
   // vague initial prompts like "there's an issue" before a project exists.
   if (
@@ -7906,7 +7964,12 @@ function fastClassify(
     !QUESTION_STARTERS.test(trimmed) &&
     PROBLEM_REPORT_PATTERNS.test(trimmed)
   ) {
-    return { intent: "build", confidence: 0.9, decisionSource: "deterministic_rule" };
+    return {
+      intent: "observe",
+      legacyIntent: "build",
+      confidence: 0.9,
+      decisionSource: "deterministic_rule",
+    };
   }
 
   // Repeat / rephrase detection: if the user is re-sending the same (or very
@@ -7924,7 +7987,12 @@ function fastClassify(
       for (const prior of priorUserTurns) {
         if (!prior) continue;
         if (prior === currentNorm) {
-          return { intent: "converse", confidence: 0.95, decisionSource: "deterministic_rule" };
+          return {
+            intent: "answer",
+            legacyIntent: "converse",
+            confidence: 0.95,
+            decisionSource: "deterministic_rule",
+          };
         }
         // High-overlap rephrase: share most non-trivial tokens with a prior
         // user turn (Jaccard ≥ 0.6 on 3+ char tokens).
@@ -7935,7 +8003,12 @@ function fastClassify(
           for (const w of a) if (b.has(w)) inter++;
           const union = a.size + b.size - inter;
           if (union > 0 && inter / union >= 0.6) {
-            return { intent: "converse", confidence: 0.9, decisionSource: "deterministic_rule" };
+            return {
+              intent: "answer",
+              legacyIntent: "converse",
+              confidence: 0.9,
+              decisionSource: "deterministic_rule",
+            };
           }
         }
       }
@@ -7946,7 +8019,12 @@ function fastClassify(
   // are not direct imperatives are also reliably converse.
   const wordCount = trimmed.split(/\s+/).length;
   if (QUESTION_STARTERS.test(trimmed) && !isImperative && wordCount <= 20) {
-    return { intent: "converse", confidence: 0.9, decisionSource: "deterministic_rule" };
+    return {
+      intent: "answer",
+      legacyIntent: "converse",
+      confidence: 0.9,
+      decisionSource: "deterministic_rule",
+    };
   }
 
   return null;
@@ -8003,27 +8081,47 @@ export async function runIntentClassifierPipeline(
 
     const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
     const parsed = JSON.parse(raw) as { intent?: string; confidence?: number };
-    const intent =
-      parsed.intent === "converse" || parsed.intent === "plan" || parsed.intent === "build"
+    const intent: IntentResult["intent"] =
+      parsed.intent === "answer" ||
+      parsed.intent === "clarify" ||
+      parsed.intent === "plan" ||
+      parsed.intent === "mutate" ||
+      parsed.intent === "observe"
         ? parsed.intent
-        : "converse";
+        : "clarify";
     const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.8;
 
-    // Bias toward converse on genuine ambiguity: an unwanted build is far
-    // more disruptive than an unwanted explanation. If the model picked
-    // "build" with low confidence and the message doesn't actually contain
-    // a build-action verb, downgrade to converse.
-    if (intent === "build" && confidence < 0.7 && !BUILD_ACTION_VERBS.test(userPrompt)) {
-      return { intent: "converse", confidence: 0.7, decisionSource: "classifier" };
+    if (confidence < 0.7) {
+      return {
+        intent: "clarify",
+        legacyIntent: intent === "mutate" ? "build" : intent === "plan" ? "plan" : "converse",
+        confidence,
+        decisionSource: "classifier",
+      };
     }
-    return { intent, confidence, decisionSource: "classifier" };
+    return {
+      intent,
+      legacyIntent:
+        intent === "mutate" || intent === "observe"
+          ? "build"
+          : intent === "plan"
+            ? "plan"
+            : "converse",
+      confidence,
+      decisionSource: "classifier",
+    };
   } catch (err) {
     // Safer fallback than "always build": if we can't classify and the
     // message doesn't even contain a build verb, treat it as conversation.
     logger.warn({ err }, "Intent classifier failed, falling back");
-    const fallbackIntent: IntentResult["intent"] =
+    const legacyIntent: IntentResult["legacyIntent"] =
       hasFiles && BUILD_ACTION_VERBS.test(userPrompt) ? "build" : "converse";
-    return { intent: fallbackIntent, confidence: 0.6, decisionSource: "classifier_fallback" };
+    return {
+      intent: "clarify",
+      legacyIntent,
+      confidence: 0.6,
+      decisionSource: "classifier_fallback",
+    };
   }
 }
 

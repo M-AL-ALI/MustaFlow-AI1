@@ -49,7 +49,7 @@ import {
 import { publishTaskEvent } from "../lib/event-bus";
 import {
   intentReceiptEnforcementRequested,
-  runIntentShadow,
+  judgeZeroIntent,
   type ZeroIntentExplicitControl,
 } from "../lib/zero-intent-judge";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
@@ -57,30 +57,10 @@ import type { IntentReceipt } from "@workspace/ora-contracts";
 
 const router: IRouter = Router();
 
-type LegacyResolvedIntent =
-  | "converse"
-  | "plan"
-  | "build"
-  | "debug"
-  | "refactor"
-  | "review"
-  | "explain"
-  | "fix_tests"
-  | "fix_types"
-  | "fix_lint"
-  | "image_generate";
-
-function legacyIntentCategory(intent: LegacyResolvedIntent): IntentReceipt["intent"] {
-  if (intent === "plan") return "plan";
-  if (intent === "debug" || intent === "review") return "observe";
-  if (intent === "converse" || intent === "explain") return "answer";
-  return "mutate";
-}
-
-async function persistShadowIntent(input: {
+async function persistAuthoritativeIntent(input: {
   projectId: number;
   requestId: string;
-  legacyIntent: LegacyResolvedIntent;
+  legacyIntent(): string;
   explicitControl?: ZeroIntentExplicitControl;
   planMode: boolean;
   approvedPlanStep: boolean;
@@ -89,38 +69,30 @@ async function persistShadowIntent(input: {
   conversationTurnCount: number;
   fileCount: number;
   classify(): Promise<IntentResult>;
-}): Promise<IntentReceipt | null> {
-  const outcome = await runIntentShadow(input.legacyIntent, input, (decision) =>
-    intentReceiptStore.persist(input.projectId, input.requestId, decision),
-  );
-  if (outcome.receipt && outcome.decision) {
-    const { decision, receipt } = outcome;
-    logger.info(
-      {
-        projectId: input.projectId,
-        legacyIntent: legacyIntentCategory(input.legacyIntent),
-        shadowIntent: decision.intent,
-        decidingSource: decision.decidingSource,
-        reasonCode: decision.reasonCode,
-        diverged: legacyIntentCategory(input.legacyIntent) !== decision.intent,
-        attachmentCount: input.attachments.length,
-        conversationTurnCount: input.conversationTurnCount,
-        fileCount: input.fileCount,
-        enforcementRequested: intentReceiptEnforcementRequested(),
-      },
-      "zero-intent shadow decision",
-    );
-    return receipt;
+}): Promise<IntentReceipt> {
+  const replay = await intentReceiptStore.find(input.projectId, input.requestId);
+  if (replay) {
+    return replay;
   }
-  logger.warn(
+  const decision = await judgeZeroIntent(input);
+  const receipt = await intentReceiptStore.persist(input.projectId, input.requestId, decision);
+  const legacyIntent = input.legacyIntent();
+  logger.info(
     {
       projectId: input.projectId,
-      errorType: outcome.errorType,
+      legacyIntent,
+      shadowIntent: decision.intent,
+      decidingSource: decision.decidingSource,
+      reasonCode: decision.reasonCode,
+      diverged: legacyIntent !== decision.intent,
+      attachmentCount: input.attachments.length,
+      conversationTurnCount: input.conversationTurnCount,
+      fileCount: input.fileCount,
       enforcementRequested: intentReceiptEnforcementRequested(),
     },
-    "zero-intent shadow receipt unavailable",
+    "zero-intent authoritative decision",
   );
-  return null;
+  return receipt;
 }
 
 function checkpointIdFromPlan(plan: Record<string, unknown> | null): number | null {
@@ -255,8 +227,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     brainstormContext,
     deepReasoning: requestedDeepReasoning,
   } = parsed.data;
-  let { content } = parsed.data;
-  const originalContent = content;
+  const { content } = parsed.data;
 
   // Idempotency dedup — if this key was already processed, return the cached result
   if (idempotencyKey) {
@@ -289,13 +260,6 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     (a) => a.kind === "image" && typeof a.url === "string",
   );
 
-  // Screenshot-to-code: if an image is attached with no meaningful text prompt,
-  // inject a sensible default so the build pipeline knows what to do.
-  const SCREENSHOT_DEFAULT_PROMPT =
-    "Replicate this UI as a React + Tailwind component, matching the layout, colours, spacing, and typography exactly.";
-  if (imageAttachments.length > 0 && content.trim().length < 10) {
-    content = SCREENSHOT_DEFAULT_PROMPT + (content.trim() ? " " + content.trim() : "");
-  }
   // Brainstorm context — if the user resolved a brainstorm session before sending
   // this message, attach the conversation thread as supplementary context so the
   // builder AI understands the nuances, priorities, and edge cases discussed.
@@ -366,21 +330,6 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     }))
     .slice(-8);
 
-  // Intent detection — resolve the routing intent for this message.
-  // Priority: image attachments (always build) > explicit agentIntent override > planMode > classifier.
-  type ResolvedIntent =
-    | "converse"
-    | "plan"
-    | "build"
-    | "debug"
-    | "refactor"
-    | "review"
-    | "explain"
-    | "fix_tests"
-    | "fix_types"
-    | "fix_lint"
-    | "image_generate";
-
   // Pattern for detecting explicit image generation requests in Ora chat.
   // Only fires when there is no explicit agentIntent override and planMode is off.
   //
@@ -404,100 +353,65 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   const IMAGE_GENERATE_PATTERNS =
     /\b(?:generate|draw|render|produce|create|make|design|show\s+me)\s+(?:(?:a|an|me|us|some|my|the|few|several)\s+){0,3}(?:logo|logos|banner|banners|icon|icons|thumbnail|thumbnails|avatar|avatars|hero\s+images?|images?|pictures?|illustrations?|photos?|wallpapers?|background\s+images?|cover\s+(?:art|images?)|mockups?|posters?|flyers?|badges?|graphics?|visuals?|artworks?|artwork|paintings?|portraits?|murals?|watercolors?|sketches?)\b(?!\s+(?:component|element|widget|button|tab|panel|section|function|class|style|color|handler|hook|hooks|template|route|page|view|modal|menu|form|input|type|types|prop|props|state|util|utils|helper|helpers|module|library|lib|file|folder|dir|container|context|provider|reducer|action|slice|store|service|controller|model|schema|interface|enum|const|var|let))|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?)\s+(?:of|showing|depicting|featuring|with)\b|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:photorealistic\s+images?|ai\s+art)\b/i;
 
-  // eslint-disable-next-line no-useless-assignment
-  let resolvedIntent: ResolvedIntent = "build";
-  let intentConfidence = 1.0;
-  let classifiedForShadow: IntentResult | null = null;
-
-  if (imageAttachments.length > 0) {
-    // Screenshot-to-code: image attachments unconditionally route to build/refine —
-    // skip classifier AND ignore any explicit intent/planMode from the client so the
-    // vision model always runs (plan/converse don't support image inputs).
-    resolvedIntent = "build";
-    intentConfidence = 1.0;
-  } else if (stagedBackgroundPlanStep) {
-    // A decomposed plan step is an execution request, not another request to
-    // plan. Pinning the intent also prevents the general classifier from
-    // treating the generated "[Step n/m: ...]" wrapper as conversational text.
-    resolvedIntent = "build";
-    intentConfidence = 1.0;
-  } else if (
-    explicitAgentIntent === "converse" ||
-    explicitAgentIntent === "plan" ||
-    explicitAgentIntent === "build" ||
-    explicitAgentIntent === "debug" ||
-    explicitAgentIntent === "refactor" ||
-    explicitAgentIntent === "review" ||
-    explicitAgentIntent === "explain" ||
-    explicitAgentIntent === "fix_tests" ||
-    explicitAgentIntent === "fix_types" ||
-    explicitAgentIntent === "fix_lint"
-  ) {
-    // Explicit client override takes second priority — always honor it,
-    // even when the Plan Mode toggle is on (e.g. "Apply to app" must build).
-    resolvedIntent = explicitAgentIntent as ResolvedIntent;
-  } else if (planMode) {
-    resolvedIntent = "plan";
-  } else {
-    // Check for explicit image generation requests before the general classifier.
-    // This prevents image prompts from being misrouted to build/refine.
-    if (IMAGE_GENERATE_PATTERNS.test(content)) {
-      resolvedIntent = "image_generate";
-    } else {
-      // Run lightweight auto-classifier (gpt-5-nano) to detect intent
-      const hasFiles = currentProjectFiles.length > 0;
-      try {
-        const classified = await runIntentClassifierPipeline(
-          content,
-          conversationHistory,
-          hasFiles,
-        );
-        resolvedIntent = classified.intent;
-        intentConfidence = classified.confidence;
-        classifiedForShadow = classified;
-      } catch (err) {
-        logger.warn({ err }, "Intent classifier failed, defaulting to build");
-        resolvedIntent = hasFiles ? "build" : "converse";
-      }
-      // Route ALL ambiguous requests to the clarifying pipeline regardless of primary intent.
-      // This prevents accidental build/plan runs when the user's meaning is unclear.
-      if (intentConfidence < 0.7) {
-        resolvedIntent = "converse"; // will be handled with isAmbiguous=true
-      }
-    }
+  const imageGenerationRequested =
+    explicitAgentIntent === undefined && !planMode && IMAGE_GENERATE_PATTERNS.test(content);
+  let classifiedForReceipt: IntentResult | null = null;
+  const classify = async (): Promise<IntentResult> => {
+    classifiedForReceipt ??= await runIntentClassifierPipeline(
+      content,
+      conversationHistory,
+      currentProjectFiles.length > 0,
+    );
+    return classifiedForReceipt;
+  };
+  let intentReceipt: IntentReceipt;
+  try {
+    intentReceipt = await persistAuthoritativeIntent({
+      projectId: project.id,
+      requestId: idempotencyKey ?? randomUUID(),
+      legacyIntent: () => {
+        if (imageAttachments.length > 0 || stagedBackgroundPlanStep || imageGenerationRequested) {
+          return "build";
+        }
+        if (explicitAgentIntent) {
+          return explicitAgentIntent;
+        }
+        if (planMode) return "plan";
+        return classifiedForReceipt?.legacyIntent ?? "converse";
+      },
+      explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
+      planMode: Boolean(planMode),
+      approvedPlanStep: Boolean(stagedBackgroundPlanStep),
+      imageGenerationRequested,
+      attachments,
+      conversationTurnCount: conversationHistory.length,
+      fileCount: currentProjectFiles.length,
+      classify,
+    });
+  } catch (error) {
+    if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
+    logger.error(
+      { projectId: project.id, errorType: error instanceof Error ? error.name : "UnknownError" },
+      "zero-intent authoritative receipt unavailable",
+    );
+    res.status(503).json({
+      error: "I couldn't safely determine what to do with that request. Please try again.",
+      code: "intent_receipt_unavailable",
+    });
+    return;
   }
-
-  const shadowReceipt = await persistShadowIntent({
-    projectId: project.id,
-    requestId: idempotencyKey ?? randomUUID(),
-    legacyIntent: resolvedIntent,
-    explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
-    planMode: Boolean(planMode),
-    approvedPlanStep: Boolean(stagedBackgroundPlanStep),
-    imageGenerationRequested: resolvedIntent === "image_generate",
-    attachments,
-    conversationTurnCount: conversationHistory.length,
-    fileCount: currentProjectFiles.length,
-    classify: () =>
-      classifiedForShadow
-        ? Promise.resolve(classifiedForShadow)
-        : runIntentClassifierPipeline(
-            originalContent,
-            conversationHistory,
-            currentProjectFiles.length > 0,
-          ),
-  });
+  const resolvedIntent = intentReceipt.intent;
 
   // Effective planMode — true when explicitly toggled OR when intent classifier auto-routes to plan.
   // This ensures assistant messages are stored with planMode=true so the plan-card UI renders.
-  const effectivePlanMode = planMode || resolvedIntent === "plan";
+  const effectivePlanMode = resolvedIntent === "plan";
 
   // Provisioning gate: prevent build intents on agentic projects that have not
   // finished provisioning. Conversational intents (converse, plan, debug,
   // refactor, review, explain) are always allowed — they never write to the
   // container. We also allow when provisioningStatus is null / 'idle' so that
   // static and legacy projects are never gated.
-  const needsContainer = resolvedIntent === "build" || runInBackground;
+  const needsContainer = resolvedIntent === "mutate" || runInBackground;
   if (needsContainer) {
     const bMode = (project as unknown as { builderMode?: string | null }).builderMode;
     const pStatus = (project as unknown as { provisioningStatus?: string | null })
@@ -532,25 +446,23 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       planMode: effectivePlanMode,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       origin: messageOrigin,
-      intentReceiptId: shadowReceipt?.receiptId,
+      intentReceiptId: intentReceipt.receiptId,
     })
     .returning();
   if (!userMessage) {
     res.status(500).json({ error: "Failed to save message" });
     return;
   }
-  if (shadowReceipt) {
-    try {
-      await intentReceiptStore.linkMessage(shadowReceipt.receiptId, userMessage.id);
-    } catch (error) {
-      logger.warn(
-        {
-          projectId: project.id,
-          errorType: error instanceof Error ? error.name : "UnknownError",
-        },
-        "zero-intent shadow message link unavailable",
-      );
-    }
+  try {
+    await intentReceiptStore.linkMessage(intentReceipt.receiptId, userMessage.id);
+  } catch (error) {
+    logger.warn(
+      {
+        projectId: project.id,
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      },
+      "zero-intent authoritative message link unavailable",
+    );
   }
 
   let assistantContent: string;
@@ -565,13 +477,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     explain: (await import("../lib/builder")).EXPLAIN_SYSTEM_PROMPT,
   };
 
-  if (
-    resolvedIntent === "converse" ||
-    resolvedIntent === "debug" ||
-    resolvedIntent === "refactor" ||
-    resolvedIntent === "review" ||
-    resolvedIntent === "explain"
-  ) {
+  if (resolvedIntent === "answer" || resolvedIntent === "clarify" || resolvedIntent === "observe") {
     // ── Conversational / developer-intent path ───────────────────────────────
     // Creates a lightweight task record (kind="converse") for history tracking.
     // No files are written, no build report is generated.
@@ -581,7 +487,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     if (converseOwner) {
       const deduction = await deductCreditsAtomic(converseOwner, 1, {
         type: "converse",
-        description: `${resolvedIntent !== "converse" ? resolvedIntent.charAt(0).toUpperCase() + resolvedIntent.slice(1) : "Assistant chat"} — project ${project.id}`,
+        description: `${resolvedIntent === "observe" ? "Project observation" : resolvedIntent === "clarify" ? "Clarifying question" : "Assistant chat"} — project ${project.id}`,
         projectId: project.id,
       });
       if ("insufficient" in deduction) {
@@ -592,16 +498,21 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       }
     }
 
-    const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
+    const isAmbiguous = resolvedIntent === "clarify";
     const systemPromptOverride =
-      resolvedIntent !== "converse" ? DEVELOPER_INTENT_SYSTEM_PROMPTS[resolvedIntent] : undefined;
+      explicitAgentIntent === "debug" ||
+      explicitAgentIntent === "refactor" ||
+      explicitAgentIntent === "review" ||
+      explicitAgentIntent === "explain"
+        ? DEVELOPER_INTENT_SYSTEM_PROMPTS[explicitAgentIntent]
+        : undefined;
     const [converseTask] = await db
       .insert(agentTasksTable)
       .values({
         projectId: project.id,
         title: `Chat: ${content.slice(0, 60)}`,
         kind: "converse",
-        status: "building",
+        status: "answering",
         prompt: content,
         agentIdentity: "main",
         origin: messageOrigin,
@@ -653,7 +564,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         plan = {
           kind: "converse",
           taskId,
-          intent: resolvedIntent !== "converse" ? resolvedIntent : undefined,
+          intent: resolvedIntent,
           streaming: true,
         } as unknown as Record<string, unknown>;
       }
@@ -664,7 +575,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         intent: resolvedIntent,
         userPrompt: content,
         assistantSummary: converseResult.markdown,
-        category: resolvedIntent === "converse" ? "conversation" : resolvedIntent,
+        category: resolvedIntent === "answer" ? "conversation" : resolvedIntent,
         tags: ["chat", resolvedIntent],
       });
     } catch (err) {
@@ -678,7 +589,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       assistantContent = `I wasn't able to answer that: ${msg}`;
       plan = { kind: "error", message: msg } as unknown as Record<string, unknown>;
     }
-  } else if (resolvedIntent === "image_generate") {
+  } else if (imageGenerationRequested) {
     // ── Async image generation via job queue ──────────────────────────────────
     // ISOLATION: uses dynamic imports to avoid coupling to the builder pipeline.
     // enqueueImageJob handles: safety check → rate limit check → credit deduction
@@ -868,7 +779,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
     // fix_tests intent: prepend a structured test-fix loop instruction so the
     // agent starts by running tests rather than guessing what to fix.
-    if (resolvedIntent === "fix_tests") {
+    if (explicitAgentIntent === "fix_tests") {
       const userContext = userPromptWithContext.trim();
       const fixInstruction =
         `[TASK: Fix Failing Tests]\n` +
@@ -885,7 +796,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
     // fix_types intent: prepend a structured TypeScript-fix loop instruction so
     // the agent starts by running tsc rather than guessing what to fix.
-    if (resolvedIntent === "fix_types") {
+    if (explicitAgentIntent === "fix_types") {
       const userContext = userPromptWithContext.trim();
       const fixInstruction =
         `[TASK: Fix TypeScript Errors]\n` +
@@ -902,7 +813,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
     // fix_lint intent: prepend a structured ESLint-fix loop instruction so the
     // agent starts by running eslint rather than guessing what to fix.
-    if (resolvedIntent === "fix_lint") {
+    if (explicitAgentIntent === "fix_lint") {
       const userContext = userPromptWithContext.trim();
       const fixInstruction =
         `[TASK: Fix Lint Violations]\n` +
@@ -1119,10 +1030,17 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           >)
         : ({ kind: "task-done", taskId: task.id } as unknown as Record<string, unknown>);
       if (refreshed?.report) {
+        plan = { ...plan, intent: resolvedIntent };
         const checkpointId = checkpointIdFromPlan(plan);
         const [completionMessage] = await db
           .update(chatMessagesTable)
-          .set({ origin: messageOrigin, checkpointId })
+          .set({
+            origin: messageOrigin,
+            checkpointId,
+            plan: sql`COALESCE(${chatMessagesTable.plan}, '{}'::jsonb) || ${JSON.stringify({
+              intent: resolvedIntent,
+            })}::jsonb`,
+          })
           .where(
             sql`id = (
               SELECT id FROM chat_messages
@@ -1209,7 +1127,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     })();
   });
 
-  const checkpointId = checkpointIdFromPlan(plan);
+  const planWithIntent = { ...(plan ?? {}), intent: resolvedIntent };
+  const checkpointId = checkpointIdFromPlan(planWithIntent);
   const [insertedAssistantMessage] = persistedAssistantMessage
     ? [persistedAssistantMessage]
     : await db
@@ -1220,7 +1139,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           content: assistantContent,
           agentMode: mode,
           planMode: effectivePlanMode,
-          plan: plan ?? undefined,
+          plan: planWithIntent,
           origin: messageOrigin,
           checkpointId,
         })
@@ -1417,14 +1336,16 @@ router.get(
 /**
  * POST /projects/:id/messages/stream
  *
- * SSE endpoint for conversational (converse-intent) messages.
+ * SSE endpoint for answer, clarify, and observe messages.
  * Streams OpenAI tokens word-by-word so the UI feels instant.
  *
  * Event types emitted:
  *   {"type":"session","streamSessionId":"…"}  — first event; use for reconnect/resume
+ *   {"type":"intent","intent":"answer"|"clarify"|"observe","receiptId":N}
  *   {"type":"token","content":"…"}   — incremental text chunk
  *   {"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}  — stream complete
- *   {"type":"fallback","intent":"build"|"plan"}  — not a converse message; client should
+ *   {"type":"fallback","intent":"mutate"|"plan"}  — regular endpoint owns execution;
+ *                                                    the client should
  *                                                    re-send via the regular POST endpoint
  *   {"type":"error","message":"…"}   — something went wrong
  */
@@ -1509,54 +1430,6 @@ router.post(
       idempotencyStore.set(streamIdempotencyKey, { status: "in-flight", timestamp: Date.now() });
     }
 
-    // Gate all converse-family intents (converse, debug, refactor, review, explain) behind a
-    // credit check BEFORE SSE headers are flushed so we can still return a proper HTTP 402.
-    const converseIntents = ["converse", "debug", "refactor", "review", "explain"] as const;
-    if (converseIntents.includes(explicitAgentIntent as (typeof converseIntents)[number])) {
-      const converseOwner = req.userId ?? project.ownerId;
-      if (converseOwner) {
-        const intentLabel =
-          explicitAgentIntent && explicitAgentIntent !== "converse"
-            ? explicitAgentIntent.charAt(0).toUpperCase() + explicitAgentIntent.slice(1)
-            : "Assistant chat";
-        const deduction = await deductCreditsAtomic(converseOwner, 1, {
-          type: "converse",
-          description: `${intentLabel} — project ${project.id}`,
-          projectId: project.id,
-        });
-        if ("insufficient" in deduction) {
-          if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
-          res.status(402).json({
-            error: "Insufficient credits. Top up in Billing to continue.",
-          });
-          return;
-        }
-      }
-    }
-
-    // Set SSE headers before any await so the client sees the stream start quickly
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    // Track client disconnect so we can skip DB writes on abort
-    const abortController = new AbortController();
-    req.on("close", () => {
-      abortController.abort();
-    });
-
-    // Create a stream session for resume support
-    const { sessionId: streamSessionId, session: streamSession } = createStreamSession();
-
-    const sendEvent = (data: Record<string, unknown>): void => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-
-    // Emit the session ID as the very first event so the client can resume if dropped
-    sendEvent({ type: "session", streamSessionId });
-
     // Load project files + recent conversation history
     const currentProjectFiles = await db
       .select({
@@ -1578,111 +1451,103 @@ router.post(
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
       .slice(-8);
 
-    // Intent detection
-    type StreamResolvedIntent =
-      | "converse"
-      | "plan"
-      | "build"
-      | "debug"
-      | "refactor"
-      | "review"
-      | "explain";
-    // eslint-disable-next-line no-useless-assignment
-    let resolvedIntent: StreamResolvedIntent = "build";
-    let intentConfidence = 1.0;
-    let classifiedForShadow: IntentResult | null = null;
-
-    if (
-      explicitAgentIntent === "converse" ||
-      explicitAgentIntent === "plan" ||
-      explicitAgentIntent === "build" ||
-      explicitAgentIntent === "debug" ||
-      explicitAgentIntent === "refactor" ||
-      explicitAgentIntent === "review" ||
-      explicitAgentIntent === "explain" ||
-      explicitAgentIntent === "fix_tests" ||
-      explicitAgentIntent === "fix_types" ||
-      explicitAgentIntent === "fix_lint"
-    ) {
-      // fix_tests / fix_types / fix_lint are not converse-family intents — treat
-      // them as build so the streaming route emits a fallback event and the
-      // regular endpoint runs the full agentic loop with the prompt transformation.
-      resolvedIntent =
-        explicitAgentIntent === "fix_tests" ||
-        explicitAgentIntent === "fix_types" ||
-        explicitAgentIntent === "fix_lint"
-          ? "build"
-          : (explicitAgentIntent as StreamResolvedIntent);
-    } else if (planMode) {
-      resolvedIntent = "plan";
-    } else {
-      const hasFiles = currentProjectFiles.length > 0;
-      try {
-        const classified = await runIntentClassifierPipeline(
-          content,
-          conversationHistory,
-          hasFiles,
-        );
-        resolvedIntent = classified.intent as StreamResolvedIntent;
-        intentConfidence = classified.confidence;
-        classifiedForShadow = classified;
-      } catch (err) {
-        logger.warn({ err }, "Intent classifier failed in stream route, defaulting");
-        resolvedIntent = hasFiles ? "build" : "converse";
-      }
-      if (intentConfidence < 0.7) {
-        resolvedIntent = "converse";
-      }
-    }
-
-    const isConverseFamily =
-      resolvedIntent === "converse" ||
-      resolvedIntent === "debug" ||
-      resolvedIntent === "refactor" ||
-      resolvedIntent === "review" ||
-      resolvedIntent === "explain";
-
-    // Non-converse: tell client to fall back to the regular endpoint.
-    // Clear the in-flight entry so the regular-endpoint call with the same
-    // idempotency key is not blocked by the 409 guard.
-    if (!isConverseFamily) {
+    let classifiedForReceipt: IntentResult | null = null;
+    const classify = async (): Promise<IntentResult> => {
+      classifiedForReceipt ??= await runIntentClassifierPipeline(
+        content,
+        conversationHistory,
+        currentProjectFiles.length > 0,
+      );
+      return classifiedForReceipt;
+    };
+    let intentReceipt: IntentReceipt;
+    try {
+      intentReceipt = await persistAuthoritativeIntent({
+        projectId: project.id,
+        requestId: streamIdempotencyKey ?? randomUUID(),
+        legacyIntent: () =>
+          explicitAgentIntent
+            ? explicitAgentIntent
+            : planMode
+              ? "plan"
+              : (classifiedForReceipt?.legacyIntent ?? "converse"),
+        explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
+        planMode: Boolean(planMode),
+        approvedPlanStep: false,
+        imageGenerationRequested: false,
+        attachments,
+        conversationTurnCount: conversationHistory.length,
+        fileCount: currentProjectFiles.length,
+        classify,
+      });
+    } catch (error) {
       if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
-      sendEvent({ type: "fallback", intent: resolvedIntent });
+      logger.error(
+        { projectId: project.id, errorType: error instanceof Error ? error.name : "UnknownError" },
+        "zero-intent authoritative stream receipt unavailable",
+      );
+      res.status(503).json({
+        error: "I couldn't safely determine what to do with that request. Please try again.",
+        code: "intent_receipt_unavailable",
+      });
+      return;
+    }
+    const resolvedIntent = intentReceipt.intent;
+
+    // The receipt is authoritative before any route dispatch. Planning and mutation
+    // requests fall back to the regular endpoint, which reuses this exact receipt.
+    if (resolvedIntent === "plan" || resolvedIntent === "mutate") {
+      if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(`data: ${JSON.stringify({ type: "fallback", intent: resolvedIntent })}\n\n`);
       res.end();
       return;
     }
 
-    const shadowReceipt = await persistShadowIntent({
-      projectId: project.id,
-      requestId: streamIdempotencyKey ?? randomUUID(),
-      legacyIntent: resolvedIntent,
-      explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
-      planMode: Boolean(planMode),
-      approvedPlanStep: false,
-      imageGenerationRequested: false,
-      attachments,
-      conversationTurnCount: conversationHistory.length,
-      fileCount: currentProjectFiles.length,
-      classify: () =>
-        classifiedForShadow
-          ? Promise.resolve(classifiedForShadow)
-          : runIntentClassifierPipeline(
-              content,
-              conversationHistory,
-              currentProjectFiles.length > 0,
-            ),
+    const converseOwner = req.userId ?? project.ownerId;
+    if (converseOwner) {
+      const deduction = await deductCreditsAtomic(converseOwner, 1, {
+        type: "converse",
+        description: `${resolvedIntent === "observe" ? "Project observation" : resolvedIntent === "clarify" ? "Clarifying question" : "Assistant chat"} — project ${project.id}`,
+        projectId: project.id,
+      });
+      if ("insufficient" in deduction) {
+        if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
+        res.status(402).json({
+          error: "Insufficient credits. Top up in Billing to continue.",
+        });
+        return;
+      }
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const abortController = new AbortController();
+    req.on("close", () => {
+      abortController.abort();
     });
 
-    const effectivePlanMode = planMode;
-    const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
-    const streamDeveloperIntentPrompts: Record<string, string> = {
-      debug: (await import("../lib/builder")).DEBUG_SYSTEM_PROMPT,
-      refactor: (await import("../lib/builder")).REFACTOR_SYSTEM_PROMPT,
-      review: (await import("../lib/builder")).REVIEW_SYSTEM_PROMPT,
-      explain: (await import("../lib/builder")).EXPLAIN_SYSTEM_PROMPT,
+    const { sessionId: streamSessionId, session: streamSession } = createStreamSession();
+    const sendEvent = (data: Record<string, unknown>): void => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
-    const _streamSystemPromptOverride =
-      resolvedIntent !== "converse" ? streamDeveloperIntentPrompts[resolvedIntent] : undefined;
+    sendEvent({ type: "session", streamSessionId });
+    sendEvent({
+      type: "intent",
+      intent: resolvedIntent,
+      receiptId: intentReceipt.receiptId,
+    });
+
+    const effectivePlanMode = false;
+    const isAmbiguous = resolvedIntent === "clarify";
 
     // Save user message
     const streamMessageOrigin =
@@ -1699,23 +1564,21 @@ router.post(
           planMode: effectivePlanMode,
           attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
           origin: streamMessageOrigin,
-          intentReceiptId: shadowReceipt?.receiptId,
+          intentReceiptId: intentReceipt.receiptId,
         })
         .returning();
       if (!userMessage) throw new Error("Failed to save user message");
       userMessageId = userMessage.id;
-      if (shadowReceipt) {
-        try {
-          await intentReceiptStore.linkMessage(shadowReceipt.receiptId, userMessage.id);
-        } catch (error) {
-          logger.warn(
-            {
-              projectId: project.id,
-              errorType: error instanceof Error ? error.name : "UnknownError",
-            },
-            "zero-intent shadow stream message link unavailable",
-          );
-        }
+      try {
+        await intentReceiptStore.linkMessage(intentReceipt.receiptId, userMessage.id);
+      } catch (error) {
+        logger.warn(
+          {
+            projectId: project.id,
+            errorType: error instanceof Error ? error.name : "UnknownError",
+          },
+          "zero-intent authoritative stream message link unavailable",
+        );
       }
     } catch (_err) {
       if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
@@ -1731,7 +1594,7 @@ router.post(
         projectId: project.id,
         title: `Chat: ${content.slice(0, 60)}`,
         kind: "converse",
-        status: "building",
+        status: "answering",
         prompt: content,
         agentIdentity: "main",
         origin: streamMessageOrigin,
@@ -1840,12 +1703,13 @@ router.post(
           question: converseResult.clarifying.question,
           options: converseResult.clarifying.options,
           taskId,
+          intent: resolvedIntent,
         };
       } else {
         plan = {
           kind: "converse",
           taskId,
-          intent: resolvedIntent !== "converse" ? resolvedIntent : undefined,
+          intent: resolvedIntent,
         };
       }
 
@@ -1872,7 +1736,7 @@ router.post(
         intent: resolvedIntent,
         userPrompt: content,
         assistantSummary: converseResult.markdown,
-        category: resolvedIntent === "converse" ? "conversation" : resolvedIntent,
+        category: resolvedIntent === "answer" ? "conversation" : resolvedIntent,
         tags: ["chat", "stream", resolvedIntent],
       });
 
@@ -1952,7 +1816,7 @@ router.post(
             content: `I wasn't able to answer that: ${msg}`,
             agentMode: mode,
             planMode: effectivePlanMode,
-            plan: { kind: "error", message: msg },
+            plan: { kind: "error", message: msg, intent: resolvedIntent },
             origin: streamMessageOrigin,
           })
           .returning();

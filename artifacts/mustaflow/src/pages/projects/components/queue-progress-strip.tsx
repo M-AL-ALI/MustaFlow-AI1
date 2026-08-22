@@ -15,6 +15,7 @@ import { getBuilderTaskQueueLabel } from "@/lib/builder-completion";
 
 type TaskStatus =
   | "queued"
+  | "answering"
   | "planning"
   | "building"
   | "testing"
@@ -56,6 +57,7 @@ interface QueueProgressStripProps {
 
 const ACTIVE_STATUSES: Set<string> = new Set([
   "queued",
+  "answering",
   "planning",
   "building",
   "testing",
