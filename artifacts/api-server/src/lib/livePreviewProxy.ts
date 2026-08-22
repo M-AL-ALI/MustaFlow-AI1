@@ -26,7 +26,6 @@ import { createProxyMiddleware, type RequestHandler } from "http-proxy-middlewar
 import { getAuth } from "@clerk/express";
 import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
 import {
-  hasContainerLayerCredentials,
   isContainerLayerConfigured,
   provisionContainer,
   tenantRuntimeProvider,
@@ -154,19 +153,6 @@ export async function loadPreviewProject(projectId: number): Promise<PreviewProj
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
   if (!project) return null;
-
-  if (!hasContainerLayerCredentials() && project.containerId) {
-    await db
-      .update(projectsTable)
-      .set({ containerId: null, containerUrl: null, containerStatus: "stopped" })
-      .where(eq(projectsTable.id, projectId));
-    logger.info(
-      { projectId, staleContainerId: project.containerId },
-      "Cleared stale preview container because the container layer is disabled",
-    );
-    return { ...project, containerId: null, containerUrl: null, containerStatus: "stopped" };
-  }
-
   return project;
 }
 

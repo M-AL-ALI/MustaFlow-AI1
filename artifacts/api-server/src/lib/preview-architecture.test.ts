@@ -201,10 +201,17 @@ describe("Preview Architecture Fix regression coverage", () => {
     );
   });
 
-  it("falls back to project_files when the Fly container layer is unavailable", () => {
+  it("falls back to project_files without clearing runtime identity during a read", () => {
     expect(containerSource).toContain("export async function isContainerLayerConfigured");
     expect(livePreviewProxySource).toContain("serveProjectFilesPreview");
-    expect(livePreviewProxySource).toContain("Cleared stale preview container");
+    const loadStart = livePreviewProxySource.indexOf("export async function loadPreviewProject");
+    const loadEnd = livePreviewProxySource.indexOf(
+      "/** Confirm the requester is allowed to preview an unpublished project. */",
+      loadStart,
+    );
+    const loadPreviewProjectSource = livePreviewProxySource.slice(loadStart, loadEnd);
+    expect(loadPreviewProjectSource).not.toContain(".update(");
+    expect(livePreviewProxySource).not.toContain("Cleared stale preview container");
     expect(projectFilesPreviewSource).toContain("Static preview — live server starting soon");
     expect(projectFilesPreviewSource).toContain("showStaticBanner");
   });
