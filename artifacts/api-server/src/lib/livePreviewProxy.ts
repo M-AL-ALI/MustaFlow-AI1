@@ -37,17 +37,11 @@ import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 
-const runtimeGatewayHostname = tenantRuntimeProvider.getGatewayHostname();
-const runtimeGatewayLabel = tenantRuntimeProvider.getGatewayLabel();
-
 type PreviewProxyState =
   | "container-starting"
   | "container-error"
   | "proxy-unavailable"
   | "server-unreachable";
-
-// Probe once for startup logging, but keep request-time checks retryable.
-void tenantRuntimeProvider.isGatewayReachable();
 
 // Accepts both the full path (`/api/projects/:id/preview/...`, as seen by the
 // top-level WebSocket upgrade handler) and the router-relative path
@@ -229,7 +223,10 @@ const ERROR_HTML = (projectId: number, reason: string): string => `<!doctype htm
   <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
 </div></body></html>`;
 
-const PROXY_UNAVAILABLE_HTML = (projectId: number): string => `<!doctype html>
+const PROXY_UNAVAILABLE_HTML = (projectId: number): string => {
+  const runtimeGatewayHostname = tenantRuntimeProvider.getGatewayHostname();
+  const runtimeGatewayLabel = tenantRuntimeProvider.getGatewayLabel();
+  return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Container preview unavailable</title>
 <style>
   html,body{margin:0;height:100%;background:#0a0f1c;color:#e5e7eb;font-family:system-ui,-apple-system,sans-serif}
@@ -246,6 +243,7 @@ const PROXY_UNAVAILABLE_HTML = (projectId: number): string => `<!doctype html>
   <p>Your app files are still saved in NabuFlow. Start a test preview, retry, or inspect container logs.</p>
   <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
 </div></body></html>`;
+};
 
 /**
  * Per-project set of in-flight wake attempts. Prevents multiple concurrent
