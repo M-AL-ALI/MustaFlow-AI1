@@ -214,11 +214,10 @@ describe("Builder Wave 3.1 container-check deferral", () => {
     expect(agentLoopSource).toContain("skipped: deferredChecks.length");
   });
 
-  it("uses only repair-eligible failures and emits an honest partial-validation result", () => {
+  it("uses only repair-eligible failures and emits a canonical changed-with-issues result", () => {
     expect(jobsSource.match(/failedChecksEligibleForRepair\(/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(jobsSource).toContain(
-      "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred.",
-    );
+    expect(jobsSource).toContain("changedWithIssuesTerminal({");
+    expect(jobsSource).toContain("PARTIAL_VALIDATION_WARNING");
     expect(jobsSource).toContain("validationWasPartial");
   });
 });

@@ -650,7 +650,7 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
     expect(cancelledEvents[0]).toMatchObject({
       taskId: TASK_ID,
       eventType: "cancelled",
-      message: "Build cancelled by user.",
+      message: "This run was interrupted.",
     });
 
     // ── Assert: publishTaskEvent (browser SSE fanout) called with "cancelled" ─
@@ -788,7 +788,7 @@ describe("Task #754 — Stop button cancellation via agentic builder loop", () =
     expect(cancelledEvents[0]).toMatchObject({
       taskId: TASK_ID,
       eventType: "cancelled",
-      message: "Build cancelled by user.",
+      message: "This run was interrupted.",
     });
 
     // ── Assert: publishTaskEvent (browser SSE fanout) called with "cancelled"

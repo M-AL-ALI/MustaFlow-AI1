@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   agentTasksTable,
@@ -19,6 +19,12 @@ import { shouldRouteToLivePreview } from "../lib/livePreviewProxy";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
 import { logger } from "../lib/logger";
+import {
+  failedTerminal,
+  presentZeroTerminalV1,
+  responseSucceededTerminal,
+} from "@workspace/ora-contracts";
+import { persistZeroTerminal, zeroTerminalRef } from "../lib/zero-terminal-persistence";
 
 export const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
@@ -324,6 +330,7 @@ async function completeSnapshotObservation(
       prompt: SNAPSHOT_OBSERVE_PROMPT,
       agentIdentity: "main",
       origin: "snapshot_control",
+      intentReceiptId: receipt.receiptId,
     })
     .returning();
   if (!task) throw new Error("snapshot observation task unavailable");
@@ -348,26 +355,45 @@ async function completeSnapshotObservation(
     });
   } catch {
     const failure = "I captured the preview, but couldn't finish observing it. Please try again.";
-    await db
-      .update(agentTasksTable)
-      .set({ status: "failed", result: failure, failureReason: failure, completedAt: sql`now()` })
-      .where(and(eq(agentTasksTable.id, task.id), eq(agentTasksTable.projectId, input.project.id)));
-    await db.insert(chatMessagesTable).values({
-      projectId: input.project.id,
-      role: "assistant",
-      content: failure,
-      agentMode: input.project.agentMode,
-      planMode: false,
-      plan: { kind: "error", message: failure, intent: "observe" },
-      origin: "snapshot_control",
+    const terminal = failedTerminal({
+      schema: "zero-terminal-v1",
+      taskId: task.id,
+      intent: "observe",
+      intentReceiptId: receipt.receiptId,
+      completedAt: new Date().toISOString(),
+      outcome: "failed",
+      runStatus: "failed",
+      cause: { code: "snapshot_observation_failed", stage: "observation" },
+      evidence: { summary: failure },
     });
+    const presentation = presentZeroTerminalV1(terminal);
+    const [assistantMessage] = await db
+      .insert(chatMessagesTable)
+      .values({
+        projectId: input.project.id,
+        role: "assistant",
+        content: presentation.message,
+        agentMode: input.project.agentMode,
+        planMode: false,
+        plan: {
+          kind: "error",
+          message: presentation.message,
+          intent: "observe",
+          terminalRef: zeroTerminalRef(terminal),
+        },
+        origin: "snapshot_control",
+      })
+      .returning();
+    if (!assistantMessage) throw new Error("snapshot observation failure response unavailable");
+    const persisted = await persistZeroTerminal({
+      terminal,
+      allowedStatuses: ["answering"],
+      taskUpdate: { failureReason: presentation.message },
+    });
+    if (!persisted) throw new Error("snapshot observation failure outcome unavailable");
     throw new Error("snapshot observation model unavailable");
   }
   const assistantContent = `I captured the ${input.previewClass} preview.\n\n${converse.markdown}`;
-  await db
-    .update(agentTasksTable)
-    .set({ status: "completed", result: assistantContent, completedAt: sql`now()` })
-    .where(and(eq(agentTasksTable.id, task.id), eq(agentTasksTable.projectId, input.project.id)));
   const [assistantMessage] = await db
     .insert(chatMessagesTable)
     .values({
@@ -386,6 +412,30 @@ async function completeSnapshotObservation(
     })
     .returning();
   if (!assistantMessage) throw new Error("snapshot observation response unavailable");
+  const terminal = responseSucceededTerminal({
+    schema: "zero-terminal-v1",
+    taskId: task.id,
+    intent: "observe",
+    intentReceiptId: receipt.receiptId,
+    completedAt: new Date().toISOString(),
+    outcome: "response_succeeded",
+    runStatus: "completed",
+    evidence: { assistantMessageId: assistantMessage.id },
+  });
+  const persisted = await persistZeroTerminal({ terminal, allowedStatuses: ["answering"] });
+  if (!persisted) throw new Error("snapshot observation outcome unavailable");
+  await db
+    .update(chatMessagesTable)
+    .set({
+      plan: {
+        kind: "converse",
+        taskId: task.id,
+        intent: "observe",
+        previewClass: input.previewClass,
+        terminalRef: zeroTerminalRef(terminal),
+      },
+    })
+    .where(eq(chatMessagesTable.id, assistantMessage.id));
 
   return {
     ok: true,
@@ -394,6 +444,7 @@ async function completeSnapshotObservation(
     userMessageId: userMessage.id,
     assistantMessageId: assistantMessage.id,
     taskId: task.id,
+    terminalRef: zeroTerminalRef(terminal),
   };
 }
 

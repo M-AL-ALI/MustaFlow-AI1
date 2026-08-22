@@ -47,13 +47,13 @@ vi.mock("./architect", () => ({
   runArchitectReview: mocks.architectReview,
 }));
 
-import { completionKindForTerminationReason, FileWorkspace, type ToolCtx } from "./agent-loop.js";
 import {
-  buildAgentTaskTerminalUpdate,
-  builderCompletionMessage,
-  builderPersistedCompletionSummary,
-  builderValidationAwareCompletionSummary,
-} from "./builder-task-completion.js";
+  agentLoopObservationText,
+  completionKindForTerminationReason,
+  FileWorkspace,
+  type ToolCtx,
+} from "./agent-loop.js";
+import { presentZeroTerminalV1, mutationSucceededTerminal } from "@workspace/ora-contracts";
 import { buildReviewerWorkspaceContext } from "./reviewer-context.js";
 import {
   dispatchReviewerStandalone,
@@ -99,63 +99,36 @@ describe("Builder Wave 7B completion honesty", () => {
     expect(completionKindForTerminationReason("step-cap")).toBe("step_cap");
   });
 
-  it("persists the true final step count in the terminal task update", () => {
-    const completedAt = new Date("2026-07-27T12:00:00.000Z");
-
+  it("keeps agent-loop observations factual until a terminal presenter earns past tense", () => {
     expect(
-      buildAgentTaskTerminalUpdate({
-        completionKind: "step_cap",
-        finalStepCount: 25,
-        completedAt,
+      agentLoopObservationText({
+        kind: "ended_without_summary",
+        terminationReason: "step-cap",
+        changedPaths: ["src/App.tsx"],
       }),
-    ).toEqual({
-      status: "completed",
-      completionKind: "step_cap",
-      currentStep: 25,
-      completedAt,
+    ).toBe("The run ended without a model summary (step-cap).");
+
+    const terminal = mutationSucceededTerminal({
+      schema: "zero-terminal-v1",
+      taskId: 25,
+      intent: "mutate",
+      intentReceiptId: 14,
+      completedAt: "2026-07-27T12:00:00.000Z",
+      outcome: "mutation_succeeded",
+      runStatus: "completed",
+      evidence: {
+        versionId: 91,
+        diffRef: { kind: "task_report", taskId: 25, revision: 1 },
+        preview: { promised: false, state: "not_promised" },
+      },
     });
-  });
-
-  it("composes honest persisted task and chat summaries for step-cap and finalized runs", () => {
-    expect(builderPersistedCompletionSummary("step_cap", "Built 15 files via agentic loop.")).toBe(
-      "Built 15 files via agentic loop — reached the step limit — you can continue with a follow-up prompt.",
-    );
-    expect(builderPersistedCompletionSummary("finalized", "Built 15 files via agentic loop.")).toBe(
-      "Built 15 files via agentic loop.",
+    expect(presentZeroTerminalV1(terminal).message).toBe(
+      "Changes applied. Preview was not promised.",
     );
 
     const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    expect(jobsSource).toContain("result: persistedAssistantSummary");
-    expect(jobsSource).toContain("content: persistedAssistantSummary");
-  });
-
-  it("discloses deferred validation in chat for passed-with-warnings builds", () => {
-    const warning =
-      "Validation was partial because live-server infrastructure is unavailable; container-dependent checks were deferred.";
-    const optimisticSummary = "The Daily Inspiration app is fully scaffolded.";
-
-    expect(
-      builderValidationAwareCompletionSummary(optimisticSummary, "passed_with_warnings", warning),
-    ).toBe(`${optimisticSummary} ${warning}`);
-    expect(builderValidationAwareCompletionSummary(optimisticSummary, "passed", warning)).toBe(
-      optimisticSummary,
-    );
-
-    const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    expect(jobsSource).toContain("builderValidationAwareCompletionSummary(");
-    expect(jobsSource).toContain("PARTIAL_VALIDATION_WARNING");
-    expect(jobsSource).toContain("content: persistedAssistantSummary");
-  });
-
-  it("uses the shared completion wording for checkpoint notes and changelogs", () => {
-    expect(builderCompletionMessage("step_cap", "Built 16 files via agentic loop.")).toContain(
-      "step limit",
-    );
-
-    const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    expect(jobsSource).toContain("const checkpointSummary = builderCompletionMessage(");
-    expect(jobsSource).toContain("changelogLines.push(checkpointSummary.slice(0, 180))");
-    expect(jobsSource).toContain("note: checkpointSummary.slice(0, 200)");
+    expect(jobsSource).toContain("persistZeroTerminal({");
+    expect(jobsSource).not.toContain("builderCompletionMessage(");
   });
 
   it("defers an empty reviewer payload without calling or charging the architect", async () => {

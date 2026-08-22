@@ -12,8 +12,9 @@ import { z } from "zod";
 import { logger } from "../lib/logger";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 import { emitTaskEventBounded } from "../lib/task-event-emission";
-import { saveMobileSettingsWithMetadata } from "../lib/mobile-settings-outcome";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
+import { mutationSucceededTerminal, presentZeroTerminalV1 } from "@workspace/ora-contracts";
+import { persistFailedZeroTerminal, persistZeroTerminal } from "../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
 
@@ -184,6 +185,11 @@ router.post(
 
     const { appName, bundleId, packageName, version, splashBackgroundColor, iconBase64 } =
       parsed.data;
+    const validatedIconContent = iconBase64?.replace(/^data:[^;]+;base64,/, "") ?? null;
+    if (validatedIconContent && !validatedIconContent.startsWith("iVBORw0KGgo")) {
+      res.status(400).json({ error: "Icon must be a valid PNG file." });
+      return;
+    }
 
     // ── Create an AgentTask to track this change in Build History ─────────────
     const changedFields: string[] = [];
@@ -222,6 +228,11 @@ router.post(
       mutationCapable: true,
       source: "system_action",
     });
+    if (!Number.isInteger(admission.receiptId) || (admission.receiptId ?? 0) <= 0) {
+      throw new Error("The settings intent receipt was not recorded");
+    }
+    const intentReceiptId = admission.receiptId as number;
+    await db.update(agentTasksTable).set({ intentReceiptId }).where(eq(agentTasksTable.id, taskId));
     await governIntentAdmission({
       phase: "execution",
       projectId,
@@ -275,12 +286,7 @@ router.post(
       // ── Icon upload ─────────────────────────────────────────────────────────
       if (iconBase64) {
         await emitEvent(taskId, "editing_files", "Processing app icon upload…");
-        const iconContent = iconBase64.replace(/^data:[^;]+;base64,/, "");
-        // Validate PNG magic bytes (base64 of \x89PNG\r\n\x1a\n starts with "iVBORw0KGgo")
-        if (!iconContent.startsWith("iVBORw0KGgo")) {
-          res.status(400).json({ error: "Icon must be a valid PNG file." });
-          return;
-        }
+        const iconContent = validatedIconContent!;
         filesToWrite.push({
           path: "assets/icon.png",
           content: iconContent,
@@ -314,7 +320,7 @@ router.post(
       const updatedSettings = expoToSettings(expo, projectId);
 
       async function commitFilesAndVersion() {
-        await writeProjectFilesAtomically({
+        const receipt = await writeProjectFilesAtomically({
           projectId,
           scope: { kind: "project" },
           replaceAll: false,
@@ -325,60 +331,62 @@ router.post(
             changelogEntry: changeDescription,
           },
         });
-        return updatedSettings;
+        if (!receipt.authoritativeVersion) {
+          throw new Error("The settings version was not recorded");
+        }
+        return { settings: updatedSettings, versionId: receipt.authoritativeVersion.id };
       }
 
-      const savedSettings = await saveMobileSettingsWithMetadata({
-        commitFilesAndVersion,
-        metadata: [
-          {
-            stage: "task_completion",
-            write: () =>
-              db
-                .update(agentTasksTable)
-                .set({
-                  status: "completed",
-                  result: changeDescription,
-                  completedAt: sql`now()`,
-                })
-                .where(eq(agentTasksTable.id, taskId)),
-          },
-          {
-            stage: "project_touch",
-            write: () =>
-              db
-                .update(projectsTable)
-                .set({ updatedAt: sql`now()` })
-                .where(eq(projectsTable.id, projectId)),
-          },
-          {
-            stage: "completion_event",
-            write: () => emitEvent(taskId, "completed", "App settings saved."),
-          },
-        ],
-        recordFailure: (failure) => {
-          logger.warn(
-            { projectId, taskId, failure },
-            "Mobile-settings post-commit metadata degraded",
-          );
+      const committed = await commitFilesAndVersion();
+      const terminal = mutationSucceededTerminal({
+        schema: "zero-terminal-v1",
+        taskId,
+        intent: "mutate",
+        intentReceiptId,
+        completedAt: new Date().toISOString(),
+        outcome: "mutation_succeeded",
+        runStatus: "completed",
+        evidence: {
+          versionId: committed.versionId,
+          diffRef: { kind: "task_report", taskId, revision: 1 },
+          preview: { promised: false, state: "not_promised" },
         },
       });
+      const terminalPersisted = await persistZeroTerminal({
+        terminal,
+        allowedStatuses: ["planning"],
+      });
+      if (!terminalPersisted) throw new Error("The settings outcome could not be recorded");
 
-      res.json({ ...savedSettings, taskId });
+      void db
+        .update(projectsTable)
+        .set({ updatedAt: sql`now()` })
+        .where(eq(projectsTable.id, projectId))
+        .catch((error) =>
+          logger.warn(
+            { projectId, taskId, errorClass: error instanceof Error ? error.name : "UnknownError" },
+            "Mobile-settings project touch degraded",
+          ),
+        );
+
+      res.json({
+        ...committed.settings,
+        taskId,
+        versionId: committed.versionId,
+        message: presentZeroTerminalV1(terminal).message,
+      });
     } catch (err) {
       logger.error({ err, projectId, taskId }, "Failed to apply mobile settings");
-      await emitEvent(taskId, "failed", err instanceof Error ? err.message : "Unknown error");
-      await db
-        .update(agentTasksTable)
-        .set({
-          status: "failed",
-          result: err instanceof Error ? err.message : "Failed to apply settings",
-          completedAt: sql`now()`,
-        })
-        .where(eq(agentTasksTable.id, taskId));
-      res
-        .status(500)
-        .json({ error: err instanceof Error ? err.message : "Failed to apply settings" });
+      const message = err instanceof Error ? err.message : "Failed to apply settings";
+      const { terminal } = await persistFailedZeroTerminal({
+        taskId,
+        intent: "mutate",
+        intentReceiptId,
+        cause: { code: "mobile_settings_failed", stage: "settings_save" },
+        summary: message,
+        allowedStatuses: ["planning"],
+      });
+      res.status(500).json({ error: presentZeroTerminalV1(terminal).message });
     }
   },
 );

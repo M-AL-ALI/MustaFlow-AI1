@@ -12,7 +12,7 @@ import {
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 import { zeroIntentReceiptsTable } from "./zero-intent-receipts";
-import type { ZeroTerminalV1 } from "@workspace/ora-contracts";
+import type { ZERO_TERMINAL_SEMANTICS, ZeroTerminalV1 } from "@workspace/ora-contracts";
 
 export type TestResult = {
   name: string;
@@ -37,6 +37,12 @@ export type AgentTaskCompletionKind =
   | "container_unavailable";
 
 export type TaskReport = {
+  /** Canonical terminal receipt; projections resolve the terminal from the task row. */
+  terminalRef?: {
+    kind: "zero_terminal";
+    schema: typeof ZERO_TERMINAL_SEMANTICS;
+    taskId: number;
+  };
   userRequest: string;
   blueprint?: Record<string, unknown> | null;
   filesCreated: string[];

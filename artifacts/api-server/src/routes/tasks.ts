@@ -1,12 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import {
-  db,
-  projectsTable,
-  agentTasksTable,
-  chatMessagesTable,
-  taskEventsTable,
-} from "@workspace/db";
+import { db, projectsTable, agentTasksTable, chatMessagesTable } from "@workspace/db";
 import {
   ListTasksParams,
   ListTasksResponse,
@@ -35,12 +29,10 @@ import {
 } from "../lib/jobs";
 import { refundCredits } from "./credits";
 import { logger } from "../lib/logger";
-import { publishTaskEvent } from "../lib/event-bus";
 import { taskCreditSettlementKey } from "../lib/billing-settlement-outbox";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
-
-const TERMINAL_TASK_EVENT_TYPES = ["completed", "failed", "cancelled"];
+import { persistInterruptedZeroTerminal } from "../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
 
@@ -232,141 +224,68 @@ router.post(
       return;
     }
 
-    // For building/planning tasks, abort the in-flight AI call first so the
-    // pipeline can clean up gracefully, then fall through to the DB update.
-    const executionWasActive = cancelActiveJob(params.data.taskId);
+    const [pre] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.id, params.data.taskId),
+          eq(agentTasksTable.projectId, params.data.id),
+        ),
+      )
+      .limit(1);
+    if (!pre) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    if (!["queued", "building", "planning"].includes(pre.status)) {
+      res
+        .status(409)
+        .json({ error: `Task is already in state "${pre.status}" and cannot be canceled` });
+      return;
+    }
+    if (!Number.isInteger(pre.intentReceiptId) || (pre.intentReceiptId ?? 0) < 1) {
+      res.status(409).json({ error: "This older task cannot be canceled safely." });
+      return;
+    }
 
-    // Attempt a conditional update: cancel if the task is queued, building, or planning.
-    // IMPORTANT: capture the pre-update reserved-credits amount in the SAME UPDATE
-    // via `returning()` (the returned row reflects values BEFORE we set them in this
-    // statement is FALSE — Postgres returns the post-update row). So we must read it
-    // first under a transaction. Use a transaction with SELECT + UPDATE to avoid the
-    // ordering bug where setting creditsReserved=null erases the refund amount.
-    const cancelResult = await db.transaction(async (tx) => {
-      const [pre] = await tx
-        .select({
-          id: agentTasksTable.id,
-          status: agentTasksTable.status,
-          creditsReserved: agentTasksTable.creditsReserved,
-        })
-        .from(agentTasksTable)
-        .where(
-          and(
-            eq(agentTasksTable.id, params.data.taskId),
-            eq(agentTasksTable.projectId, params.data.id),
-          ),
-        )
-        .limit(1);
-
-      if (!pre) return { task: null, reserved: 0, queuedCancellationEvent: null };
-      if (!["queued", "building", "planning"].includes(pre.status)) {
-        return { task: pre, reserved: 0, alreadyTerminal: true, queuedCancellationEvent: null };
-      }
-
-      const [updated] = await tx
-        .update(agentTasksTable)
-        .set({ status: "canceled", completedAt: sql`now()`, creditsReserved: null })
-        .where(eq(agentTasksTable.id, pre.id))
-        .returning();
-
-      let queuedCancellationEvent: typeof taskEventsTable.$inferSelect | null = null;
-      // Running pipelines own their terminal event. The route writes one only
-      // for a queued task that never acquired an execution controller.
-      if (pre.status === "queued" && !executionWasActive) {
-        const [existingTerminal] = await tx
-          .select({ id: taskEventsTable.id })
-          .from(taskEventsTable)
-          .where(
-            and(
-              eq(taskEventsTable.taskId, pre.id),
-              inArray(taskEventsTable.eventType, TERMINAL_TASK_EVENT_TYPES),
-            ),
-          )
-          .limit(1);
-        if (!existingTerminal) {
-          const [event] = await tx
-            .insert(taskEventsTable)
-            .values({
-              taskId: pre.id,
-              eventType: "cancelled",
-              message: "Task cancelled by user.",
-              filePath: null,
-            })
-            .returning();
-          queuedCancellationEvent = event ?? null;
-        }
-      }
-
-      return {
-        task: updated ?? pre,
-        reserved: pre.creditsReserved ?? 0,
-        queuedCancellationEvent,
-      };
+    cancelActiveJob(pre.id);
+    const { persisted } = await persistInterruptedZeroTerminal({
+      taskId: pre.id,
+      intent: pre.kind === "plan" ? "plan" : "mutate",
+      intentReceiptId: pre.intentReceiptId!,
+      cause: "user_stop",
+      evidence: { lastPhase: pre.status === "queued" ? null : pre.status, changedPaths: [] },
+      allowedStatuses: ["queued", "building", "planning"],
+      taskUpdate: { creditsReserved: null },
     });
-
-    // The abort listener can win the DB race and commit `canceled` before this
-    // route's transaction reads the row. That is still a successful response
-    // to this cancel request, not an "already terminal" conflict.
-    const activeExecutionCommittedCancellation =
-      executionWasActive &&
-      cancelResult.alreadyTerminal === true &&
-      cancelResult.task?.status === "canceled";
-    const task =
-      cancelResult.task && (!cancelResult.alreadyTerminal || activeExecutionCommittedCancellation)
-        ? cancelResult.task
-        : null;
-
-    if (cancelResult.queuedCancellationEvent) {
-      const event = cancelResult.queuedCancellationEvent;
-      publishTaskEvent({
-        id: event.id,
-        taskId: event.taskId,
-        eventType: event.eventType,
-        message: event.message,
-        filePath: event.filePath ?? null,
-        data: (event.data as Record<string, unknown> | undefined) ?? undefined,
-        createdAt: event.createdAt,
+    const [task] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(eq(agentTasksTable.id, pre.id))
+      .limit(1);
+    if (!persisted && task?.terminal?.outcome !== "interrupted") {
+      res.status(409).json({
+        error: `Task is already in state "${task?.status ?? "unknown"}" and cannot be canceled`,
       });
+      return;
     }
 
     // Refund the captured pre-update amount (Task #509 — background jobs).
-    if (task && cancelResult.reserved > 0) {
+    if (task && (pre.creditsReserved ?? 0) > 0) {
       const [proj] = await db
         .select({ ownerId: projectsTable.ownerId })
         .from(projectsTable)
         .where(eq(projectsTable.id, params.data.id))
         .limit(1);
       if (proj?.ownerId) {
-        void refundCredits(proj.ownerId, cancelResult.reserved, {
+        void refundCredits(proj.ownerId, pre.creditsReserved ?? 0, {
           projectId: params.data.id,
           taskId: task.id,
           settlementKey: taskCreditSettlementKey(task.id, "pipeline"),
           description: `Background task #${task.id} canceled`,
         }).catch((err) => logger.warn({ err, taskId: task.id }, "Credit refund failed"));
       }
-    }
-
-    if (!task) {
-      // Either the task doesn't exist or it's already in a terminal state.
-      const [existing] = await db
-        .select({ id: agentTasksTable.id, status: agentTasksTable.status })
-        .from(agentTasksTable)
-        .where(
-          and(
-            eq(agentTasksTable.id, params.data.taskId),
-            eq(agentTasksTable.projectId, params.data.id),
-          ),
-        )
-        .limit(1);
-
-      if (!existing) {
-        res.status(404).json({ error: "Task not found" });
-        return;
-      }
-      res
-        .status(409)
-        .json({ error: `Task is already in state "${existing.status}" and cannot be canceled` });
-      return;
     }
 
     res.json(task);
@@ -405,7 +324,12 @@ router.post(
     // Cancel any currently active executable tasks for this project. Review/fix
     // gates are user decisions and should be resolved from their own controls.
     const activeTasks = await db
-      .select({ id: agentTasksTable.id })
+      .select({
+        id: agentTasksTable.id,
+        kind: agentTasksTable.kind,
+        status: agentTasksTable.status,
+        intentReceiptId: agentTasksTable.intentReceiptId,
+      })
       .from(agentTasksTable)
       .where(
         and(
@@ -414,17 +338,20 @@ router.post(
         ),
       );
 
+    if (activeTasks.some((active) => !Number.isInteger(active.intentReceiptId))) {
+      res.status(409).json({ error: "An older active task cannot be interrupted safely." });
+      return;
+    }
     for (const active of activeTasks) {
       cancelActiveJob(active.id);
-      await db
-        .update(agentTasksTable)
-        .set({ status: "canceled", completedAt: sql`now()` })
-        .where(
-          and(
-            eq(agentTasksTable.id, active.id),
-            inArray(agentTasksTable.status, ["building", "planning"]),
-          ),
-        );
+      await persistInterruptedZeroTerminal({
+        taskId: active.id,
+        intent: active.kind === "plan" ? "plan" : "mutate",
+        intentReceiptId: active.intentReceiptId!,
+        cause: "superseded",
+        evidence: { lastPhase: active.status, changedPaths: [] },
+        allowedStatuses: ["building", "planning"],
+      });
       logger.info({ activeTaskId: active.id, projectId }, "Force-start: cancelled active task");
     }
 

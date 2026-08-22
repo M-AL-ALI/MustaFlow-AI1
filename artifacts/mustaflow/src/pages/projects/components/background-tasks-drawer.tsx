@@ -16,7 +16,11 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
+import {
+  terminalPresentationFor,
+  terminalTaskMessage,
+  terminalTaskStatus,
+} from "@/lib/zero-terminal";
 
 type TaskReport = {
   versionId?: number | null;
@@ -214,9 +218,9 @@ function TaskCard({
         </div>
       )}
 
-      {isFailed && (terminal?.message ?? task.result) && (
+      {isFailed && terminalTaskMessage(task, task.result ?? "") && (
         <p className="text-[10px] text-destructive/80 leading-relaxed pt-1 border-t border-destructive/20">
-          {(terminal?.message ?? task.result ?? "").slice(0, 120)}
+          {terminalTaskMessage(task, task.result ?? "").slice(0, 120)}
         </p>
       )}
     </div>

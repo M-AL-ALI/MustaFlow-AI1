@@ -39,7 +39,9 @@ describe("project job cross-replica lock posture", () => {
     const claimCatch = extractCatchClauseByParameter(source, "admissionError");
 
     expect(claimCatch).toContain("catch (admissionError)");
-    expect(claimCatch).toContain("persistParallelBuildAdmissionUnavailable(taskId)");
+    expect(claimCatch).toContain(
+      "persistParallelBuildAdmissionUnavailable(taskId, terminalIntentReceiptId)",
+    );
     expect(claimCatch).toContain("return;");
     expect(claimCatch).not.toContain("generateFixSuggestions");
     expect(claimCatch).not.toContain("runBuildPipeline");

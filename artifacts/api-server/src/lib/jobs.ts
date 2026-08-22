@@ -21,7 +21,6 @@ import {
   projectActivityTable,
   notificationsTable,
   nabuflowOrgSeatsTable,
-  type AgentTaskCompletionKind,
   type TaskReport,
   type FileSnapshotEntry,
   type CvePatchStatus,
@@ -131,14 +130,23 @@ import {
   inferZeroDeclaredCapabilities,
 } from "./zero-capability-eligibility";
 import { architectureChangeMessage, shouldAutoDetectStack } from "./stack-selection";
-import {
-  buildAgentTaskTerminalUpdate,
-  builderCompletionMessage,
-  builderPersistedCompletionSummary,
-  builderValidationAwareCompletionSummary,
-} from "./builder-task-completion";
 import { governIntentAdmission } from "./zero-intent-admission";
-import { IntentReceiptError, type IntentReceiptErrorCode } from "@workspace/ora-contracts";
+import {
+  changedWithIssuesTerminal,
+  failedTerminal,
+  mutationSucceededTerminal,
+  presentZeroTerminalV1,
+  IntentReceiptError,
+  type IntentReceiptErrorCode,
+  type ZeroTerminalPreview,
+  type ZeroTerminalV1,
+} from "@workspace/ora-contracts";
+import {
+  persistFailedZeroTerminal,
+  persistInterruptedZeroTerminal,
+  persistZeroTerminal,
+  zeroTerminalRef,
+} from "./zero-terminal-persistence";
 
 import {
   buildPreviewRepairObservation,
@@ -913,59 +921,17 @@ async function emitEvent(
   });
 }
 
-async function finalizeAgentTaskWithEvent(input: {
-  taskId: number;
-  completionKind: AgentTaskCompletionKind;
-  currentStep: number;
-  message: string;
-}): Promise<boolean> {
-  const completedAt = new Date();
-  const terminalTaskUpdate = buildAgentTaskTerminalUpdate({
-    completionKind: input.completionKind,
-    finalStepCount: input.currentStep,
-    completedAt,
-  });
-  const terminalEvent = await db.transaction(async (tx) => {
-    const [updatedTask] = await tx
-      .update(agentTasksTable)
-      .set(terminalTaskUpdate)
-      .where(
-        and(
-          eq(agentTasksTable.id, input.taskId),
-          // A cancel that wins this race remains authoritative.
-          inArray(agentTasksTable.status, ["building", "planning"]),
-        ),
-      )
-      .returning({ id: agentTasksTable.id });
-
-    if (!updatedTask) return null;
-
-    const [event] = await tx
-      .insert(taskEventsTable)
-      .values({
-        taskId: input.taskId,
-        eventType: "completed",
-        message: input.message,
-        filePath: null,
-        data: null,
-        createdAt: completedAt,
-      })
-      .returning();
-    return event ?? null;
-  });
-
-  if (!terminalEvent) return false;
-
-  publishTaskEvent({
-    id: terminalEvent.id,
-    taskId: terminalEvent.taskId,
-    eventType: terminalEvent.eventType,
-    message: terminalEvent.message,
-    filePath: terminalEvent.filePath ?? null,
-    data: (terminalEvent.data as Record<string, unknown> | undefined) ?? undefined,
-    createdAt: terminalEvent.createdAt,
-  });
-  return true;
+function terminalPreview(report: TaskReport, versionId: number): ZeroTerminalPreview {
+  if (report.previewUpdated) {
+    return { promised: true, state: "ready", receiptId: `version:${versionId}` };
+  }
+  if (report.previewSyncQueued) {
+    return { promised: true, state: "queued", receiptId: `version:${versionId}` };
+  }
+  if (report.previewSyncFailed) {
+    return { promised: true, state: "unavailable", cause: "preview_sync_failed" };
+  }
+  return { promised: false, state: "not_promised" };
 }
 
 /**
@@ -1910,15 +1876,36 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
   if (!failedTask?.queueBatchId) return;
 
   try {
-    await db
-      .update(agentTasksTable)
-      .set({ status: "canceled", completedAt: sql`now()` })
+    const queued = await db
+      .select({
+        id: agentTasksTable.id,
+        kind: agentTasksTable.kind,
+        intentReceiptId: agentTasksTable.intentReceiptId,
+      })
+      .from(agentTasksTable)
       .where(
         and(
           eq(agentTasksTable.queueBatchId, failedTask.queueBatchId),
           eq(agentTasksTable.status, "queued"),
         ),
       );
+    for (const task of queued) {
+      if (!Number.isInteger(task.intentReceiptId) || (task.intentReceiptId ?? 0) < 1) {
+        logger.warn(
+          { taskId: task.id, queueBatchId: failedTask.queueBatchId },
+          "Older queued task could not be interrupted canonically",
+        );
+        continue;
+      }
+      await persistInterruptedZeroTerminal({
+        taskId: task.id,
+        intent: task.kind === "plan" ? "plan" : "mutate",
+        intentReceiptId: task.intentReceiptId!,
+        cause: "superseded",
+        evidence: { lastPhase: null, changedPaths: [] },
+        allowedStatuses: ["queued"],
+      });
+    }
     logger.info(
       { queueBatchId: failedTask.queueBatchId },
       "Cancelled remaining batch tasks after failure",
@@ -1959,45 +1946,18 @@ export type ProjectJobClaimResult =
 
 async function persistParallelBuildAdmissionUnavailable(
   taskId: number,
-): Promise<PersistedAdmissionEvent | null> {
-  return db.transaction(async (tx) => {
-    const completedAt = new Date();
-    const [terminalTask] = await tx
-      .update(agentTasksTable)
-      .set({
-        status: "failed",
-        completionKind: "admission_unavailable",
-        result: PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE,
-        completedAt,
-      })
-      .where(
-        and(
-          eq(agentTasksTable.id, taskId),
-          inArray(agentTasksTable.status, ["queued", "planning"]),
-        ),
-      )
-      .returning({ id: agentTasksTable.id });
-    if (!terminalTask) return null;
-
-    const [event] = await tx
-      .insert(taskEventsTable)
-      .values({
-        taskId,
-        eventType: "failed",
-        message: PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE,
-        data: {
-          code: "parallel_build_admission_unavailable",
-          completionKind: "admission_unavailable",
-          retryable: true,
-        },
-      })
-      .returning();
-    if (!event) throw new Error("Parallel build admission unavailable event was not persisted");
-    return {
-      ...event,
-      data: (event.data as Record<string, unknown> | null) ?? null,
-    };
+  intentReceiptId: number,
+): Promise<boolean> {
+  const { persisted } = await persistFailedZeroTerminal({
+    taskId,
+    intent: "mutate",
+    intentReceiptId,
+    cause: { code: "parallel_build_admission_unavailable", stage: "admission" },
+    summary: PARALLEL_BUILD_ADMISSION_UNAVAILABLE_MESSAGE,
+    allowedStatuses: ["queued", "planning"],
+    taskUpdate: { completionKind: "admission_unavailable" },
   });
+  return persisted;
 }
 
 const INTENT_RECEIPT_ADMISSION_MESSAGE =
@@ -2070,6 +2030,7 @@ async function countRunningBuildsForAdmission(
 export async function claimProjectJobExecution(
   taskId: number,
   projectId: number,
+  intentReceiptId: number,
 ): Promise<ProjectJobClaimResult> {
   const [projectOwner] = await db
     .select({ ownerId: projectsTable.ownerId })
@@ -2095,12 +2056,25 @@ export async function claimProjectJobExecution(
     const admission = evaluateParallelBuildAdmission(admissionScope, activeBuilds);
     if (!admission.allowed) {
       const completedAt = new Date();
+      const terminal = failedTerminal({
+        schema: "zero-terminal-v1",
+        taskId,
+        intent: "mutate",
+        intentReceiptId,
+        completedAt: completedAt.toISOString(),
+        outcome: "failed",
+        runStatus: "failed",
+        cause: { code: admission.code, stage: "parallel_build_admission" },
+        evidence: { summary: admission.message },
+      });
+      const terminalPresentation = presentZeroTerminalV1(terminal);
       const [terminalTask] = await tx
         .update(agentTasksTable)
         .set({
           status: "failed",
+          terminal,
           completionKind: "admission_blocked",
-          result: admission.message,
+          result: terminalPresentation.message,
           completedAt,
         })
         .where(
@@ -2117,16 +2091,9 @@ export async function claimProjectJobExecution(
         .values({
           taskId,
           eventType: "failed",
-          message: admission.message,
+          message: terminalPresentation.message,
           filePath: null,
-          data: {
-            code: admission.code,
-            completionKind: "admission_blocked",
-            planId: admission.planId,
-            limit: admission.limit,
-            activeBuilds: admission.activeBuilds,
-            retryable: admission.retryable,
-          },
+          data: terminal as unknown as Record<string, unknown>,
         })
         .returning();
       if (!event) throw new Error("Parallel build admission terminal event was not persisted");
@@ -2218,6 +2185,7 @@ export async function runJob(input: JobInput): Promise<void> {
     logger.warn({ taskId, projectId, code }, "Intent receipt admission rejected task");
     return;
   }
+  const terminalIntentReceiptId = input.intentReceiptId as number;
   let { userPrompt, agentMode } = input;
   const agentIdentity: AgentIdentity = input.agentIdentity ?? "main";
   const autoMergeBackgroundPlanStep = shouldAutoMergeBackgroundPlanStep({
@@ -2307,24 +2275,13 @@ export async function runJob(input: JobInput): Promise<void> {
   try {
     let claim: ProjectJobClaimResult;
     try {
-      claim = await claimProjectJobExecution(taskId, projectId);
+      claim = await claimProjectJobExecution(taskId, projectId, terminalIntentReceiptId);
     } catch (admissionError) {
       // Admission resolution/count failures are their own typed terminal. They
       // must never fall through to the generic failure path, which may ask a
       // model for repair suggestions after a build has already been denied.
       try {
-        const event = await persistParallelBuildAdmissionUnavailable(taskId);
-        if (event) {
-          publishTaskEvent({
-            id: event.id,
-            taskId: event.taskId,
-            eventType: event.eventType,
-            message: event.message,
-            filePath: event.filePath,
-            data: event.data ?? undefined,
-            createdAt: event.createdAt,
-          });
-        }
+        await persistParallelBuildAdmissionUnavailable(taskId, terminalIntentReceiptId);
       } catch (terminalError) {
         logger.error(
           {
@@ -2407,16 +2364,15 @@ export async function runJob(input: JobInput): Promise<void> {
 
     const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
     if (!project) {
-      await emitEvent(taskId, "failed", "Project not found.");
-      await db
-        .update(agentTasksTable)
-        .set({
-          status: "failed",
-          result: "Project not found",
-          completedAt: sql`now()`,
-          tokenCount: flushTokenCount(taskId),
-        })
-        .where(eq(agentTasksTable.id, taskId));
+      await persistFailedZeroTerminal({
+        taskId,
+        intent: "mutate",
+        intentReceiptId: terminalIntentReceiptId,
+        cause: { code: "project_not_found", stage: "project_load" },
+        summary: "The project could not be found.",
+        allowedStatuses: ["building", "planning"],
+        taskUpdate: { tokenCount: flushTokenCount(taskId) },
+      });
       return;
     }
     // Deployment-owned and resolved once. No request, project row, generated
@@ -2613,16 +2569,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       });
       if (!gate.allowed) {
         const msg = gate.error.message;
-        await emitEvent(taskId, "failed", msg);
-        await db
-          .update(agentTasksTable)
-          .set({
-            status: "failed",
-            result: msg,
-            completedAt: sql`now()`,
-            tokenCount: flushTokenCount(taskId),
-          })
-          .where(eq(agentTasksTable.id, taskId));
+        await persistFailedZeroTerminal({
+          taskId,
+          intent: "mutate",
+          intentReceiptId: terminalIntentReceiptId,
+          cause: { code: "build_gate_blocked", stage: "billing_gate" },
+          summary: msg,
+          allowedStatuses: ["building", "planning"],
+          taskUpdate: { tokenCount: flushTokenCount(taskId) },
+        });
         // Pause queued siblings so they don't drain and fail one-by-one with
         // the same billing error (mirrors the insufficient-credits path).
         await pauseRemainingQueuedTasks(taskId, projectId);
@@ -2649,16 +2604,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const credits = await getOrCreateCredits(project.ownerId);
       if (credits.balance < creditCost) {
         const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
-        await emitEvent(taskId, "failed", msg);
-        await db
-          .update(agentTasksTable)
-          .set({
-            status: "failed",
-            result: msg,
-            completedAt: sql`now()`,
-            tokenCount: flushTokenCount(taskId),
-          })
-          .where(eq(agentTasksTable.id, taskId));
+        await persistFailedZeroTerminal({
+          taskId,
+          intent: "mutate",
+          intentReceiptId: terminalIntentReceiptId,
+          cause: { code: "insufficient_credits", stage: "credit_gate" },
+          summary: msg,
+          allowedStatuses: ["building", "planning"],
+          taskUpdate: { tokenCount: flushTokenCount(taskId) },
+        });
         // Task #638 — pause any remaining queued siblings so they don't drain
         // and fail one-by-one with the same insufficient-credits error.
         await pauseRemainingQueuedTasks(taskId, projectId);
@@ -3124,11 +3078,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           if (!preflightResult.ok) {
             const preflightMsg = preflightResult.message ?? "Pre-flight check failed.";
             await emitEvent(taskId, "preflight_error", preflightMsg);
-            await emitEvent(taskId, "failed", preflightMsg);
-            await db
-              .update(agentTasksTable)
-              .set({ status: "failed", completedAt: new Date() })
-              .where(eq(agentTasksTable.id, taskId));
+            await persistFailedZeroTerminal({
+              taskId,
+              intent: "mutate",
+              intentReceiptId: terminalIntentReceiptId,
+              cause: { code: "preflight_failed", stage: "runtime_preflight" },
+              summary: preflightMsg,
+              allowedStatuses: ["building", "planning"],
+            });
             await db
               .update(projectsTable)
               .set({ status: "failed", updatedAt: sql`now()` })
@@ -3694,11 +3651,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           if (!preflightResult.ok) {
             const preflightMsg = preflightResult.message ?? "Pre-flight check failed.";
             await emitEvent(taskId, "preflight_error", preflightMsg);
-            await emitEvent(taskId, "failed", preflightMsg);
-            await db
-              .update(agentTasksTable)
-              .set({ status: "failed", completedAt: new Date() })
-              .where(eq(agentTasksTable.id, taskId));
+            await persistFailedZeroTerminal({
+              taskId,
+              intent: "mutate",
+              intentReceiptId: terminalIntentReceiptId,
+              cause: { code: "preflight_failed", stage: "runtime_preflight" },
+              summary: preflightMsg,
+              allowedStatuses: ["building", "planning"],
+            });
             await db
               .update(projectsTable)
               .set({ status: "failed", updatedAt: sql`now()` })
@@ -4553,7 +4513,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           versionValidationStatus = "completed_with_errors";
           report.completedWithErrors = true;
           report.warnings = [
-            `TypeScript repair loop exhausted after ${repairAttemptRecords.length} attempt${repairAttemptRecords.length !== 1 ? "s" : ""}. Snapshot saved with completed_with_errors status.`,
+            `TypeScript repair loop exhausted after ${repairAttemptRecords.length} attempt${repairAttemptRecords.length !== 1 ? "s" : ""}. Validation ended with completed_with_errors; the version receipt is still pending.`,
             ...(report.warnings ?? []),
           ];
         } else {
@@ -4929,14 +4889,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
           await emitEvent(
             taskId,
-            "completed",
+            "narration",
             "Quality checks failed — review the report and use Auto-fix to address the issues.",
           );
 
           await db.insert(chatMessagesTable).values({
             projectId,
             role: "system",
-            content: assistantSummary,
+            content: "Quality checks need attention before the staged changes can be applied.",
             agentMode,
             planMode: false,
             origin: jobOrigin,
@@ -5024,14 +4984,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
         await emitEvent(
           taskId,
-          "completed",
+          "narration",
           `Staged review: ${stagingData.length} file(s) ready - apply or discard.`,
         );
 
         await db.insert(chatMessagesTable).values({
           projectId,
           role: "system",
-          content: assistantSummary,
+          content: "Staged changes are ready for review. Apply or discard them to finish this run.",
           agentMode,
           planMode: false,
           origin: jobOrigin,
@@ -5182,11 +5142,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       // Fetch the most recent plan snapshot to annotate this version
       const planSnapshot = await loadLatestPlanSnapshot(projectId);
-      const checkpointCompletionKind = report.agentLoop?.completionKind ?? "finalized";
-      const checkpointSummary = builderCompletionMessage(
-        checkpointCompletionKind,
-        assistantSummary,
-      );
+      const checkpointSummary = assistantSummary;
 
       // Build changelog entry: combine action context with diff summary
       const changelogLines: string[] = [];
@@ -5223,18 +5179,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           .returning({ id: projectVersionsTable.id });
         version = inserted[0];
       } catch (snapErr) {
-        // Non-fatal: the actual file writes already landed in project_files.
-        // Losing the rollback checkpoint should not fail the whole task —
-        // otherwise the user sees "task failed" even though their app updated.
+        // The project file write completed, but terminal success is impossible
+        // without the durable version receipt below.
         logger.warn(
           { err: snapErr, projectId, taskId },
           "Failed to save project version snapshot (non-fatal — files already persisted)",
         );
-        await emitEvent(
-          taskId,
-          "narration",
-          "Couldn't save rollback checkpoint — your changes are still applied.",
-        );
+        await emitEvent(taskId, "narration", "The rollback checkpoint could not be recorded.");
       }
       report.versionId = version?.id ?? null;
 
@@ -5780,18 +5731,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
         if (!migResult.ok) {
           logger.warn({ projectId, taskId }, "Drizzle migration failed — marking task as failed");
-          await emitEvent(taskId, "failed", migResult.error);
+          const { terminal } = await persistFailedZeroTerminal({
+            taskId,
+            intent: "mutate",
+            intentReceiptId: terminalIntentReceiptId,
+            cause: { code: "migration_failed", stage: "post_write_migration" },
+            summary: migResult.error,
+            allowedStatuses: ["building", "planning"],
+            taskUpdate: { tokenCount: flushTokenCount(taskId) },
+          });
           await db
             .update(agentTasksTable)
             .set({
-              status: "failed",
-              result: migResult.error,
               report: {
                 ...report,
+                terminalRef: zeroTerminalRef(terminal),
                 warnings: [...(report.warnings ?? []), migResult.error],
               },
-              completedAt: sql`now()`,
-              tokenCount: flushTokenCount(taskId),
             })
             .where(eq(agentTasksTable.id, taskId));
           return;
@@ -6064,11 +6020,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       const completionKind = report.agentLoop?.completionKind ?? "finalized";
       const finalStepCount = report.agentLoop?.steps ?? 0;
-      const persistedAssistantSummary = builderValidationAwareCompletionSummary(
-        builderPersistedCompletionSummary(completionKind, assistantSummary),
-        versionValidationStatus,
-        PARTIAL_VALIDATION_WARNING,
-      );
+      const persistedAssistantSummary = assistantSummary;
       // NabuFlow R2 Phase D: flush per-build token telemetry alongside the
       // existing token_count update so both the aggregate counter and the
       // queryable telemetry row are written at the same logical completion point.
@@ -6584,23 +6536,66 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End Browser QA ─────────────────────────────────────────────────────
 
-      const finalizedCompletionMessage =
-        versionValidationStatus === "completed_with_errors"
-          ? "Build completed with unresolved validation or preview errors. Review the report for details."
-          : validationWasPartial
-            ? "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred."
-            : versionValidationStatus === "passed_with_warnings"
-              ? "Build completed with warnings — preview is available but validation is not fully clean."
-              : "Task completed.";
-      const completionMessage = builderCompletionMessage(
-        completionKind,
-        finalizedCompletionMessage,
-      );
-      const taskCompleted = await finalizeAgentTaskWithEvent({
-        taskId,
-        completionKind,
-        currentStep: finalStepCount,
-        message: completionMessage,
+      const completedAt = new Date().toISOString();
+      const terminal: ZeroTerminalV1 = !version?.id
+        ? failedTerminal({
+            schema: "zero-terminal-v1",
+            taskId,
+            intent: "mutate",
+            intentReceiptId: terminalIntentReceiptId,
+            completedAt,
+            outcome: "failed",
+            runStatus: "failed",
+            cause: { code: "version_receipt_missing", stage: "version_persistence" },
+            evidence: { summary: "The changes could not be recorded as a durable version." },
+          })
+        : versionValidationStatus === "completed_with_errors" ||
+            versionValidationStatus === "passed_with_warnings" ||
+            validationWasPartial ||
+            report.previewSyncFailed
+          ? changedWithIssuesTerminal({
+              schema: "zero-terminal-v1",
+              taskId,
+              intent: "mutate",
+              intentReceiptId: terminalIntentReceiptId,
+              completedAt,
+              outcome: "changed_with_issues",
+              runStatus: "completed",
+              cause: {
+                code: report.previewSyncFailed ? "preview_sync_failed" : "validation_incomplete",
+                stage: report.previewSyncFailed ? "preview" : "validation",
+              },
+              evidence: {
+                versionId: version.id,
+                diffRef: { kind: "task_report", taskId, revision: 1 },
+                preview: terminalPreview(report, version.id),
+              },
+            })
+          : mutationSucceededTerminal({
+              schema: "zero-terminal-v1",
+              taskId,
+              intent: "mutate",
+              intentReceiptId: terminalIntentReceiptId,
+              completedAt,
+              outcome: "mutation_succeeded",
+              runStatus: "completed",
+              evidence: {
+                versionId: version.id,
+                diffRef: { kind: "task_report", taskId, revision: 1 },
+                preview: terminalPreview(report, version.id),
+              },
+            });
+      const terminalPresentation = presentZeroTerminalV1(terminal);
+      report.terminalRef = zeroTerminalRef(terminal);
+      const taskCompleted = await persistZeroTerminal({
+        terminal,
+        allowedStatuses: ["building", "planning"],
+        taskUpdate: {
+          report,
+          completionKind,
+          currentStep: finalStepCount,
+          tokenCount: flushedTelemetryTokenCount,
+        },
       });
       if (!taskCompleted) {
         logger.info(
@@ -6616,20 +6611,20 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           .insert(notificationsTable)
           .values({
             recipientId: project.ownerId,
-            type: "build_complete",
-            title:
-              completionKind === "finalized"
-                ? `${kind === "build" ? "Build" : "Refine"} completed`
-                : builderCompletionMessage(completionKind, "Task completed."),
-            body:
-              completionKind === "finalized"
-                ? `Your ${agentMode} ${kind} on "${project.name}" finished successfully.`
-                : `${project.name}: ${completionMessage}`,
+            type: terminal.outcome === "failed" ? "build_failed" : "build_complete",
+            title: terminalPresentation.title,
+            body: terminalPresentation.message,
             actorId: project.ownerId,
             resourceType: "build",
             resourceId: String(taskId),
             projectId,
-            metadata: { taskId, agentMode, durationMs: Date.now() - jobStartTime },
+            metadata: {
+              taskId,
+              agentMode,
+              durationMs: Date.now() - jobStartTime,
+              terminal,
+              terminalRef: report.terminalRef,
+            },
           })
           .catch((err) =>
             logger.warn({ err, taskId }, "Failed to insert build_complete notification"),
@@ -6643,6 +6638,45 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       void drainNextProjectTask(projectId).catch((err) =>
         logger.warn({ err, projectId }, "Failed to drain next project task"),
       );
+
+      if (terminal.outcome === "failed") {
+        await db.insert(chatMessagesTable).values({
+          projectId,
+          role: "system",
+          content: terminalPresentation.message,
+          agentMode,
+          planMode: false,
+          origin: jobOrigin,
+          plan: {
+            kind: "error",
+            report,
+            taskId,
+            terminalRef: report.terminalRef,
+          } as unknown as Record<string, unknown>,
+        });
+        void db
+          .insert(buildAnalyticsTable)
+          .values({
+            taskId,
+            projectId,
+            userId: project.ownerId ?? null,
+            model: MODEL_FOR_MODE[agentMode],
+            agentMode,
+            kind,
+            durationMs: Date.now() - jobStartTime,
+            correctionPasses: analyticsCorrectionPasses,
+            escalated: wasEscalated,
+            outcome: "failed",
+            primaryErrorCategory: terminal.cause.code,
+          })
+          .catch((analyticsErr) =>
+            logger.warn({ analyticsErr, taskId }, "Failed to record terminal build analytics"),
+          );
+        void cancelRemainingBatchTasks(taskId).catch((err) =>
+          logger.warn({ err, taskId }, "Failed to cancel batch after terminal build failure"),
+        );
+        return;
+      }
 
       // Generate post-build suggestions in the background (non-blocking)
       setImmediate(() => {
@@ -6795,14 +6829,17 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       await db.insert(chatMessagesTable).values({
         projectId,
         role: "system",
-        content: persistedAssistantSummary,
+        content: terminalPresentation.message,
         agentMode,
         planMode: false,
         origin: jobOrigin,
-        plan: { kind: "report", report, taskId, ...batchMeta } as unknown as Record<
-          string,
-          unknown
-        >,
+        plan: {
+          kind: "report",
+          report,
+          taskId,
+          terminalRef: zeroTerminalRef(terminal),
+          ...batchMeta,
+        } as unknown as Record<string, unknown>,
         // Task #538 — anchor this system summary to the new checkpoint so the
         // chat UI can offer "Rewind to here" (restores files + db + truncates chat).
         checkpointId: version?.id ?? null,
@@ -6961,7 +6998,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         err instanceof Error &&
         (err.message === "Build cancelled" || abortController.signal.aborted)
       ) {
-        await emitEvent(taskId, "cancelled", "Build cancelled by user.");
         // Canceled work still consumed provider tokens. Persist it with an
         // explicit status so calibration can include or filter it honestly.
         const { flushBuildTokenTelemetry } = await import("./ai-providers");
@@ -6969,27 +7005,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // Flush the token counter before entering the transaction so we can
         // persist the partial count even for mid-run cancellations.
         const canceledTokenCount = flushTokenCount(taskId);
-        // Atomically transition to canceled and clear reserved credits, capturing
-        // the prior reserved amount so we can refund exactly once (Task #509).
-        const cancelTx = await db.transaction(async (tx) => {
-          const [pre] = await tx
-            .select({ creditsReserved: agentTasksTable.creditsReserved })
-            .from(agentTasksTable)
-            .where(eq(agentTasksTable.id, taskId))
-            .limit(1);
-          await tx
-            .update(agentTasksTable)
-            .set({
-              status: "canceled",
-              completedAt: sql`now()`,
-              creditsReserved: null,
-              tokenCount: canceledTokenCount,
-            })
-            .where(eq(agentTasksTable.id, taskId));
-          return { reserved: pre?.creditsReserved ?? 0 };
+        const [preCancel] = await db
+          .select({ creditsReserved: agentTasksTable.creditsReserved })
+          .from(agentTasksTable)
+          .where(eq(agentTasksTable.id, taskId))
+          .limit(1);
+        await persistInterruptedZeroTerminal({
+          taskId,
+          intent: "mutate",
+          intentReceiptId: terminalIntentReceiptId,
+          cause: "user_stop",
+          evidence: { lastPhase: "agent_loop", changedPaths: [] },
+          allowedStatuses: ["building", "planning"],
+          taskUpdate: { creditsReserved: null, tokenCount: canceledTokenCount },
         });
-        if (cancelTx.reserved > 0 && project.ownerId) {
-          void refundCredits(project.ownerId, cancelTx.reserved, {
+        const reservedCredits = preCancel?.creditsReserved ?? 0;
+        if (reservedCredits > 0 && project.ownerId) {
+          void refundCredits(project.ownerId, reservedCredits, {
             projectId,
             taskId,
             settlementKey: taskCreditSettlementKey(taskId, "pipeline"),
@@ -7039,7 +7071,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             : undefined;
       const message = sealedProjectRecovery?.message ?? rawMessage;
       if (failureEvidence !== undefined) analyticsErrorCategory = failureEvidence.code;
-      await emitEvent(taskId, "failed", message);
+      const { flushBuildTokenTelemetry } = await import("./ai-providers");
+      await flushBuildTokenTelemetry(taskId, "failed");
+      const finalTokenCount = flushTokenCount(taskId);
+      const { terminal: failureTerminal, persisted: failureCommitted } =
+        await persistFailedZeroTerminal({
+          taskId,
+          intent: "mutate",
+          intentReceiptId: terminalIntentReceiptId,
+          cause: { code: failureEvidence?.code ?? "builder_failed", stage: "mutation" },
+          summary: message,
+          allowedStatuses: ["building", "planning", "needs_review", "needs_fix"],
+          taskUpdate: { tokenCount: finalTokenCount },
+        });
+      const failurePresentation = presentZeroTerminalV1(failureTerminal);
+      if (!failureCommitted) return;
 
       // Notify project owner of build failure (fire-and-forget)
       if (project?.ownerId) {
@@ -7048,38 +7094,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           .values({
             recipientId: project.ownerId,
             type: "build_failed",
-            title: `${kind === "build" ? "Build" : "Refine"} failed`,
-            body: message.slice(0, 200),
+            title: failurePresentation.title,
+            body: failurePresentation.message.slice(0, 200),
             actorId: project.ownerId,
             resourceType: "build",
             resourceId: String(taskId),
             projectId,
-            metadata: { taskId, reason: message.slice(0, 500) },
+            metadata: {
+              taskId,
+              terminal: failureTerminal,
+              terminalRef: zeroTerminalRef(failureTerminal),
+            },
           })
           .catch((notifErr) =>
             logger.warn({ err: notifErr, taskId }, "Failed to insert build_failed notification"),
           );
       }
 
-      // Failed work still consumed provider tokens. Persist it separately from
-      // completed builds rather than deleting paid usage.
-      {
-        const { flushBuildTokenTelemetry } = await import("./ai-providers");
-        await flushBuildTokenTelemetry(taskId, "failed");
-      }
       // Generate specific fix suggestions via AI (parallel with DB writes)
-      const finalTokenCount = flushTokenCount(taskId);
       const [suggestions] = await Promise.all([
         sealedProjectRecovery?.suggestions ?? generateFixSuggestions(userPrompt, message),
-        db
-          .update(agentTasksTable)
-          .set({
-            status: "failed",
-            result: message,
-            completedAt: sql`now()`,
-            tokenCount: finalTokenCount,
-          })
-          .where(eq(agentTasksTable.id, taskId)),
         db
           .update(projectsTable)
           .set({ status: "failed", updatedAt: sql`now()` })
@@ -7091,6 +7125,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .update(agentTasksTable)
         .set({
           report: {
+            terminalRef: zeroTerminalRef(failureTerminal),
             userRequest: userPrompt,
             filesCreated: [],
             filesChanged: [],
@@ -7183,7 +7218,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         await db.insert(chatMessagesTable).values({
           projectId,
           role: "assistant",
-          content: `Build failed: ${message}`,
+          content: failurePresentation.message,
           agentMode,
           planMode: false,
           origin: jobOrigin,
@@ -7192,6 +7227,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             message,
             suggestions,
             ...(failureEvidence === undefined ? {} : { code: failureEvidence.code }),
+            terminalRef: zeroTerminalRef(failureTerminal),
             ...(sealedProjectRecovery === undefined
               ? {}
               : { recoveryAction: sealedProjectRecovery.action }),
@@ -7785,6 +7821,9 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     throw new Error(`Task is in state "${task.status}", not needs_review`);
   if (!task.stagingSnapshot || !Array.isArray(task.stagingSnapshot))
     throw new Error("Task has no staging snapshot to apply");
+  if (!Number.isInteger(task.intentReceiptId) || (task.intentReceiptId ?? 0) <= 0) {
+    throw new Error("Task has no authoritative intent receipt");
+  }
 
   const stagingFiles = task.stagingSnapshot as Array<{
     path: string;
@@ -7848,26 +7887,23 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
           remediation: f.detail ?? null,
         })),
       };
-      const structuredResult = JSON.stringify({
-        type: "sast_block",
-        findings: structuredFindings.sast,
-        message: humanMessage,
-        fixPrompt: structuredFindings.fixPrompt,
-      });
-
       const sastMergedReport: TaskReport = {
         ...((report as TaskReport | null) ?? ({} as TaskReport)),
         securityFindings: structuredFindings,
       };
 
+      const { terminal } = await persistFailedZeroTerminal({
+        taskId,
+        intent: "mutate",
+        intentReceiptId: task.intentReceiptId!,
+        cause: { code: "sast_blocked", stage: "staged_apply" },
+        summary: humanMessage,
+        allowedStatuses: ["needs_review", "needs_fix", "building", "planning"],
+        taskUpdate: { report: sastMergedReport },
+      });
       await db
         .update(agentTasksTable)
-        .set({
-          status: "failed",
-          result: structuredResult.slice(0, 2000),
-          report: sastMergedReport,
-          completedAt: new Date(),
-        })
+        .set({ report: { ...sastMergedReport, terminalRef: zeroTerminalRef(terminal) } })
         .where(eq(agentTasksTable.id, taskId));
 
       throw new Error(humanMessage);
@@ -7919,27 +7955,22 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
               "Start the project container from the Terminal tab so the dependency audit can run, then click Apply again.",
           },
         };
-        const noContainerResult = JSON.stringify({
-          type: "npm_audit_block",
-          critical: 0,
-          high: 0,
-          parsed: false,
-          packages: [],
-          message: noContainerMsg,
-          fixPrompt: noContainerFindings.fixPrompt,
-        });
         const noContainerReport: TaskReport = {
           ...((report as TaskReport | null) ?? ({} as TaskReport)),
           securityFindings: noContainerFindings,
         };
+        const { terminal } = await persistFailedZeroTerminal({
+          taskId,
+          intent: "mutate",
+          intentReceiptId: task.intentReceiptId!,
+          cause: { code: "audit_runtime_unavailable", stage: "staged_apply" },
+          summary: noContainerMsg,
+          allowedStatuses: ["needs_review", "needs_fix", "building", "planning"],
+          taskUpdate: { report: noContainerReport },
+        });
         await db
           .update(agentTasksTable)
-          .set({
-            status: "failed",
-            result: noContainerResult.slice(0, 2000),
-            report: noContainerReport,
-            completedAt: new Date(),
-          })
+          .set({ report: { ...noContainerReport, terminalRef: zeroTerminalRef(terminal) } })
           .where(eq(agentTasksTable.id, taskId));
         throw new Error(noContainerMsg);
       }
@@ -8034,28 +8065,23 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
                 "Run `npm audit fix` locally, or upgrade the affected packages to patched versions in package.json, then retry Apply.",
             },
           };
-          const structuredResult = JSON.stringify({
-            type: "npm_audit_block",
-            critical: criticalCount ?? 0,
-            high: highCount ?? 0,
-            parsed: highCount !== null && criticalCount !== null,
-            packages: affectedPackages,
-            message: humanMessage,
-            fixPrompt: fixPromptText,
-          });
           const auditMergedReport: TaskReport = {
             ...((report as TaskReport | null) ?? ({} as TaskReport)),
             securityFindings: auditFindings,
           };
 
+          const { terminal } = await persistFailedZeroTerminal({
+            taskId,
+            intent: "mutate",
+            intentReceiptId: task.intentReceiptId!,
+            cause: { code: "dependency_audit_blocked", stage: "staged_apply" },
+            summary: humanMessage,
+            allowedStatuses: ["needs_review", "needs_fix", "building", "planning"],
+            taskUpdate: { report: auditMergedReport },
+          });
           await db
             .update(agentTasksTable)
-            .set({
-              status: "failed",
-              result: structuredResult.slice(0, 2000),
-              report: auditMergedReport,
-              completedAt: new Date(),
-            })
+            .set({ report: { ...auditMergedReport, terminalRef: zeroTerminalRef(terminal) } })
             .where(eq(agentTasksTable.id, taskId));
           throw new Error(humanMessage);
         }
@@ -8074,10 +8100,14 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         const errMsg = `Apply blocked: dependency security audit could not be completed (${
           npmAuditErr instanceof Error ? npmAuditErr.message : String(npmAuditErr)
         }). Verify the container is running and retry.`;
-        await db
-          .update(agentTasksTable)
-          .set({ status: "failed", result: errMsg.slice(0, 500), completedAt: new Date() })
-          .where(eq(agentTasksTable.id, taskId));
+        await persistFailedZeroTerminal({
+          taskId,
+          intent: "mutate",
+          intentReceiptId: task.intentReceiptId!,
+          cause: { code: "dependency_audit_unavailable", stage: "staged_apply" },
+          summary: errMsg,
+          allowedStatuses: ["needs_review", "needs_fix", "building", "planning"],
+        });
         throw new Error(errMsg, { cause: npmAuditErr });
       }
     }
@@ -8213,25 +8243,54 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     versionId: version.id,
   };
 
-  // Mark task completed + clear staging snapshot + stamp appliedAt (Task #509).
-  // Also clear creditsReserved so refunds on a future no-op cancel don't double-credit.
-  await db
-    .update(agentTasksTable)
-    .set({
-      status: "completed",
+  const completedAt = new Date().toISOString();
+  const applyTerminal: ZeroTerminalV1 =
+    finalReport.previewSyncFailed || finalReport.warnings.length > 0
+      ? changedWithIssuesTerminal({
+          schema: "zero-terminal-v1",
+          taskId,
+          intent: "mutate",
+          intentReceiptId: task.intentReceiptId!,
+          completedAt,
+          outcome: "changed_with_issues",
+          runStatus: "completed",
+          cause: {
+            code: finalReport.previewSyncFailed ? "preview_sync_failed" : "post_write_warning",
+            stage: finalReport.previewSyncFailed ? "preview" : "post_write",
+          },
+          evidence: {
+            versionId: version.id,
+            diffRef: { kind: "task_report", taskId, revision: 1 },
+            preview: terminalPreview(finalReport, version.id),
+          },
+        })
+      : mutationSucceededTerminal({
+          schema: "zero-terminal-v1",
+          taskId,
+          intent: "mutate",
+          intentReceiptId: task.intentReceiptId!,
+          completedAt,
+          outcome: "mutation_succeeded",
+          runStatus: "completed",
+          evidence: {
+            versionId: version.id,
+            diffRef: { kind: "task_report", taskId, revision: 1 },
+            preview: terminalPreview(finalReport, version.id),
+          },
+        });
+  const applyPresentation = presentZeroTerminalV1(applyTerminal);
+  finalReport.terminalRef = zeroTerminalRef(applyTerminal);
+  const applied = await persistZeroTerminal({
+    terminal: applyTerminal,
+    allowedStatuses: ["building", "planning", "needs_review"],
+    taskUpdate: {
       report: finalReport,
       stagingSnapshot: null,
-      completedAt: sql`now()`,
-      appliedAt: sql`now()`,
+      appliedAt: new Date(completedAt),
       creditsReserved: null,
-    })
-    .where(
-      and(
-        eq(agentTasksTable.id, taskId),
-        // Guard against cancel race: if cancel already wrote "canceled", don't overwrite it.
-        inArray(agentTasksTable.status, ["building", "planning", "needs_review"]),
-      ),
-    );
+    },
+  });
+  if (!applied) return;
 
   const mergedStatus = autoMergedBackgroundPlanStep
     ? backgroundPlanStepStatus(taskId, "merged")
@@ -8239,7 +8298,9 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   await db.insert(chatMessagesTable).values({
     projectId,
     role: "system",
-    content: mergedStatus ? `${mergedStatus}\n\n${assistantSummary}` : assistantSummary,
+    content: mergedStatus
+      ? `${mergedStatus}\n\n${applyPresentation.message}`
+      : applyPresentation.message,
     agentMode,
     planMode: false,
     origin: taskOrigin,
@@ -8249,12 +8310,13 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       taskId,
       agentIdentity: "task",
       applied: true,
+      terminalRef: finalReport.terminalRef,
       ...(autoMergedBackgroundPlanStep ? { backgroundPlanStep: true, autoMerged: true } : {}),
     } as unknown as Record<string, unknown>,
     checkpointId: version.id,
   });
   if (mergedStatus) {
-    await emitEvent(taskId, "completed", mergedStatus);
+    await emitEvent(taskId, "narration", mergedStatus);
   }
 
   try {
@@ -9461,6 +9523,8 @@ export async function failStuckBackgroundTasksOnBoot(): Promise<void> {
         id: agentTasksTable.id,
         projectId: agentTasksTable.projectId,
         creditsReserved: agentTasksTable.creditsReserved,
+        kind: agentTasksTable.kind,
+        intentReceiptId: agentTasksTable.intentReceiptId,
       })
       .from(agentTasksTable)
       .where(
@@ -9472,15 +9536,23 @@ export async function failStuckBackgroundTasksOnBoot(): Promise<void> {
 
     for (const t of stuck) {
       const msg = "Interrupted by server restart. Please retry.";
-      await db
-        .update(agentTasksTable)
-        .set({
-          status: "failed",
-          result: msg,
-          completedAt: sql`now()`,
-          creditsReserved: null,
-        })
-        .where(eq(agentTasksTable.id, t.id));
+      if (Number.isInteger(t.intentReceiptId) && (t.intentReceiptId ?? 0) > 0) {
+        await persistInterruptedZeroTerminal({
+          taskId: t.id,
+          intent: t.kind === "plan" ? "plan" : "mutate",
+          intentReceiptId: t.intentReceiptId!,
+          cause: "superseded",
+          evidence: { lastPhase: "server_restart", changedPaths: [] },
+          allowedStatuses: ["building", "planning"],
+          taskUpdate: { creditsReserved: null },
+        });
+      } else {
+        await db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: msg, completedAt: sql`now()`, creditsReserved: null })
+          .where(eq(agentTasksTable.id, t.id));
+        void emitEvent(t.id, "failed", msg).catch(() => undefined);
+      }
 
       if (t.creditsReserved && t.creditsReserved > 0) {
         const [proj] = await db
@@ -9499,8 +9571,6 @@ export async function failStuckBackgroundTasksOnBoot(): Promise<void> {
           );
         }
       }
-
-      void emitEvent(t.id, "failed", msg).catch(() => undefined);
     }
 
     // Drain every project that had a stuck background task — this kicks off any

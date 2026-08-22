@@ -10,6 +10,7 @@ import type { AgentIdentity } from "../lib/jobs";
 import { estimateQueueCreditCost } from "../lib/queue-credit-costs";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
+import { persistInterruptedZeroTerminal } from "../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
 
@@ -287,19 +288,38 @@ router.delete(
     }
 
     try {
-      const result = await db
-        .update(agentTasksTable)
-        .set({ status: "canceled", completedAt: sql`now()` })
+      const queued = await db
+        .select({
+          id: agentTasksTable.id,
+          kind: agentTasksTable.kind,
+          intentReceiptId: agentTasksTable.intentReceiptId,
+        })
+        .from(agentTasksTable)
         .where(
           and(
             eq(agentTasksTable.projectId, projectId),
             eq(agentTasksTable.queueBatchId, batchId),
             eq(agentTasksTable.status, "queued"),
           ),
-        )
-        .returning({ id: agentTasksTable.id });
+        );
+      if (queued.some((task) => !Number.isInteger(task.intentReceiptId))) {
+        res.status(409).json({ error: "An older queued task cannot be cancelled safely." });
+        return;
+      }
+      let cancelled = 0;
+      for (const task of queued) {
+        const { persisted } = await persistInterruptedZeroTerminal({
+          taskId: task.id,
+          intent: task.kind === "plan" ? "plan" : "mutate",
+          intentReceiptId: task.intentReceiptId!,
+          cause: "user_stop",
+          evidence: { lastPhase: null, changedPaths: [] },
+          allowedStatuses: ["queued"],
+        });
+        if (persisted) cancelled += 1;
+      }
 
-      res.json({ cancelled: result.length, batchId });
+      res.json({ cancelled, batchId });
     } catch (err) {
       logger.error({ err }, "Failed to cancel queue batch");
       res.status(500).json({ error: "Failed to cancel batch" });

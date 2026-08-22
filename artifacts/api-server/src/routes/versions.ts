@@ -37,6 +37,12 @@ import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
+import { mutationSucceededTerminal, presentZeroTerminalV1 } from "@workspace/ora-contracts";
+import {
+  persistFailedZeroTerminal,
+  persistZeroTerminal,
+  zeroTerminalRef,
+} from "../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
 
@@ -330,11 +336,16 @@ router.post(
       mutationCapable: true,
       source: "system_action",
     });
+    if (!Number.isInteger(admission.receiptId) || (admission.receiptId ?? 0) <= 0) {
+      throw new Error("The rollback intent receipt was not recorded");
+    }
+    const intentReceiptId = admission.receiptId as number;
+    await db.update(agentTasksTable).set({ intentReceiptId }).where(eq(agentTasksTable.id, taskId));
     await governIntentAdmission({
       phase: "execution",
       projectId,
       taskId,
-      intentReceiptId: admission.receiptId,
+      intentReceiptId,
     });
 
     await emitRollbackEvent(taskId, "queued", "Rollback initiated…");
@@ -358,14 +369,28 @@ router.post(
     // Version snapshots are project-wide and predate artifact identity. Keep that
     // established scope explicit while using the same bounded atomic writer as
     // builder commits, so a failed restore leaves every prior row intact.
-    await writeProjectFilesAtomically({
-      projectId,
-      scope: { kind: "project" },
-      replaceAll: true,
-      files: snapshot,
-    });
+    try {
+      await writeProjectFilesAtomically({
+        projectId,
+        scope: { kind: "project" },
+        replaceAll: true,
+        files: snapshot,
+      });
+    } catch (error) {
+      const { terminal } = await persistFailedZeroTerminal({
+        taskId,
+        intent: "mutate",
+        intentReceiptId,
+        cause: { code: "rollback_files_failed", stage: "file_write" },
+        summary: "The rollback could not be completed.",
+        allowedStatuses: ["planning"],
+      });
+      req.log.error({ error, projectId, taskId }, "rollback: atomic file restore failed");
+      res.status(500).json({ error: presentZeroTerminalV1(terminal).message });
+      return;
+    }
 
-    let rollbackRevisionId: number | null = null;
+    let rollbackRevisionId: number | null;
     try {
       const [rollbackRevision] = await db
         .insert(projectVersionsTable)
@@ -386,12 +411,35 @@ router.post(
         { err: revisionErr, projectId, taskId, sourceVersionId: version.id },
         "rollback: failed to create authoritative preview revision",
       );
+      const { terminal } = await persistFailedZeroTerminal({
+        taskId,
+        intent: "mutate",
+        intentReceiptId,
+        cause: { code: "rollback_version_failed", stage: "version_write" },
+        summary:
+          "The project files were restored, but the rollback could not be completed because its version receipt was not recorded.",
+        allowedStatuses: ["planning"],
+      });
+      res.status(500).json({ error: presentZeroTerminalV1(terminal).message });
+      return;
+    }
+    if (!rollbackRevisionId) {
+      const { terminal } = await persistFailedZeroTerminal({
+        taskId,
+        intent: "mutate",
+        intentReceiptId,
+        cause: { code: "rollback_version_missing", stage: "version_write" },
+        summary:
+          "The project files were restored, but the rollback could not be completed because its version receipt is unavailable.",
+        allowedStatuses: ["planning"],
+      });
+      res.status(500).json({ error: presentZeroTerminalV1(terminal).message });
+      return;
     }
 
     // Emit project_files_changed so any active SSE subscriber can sync the
     // WebContainer filesystem without a full page reload.
     try {
-      if (!rollbackRevisionId) throw new Error("Rollback preview revision was not created");
       const filesChangedPayload = publishProjectFilesChanged(
         projectId,
         rollbackRevisionId,
@@ -429,20 +477,64 @@ router.post(
 
     await emitRollbackEvent(taskId, "updating_preview", "Refreshing preview with restored files…");
 
+    const rollbackReport = {
+      userRequest: `Restore project to version: ${version.label}`,
+      filesCreated: [],
+      filesChanged: snapshot.map((file) => file.path),
+      filesRemoved: rollbackRemovedPaths,
+      warnings: [],
+      integrationsNeeded: [],
+      previewSyncQueued: true,
+      previewUpdated: false,
+      versionId: rollbackRevisionId,
+      terminalRef: {
+        kind: "zero_terminal" as const,
+        schema: "zero-terminal-v1" as const,
+        taskId,
+      },
+      nextRecommendation: `Preview sync was requested after rollback to "${version.label}". Test the preview before publishing.`,
+    };
+    const rollbackTerminal = mutationSucceededTerminal({
+      schema: "zero-terminal-v1",
+      taskId,
+      intent: "mutate",
+      intentReceiptId,
+      completedAt: new Date().toISOString(),
+      outcome: "mutation_succeeded",
+      runStatus: "completed",
+      evidence: {
+        versionId: rollbackRevisionId,
+        diffRef: { kind: "task_report", taskId, revision: 1 },
+        preview: {
+          promised: true,
+          state: "queued",
+          receiptId: `version:${rollbackRevisionId}`,
+        },
+      },
+    });
+    const rollbackPersisted = await persistZeroTerminal({
+      terminal: rollbackTerminal,
+      allowedStatuses: ["planning"],
+      taskUpdate: { report: rollbackReport },
+    });
+    if (!rollbackPersisted) throw new Error("Rollback outcome could not be recorded");
+
     await db.insert(chatMessagesTable).values({
       projectId,
       role: "system",
-      content: `Rolled back to version "${version.label}" (${snapshot.length} files restored).`,
+      content: presentZeroTerminalV1(rollbackTerminal).message,
       agentMode: "eco",
       planMode: false,
-      checkpointId: version.id,
+      checkpointId: rollbackRevisionId,
       plan: {
         kind: "rollback",
         taskId,
-        versionId: version.id,
+        versionId: rollbackRevisionId,
+        sourceVersionId: version.id,
         versionLabel: version.label,
         filesRestored: snapshot.length,
         removedPaths: rollbackRemovedPaths,
+        terminalRef: zeroTerminalRef(rollbackTerminal),
       },
     });
 
@@ -451,42 +543,17 @@ router.post(
       .set({
         updatedAt: sql`now()`,
         status: "testing",
-        lastTaskSummary: `Rolled back to "${version.label}"`,
+        lastTaskSummary: presentZeroTerminalV1(rollbackTerminal).message,
         lastTaskSummaryProvenance: projectSummaryProvenance({
           sourceKind: "version",
-          sourceIdentity: `version:${version.id}`,
+          sourceIdentity: `version:${rollbackRevisionId}`,
           taskId,
-          versionId: version.id,
+          versionId: rollbackRevisionId,
           actorUserId: req.userId,
-          content: `Rolled back to "${version.label}"`,
+          content: presentZeroTerminalV1(rollbackTerminal).message,
         }),
       })
       .where(eq(projectsTable.id, projectId));
-
-    await emitRollbackEvent(taskId, "completed", "Rollback complete.");
-
-    if (rollbackTask) {
-      await db
-        .update(agentTasksTable)
-        .set({
-          status: "completed",
-          result: `Rolled back to "${version.label}"`,
-          report: {
-            userRequest: `Restore project to version: ${version.label}`,
-            filesCreated: [],
-            filesChanged: snapshot.map((file) => file.path),
-            filesRemoved: rollbackRemovedPaths,
-            warnings: [],
-            integrationsNeeded: [],
-            previewSyncQueued: true,
-            previewUpdated: false,
-            versionId: version.id,
-            nextRecommendation: `Preview sync was requested after rollback to "${version.label}". Test the preview before publishing.`,
-          },
-          completedAt: sql`now()`,
-        })
-        .where(eq(agentTasksTable.id, rollbackTask.id));
-    }
 
     // Log rollback to the project activity feed
     try {
@@ -704,6 +771,8 @@ router.post(
       versionId,
       label: version.label,
       taskId: rollbackTask?.id ?? null,
+      terminalRef: zeroTerminalRef(rollbackTerminal),
+      message: presentZeroTerminalV1(rollbackTerminal).message,
       dbSnapshotRestored,
       dbSnapshotId,
       dbSnapshotError,

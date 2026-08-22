@@ -54,7 +54,22 @@ import {
 } from "../lib/zero-intent-judge";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
-import type { IntentReceipt } from "@workspace/ora-contracts";
+import {
+  failedTerminal,
+  interruptedTerminal,
+  planSucceededTerminal,
+  presentPersistedZeroTerminal,
+  presentZeroTerminalV1,
+  responseSucceededTerminal,
+  type IntentReceipt,
+  type ZeroTerminalV1,
+} from "@workspace/ora-contracts";
+import {
+  persistFailedZeroTerminal,
+  persistInterruptedZeroTerminal,
+  persistZeroTerminal,
+  zeroTerminalRef,
+} from "../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
 
@@ -402,6 +417,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     return;
   }
   const resolvedIntent = intentReceipt.intent;
+  const terminalIntentReceiptId = intentReceipt.receiptId;
 
   // Effective planMode — true when explicitly toggled OR when intent classifier auto-routes to plan.
   // This ensures assistant messages are stored with planMode=true so the plan-card UI renders.
@@ -470,6 +486,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
   let persistedAssistantMessage: typeof chatMessagesTable.$inferSelect | null = null;
+  let terminalAfterAssistant: ((assistantMessageId: number) => ZeroTerminalV1) | null = null;
+  let terminalMemory: { taskId: number; intent: string; category: string; tags: string[] } | null =
+    null;
 
   const DEVELOPER_INTENT_SYSTEM_PROMPTS: Record<string, string> = {
     debug: (await import("../lib/builder")).DEBUG_SYSTEM_PROMPT,
@@ -517,6 +536,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         prompt: content,
         agentIdentity: "main",
         origin: messageOrigin,
+        intentReceiptId: terminalIntentReceiptId,
         hasBrainstormContext,
         brainstormTurnCount: hasBrainstormContext
           ? (brainstormContext as Array<{ role: string; content: string }>).length
@@ -556,13 +576,6 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         systemPromptOverride,
       });
 
-      if (converseTask) {
-        await db
-          .update(agentTasksTable)
-          .set({ status: "completed", result: converseResult.markdown, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, converseTask.id));
-      }
-
       assistantContent = converseResult.markdown;
       if (converseResult.clarifying) {
         plan = {
@@ -580,26 +593,44 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           streaming: true,
         } as unknown as Record<string, unknown>;
       }
-      rememberCompletedAgentTask({
-        projectId: project.id,
-        userId: req.userId ?? project.ownerId,
-        taskId,
-        intent: resolvedIntent,
-        userPrompt: content,
-        assistantSummary: converseResult.markdown,
-        category: resolvedIntent === "answer" ? "conversation" : resolvedIntent,
-        tags: ["chat", resolvedIntent],
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Conversation failed";
       if (converseTask) {
-        await db
-          .update(agentTasksTable)
-          .set({ status: "failed", result: msg, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, converseTask.id));
+        terminalAfterAssistant = (assistantMessageId) =>
+          responseSucceededTerminal({
+            schema: "zero-terminal-v1",
+            taskId,
+            intent: resolvedIntent,
+            intentReceiptId: terminalIntentReceiptId,
+            completedAt: new Date().toISOString(),
+            outcome: "response_succeeded",
+            runStatus: "completed",
+            evidence: { assistantMessageId },
+          });
+        terminalMemory = {
+          taskId,
+          intent: resolvedIntent,
+          category: resolvedIntent === "answer" ? "conversation" : resolvedIntent,
+          tags: ["chat", resolvedIntent],
+        };
       }
-      assistantContent = `I wasn't able to answer that: ${msg}`;
-      plan = { kind: "error", message: msg } as unknown as Record<string, unknown>;
+    } catch {
+      if (converseTask) {
+        const terminal = failedTerminal({
+          schema: "zero-terminal-v1",
+          taskId,
+          intent: resolvedIntent,
+          intentReceiptId: terminalIntentReceiptId,
+          completedAt: new Date().toISOString(),
+          outcome: "failed",
+          runStatus: "failed",
+          cause: { code: "conversation_failed", stage: "response" },
+          evidence: { summary: "I wasn't able to answer that request." },
+        });
+        terminalAfterAssistant = () => terminal;
+        assistantContent = presentZeroTerminalV1(terminal).message;
+      } else {
+        assistantContent = "I wasn't able to answer that request.";
+      }
+      plan = { kind: "error", message: assistantContent } as unknown as Record<string, unknown>;
     }
   } else if (imageGenerationRequested) {
     // ── Async image generation via job queue ──────────────────────────────────
@@ -678,6 +709,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         prompt: content,
         agentIdentity: "planning",
         origin: messageOrigin,
+        intentReceiptId: terminalIntentReceiptId,
       })
       .returning();
 
@@ -718,79 +750,71 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         });
       },
       commitCompleted: async (result) => {
-        if (!planTask) return false;
-        const [completedTask] = await db
-          .update(agentTasksTable)
-          .set({ status: "completed", result: result.summary, completedAt: sql`now()` })
-          .where(and(eq(agentTasksTable.id, planTask.id), eq(agentTasksTable.status, "planning")))
-          .returning({ id: agentTasksTable.id });
-        return Boolean(completedTask);
+        return Boolean(planTask && result);
       },
-      commitCanceled: async () => {
-        if (!planTask) return;
-        await db
-          .update(agentTasksTable)
-          .set({ status: "canceled", completedAt: sql`now()` })
-          .where(and(eq(agentTasksTable.id, planTask.id), eq(agentTasksTable.status, "planning")));
-      },
-      commitFailed: async (error) => {
-        if (!planTask) return false;
-        const message = error instanceof Error ? error.message : "Plan generation failed";
-        const [failedTask] = await db
-          .update(agentTasksTable)
-          .set({ status: "failed", result: message, completedAt: sql`now()` })
-          .where(and(eq(agentTasksTable.id, planTask.id), eq(agentTasksTable.status, "planning")))
-          .returning({ id: agentTasksTable.id });
-        return Boolean(failedTask);
-      },
-      emitTerminal: async (kind, value) => {
-        if (kind === "cancelled") {
-          await emitPlanEvent(taskId, "cancelled", "Plan cancelled by user.");
-          return;
-        }
-        if (kind === "failed") {
-          const message = value instanceof Error ? value.message : "Plan generation failed";
-          await emitPlanEvent(taskId, "failed", message);
-          return;
-        }
-
-        const result = value as Awaited<ReturnType<typeof runPlanPipeline>>;
-        const planPageCount = Array.isArray(
-          (result.plan as Record<string, unknown> | null)?.["pages"],
-        )
-          ? ((result.plan as Record<string, unknown>)["pages"] as unknown[]).length
-          : 0;
-        await emitPlanEvent(
-          taskId,
-          "completed",
-          planPageCount > 0
-            ? `Plan ready: ${planPageCount} page(s) outlined.`
-            : "Plan ready — review the structured plan above.",
-        );
-      },
+      commitCanceled: async () => undefined,
+      commitFailed: async () => Boolean(planTask),
+      emitTerminal: async () => undefined,
     });
 
     if (planOutcome.status === "completed") {
       assistantContent = planOutcome.value.summary;
       plan = planOutcome.value.plan;
-      rememberCompletedAgentTask({
-        projectId: project.id,
-        userId: req.userId ?? project.ownerId,
-        taskId,
-        intent: "plan",
-        userPrompt: content,
-        assistantSummary: planOutcome.value.summary,
-        category: "plan",
-        tags: ["plan"],
-      });
+      if (planTask) {
+        terminalAfterAssistant = (assistantMessageId) =>
+          planSucceededTerminal({
+            schema: "zero-terminal-v1",
+            taskId,
+            intent: "plan",
+            intentReceiptId: terminalIntentReceiptId,
+            completedAt: new Date().toISOString(),
+            outcome: "plan_succeeded",
+            runStatus: "completed",
+            evidence: {
+              assistantMessageId,
+              planRef: { kind: "chat_message_plan", messageId: assistantMessageId },
+            },
+          });
+        terminalMemory = { taskId, intent: "plan", category: "plan", tags: ["plan"] };
+      }
     } else if (planOutcome.status === "canceled") {
-      assistantContent = "Plan cancelled by user.";
       plan = { kind: "cancelled", taskId };
+      if (planTask) {
+        const terminal = interruptedTerminal({
+          schema: "zero-terminal-v1",
+          taskId,
+          intent: "plan",
+          intentReceiptId: terminalIntentReceiptId,
+          completedAt: new Date().toISOString(),
+          outcome: "interrupted",
+          runStatus: "interrupted",
+          cause: "user_stop",
+          evidence: { lastPhase: "planning", changedPaths: [] },
+        });
+        terminalAfterAssistant = () => terminal;
+        assistantContent = presentZeroTerminalV1(terminal).message;
+      } else {
+        assistantContent = "This run was interrupted.";
+      }
     } else {
-      const message =
-        planOutcome.error instanceof Error ? planOutcome.error.message : "Plan generation failed";
-      assistantContent = `Plan generation failed: ${message}`;
-      plan = { kind: "error", message };
+      if (planTask) {
+        const terminal = failedTerminal({
+          schema: "zero-terminal-v1",
+          taskId,
+          intent: "plan",
+          intentReceiptId: terminalIntentReceiptId,
+          completedAt: new Date().toISOString(),
+          outcome: "failed",
+          runStatus: "failed",
+          cause: { code: "plan_failed", stage: "planning" },
+          evidence: { summary: "The plan could not be prepared." },
+        });
+        terminalAfterAssistant = () => terminal;
+        assistantContent = presentZeroTerminalV1(terminal).message;
+      } else {
+        assistantContent = "The plan could not be prepared.";
+      }
+      plan = { kind: "error", message: assistantContent };
     }
   } else {
     // Determine if this is an initial build or a refinement
@@ -951,6 +975,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       mutationCapable: true,
       receipt: intentReceipt,
     });
+    if (!Number.isInteger(admission.receiptId) || (admission.receiptId ?? 0) < 1) {
+      throw new Error("The mutation intent receipt was not recorded");
+    }
+    const mutationIntentReceiptId = admission.receiptId as number;
+    await db
+      .update(agentTasksTable)
+      .set({ intentReceiptId: mutationIntentReceiptId })
+      .where(eq(agentTasksTable.id, task.id));
 
     // Background work reserves the same flat pipeline price as foreground work,
     // but only after the task exists so every debit has an idempotent task key.
@@ -971,14 +1003,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         },
       });
       if ("insufficient" in reservation) {
-        await db
-          .update(agentTasksTable)
-          .set({
-            status: "failed",
-            result: "Insufficient credits to reserve background run.",
-            completedAt: sql`now()`,
-          })
-          .where(eq(agentTasksTable.id, task.id));
+        await persistFailedZeroTerminal({
+          taskId: task.id,
+          intent: "mutate",
+          intentReceiptId: mutationIntentReceiptId,
+          cause: { code: "background_reservation_unavailable", stage: "admission" },
+          summary: "Insufficient credits to reserve background run.",
+          allowedStatuses: ["queued", "planning"],
+        });
         res.status(402).json({ error: "Insufficient credits to reserve background run." });
         return;
       }
@@ -1051,17 +1083,25 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         .select()
         .from(agentTasksTable)
         .where(eq(agentTasksTable.id, task.id));
+      const persistedTerminalPresentation = presentPersistedZeroTerminal(refreshed?.terminal);
       assistantContent =
-        refreshed?.result ??
-        (kind === "build"
-          ? "I generated your app. Open the Preview tab to see it."
-          : "I applied your changes. Refresh the Preview tab.");
+        persistedTerminalPresentation?.message ?? "Outcome unavailable for this run.";
       plan = refreshed?.report
-        ? ({ kind: "report", report: refreshed.report, taskId: task.id } as unknown as Record<
-            string,
-            unknown
-          >)
-        : ({ kind: "task-done", taskId: task.id } as unknown as Record<string, unknown>);
+        ? ({
+            kind: "report",
+            report: refreshed.report,
+            taskId: task.id,
+            ...(refreshed?.terminal
+              ? {
+                  terminalRef: {
+                    kind: "zero_terminal",
+                    schema: "zero-terminal-v1",
+                    taskId: task.id,
+                  },
+                }
+              : {}),
+          } as unknown as Record<string, unknown>)
+        : ({ kind: "outcome-unavailable", taskId: task.id } as unknown as Record<string, unknown>);
       if (refreshed?.report) {
         plan = { ...plan, intent: resolvedIntent };
         const checkpointId = checkpointIdFromPlan(plan);
@@ -1182,6 +1222,38 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
     res.status(500).json({ error: "Failed to save assistant message" });
     return;
+  }
+
+  if (terminalAfterAssistant) {
+    const terminal = terminalAfterAssistant(assistantMessage.id);
+    const persisted = await persistZeroTerminal({
+      terminal,
+      allowedStatuses: ["answering", "planning"],
+    });
+    if (!persisted) {
+      if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
+      res.status(409).json({ error: "The run ended before its outcome could be recorded." });
+      return;
+    }
+    const ref = zeroTerminalRef(terminal);
+    await db
+      .update(chatMessagesTable)
+      .set({
+        plan: sql`COALESCE(${chatMessagesTable.plan}, '{}'::jsonb) || ${JSON.stringify({ terminalRef: ref })}::jsonb`,
+      })
+      .where(eq(chatMessagesTable.id, assistantMessage.id));
+    if (terminalMemory && terminal.outcome !== "interrupted" && terminal.outcome !== "failed") {
+      rememberCompletedAgentTask({
+        projectId: project.id,
+        userId: req.userId ?? project.ownerId,
+        taskId: terminalMemory.taskId,
+        intent: terminalMemory.intent,
+        userPrompt: content,
+        assistantSummary: assistantContent,
+        category: terminalMemory.category,
+        tags: terminalMemory.tags,
+      });
+    }
   }
 
   await db
@@ -1526,6 +1598,7 @@ router.post(
       return;
     }
     const resolvedIntent = intentReceipt.intent;
+    const terminalIntentReceiptId = intentReceipt.receiptId;
 
     // The receipt is authoritative before any route dispatch. Planning and mutation
     // requests fall back to the regular endpoint, which reuses this exact receipt.
@@ -1631,6 +1704,7 @@ router.post(
         prompt: content,
         agentIdentity: "main",
         origin: streamMessageOrigin,
+        intentReceiptId: terminalIntentReceiptId,
         hasBrainstormContext: streamHasBrainstormContext,
         brainstormTurnCount: streamHasBrainstormContext
           ? (streamBrainstormContext as Array<{ role: string; content: string }>).length
@@ -1719,24 +1793,25 @@ router.post(
       // Pipeline resolved — stop keep-alive pings
       stopKeepAlive();
 
-      // Client disconnected mid-stream — discard partial result, skip DB writes
+      // A disconnect is a durable interrupted outcome; never close a stream
+      // without the same terminal evidence that the task row carries.
       if (abortController.signal.aborted) {
+        let terminal: ZeroTerminalV1 | null = null;
         if (converseTask) {
-          await db
-            .update(agentTasksTable)
-            .set({ status: "failed", result: "Aborted by client", completedAt: sql`now()` })
-            .where(eq(agentTasksTable.id, converseTask.id));
+          ({ terminal } = await persistInterruptedZeroTerminal({
+            taskId: converseTask.id,
+            intent: resolvedIntent,
+            intentReceiptId: terminalIntentReceiptId,
+            cause: "client_disconnect",
+            evidence: { lastPhase: "response_stream", changedPaths: [] },
+            allowedStatuses: ["answering"],
+          }));
         }
+        streamSession.complete = true;
+        streamSession.donePayload = { terminal };
+        streamSession.emitter.emit("done");
         res.end();
         return;
-      }
-
-      // Update task status
-      if (converseTask) {
-        await db
-          .update(agentTasksTable)
-          .set({ status: "completed", result: converseResult.markdown, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, converseTask.id));
       }
 
       // Build the plan payload
@@ -1773,6 +1848,28 @@ router.post(
 
       if (!assistantMessage) throw new Error("Failed to save assistant message");
 
+      const terminal = converseTask
+        ? responseSucceededTerminal({
+            schema: "zero-terminal-v1",
+            taskId: converseTask.id,
+            intent: resolvedIntent,
+            intentReceiptId: terminalIntentReceiptId,
+            completedAt: new Date().toISOString(),
+            outcome: "response_succeeded",
+            runStatus: "completed",
+            evidence: { assistantMessageId: assistantMessage.id },
+          })
+        : null;
+      if (terminal) {
+        const persisted = await persistZeroTerminal({ terminal, allowedStatuses: ["answering"] });
+        if (!persisted) throw new Error("The response outcome could not be recorded");
+        plan = { ...plan, terminalRef: zeroTerminalRef(terminal) };
+        await db
+          .update(chatMessagesTable)
+          .set({ plan })
+          .where(eq(chatMessagesTable.id, assistantMessage.id));
+      }
+
       rememberCompletedAgentTask({
         projectId: project.id,
         userId: req.userId ?? project.ownerId,
@@ -1805,6 +1902,7 @@ router.post(
         userMessageId,
         assistantMessageId: assistantMessage.id,
         plan,
+        terminal,
       };
 
       // Cache the done payload so a retried request with the same idempotency key
@@ -1829,52 +1927,84 @@ router.post(
       // are not permanently blocked by a stale in-flight entry.
       if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
 
-      // Client aborted mid-stream — just mark task failed, no error message to DB
+      // Client aborts converge on the same durable interrupted terminal.
       if (abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+        let terminal: ZeroTerminalV1 | null = null;
         if (converseTask) {
-          await db
-            .update(agentTasksTable)
-            .set({ status: "failed", result: "Aborted by client", completedAt: sql`now()` })
-            .where(eq(agentTasksTable.id, converseTask.id));
+          ({ terminal } = await persistInterruptedZeroTerminal({
+            taskId: converseTask.id,
+            intent: resolvedIntent,
+            intentReceiptId: terminalIntentReceiptId,
+            cause: "client_disconnect",
+            evidence: { lastPhase: "response_stream", changedPaths: [] },
+            allowedStatuses: ["answering"],
+          }));
         }
-        // Mark session complete so resume clients don't hang
         streamSession.complete = true;
+        streamSession.donePayload = { terminal };
         streamSession.emitter.emit("done");
         res.end();
         return;
       }
-      const msg = err instanceof Error ? err.message : "Conversation failed";
-      if (converseTask) {
-        await db
-          .update(agentTasksTable)
-          .set({ status: "failed", result: msg, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, converseTask.id));
-      }
       // Save a fallback error message to the DB
       try {
+        const terminal = converseTask
+          ? failedTerminal({
+              schema: "zero-terminal-v1",
+              taskId: converseTask.id,
+              intent: resolvedIntent,
+              intentReceiptId: terminalIntentReceiptId,
+              completedAt: new Date().toISOString(),
+              outcome: "failed",
+              runStatus: "failed",
+              cause: { code: "conversation_failed", stage: "response_stream" },
+              evidence: { summary: "I wasn't able to answer that request." },
+            })
+          : null;
+        const failureMessage = terminal
+          ? presentZeroTerminalV1(terminal).message
+          : "I wasn't able to answer that request.";
         const [errMsg] = await db
           .insert(chatMessagesTable)
           .values({
             projectId: project.id,
             role: "assistant",
-            content: `I wasn't able to answer that: ${msg}`,
+            content: failureMessage,
             agentMode: mode,
             planMode: effectivePlanMode,
-            plan: { kind: "error", message: msg, intent: resolvedIntent },
+            plan: { kind: "error", message: failureMessage, intent: resolvedIntent },
             origin: streamMessageOrigin,
+            intentReceiptId: terminalIntentReceiptId,
           })
           .returning();
+        if (terminal) {
+          await persistZeroTerminal({ terminal, allowedStatuses: ["answering"] });
+          if (errMsg) {
+            await db
+              .update(chatMessagesTable)
+              .set({
+                plan: {
+                  kind: "error",
+                  message: failureMessage,
+                  intent: resolvedIntent,
+                  terminalRef: zeroTerminalRef(terminal),
+                },
+              })
+              .where(eq(chatMessagesTable.id, errMsg.id));
+          }
+        }
         const errorPayload = {
-          message: msg,
+          message: failureMessage,
           userMessageId,
           assistantMessageId: errMsg?.id,
+          terminal,
         };
         streamSession.complete = true;
         streamSession.errorPayload = errorPayload;
         streamSession.emitter.emit("error");
         sendEvent({ type: "error", ...errorPayload });
       } catch {
-        const errorPayload = { message: msg, userMessageId };
+        const errorPayload = { message: "I wasn't able to answer that request.", userMessageId };
         streamSession.complete = true;
         streamSession.errorPayload = errorPayload;
         streamSession.emitter.emit("error");

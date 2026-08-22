@@ -283,6 +283,8 @@ export type AgentLoopReport = {
   }>;
 };
 
+export type AgentLoopTerminationReason = AgentLoopReport["terminationReason"];
+
 export function completionKindForTerminationReason(
   reason: AgentLoopReport["terminationReason"],
 ): AgentTaskCompletionKind {
@@ -315,12 +317,33 @@ export type AgentLoopResult = {
   changedFiles: BuilderFile[];
   removedPaths: string[];
   unchangedFiles: string[];
-  assistantSummary: string;
+  observation: AgentLoopObservation;
   warnings: string[];
   loopReport: AgentLoopReport;
   /** True when any required check failed and the agent could not recover. */
   checksFailed: boolean;
 };
+
+export type AgentLoopObservation =
+  | { kind: "model_summary"; text: string }
+  | { kind: "interrupted"; cause: "user_stop"; changedPaths: string[] }
+  | {
+      kind: "ended_without_summary";
+      terminationReason: AgentLoopTerminationReason;
+      changedPaths: string[];
+    };
+
+/** Human-readable context only; never a terminal success claim. */
+export function agentLoopObservationText(observation: AgentLoopObservation): string {
+  switch (observation.kind) {
+    case "model_summary":
+      return observation.text;
+    case "interrupted":
+      return "The run was interrupted before it reached a terminal result.";
+    case "ended_without_summary":
+      return `The run ended without a model summary (${observation.terminationReason}).`;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -3419,7 +3442,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       changedFiles: diff.changed,
       removedPaths: diff.removed,
       unchangedFiles: diff.unchanged,
-      assistantSummary: finalSummary || "Aborted by user.",
+      observation: {
+        kind: "interrupted",
+        cause: "user_stop",
+        changedPaths: diff.changed.map((file) => file.path),
+      },
       warnings: finalWarnings,
       checksFailed: true,
       loopReport: {
@@ -3740,11 +3767,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     changedFiles: diff.changed,
     removedPaths: diff.removed,
     unchangedFiles: diff.unchanged,
-    assistantSummary:
-      finalSummary ||
-      (input.mode === "build"
-        ? `Built ${allFiles.length} file${allFiles.length === 1 ? "" : "s"} via agentic loop.`
-        : `Refined ${diff.changed.length} file${diff.changed.length === 1 ? "" : "s"} via agentic loop.`),
+    observation: finalSummary
+      ? { kind: "model_summary", text: finalSummary }
+      : {
+          kind: "ended_without_summary",
+          terminationReason,
+          changedPaths: diff.changed.map((file) => file.path),
+        },
     warnings: finalWarnings,
     checksFailed: requiredFailed,
     loopReport: {
@@ -8157,7 +8186,7 @@ export function loopResultToBuildResult(
     files: result.files,
     blueprint,
     report: baseReport,
-    assistantSummary: result.assistantSummary,
+    assistantSummary: agentLoopObservationText(result.observation),
     correctionPasses: 0,
     // Hard gate: required-check failures must block the snapshot from being
     // saved as a successful build. runJob inspects correctionFailed and
@@ -8187,7 +8216,7 @@ export function loopResultToRefineResult(
     removedPaths: result.removedPaths,
     unchangedFiles: result.unchangedFiles,
     report: baseReport,
-    assistantSummary: result.assistantSummary,
+    assistantSummary: agentLoopObservationText(result.observation),
     correctionPasses: 0,
     // Hard gate (refine path): see comment on loopResultToBuildResult.
     correctionFailed: result.checksFailed,
@@ -8238,7 +8267,7 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
     previewUpdated: false,
     warnings,
     integrationsNeeded: [],
-    summary: result.assistantSummary,
+    summary: agentLoopObservationText(result.observation),
     checkSummary,
     checkRunsSummary: {
       passed,
@@ -8249,9 +8278,8 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
       warnChecks: deferredChecks.map((check) => check.id),
     },
     syntaxValid: deferredChecks.length > 0 ? undefined : !result.checksFailed,
-    // Stash the full loop report on validationReport so the existing UI surfaces it,
-    // and on a side channel via `summary` for now. Frontend can later read the raw
-    // loopReport via the typed extension below.
+    // Keep the full loop report on validationReport for the existing UI while the
+    // typed agentLoop field below carries the complete observation record.
     validationReport:
       deferredChecks.length > 0
         ? null

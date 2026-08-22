@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -219,6 +219,7 @@ function changedRepositoryInventory(): Map<string, string> {
   const changed = gitLines([
     "diff",
     "--name-only",
+    "--diff-filter=ACMR",
     REACHABILITY_ANCHOR,
     "--",
     "artifacts",
@@ -250,7 +251,9 @@ function currentRepositoryInventory(): Map<string, string> {
     "artifacts",
     "lib",
     "scripts",
-  ]).filter(isProductionTypeScript);
+  ]).filter(
+    (filePath) => isProductionTypeScript(filePath) && existsSync(path.join(REPO_ROOT, filePath)),
+  );
   return new Map(
     paths.map((filePath) => [filePath, readFileSync(path.join(REPO_ROOT, filePath), "utf8")]),
   );
@@ -258,7 +261,7 @@ function currentRepositoryInventory(): Map<string, string> {
 
 describe("non-test export reachability", () => {
   it("marks every registered dormant export at its definition", () => {
-    expect(dormantExports).toHaveLength(6);
+    expect(dormantExports).toHaveLength(5);
     expect(
       new Set(dormantExports.map(({ path: filePath, symbol }) => `${filePath}#${symbol}`)).size,
     ).toBe(dormantExports.length);

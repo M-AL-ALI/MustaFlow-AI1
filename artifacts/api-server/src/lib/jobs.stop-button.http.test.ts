@@ -152,6 +152,8 @@ const {
             status: routeTaskStatus.value,
             creditsReserved: null,
             queueBatchId: null,
+            kind: "main",
+            intentReceiptId: 71,
           },
         ]);
       case "task_events":
@@ -244,6 +246,12 @@ const {
             where: (..._args: unknown[]) => ({
               returning: () => {
                 const status = (vals as { status?: string }).status;
+                if (
+                  (_table as { __id?: string }).__id === "agent_tasks" &&
+                  ["completed", "failed", "canceled"].includes(routeTaskStatus.value)
+                ) {
+                  return Promise.resolve([]);
+                }
                 if (status) routeTaskStatus.value = status;
                 return Promise.resolve([
                   {
@@ -702,7 +710,7 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     expect(cancelledRows[0]).toMatchObject({
       taskId: TASK_ID,
       eventType: "cancelled",
-      message: "Build cancelled by user.",
+      message: "This run was interrupted.",
     });
   }, 15_000);
 
@@ -716,7 +724,7 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     const resp = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/cancel`, {
       method: "POST",
     });
-    expect(resp.status).toBe(200);
+    expect(resp.status, await resp.clone().text()).toBe(200);
     const body = (await resp.json()) as { id: number; status: string };
     expect(body).toMatchObject({ id: TASK_ID, status: "canceled" });
 
@@ -727,7 +735,7 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     expect(emittedEventRows.filter((row) => row.eventType === "cancelled")).toHaveLength(1);
   }, 5_000);
 
-  it("returns success when plan cleanup wins the status race and writes one terminal event", async () => {
+  it("lets the cancel route own one canonical plan interruption event", async () => {
     routeTaskStatus.value = "planning";
     const terminalEvents: string[] = [];
     let planStarted = false;
@@ -742,20 +750,10 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
         });
       },
       commitCompleted: async () => false,
-      commitCanceled: async () => {
-        routeTaskStatus.value = "canceled";
-      },
+      commitCanceled: async () => undefined,
       commitFailed: async () => false,
       emitTerminal: async (kind) => {
         terminalEvents.push(kind);
-        emittedEventRows.push({
-          id: insertIdCounter.value++,
-          taskId: TASK_ID,
-          eventType: kind,
-          message: "Plan cancelled by user.",
-          filePath: null,
-          createdAt: new Date(),
-        });
       },
     });
     await vi.waitFor(() => expect(planStarted).toBe(true));
@@ -784,7 +782,7 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     const resp = await fetch(`${baseUrl}/projects/${PROJECT_ID}/tasks/${TASK_ID}/cancel`, {
       method: "POST",
     });
-    expect(resp.status).toBe(200);
+    expect(resp.status).toBe(409);
     expect(emittedEventRows.filter((row) => row.eventType === "cancelled")).toHaveLength(1);
   }, 5_000);
 });

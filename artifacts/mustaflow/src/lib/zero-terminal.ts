@@ -16,10 +16,7 @@ export function terminalTaskStatus(carrier: ZeroTerminalCarrier, legacyStatus: s
   return terminalPresentationFor(carrier)?.taskStatus ?? legacyStatus;
 }
 
-/**
- * @dormantExport
- * B3b consumes this canonical message helper when durable terminal writers are wired.
- */
+/** Prefer durable terminal truth; null preserves the caller's legacy message exactly. */
 export function terminalTaskMessage(carrier: ZeroTerminalCarrier, legacyMessage: string): string {
   return terminalPresentationFor(carrier)?.message ?? legacyMessage;
 }

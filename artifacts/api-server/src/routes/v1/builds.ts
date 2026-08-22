@@ -18,6 +18,7 @@ import { logger } from "../../lib/logger";
 import { checkV1ProjectAccess, requirePatScope } from "./access";
 import { projectSummaryProvenance } from "../../lib/project-summary-provenance";
 import { governIntentAdmission } from "../../lib/zero-intent-admission";
+import { persistInterruptedZeroTerminal } from "../../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
 
@@ -278,18 +279,24 @@ router.post(
       });
       return;
     }
+    if (!Number.isInteger(task.intentReceiptId) || (task.intentReceiptId ?? 0) < 1) {
+      res.status(409).json({ error: "This older build cannot be cancelled safely." });
+      return;
+    }
 
     cancelActiveJob(buildId);
-
-    await db
-      .update(agentTasksTable)
-      .set({ status: "cancelled", completedAt: new Date() })
-      .where(
-        and(
-          eq(agentTasksTable.id, buildId),
-          inArray(agentTasksTable.status, ["queued", "planning", "building"]),
-        ),
-      );
+    const { persisted } = await persistInterruptedZeroTerminal({
+      taskId: buildId,
+      intent: task.kind === "plan" ? "plan" : "mutate",
+      intentReceiptId: task.intentReceiptId!,
+      cause: "user_stop",
+      evidence: { lastPhase: task.status === "queued" ? null : task.status, changedPaths: [] },
+      allowedStatuses: ["queued", "planning", "building"],
+    });
+    if (!persisted) {
+      res.status(409).json({ error: "Build is already terminal and cannot be cancelled." });
+      return;
+    }
 
     logger.info({ buildId, projectId }, "v1 build cancelled");
     res.json({ cancelled: true, buildId });
