@@ -7760,6 +7760,7 @@ export async function runPythonRefinePipeline(args: {
 export type IntentResult = {
   intent: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
   confidence: number;
+  decisionSource: "deterministic_rule" | "classifier" | "classifier_fallback";
 };
 
 export const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder chat. Read the user's latest message in the context of the recent conversation and classify their true intent into exactly one of:
@@ -7855,7 +7856,7 @@ function fastClassify(
 
   const normalized = trimmed.toLowerCase().replace(/[.!?…]+$/g, "");
   if (SHORT_REACTIONS.has(normalized)) {
-    return { intent: "converse", confidence: 0.95 };
+    return { intent: "converse", confidence: 0.95, decisionSource: "deterministic_rule" };
   }
 
   // Developer-specific intents — check early so they take precedence over generic
@@ -7863,16 +7864,16 @@ function fastClassify(
   // descriptions) that don't look like direct code-change commands.
   if (!STARTS_WITH_BUILD_IMPERATIVE.test(trimmed) || trimmed.endsWith("?")) {
     if (hasFiles && DEBUG_PATTERNS.test(trimmed)) {
-      return { intent: "debug", confidence: 0.9 };
+      return { intent: "debug", confidence: 0.9, decisionSource: "deterministic_rule" };
     }
     if (REFACTOR_PATTERNS.test(trimmed)) {
-      return { intent: "refactor", confidence: 0.9 };
+      return { intent: "refactor", confidence: 0.9, decisionSource: "deterministic_rule" };
     }
     if (REVIEW_PATTERNS.test(trimmed)) {
-      return { intent: "review", confidence: 0.9 };
+      return { intent: "review", confidence: 0.9, decisionSource: "deterministic_rule" };
     }
     if (EXPLAIN_PATTERNS.test(trimmed)) {
-      return { intent: "explain", confidence: 0.9 };
+      return { intent: "explain", confidence: 0.9, decisionSource: "deterministic_rule" };
     }
   }
 
@@ -7883,7 +7884,7 @@ function fastClassify(
   // is no reason to send "please create the app" through the LLM classifier
   // and risk a converse misroute that tells the user to start a new project.
   if (isImperative && !trimmed.endsWith("?")) {
-    return { intent: "build", confidence: 0.95 };
+    return { intent: "build", confidence: 0.95, decisionSource: "deterministic_rule" };
   }
 
   // Strong signal: any message ending in "?" that is not a direct imperative
@@ -7891,7 +7892,7 @@ function fastClassify(
   // inside it. ("Why isn't it fixed?", "Nothing changed, why?", "How do I
   // make this work?") all → converse.
   if (trimmed.endsWith("?") && !isImperative) {
-    return { intent: "converse", confidence: 0.95 };
+    return { intent: "converse", confidence: 0.95, decisionSource: "deterministic_rule" };
   }
 
   // Implicit fix request: the message describes a problem/bug/error without
@@ -7905,7 +7906,7 @@ function fastClassify(
     !QUESTION_STARTERS.test(trimmed) &&
     PROBLEM_REPORT_PATTERNS.test(trimmed)
   ) {
-    return { intent: "build", confidence: 0.9 };
+    return { intent: "build", confidence: 0.9, decisionSource: "deterministic_rule" };
   }
 
   // Repeat / rephrase detection: if the user is re-sending the same (or very
@@ -7923,7 +7924,7 @@ function fastClassify(
       for (const prior of priorUserTurns) {
         if (!prior) continue;
         if (prior === currentNorm) {
-          return { intent: "converse", confidence: 0.95 };
+          return { intent: "converse", confidence: 0.95, decisionSource: "deterministic_rule" };
         }
         // High-overlap rephrase: share most non-trivial tokens with a prior
         // user turn (Jaccard ≥ 0.6 on 3+ char tokens).
@@ -7934,7 +7935,7 @@ function fastClassify(
           for (const w of a) if (b.has(w)) inter++;
           const union = a.size + b.size - inter;
           if (union > 0 && inter / union >= 0.6) {
-            return { intent: "converse", confidence: 0.9 };
+            return { intent: "converse", confidence: 0.9, decisionSource: "deterministic_rule" };
           }
         }
       }
@@ -7945,7 +7946,7 @@ function fastClassify(
   // are not direct imperatives are also reliably converse.
   const wordCount = trimmed.split(/\s+/).length;
   if (QUESTION_STARTERS.test(trimmed) && !isImperative && wordCount <= 20) {
-    return { intent: "converse", confidence: 0.9 };
+    return { intent: "converse", confidence: 0.9, decisionSource: "deterministic_rule" };
   }
 
   return null;
@@ -8013,16 +8014,16 @@ export async function runIntentClassifierPipeline(
     // "build" with low confidence and the message doesn't actually contain
     // a build-action verb, downgrade to converse.
     if (intent === "build" && confidence < 0.7 && !BUILD_ACTION_VERBS.test(userPrompt)) {
-      return { intent: "converse", confidence: 0.7 };
+      return { intent: "converse", confidence: 0.7, decisionSource: "classifier" };
     }
-    return { intent, confidence };
+    return { intent, confidence, decisionSource: "classifier" };
   } catch (err) {
     // Safer fallback than "always build": if we can't classify and the
     // message doesn't even contain a build verb, treat it as conversation.
     logger.warn({ err }, "Intent classifier failed, falling back");
     const fallbackIntent: IntentResult["intent"] =
       hasFiles && BUILD_ACTION_VERBS.test(userPrompt) ? "build" : "converse";
-    return { intent: fallbackIntent, confidence: 0.6 };
+    return { intent: fallbackIntent, confidence: 0.6, decisionSource: "classifier_fallback" };
   }
 }
 

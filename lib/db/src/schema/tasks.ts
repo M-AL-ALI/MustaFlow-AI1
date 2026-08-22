@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
+import { zeroIntentReceiptsTable } from "./zero-intent-receipts";
 
 export type TestResult = {
   name: string;
@@ -471,6 +472,9 @@ export const agentTasksTable = pgTable(
     // origin: source surface that created the task. Mirrors chat_messages.origin
     // so queued/background task reports can be written back to the same thread.
     origin: text("origin"),
+    intentReceiptId: integer("intent_receipt_id").references(() => zeroIntentReceiptsTable.id, {
+      onDelete: "set null",
+    }),
     // stagingSnapshot: legacy staged files awaiting user approval. Null for
     // Main Agent rows because files are written directly to project_files.
     stagingSnapshot:
@@ -528,6 +532,7 @@ export const agentTasksTable = pgTable(
     index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),
     index("agent_tasks_queue_batch_id_idx").on(table.queueBatchId),
     index("agent_tasks_run_mode_status_idx").on(table.runMode, table.status),
+    index("agent_tasks_intent_receipt_id_idx").on(table.intentReceiptId),
     // Partial unique index: prevents more than one active background auto-fix task
     // with the same title from being queued for the same project simultaneously.
     // Rows that have transitioned to done/failed/canceled fall outside the index,

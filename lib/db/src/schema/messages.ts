@@ -11,6 +11,7 @@ import {
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 import { projectVersionsTable } from "./versions";
+import { zeroIntentReceiptsTable } from "./zero-intent-receipts";
 
 export const chatMessagesTable = pgTable(
   "chat_messages",
@@ -35,6 +36,9 @@ export const chatMessagesTable = pgTable(
     // origin: identifies which panel/surface sent this message.
     // 'zero' = Zero agent panel; null = main builder chat or other sources.
     origin: text("origin"),
+    intentReceiptId: integer("intent_receipt_id").references(() => zeroIntentReceiptsTable.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -43,6 +47,7 @@ export const chatMessagesTable = pgTable(
       .on(table.checkpointId)
       .where(sql`checkpoint_id IS NOT NULL`),
     index("chat_messages_content_tsv_idx").using("gin", sql`content_tsv`),
+    index("chat_messages_intent_receipt_id_idx").on(table.intentReceiptId),
   ],
 );
 

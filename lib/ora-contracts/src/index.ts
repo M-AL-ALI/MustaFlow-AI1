@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./zero-prompt-queue-boundary";
+export * from "./zero-intent";
 export * from "./billing-user-errors";
 export * from "./user-visible-errors";
 

@@ -727,6 +727,122 @@ export async function applyZeroPromptQueuePersistenceMigration(
   await client.query("COMMIT");
 }
 
+type ZeroIntentReceiptSchemaState = {
+  table_ready: boolean;
+  receipt_columns_ready: boolean;
+  message_link_ready: boolean;
+  task_link_ready: boolean;
+  constraints_ready: boolean;
+};
+
+/** Add durable, admission-ready intent receipts without backfilling legacy work. */
+export async function applyZeroIntentReceiptMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS zero_intent_receipts (
+        id SERIAL PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        source_message_id INTEGER,
+        intent TEXT NOT NULL,
+        deciding_source TEXT NOT NULL,
+        confidence DOUBLE PRECISION,
+        reason_code TEXT NOT NULL,
+        decided_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        consumed_at TIMESTAMPTZ,
+        CONSTRAINT zero_intent_receipts_project_request_uq UNIQUE (project_id, request_id),
+        CONSTRAINT zero_intent_receipts_intent_check
+          CHECK (intent IN ('answer', 'clarify', 'plan', 'mutate', 'observe')),
+        CONSTRAINT zero_intent_receipts_source_check
+          CHECK (deciding_source IN (
+            'user_explicit', 'plan_approved', 'deterministic_rule', 'classifier',
+            'classifier_fallback', 'snapshot_control', 'queue_promoted',
+            'system_action', 'scheduled_action'
+          )),
+        CONSTRAINT zero_intent_receipts_confidence_check
+          CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
+      )
+    `);
+    await client.query(`
+      ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS intent_receipt_id INTEGER;
+      ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS intent_receipt_id INTEGER;
+      DO $$ BEGIN
+        ALTER TABLE zero_intent_receipts
+          ADD CONSTRAINT zero_intent_receipts_source_message_fk
+          FOREIGN KEY (source_message_id) REFERENCES chat_messages(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+      DO $$ BEGIN
+        ALTER TABLE chat_messages
+          ADD CONSTRAINT chat_messages_intent_receipt_fk
+          FOREIGN KEY (intent_receipt_id) REFERENCES zero_intent_receipts(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+      DO $$ BEGIN
+        ALTER TABLE agent_tasks
+          ADD CONSTRAINT agent_tasks_intent_receipt_fk
+          FOREIGN KEY (intent_receipt_id) REFERENCES zero_intent_receipts(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS zero_intent_receipts_project_decided_idx
+        ON zero_intent_receipts(project_id, decided_at);
+      CREATE INDEX IF NOT EXISTS zero_intent_receipts_admission_idx
+        ON zero_intent_receipts(project_id, intent, consumed_at);
+      CREATE INDEX IF NOT EXISTS chat_messages_intent_receipt_id_idx
+        ON chat_messages(intent_receipt_id);
+      CREATE INDEX IF NOT EXISTS agent_tasks_intent_receipt_id_idx
+        ON agent_tasks(intent_receipt_id)
+    `);
+    const verification = await client.query<ZeroIntentReceiptSchemaState>(`
+      SELECT
+        to_regclass('public.zero_intent_receipts') IS NOT NULL AS table_ready,
+        (SELECT count(*) = 10
+           FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'zero_intent_receipts'
+            AND column_name IN (
+              'id', 'request_id', 'project_id', 'source_message_id', 'intent',
+              'deciding_source', 'confidence', 'reason_code', 'decided_at', 'consumed_at'
+            )) AS receipt_columns_ready,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'chat_messages'
+                   AND column_name = 'intent_receipt_id') AS message_link_ready,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'agent_tasks'
+                   AND column_name = 'intent_receipt_id') AS task_link_ready,
+        (SELECT count(*) >= 6
+           FROM pg_constraint
+          WHERE conrelid IN (
+            'zero_intent_receipts'::regclass,
+            'chat_messages'::regclass,
+            'agent_tasks'::regclass
+          )
+            AND conname IN (
+              'zero_intent_receipts_project_request_uq',
+              'zero_intent_receipts_intent_check',
+              'zero_intent_receipts_source_check',
+              'zero_intent_receipts_source_message_fk',
+              'chat_messages_intent_receipt_fk',
+              'agent_tasks_intent_receipt_fk'
+            )) AS constraints_ready
+    `);
+    const state = verification.rows[0];
+    if (
+      !state?.table_ready ||
+      !state.receipt_columns_ready ||
+      !state.message_link_ready ||
+      !state.task_link_ready ||
+      !state.constraints_ready
+    ) {
+      throw new Error("zero_intent_receipt_schema_incomplete");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 const MIGRATION_STEPS: MigrationStep[] = [
   {
     name: "migrate-production-artifact-release-records",
@@ -5858,6 +5974,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-zero-prompt-queue-items",
     async run(client) {
       await applyZeroPromptQueuePersistenceMigration(client);
+    },
+  },
+  {
+    name: "migrate-zero-intent-receipts",
+    async run(client) {
+      await applyZeroIntentReceiptMigration(client);
     },
   },
 ];

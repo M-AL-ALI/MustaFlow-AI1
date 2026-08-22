@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
 import { asc, and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
   db,
@@ -24,7 +25,7 @@ import {
   runConverseStreamPipeline,
   runIntentClassifierPipeline,
 } from "../lib/builder";
-import type { ConversationTurn, ConverseImageAttachment } from "../lib/builder";
+import type { ConversationTurn, ConverseImageAttachment, IntentResult } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   enqueueJob,
@@ -46,8 +47,81 @@ import {
   shouldStageBackgroundPlanStep,
 } from "../lib/background-plan-step";
 import { publishTaskEvent } from "../lib/event-bus";
+import {
+  intentReceiptEnforcementRequested,
+  runIntentShadow,
+  type ZeroIntentExplicitControl,
+} from "../lib/zero-intent-judge";
+import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
+import type { IntentReceipt } from "@workspace/ora-contracts";
 
 const router: IRouter = Router();
+
+type LegacyResolvedIntent =
+  | "converse"
+  | "plan"
+  | "build"
+  | "debug"
+  | "refactor"
+  | "review"
+  | "explain"
+  | "fix_tests"
+  | "fix_types"
+  | "fix_lint"
+  | "image_generate";
+
+function legacyIntentCategory(intent: LegacyResolvedIntent): IntentReceipt["intent"] {
+  if (intent === "plan") return "plan";
+  if (intent === "debug" || intent === "review") return "observe";
+  if (intent === "converse" || intent === "explain") return "answer";
+  return "mutate";
+}
+
+async function persistShadowIntent(input: {
+  projectId: number;
+  requestId: string;
+  legacyIntent: LegacyResolvedIntent;
+  explicitControl?: ZeroIntentExplicitControl;
+  planMode: boolean;
+  approvedPlanStep: boolean;
+  imageGenerationRequested: boolean;
+  attachments: readonly unknown[];
+  conversationTurnCount: number;
+  fileCount: number;
+  classify(): Promise<IntentResult>;
+}): Promise<IntentReceipt | null> {
+  const outcome = await runIntentShadow(input.legacyIntent, input, (decision) =>
+    intentReceiptStore.persist(input.projectId, input.requestId, decision),
+  );
+  if (outcome.receipt && outcome.decision) {
+    const { decision, receipt } = outcome;
+    logger.info(
+      {
+        projectId: input.projectId,
+        legacyIntent: legacyIntentCategory(input.legacyIntent),
+        shadowIntent: decision.intent,
+        decidingSource: decision.decidingSource,
+        reasonCode: decision.reasonCode,
+        diverged: legacyIntentCategory(input.legacyIntent) !== decision.intent,
+        attachmentCount: input.attachments.length,
+        conversationTurnCount: input.conversationTurnCount,
+        fileCount: input.fileCount,
+        enforcementRequested: intentReceiptEnforcementRequested(),
+      },
+      "zero-intent shadow decision",
+    );
+    return receipt;
+  }
+  logger.warn(
+    {
+      projectId: input.projectId,
+      errorType: outcome.errorType,
+      enforcementRequested: intentReceiptEnforcementRequested(),
+    },
+    "zero-intent shadow receipt unavailable",
+  );
+  return null;
+}
 
 function checkpointIdFromPlan(plan: Record<string, unknown> | null): number | null {
   const report = plan?.kind === "report" ? plan.report : null;
@@ -182,6 +256,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     deepReasoning: requestedDeepReasoning,
   } = parsed.data;
   let { content } = parsed.data;
+  const originalContent = content;
 
   // Idempotency dedup — if this key was already processed, return the cached result
   if (idempotencyKey) {
@@ -332,6 +407,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   // eslint-disable-next-line no-useless-assignment
   let resolvedIntent: ResolvedIntent = "build";
   let intentConfidence = 1.0;
+  let classifiedForShadow: IntentResult | null = null;
 
   if (imageAttachments.length > 0) {
     // Screenshot-to-code: image attachments unconditionally route to build/refine —
@@ -378,6 +454,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         );
         resolvedIntent = classified.intent;
         intentConfidence = classified.confidence;
+        classifiedForShadow = classified;
       } catch (err) {
         logger.warn({ err }, "Intent classifier failed, defaulting to build");
         resolvedIntent = hasFiles ? "build" : "converse";
@@ -389,6 +466,27 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       }
     }
   }
+
+  const shadowReceipt = await persistShadowIntent({
+    projectId: project.id,
+    requestId: idempotencyKey ?? randomUUID(),
+    legacyIntent: resolvedIntent,
+    explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
+    planMode: Boolean(planMode),
+    approvedPlanStep: Boolean(stagedBackgroundPlanStep),
+    imageGenerationRequested: resolvedIntent === "image_generate",
+    attachments,
+    conversationTurnCount: conversationHistory.length,
+    fileCount: currentProjectFiles.length,
+    classify: () =>
+      classifiedForShadow
+        ? Promise.resolve(classifiedForShadow)
+        : runIntentClassifierPipeline(
+            originalContent,
+            conversationHistory,
+            currentProjectFiles.length > 0,
+          ),
+  });
 
   // Effective planMode — true when explicitly toggled OR when intent classifier auto-routes to plan.
   // This ensures assistant messages are stored with planMode=true so the plan-card UI renders.
@@ -434,11 +532,25 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       planMode: effectivePlanMode,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       origin: messageOrigin,
+      intentReceiptId: shadowReceipt?.receiptId,
     })
     .returning();
   if (!userMessage) {
     res.status(500).json({ error: "Failed to save message" });
     return;
+  }
+  if (shadowReceipt) {
+    try {
+      await intentReceiptStore.linkMessage(shadowReceipt.receiptId, userMessage.id);
+    } catch (error) {
+      logger.warn(
+        {
+          projectId: project.id,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        },
+        "zero-intent shadow message link unavailable",
+      );
+    }
   }
 
   let assistantContent: string;
@@ -1478,6 +1590,7 @@ router.post(
     // eslint-disable-next-line no-useless-assignment
     let resolvedIntent: StreamResolvedIntent = "build";
     let intentConfidence = 1.0;
+    let classifiedForShadow: IntentResult | null = null;
 
     if (
       explicitAgentIntent === "converse" ||
@@ -1512,6 +1625,7 @@ router.post(
         );
         resolvedIntent = classified.intent as StreamResolvedIntent;
         intentConfidence = classified.confidence;
+        classifiedForShadow = classified;
       } catch (err) {
         logger.warn({ err }, "Intent classifier failed in stream route, defaulting");
         resolvedIntent = hasFiles ? "build" : "converse";
@@ -1537,6 +1651,27 @@ router.post(
       res.end();
       return;
     }
+
+    const shadowReceipt = await persistShadowIntent({
+      projectId: project.id,
+      requestId: streamIdempotencyKey ?? randomUUID(),
+      legacyIntent: resolvedIntent,
+      explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
+      planMode: Boolean(planMode),
+      approvedPlanStep: false,
+      imageGenerationRequested: false,
+      attachments,
+      conversationTurnCount: conversationHistory.length,
+      fileCount: currentProjectFiles.length,
+      classify: () =>
+        classifiedForShadow
+          ? Promise.resolve(classifiedForShadow)
+          : runIntentClassifierPipeline(
+              content,
+              conversationHistory,
+              currentProjectFiles.length > 0,
+            ),
+    });
 
     const effectivePlanMode = planMode;
     const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
@@ -1564,10 +1699,24 @@ router.post(
           planMode: effectivePlanMode,
           attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
           origin: streamMessageOrigin,
+          intentReceiptId: shadowReceipt?.receiptId,
         })
         .returning();
       if (!userMessage) throw new Error("Failed to save user message");
       userMessageId = userMessage.id;
+      if (shadowReceipt) {
+        try {
+          await intentReceiptStore.linkMessage(shadowReceipt.receiptId, userMessage.id);
+        } catch (error) {
+          logger.warn(
+            {
+              projectId: project.id,
+              errorType: error instanceof Error ? error.name : "UnknownError",
+            },
+            "zero-intent shadow stream message link unavailable",
+          );
+        }
+      }
     } catch (_err) {
       if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
       sendEvent({ type: "error", message: "Failed to save message" });
