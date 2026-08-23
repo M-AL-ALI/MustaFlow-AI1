@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import {
   ParityIsolationError,
   type ParityIsolationConnector,
+  type ParityProofConnector,
+  relayChildOutput,
   runParityIsolation,
+  runThreeProofParity,
 } from "./startup-migrations-parity-isolation";
 
 function connectorThatMustNotRun(): ParityIsolationConnector {
@@ -151,5 +155,92 @@ describe("startup-migrations parity isolation", () => {
       },
     );
     assert.deepEqual(calls, ["setup", "check", "teardown"]);
+  });
+
+  it("bootstraps before idempotency and runs the restore probe last", async () => {
+    const calls: string[] = [];
+    const lines: string[] = [];
+    let materializationRun = 0;
+    let migrationRun = 0;
+    const connector: ParityProofConnector = {
+      async materializeBase() {
+        materializationRun++;
+        calls.push(`materialize:${materializationRun}`);
+        return { objectCount: 137 };
+      },
+      async runMigrations() {
+        migrationRun++;
+        calls.push(`migrate:${migrationRun}`);
+        return { migrationCount: 145 };
+      },
+      async captureSchema() {
+        calls.push(`capture:${migrationRun}`);
+        return ["relation:public.projects", "column:public.projects.id"];
+      },
+      async dropRestoreProbeColumn() {
+        calls.push("drop-restore-column");
+      },
+      async hasRestoreProbeColumn() {
+        calls.push("verify-restore-column");
+        return true;
+      },
+      async close() {
+        calls.push("close");
+      },
+    };
+
+    await runThreeProofParity({
+      target: {
+        connectionString: "postgresql://user:secret@scratch.dev.example/parity_scratch_order",
+        host: "scratch.dev.example",
+        databaseName: "parity_scratch_order",
+      },
+      connector,
+      log: (line) => lines.push(line),
+    });
+
+    assert.deepEqual(calls, [
+      "materialize:1",
+      "migrate:1",
+      "capture:1",
+      "materialize:2",
+      "migrate:2",
+      "capture:2",
+      "drop-restore-column",
+      "migrate:3",
+      "verify-restore-column",
+      "close",
+    ]);
+    assert.ok(lines.some((line) => line.includes("parity_layer1_materialize_pass")));
+    assert.ok(lines.some((line) => line.includes("parity_layer2_migrations_pass")));
+    assert.ok(lines.some((line) => line.includes("parity_construction_pass")));
+    assert.ok(lines.some((line) => line.includes("diff_count=0")));
+    assert.ok(lines.some((line) => line.includes("parity_restore_probe_pass")));
+    assert.ok(lines.every((line) => !line.includes("user")));
+    assert.ok(lines.every((line) => !line.includes("secret")));
+  });
+
+  it("relays child stdout and stderr without suppressing either stream", () => {
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+
+    relayChildOutput(stdout, {
+      write(chunk) {
+        stdoutChunks.push(Buffer.from(chunk).toString("utf8"));
+      },
+    });
+    relayChildOutput(stderr, {
+      write(chunk) {
+        stderrChunks.push(Buffer.from(chunk).toString("utf8"));
+      },
+    });
+
+    stdout.emit("data", Buffer.from("migration receipt\n"));
+    stderr.emit("data", Buffer.from("underlying failure stack\n"));
+
+    assert.deepEqual(stdoutChunks, ["migration receipt\n"]);
+    assert.deepEqual(stderrChunks, ["underlying failure stack\n"]);
   });
 });
