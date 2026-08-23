@@ -1,3 +1,4 @@
+- [Parity harness first clean pass](parity-harness-first-clean-pass.md) — first parity_check_pass at HEAD 8ab1d25d; layer-1 pin=252, 144+1 tolerated, diff_count=0, restore probe pass. Invocation + CREATE DB pattern inside.
 - [CI typeof-import type inclusion](ci-typeof-import-type-inclusion.md) — `typeof import("../routes/foo")` in a type position is static; drags the file into any tsconfig. Fix: move shared fns to lib, never use typeof-import in lib signatures.
 - [E2E_TEST_ENABLED stub in approval tests](e2e-test-enabled-stub-in-approval-tests.md) — stub E2E_TEST_ENABLED="" in beforeEach for any test asserting createPrompt fired; env is true globally in Replit, bypassing gates silently.
 - [admin.ts merge revert pattern](admin-ts-merge-revert-pattern.md) — task-agent merges repeatedly revert 8 known fixes; always typecheck+lint before firing gate after any auto-merge of admin.ts.
