@@ -35,9 +35,16 @@ import {
   VISION_MODEL,
   type Provider,
 } from "./ai-provider-config";
+import { EmptyCompletionError, type EmptyCompletionDetails } from "./empty-completion";
 
 export { isDeepSeekAvailable, MODEL_DEFAULTS, VISION_MODEL };
+export { EmptyCompletionError } from "./empty-completion";
+export type { EmptyCompletionDetails } from "./empty-completion";
 export type { Provider };
+
+function assertStreamProducedContent(contentLength: number, details: EmptyCompletionDetails): void {
+  if (contentLength === 0) throw new EmptyCompletionError(details);
+}
 
 /** DeepSeek's OpenAI-compatible REST endpoint. */
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
@@ -452,6 +459,8 @@ export interface StreamChatCompletionParams {
    * the Builder code-generation stream) keep full thinking.
    */
   disableThinking?: boolean;
+  /** OpenAI reasoning effort for latency-sensitive streaming callers. */
+  reasoning_effort?: "low" | "medium" | "high";
   /**
    * NabuFlow R2 Phase D: when set, token usage captured from the provider's
    * streaming response is accumulated in the in-memory BuildTokenAccumulator
@@ -486,16 +495,28 @@ export async function* streamChatCompletion(
       ...(params.max_completion_tokens != null
         ? { max_completion_tokens: params.max_completion_tokens }
         : {}),
+      ...(params.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
     });
     let inputTokens = 0;
     let outputTokens = 0;
+    let reasoningTokens: number | undefined;
+    let finishReason: string | null = null;
+    let refusal = false;
+    let contentLength = 0;
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) yield delta;
+      const choice = chunk.choices[0];
+      const delta = choice?.delta?.content;
+      if (delta) {
+        contentLength += delta.length;
+        yield delta;
+      }
+      if (choice?.delta?.refusal) refusal = true;
+      if (choice?.finish_reason != null) finishReason = choice.finish_reason;
       // The final chunk (when stream_options.include_usage is set) has usage.
       if (chunk.usage) {
         inputTokens = chunk.usage.prompt_tokens ?? 0;
         outputTokens = chunk.usage.completion_tokens ?? 0;
+        reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens ?? undefined;
       }
     }
     if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
@@ -507,6 +528,12 @@ export async function* streamChatCompletion(
         outputTokens,
       });
     }
+    assertStreamProducedContent(contentLength, {
+      finishReason,
+      outputTokens,
+      reasoningTokens,
+      refusal,
+    });
     return;
   }
 
@@ -541,9 +568,16 @@ async function* streamDeepSeek(
   });
   let inputTokens = 0;
   let outputTokens = 0;
+  let finishReason: string | null = null;
+  let contentLength = 0;
   for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
-    if (delta) yield delta;
+    const choice = chunk.choices[0];
+    const delta = choice?.delta?.content;
+    if (delta) {
+      contentLength += delta.length;
+      yield delta;
+    }
+    if (choice?.finish_reason != null) finishReason = choice.finish_reason;
     if (chunk.usage) {
       inputTokens = chunk.usage.prompt_tokens ?? 0;
       outputTokens = chunk.usage.completion_tokens ?? 0;
@@ -558,6 +592,7 @@ async function* streamDeepSeek(
       outputTokens,
     });
   }
+  assertStreamProducedContent(contentLength, { finishReason, outputTokens });
 }
 
 async function* streamAnthropic(
@@ -594,6 +629,8 @@ async function* streamAnthropic(
 
   let inputTokens = 0;
   let outputTokens = 0;
+  let finishReason: string | null = null;
+  let contentLength = 0;
   const stream = anthropic.messages.stream({
     model: params.model,
     system: systemParts.join("\n\n") || undefined,
@@ -603,7 +640,10 @@ async function* streamAnthropic(
   for await (const event of stream) {
     if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
       const text = event.delta.text;
-      if (typeof text === "string" && text.length > 0) yield text;
+      if (typeof text === "string" && text.length > 0) {
+        contentLength += text.length;
+        yield text;
+      }
     }
     // Capture token counts: message_start has input_tokens; message_delta has output_tokens.
     if (event?.type === "message_start" && event.message?.usage) {
@@ -611,6 +651,10 @@ async function* streamAnthropic(
     }
     if (event?.type === "message_delta" && event.usage) {
       outputTokens = event.usage.output_tokens ?? 0;
+    }
+    if (event?.type === "message_delta") {
+      const stopReason = (event as { delta?: { stop_reason?: string | null } }).delta?.stop_reason;
+      if (stopReason != null) finishReason = stopReason;
     }
   }
   if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
@@ -622,6 +666,7 @@ async function* streamAnthropic(
       outputTokens,
     });
   }
+  assertStreamProducedContent(contentLength, { finishReason, outputTokens });
 }
 
 async function* streamGemini(
@@ -685,15 +730,24 @@ async function* streamGemini(
 
   let inputTokens = 0;
   let outputTokens = 0;
+  let reasoningTokens: number | undefined;
+  let finishReason: string | null = null;
+  let contentLength = 0;
   for await (const chunk of stream) {
     const parts = (chunk as any).candidates?.[0]?.content?.parts ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
     for (const part of parts) {
-      if (typeof part.text === "string" && part.text.length > 0) yield part.text;
+      if (typeof part.text === "string" && part.text.length > 0) {
+        contentLength += part.text.length;
+        yield part.text;
+      }
     }
+    const candidateFinishReason = (chunk as any).candidates?.[0]?.finishReason; // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (typeof candidateFinishReason === "string") finishReason = candidateFinishReason;
     const meta = (chunk as any).usageMetadata; // eslint-disable-line @typescript-eslint/no-explicit-any
     if (meta) {
       inputTokens = meta.promptTokenCount ?? 0;
       outputTokens = meta.candidatesTokenCount ?? 0;
+      reasoningTokens = meta.thoughtsTokenCount ?? undefined;
     }
   }
   if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
@@ -705,6 +759,11 @@ async function* streamGemini(
       outputTokens,
     });
   }
+  assertStreamProducedContent(contentLength, {
+    finishReason,
+    outputTokens,
+    reasoningTokens,
+  });
 }
 
 async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCompletion> {

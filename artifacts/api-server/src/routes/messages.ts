@@ -38,6 +38,7 @@ import {
 import { deductCreditsAtomic } from "./credits";
 import { settleCreditsDurably } from "../lib/billing-settlement-outbox";
 import { logger } from "../lib/logger";
+import { describeConverseFailure } from "../lib/converse-failure";
 import { writeKnowledge } from "../lib/knowledge";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -612,7 +613,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           tags: ["chat", resolvedIntent],
         };
       }
-    } catch {
+    } catch (err) {
+      const failure = describeConverseFailure(err);
       if (converseTask) {
         const terminal = failedTerminal({
           schema: "zero-terminal-v1",
@@ -622,13 +624,13 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           completedAt: new Date().toISOString(),
           outcome: "failed",
           runStatus: "failed",
-          cause: { code: "conversation_failed", stage: "response" },
-          evidence: { summary: "I wasn't able to answer that request." },
+          cause: { code: failure.code, stage: "response" },
+          evidence: { summary: failure.message },
         });
         terminalAfterAssistant = () => terminal;
         assistantContent = presentZeroTerminalV1(terminal).message;
       } else {
-        assistantContent = "I wasn't able to answer that request.";
+        assistantContent = failure.message;
       }
       plan = { kind: "error", message: assistantContent } as unknown as Record<string, unknown>;
     }
@@ -1948,6 +1950,7 @@ router.post(
       }
       // Save a fallback error message to the DB
       try {
+        const failure = describeConverseFailure(err);
         const terminal = converseTask
           ? failedTerminal({
               schema: "zero-terminal-v1",
@@ -1957,13 +1960,11 @@ router.post(
               completedAt: new Date().toISOString(),
               outcome: "failed",
               runStatus: "failed",
-              cause: { code: "conversation_failed", stage: "response_stream" },
-              evidence: { summary: "I wasn't able to answer that request." },
+              cause: { code: failure.code, stage: "response_stream" },
+              evidence: { summary: failure.message },
             })
           : null;
-        const failureMessage = terminal
-          ? presentZeroTerminalV1(terminal).message
-          : "I wasn't able to answer that request.";
+        const failureMessage = terminal ? presentZeroTerminalV1(terminal).message : failure.message;
         const [errMsg] = await db
           .insert(chatMessagesTable)
           .values({

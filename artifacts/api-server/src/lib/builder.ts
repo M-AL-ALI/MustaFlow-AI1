@@ -5,7 +5,7 @@ import { runTsCheck, formatTsErrors } from "./checks/ts-checker";
 import { logger } from "./logger";
 import { isValidTenantServicePort } from "./runtime-manifest";
 import type { AgentMode } from "./ai";
-import { creditCostFor, resolveStageProvider } from "./ai-providers";
+import { creditCostFor, EmptyCompletionError, resolveStageProvider } from "./ai-providers";
 import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
@@ -56,6 +56,8 @@ const MODEL_FOR_MODE: Record<AgentMode, string> = {
   power: "gpt-5.4",
   pro: "gpt-5.4",
 };
+
+const CONVERSE_MAX_COMPLETION_TOKENS = 4_096;
 
 const MODE_QUALITY_STANDARDS: Record<AgentMode, string> = {
   lite: `QUALITY STANDARD — Lite (quick fix):
@@ -8452,13 +8454,21 @@ export async function runConversePipeline(args: {
     const response = await createChatCompletion({
       provider: cProvider,
       model: cModel,
-      max_completion_tokens: 1200,
+      max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
+      disableThinking: true,
+      reasoning_effort: "low",
       // OpenAI types accept multimodal content; our local union mirrors that shape.
       messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
     });
-    const markdown =
-      response.choices[0]?.message?.content?.trim() ??
-      "I couldn't generate a response. Please try again.";
+    const markdown = response.choices[0]?.message?.content?.trim();
+    if (!markdown) {
+      throw new EmptyCompletionError({
+        finishReason: response.choices[0]?.finish_reason ?? null,
+        outputTokens: response.usage?.completion_tokens ?? 0,
+        reasoningTokens: response.usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
+        refusal: Boolean(response.choices[0]?.message?.refusal),
+      });
+    }
     return { markdown };
   } catch (err) {
     logger.error({ err }, "Converse pipeline failed");
@@ -8626,7 +8636,9 @@ export async function runConverseStreamPipeline(
     for await (const delta of streamChatCompletion({
       provider: streamProv,
       model: streamModel,
-      max_completion_tokens: 1200,
+      max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
+      disableThinking: true,
+      reasoning_effort: "low",
       messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
       signal,
     })) {
@@ -8635,7 +8647,6 @@ export async function runConverseStreamPipeline(
       onToken(delta);
     }
 
-    if (!markdown) markdown = "I couldn't generate a response. Please try again.";
     return { markdown };
   } catch (err) {
     logger.error({ err }, "Converse stream pipeline failed");
