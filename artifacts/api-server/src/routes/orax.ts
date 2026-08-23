@@ -4328,7 +4328,7 @@ async function createOraxRunnerWorkspaceChangeSet(input: {
       type: "workspace_change_set",
       status: "completed",
       title: `Workspace change set for ${input.task.title}`,
-      summary: `Workspace change set ready for ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`,
+      summary: `Workspace change set prepared for ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`,
       payload: {
         sourceArtifactId: context.sandboxArtifact.id,
         draftArtifactId: context.draftArtifact.id,
@@ -4389,7 +4389,7 @@ async function createOraxRunnerWorkspaceChangeSet(input: {
     session: input.session,
     status: "continued",
     action: "create_workspace_change_set",
-    message: `Workspace change set ready: ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"} changed.`,
+    message: `Workspace change set prepared: ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"} changed.`,
     artifactId: workspaceArtifact.id,
     artifact: workspaceArtifact,
   });

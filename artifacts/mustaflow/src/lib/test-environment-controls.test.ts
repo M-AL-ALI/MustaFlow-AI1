@@ -7,6 +7,10 @@ const previewSource = readFileSync(
   "utf8",
 );
 const workspaceSource = readFileSync(resolve(process.cwd(), "src/pages/projects/[id].tsx"), "utf8");
+const changelogSource = readFileSync(
+  resolve(process.cwd(), "src/pages/developers-changelog.tsx"),
+  "utf8",
+);
 
 describe("workspace test-environment controls", () => {
   it("wires start, rebuild, status, and approval to the authenticated product routes", () => {
@@ -23,5 +27,10 @@ describe("workspace test-environment controls", () => {
     expect(previewSource).toContain("onTestingStatusChanged?.()");
     expect(workspaceSource).toContain("onTestingStatusChanged={() =>");
     expect(workspaceSource).toContain("void refetchProject();");
+  });
+
+  it("describes a sealed candidate as awaiting approval rather than ready", () => {
+    expect(changelogSource).toContain("approve the sealed test candidate for promotion");
+    expect(changelogSource).not.toMatch(/snapshot as tested and ready to promote/i);
   });
 });
