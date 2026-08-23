@@ -2050,7 +2050,7 @@ export default function OraxPage() {
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-semibold">Workspace ready</div>
+            <div className="text-sm font-semibold">Repository details</div>
             <div className="mt-1 truncate text-base font-semibold">
               {selectedRepository.owner}/{selectedRepository.name}
             </div>
@@ -3434,7 +3434,7 @@ function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
       diff && (diff.additions || diff.deletions)
         ? ` (+${diff.additions ?? 0} / -${diff.deletions ?? 0})`
         : "";
-    return `Workspace change set ready for ${changedFiles} file${changedFiles === 1 ? "" : "s"}${diffText}.`;
+    return `Workspace change set prepared for ${changedFiles} file${changedFiles === 1 ? "" : "s"}${diffText}.`;
   }
   if (artifact.type === "command_result") {
     const passed =

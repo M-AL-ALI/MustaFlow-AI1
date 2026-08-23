@@ -127,8 +127,14 @@ describe("Builder Wave 7B completion honesty", () => {
     );
 
     const jobsSource = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const startupMigrationsSource = readFileSync(
+      new URL("./startup-migrations.ts", import.meta.url),
+      "utf8",
+    );
     expect(jobsSource).toContain("persistZeroTerminal({");
     expect(jobsSource).not.toContain("builderCompletionMessage(");
+    expect(startupMigrationsSource).toContain("migrate-agent-task-completion-kind");
+    expect(startupMigrationsSource).not.toContain("migrate-builder-task-completion-kind");
   });
 
   it("defers an empty reviewer payload without calling or charging the architect", async () => {

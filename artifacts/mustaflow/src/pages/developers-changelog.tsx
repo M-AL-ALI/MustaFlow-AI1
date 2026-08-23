@@ -30,7 +30,7 @@ const CHANGELOG: ChangelogEntry[] = [
       },
       {
         type: "added",
-        text: "POST /api/projects/:id/preview-env/approve — mark a snapshot as tested and ready to promote",
+        text: "POST /api/projects/:id/preview-env/approve — approve the sealed test candidate for promotion",
       },
       {
         type: "added",

@@ -3536,7 +3536,7 @@ function RepositoryWorkspaceCard({
       <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
         <View style={{ flex: 1, gap: 3 }}>
           <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 16 }}>
-            Workspace ready
+            Repository details
           </Text>
           <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 15 }}>
             {repo.owner}/{repo.name}
@@ -4863,7 +4863,7 @@ function describeArtifact(artifact: OraxArtifact): string {
       diff && (diff.additions || diff.deletions)
         ? ` (+${diff.additions ?? 0} / -${diff.deletions ?? 0})`
         : "";
-    return `Workspace change set ready for ${changedFiles} file${changedFiles === 1 ? "" : "s"}${diffText}.`;
+    return `Workspace change set prepared for ${changedFiles} file${changedFiles === 1 ? "" : "s"}${diffText}.`;
   }
   if (artifact.type === "command_result") {
     const passed =

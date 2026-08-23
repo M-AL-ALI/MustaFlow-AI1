@@ -5507,9 +5507,9 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
-  // ── migrate-builder-task-completion-kind (Builder Wave 7B) ───────────────
+  // ── migrate-agent-task-completion-kind (Builder Wave 7B) ─────────────────
   {
-    name: "migrate-builder-task-completion-kind",
+    name: "migrate-agent-task-completion-kind",
     async run(client) {
       await client.query("BEGIN");
       await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS completion_kind TEXT`);

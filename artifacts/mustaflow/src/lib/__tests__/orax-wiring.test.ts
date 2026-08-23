@@ -129,7 +129,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("selectRepositoryFromMenu");
     expect(oraxPage).toContain("selectTaskFromMenu");
     expect(oraxPage).toContain("Connect GitHub repository");
-    expect(oraxPage).toContain("Workspace ready");
+    expect(oraxPage).toContain("Repository details");
+    expect(oraxPage).not.toContain("Workspace ready");
+    expect(oraxPage).toContain("Workspace change set prepared");
+    expect(oraxPage).not.toContain("Workspace change set ready");
     expect(oraxPage).toContain("Connected as");
     expect(oraxPage).toContain("Connect token or scan public repo");
     expect(oraxPage).toContain("GitHub access connected");
@@ -207,7 +210,10 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("selectTaskFromMenu");
     expect(mobileOraxScreen).not.toContain("openDrawer");
     expect(mobileOraxScreen).not.toContain('setThreadDraft("/status")');
-    expect(mobileOraxScreen).toContain("Workspace ready");
+    expect(mobileOraxScreen).toContain("Repository details");
+    expect(mobileOraxScreen).not.toContain("Workspace ready");
+    expect(mobileOraxScreen).toContain("Workspace change set prepared");
+    expect(mobileOraxScreen).not.toContain("Workspace change set ready");
     expect(mobileOraxScreen).toContain("Connected as");
     expect(mobileOraxScreen).toContain("Connect token or scan public repo");
     expect(mobileOraxScreen).toContain("Connect a GitHub repository before starting an Orax chat.");
