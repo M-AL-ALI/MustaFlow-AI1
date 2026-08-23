@@ -7,11 +7,16 @@ import {
   boolean,
   jsonb,
   index,
+  customType,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 import { projectVersionsTable } from "./versions";
 import { zeroIntentReceiptsTable } from "./zero-intent-receipts";
+
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => "tsvector",
+});
 
 export const chatMessagesTable = pgTable(
   "chat_messages",
@@ -22,6 +27,11 @@ export const chatMessagesTable = pgTable(
       .references(() => projectsTable.id, { onDelete: "cascade" }),
     role: text("role").notNull(),
     content: text("content").notNull(),
+    // Canonical schema owner for the generated search column. The historical
+    // startup owner is migrate-agent-inbox in startup-migrations.ts.
+    contentTsv: tsvector("content_tsv").generatedAlwaysAs(
+      sql`to_tsvector('english', coalesce(content, ''))`,
+    ),
     agentMode: text("agent_mode").notNull().default("eco"),
     planMode: boolean("plan_mode").notNull().default(false),
     plan: jsonb("plan"),
