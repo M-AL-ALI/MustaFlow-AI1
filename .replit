@@ -149,6 +149,7 @@ AI_PROVIDER_ARCHITECT = "anthropic:claude-opus-4-7"
 STRIPE_CORE_PRICE_ID = "price_1TevbdDCzx2AknNDiqa2FXAy"
 STRIPE_WAVE_PRICE_ID = "price_1TiEDUDCzx2AknNDdfTcn6ZL"
 E2E_TEST_ENABLED = "true"
+LEGACY_ADOPTION_OWNER_ID = "user_3Dv2h4CdaJoviog3ToUryvt3kft"
 
 [userenv.production]
 AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
