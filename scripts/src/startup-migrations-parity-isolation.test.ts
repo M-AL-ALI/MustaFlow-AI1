@@ -172,7 +172,7 @@ describe("startup-migrations parity isolation", () => {
       async materializeBase() {
         materializationRun++;
         calls.push(`materialize:${materializationRun}`);
-        return { objectCount: 137, sentinelPresent: true, stdout: "schema pushed\n", stderr: "" };
+        return { objectCount: 252, sentinelPresent: true, stdout: "schema pushed\n", stderr: "" };
       },
       async runMigrations() {
         migrationRun++;
@@ -220,7 +220,7 @@ describe("startup-migrations parity isolation", () => {
     ]);
     assert.ok(lines.some((line) => line.includes("parity_layer0_extension_pass")));
     assert.ok(lines.some((line) => line.includes("parity_layer1_materialize_pass")));
-    assert.ok(lines.some((line) => line.includes("expected_object_count=TODO_PHASE_2_4")));
+    assert.ok(lines.some((line) => line.includes("expected_object_count=252")));
     assert.ok(lines.some((line) => line.includes("parity_layer2_migrations_pass")));
     assert.ok(lines.some((line) => line.includes("parity_construction_pass")));
     assert.ok(lines.some((line) => line.includes("diff_count=0")));
