@@ -46,6 +46,13 @@ describe("ZeroTerminalV1", () => {
         outcome: "response_succeeded",
         runStatus: "completed",
       });
+      responseSucceededTerminal({
+        ...common,
+        outcome: "response_succeeded",
+        runStatus: "completed",
+        // @ts-expect-error a saved message alone cannot prove the provider completed the response
+        evidence: { assistantMessageId: 44 },
+      });
       // @ts-expect-error plan success cannot exist without both message and plan references
       planSucceededTerminal({ ...common, outcome: "plan_succeeded", runStatus: "completed" });
       // @ts-expect-error the presenter never accepts display strings as terminal truth
@@ -77,6 +84,15 @@ describe("ZeroTerminalV1", () => {
     expect(parseZeroTerminalV1({ ...terminal, schema: "zero-terminal-v0" })).toBe(
       ZERO_TERMINAL_UNKNOWN,
     );
+    expect(
+      parseZeroTerminalV1({
+        ...common,
+        intent: "answer",
+        outcome: "response_succeeded",
+        runStatus: "completed",
+        evidence: { assistantMessageId: 44 },
+      }),
+    ).toBe(ZERO_TERMINAL_UNKNOWN);
   });
 
   it("presents all six variants from evidence rather than legacy status prose", () => {
@@ -95,7 +111,10 @@ describe("ZeroTerminalV1", () => {
       intent: "answer",
       outcome: "response_succeeded",
       runStatus: "completed",
-      evidence: { assistantMessageId: 44 },
+      evidence: {
+        assistantMessageId: 44,
+        stopEvidence: { providerReason: "stop" },
+      },
     });
     const plan = planSucceededTerminal({
       ...common,
@@ -144,6 +163,18 @@ describe("ZeroTerminalV1", () => {
       "Changes were saved, but validation failed during checks. Preview is unavailable: runtime unavailable.",
     );
     expect(presentZeroTerminalV1(interrupted).message).toBe("This run was interrupted.");
+    const truncated = interruptedTerminal({
+      ...common,
+      outcome: "interrupted",
+      runStatus: "interrupted",
+      cause: "completion_truncated",
+      evidence: { lastPhase: "response_stream", changedPaths: [] },
+    });
+    expect(presentZeroTerminalV1(truncated)).toMatchObject({
+      tone: "interrupted",
+      title: "Response ended early",
+      message: "Zero's response was cut short. Please try again.",
+    });
     expect(presentZeroTerminalV1(failed).message).toBe("Required checks did not pass.");
     expect(presentZeroTerminalV1(ZERO_TERMINAL_UNKNOWN).message).toBe(
       "Outcome unavailable for this older run",

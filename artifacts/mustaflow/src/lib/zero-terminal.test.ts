@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { mutationSucceededTerminal } from "@workspace/ora-contracts";
+import { interruptedTerminal, mutationSucceededTerminal } from "@workspace/ora-contracts";
 import { parseTaskStreamReceipt } from "@/hooks/use-task-event-stream";
 import { terminalPresentationFor, terminalTaskMessage, terminalTaskStatus } from "./zero-terminal";
 
@@ -69,6 +69,44 @@ describe("staged terminal readers", () => {
       event: { eventType: "completed", message: "Changes applied. Preview is ready." },
       terminalPresentation: { shouldRefreshPreview: true },
     });
+  });
+
+  it("never celebrates or refreshes for a cut-short response", () => {
+    const interrupted = interruptedTerminal({
+      schema: "zero-terminal-v1",
+      outcome: "interrupted",
+      runStatus: "interrupted",
+      taskId: 15,
+      intent: "answer",
+      intentReceiptId: 23,
+      completedAt: "2026-08-23T05:31:23.000Z",
+      cause: "completion_truncated",
+      evidence: { lastPhase: "response_stream", changedPaths: [] },
+    });
+    const receipt = parseTaskStreamReceipt(
+      JSON.stringify({
+        id: 10,
+        taskId: 15,
+        eventType: "completed",
+        message: "legacy success",
+        createdAt: "2026-08-23T05:31:23.000Z",
+        terminal: interrupted,
+      }),
+      15,
+    );
+
+    expect(receipt).toMatchObject({
+      terminal: true,
+      event: {
+        eventType: "cancelled",
+        message: "Zero's response was cut short. Please try again.",
+      },
+      terminalPresentation: {
+        tone: "interrupted",
+        shouldRefreshPreview: false,
+      },
+    });
+    expect(receipt.terminalPresentation?.message).not.toMatch(/response sent|finished|ready/i);
   });
 
   it("pins every C1-C8 reader family to the canonical terminal path", () => {

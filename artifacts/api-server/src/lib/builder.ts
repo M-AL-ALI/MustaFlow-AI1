@@ -6,6 +6,13 @@ import { logger } from "./logger";
 import { isValidTenantServicePort } from "./runtime-manifest";
 import type { AgentMode } from "./ai";
 import { creditCostFor, EmptyCompletionError, resolveStageProvider } from "./ai-providers";
+import type { StreamCompletionSummary } from "./ai-providers";
+import {
+  completionSummaryFromResponse,
+  ConverseCompletionInterruptedError,
+  requireCleanConverseCompletion,
+  type ConverseStopEvidence,
+} from "./converse-completion";
 import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
@@ -8133,6 +8140,7 @@ export async function runIntentClassifierPipeline(
 
 export type ConverseResult = {
   markdown: string;
+  stopEvidence: ConverseStopEvidence;
   clarifying?: {
     question: string;
     options: string[];
@@ -8385,8 +8393,19 @@ export async function runConversePipeline(args: {
       const options = Array.isArray(parsed.options)
         ? parsed.options.filter((o): o is string => typeof o === "string").slice(0, 3)
         : ["Explain how it works", "Build something new", "Create a plan first"];
-      return { markdown: question, clarifying: { question, options } };
+      const stopEvidence = requireCleanConverseCompletion(
+        completionSummaryFromResponse({
+          finishReason: response.choices[0]?.finish_reason ?? null,
+          inputTokens: response.usage?.prompt_tokens ?? 0,
+          outputTokens: response.usage?.completion_tokens ?? 0,
+          reasoningTokens: response.usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
+          refusal: Boolean(response.choices[0]?.message?.refusal),
+        }),
+        question,
+      );
+      return { markdown: question, stopEvidence, clarifying: { question, options } };
     } catch (err) {
+      if (err instanceof ConverseCompletionInterruptedError) throw err;
       logger.warn({ err }, "Clarify call failed, falling through to converse");
     }
   }
@@ -8455,13 +8474,21 @@ export async function runConversePipeline(args: {
       provider: cProvider,
       model: cModel,
       max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
-      disableThinking: true,
+      ...(cProvider === "gemini" ? { disableThinking: true } : {}),
       reasoning_effort: "low",
       // OpenAI types accept multimodal content; our local union mirrors that shape.
       messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
     });
+    const completionSummary = completionSummaryFromResponse({
+      finishReason: response.choices[0]?.finish_reason ?? null,
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+      reasoningTokens: response.usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
+      refusal: Boolean(response.choices[0]?.message?.refusal),
+    });
     const markdown = response.choices[0]?.message?.content?.trim();
     if (!markdown) {
+      requireCleanConverseCompletion(completionSummary, "");
       throw new EmptyCompletionError({
         finishReason: response.choices[0]?.finish_reason ?? null,
         outputTokens: response.usage?.completion_tokens ?? 0,
@@ -8469,7 +8496,8 @@ export async function runConversePipeline(args: {
         refusal: Boolean(response.choices[0]?.message?.refusal),
       });
     }
-    return { markdown };
+    const stopEvidence = requireCleanConverseCompletion(completionSummary, markdown);
+    return { markdown, stopEvidence };
   } catch (err) {
     logger.error({ err }, "Converse pipeline failed");
     throw err instanceof Error ? err : new Error(String(err));
@@ -8570,8 +8598,19 @@ export async function runConverseStreamPipeline(
         ? parsed.options.filter((o): o is string => typeof o === "string").slice(0, 3)
         : ["Explain how it works", "Build something new", "Create a plan first"];
       onToken(question);
-      return { markdown: question, clarifying: { question, options } };
+      const stopEvidence = requireCleanConverseCompletion(
+        completionSummaryFromResponse({
+          finishReason: response.choices[0]?.finish_reason ?? null,
+          inputTokens: response.usage?.prompt_tokens ?? 0,
+          outputTokens: response.usage?.completion_tokens ?? 0,
+          reasoningTokens: response.usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
+          refusal: Boolean(response.choices[0]?.message?.refusal),
+        }),
+        question,
+      );
+      return { markdown: question, stopEvidence, clarifying: { question, options } };
     } catch (err) {
+      if (err instanceof ConverseCompletionInterruptedError) throw err;
       logger.warn({ err }, "Clarify call failed, falling through to converse stream");
     }
   }
@@ -8633,21 +8672,31 @@ export async function runConverseStreamPipeline(
       model,
     );
     let markdown = "";
-    for await (const delta of streamChatCompletion({
-      provider: streamProv,
-      model: streamModel,
-      max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
-      disableThinking: true,
-      reasoning_effort: "low",
-      messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
-      signal,
-    })) {
-      if (signal?.aborted) break;
-      markdown += delta;
-      onToken(delta);
+    const completion = { summary: null as StreamCompletionSummary | null };
+    try {
+      for await (const delta of streamChatCompletion({
+        provider: streamProv,
+        model: streamModel,
+        max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
+        ...(streamProv === "gemini" ? { disableThinking: true } : {}),
+        reasoning_effort: "low",
+        messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
+        signal,
+        onFinish: (summary) => {
+          completion.summary = summary;
+        },
+      })) {
+        markdown += delta;
+        onToken(delta);
+      }
+    } catch (error) {
+      if (completion.summary) {
+        requireCleanConverseCompletion(completion.summary, markdown);
+      }
+      throw error;
     }
-
-    return { markdown };
+    const stopEvidence = requireCleanConverseCompletion(completion.summary, markdown);
+    return { markdown, stopEvidence };
   } catch (err) {
     logger.error({ err }, "Converse stream pipeline failed");
     throw err instanceof Error ? err : new Error(String(err));

@@ -420,7 +420,10 @@ async function completeSnapshotObservation(
     completedAt: new Date().toISOString(),
     outcome: "response_succeeded",
     runStatus: "completed",
-    evidence: { assistantMessageId: assistantMessage.id },
+    evidence: {
+      assistantMessageId: assistantMessage.id,
+      stopEvidence: converse.stopEvidence,
+    },
   });
   const persisted = await persistZeroTerminal({ terminal, allowedStatuses: ["answering"] });
   if (!persisted) throw new Error("snapshot observation outcome unavailable");

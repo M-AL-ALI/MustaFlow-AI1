@@ -26,6 +26,10 @@ export type ZeroTerminalDiffRef = {
   revision: 1;
 };
 
+export type ZeroTerminalStopEvidence = {
+  providerReason: string;
+};
+
 type ZeroTerminalCommon = {
   schema: typeof ZERO_TERMINAL_SEMANTICS;
   taskId: number;
@@ -52,7 +56,10 @@ export type ResponseSucceededTerminal = ZeroTerminalCommon &
   ZeroTerminalBrand & {
     outcome: "response_succeeded";
     runStatus: "completed";
-    evidence: { assistantMessageId: number };
+    evidence: {
+      assistantMessageId: number;
+      stopEvidence: ZeroTerminalStopEvidence;
+    };
   };
 
 export type PlanSucceededTerminal = ZeroTerminalCommon &
@@ -81,7 +88,14 @@ export type InterruptedTerminal = ZeroTerminalCommon &
   ZeroTerminalBrand & {
     outcome: "interrupted";
     runStatus: "interrupted";
-    cause: "user_stop" | "client_disconnect" | "superseded";
+    cause:
+      | "user_stop"
+      | "client_disconnect"
+      | "superseded"
+      | "stream_aborted"
+      | "stream_ended_without_completion"
+      | "completion_truncated"
+      | "content_filtered";
     evidence: { lastPhase: string | null; changedPaths: string[] };
   };
 
@@ -241,12 +255,19 @@ export function parseZeroTerminalV1(value: unknown): ZeroTerminalV1 | typeof ZER
   }
 
   if (candidate.outcome === "response_succeeded" && candidate.runStatus === "completed") {
-    if (positiveInteger(evidence?.assistantMessageId)) {
+    const stopEvidence = record(evidence?.stopEvidence);
+    if (
+      positiveInteger(evidence?.assistantMessageId) &&
+      nonEmptyString(stopEvidence?.providerReason)
+    ) {
       return responseSucceededTerminal({
         ...common,
         outcome: "response_succeeded",
         runStatus: "completed",
-        evidence: { assistantMessageId: evidence.assistantMessageId },
+        evidence: {
+          assistantMessageId: evidence.assistantMessageId,
+          stopEvidence: { providerReason: stopEvidence.providerReason },
+        },
       });
     }
   }
@@ -289,7 +310,15 @@ export function parseZeroTerminalV1(value: unknown): ZeroTerminalV1 | typeof ZER
   if (candidate.outcome === "interrupted" && candidate.runStatus === "interrupted") {
     const changedPaths = evidence?.changedPaths;
     if (
-      ["user_stop", "client_disconnect", "superseded"].includes(String(candidate.cause)) &&
+      [
+        "user_stop",
+        "client_disconnect",
+        "superseded",
+        "stream_aborted",
+        "stream_ended_without_completion",
+        "completion_truncated",
+        "content_filtered",
+      ].includes(String(candidate.cause)) &&
       (evidence?.lastPhase === null || nonEmptyString(evidence?.lastPhase)) &&
       Array.isArray(changedPaths) &&
       changedPaths.every((path) => typeof path === "string")
@@ -403,16 +432,38 @@ export function presentZeroTerminalV1(
         previewState: terminal.evidence.preview.state,
         shouldRefreshPreview: terminal.evidence.preview.state === "ready",
       };
-    case "interrupted":
+    case "interrupted": {
+      const responseInterruptions: Partial<
+        Record<InterruptedTerminal["cause"], { title: string; message: string }>
+      > = {
+        stream_aborted: {
+          title: "Response ended early",
+          message: "Zero's response was cut short. Please try again.",
+        },
+        stream_ended_without_completion: {
+          title: "Response ended early",
+          message: "Zero's response was cut short. Please try again.",
+        },
+        completion_truncated: {
+          title: "Response ended early",
+          message: "Zero's response was cut short. Please try again.",
+        },
+        content_filtered: {
+          title: "Response ended early",
+          message: "Zero's response was cut short. Please try again.",
+        },
+      };
+      const responseInterruption = responseInterruptions[terminal.cause];
       return {
         outcome: terminal.outcome,
         tone: "interrupted",
         taskStatus: "canceled",
-        title: "Run interrupted",
-        message: "This run was interrupted.",
+        title: responseInterruption?.title ?? "Run interrupted",
+        message: responseInterruption?.message ?? "This run was interrupted.",
         previewState: "not_promised",
         shouldRefreshPreview: false,
       };
+    }
     case "failed":
       return {
         outcome: terminal.outcome,

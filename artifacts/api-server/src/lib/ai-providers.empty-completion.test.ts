@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   deepseekCreate: vi.fn(),
   anthropicStream: vi.fn(),
   geminiStream: vi.fn(),
+  loggerInfo: vi.fn(),
 }));
 
 vi.mock("openai", () => ({
@@ -26,10 +27,10 @@ vi.mock("@workspace/integrations-gemini-ai", () => ({
 }));
 
 vi.mock("./logger", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: mocks.loggerInfo, warn: vi.fn(), error: vi.fn() },
 }));
 
-import { streamChatCompletion } from "./ai-providers";
+import { streamChatCompletion, type StreamCompletionSummary } from "./ai-providers";
 
 async function* streamOf(...chunks: unknown[]): AsyncGenerator<unknown> {
   for (const chunk of chunks) yield chunk;
@@ -64,6 +65,7 @@ describe("stream completion honesty", () => {
       ),
     );
 
+    let summary: StreamCompletionSummary | null = null;
     const promise = collect(
       streamChatCompletion({
         provider: "openai",
@@ -71,6 +73,9 @@ describe("stream completion honesty", () => {
         messages,
         max_completion_tokens: 4_096,
         reasoning_effort: "low",
+        onFinish: (value) => {
+          summary = value;
+        },
       }),
     );
 
@@ -89,6 +94,18 @@ describe("stream completion honesty", () => {
         stream: true,
       }),
     );
+    expect(summary).toEqual({
+      finishReason: "length",
+      inputTokens: 40,
+      outputTokens: 1_200,
+      reasoningTokens: 1_200,
+      refusal: true,
+      aborted: false,
+    });
+    expect(mocks.loggerInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ finishReason: "length", outputTokens: 1_200, aborted: false }),
+      "AI stream completion summary",
+    );
   });
 
   it("preserves a normal OpenAI text stream", async () => {
@@ -102,12 +119,32 @@ describe("stream completion honesty", () => {
       ),
     );
 
+    let summary: StreamCompletionSummary | null = null;
     await expect(
-      collect(streamChatCompletion({ provider: "openai", model: "gpt-5-mini", messages })),
+      collect(
+        streamChatCompletion({
+          provider: "openai",
+          model: "gpt-5-mini",
+          messages,
+          onFinish: (value) => {
+            summary = value;
+          },
+        }),
+      ),
     ).resolves.toBe("The app is ready.");
+    expect(summary).toMatchObject({
+      finishReason: "stop",
+      inputTokens: 10,
+      outputTokens: 4,
+      refusal: false,
+      aborted: false,
+    });
   });
 
   it("guards empty Anthropic, DeepSeek, and Gemini streams", async () => {
+    let anthropicSummary: StreamCompletionSummary | null = null;
+    let deepSeekSummary: StreamCompletionSummary | null = null;
+    let geminiSummary: StreamCompletionSummary | null = null;
     mocks.anthropicStream.mockReturnValue(
       streamOf(
         { type: "message_start", message: { usage: { input_tokens: 9 } } },
@@ -128,17 +165,92 @@ describe("stream completion honesty", () => {
     );
 
     await expect(
-      collect(streamChatCompletion({ provider: "anthropic", model: "claude-test", messages })),
+      collect(
+        streamChatCompletion({
+          provider: "anthropic",
+          model: "claude-test",
+          messages,
+          onFinish: (value) => {
+            anthropicSummary = value;
+          },
+        }),
+      ),
     ).rejects.toMatchObject({ name: "EmptyCompletionError", finishReason: "end_turn" });
     await expect(
-      collect(streamChatCompletion({ provider: "deepseek", model: "deepseek-test", messages })),
+      collect(
+        streamChatCompletion({
+          provider: "deepseek",
+          model: "deepseek-test",
+          messages,
+          onFinish: (value) => {
+            deepSeekSummary = value;
+          },
+        }),
+      ),
     ).rejects.toMatchObject({ name: "EmptyCompletionError", finishReason: "length" });
     await expect(
-      collect(streamChatCompletion({ provider: "gemini", model: "gemini-test", messages })),
+      collect(
+        streamChatCompletion({
+          provider: "gemini",
+          model: "gemini-test",
+          messages,
+          onFinish: (value) => {
+            geminiSummary = value;
+          },
+        }),
+      ),
     ).rejects.toMatchObject({
       name: "EmptyCompletionError",
       finishReason: "MAX_TOKENS",
       reasoningTokens: 12,
+    });
+    expect(anthropicSummary).toMatchObject({
+      finishReason: "end_turn",
+      inputTokens: 9,
+      outputTokens: 0,
+      aborted: false,
+    });
+    expect(deepSeekSummary).toMatchObject({
+      finishReason: "length",
+      inputTokens: 9,
+      outputTokens: 0,
+      aborted: false,
+    });
+    expect(geminiSummary).toMatchObject({
+      finishReason: "MAX_TOKENS",
+      inputTokens: 9,
+      outputTokens: 0,
+      reasoningTokens: 12,
+      aborted: false,
+    });
+  });
+
+  it("reports an aborted stream even when the provider throws before a finish reason", async () => {
+    async function* abortedStream(): AsyncGenerator<unknown> {
+      yield { choices: [{ delta: { content: "Partial" }, finish_reason: null }] };
+      const error = new Error("request aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+    mocks.openaiCreate.mockResolvedValue(abortedStream());
+    let summary: StreamCompletionSummary | null = null;
+
+    await expect(
+      collect(
+        streamChatCompletion({
+          provider: "openai",
+          model: "gpt-5-mini",
+          messages,
+          onFinish: (value) => {
+            summary = value;
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(summary).toMatchObject({
+      finishReason: null,
+      refusal: false,
+      aborted: true,
     });
   });
 });

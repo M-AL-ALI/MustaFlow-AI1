@@ -39,6 +39,7 @@ import { deductCreditsAtomic } from "./credits";
 import { settleCreditsDurably } from "../lib/billing-settlement-outbox";
 import { logger } from "../lib/logger";
 import { describeConverseFailure } from "../lib/converse-failure";
+import { ConverseCompletionInterruptedError } from "../lib/converse-completion";
 import { writeKnowledge } from "../lib/knowledge";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -604,7 +605,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
             completedAt: new Date().toISOString(),
             outcome: "response_succeeded",
             runStatus: "completed",
-            evidence: { assistantMessageId },
+            evidence: {
+              assistantMessageId,
+              stopEvidence: converseResult.stopEvidence,
+            },
           });
         terminalMemory = {
           taskId,
@@ -614,8 +618,29 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         };
       }
     } catch (err) {
-      const failure = describeConverseFailure(err);
-      if (converseTask) {
+      const interruption = err instanceof ConverseCompletionInterruptedError ? err : null;
+      const failure = interruption ? null : describeConverseFailure(err);
+      if (converseTask && interruption) {
+        const terminal = interruptedTerminal({
+          schema: "zero-terminal-v1",
+          taskId,
+          intent: resolvedIntent,
+          intentReceiptId: terminalIntentReceiptId,
+          completedAt: new Date().toISOString(),
+          outcome: "interrupted",
+          runStatus: "interrupted",
+          cause: interruption.code,
+          evidence: { lastPhase: "response", changedPaths: [] },
+        });
+        terminalAfterAssistant = () => terminal;
+        assistantContent =
+          interruption.partialText.trim() || presentZeroTerminalV1(terminal).message;
+        plan = {
+          kind: "interrupted",
+          message: presentZeroTerminalV1(terminal).message,
+          retry: true,
+        } as unknown as Record<string, unknown>;
+      } else if (converseTask && failure) {
         const terminal = failedTerminal({
           schema: "zero-terminal-v1",
           taskId,
@@ -629,10 +654,21 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         });
         terminalAfterAssistant = () => terminal;
         assistantContent = presentZeroTerminalV1(terminal).message;
+        plan = { kind: "error", message: assistantContent } as unknown as Record<string, unknown>;
       } else {
-        assistantContent = failure.message;
+        assistantContent =
+          interruption?.partialText.trim() ||
+          (interruption
+            ? "Zero's response was cut short. Please try again."
+            : (failure?.message ?? "I wasn't able to answer that request."));
+        plan = {
+          kind: interruption ? "interrupted" : "error",
+          message: interruption
+            ? "Zero's response was cut short. Please try again."
+            : assistantContent,
+          ...(interruption ? { retry: true } : {}),
+        } as unknown as Record<string, unknown>;
       }
-      plan = { kind: "error", message: assistantContent } as unknown as Record<string, unknown>;
     }
   } else if (imageGenerationRequested) {
     // ── Async image generation via job queue ──────────────────────────────────
@@ -1859,7 +1895,10 @@ router.post(
             completedAt: new Date().toISOString(),
             outcome: "response_succeeded",
             runStatus: "completed",
-            evidence: { assistantMessageId: assistantMessage.id },
+            evidence: {
+              assistantMessageId: assistantMessage.id,
+              stopEvidence: converseResult.stopEvidence,
+            },
           })
         : null;
       if (terminal) {
@@ -1950,30 +1989,56 @@ router.post(
       }
       // Save a fallback error message to the DB
       try {
-        const failure = describeConverseFailure(err);
+        const interruption = err instanceof ConverseCompletionInterruptedError ? err : null;
+        const failure = interruption ? null : describeConverseFailure(err);
         const terminal = converseTask
-          ? failedTerminal({
-              schema: "zero-terminal-v1",
-              taskId: converseTask.id,
-              intent: resolvedIntent,
-              intentReceiptId: terminalIntentReceiptId,
-              completedAt: new Date().toISOString(),
-              outcome: "failed",
-              runStatus: "failed",
-              cause: { code: failure.code, stage: "response_stream" },
-              evidence: { summary: failure.message },
-            })
+          ? interruption
+            ? interruptedTerminal({
+                schema: "zero-terminal-v1",
+                taskId: converseTask.id,
+                intent: resolvedIntent,
+                intentReceiptId: terminalIntentReceiptId,
+                completedAt: new Date().toISOString(),
+                outcome: "interrupted",
+                runStatus: "interrupted",
+                cause: interruption.code,
+                evidence: { lastPhase: "response_stream", changedPaths: [] },
+              })
+            : failedTerminal({
+                schema: "zero-terminal-v1",
+                taskId: converseTask.id,
+                intent: resolvedIntent,
+                intentReceiptId: terminalIntentReceiptId,
+                completedAt: new Date().toISOString(),
+                outcome: "failed",
+                runStatus: "failed",
+                cause: {
+                  code: failure?.code ?? "conversation_failed",
+                  stage: "response_stream",
+                },
+                evidence: {
+                  summary: failure?.message ?? "I wasn't able to answer that request.",
+                },
+              })
           : null;
-        const failureMessage = terminal ? presentZeroTerminalV1(terminal).message : failure.message;
+        const failureMessage = terminal
+          ? presentZeroTerminalV1(terminal).message
+          : (failure?.message ?? "I wasn't able to answer that request.");
+        const persistedContent = interruption?.partialText.trim() || failureMessage;
         const [errMsg] = await db
           .insert(chatMessagesTable)
           .values({
             projectId: project.id,
             role: "assistant",
-            content: failureMessage,
+            content: persistedContent,
             agentMode: mode,
             planMode: effectivePlanMode,
-            plan: { kind: "error", message: failureMessage, intent: resolvedIntent },
+            plan: {
+              kind: interruption ? "interrupted" : "error",
+              message: failureMessage,
+              intent: resolvedIntent,
+              ...(interruption ? { retry: true } : {}),
+            },
             origin: streamMessageOrigin,
             intentReceiptId: terminalIntentReceiptId,
           })
@@ -1985,9 +2050,10 @@ router.post(
               .update(chatMessagesTable)
               .set({
                 plan: {
-                  kind: "error",
+                  kind: interruption ? "interrupted" : "error",
                   message: failureMessage,
                   intent: resolvedIntent,
+                  ...(interruption ? { retry: true } : {}),
                   terminalRef: zeroTerminalRef(terminal),
                 },
               })

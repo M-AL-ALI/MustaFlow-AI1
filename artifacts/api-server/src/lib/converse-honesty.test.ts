@@ -5,6 +5,7 @@ import { EmptyCompletionError } from "./empty-completion";
 import { describeConverseFailure, EMPTY_COMPLETION_USER_MESSAGE } from "./converse-failure";
 
 const builderSource = readFileSync(new URL("./builder.ts", import.meta.url), "utf8");
+const providersSource = readFileSync(new URL("./ai-providers.ts", import.meta.url), "utf8");
 const messagesSource = readFileSync(new URL("../routes/messages.ts", import.meta.url), "utf8");
 
 describe("converse completion honesty", () => {
@@ -15,7 +16,12 @@ describe("converse completion honesty", () => {
     expect(builderSource).toContain('pro: "gpt-5.4"');
     expect(builderSource).toContain("const CONVERSE_MAX_COMPLETION_TOKENS = 4_096");
     expect(builderSource.match(/disableThinking: true/g)).toHaveLength(2);
+    expect(builderSource).toContain('cProvider === "gemini"');
+    expect(builderSource).toContain('streamProv === "gemini"');
     expect(builderSource.match(/reasoning_effort: "low"/g)).toHaveLength(2);
+    expect(providersSource).toContain("Provider parameter mapping:");
+    expect(providersSource).toContain("disableThinking is consumed only by this branch");
+    expect(providersSource).toContain('"AI stream completion summary"');
   });
 
   it("maps an empty completion to an honest typed user outcome", () => {
@@ -35,9 +41,15 @@ describe("converse completion honesty", () => {
     expect(EMPTY_COMPLETION_USER_MESSAGE).toContain("try again");
   });
 
-  it("persists that outcome through both receipt-linked converse terminals", () => {
+  it("persists typed failures and interrupted partial responses through both converse terminals", () => {
     expect(messagesSource.match(/describeConverseFailure\(err\)/g)).toHaveLength(2);
-    expect(messagesSource.match(/cause: \{ code: failure\.code, stage:/g)).toHaveLength(2);
+    expect(messagesSource.match(/cause: \{ code: failure\.code, stage:/g)).toHaveLength(1);
+    expect(messagesSource.match(/err instanceof ConverseCompletionInterruptedError/g)).toHaveLength(
+      2,
+    );
+    expect(messagesSource.match(/cause: interruption\.code/g)).toHaveLength(2);
+    expect(messagesSource.match(/stopEvidence: converseResult\.stopEvidence/g)).toHaveLength(2);
+    expect(messagesSource.match(/partialText\.trim\(\)/g)).toHaveLength(3);
     expect(
       (messagesSource.match(/intentReceiptId: terminalIntentReceiptId/g) ?? []).length,
     ).toBeGreaterThanOrEqual(4);

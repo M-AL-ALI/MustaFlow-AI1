@@ -470,9 +470,55 @@ export interface StreamChatCompletionParams {
   taskId?: number;
   /** Build mode (lite/eco/power/pro). Ignored when taskId is absent. */
   taskMode?: string;
+  /** Receives the provider's terminal stream evidence exactly once. */
+  onFinish?: (summary: StreamCompletionSummary) => void;
+}
+
+export interface StreamCompletionSummary {
+  finishReason: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  refusal: boolean;
+  aborted: boolean;
+}
+
+function streamWasAborted(signal: AbortSignal | undefined, error: unknown): boolean {
+  return (
+    signal?.aborted === true ||
+    (error instanceof Error && (error.name === "AbortError" || error.message === "AbortError"))
+  );
+}
+
+function reportStreamCompletion(
+  params: StreamChatCompletionParams,
+  summary: StreamCompletionSummary,
+): void {
+  logger.info(
+    {
+      provider: params.provider,
+      model: params.model,
+      finishReason: summary.finishReason,
+      inputTokens: summary.inputTokens,
+      outputTokens: summary.outputTokens,
+      reasoningTokens: summary.reasoningTokens ?? null,
+      refusal: summary.refusal,
+      aborted: summary.aborted,
+    },
+    "AI stream completion summary",
+  );
+  params.onFinish?.(summary);
 }
 
 /**
+ * Provider parameter mapping:
+ * - OpenAI: max_completion_tokens, reasoning_effort, stream_options.include_usage;
+ *   finish_reason and completion_tokens_details.reasoning_tokens are observed.
+ * - Anthropic: max_tokens; message_start/message_delta usage and stop_reason are observed.
+ * - DeepSeek: max_tokens and stream_options.include_usage; finish_reason is observed.
+ * - Gemini: maxOutputTokens and optional thinkingConfig; usageMetadata and finishReason
+ *   are observed. disableThinking is consumed only by this branch.
+ *
  * Provider-agnostic streaming chat completion. Yields incremental text deltas
  * so callers can pipe them into their existing SSE channel without caring
  * which provider executed the request.
@@ -503,21 +549,36 @@ export async function* streamChatCompletion(
     let finishReason: string | null = null;
     let refusal = false;
     let contentLength = 0;
-    for await (const chunk of stream) {
-      const choice = chunk.choices[0];
-      const delta = choice?.delta?.content;
-      if (delta) {
-        contentLength += delta.length;
-        yield delta;
+    let streamError: unknown;
+    try {
+      for await (const chunk of stream) {
+        const choice = chunk.choices[0];
+        const delta = choice?.delta?.content;
+        if (delta) {
+          contentLength += delta.length;
+          yield delta;
+        }
+        if (choice?.delta?.refusal) refusal = true;
+        if (choice?.finish_reason != null) finishReason = choice.finish_reason;
+        // The final chunk (when stream_options.include_usage is set) has usage.
+        if (chunk.usage) {
+          inputTokens = chunk.usage.prompt_tokens ?? 0;
+          outputTokens = chunk.usage.completion_tokens ?? 0;
+          reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens ?? undefined;
+        }
       }
-      if (choice?.delta?.refusal) refusal = true;
-      if (choice?.finish_reason != null) finishReason = choice.finish_reason;
-      // The final chunk (when stream_options.include_usage is set) has usage.
-      if (chunk.usage) {
-        inputTokens = chunk.usage.prompt_tokens ?? 0;
-        outputTokens = chunk.usage.completion_tokens ?? 0;
-        reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens ?? undefined;
-      }
+    } catch (error) {
+      streamError = error;
+      throw error;
+    } finally {
+      reportStreamCompletion(params, {
+        finishReason,
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        refusal,
+        aborted: streamWasAborted(params.signal, streamError),
+      });
     }
     if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
       accumulateBuildTokens(params.taskId, {
@@ -570,18 +631,32 @@ async function* streamDeepSeek(
   let outputTokens = 0;
   let finishReason: string | null = null;
   let contentLength = 0;
-  for await (const chunk of stream) {
-    const choice = chunk.choices[0];
-    const delta = choice?.delta?.content;
-    if (delta) {
-      contentLength += delta.length;
-      yield delta;
+  let streamError: unknown;
+  try {
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
+      const delta = choice?.delta?.content;
+      if (delta) {
+        contentLength += delta.length;
+        yield delta;
+      }
+      if (choice?.finish_reason != null) finishReason = choice.finish_reason;
+      if (chunk.usage) {
+        inputTokens = chunk.usage.prompt_tokens ?? 0;
+        outputTokens = chunk.usage.completion_tokens ?? 0;
+      }
     }
-    if (choice?.finish_reason != null) finishReason = choice.finish_reason;
-    if (chunk.usage) {
-      inputTokens = chunk.usage.prompt_tokens ?? 0;
-      outputTokens = chunk.usage.completion_tokens ?? 0;
-    }
+  } catch (error) {
+    streamError = error;
+    throw error;
+  } finally {
+    reportStreamCompletion(params, {
+      finishReason,
+      inputTokens,
+      outputTokens,
+      refusal: false,
+      aborted: streamWasAborted(params.signal, streamError),
+    });
   }
   if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
     accumulateBuildTokens(params.taskId, {
@@ -631,31 +706,46 @@ async function* streamAnthropic(
   let outputTokens = 0;
   let finishReason: string | null = null;
   let contentLength = 0;
+  let streamError: unknown;
   const stream = anthropic.messages.stream({
     model: params.model,
     system: systemParts.join("\n\n") || undefined,
     messages: turns as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     max_tokens: params.max_completion_tokens ?? defaultMaxTokens,
   });
-  for await (const event of stream) {
-    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
-      const text = event.delta.text;
-      if (typeof text === "string" && text.length > 0) {
-        contentLength += text.length;
-        yield text;
+  try {
+    for await (const event of stream) {
+      if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        const text = event.delta.text;
+        if (typeof text === "string" && text.length > 0) {
+          contentLength += text.length;
+          yield text;
+        }
+      }
+      // Capture token counts: message_start has input_tokens; message_delta has output_tokens.
+      if (event?.type === "message_start" && event.message?.usage) {
+        inputTokens = event.message.usage.input_tokens ?? 0;
+      }
+      if (event?.type === "message_delta" && event.usage) {
+        outputTokens = event.usage.output_tokens ?? 0;
+      }
+      if (event?.type === "message_delta") {
+        const stopReason = (event as { delta?: { stop_reason?: string | null } }).delta
+          ?.stop_reason;
+        if (stopReason != null) finishReason = stopReason;
       }
     }
-    // Capture token counts: message_start has input_tokens; message_delta has output_tokens.
-    if (event?.type === "message_start" && event.message?.usage) {
-      inputTokens = event.message.usage.input_tokens ?? 0;
-    }
-    if (event?.type === "message_delta" && event.usage) {
-      outputTokens = event.usage.output_tokens ?? 0;
-    }
-    if (event?.type === "message_delta") {
-      const stopReason = (event as { delta?: { stop_reason?: string | null } }).delta?.stop_reason;
-      if (stopReason != null) finishReason = stopReason;
-    }
+  } catch (error) {
+    streamError = error;
+    throw error;
+  } finally {
+    reportStreamCompletion(params, {
+      finishReason,
+      inputTokens,
+      outputTokens,
+      refusal: false,
+      aborted: streamWasAborted(params.signal, streamError),
+    });
   }
   if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
     accumulateBuildTokens(params.taskId, {
@@ -733,22 +823,37 @@ async function* streamGemini(
   let reasoningTokens: number | undefined;
   let finishReason: string | null = null;
   let contentLength = 0;
-  for await (const chunk of stream) {
-    const parts = (chunk as any).candidates?.[0]?.content?.parts ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
-    for (const part of parts) {
-      if (typeof part.text === "string" && part.text.length > 0) {
-        contentLength += part.text.length;
-        yield part.text;
+  let streamError: unknown;
+  try {
+    for await (const chunk of stream) {
+      const parts = (chunk as any).candidates?.[0]?.content?.parts ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      for (const part of parts) {
+        if (typeof part.text === "string" && part.text.length > 0) {
+          contentLength += part.text.length;
+          yield part.text;
+        }
+      }
+      const candidateFinishReason = (chunk as any).candidates?.[0]?.finishReason; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (typeof candidateFinishReason === "string") finishReason = candidateFinishReason;
+      const meta = (chunk as any).usageMetadata; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (meta) {
+        inputTokens = meta.promptTokenCount ?? 0;
+        outputTokens = meta.candidatesTokenCount ?? 0;
+        reasoningTokens = meta.thoughtsTokenCount ?? undefined;
       }
     }
-    const candidateFinishReason = (chunk as any).candidates?.[0]?.finishReason; // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (typeof candidateFinishReason === "string") finishReason = candidateFinishReason;
-    const meta = (chunk as any).usageMetadata; // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (meta) {
-      inputTokens = meta.promptTokenCount ?? 0;
-      outputTokens = meta.candidatesTokenCount ?? 0;
-      reasoningTokens = meta.thoughtsTokenCount ?? undefined;
-    }
+  } catch (error) {
+    streamError = error;
+    throw error;
+  } finally {
+    reportStreamCompletion(params, {
+      finishReason,
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      refusal: false,
+      aborted: streamWasAborted(params.signal, streamError),
+    });
   }
   if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
     accumulateBuildTokens(params.taskId, {
