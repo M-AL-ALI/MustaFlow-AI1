@@ -130,3 +130,6 @@
 - [Stripe shared-customer routing](stripe-shared-customer-routing.md) — two plan families on ONE customer: route webhooks metadata-first + local sub lookup, EARLY, both-direction isolation tests.
 - [NabuFlow billing UI test recipe](nabuflow-billing-ui-testing.md) — BUILDER_OPEN_TO_ALL grants access w/o billing exemption; CREDITS_ENFORCEMENT is live-read; seed 3 nabuflow tables; post-restore /mode-select bounce = success.
 - [Acceptance script pricing coupling](acceptance-script-pricing-coupling.md) — verify-ladder.ts has hardcoded expected overage cents; update when plan rates change.
+- [Prod terminal lookup via task_events](prod-task-events-vs-agent-tasks.md) — agent_tasks blocked in prod; use task_events event_type='completed', data column has full terminal JSON.
+- [stopEvidence inside evidence wrapper](stop-evidence-in-evidence-wrapper.md) — TIP5 fix: evidence.stopEvidence.providerReason (not top-level); disease had no stopEvidence at all.
+- [Env-only Republish receipt child](env-only-republish-receipt-child.md) — env-change-only Republish yields new commit hash but same tree; TREE is the binding identity for ceremony closure.
