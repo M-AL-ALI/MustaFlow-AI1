@@ -25,8 +25,8 @@
     "reachableWhen": "Production code enumerates the phases that may be emitted."
   },
   {
-    "path": "lib/api-client-react/src/generated/api.ts",
-    "symbol": "useGetServedBuildIdentity",
+    "path": "lib/api-client-react/src/served-identity.ts",
+    "symbol": "useServedBuildIdentity",
     "reachableWhen": "A first-party status surface reads the serving build identity through the generated React query hook."
   }
 ]
