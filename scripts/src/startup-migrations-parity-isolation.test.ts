@@ -5,6 +5,8 @@ import {
   ParityIsolationError,
   type ParityIsolationConnector,
   type ParityProofConnector,
+  assertHonestLayerOneReceipt,
+  assertToleratedMigrationResult,
   relayChildOutput,
   runParityIsolation,
   runThreeProofParity,
@@ -163,10 +165,14 @@ describe("startup-migrations parity isolation", () => {
     let materializationRun = 0;
     let migrationRun = 0;
     const connector: ParityProofConnector = {
+      async provisionExtensions() {
+        calls.push("extensions:vector");
+        return ["vector"];
+      },
       async materializeBase() {
         materializationRun++;
         calls.push(`materialize:${materializationRun}`);
-        return { objectCount: 137 };
+        return { objectCount: 137, sentinelPresent: true, stdout: "schema pushed\n", stderr: "" };
       },
       async runMigrations() {
         migrationRun++;
@@ -200,6 +206,7 @@ describe("startup-migrations parity isolation", () => {
     });
 
     assert.deepEqual(calls, [
+      "extensions:vector",
       "materialize:1",
       "migrate:1",
       "capture:1",
@@ -211,13 +218,130 @@ describe("startup-migrations parity isolation", () => {
       "verify-restore-column",
       "close",
     ]);
+    assert.ok(lines.some((line) => line.includes("parity_layer0_extension_pass")));
     assert.ok(lines.some((line) => line.includes("parity_layer1_materialize_pass")));
+    assert.ok(lines.some((line) => line.includes("expected_object_count=TODO_PHASE_2_4")));
     assert.ok(lines.some((line) => line.includes("parity_layer2_migrations_pass")));
     assert.ok(lines.some((line) => line.includes("parity_construction_pass")));
     assert.ok(lines.some((line) => line.includes("diff_count=0")));
     assert.ok(lines.some((line) => line.includes("parity_restore_probe_pass")));
     assert.ok(lines.every((line) => !line.includes("user")));
     assert.ok(lines.every((line) => !line.includes("secret")));
+  });
+
+  it("rejects an exit-zero layer-one child whose stderr contains a PostgreSQL error", async () => {
+    const calls: string[] = [];
+    const connector: ParityProofConnector = {
+      async provisionExtensions() {
+        calls.push("extensions");
+        return ["vector"];
+      },
+      async materializeBase() {
+        calls.push("materialize");
+        return {
+          objectCount: 23,
+          sentinelPresent: false,
+          stdout: "pull complete\n",
+          stderr: 'error: type "vector" does not exist\n',
+        };
+      },
+      async runMigrations() {
+        calls.push("migrate");
+        return { migrationCount: 145 };
+      },
+      async captureSchema() {
+        return [];
+      },
+      async dropRestoreProbeColumn() {},
+      async hasRestoreProbeColumn() {
+        return false;
+      },
+      async close() {
+        calls.push("close");
+      },
+    };
+
+    await assert.rejects(
+      () =>
+        runThreeProofParity({
+          target: {
+            connectionString: "postgresql://user:secret@scratch.dev.example/parity_scratch_error",
+            host: "scratch.dev.example",
+            databaseName: "parity_scratch_error",
+          },
+          connector,
+          log: () => undefined,
+        }),
+      /parity_layer1_output_error.*type.*vector/u,
+    );
+    assert.deepEqual(calls, ["extensions", "materialize", "close"]);
+  });
+
+  it("requires the layer-one sentinel and enforces a numeric object-count pin", () => {
+    assert.throws(
+      () =>
+        assertHonestLayerOneReceipt({
+          objectCount: 137,
+          sentinelPresent: false,
+          stdout: "schema pushed\n",
+          stderr: "",
+        }),
+      /parity_layer1_sentinel_missing/u,
+    );
+    assert.throws(
+      () =>
+        assertHonestLayerOneReceipt(
+          {
+            objectCount: 137,
+            sentinelPresent: true,
+            stdout: "schema pushed\n",
+            stderr: "",
+          },
+          138,
+        ),
+      /parity_layer1_object_count_mismatch expected=138 actual=137/u,
+    );
+  });
+
+  it("accepts only the exact tolerated startup-migration failure set", () => {
+    assert.deepEqual(
+      assertToleratedMigrationResult({
+        passed: 144,
+        failed: 1,
+        errors: [
+          {
+            name: "migrate-workspace-tenancy",
+            message: "legacy_adoption_owner_id_missing",
+          },
+        ],
+      }),
+      { migrationCount: 145 },
+    );
+
+    assert.throws(
+      () =>
+        assertToleratedMigrationResult({
+          passed: 143,
+          failed: 2,
+          errors: [
+            {
+              name: "migrate-workspace-tenancy",
+              message: "legacy_adoption_owner_id_missing",
+            },
+            { name: "migrate-other", message: "other_failure" },
+          ],
+        }),
+      /parity_migrations_failed/u,
+    );
+    assert.throws(
+      () =>
+        assertToleratedMigrationResult({
+          passed: 144,
+          failed: 1,
+          errors: [{ name: "migrate-other", message: "other_failure" }],
+        }),
+      /parity_migrations_failed/u,
+    );
   });
 
   it("relays child stdout and stderr without suppressing either stream", () => {
