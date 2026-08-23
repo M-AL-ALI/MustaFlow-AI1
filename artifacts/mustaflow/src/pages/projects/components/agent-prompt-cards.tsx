@@ -1,5 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { HelpCircle, KeyRound, Rocket, ExternalLink, X, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,11 @@ import {
 } from "@workspace/api-client-react";
 import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
 import { ZeroAvatar } from "./zero-avatar";
+import {
+  fetchWorkspaceReadinessReceipt,
+  WORKSPACE_READINESS_UNBLOCK_LABELS,
+  type WorkspaceReadinessReceipt,
+} from "@/lib/workspace-readiness";
 
 export type AgentPromptKind = "user_query" | "request_secret" | "suggest_deploy";
 
@@ -26,6 +31,7 @@ interface CommonProps {
   projectId: number;
   taskId: number;
   prompt: AgentPromptCard;
+  terminal?: unknown;
   onDismiss: (promptId: string) => void;
   onPublishingActivity?: (update: InlineSurfaceActivityUpdate) => void;
 }
@@ -333,6 +339,7 @@ function RequestSecretCardImpl({ projectId, taskId, prompt, onDismiss }: CommonP
 
 function SuggestDeployCardImpl({
   projectId,
+  terminal,
   prompt,
   onDismiss,
   onPublishingActivity,
@@ -344,7 +351,32 @@ function SuggestDeployCardImpl({
   const [publishing, setPublishing] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<WorkspaceReadinessReceipt | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [readinessChecked, setReadinessChecked] = useState(false);
   const queryClient = useQueryClient();
+
+  const checkReadiness = useCallback(async () => {
+    setChecking(true);
+    setReadinessChecked(false);
+    try {
+      setReadiness(
+        await fetchWorkspaceReadinessReceipt({
+          projectId,
+          terminal,
+          env: payload.environment ?? "testing",
+          surface: "publish",
+        }),
+      );
+    } finally {
+      setReadinessChecked(true);
+      setChecking(false);
+    }
+  }, [payload.environment, projectId, terminal]);
+
+  useEffect(() => {
+    void checkReadiness();
+  }, [checkReadiness]);
 
   const handlePublish = async () => {
     setPublishing(true);
@@ -366,12 +398,24 @@ function SuggestDeployCardImpl({
   return (
     <CardShell
       icon={<Rocket className="h-4 w-4" />}
-      title={`Ready to publish to ${payload.environment ?? "testing"}`}
-      subtitle={payload.note ?? "The agent thinks this build is ready to go live."}
+      title={
+        readiness?.presentation.title ??
+        (readinessChecked ? "Status could not be verified" : "Checking this version")
+      }
+      subtitle={
+        readiness?.presentation.message ??
+        (readinessChecked
+          ? "Check the saved results again before continuing."
+          : (payload.note ?? "Zero is verifying the saved version before publishing."))
+      }
       onDismiss={() => onDismiss(prompt.promptId)}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <Button size="sm" onClick={handlePublish} disabled={publishing || !!done}>
+        <Button
+          size="sm"
+          onClick={handlePublish}
+          disabled={publishing || !!done || readiness?.presentation.canPublish !== true}
+        >
           {publishing ? (
             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
           ) : (
@@ -379,6 +423,18 @@ function SuggestDeployCardImpl({
           )}
           {done ? "Published" : "Publish now"}
         </Button>
+        {readiness?.presentation.unblock && (
+          <Button size="sm" variant="outline" disabled={checking} onClick={checkReadiness}>
+            {checking ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            {WORKSPACE_READINESS_UNBLOCK_LABELS[readiness.presentation.unblock]}
+          </Button>
+        )}
+        {readinessChecked && !readiness && (
+          <Button size="sm" variant="outline" disabled={checking} onClick={checkReadiness}>
+            {checking ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            Check again
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -406,12 +462,14 @@ function SuggestDeployCardImpl({
 export function AgentPromptCardsList({
   projectId,
   taskId,
+  terminal,
   prompts,
   onDismiss,
   onPublishingActivity,
 }: {
   projectId: number;
   taskId: number | null;
+  terminal?: unknown;
   prompts: AgentPromptCard[];
   onDismiss: (promptId: string) => void;
   onPublishingActivity?: (update: InlineSurfaceActivityUpdate) => void;
@@ -420,7 +478,14 @@ export function AgentPromptCardsList({
   return (
     <div className="px-2">
       {prompts.map((p) => {
-        const common = { projectId, taskId, prompt: p, onDismiss, onPublishingActivity };
+        const common = {
+          projectId,
+          taskId,
+          terminal,
+          prompt: p,
+          onDismiss,
+          onPublishingActivity,
+        };
         if (p.kind === "user_query") return <UserQueryCardImpl key={p.promptId} {...common} />;
         if (p.kind === "request_secret")
           return <RequestSecretCardImpl key={p.promptId} {...common} />;

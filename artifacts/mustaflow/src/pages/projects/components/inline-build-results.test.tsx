@@ -1,7 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { InlineBuildResults, type InlineBuildResultsReport } from "./inline-build-results";
+import { authFetch } from "@/lib/api-fetch";
+
+vi.mock("@/lib/api-fetch", () => ({ authFetch: vi.fn() }));
 
 const report: InlineBuildResultsReport = {
   filesCreated: ["src/App.tsx", "src/components/Todo.tsx", "src/styles.css"],
@@ -83,5 +86,50 @@ describe("InlineBuildResults", () => {
         "Build completed with partial validation — live-server infrastructure was unavailable, so container-dependent checks were deferred.",
       ),
     ).toBeVisible();
+  });
+
+  it("composes saved-version truth with subject-bound readiness before celebrating", async () => {
+    const terminal = {
+      schema: "zero-terminal-v1",
+      taskId: 13,
+      intent: "mutate",
+      intentReceiptId: 17,
+      completedAt: "2026-08-22T00:00:00.000Z",
+      outcome: "mutation_succeeded",
+      runStatus: "completed",
+      evidence: {
+        versionId: 64,
+        diffRef: { kind: "task_report", taskId: 13, revision: 1 },
+        preview: { promised: true, state: "unavailable", cause: "preview_failed" },
+      },
+    };
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          workspaceReadiness: {
+            schema: "workspace-readiness-v1",
+            projectId: 7,
+            subject: { versionId: 64, taskId: 13, revision: 1 },
+            state: "blocked",
+            cause: "preview_broken",
+            unblock: "wait_or_retry_preview",
+            evidence: { receiptId: "preview-64" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    render(<InlineBuildResults report={report} terminal={terminal} projectId={7} />);
+
+    await waitFor(() => expect(screen.getByTestId("inline-workspace-readiness")).toBeVisible());
+    expect(screen.getByTestId("inline-workspace-readiness")).toHaveTextContent("Changes applied");
+    expect(screen.getByTestId("inline-workspace-readiness")).toHaveTextContent(
+      "Preview needs attention",
+    );
+    expect(screen.getByTestId("inline-workspace-readiness")).not.toHaveTextContent(
+      "This version is ready",
+    );
+    expect(vi.mocked(authFetch).mock.calls[0]?.[0]).toContain("versionId=64&taskId=13&revision=1");
   });
 });

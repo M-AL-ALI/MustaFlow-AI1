@@ -28,15 +28,5 @@
     "path": "lib/api-client-react/src/generated/api.ts",
     "symbol": "useGetServedBuildIdentity",
     "reachableWhen": "A first-party status surface reads the serving build identity through the generated React query hook."
-  },
-  {
-    "path": "lib/ora-contracts/src/workspace-readiness.ts",
-    "symbol": "parseWorkspaceReadiness",
-    "reachableWhen": "B4b consumes a readiness receipt across a process boundary."
-  },
-  {
-    "path": "lib/ora-contracts/src/workspace-readiness.ts",
-    "symbol": "presentWorkspaceReadiness",
-    "reachableWhen": "B4b flips the first user-facing readiness surface to the sole presenter."
   }
 ]

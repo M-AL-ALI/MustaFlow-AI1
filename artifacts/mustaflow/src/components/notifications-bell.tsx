@@ -14,6 +14,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { terminalPresentationFor } from "@/lib/zero-terminal";
+import {
+  composeTerminalAndReadiness,
+  fetchWorkspaceReadinessReceipt,
+  WORKSPACE_READINESS_UNBLOCK_LABELS,
+  type WorkspaceReadinessReceipt,
+} from "@/lib/workspace-readiness";
 
 interface Notification {
   id: number;
@@ -79,6 +85,67 @@ function timeAgo(iso: string): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+function NotificationCopy({ notification }: { notification: Notification }) {
+  const terminal = terminalPresentationFor({
+    terminal: notification.metadata?.terminal,
+    status:
+      notification.type === "build_complete"
+        ? "completed"
+        : notification.type === "build_failed"
+          ? "failed"
+          : undefined,
+  });
+  const [readiness, setReadiness] = useState<WorkspaceReadinessReceipt | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReadiness(null);
+    if (
+      notification.type !== "build_complete" ||
+      !notification.projectId ||
+      notification.metadata?.terminal == null
+    ) {
+      return () => undefined;
+    }
+    void fetchWorkspaceReadinessReceipt({
+      projectId: notification.projectId,
+      terminal: notification.metadata.terminal,
+      env: typeof notification.metadata.env === "string" ? notification.metadata.env : "testing",
+      surface: "notification",
+    })
+      .then((receipt) => {
+        if (!cancelled) setReadiness(receipt);
+      })
+      .catch(() => {
+        if (!cancelled) setReadiness(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notification]);
+
+  const composed = readiness
+    ? composeTerminalAndReadiness(
+        terminal?.message ?? notification.body ?? "The version was saved.",
+        readiness,
+      )
+    : null;
+  const title = composed?.title ?? terminal?.title ?? notification.title;
+  const body = composed?.message ?? terminal?.message ?? notification.body;
+
+  return (
+    <>
+      <p className={cn("text-sm", !notification.read && "font-medium")}>{title}</p>
+      {body && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{body}</p>}
+      {readiness?.presentation.unblock && (
+        <p className="mt-1 text-[11px] font-medium text-amber-400">
+          {WORKSPACE_READINESS_UNBLOCK_LABELS[readiness.presentation.unblock]}
+        </p>
+      )}
+    </>
+  );
 }
 
 export function NotificationsBell() {
@@ -254,14 +321,7 @@ export function NotificationsBell() {
                       <Icon className="h-3.5 w-3.5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className={cn("text-sm", !n.read && "font-medium")}>
-                        {terminal?.title ?? n.title}
-                      </p>
-                      {(terminal?.message ?? n.body) && (
-                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                          {terminal?.message ?? n.body}
-                        </p>
-                      )}
+                      <NotificationCopy notification={n} />
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {timeAgo(n.createdAt)}
                       </p>

@@ -39,6 +39,6 @@ describe("page map card model", () => {
     expect(pageCardStatus({ hasError: true })).toBe("Needs attention");
     expect(pageCardStatus({ planned: true })).toBe("Planned");
     expect(pageCardStatus({ isNew: true })).toBe("New");
-    expect(pageCardStatus({})).toBe("Ready");
+    expect(pageCardStatus({})).toBe("Page built");
   });
 });

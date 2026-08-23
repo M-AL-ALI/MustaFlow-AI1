@@ -1037,7 +1037,9 @@ export function ZeroAgentPanel({
                 <DynamicAtom size={32} className="text-primary" animate />
               </div>
               <div>
-                <p className="text-sm font-semibold text-foreground">Zero is ready</p>
+                <p className="text-sm font-semibold text-foreground">
+                  Zero is ready for another request
+                </p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed max-w-[240px]">
                   Describe what to build or change. Zero reads files, writes code, and runs commands
                   — streaming every action live.

@@ -28,7 +28,7 @@ const TOUR_STEPS: TourStep[] = [
     targetSelector: "[data-tab='publishing']",
     title: "Publishing tab",
     description:
-      "When your app is ready, publish it here to get a shareable public link — no server setup needed.",
+      "When a saved version passes review, validation, preview, and publishing checks, publish it here to get a shareable public link — no server setup needed.",
     placement: "bottom",
   },
   {

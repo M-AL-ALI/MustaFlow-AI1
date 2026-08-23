@@ -167,6 +167,7 @@ import {
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
 import { QATapeInline } from "./components/qa-tape-inline";
 import { InlineBuildResults } from "./components/inline-build-results";
+import { workspaceReadinessSubjectFromTerminal } from "@/lib/workspace-readiness";
 import { useCheckpointHistoryNavigation } from "./components/use-checkpoint-history-navigation";
 import {
   appendNarrationEntry,
@@ -912,6 +913,15 @@ export default function ProjectWorkspacePage() {
       refetchInterval: sendMessage.isPending ? 800 : 30_000,
     },
   });
+  const latestReadinessTerminal = useMemo(
+    () =>
+      (
+        tasksForFeed as Array<{
+          terminal?: unknown;
+        }>
+      ).find((task) => workspaceReadinessSubjectFromTerminal(task.terminal) !== null)?.terminal,
+    [tasksForFeed],
+  );
 
   // Global suggestions poll — catches background build suggestions even when SuggestionChips
   // is not visible (background tasks don't create a foreground report card).
@@ -2293,8 +2303,14 @@ export default function ProjectWorkspacePage() {
           event.eventType === "cancelled"
         ) {
           setLiveRunTerminalEvent(event.eventType);
-          // Drop any unanswered prompts and clear the live code buffer when task ends.
-          setAgentPrompts([]);
+          // Keep a deploy suggestion after a successful terminal so the card can bind
+          // itself to that task's durable readiness receipt. Other prompts are no
+          // longer actionable once the task ends.
+          setAgentPrompts((current) =>
+            event.eventType === "completed"
+              ? current.filter((prompt) => prompt.kind === "suggest_deploy")
+              : [],
+          );
           setLiveCodeBuffer("");
           // Reload the preview iframe so the freshly-built files are visible.
           const shouldRefreshPreview =
@@ -4404,6 +4420,13 @@ export default function ProjectWorkspacePage() {
                       <AgentPromptCardsList
                         projectId={projectId}
                         taskId={activeTaskId}
+                        terminal={
+                          (
+                            tasksForFeed.find((task) => task.id === activeTaskId) as
+                              | { terminal?: unknown }
+                              | undefined
+                          )?.terminal
+                        }
                         prompts={agentPrompts}
                         onDismiss={dismissAgentPrompt}
                         onPublishingActivity={handlePublishingActivity}
@@ -5238,6 +5261,7 @@ export default function ProjectWorkspacePage() {
                       (t) => t.id === activeTaskId,
                     )?.status === "needs_review"
                   }
+                  readinessTerminal={latestReadinessTerminal}
                   validationWarnings={(() => {
                     const recentReport = [...(messages ?? [])].reverse().find((m) => {
                       const p = m.plan as ChatPlanPayload | null | undefined;
@@ -5473,6 +5497,7 @@ export default function ProjectWorkspacePage() {
                   containerId={project.containerId}
                   testedSnapshotId={project.testedSnapshotId}
                   testingStatus={project.testingStatus}
+                  readinessTerminal={latestReadinessTerminal}
                   onNavigateToSecret={handleAddKey}
                   onNavigateToMobileSettings={() => {
                     setScrollManageToMobileSettings(true);

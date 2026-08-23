@@ -337,10 +337,7 @@ function expectedUnblock(
   }
 }
 
-/**
- * @dormantExport
- * Parse durable JSON when B4b begins consuming readiness receipts across process boundaries.
- */
+/** Parse durable readiness evidence at every process boundary. */
 export function parseWorkspaceReadiness(
   value: unknown,
   context: WorkspaceReadinessContext,
@@ -448,10 +445,7 @@ const BLOCKED_COPY: Record<WorkspaceReadinessBlockedCause, { title: string; mess
   },
 };
 
-/**
- * @dormantExport
- * Render readiness only when B4b flips the first user-facing consumer.
- */
+/** Sole user-facing renderer for workspace readiness. */
 export function presentWorkspaceReadiness(
   readiness: WorkspaceReadiness,
   _surface: WorkspaceReadinessSurface,

@@ -197,7 +197,7 @@ const EVENT_META: Record<
   preview_ready: {
     icon: CheckCircle2,
     color: "text-green-400",
-    label: "Preview ready",
+    label: "Preview receipt verified",
     pillStyle: "done",
   },
   github_sync: {

@@ -1,4 +1,4 @@
-export type PageCardStatus = "Updating" | "Needs attention" | "Planned" | "New" | "Ready";
+export type PageCardStatus = "Updating" | "Needs attention" | "Planned" | "New" | "Page built";
 
 type PageCardSource = {
   label: string;
@@ -69,5 +69,5 @@ export function pageCardStatus(
   if (source.hasError) return "Needs attention";
   if (source.planned) return "Planned";
   if (source.isNew) return "New";
-  return "Ready";
+  return "Page built";
 }

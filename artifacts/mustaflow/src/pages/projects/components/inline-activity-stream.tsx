@@ -184,7 +184,7 @@ const EVENT_ACTIVITY: Record<string, ActivityDefinition> = {
   preview_ready: {
     kind: "preview",
     label: "Finishing the preview",
-    resolvedLabel: "Preview ready",
+    resolvedLabel: "Preview receipt verified",
     completionEvidence: { source: "task-event", eventType: "preview_ready" },
   },
   finalized: { kind: "done", label: "Done", terminal: true },

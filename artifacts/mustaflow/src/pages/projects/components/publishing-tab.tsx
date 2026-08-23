@@ -58,6 +58,13 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
 import { SupportReportLink } from "@/components/support-report-link";
 import { selectGithubFailureError } from "@/lib/user-visible-errors";
+import {
+  parseWorkspaceReadinessReceipt,
+  unavailableWorkspaceReadinessReceipt,
+  workspaceReadinessSubjectFromTerminal,
+  WORKSPACE_READINESS_UNBLOCK_LABELS,
+  type WorkspaceReadinessReceipt,
+} from "@/lib/workspace-readiness";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -1144,6 +1151,7 @@ function ReadinessCheckRow({ check, onFix }: { check: ReadinessCheck; onFix?: ()
 
 function ReadinessGate({
   readiness,
+  workspaceReadiness,
   loading,
   onRefresh,
   projectId,
@@ -1151,6 +1159,7 @@ function ReadinessGate({
   onNavigateToSecurity,
 }: {
   readiness: ReadinessResult | null;
+  workspaceReadiness: WorkspaceReadinessReceipt | null;
   loading: boolean;
   onRefresh: () => void;
   projectId: number;
@@ -1167,13 +1176,11 @@ function ReadinessGate({
       </div>
     );
   }
-  if (!readiness) return null;
-
-  const blockingFailed = readiness.checks.filter(
+  const blockingFailed = (readiness?.checks ?? []).filter(
     (c) => c.severity === "blocking" && c.status === "fail",
   );
-  const warnings = readiness.checks.filter((c) => c.status === "warning");
-  const securityCheck = readiness.checks.find((c) => c.id === "no_critical_findings");
+  const warnings = (readiness?.checks ?? []).filter((c) => c.status === "warning");
+  const securityCheck = readiness?.checks.find((c) => c.id === "no_critical_findings");
   const securityBlocked =
     securityCheck?.status === "fail" &&
     securityCheck.criticalFindings &&
@@ -1208,7 +1215,7 @@ function ReadinessGate({
         </button>
       </div>
       <div className="space-y-2">
-        {readiness.checks.map((check) => (
+        {(readiness?.checks ?? []).map((check) => (
           <ReadinessCheckRow key={check.id} check={check} />
         ))}
       </div>
@@ -1271,7 +1278,7 @@ function ReadinessGate({
         </div>
       )}
 
-      {!readiness.canPublish && blockingFailed.length > 0 && !securityBlocked && (
+      {readiness && !readiness.canPublish && blockingFailed.length > 0 && !securityBlocked && (
         <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span>
@@ -1280,19 +1287,38 @@ function ReadinessGate({
           </span>
         </div>
       )}
-      {readiness.canPublish && warnings.length > 0 && (
+      {workspaceReadiness && (
+        <div
+          className={cn(
+            "rounded-lg border px-3 py-2 text-xs",
+            workspaceReadiness.presentation.state === "ready"
+              ? "border-green-500/20 bg-green-500/10 text-green-600"
+              : "border-yellow-500/20 bg-yellow-500/10 text-yellow-600",
+          )}
+        >
+          <p className="font-semibold">{workspaceReadiness.presentation.title}</p>
+          <p className="mt-0.5">{workspaceReadiness.presentation.message}</p>
+          {workspaceReadiness.presentation.unblock && (
+            <p className="mt-1 font-medium">
+              {WORKSPACE_READINESS_UNBLOCK_LABELS[workspaceReadiness.presentation.unblock]}
+            </p>
+          )}
+        </div>
+      )}
+      {!workspaceReadiness && (
+        <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-600">
+          <p className="font-semibold">Status could not be verified</p>
+          <p className="mt-0.5">Check the saved results again before publishing.</p>
+          <p className="mt-1 font-medium">Check again</p>
+        </div>
+      )}
+      {readiness?.canPublish && warnings.length > 0 && (
         <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span>
             {warnings.length} warning{warnings.length !== 1 ? "s" : ""} — you can publish, but
             review them first.
           </span>
-        </div>
-      )}
-      {readiness.canPublish && warnings.length === 0 && (
-        <div className="flex items-center gap-2 text-xs text-green-600">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          All gates passed — ready to publish.
         </div>
       )}
     </div>
@@ -3233,6 +3259,7 @@ export function PublishingTab({
   onNavigateToLogs,
   onNavigateToTestEnv,
   onPublishingActivity,
+  readinessTerminal,
 }: {
   projectId: number;
   kind?: string;
@@ -3252,6 +3279,8 @@ export function PublishingTab({
   /** Task #768: navigate to the Test Environment tab. Shown in the testing gate banner. */
   onNavigateToTestEnv?: () => void;
   onPublishingActivity?: (update: InlineSurfaceActivityUpdate) => void;
+  /** Durable terminal for the exact version whose publish controls are shown. */
+  readinessTerminal?: unknown;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const isAgentic = builderMode === "agentic";
@@ -3298,6 +3327,9 @@ export function PublishingTab({
   // Readiness gate state (web)
   const [readiness, setReadiness] = useState<ReadinessResult | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
+  const [workspaceReadiness, setWorkspaceReadiness] = useState<WorkspaceReadinessReceipt | null>(
+    null,
+  );
 
   // Readiness gate state (mobile store)
   const [iosReadiness, setIosReadiness] = useState<ReadinessResult | null>(null);
@@ -3741,6 +3773,10 @@ export function PublishingTab({
   };
 
   async function handleDeploy() {
+    if (workspaceReadiness?.presentation.canPublish !== true) {
+      setDeployError("Check this saved version's readiness before publishing.");
+      return;
+    }
     setIsDeploying(true);
     setDeployError(null);
     onPublishingActivity?.({ status: "running", label: "Publishing to production" });
@@ -3845,6 +3881,10 @@ export function PublishingTab({
   }
 
   async function handlePublish() {
+    if (workspaceReadiness?.presentation.canPublish !== true) {
+      setPublishError("Check this saved version's readiness before publishing.");
+      return;
+    }
     setIsPublishing(true);
     setPublishError(null);
     onPublishingActivity?.({ status: "running", label: "Publishing" });
@@ -3893,15 +3933,48 @@ export function PublishingTab({
   const fetchReadiness = useCallback(async () => {
     if (platform !== "web") return;
     setReadinessLoading(true);
+    setWorkspaceReadiness(null);
+    const subject = workspaceReadinessSubjectFromTerminal(readinessTerminal);
+    if (!subject) {
+      setReadiness(null);
+      setReadinessLoading(false);
+      return;
+    }
     try {
-      const res = await authFetch(`/api/projects/${projectId}/publish-readiness?env=${webEnv}`);
-      if (res.ok) setReadiness((await res.json()) as ReadinessResult);
+      const query = new URLSearchParams({
+        env: webEnv,
+        versionId: String(subject.versionId),
+        taskId: String(subject.taskId),
+        revision: String(subject.revision),
+      });
+      const res = await authFetch(
+        `/api/projects/${projectId}/publish-readiness?${query.toString()}`,
+      );
+      if (res.ok) {
+        const body = (await res.json()) as ReadinessResult & { workspaceReadiness?: unknown };
+        setReadiness(body);
+        setWorkspaceReadiness(
+          parseWorkspaceReadinessReceipt(
+            body.workspaceReadiness,
+            { projectId, subject },
+            "publish",
+          ),
+        );
+      } else {
+        setReadiness(null);
+        setWorkspaceReadiness(
+          unavailableWorkspaceReadinessReceipt({ projectId, subject }, "publish"),
+        );
+      }
     } catch {
-      /* ignore */
+      setReadiness(null);
+      setWorkspaceReadiness(
+        unavailableWorkspaceReadinessReceipt({ projectId, subject }, "publish"),
+      );
     } finally {
       setReadinessLoading(false);
     }
-  }, [projectId, webEnv, platform]);
+  }, [projectId, readinessTerminal, webEnv, platform]);
 
   const fetchIosReadiness = useCallback(async () => {
     if (!isMobile) return;
@@ -6124,6 +6197,7 @@ export function PublishingTab({
                 {platform === "web" && (
                   <ReadinessGate
                     readiness={readiness}
+                    workspaceReadiness={workspaceReadiness}
                     loading={readinessLoading}
                     onRefresh={() => void fetchReadiness()}
                     projectId={projectId}
@@ -6173,7 +6247,7 @@ export function PublishingTab({
                           {testingStatus === "stale"
                             ? "Draft changed after the last test — run a new test before deploying to production."
                             : testingStatus === "ready"
-                              ? "Test environment is running. Approve it in the Test Environment tab to unlock production deploys."
+                              ? "The sealed test candidate is awaiting review. Approve it in the Test Environment tab to unlock production deploys."
                               : "This project must pass a test preview before deploying to production."}
                         </span>
                         {onNavigateToTestEnv && (
@@ -6192,7 +6266,7 @@ export function PublishingTab({
                         className="w-full"
                         disabled={
                           !webReadyToPublish ||
-                          readiness?.canPublish === false ||
+                          workspaceReadiness?.presentation.canPublish !== true ||
                           isDeploying ||
                           isFullStackWithoutTest
                         }
@@ -6221,7 +6295,9 @@ export function PublishingTab({
                           <Button
                             className="flex-1"
                             onClick={() => void handleDeploy()}
-                            disabled={isDeploying}
+                            disabled={
+                              isDeploying || workspaceReadiness?.presentation.canPublish !== true
+                            }
                           >
                             {isDeploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                             {isDeploying ? "Deploying…" : "Confirm Deploy"}
@@ -6386,7 +6462,12 @@ export function PublishingTab({
                         <Button
                           variant="outline"
                           className="w-full"
-                          disabled={!webReadyToPublish || isPublishing || isSecBlocked}
+                          disabled={
+                            !webReadyToPublish ||
+                            isPublishing ||
+                            isSecBlocked ||
+                            workspaceReadiness?.presentation.canPublish !== true
+                          }
                           onClick={() => void handlePublish()}
                         >
                           {isPublishing ? (

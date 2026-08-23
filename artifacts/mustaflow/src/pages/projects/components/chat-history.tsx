@@ -1100,6 +1100,7 @@ function InlineReportCard({
       <InlineBuildResults
         report={report}
         terminal={(liveTask as (typeof liveTask & { terminal?: unknown }) | undefined)?.terminal}
+        projectId={projectId}
         onViewFile={onViewFile}
         onOpenCheckpoint={onOpenCheckpoint}
         onSendMessage={onSendMessage}

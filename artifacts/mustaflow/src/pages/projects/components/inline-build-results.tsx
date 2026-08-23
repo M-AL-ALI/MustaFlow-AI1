@@ -11,6 +11,13 @@ import {
 import { cn } from "@/lib/utils";
 import { CheckpointHistoryAction, type OpenCheckpointHistory } from "./checkpoint-history-action";
 import { terminalPresentationFor } from "@/lib/zero-terminal";
+import {
+  composeTerminalAndReadiness,
+  fetchWorkspaceReadinessReceipt,
+  WORKSPACE_READINESS_UNBLOCK_LABELS,
+  type WorkspaceReadinessReceipt,
+} from "@/lib/workspace-readiness";
+import { useEffect, useState } from "react";
 
 type KnowledgeLesson = {
   id: number;
@@ -46,6 +53,7 @@ type InlineBuildResultsProps = {
   showCheckpoint?: boolean;
   className?: string;
   terminal?: unknown;
+  projectId?: number;
 };
 
 type ResultRowProps = {
@@ -174,12 +182,39 @@ export function InlineBuildResults({
   showCheckpoint = true,
   className,
   terminal,
+  projectId,
 }: InlineBuildResultsProps) {
   const terminalPresentation = terminalPresentationFor({ terminal, status: "completed" });
+  const [workspaceReadiness, setWorkspaceReadiness] = useState<WorkspaceReadinessReceipt | null>(
+    null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    setWorkspaceReadiness(null);
+    if (!projectId || terminal == null) return () => undefined;
+    void fetchWorkspaceReadinessReceipt({
+      projectId,
+      terminal,
+      env: "testing",
+      surface: "chat",
+    })
+      .then((receipt) => {
+        if (!cancelled) setWorkspaceReadiness(receipt);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceReadiness(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, terminal]);
   const lessons = report.knowledgeApplied ?? [];
   const checks = report.checkRunsSummary;
   const failedOrWarned = [...(checks?.failedChecks ?? []), ...(checks?.warnChecks ?? [])];
   const partialValidation = partialValidationMessage(report);
+  const composedReadiness = workspaceReadiness
+    ? composeTerminalAndReadiness(resultSummary(report, terminal), workspaceReadiness)
+    : null;
 
   return (
     <div
@@ -190,17 +225,39 @@ export function InlineBuildResults({
       data-testid="inline-build-results"
       aria-label="Build results"
     >
-      <p
-        className="flex items-center gap-2 pb-1.5 text-[11px] leading-relaxed text-foreground"
-        data-testid="inline-build-summary"
-      >
-        {terminalPresentation && terminalPresentation.tone !== "success" ? (
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden="true" />
-        ) : (
-          <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        )}
-        {resultSummary(report, terminal)}
-      </p>
+      {!workspaceReadiness && (
+        <p
+          className="flex items-center gap-2 pb-1.5 text-[11px] leading-relaxed text-foreground"
+          data-testid="inline-build-summary"
+        >
+          {terminalPresentation && terminalPresentation.tone !== "success" ? (
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden="true" />
+          ) : (
+            <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          )}
+          {resultSummary(report, terminal)}
+        </p>
+      )}
+
+      {workspaceReadiness && (
+        <div
+          className={cn(
+            "mb-1.5 rounded-md border px-2.5 py-2 text-[11px]",
+            workspaceReadiness.presentation.state === "ready"
+              ? "border-emerald-500/25 bg-emerald-500/5 text-emerald-300"
+              : "border-amber-500/25 bg-amber-500/5 text-amber-200",
+          )}
+          data-testid="inline-workspace-readiness"
+        >
+          <p className="font-semibold">{composedReadiness?.title}</p>
+          <p className="mt-0.5 text-muted-foreground">{composedReadiness?.message}</p>
+          {workspaceReadiness.presentation.unblock && (
+            <p className="mt-1 font-medium">
+              {WORKSPACE_READINESS_UNBLOCK_LABELS[workspaceReadiness.presentation.unblock]}
+            </p>
+          )}
+        </div>
+      )}
 
       <ResultRow
         label="Files changed"

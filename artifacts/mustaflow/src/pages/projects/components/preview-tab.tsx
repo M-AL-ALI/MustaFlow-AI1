@@ -54,6 +54,11 @@ import {
   useListSecrets,
   getListSecretsQueryKey,
 } from "@workspace/api-client-react";
+import {
+  fetchWorkspaceReadinessReceipt,
+  WORKSPACE_READINESS_UNBLOCK_LABELS,
+  type WorkspaceReadinessReceipt,
+} from "@/lib/workspace-readiness";
 
 type Platform = "web" | "ios" | "android";
 type DeviceFrame = "desktop" | "tablet" | "mobile";
@@ -183,6 +188,8 @@ type PreviewTabProps = {
    * build, not the pending staged files.
    */
   isTaskStaged?: boolean;
+  /** Durable terminal for the exact version represented by this preview. */
+  readinessTerminal?: unknown;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -223,6 +230,7 @@ export function PreviewTab({
   onPreviewRevisionFailed,
   navigationRequest,
   isTaskStaged,
+  readinessTerminal,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
@@ -241,6 +249,30 @@ export function PreviewTab({
     code: string;
     message: string;
   } | null>(null);
+  const [workspaceReadiness, setWorkspaceReadiness] = useState<WorkspaceReadinessReceipt | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setWorkspaceReadiness(null);
+    if (readinessTerminal == null) return () => undefined;
+    void fetchWorkspaceReadinessReceipt({
+      projectId: project.id,
+      terminal: readinessTerminal,
+      env: "testing",
+      surface: "preview",
+    })
+      .then((receipt) => {
+        if (!cancelled) setWorkspaceReadiness(receipt);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceReadiness(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, readinessTerminal]);
   const refreshTestEnvironment = useCallback(async () => {
     if (!project.containerId) return null;
     const response = await authFetch(`/api/projects/${project.id}/preview-env/status`);
@@ -2117,6 +2149,26 @@ export function PreviewTab({
         </div>
       </div>
 
+      {workspaceReadiness && (
+        <div
+          className={cn(
+            "absolute left-3 right-3 top-12 z-20 rounded-md border px-3 py-2 text-xs shadow-sm",
+            workspaceReadiness.presentation.canCelebrate
+              ? "border-emerald-500/25 bg-emerald-950/90 text-emerald-100"
+              : "border-amber-500/25 bg-amber-950/90 text-amber-100",
+          )}
+          data-testid="preview-workspace-readiness"
+        >
+          <p className="font-semibold">{workspaceReadiness.presentation.title}</p>
+          <p className="mt-0.5">{workspaceReadiness.presentation.message}</p>
+          {workspaceReadiness.presentation.unblock && (
+            <p className="mt-1 font-medium">
+              {WORKSPACE_READINESS_UNBLOCK_LABELS[workspaceReadiness.presentation.unblock]}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Container waking/starting banner — Phase C server-side containers */}
       {/* Task #768: testing gate nudge — shown for full-stack projects whose draft is not yet test-approved */}
       {project.containerId && effectiveTestingStatus !== "passed" && (
@@ -2128,17 +2180,15 @@ export function PreviewTab({
                 {effectiveTestingStatus === "stale"
                   ? "Draft changed after last test — run a new test before publishing."
                   : effectiveTestingStatus === "ready"
-                    ? "Test environment is ready. Approve it to unlock production publishing."
+                    ? "The sealed test candidate is awaiting your review. Approve it to unlock production publishing."
                     : effectiveTestingStatus === "building"
                       ? "The exact sealed test candidate is being prepared."
                       : "Start a test build to preview and approve this app before publishing."}
               </span>
               {testEnvironmentError && (
-                <p
-                  className="truncate text-[10px] text-destructive"
-                  title={testEnvironmentError.code}
-                >
-                  {testEnvironmentError.code}: {testEnvironmentError.message}
+                <p className="truncate text-[10px] text-destructive">
+                  {workspaceReadiness?.presentation.message ??
+                    "The test candidate needs attention. Open its details or retry it."}
                 </p>
               )}
             </div>
