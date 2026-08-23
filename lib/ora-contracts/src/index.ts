@@ -3,6 +3,7 @@ import { z } from "zod";
 export * from "./zero-prompt-queue-boundary";
 export * from "./zero-intent";
 export * from "./zero-terminal";
+export * from "./workspace-readiness";
 export * from "./billing-user-errors";
 export * from "./user-visible-errors";
 

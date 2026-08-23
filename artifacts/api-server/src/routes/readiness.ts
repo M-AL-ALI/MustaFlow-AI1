@@ -15,9 +15,21 @@ import {
   secretsTable,
   deploymentLogsTable,
   checkRunsTable,
+  agentTasksTable,
 } from "@workspace/db";
 import type { CheckFinding } from "@workspace/db";
+import {
+  parseZeroTerminalV1,
+  ZERO_TERMINAL_UNKNOWN,
+  type WorkspaceReadiness,
+  type WorkspaceReadinessSubject,
+} from "@workspace/ora-contracts";
 import { requireProjectOwnership } from "../lib/auth";
+import { readDatabaseWorkspaceReadiness } from "../lib/workspace-readiness-reader";
+import {
+  bindPublishReadinessToSubject,
+  type VersionBoundPublishReadinessInput,
+} from "../lib/workspace-readiness";
 
 // ─── Security finding helpers ─────────────────────────────────────────────────
 
@@ -113,6 +125,83 @@ export interface ReadinessResult {
   env: string;
   canPublish: boolean;
   checks: ReadinessCheck[];
+  workspaceReadinessInput?: VersionBoundPublishReadinessInput;
+  workspaceReadiness?: WorkspaceReadiness;
+}
+
+type RequestedSubject =
+  | { kind: "none" }
+  | { kind: "invalid" }
+  | { kind: "subject"; subject: WorkspaceReadinessSubject };
+
+function requestedSubject(query: Record<string, unknown>): RequestedSubject {
+  const values = [query.versionId, query.taskId, query.revision];
+  if (values.every((value) => value === undefined)) return { kind: "none" };
+  const parsed = values.map((value) => Number(value));
+  if (parsed.some((value) => !Number.isInteger(value) || value <= 0) || parsed[2] !== 1) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "subject",
+    subject: { versionId: parsed[0], taskId: parsed[1], revision: 1 },
+  };
+}
+
+async function subjectBelongsToProject(
+  projectId: number,
+  subject: WorkspaceReadinessSubject,
+): Promise<boolean> {
+  const [[version], [task]] = await Promise.all([
+    db
+      .select({ id: projectVersionsTable.id })
+      .from(projectVersionsTable)
+      .where(
+        and(
+          eq(projectVersionsTable.id, subject.versionId),
+          eq(projectVersionsTable.projectId, projectId),
+        ),
+      ),
+    db
+      .select({ terminal: agentTasksTable.terminal })
+      .from(agentTasksTable)
+      .where(and(eq(agentTasksTable.id, subject.taskId), eq(agentTasksTable.projectId, projectId))),
+  ]);
+  const terminal = parseZeroTerminalV1(task?.terminal);
+  if (!version || terminal === ZERO_TERMINAL_UNKNOWN || terminal.taskId !== subject.taskId) {
+    return false;
+  }
+  if (terminal.outcome !== "mutation_succeeded" && terminal.outcome !== "changed_with_issues") {
+    return false;
+  }
+  return (
+    terminal.evidence.versionId === subject.versionId &&
+    terminal.evidence.diffRef.revision === subject.revision
+  );
+}
+
+async function bindResultToRequestedSubject(
+  projectId: number,
+  request: RequestedSubject,
+  result: ReadinessResult,
+): Promise<ReadinessResult | null> {
+  if (request.kind === "none") return result;
+  if (request.kind === "invalid" || !(await subjectBelongsToProject(projectId, request.subject))) {
+    return null;
+  }
+  const workspaceReadinessInput = bindPublishReadinessToSubject({
+    subject: request.subject,
+    env: result.env,
+    canPublish: result.canPublish,
+    checks: result.checks,
+  });
+  return {
+    ...result,
+    workspaceReadinessInput,
+    workspaceReadiness: await readDatabaseWorkspaceReadiness(
+      { projectId, subject: request.subject },
+      workspaceReadinessInput,
+    ),
+  };
 }
 
 const TEST_KEY_PATTERNS = [/^sk_test_/i, /^pk_test_/i, /^rk_test_/i, /test_key/i];
@@ -370,11 +459,28 @@ router.get(
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const env = (req.query.env as string) || "testing";
+    const subjectRequest = requestedSubject(req.query as Record<string, unknown>);
+
+    if (subjectRequest.kind === "invalid") {
+      res.status(400).json({
+        error: "versionId and taskId must be positive integers, and revision must be 1",
+        code: "readiness_subject_invalid",
+      });
+      return;
+    }
 
     // ── Mobile store readiness paths ─────────────────────────────────────────
     if (env === "ios" || env === "android") {
       const result = await getMobileReadiness(projectId, env);
-      res.json(result);
+      const bound = await bindResultToRequestedSubject(projectId, subjectRequest, result);
+      if (!bound) {
+        res.status(409).json({
+          error: "Readiness evidence does not match the requested saved version",
+          code: "readiness_subject_mismatch",
+        });
+        return;
+      }
+      res.json(bound);
       return;
     }
 
@@ -592,7 +698,15 @@ router.get(
       checks,
     };
 
-    res.json(result);
+    const bound = await bindResultToRequestedSubject(projectId, subjectRequest, result);
+    if (!bound) {
+      res.status(409).json({
+        error: "Readiness evidence does not match the requested saved version",
+        code: "readiness_subject_mismatch",
+      });
+      return;
+    }
+    res.json(bound);
   },
 );
 

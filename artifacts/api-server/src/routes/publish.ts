@@ -89,6 +89,7 @@ import {
   SealedTestingCandidateError,
 } from "../lib/sealed-testing-candidate";
 import { removeUncommittedProductionSnapshot } from "../lib/production-publish-retry-safety";
+import { readReadinessEvidence } from "../lib/workspace-readiness";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
 import {
   r2Enabled,
@@ -350,29 +351,33 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // the agentic repair loop exhausted all attempts. Require explicit opt-in via
   // forcePublishWithErrors=true to allow publishing with known TypeScript errors.
   if (env === "production" && !publishVersionId) {
-    try {
+    const validationRead = await readReadinessEvidence(async () => {
       const [latestVersion] = await db
         .select({ validationStatus: projectVersionsTable.validationStatus })
         .from(projectVersionsTable)
         .where(eq(projectVersionsTable.projectId, projectId))
         .orderBy(desc(projectVersionsTable.createdAt))
         .limit(1);
-      if (latestVersion?.validationStatus === "completed_with_errors") {
-        const force = (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
-        if (!force) {
-          res.status(422).json({
-            error:
-              "The latest build completed with TypeScript errors that could not be auto-repaired. Fix the errors before publishing to production, or pass forcePublishWithErrors=true to override.",
-            code: "completed_with_errors",
-          });
-          return;
-        }
+      return latestVersion ?? null;
+    });
+    if (validationRead.state === "unknown") {
+      req.log.error({ projectId }, "Validation gate evidence could not be read — blocking publish");
+      res.status(503).json({
+        error: "Readiness could not be verified. Try the publish check again.",
+        code: "workspace_readiness_unknown",
+      });
+      return;
+    }
+    if (validationRead.value?.validationStatus === "completed_with_errors") {
+      const force = (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
+      if (!force) {
+        res.status(422).json({
+          error:
+            "The latest build completed with TypeScript errors that could not be auto-repaired. Fix the errors before publishing to production, or pass forcePublishWithErrors=true to override.",
+          code: "completed_with_errors",
+        });
+        return;
       }
-    } catch (validationGateErr) {
-      req.log.warn(
-        { err: validationGateErr, projectId },
-        "Validation gate check failed (non-fatal) — proceeding with publish",
-      );
     }
   }
 
@@ -381,29 +386,33 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // failed but required checks passed. Preview works, but the build is not
   // fully clean. Require explicit opt-in via forcePublishWithWarnings=true.
   if (env === "production" && !publishVersionId) {
-    try {
+    const warningRead = await readReadinessEvidence(async () => {
       const [latestVersion] = await db
         .select({ validationStatus: projectVersionsTable.validationStatus })
         .from(projectVersionsTable)
         .where(eq(projectVersionsTable.projectId, projectId))
         .orderBy(desc(projectVersionsTable.createdAt))
         .limit(1);
-      if (latestVersion?.validationStatus === "passed_with_warnings") {
-        const force = (req.body as Record<string, unknown>)?.forcePublishWithWarnings === true;
-        if (!force) {
-          res.status(422).json({
-            error:
-              "The latest build completed with validation warnings (non-blocking checks failed). The preview is functional, but the build is not fully clean. Fix the warnings before publishing, or pass forcePublishWithWarnings=true to override.",
-            code: "passed_with_warnings",
-          });
-          return;
-        }
+      return latestVersion ?? null;
+    });
+    if (warningRead.state === "unknown") {
+      req.log.error({ projectId }, "Warning gate evidence could not be read — blocking publish");
+      res.status(503).json({
+        error: "Readiness could not be verified. Try the publish check again.",
+        code: "workspace_readiness_unknown",
+      });
+      return;
+    }
+    if (warningRead.value?.validationStatus === "passed_with_warnings") {
+      const force = (req.body as Record<string, unknown>)?.forcePublishWithWarnings === true;
+      if (!force) {
+        res.status(422).json({
+          error:
+            "The latest build completed with validation warnings (non-blocking checks failed). The preview is functional, but the build is not fully clean. Fix the warnings before publishing, or pass forcePublishWithWarnings=true to override.",
+          code: "passed_with_warnings",
+        });
+        return;
       }
-    } catch (warningGateErr) {
-      req.log.warn(
-        { err: warningGateErr, projectId },
-        "Warning gate check failed (non-fatal) — proceeding with publish",
-      );
     }
   }
 
