@@ -547,6 +547,7 @@ export type GetServedBuildIdentityQueryError = ErrorType<unknown>
 
 /**
  * @summary Identity of the exact API build serving this request
+ * @dormantExport Consumed when a first-party status surface reads the serving build identity through the generated hook.
  */
 
 export function useGetServedBuildIdentity<TData = Awaited<ReturnType<typeof getServedBuildIdentity>>, TError = ErrorType<unknown>>(
@@ -23119,4 +23120,3 @@ export const useEscalateSupport = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getEscalateSupportMutationOptions(options));
     }
-
