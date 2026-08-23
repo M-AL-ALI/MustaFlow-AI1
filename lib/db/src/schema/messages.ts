@@ -8,6 +8,7 @@ import {
   jsonb,
   index,
   customType,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
@@ -46,9 +47,12 @@ export const chatMessagesTable = pgTable(
     // origin: identifies which panel/surface sent this message.
     // 'zero' = Zero agent panel; null = main builder chat or other sources.
     origin: text("origin"),
-    intentReceiptId: integer("intent_receipt_id").references(() => zeroIntentReceiptsTable.id, {
-      onDelete: "set null",
-    }),
+    intentReceiptId: integer("intent_receipt_id").references(
+      (): AnyPgColumn => zeroIntentReceiptsTable.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
