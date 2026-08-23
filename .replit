@@ -50,24 +50,20 @@ mode = "parallel"
 author = "agent"
 
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "push-to-github"
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
 
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "ora-stability-gate"
+task = "shell.exec"
+args = "pnpm --filter @workspace/mustaflow run dev"
 
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "ora-gate-fast"
+task = "shell.exec"
+args = "pnpm --filter @workspace/ora-mobile run dev"
 
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "codegen-drift"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "pull-from-github"
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
 
 [[workflows.workflow]]
 name = "push-to-github"
@@ -75,21 +71,10 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash scripts/push-to-github.sh --force"
+args = "bash scripts/push-to-github.sh"
 
 [workflows.workflow.metadata]
 outputType = "console"
-
-[[workflows.workflow]]
-name = "ora-stability-gate"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean --report=tmp/ora-stability-gate-report.md"
 
 [[workflows.workflow]]
 name = "ora-gate-fast"

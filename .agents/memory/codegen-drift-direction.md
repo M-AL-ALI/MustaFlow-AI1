@@ -12,5 +12,5 @@ When the codegen-drift check fails, diff the regenerated output against the comm
 
 **How to apply:**
 - Drift that ADDS annotations/fields = usually stale committed files; safe to regenerate.
-- Drift that REMOVES a field which appears in `routes/*.ts` request parsing = spec bug; keep the committed files, restore the regenerated ones (`git restore lib/*/src/generated`), and flag the spec gap upstream rather than regenerating.
-- The failed codegen-drift workflow leaves modified generated files sitting in the working tree — restore them before merges or the stability gate (`--require-clean`) fails.
+
+Generated modifications after a codegen run are REPORTED AND HELD verbatim; never commit or restore generated changes without an explicit desk block.

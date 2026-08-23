@@ -6,19 +6,12 @@
 # This guarantees commits pushed from another machine (Windows dev checkout)
 # are never silently overwritten by a Replit checkpoint push.
 #
-# --force is accepted for backward compatibility with the configured workflow
-# command but is IGNORED.  If you genuinely need to force-push to reset a
-# broken remote state, pass --really-force instead (manual use only).
-#
 # Usage:
 #   bash scripts/push-to-github.sh              # normal safe push
-#   bash scripts/push-to-github.sh --force      # same as above (--force ignored)
-#   bash scripts/push-to-github.sh --really-force  # destructive, manual only
 set -euo pipefail
 
 REMOTE_URL="https://github.com/M-AL-ALI/MustaFlow-AI1.git"
 BRANCH="${PUSH_BRANCH:-main}"
-ARG="${1:-}"
 
 # ── Commit any staged changes before pushing ──────────────────────────────────
 # The platform checkpoint uses a sandboxed git that cannot reach the global
@@ -85,41 +78,25 @@ fi
 
 CRED_HELPER='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'
 
-# Warn and downgrade the legacy --force flag so checkpoints can't overwrite
-# commits pushed from Windows / another machine.
-if [ "$ARG" = "--force" ]; then
-  echo "WARN: --force is deprecated for automated pushes and has been ignored." >&2
-  echo "      Replit checkpoints will now safely merge upstream commits first." >&2
-  ARG=""
-fi
+# ── Fetch → merge upstream ───────────────────────────────────────────────────
+echo "Fetching from GitHub MustaFlow-AI1 …"
+git -c credential.helper="$CRED_HELPER" \
+  fetch "$REMOTE_URL" "+$BRANCH:refs/remotes/github/$BRANCH" 2>&1 || {
+  echo "WARN: fetch failed — will attempt push without pre-merge" >&2
+}
 
-REALLY_FORCE=""
-if [ "$ARG" = "--really-force" ]; then
-  REALLY_FORCE="--force"
-  echo "WARN: --really-force requested — skipping upstream merge." >&2
-fi
-
-# ── Fetch → merge upstream (skipped only for --really-force) ─────────────────
-if [ -z "$REALLY_FORCE" ]; then
-  echo "Fetching from GitHub MustaFlow-AI1 …"
-  git -c credential.helper="$CRED_HELPER" \
-    fetch "$REMOTE_URL" "+$BRANCH:refs/remotes/github/$BRANCH" 2>&1 || {
-    echo "WARN: fetch failed — will attempt push without pre-merge" >&2
-  }
-
-  if git rev-parse --verify "refs/remotes/github/$BRANCH" >/dev/null 2>&1; then
-    AHEAD=$(git rev-list HEAD..refs/remotes/github/$BRANCH --count 2>/dev/null || echo 0)
-    if [ "$AHEAD" -gt 0 ]; then
-      echo "GitHub has $AHEAD commit(s) ahead of local — merging before push …"
-      git -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
-          -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
-          merge --no-edit -X ours "refs/remotes/github/$BRANCH" || {
-        echo "ERROR: merge conflict — resolve manually and re-run push" >&2
-        exit 1
-      }
-    else
-      echo "Local is up to date with (or ahead of) GitHub — no merge needed."
-    fi
+if git rev-parse --verify "refs/remotes/github/$BRANCH" >/dev/null 2>&1; then
+  AHEAD=$(git rev-list HEAD..refs/remotes/github/$BRANCH --count 2>/dev/null || echo 0)
+  if [ "$AHEAD" -gt 0 ]; then
+    echo "GitHub has $AHEAD commit(s) ahead of local — merging before push …"
+    git -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
+        -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
+        merge --no-edit -X ours "refs/remotes/github/$BRANCH" || {
+      echo "ERROR: merge conflict — resolve manually and re-run push" >&2
+      exit 1
+    }
+  else
+    echo "Local is up to date with (or ahead of) GitHub — no merge needed."
   fi
 fi
 
@@ -129,7 +106,7 @@ echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub …"
 ATTEMPTS=5
 for i in $(seq 1 "$ATTEMPTS"); do
   if git -c credential.helper="$CRED_HELPER" \
-       push "$REMOTE_URL" "$BRANCH:$BRANCH" $REALLY_FORCE; then
+       push "$REMOTE_URL" "$BRANCH:$BRANCH"; then
     echo "Done."
     exit 0
   fi
