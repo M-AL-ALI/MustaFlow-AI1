@@ -21,6 +21,9 @@ import { isDeepSeekAvailable, MODEL_DEFAULTS, type Provider } from "../ai-provid
 import { ALL_BREAKERS } from "../resilience";
 import type { OraIntent, OraConfidence, OraTopic } from "./classifier";
 import { logger } from "../logger";
+import { EmptyCompletionError } from "../empty-completion";
+
+export { EmptyCompletionError } from "../empty-completion";
 
 /** A single provider+model the caller can attempt. */
 export interface ModelCandidate {
@@ -694,13 +697,6 @@ export type ProviderErrorKind =
  * candidate (Anthropic / OpenAI) and classifies cleanly as `empty_completion`
  * in structured logs.
  */
-export class EmptyCompletionError extends Error {
-  constructor(message = "Provider returned an empty completion") {
-    super(message);
-    this.name = "EmptyCompletionError";
-  }
-}
-
 /**
  * Throws `EmptyCompletionError` when a completion has neither non-blank text
  * content nor any tool calls. Call this inside a `runCandidateChain` attempt so
