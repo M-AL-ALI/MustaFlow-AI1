@@ -3,7 +3,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── isPreviewSubdomainHost — pure hostname check ──────────────────────────────
 // Import only the pure export; validatePreviewWebSocketUpgrade is DB-dependent
 // and tested with mocked DB below.
-import { isPreviewSubdomainHost } from "../previewSubdomainGateway";
+import {
+  extractB5PreviewProjectId,
+  isPreviewSubdomainHost,
+  previewSubdomainGateway,
+  resolvePreviewRoutingHost,
+} from "../previewSubdomainGateway";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -55,8 +60,14 @@ vi.mock("@workspace/db", () => {
   return { db: mockDb, projectsTable: {}, previewSessionsTable: {} };
 });
 
+vi.mock("../../lib/livePreviewProxy", () => ({
+  handleLivePreviewHttp: vi.fn(),
+  loadPreviewProject: vi.fn(),
+}));
+
 import { validatePreviewWebSocketUpgrade } from "../previewSubdomainGateway";
 import { db } from "@workspace/db";
+import { handleLivePreviewHttp, loadPreviewProject } from "../../lib/livePreviewProxy";
 
 // Build a valid HMAC cookie value matching what the gateway produces.
 // We reproduce the signing logic here so we can generate valid test tokens.
@@ -72,6 +83,7 @@ const SESSION_ID = "abcdef1234567890"; // 16-char hex
 
 beforeEach(() => {
   process.env.ENCRYPTION_KEY = SECRET;
+  process.env.B5_RELAY_SECRET = "relay-secret";
   vi.clearAllMocks();
 });
 
@@ -85,11 +97,13 @@ describe("validatePreviewWebSocketUpgrade", () => {
       from: () => ({
         where: () => {
           callCount++;
-          if (callCount === 1) return Promise.resolve(sessionRow ? [sessionRow] : []);
-          return Promise.resolve(projectRow ? [projectRow] : []);
+          return Promise.resolve(
+            callCount === 1 ? (sessionRow ? [sessionRow] : []) : projectRow ? [projectRow] : [],
+          );
         },
       }),
     }));
+    (loadPreviewProject as ReturnType<typeof vi.fn>).mockResolvedValue(projectRow);
   }
 
   it("returns null for non-preview host", async () => {
@@ -145,7 +159,7 @@ describe("validatePreviewWebSocketUpgrade", () => {
   it("returns null when project has no testContainerUrl", async () => {
     setupDbReturns(
       { id: 1, projectId: 10, expiresAt: new Date(Date.now() + 3_600_000), revokedAt: null },
-      { testContainerUrl: null, testContainerStatus: "running", deletedAt: null },
+      { containerUrl: null, containerId: "runtime-10", containerStatus: "running" },
     );
     const result = await validatePreviewWebSocketUpgrade(validHost, validCookie);
     expect(result).toBeNull();
@@ -155,9 +169,9 @@ describe("validatePreviewWebSocketUpgrade", () => {
     setupDbReturns(
       { id: 1, projectId: 10, expiresAt: new Date(Date.now() + 3_600_000), revokedAt: null },
       {
-        testContainerUrl: "https://test.container.internal",
-        testContainerStatus: "stopped",
-        deletedAt: null,
+        containerUrl: "https://test.container.internal",
+        containerId: "runtime-10",
+        containerStatus: "stopped",
       },
     );
     const result = await validatePreviewWebSocketUpgrade(validHost, validCookie);
@@ -168,14 +182,238 @@ describe("validatePreviewWebSocketUpgrade", () => {
     setupDbReturns(
       { id: 1, projectId: 10, expiresAt: new Date(Date.now() + 3_600_000), revokedAt: null },
       {
-        testContainerUrl: "https://test.container.internal",
-        testContainerStatus: "running",
-        deletedAt: null,
+        containerUrl: "https://test.container.internal",
+        containerId: "runtime-10",
+        containerStatus: "running",
       },
     );
     const result = await validatePreviewWebSocketUpgrade(validHost, validCookie);
     expect(result).not.toBeNull();
     expect(result?.containerUrl).toBe("https://test.container.internal");
+  });
+});
+
+describe("B5 preview-host routing", () => {
+  it.each([
+    ["p1.preview.mustaflow.com", 1],
+    ["P52.PREVIEW.MUSTAFLOW.COM", 52],
+    ["p52.preview.mustaflow.com:443", 52],
+  ])("accepts the exact project-host shape %s", (host, expected) => {
+    expect(extractB5PreviewProjectId(host)).toBe(expected);
+  });
+
+  it.each([
+    "p0.preview.mustaflow.com",
+    "p9007199254740992.preview.mustaflow.com",
+    "p1.preview.mustaflow.com.evil.test",
+    "x1.preview.mustaflow.com",
+    "p1.preview.mustaflow.com:0",
+    "p1.preview.mustaflow.com:65536",
+    "p1.preview.mustaflow.com:443:80",
+  ])("rejects a lookalike or invalid host %s", (host) => {
+    expect(extractB5PreviewProjectId(host)).toBeNull();
+  });
+
+  it("honors a relayed host only when the exact secret is present", () => {
+    const headers = {
+      host: "musta-flow-ai.replit.app",
+      "x-b5-preview-host": "p52.preview.mustaflow.com",
+      "x-b5-relay-auth": "relay-secret",
+    };
+    expect(resolvePreviewRoutingHost(headers, { B5_RELAY_SECRET: "relay-secret" })).toBe(
+      "p52.preview.mustaflow.com",
+    );
+    expect(resolvePreviewRoutingHost(headers, { B5_RELAY_SECRET: "wrong-secret" })).toBe(
+      "musta-flow-ai.replit.app",
+    );
+    expect(
+      resolvePreviewRoutingHost(
+        { host: headers.host, "x-b5-preview-host": headers["x-b5-preview-host"] },
+        { B5_RELAY_SECRET: "relay-secret" },
+      ),
+    ).toBe("musta-flow-ai.replit.app");
+  });
+
+  it("makes forged relay headers response-identical to no relay headers", async () => {
+    const direct = responseRecorder();
+    const forged = responseRecorder();
+    const directNext = vi.fn();
+    const forgedNext = vi.fn();
+    const base = {
+      path: "/",
+      method: "GET",
+      query: {},
+      originalUrl: "/",
+      url: "/",
+    };
+    await previewSubdomainGateway(
+      { ...base, headers: { host: "musta-flow-ai.replit.app" } } as never,
+      direct.response as never,
+      directNext,
+    );
+    await previewSubdomainGateway(
+      {
+        ...base,
+        headers: {
+          host: "musta-flow-ai.replit.app",
+          "x-b5-preview-host": "p52.preview.mustaflow.com",
+          "x-b5-relay-auth": "forged",
+        },
+      } as never,
+      forged.response as never,
+      forgedNext,
+    );
+    expect(forged.record).toEqual(direct.record);
+    expect(directNext).toHaveBeenCalledOnce();
+    expect(forgedNext).toHaveBeenCalledOnce();
+  });
+
+  function responseRecorder() {
+    const record = { status: 0, body: "", headers: {} as Record<string, string> };
+    const response = {
+      status(code: number) {
+        record.status = code;
+        return response;
+      },
+      type() {
+        return response;
+      },
+      setHeader(name: string, value: string) {
+        record.headers[name] = value;
+        return response;
+      },
+      send(body: string) {
+        record.body = body;
+        return response;
+      },
+      redirect(code: number, location: string) {
+        record.status = code;
+        record.headers.Location = location;
+        return response;
+      },
+    };
+    return { response, record };
+  }
+
+  async function anonymousGate(host: string) {
+    const { response, record } = responseRecorder();
+    const next = vi.fn();
+    await previewSubdomainGateway(
+      {
+        headers: { host },
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/",
+        url: "/",
+      } as never,
+      response as never,
+      next,
+    );
+    return { record, next };
+  }
+
+  it("is enumeration-blind and performs no project read for anonymous visitors", async () => {
+    const existing = await anonymousGate("p52.preview.mustaflow.com");
+    const missing = await anonymousGate("p999999.preview.mustaflow.com");
+    expect(existing.record).toEqual(missing.record);
+    expect(existing.record.status).toBe(200);
+    expect(existing.record.body).toContain("This preview is shared by invitation");
+    expect(db.select).not.toHaveBeenCalled();
+    expect(loadPreviewProject).not.toHaveBeenCalled();
+    expect(handleLivePreviewHttp).not.toHaveBeenCalled();
+  });
+
+  it("honors grant expiry without consulting or waking the runtime", async () => {
+    const sessionId = "0123456789abcdef";
+    const cookie = makeValidCookie(sessionId, SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([{ id: 1, projectId: 52, expiresAt: new Date(Date.now() - 1) }]),
+      }),
+    }));
+    const { response, record } = responseRecorder();
+    await previewSubdomainGateway(
+      {
+        headers: { host: "p52.preview.mustaflow.com", cookie },
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/",
+        url: "/",
+      } as never,
+      response as never,
+      vi.fn(),
+    );
+    expect(record.status).toBe(200);
+    expect(record.body).toContain("This preview is shared by invitation");
+    expect(loadPreviewProject).not.toHaveBeenCalled();
+    expect(handleLivePreviewHttp).not.toHaveBeenCalled();
+  });
+
+  it("never wakes or proxies a granted preview whose runtime is not running", async () => {
+    const sessionId = "0123456789abcdef";
+    const cookie = makeValidCookie(sessionId, SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([{ id: 1, projectId: 52, expiresAt: new Date(Date.now() + 60_000) }]),
+      }),
+    }));
+    (loadPreviewProject as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 52,
+      containerId: "runtime-52",
+      containerStatus: "stopped",
+    });
+    const { response, record } = responseRecorder();
+    await previewSubdomainGateway(
+      {
+        headers: { host: "p52.preview.mustaflow.com", cookie },
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/",
+        url: "/",
+      } as never,
+      response as never,
+      vi.fn(),
+    );
+    expect(record.status).toBe(503);
+    expect(record.body).toContain("preview is asleep");
+    expect(handleLivePreviewHttp).not.toHaveBeenCalled();
+  });
+
+  it("proxies only after grant and running-runtime truth both pass", async () => {
+    const sessionId = "0123456789abcdef";
+    const cookie = makeValidCookie(sessionId, SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([{ id: 1, projectId: 52, expiresAt: new Date(Date.now() + 60_000) }]),
+      }),
+    }));
+    const project = {
+      id: 52,
+      containerId: "runtime-52",
+      containerStatus: "running",
+      containerUrl: "https://runtime.invalid",
+    };
+    (loadPreviewProject as ReturnType<typeof vi.fn>).mockResolvedValue(project);
+    const { response } = responseRecorder();
+    const request = {
+      headers: { host: "p52.preview.mustaflow.com", cookie },
+      path: "/assets/app.js",
+      method: "GET",
+      query: {},
+      originalUrl: "/assets/app.js",
+      url: "/assets/app.js",
+    };
+    const next = vi.fn();
+    await previewSubdomainGateway(request as never, response as never, next);
+    expect(handleLivePreviewHttp).toHaveBeenCalledWith(request, response, next, project, {
+      publicRequestUrl: "/assets/app.js",
+    });
   });
 });
 

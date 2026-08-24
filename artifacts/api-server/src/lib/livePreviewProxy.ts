@@ -93,7 +93,14 @@ export async function resolveCloudflareLivePreviewLaunchUrl(
   const sourceUrl = new URL(requestUrl ?? "/", "https://platform.invalid");
   const matched = matchPreviewPath(sourceUrl.pathname);
   const launchUrl = new URL(grant.launchUrl);
-  if (matched?.rest) launchUrl.pathname = `${launchUrl.pathname}${matched.rest}`;
+  if (matched?.rest) {
+    launchUrl.pathname = `${launchUrl.pathname}${matched.rest}`;
+  } else if (!matched && sourceUrl.pathname !== "/") {
+    launchUrl.pathname = `${launchUrl.pathname}${sourceUrl.pathname.replace(/^\//, "")}`;
+  }
+  for (const [key, value] of sourceUrl.searchParams) {
+    launchUrl.searchParams.append(key, value);
+  }
   return launchUrl.toString();
 }
 
@@ -108,6 +115,16 @@ type PreviewProject = {
   containerUrl: string | null;
   stack: string | null;
   runtimePort: number | null;
+};
+
+type PublicPreviewContext = {
+  projectId: number;
+  requestUrl: string;
+};
+
+type PreviewProxyRequest = IncomingMessage & {
+  originalUrl?: string;
+  mustaFlowPublicPreview?: PublicPreviewContext;
 };
 
 /**
@@ -304,7 +321,11 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
     // Inside the mounted `/api` router Express strips the prefix from
     // `req.url`, so prefer `req.originalUrl` (always full path) and fall
     // back to `req.url` for the WS upgrade case where originalUrl is unset.
-    const expressReq = req as IncomingMessage & { originalUrl?: string };
+    const expressReq = req as PreviewProxyRequest;
+    if (expressReq.mustaFlowPublicPreview) {
+      const project = await loadPreviewProject(expressReq.mustaFlowPublicPreview.projectId);
+      return project?.containerUrl ?? undefined;
+    }
     const url = expressReq.originalUrl ?? req.url ?? "";
     const projectId = projectIdFromUrl(url);
     if (projectId == null) return undefined;
@@ -314,7 +335,10 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
   pathRewrite: (path, req) => {
     // `path` is `req.url` (router-stripped inside the /api mount).
     // Prefer originalUrl so the rewrite always sees the full preview path.
-    const expressReq = req as IncomingMessage & { originalUrl?: string };
+    const expressReq = req as PreviewProxyRequest;
+    if (expressReq.mustaFlowPublicPreview) {
+      return expressReq.mustaFlowPublicPreview.requestUrl;
+    }
     const sourceUrl = expressReq.originalUrl ?? path;
     const m = matchPreviewPath(sourceUrl.split("?")[0] ?? "");
     if (!m) return path;
@@ -400,10 +424,12 @@ export async function handleLivePreviewHttp(
   res: Response,
   next: NextFunction,
   project: PreviewProject,
+  options?: { publicRequestUrl?: string },
 ): Promise<void> {
+  const sourceRequestUrl = options?.publicRequestUrl ?? req.originalUrl ?? req.url;
   const cloudflareLaunchUrl = await resolveCloudflareLivePreviewLaunchUrl(
     project,
-    req.originalUrl ?? req.url,
+    sourceRequestUrl,
   );
   if (cloudflareLaunchUrl !== null) {
     res
@@ -417,12 +443,11 @@ export async function handleLivePreviewHttp(
 
   // Container layer not configured in this environment — serve files from DB.
   if (!(await isContainerLayerConfigured())) {
-    await serveProjectFilesPreview(
-      res,
-      project.id,
-      previewFilePathFromUrl(req.originalUrl ?? req.url),
-      { projectStatus: project.status, showStaticBanner: true, previewState: "static-fallback" },
-    );
+    await serveProjectFilesPreview(res, project.id, previewFilePathFromUrl(sourceRequestUrl), {
+      projectStatus: project.status,
+      showStaticBanner: true,
+      previewState: "static-fallback",
+    });
     return;
   }
 
@@ -462,16 +487,21 @@ export async function handleLivePreviewHttp(
   // 503 would trigger the COLD_START_HTML auto-refresh meta tag.
   const reachable = await tenantRuntimeProvider.isGatewayReachable();
   if (!reachable) {
-    await serveProjectFilesPreview(
-      res,
-      project.id,
-      previewFilePathFromUrl(req.originalUrl ?? req.url),
-      { projectStatus: project.status, showStaticBanner: true, previewState: "static-fallback" },
-    );
+    await serveProjectFilesPreview(res, project.id, previewFilePathFromUrl(sourceRequestUrl), {
+      projectStatus: project.status,
+      showStaticBanner: true,
+      previewState: "static-fallback",
+    });
     return;
   }
 
   // Container is running — proxy through to the dev server.
+  if (options?.publicRequestUrl) {
+    (req as Request & { mustaFlowPublicPreview?: PublicPreviewContext }).mustaFlowPublicPreview = {
+      projectId: project.id,
+      requestUrl: options.publicRequestUrl,
+    };
+  }
   await proxyMiddleware(req, res, next);
 }
 

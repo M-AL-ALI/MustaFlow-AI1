@@ -59,6 +59,7 @@ import {
   WORKSPACE_READINESS_UNBLOCK_LABELS,
   type WorkspaceReadinessReceipt,
 } from "@/lib/workspace-readiness";
+import { SharePreviewControl } from "./share-preview-control";
 
 type Platform = "web" | "ios" | "android";
 type DeviceFrame = "desktop" | "tablet" | "mobile";
@@ -2072,6 +2073,13 @@ export function PreviewTab({
 
         {/* ── Share / Snapshot / Focus cluster ── */}
         <div className="flex items-center gap-1 shrink-0">
+          {hasFiles && (
+            <SharePreviewControl
+              projectId={project.id}
+              runtimeRunning={containerStatus === "running" && Boolean(containerUrl)}
+              readiness={workspaceReadiness}
+            />
+          )}
           {hasFiles && onSnapshotObserve && (
             <Button
               variant="ghost"

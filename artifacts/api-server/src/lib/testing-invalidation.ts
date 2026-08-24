@@ -20,7 +20,7 @@
  *   The preview session is revoked immediately so the subdomain gateway blocks access.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, previewSessionsTable } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -83,7 +83,7 @@ export async function staleDraftCandidate(
 
 /**
  * Called when security configuration changes. Marks stale, revokes the active
- * preview session, and stops the test container so it cannot continue running
+ * preview sessions, and stops the test container so it cannot continue running
  * with outdated credentials or database access.
  */
 export async function revokePreviewForSecurityChange(
@@ -101,13 +101,14 @@ export async function revokePreviewForSecurityChange(
 
   if (!project) return;
 
-  // Revoke active preview session immediately.
-  if (project.activePreviewSessionId) {
-    await db
-      .update(previewSessionsTable)
-      .set({ revokedAt: new Date(), revokeReason: reason })
-      .where(eq(previewSessionsTable.sessionId, project.activePreviewSessionId));
-  }
+  // Revoke every live preview grant immediately, including independently minted
+  // B5 share links that are intentionally not stored as the active editor session.
+  await db
+    .update(previewSessionsTable)
+    .set({ revokedAt: new Date(), revokeReason: reason })
+    .where(
+      and(eq(previewSessionsTable.projectId, projectId), isNull(previewSessionsTable.revokedAt)),
+    );
 
   // Stop the test container (non-fatal if it fails — machine may already be stopped).
   if (

@@ -25,6 +25,7 @@ import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewPro
 import {
   validatePreviewWebSocketUpgrade,
   isPreviewSubdomainHost,
+  resolvePreviewRoutingHost,
 } from "./middlewares/previewSubdomainGateway";
 import { runStartupMigrations } from "./lib/startup-migrations";
 import { startupHealthState } from "./lib/startup-health-state";
@@ -159,7 +160,7 @@ server.on("upgrade", (req, socket, head) => {
   // Security: preview subdomain WebSocket upgrades must be validated with the
   // same host/cookie/HMAC/expiry/revocation checks as HTTP requests.
   // Production and public hosts must never accept preview WebSocket upgrades.
-  const host = req.headers.host;
+  const host = resolvePreviewRoutingHost(req.headers);
   if (isPreviewSubdomainHost(host)) {
     // Resume the socket immediately so the HTTP server does not reclaim it
     // while async session validation (DB queries) is in flight.
