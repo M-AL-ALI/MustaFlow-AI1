@@ -6,7 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   extractB5PreviewProjectId,
   isPreviewSubdomainHost,
+  previewPathBridge,
   previewSubdomainGateway,
+  resolveB5PreviewRelayContext,
+  resolvePreviewRoutingPath,
   resolvePreviewRoutingHost,
 } from "../previewSubdomainGateway";
 
@@ -234,6 +237,67 @@ describe("B5 preview-host routing", () => {
     ).toBe("musta-flow-ai.replit.app");
   });
 
+  it("accepts a complete authenticated bridge assertion without normalizing its path", () => {
+    const headers = {
+      host: "musta-flow-ai.replit.app",
+      "x-b5-preview-host": "p52.preview.mustaflow.com",
+      "x-b5-preview-path": "/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93",
+      "x-b5-relay-auth": "relay-secret",
+    };
+    expect(resolveB5PreviewRelayContext(headers, { B5_RELAY_SECRET: "relay-secret" })).toEqual({
+      host: "p52.preview.mustaflow.com",
+      publicRequestUrl: "/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93",
+    });
+    expect(
+      resolvePreviewRoutingPath(headers, "/api/b5-preview/fallback", {
+        B5_RELAY_SECRET: "relay-secret",
+      }),
+    ).toBe("/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93");
+  });
+
+  it.each([
+    ["wrong secret", { "x-b5-relay-auth": "wrong" }],
+    ["missing host", { "x-b5-preview-host": undefined }],
+    ["missing path", { "x-b5-preview-path": undefined }],
+    ["absolute path", { "x-b5-preview-path": "https://evil.test/" }],
+    ["protocol-relative path", { "x-b5-preview-path": "//evil.test/" }],
+    ["fragment-bearing path", { "x-b5-preview-path": "/#fragment" }],
+  ])("fails closed for a %s bridge assertion", (_label, override) => {
+    const headers = {
+      host: "musta-flow-ai.replit.app",
+      "x-b5-preview-host": "p52.preview.mustaflow.com",
+      "x-b5-preview-path": "/",
+      "x-b5-relay-auth": "relay-secret",
+      ...override,
+    };
+    expect(resolveB5PreviewRelayContext(headers, { B5_RELAY_SECRET: "relay-secret" })).toBeNull();
+    expect(
+      resolvePreviewRoutingPath(headers, "/api/b5-preview/fallback", {
+        B5_RELAY_SECRET: "relay-secret",
+      }),
+    ).toBe("/api/b5-preview/fallback");
+  });
+
+  it.each([
+    ["NUL", 0x00],
+    ["unit separator", 0x1f],
+    ["DEL", 0x7f],
+  ])("rejects a bridge path containing %s", (_label, characterCode) => {
+    const headers = {
+      host: "musta-flow-ai.replit.app",
+      "x-b5-preview-host": "p52.preview.mustaflow.com",
+      "x-b5-preview-path": `/assets/app${String.fromCharCode(characterCode)}.js?q=a%2Fb`,
+      "x-b5-relay-auth": "relay-secret",
+    };
+
+    expect(resolveB5PreviewRelayContext(headers, { B5_RELAY_SECRET: "relay-secret" })).toBeNull();
+    expect(
+      resolvePreviewRoutingPath(headers, "/api/b5-preview/fallback", {
+        B5_RELAY_SECRET: "relay-secret",
+      }),
+    ).toBe("/api/b5-preview/fallback");
+  });
+
   it("makes forged relay headers response-identical to no relay headers", async () => {
     const direct = responseRecorder();
     const forged = responseRecorder();
@@ -257,6 +321,7 @@ describe("B5 preview-host routing", () => {
         headers: {
           host: "musta-flow-ai.replit.app",
           "x-b5-preview-host": "p52.preview.mustaflow.com",
+          "x-b5-preview-path": "/private?forged=true",
           "x-b5-relay-auth": "forged",
         },
       } as never,
@@ -313,6 +378,34 @@ describe("B5 preview-host routing", () => {
     return { record, next };
   }
 
+  function bridgeHeaders(publicRequestUrl: string, cookie?: string) {
+    return {
+      host: "musta-flow-ai.replit.app",
+      "x-b5-preview-host": "p52.preview.mustaflow.com",
+      "x-b5-preview-path": publicRequestUrl,
+      "x-b5-relay-auth": "relay-secret",
+      ...(cookie ? { cookie } : {}),
+    };
+  }
+
+  async function anonymousBridge(host: string) {
+    const { response, record } = responseRecorder();
+    const next = vi.fn();
+    await previewPathBridge(
+      {
+        headers: { ...bridgeHeaders("/"), "x-b5-preview-host": host },
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/api/b5-preview/",
+        url: "/",
+      } as never,
+      response as never,
+      next,
+    );
+    return { record, next };
+  }
+
   it("is enumeration-blind and performs no project read for anonymous visitors", async () => {
     const existing = await anonymousGate("p52.preview.mustaflow.com");
     const missing = await anonymousGate("p999999.preview.mustaflow.com");
@@ -322,6 +415,183 @@ describe("B5 preview-host routing", () => {
     expect(db.select).not.toHaveBeenCalled();
     expect(loadPreviewProject).not.toHaveBeenCalled();
     expect(handleLivePreviewHttp).not.toHaveBeenCalled();
+  });
+
+  it("keeps the API bridge enumeration-blind and performs no project read", async () => {
+    const existing = await anonymousBridge("p52.preview.mustaflow.com");
+    const missing = await anonymousBridge("p999999.preview.mustaflow.com");
+    expect(existing.record).toEqual(missing.record);
+    expect(existing.record.status).toBe(200);
+    expect(existing.record.body).toContain("This preview is shared by invitation");
+    expect(existing.next).not.toHaveBeenCalled();
+    expect(missing.next).not.toHaveBeenCalled();
+    expect(db.select).not.toHaveBeenCalled();
+    expect(loadPreviewProject).not.toHaveBeenCalled();
+  });
+
+  it("makes a forged API bridge call indistinguishable from an ordinary API request", async () => {
+    const direct = responseRecorder();
+    const forged = responseRecorder();
+    const directNext = vi.fn();
+    const forgedNext = vi.fn();
+    const base = {
+      path: "/",
+      method: "GET",
+      query: {},
+      originalUrl: "/api/b5-preview/",
+      url: "/",
+    };
+    await previewPathBridge(
+      { ...base, headers: { host: "musta-flow-ai.replit.app" } } as never,
+      direct.response as never,
+      directNext,
+    );
+    await previewPathBridge(
+      {
+        ...base,
+        headers: {
+          ...bridgeHeaders("/private"),
+          "x-b5-relay-auth": "forged",
+        },
+      } as never,
+      forged.response as never,
+      forgedNext,
+    );
+    expect(forged.record).toEqual(direct.record);
+    expect(directNext).toHaveBeenCalledOnce();
+    expect(forgedNext).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an expired bridged grant at the gate without waking the runtime", async () => {
+    const sessionId = "0123456789abcdef";
+    const cookie = makeValidCookie(sessionId, SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([{ id: 1, projectId: 52, expiresAt: new Date(Date.now() - 1) }]),
+      }),
+    }));
+    const { response, record } = responseRecorder();
+    await previewPathBridge(
+      {
+        headers: bridgeHeaders("/", cookie),
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/api/b5-preview/",
+        url: "/",
+      } as never,
+      response as never,
+      vi.fn(),
+    );
+    expect(record.status).toBe(200);
+    expect(record.body).toContain("This preview is shared by invitation");
+    expect(loadPreviewProject).not.toHaveBeenCalled();
+    expect(handleLivePreviewHttp).not.toHaveBeenCalled();
+  });
+
+  it("keeps a bridged project grant bound to the host project", async () => {
+    const cookie = makeValidCookie("0123456789abcdef", SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({ where: () => Promise.resolve([]) }),
+    }));
+    const { response, record } = responseRecorder();
+    await previewPathBridge(
+      {
+        headers: bridgeHeaders("/", cookie),
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/api/b5-preview/",
+        url: "/",
+      } as never,
+      response as never,
+      vi.fn(),
+    );
+    expect(record.status).toBe(200);
+    expect(record.body).toContain("This preview is shared by invitation");
+    expect(loadPreviewProject).not.toHaveBeenCalled();
+  });
+
+  it("never wakes a stopped runtime reached through the API bridge", async () => {
+    const sessionId = "0123456789abcdef";
+    const cookie = makeValidCookie(sessionId, SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([{ id: 1, projectId: 52, expiresAt: new Date(Date.now() + 60_000) }]),
+      }),
+    }));
+    (loadPreviewProject as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 52,
+      containerId: "runtime-52",
+      containerStatus: "stopped",
+    });
+    const { response, record } = responseRecorder();
+    await previewPathBridge(
+      {
+        headers: bridgeHeaders("/", cookie),
+        path: "/",
+        method: "GET",
+        query: {},
+        originalUrl: "/api/b5-preview/",
+        url: "/",
+      } as never,
+      response as never,
+      vi.fn(),
+    );
+    expect(record.status).toBe(503);
+    expect(record.body).toContain("preview is asleep");
+    expect(handleLivePreviewHttp).not.toHaveBeenCalled();
+  });
+
+  it("uses the authenticated public path for launch routing and proxy fidelity", async () => {
+    const launch = responseRecorder();
+    await previewPathBridge(
+      {
+        headers: bridgeHeaders("/__preview-launch?t=deadbeef"),
+        path: "/__preview-launch",
+        method: "GET",
+        query: { t: "deadbeef" },
+        originalUrl: "/api/b5-preview/__preview-launch?t=deadbeef",
+        url: "/__preview-launch?t=deadbeef",
+      } as never,
+      launch.response as never,
+      vi.fn(),
+    );
+    expect(launch.record.status).toBe(200);
+    expect(launch.record.body).toContain("This preview is shared by invitation");
+
+    const sessionId = "0123456789abcdef";
+    const cookie = makeValidCookie(sessionId, SECRET);
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([{ id: 1, projectId: 52, expiresAt: new Date(Date.now() + 60_000) }]),
+      }),
+    }));
+    const project = {
+      id: 52,
+      containerId: "runtime-52",
+      containerStatus: "running",
+      containerUrl: "https://runtime.invalid",
+    };
+    (loadPreviewProject as ReturnType<typeof vi.fn>).mockResolvedValue(project);
+    const { response } = responseRecorder();
+    const publicRequestUrl = "/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93";
+    const request = {
+      headers: bridgeHeaders(publicRequestUrl, cookie),
+      path: "/assets/app name.js",
+      method: "GET",
+      query: { q: "a/b", mark: "✓" },
+      originalUrl: `/api/b5-preview${publicRequestUrl}`,
+      url: publicRequestUrl,
+    };
+    const next = vi.fn();
+    await previewPathBridge(request as never, response as never, next);
+    expect(handleLivePreviewHttp).toHaveBeenCalledWith(request, response, next, project, {
+      publicRequestUrl,
+    });
   });
 
   it("honors grant expiry without consulting or waking the runtime", async () => {

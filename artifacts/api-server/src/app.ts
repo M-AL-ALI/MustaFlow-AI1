@@ -7,7 +7,7 @@ import { CLERK_PROXY_PATH, clerkProxyMiddleware } from "./middlewares/clerkProxy
 import router from "./routes";
 import { profileSsrRouter } from "./routes/profile-ssr";
 import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
-import { previewSubdomainGateway } from "./middlewares/previewSubdomainGateway";
+import { previewPathBridge, previewSubdomainGateway } from "./middlewares/previewSubdomainGateway";
 import { logger } from "./lib/logger";
 import { startProdLogRetentionWorker } from "./lib/prodLogs";
 import "./lib/preview-purge";
@@ -160,6 +160,9 @@ app.use(clerkMiddleware());
 // Preview subdomain gateway: intercepts {sessionId}.preview.{PLATFORM_DOMAIN}
 // requests BEFORE the custom-domain middleware and the /api router so that
 // preview session validation and proxying are fully isolated from platform traffic.
+// Replit sends only /api paths to Express, so the authenticated Cloudflare relay
+// uses this bridge for page traffic before the ordinary preview-host middleware.
+app.use("/api/b5-preview", previewPathBridge);
 app.use(previewSubdomainGateway);
 app.use(customDomainMiddleware);
 

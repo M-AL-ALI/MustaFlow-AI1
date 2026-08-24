@@ -48,11 +48,32 @@ describe("B5 preview relay Worker", () => {
     expect(response.status).toBe(207);
     expect(await response.text()).toBe("origin-body");
     const [target, init] = fetchMock.mock.calls[0];
-    expect(String(target)).toBe("https://musta-flow-ai.replit.app/api/items?q=one");
+    expect(String(target)).toBe("https://musta-flow-ai.replit.app/api/b5-preview/api/items?q=one");
     expect(init.method).toBe("POST");
     expect(await new Response(init.body).text()).toBe("payload");
     const headers = new Headers(init.headers);
     expect(headers.get("x-b5-preview-host")).toBe("p52.preview.mustaflow.com");
+    expect(headers.get("x-b5-preview-path")).toBe("/api/items?q=one");
     expect(headers.get("x-b5-relay-auth")).toBe("relay-secret");
+  });
+
+  it("preserves encoded public paths and overwrites a forged path assertion", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await relayPreviewRequest(
+      new Request("https://p52.preview.mustaflow.com/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93", {
+        headers: { "x-b5-preview-path": "/forged" },
+      }),
+      { B5_RELAY_SECRET: "relay-secret" },
+    );
+
+    const [target, init] = fetchMock.mock.calls[0];
+    expect(String(target)).toBe(
+      "https://musta-flow-ai.replit.app/api/b5-preview/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93",
+    );
+    expect(new Headers(init.headers).get("x-b5-preview-path")).toBe(
+      "/assets/app%20name.js?q=a%2Fb&mark=%E2%9C%93",
+    );
   });
 });

@@ -25,6 +25,7 @@ import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewPro
 import {
   validatePreviewWebSocketUpgrade,
   isPreviewSubdomainHost,
+  resolvePreviewRoutingPath,
   resolvePreviewRoutingHost,
 } from "./middlewares/previewSubdomainGateway";
 import { runStartupMigrations } from "./lib/startup-migrations";
@@ -161,6 +162,7 @@ server.on("upgrade", (req, socket, head) => {
   // same host/cookie/HMAC/expiry/revocation checks as HTTP requests.
   // Production and public hosts must never accept preview WebSocket upgrades.
   const host = resolvePreviewRoutingHost(req.headers);
+  const publicRequestUrl = resolvePreviewRoutingPath(req.headers, req.url ?? "/");
   if (isPreviewSubdomainHost(host)) {
     // Resume the socket immediately so the HTTP server does not reclaim it
     // while async session validation (DB queries) is in flight.
@@ -183,7 +185,7 @@ server.on("upgrade", (req, socket, head) => {
         // Valid session — proxy the WebSocket upgrade to the test container.
         // Use TLS-aware request: httpsRequest for https:// targets, httpRequest otherwise.
         const isSecure = result.containerUrl.startsWith("https://");
-        const target = new URL(result.containerUrl.replace(/\/$/, "") + (req.url ?? "/"));
+        const target = new URL(result.containerUrl.replace(/\/$/, "") + publicRequestUrl);
         const requestFn = isSecure ? httpsRequest : httpRequest;
         const proxyReq = requestFn({
           hostname: target.hostname,

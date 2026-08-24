@@ -1,6 +1,10 @@
 /* global Headers, Response, URL, fetch */
+// Replit's application router serves page paths from static assets and forwards
+// only /api/* to Express. Route every preview request through this API bridge so
+// the authenticated preview gateway, not the static shell, owns the response.
 const PREVIEW_HOST_PATTERN = /^p\d+\.preview\.mustaflow\.com$/i;
 const ORIGIN = "https://musta-flow-ai.replit.app";
+const PREVIEW_BRIDGE_PREFIX = "/api/b5-preview";
 
 const NOT_FOUND =
   '<!doctype html><html><head><meta charset="utf-8"><title>Preview not found</title></head>' +
@@ -22,9 +26,11 @@ export async function relayPreviewRequest(request, env) {
     return new Response("Preview relay is not configured.", { status: 503 });
   }
 
-  const target = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN);
+  const publicRequestPath = incomingUrl.pathname + incomingUrl.search;
+  const target = new URL(PREVIEW_BRIDGE_PREFIX + publicRequestPath, ORIGIN);
   const headers = new Headers(request.headers);
   headers.set("X-B5-Preview-Host", incomingUrl.host);
+  headers.set("X-B5-Preview-Path", publicRequestPath);
   headers.set("X-B5-Relay-Auth", env.B5_RELAY_SECRET);
   headers.set("Host", target.host);
 

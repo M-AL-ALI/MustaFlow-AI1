@@ -1,4 +1,11 @@
-/** Authenticated preview-host gateway for legacy sessions and B5 project shares. */
+/**
+ * Authenticated preview-host gateway for legacy sessions and B5 project shares.
+ *
+ * Replit's application router owns non-/api page paths, so the Cloudflare relay
+ * carries B5 requests through /api/b5-preview and preserves the public path in
+ * an authenticated header. The same gateway decisions serve direct and bridged
+ * requests; only the transport path differs.
+ */
 
 import type { IncomingHttpHeaders } from "node:http";
 import type { Request, Response, NextFunction } from "express";
@@ -17,6 +24,7 @@ const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 const LEGACY_PREVIEW_SUFFIX = `.preview.${PLATFORM_DOMAIN}`;
 const B5_PREVIEW_SUFFIX = ".preview.mustaflow.com";
 const B5_FORWARDED_HOST_HEADER = "x-b5-preview-host";
+const B5_FORWARDED_PATH_HEADER = "x-b5-preview-path";
 const B5_RELAY_AUTH_HEADER = "x-b5-relay-auth";
 
 const GATE_HTML =
@@ -64,6 +72,54 @@ export function resolvePreviewRoutingHost(
   return secretsMatchConstantTime(environment.B5_RELAY_SECRET, suppliedSecret)
     ? (forwardedHost ?? directHost)
     : directHost;
+}
+
+export type B5PreviewRelayContext = {
+  host: string;
+  publicRequestUrl: string;
+};
+
+function isSafePublicRequestUrl(value: string): boolean {
+  let hasControlCharacter = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const characterCode = value.charCodeAt(index);
+    if (characterCode < 0x20 || characterCode === 0x7f) {
+      hasControlCharacter = true;
+      break;
+    }
+  }
+
+  return (
+    value.startsWith("/") && !value.startsWith("//") && !value.includes("#") && !hasControlCharacter
+  );
+}
+
+/** Resolve the complete Worker assertion atomically; partial assertions fail closed. */
+export function resolveB5PreviewRelayContext(
+  headers: IncomingHttpHeaders,
+  environment: Record<string, string | undefined> = process.env,
+): B5PreviewRelayContext | null {
+  const forwardedHost = firstHeader(headers[B5_FORWARDED_HOST_HEADER]);
+  const forwardedPath = firstHeader(headers[B5_FORWARDED_PATH_HEADER]);
+  const suppliedSecret = firstHeader(headers[B5_RELAY_AUTH_HEADER]);
+  if (
+    !secretsMatchConstantTime(environment.B5_RELAY_SECRET, suppliedSecret) ||
+    !forwardedHost ||
+    !forwardedPath ||
+    !isSafePublicRequestUrl(forwardedPath)
+  ) {
+    return null;
+  }
+  return { host: forwardedHost, publicRequestUrl: forwardedPath };
+}
+
+/** Return the public path only for a complete authenticated Worker assertion. */
+export function resolvePreviewRoutingPath(
+  headers: IncomingHttpHeaders,
+  fallback: string,
+  environment: Record<string, string | undefined> = process.env,
+): string {
+  return resolveB5PreviewRelayContext(headers, environment)?.publicRequestUrl ?? fallback;
 }
 
 /** Parse an exact p<positive-safe-integer>.preview.mustaflow.com host. */
@@ -261,6 +317,11 @@ export async function previewSubdomainGateway(
   next: NextFunction,
 ): Promise<void> {
   const routingHost = resolvePreviewRoutingHost(req.headers);
+  const publicRequestUrl = resolvePreviewRoutingPath(
+    req.headers,
+    req.originalUrl || req.url || "/",
+  );
+  const publicUrl = new URL(publicRequestUrl, "http://preview.invalid");
   const projectId = extractB5PreviewProjectId(routingHost);
   const legacySessionId = extractLegacySessionId(routingHost);
 
@@ -270,8 +331,8 @@ export async function previewSubdomainGateway(
     return;
   }
 
-  if (req.path === "/__preview-launch" && req.method === "GET") {
-    const token = String(req.query.t ?? "");
+  if (publicUrl.pathname === "/__preview-launch" && req.method === "GET") {
+    const token = publicUrl.searchParams.get("t") ?? "";
     if (!/^[0-9a-f]{64}$/.test(token)) {
       if (projectId !== null) sendGate(res);
       else res.status(400).send("Missing or invalid launch token.");
@@ -325,10 +386,26 @@ export async function previewSubdomainGateway(
       return;
     }
     await handleLivePreviewHttp(req, res, next, project, {
-      publicRequestUrl: req.originalUrl || req.url || "/",
+      publicRequestUrl,
     });
   } catch (error) {
     logger.warn({ error, projectId: session.projectId }, "Shared preview proxy failed");
     if (!res.headersSent) res.status(502).send("The shared preview could not be reached.");
   }
+}
+
+/**
+ * API bridge entry point. Only a complete authenticated Worker assertion may
+ * enter the shared gateway; direct or forged API calls fall through unchanged.
+ */
+export async function previewPathBridge(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  if (!resolveB5PreviewRelayContext(req.headers)) {
+    next();
+    return;
+  }
+  await previewSubdomainGateway(req, res, next);
 }
