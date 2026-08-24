@@ -8388,7 +8388,7 @@ components:
         containerId:
           {
             type: ["string", "null"],
-            description: "Fly.io Machine ID for this project's dev container. Null = not provisioned.",
+            description: "Provider runtime identity for this project's dev container. Null = not provisioned.",
           }
         containerStatus:
           type: string
@@ -8397,8 +8397,12 @@ components:
         containerUrl:
           {
             type: ["string", "null"],
-            description: "Proxy URL to reach the container's dev server.",
+            description: "Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.",
           }
+        previewAccess:
+          allOf:
+            - $ref: "#/components/schemas/PreviewAccess"
+          description: "Derived browser-preview reachability. Present on the project detail response and never persisted."
         prodContainerId:
           {
             type: ["string", "null"],
@@ -10833,13 +10837,29 @@ components:
 
     ContainerStatus:
       type: object
-      required: [containerStatus]
+      required: [containerStatus, previewAccess]
       properties:
         containerId: { type: ["string", "null"] }
         containerStatus:
           type: string
           enum: [stopped, starting, running, hibernated, error]
         containerUrl: { type: ["string", "null"] }
+        previewAccess:
+          $ref: "#/components/schemas/PreviewAccess"
+
+    PreviewAccess:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: { type: string, enum: [unavailable] }
+        - type: object
+          additionalProperties: false
+          required: [state, transport]
+          properties:
+            state: { type: string, enum: [reachable] }
+            transport: { type: string, enum: [direct, gateway] }
 
     ContainerLog:
       type: object

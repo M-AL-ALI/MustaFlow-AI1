@@ -21,10 +21,12 @@ import {
   destroyContainer,
   ensureContainerLogTailer,
   recordContainerLog,
+  tenantRuntimeProvider,
 } from "../lib/tenant-runtime";
 import { subscribeContainerLogs, type ContainerLogPayload } from "../lib/event-bus";
 import { getContainerSecretMap } from "../lib/container-secrets";
 import { logger } from "../lib/logger";
+import { deriveConfiguredPreviewAccess } from "../lib/preview-access";
 
 const router: IRouter = Router();
 
@@ -95,6 +97,14 @@ router.get(
       containerId: project.containerId ?? null,
       containerStatus: status,
       containerUrl: project.containerUrl ?? null,
+      previewAccess: deriveConfiguredPreviewAccess(
+        {
+          runtimeId: project.containerId,
+          runtimeStatus: status,
+          endpoint: project.containerUrl,
+        },
+        tenantRuntimeProvider.providerId,
+      ),
     });
   },
 );
@@ -116,6 +126,14 @@ router.post(
         containerId: project.containerId,
         containerStatus: "running",
         containerUrl: project.containerUrl,
+        previewAccess: deriveConfiguredPreviewAccess(
+          {
+            runtimeId: project.containerId,
+            runtimeStatus: "running",
+            endpoint: project.containerUrl,
+          },
+          tenantRuntimeProvider.providerId,
+        ),
       });
       return;
     }
@@ -141,6 +159,7 @@ router.post(
       containerId: project.containerId ?? null,
       containerStatus: "starting",
       containerUrl: project.containerUrl ?? null,
+      previewAccess: { state: "unavailable" },
     });
 
     // Provision asynchronously (don't await — client will poll /status)

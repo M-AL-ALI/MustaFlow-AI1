@@ -29,7 +29,8 @@ import {
   provisionPreviewDb,
   getRollingAverageMs,
 } from "../lib/provisioning";
-import { isContainerLayerConfigured } from "../lib/tenant-runtime";
+import { isContainerLayerConfigured, tenantRuntimeProvider } from "../lib/tenant-runtime";
+import { deriveConfiguredPreviewAccess } from "../lib/preview-access";
 import { resolveInitialStackSelection } from "../lib/stack-selection";
 import { resolveProjectRuntimeManifest } from "../lib/runtime-manifest";
 import {
@@ -1545,7 +1546,17 @@ router.get("/projects/:id", requireProjectAccess("viewer"), async (req, res): Pr
     return;
   }
 
-  const parsed = GetProjectResponse.parse(project);
+  const parsed = GetProjectResponse.parse({
+    ...project,
+    previewAccess: deriveConfiguredPreviewAccess(
+      {
+        runtimeId: project.containerId,
+        runtimeStatus: project.containerStatus,
+        endpoint: project.containerUrl,
+      },
+      tenantRuntimeProvider.providerId,
+    ),
+  });
   const healthScore = await computeHealthScoreForProject(project.id);
   res.json({ ...parsed, healthScore });
 });
