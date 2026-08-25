@@ -33,6 +33,7 @@ const results = ZERO_GUIDANCE_LIVE_CASES.map((liveCase) => ({
   candidateEvidenceChars: 180,
   jsonValid: liveCase.jsonMode ? true : null,
   generationAttempts: 1,
+  judgeAttempts: 1,
 }));
 const valid: ZeroGuidanceLiveResult = {
   schemaVersion: 1,

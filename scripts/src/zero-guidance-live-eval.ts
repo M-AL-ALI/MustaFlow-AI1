@@ -9,6 +9,7 @@ import {
   classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
   promptEvalJudgeInstruction,
+  selectPromptEvalJudgeConsensus,
 } from "./prompt-eval-evidence";
 import {
   buildZeroGuidanceInventory,
@@ -67,7 +68,7 @@ async function judgeCandidate(
   rubric: string,
   candidate: string,
   mode: ZeroGuidanceLiveCase["mode"],
-): Promise<{ score: number; reasoning: string }> {
+): Promise<{ score: number; reasoning: string; attempts: number }> {
   const messages = [
     {
       role: "system" as const,
@@ -80,7 +81,10 @@ async function judgeCandidate(
       content: `Rubric: ${rubric}\n\nCandidate evidence:\n${candidate}`,
     },
   ];
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const decisions: Array<{ score: number; reasoning: string }> = [];
+  let attempts = 0;
+  while (attempts < 5) {
+    attempts += 1;
     const judged = await client.chat.completions.create({
       model: MODEL,
       response_format: { type: "json_object" },
@@ -88,7 +92,10 @@ async function judgeCandidate(
       max_completion_tokens: MAX_JUDGE_TOKENS,
     });
     const parsed = parsePromptEvalJudgeDecision(judged.choices[0]?.message?.content ?? "");
-    if (parsed) return parsed;
+    if (!parsed) continue;
+    decisions.push(parsed);
+    const consensus = selectPromptEvalJudgeConsensus(decisions);
+    if (consensus) return { ...consensus.decision, attempts };
   }
   throw new Error("zero_guidance_judge_invalid_after_retry");
 }
@@ -138,6 +145,7 @@ async function runCase(
   contentBySourceId: ReadonlyMap<string, string>,
 ): Promise<ZeroGuidanceLiveCaseResult> {
   let generationAttempts = 0;
+  let judgeAttempts = 0;
   try {
     let output = "";
     let generationIssue: ReturnType<typeof classifyPromptEvalGeneration> = "empty";
@@ -159,8 +167,10 @@ async function runCase(
     if (generationIssue !== null) {
       throw new Error(`zero_guidance_generation_${generationIssue}_after_retry`);
     }
-    const evidence = buildPromptEvalCandidateEvidence(output, liveCase.jsonMode);
+    const candidateKind = liveCase.mode === "source-audit" ? "source-audit-answer" : "artifact";
+    const evidence = buildPromptEvalCandidateEvidence(output, liveCase.jsonMode, candidateKind);
     const parsed = await judgeCandidate(client, liveCase.rubric, evidence.display, liveCase.mode);
+    judgeAttempts = parsed.attempts;
     const score = parsed.score;
     return {
       id: liveCase.id,
@@ -173,6 +183,7 @@ async function runCase(
       candidateEvidenceChars: evidence.evidenceChars,
       jsonValid: evidence.jsonValid,
       generationAttempts,
+      judgeAttempts,
       ...(score < 6 ? { failureEvidence: evidence.display.slice(0, 4_000) } : {}),
     };
   } catch (error) {
@@ -187,6 +198,7 @@ async function runCase(
       candidateEvidenceChars: 0,
       jsonValid: liveCase.jsonMode ? false : null,
       generationAttempts,
+      judgeAttempts,
       error: errorSpecimen(error),
       failureEvidence: `error:${errorSpecimen(error)}`,
     };

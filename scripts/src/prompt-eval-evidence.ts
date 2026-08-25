@@ -22,6 +22,11 @@ export interface PromptEvalJudgeDecision {
 export type PromptEvalGenerationIssue = "empty" | "invalid_json";
 export type PromptEvalCandidateKind = "artifact" | "source-audit-answer";
 
+export interface PromptEvalJudgeConsensus {
+  decision: PromptEvalJudgeDecision;
+  requiresConsensus: boolean;
+}
+
 export function promptEvalJudgeInstruction(kind: PromptEvalCandidateKind): string {
   const common =
     'Return strict JSON: {"score": integer 0-10, "reasoning": string no longer than 200 characters}. A score of 6 passes. Judge only against the supplied rubric. Treat authoritative structural prechecks as facts. A bounded projection or truncation marker is not end-of-file and is never, by itself, a defect.';
@@ -94,6 +99,7 @@ function projectValue(value: unknown, depth = 0): unknown {
 export function buildPromptEvalCandidateEvidence(
   output: string,
   jsonMode: boolean,
+  kind: PromptEvalCandidateKind = "artifact",
 ): PromptEvalCandidateEvidence {
   const outputSha256 = createHash("sha256").update(output).digest("hex");
   let jsonValid: boolean | null = null;
@@ -120,7 +126,9 @@ export function buildPromptEvalCandidateEvidence(
     }
   } else {
     body = [
-      "Candidate is plain text. A truncation marker is an evidence boundary, not end-of-file.",
+      kind === "source-audit-answer"
+        ? "AUTHORITATIVE STRUCTURAL PRECHECK: the candidate below is the complete explanatory answer derived from the supplied source. Judge its prose against the rubric; do not ask for source files or runnable code unless the rubric explicitly asks for them."
+        : "Candidate is plain text. A truncation marker is an evidence boundary, not end-of-file.",
       output,
     ].join("\n\n");
   }
@@ -133,6 +141,18 @@ export function buildPromptEvalCandidateEvidence(
     evidenceChars: display.length,
     jsonValid,
   };
+}
+
+export function selectPromptEvalJudgeConsensus(
+  decisions: readonly PromptEvalJudgeDecision[],
+): PromptEvalJudgeConsensus | null {
+  if (decisions.length === 0) return null;
+  if (decisions[0]!.score >= 6) {
+    return { decision: decisions[0]!, requiresConsensus: false };
+  }
+  if (decisions.length < 3) return null;
+  const ordered = decisions.slice(0, 3).sort((left, right) => left.score - right.score);
+  return { decision: ordered[1]!, requiresConsensus: true };
 }
 
 export function parsePromptEvalJudgeDecision(raw: string): PromptEvalJudgeDecision | null {

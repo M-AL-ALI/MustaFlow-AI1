@@ -373,6 +373,15 @@ const EXPLICIT_SOURCES: ExplicitSourceSpec[] = [
     liveCoverageId: "live:intent-admission",
   },
   {
+    id: "contract:intent-admission:judge",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/lib/zero-intent-judge.ts",
+    selector: { type: "function", name: "judgeZeroIntent" },
+    consumers: ["messages", "intent-routing"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:intent-admission",
+  },
+  {
     id: "contract:intent-admission:routing",
     kind: "context-assembler",
     sourcePath: "artifacts/api-server/src/routes/messages.ts",

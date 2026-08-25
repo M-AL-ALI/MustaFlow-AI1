@@ -66,7 +66,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     coverageId: "live:review",
     mode: "runtime-prompt",
     sourceIds: ["prompt:architect:ARCHITECT_SYSTEM_PROMPT"],
-    user: "Review a complete source file that safely parameterizes a database query and carries no truncation marker.",
+    user: 'Review this complete source file; it has no omitted tail or truncation marker:\n```ts\nexport async function findUser(db: { query(sql: string, values: unknown[]): Promise<unknown> }, id: string) {\n  return db.query("SELECT id, name FROM users WHERE id = $1", [id]);\n}\n```',
     rubric:
       "Returns the declared review shape, treats the source as complete, and does not invent missing-tail findings.",
     jsonMode: true,
@@ -187,7 +187,11 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     id: "intent-admission-contract",
     coverageId: "live:intent-admission",
     mode: "source-audit",
-    sourceIds: ["contract:intent-admission:governor", "contract:intent-admission:routing"],
+    sourceIds: [
+      "contract:intent-admission:governor",
+      "contract:intent-admission:judge",
+      "contract:intent-admission:routing",
+    ],
     user: "Explain what must exist before Zero may mutate a project, and what happens when the user's request is observational or ambiguous.",
     rubric:
       "Requires a typed request-bound intent receipt before mutation, keeps observe and answer requests out of the write path, and routes ambiguity to one focused clarification rather than guessing.",
@@ -208,7 +212,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     coverageId: "live:snapshot-observe",
     mode: "source-audit",
     sourceIds: ["contract:snapshot-observe:client", "contract:snapshot-observe:server"],
-    user: "Explain what Snapshot-to-Zero sends, which intent path receives it, and what must never happen invisibly after capture fails.",
+    user: "Explain what Snapshot-to-Zero sends, which intent path receives it, whether it writes project source or versions, and whether a consumed grant followed by capture failure is ever retried invisibly.",
     rubric:
       "Identifies captured image bytes and the preview class, keeps the path observe-only with zero project writes, and says a consumed grant followed by capture failure is reported unavailable without an invisible retry or mutation.",
     jsonMode: false,

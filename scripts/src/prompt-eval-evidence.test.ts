@@ -4,6 +4,7 @@ import {
   classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
   promptEvalJudgeInstruction,
+  selectPromptEvalJudgeConsensus,
 } from "./prompt-eval-evidence";
 
 const longContent = `HEAD_SENTINEL${"x".repeat(40_000)}TAIL_SENTINEL`;
@@ -40,6 +41,14 @@ assert.equal(plain.jsonValid, null);
 assert.match(plain.display, /HEAD_SENTINEL/u);
 assert.match(plain.display, /TAIL_SENTINEL/u);
 
+const sourceAudit = buildPromptEvalCandidateEvidence(
+  "The supplied source requires a request-bound receipt.",
+  false,
+  "source-audit-answer",
+);
+assert.match(sourceAudit.display, /complete explanatory answer/u);
+assert.doesNotMatch(sourceAudit.display, /Candidate is plain text/u);
+
 assert.deepEqual(parsePromptEvalJudgeDecision('{"score":8,"reasoning":"Meets the rubric."}'), {
   score: 8,
   reasoning: "Meets the rubric.",
@@ -47,6 +56,20 @@ assert.deepEqual(parsePromptEvalJudgeDecision('{"score":8,"reasoning":"Meets the
 assert.equal(parsePromptEvalJudgeDecision("not-json"), null);
 assert.equal(parsePromptEvalJudgeDecision('{"score":11,"reasoning":"Invalid score."}'), null);
 assert.equal(parsePromptEvalJudgeDecision('{"score":8,"reasoning":""}'), null);
+
+assert.deepEqual(selectPromptEvalJudgeConsensus([{ score: 8, reasoning: "passes" }]), {
+  decision: { score: 8, reasoning: "passes" },
+  requiresConsensus: false,
+});
+assert.equal(selectPromptEvalJudgeConsensus([{ score: 3, reasoning: "first failure" }]), null);
+assert.deepEqual(
+  selectPromptEvalJudgeConsensus([
+    { score: 2, reasoning: "false negative" },
+    { score: 8, reasoning: "passes" },
+    { score: 9, reasoning: "passes strongly" },
+  ]),
+  { decision: { score: 8, reasoning: "passes" }, requiresConsensus: true },
+);
 
 assert.equal(classifyPromptEvalGeneration("", true), "empty");
 assert.equal(classifyPromptEvalGeneration("  \n", false), "empty");

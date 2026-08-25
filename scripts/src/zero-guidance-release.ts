@@ -14,6 +14,7 @@ export interface ZeroGuidanceLiveCaseResult {
   candidateEvidenceChars: number;
   jsonValid: boolean | null;
   generationAttempts: number;
+  judgeAttempts: number;
   failureEvidence?: string;
   error?: string;
 }
@@ -226,6 +227,9 @@ export function validateZeroGuidanceLiveResult(input: {
         !Number.isInteger(entry.generationAttempts) ||
         entry.generationAttempts < 1 ||
         entry.generationAttempts > 2 ||
+        !Number.isInteger(entry.judgeAttempts) ||
+        entry.judgeAttempts < (entry.error ? 0 : 1) ||
+        entry.judgeAttempts > 5 ||
         (entry.failureEvidence !== undefined &&
           (entry.failureEvidence.length === 0 || entry.failureEvidence.length > 4_000)) ||
         (!entry.passed && !entry.error && !entry.failureEvidence) ||
