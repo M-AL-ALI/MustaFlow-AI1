@@ -216,8 +216,10 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(projectFilesPreviewSource).toContain("showStaticBanner");
   });
 
-  it("prefers WebContainer for React/Vite unless Fly is genuinely live", () => {
-    expect(previewTabSource).toContain("isReactVite && !containerLive");
+  it("prefers WebContainer for React/Vite unless the server reports preview access", () => {
+    expect(previewTabSource).toContain("isReactVite && !serverPreviewLive");
+    expect(previewTabSource).toContain("hasServerPreviewAccess(previewAccess)");
+    expect(previewTabSource).not.toContain("Boolean(containerUrl)");
     expect(previewTabSource).toContain(
       "const src = webContainerLive ? wc.previewUrl! : previewSrc",
     );

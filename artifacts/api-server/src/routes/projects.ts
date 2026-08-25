@@ -1552,7 +1552,6 @@ router.get("/projects/:id", requireProjectAccess("viewer"), async (req, res): Pr
       {
         runtimeId: project.containerId,
         runtimeStatus: project.containerStatus,
-        endpoint: project.containerUrl,
       },
       tenantRuntimeProvider.providerId,
     ),

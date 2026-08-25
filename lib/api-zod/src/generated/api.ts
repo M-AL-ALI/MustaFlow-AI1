@@ -777,9 +777,10 @@ export const ListProjectsResponseItem = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerId": zod.string().nullish().describe('Provider runtime identity for this project\'s dev container. Null = not provisioned.'),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
-  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "containerUrl": zod.string().nullish().describe('Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.'),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway']).optional().describe('Derived browser-preview transport. Present on the project detail response and never persisted.'),
   "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
@@ -874,9 +875,10 @@ export const GetProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerId": zod.string().nullish().describe('Provider runtime identity for this project\'s dev container. Null = not provisioned.'),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
-  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "containerUrl": zod.string().nullish().describe('Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.'),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway']).optional().describe('Derived browser-preview transport. Present on the project detail response and never persisted.'),
   "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
@@ -971,9 +973,10 @@ export const UpdateProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerId": zod.string().nullish().describe('Provider runtime identity for this project\'s dev container. Null = not provisioned.'),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
-  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "containerUrl": zod.string().nullish().describe('Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.'),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway']).optional().describe('Derived browser-preview transport. Present on the project detail response and never persisted.'),
   "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
@@ -1048,9 +1051,10 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerId": zod.string().nullish().describe('Provider runtime identity for this project\'s dev container. Null = not provisioned.'),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
-  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "containerUrl": zod.string().nullish().describe('Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.'),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway']).optional().describe('Derived browser-preview transport. Present on the project detail response and never persisted.'),
   "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
@@ -1125,9 +1129,10 @@ export const RestoreProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerId": zod.string().nullish().describe('Provider runtime identity for this project\'s dev container. Null = not provisioned.'),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
-  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "containerUrl": zod.string().nullish().describe('Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.'),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway']).optional().describe('Derived browser-preview transport. Present on the project detail response and never persisted.'),
   "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
@@ -1201,9 +1206,10 @@ export const GetProjectsSummaryResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerId": zod.string().nullish().describe('Provider runtime identity for this project\'s dev container. Null = not provisioned.'),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
-  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "containerUrl": zod.string().nullish().describe('Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.'),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway']).optional().describe('Derived browser-preview transport. Present on the project detail response and never persisted.'),
   "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
@@ -5719,7 +5725,8 @@ export const GetContainerStatusParams = zod.object({
 export const GetContainerStatusResponse = zod.object({
   "containerId": zod.string().nullish(),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']),
-  "containerUrl": zod.string().nullish()
+  "containerUrl": zod.string().nullish(),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway'])
 })
 
 
@@ -5733,7 +5740,8 @@ export const StartContainerParams = zod.object({
 export const StartContainerResponse = zod.object({
   "containerId": zod.string().nullish(),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']),
-  "containerUrl": zod.string().nullish()
+  "containerUrl": zod.string().nullish(),
+  "previewAccess": zod.enum(['unavailable', 'direct', 'gateway'])
 })
 
 

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ContainerStatusContainerStatus } from './containerStatusContainerStatus';
+import type { PreviewAccess } from './previewAccess';
 
 export interface ContainerStatus {
   /** @nullable */
@@ -13,4 +14,5 @@ export interface ContainerStatus {
   containerStatus: ContainerStatusContainerStatus;
   /** @nullable */
   containerUrl?: string | null;
+  previewAccess: PreviewAccess;
 }

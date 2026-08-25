@@ -766,6 +766,15 @@ export const ProjectProjectMode = {
   developer: 'developer',
 } as const;
 
+export type PreviewAccess = typeof PreviewAccess[keyof typeof PreviewAccess];
+
+
+export const PreviewAccess = {
+  unavailable: 'unavailable',
+  direct: 'direct',
+  gateway: 'gateway',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -799,17 +808,19 @@ export interface Project {
   /** @nullable */
   mobilePreviewUrl?: string | null;
   /**
-     * Fly.io Machine ID for this project's dev container. Null = not provisioned.
+     * Provider runtime identity for this project's dev container. Null = not provisioned.
      * @nullable
      */
   containerId?: string | null;
   /** Current dev container lifecycle state. */
   containerStatus?: ProjectContainerStatus;
   /**
-     * Proxy URL to reach the container's dev server.
+     * Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.
      * @nullable
      */
   containerUrl?: string | null;
+  /** Derived browser-preview transport. Present on the project detail response and never persisted. */
+  previewAccess?: PreviewAccess;
   /**
      * Fly.io Machine ID for the live production container. Null = not deployed.
      * @nullable
@@ -3445,6 +3456,7 @@ export interface ContainerStatus {
   containerStatus: ContainerStatusContainerStatus;
   /** @nullable */
   containerUrl?: string | null;
+  previewAccess: PreviewAccess;
 }
 
 export type ContainerLogLevel = typeof ContainerLogLevel[keyof typeof ContainerLogLevel];

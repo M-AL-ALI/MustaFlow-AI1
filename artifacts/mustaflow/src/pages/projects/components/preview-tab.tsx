@@ -53,7 +53,13 @@ import {
   getListProjectFilesQueryKey,
   useListSecrets,
   getListSecretsQueryKey,
+  type PreviewAccess,
 } from "@workspace/api-client-react";
+import {
+  getPreviewAddress,
+  getServerPreviewBadge,
+  hasServerPreviewAccess,
+} from "@/lib/preview-access-ui";
 import {
   fetchWorkspaceReadinessReceipt,
   WORKSPACE_READINESS_UNBLOCK_LABELS,
@@ -154,6 +160,8 @@ type PreviewTabProps = {
   containerStatus?: ContainerStatus;
   /** Proxied URL to the running container dev server. Shown in the address bar when active. */
   containerUrl?: string | null;
+  /** Server-derived browser preview transport. Never inferred from containerUrl. */
+  previewAccess?: PreviewAccess;
   /** Called when user clicks "Wake container" from the preview overlay. */
   onStartContainer?: () => void;
   /** Most recent build report — used to populate the mobile readiness panel. */
@@ -219,6 +227,7 @@ export function PreviewTab({
   onOpenFileInEditor,
   containerStatus,
   containerUrl,
+  previewAccess,
   onStartContainer,
   latestReport,
   onJumpToSecrets,
@@ -902,15 +911,15 @@ export function PreviewTab({
   // Build completion must not reboot the browser runtime: source edits belong
   // to Vite HMR, while dependency/config changes trigger their precise actions.
   const isAgentic = project.builderMode === "agentic";
-  const containerLive = containerStatus === "running" && !!containerUrl;
+  const serverPreviewLive = isAgentic && hasServerPreviewAccess(previewAccess);
   const webContainerLive =
-    isReactVite && !containerLive && wc.status === "ready" && wc.previewUrl != null;
+    isReactVite && !serverPreviewLive && wc.status === "ready" && wc.previewUrl != null;
 
   // Detect agentic preview failure class from the backend header. A 502 can mean
   // either the Fly proxy is unreachable or the app server crashed; keep those
   // separate so the UI suggests the right action.
   useEffect(() => {
-    if (!isAgentic || containerStatus !== "running") {
+    if (!serverPreviewLive) {
       setPreviewIssue(null);
       return;
     }
@@ -941,7 +950,7 @@ export function PreviewTab({
     return () => {
       cancelled = true;
     };
-  }, [isAgentic, containerStatus, project.id, iframeKey]);
+  }, [serverPreviewLive, project.id, iframeKey]);
 
   // Step 6: Bridge WC process stdout/stderr into the PreviewTab console panel.
   // We track the last-seen WC log ID so we only forward net-new entries each render.
@@ -1912,13 +1921,13 @@ export function PreviewTab({
 
         {/* Runtime mode badge — shows which preview engine is active */}
         {(() => {
-          const containerRunning = isAgentic && containerStatus === "running" && !!containerUrl;
+          const serverBadge = getServerPreviewBadge(previewAccess);
           let label: string;
           let subtitle: string;
           let badgeClass: string;
-          if (containerRunning) {
-            label = "Full App Preview — Container";
-            subtitle = "Live container; backend routes and server logs available";
+          if (isAgentic && serverBadge) {
+            label = serverBadge.label;
+            subtitle = serverBadge.subtitle;
             badgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/25";
           } else if (webContainerLive) {
             label = "Quick Preview — WebContainer";
@@ -2076,7 +2085,7 @@ export function PreviewTab({
           {hasFiles && (
             <SharePreviewControl
               projectId={project.id}
-              runtimeRunning={containerStatus === "running" && Boolean(containerUrl)}
+              runtimeRunning={serverPreviewLive}
               readiness={workspaceReadiness}
             />
           )}
@@ -2718,11 +2727,12 @@ export function PreviewTab({
                 <div className="flex-1 flex items-center bg-zinc-900 border border-zinc-700 rounded-md px-3 h-6 gap-2 max-w-md mx-auto">
                   <Globe className="h-3 w-3 text-zinc-500 shrink-0" />
                   <span className="text-[11px] text-zinc-300 font-mono truncate flex-1">
-                    {containerStatus === "running" && containerUrl
-                      ? containerUrl
-                      : isReactVite && wc.previewUrl
-                        ? wc.previewUrl
-                        : `preview/${project.id}/`}
+                    {getPreviewAddress({
+                      previewAccess,
+                      containerUrl,
+                      webContainerUrl: isReactVite ? wc.previewUrl : null,
+                      projectId: project.id,
+                    })}
                   </span>
                 </div>
               </div>

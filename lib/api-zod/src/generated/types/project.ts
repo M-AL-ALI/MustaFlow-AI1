@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { PreviewAccess } from './previewAccess';
 import type { ProjectAgentMode } from './projectAgentMode';
 import type { ProjectBuilderMode } from './projectBuilderMode';
 import type { ProjectContainerStatus } from './projectContainerStatus';
@@ -57,17 +58,19 @@ export interface Project {
   /** @nullable */
   mobilePreviewUrl?: string | null;
   /**
-     * Fly.io Machine ID for this project's dev container. Null = not provisioned.
+     * Provider runtime identity for this project's dev container. Null = not provisioned.
      * @nullable
      */
   containerId?: string | null;
   /** Current dev container lifecycle state. */
   containerStatus?: ProjectContainerStatus;
   /**
-     * Proxy URL to reach the container's dev server.
+     * Direct provider endpoint when the selected transport exposes one. Cloudflare gateway previews intentionally return null.
      * @nullable
      */
   containerUrl?: string | null;
+  /** Derived browser-preview transport. Present on the project detail response and never persisted. */
+  previewAccess?: PreviewAccess;
   /**
      * Fly.io Machine ID for the live production container. Null = not deployed.
      * @nullable

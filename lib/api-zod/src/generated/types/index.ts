@@ -391,6 +391,7 @@ export * from './pageMapNodePosition';
 export * from './pageMapPlatformData';
 export * from './pageMapResponse';
 export * from './patchVersionBody';
+export * from './previewAccess';
 export * from './project';
 export * from './projectAgentMode';
 export * from './projectAnalyticsResponse';

@@ -1,92 +1,68 @@
 import { describe, expect, it } from "vitest";
-import {
-  derivePreviewAccess,
-  isCloudflarePreviewDataPlaneConfigured,
-} from "./preview-access";
+import { derivePreviewAccess, isCloudflarePreviewDataPlaneConfigured } from "./preview-access";
 
 describe("derivePreviewAccess", () => {
   it.each([
     {
-      name: "Fly running with its direct endpoint",
+      name: "Fly running with provider identity and no URL proxy",
       providerId: "fly",
       runtimeId: "fly-runtime",
       runtimeStatus: "running",
-      endpoint: "https://runtime.example.test",
       cloudflarePreviewConfigured: false,
-      expected: { state: "reachable", transport: "direct" },
-    },
-    {
-      name: "Fly running without a direct endpoint",
-      providerId: "fly",
-      runtimeId: "fly-runtime",
-      runtimeStatus: "running",
-      endpoint: null,
-      cloudflarePreviewConfigured: false,
-      expected: { state: "unavailable" },
+      expected: "direct",
     },
     {
       name: "Cloudflare running without a direct endpoint",
       providerId: "cloudflare",
       runtimeId: "nrf-project-preview-primary",
       runtimeStatus: "running",
-      endpoint: null,
       cloudflarePreviewConfigured: true,
-      expected: { state: "reachable", transport: "gateway" },
+      expected: "gateway",
     },
     {
       name: "Cloudflare running without its preview data plane",
       providerId: "cloudflare",
       runtimeId: "nrf-project-preview-primary",
       runtimeStatus: "running",
-      endpoint: null,
       cloudflarePreviewConfigured: false,
-      expected: { state: "unavailable" },
+      expected: "unavailable",
     },
     {
       name: "a stopped Cloudflare runtime",
       providerId: "cloudflare",
       runtimeId: "nrf-project-preview-primary",
       runtimeStatus: "stopped",
-      endpoint: null,
       cloudflarePreviewConfigured: true,
-      expected: { state: "unavailable" },
+      expected: "unavailable",
     },
     {
       name: "a running row without runtime identity",
       providerId: "cloudflare",
       runtimeId: null,
       runtimeStatus: "running",
-      endpoint: null,
       cloudflarePreviewConfigured: true,
-      expected: { state: "unavailable" },
+      expected: "unavailable",
     },
     {
       name: "an unknown provider",
       providerId: "unknown",
       runtimeId: "runtime",
       runtimeStatus: "running",
-      endpoint: "https://runtime.example.test",
       cloudflarePreviewConfigured: true,
-      expected: { state: "unavailable" },
+      expected: "unavailable",
     },
   ])("classifies $name", ({ expected, name: _name, ...input }) => {
     expect(derivePreviewAccess(input)).toEqual(expected);
   });
 
-  it("uses explicit provider identity rather than inferring Cloudflare from a null endpoint", () => {
+  it("uses explicit provider identity rather than a nullable endpoint", () => {
     const common = {
       runtimeId: "runtime",
       runtimeStatus: "running",
-      endpoint: null,
       cloudflarePreviewConfigured: true,
     };
-    expect(derivePreviewAccess({ ...common, providerId: "fly" })).toEqual({
-      state: "unavailable",
-    });
-    expect(derivePreviewAccess({ ...common, providerId: "cloudflare" })).toEqual({
-      state: "reachable",
-      transport: "gateway",
-    });
+    expect(derivePreviewAccess({ ...common, providerId: "fly" })).toBe("direct");
+    expect(derivePreviewAccess({ ...common, providerId: "cloudflare" })).toBe("gateway");
   });
 });
 

@@ -8402,7 +8402,7 @@ components:
         previewAccess:
           allOf:
             - $ref: "#/components/schemas/PreviewAccess"
-          description: "Derived browser-preview reachability. Present on the project detail response and never persisted."
+          description: "Derived browser-preview transport. Present on the project detail response and never persisted."
         prodContainerId:
           {
             type: ["string", "null"],
@@ -10848,18 +10848,8 @@ components:
           $ref: "#/components/schemas/PreviewAccess"
 
     PreviewAccess:
-      oneOf:
-        - type: object
-          additionalProperties: false
-          required: [state]
-          properties:
-            state: { type: string, enum: [unavailable] }
-        - type: object
-          additionalProperties: false
-          required: [state, transport]
-          properties:
-            state: { type: string, enum: [reachable] }
-            transport: { type: string, enum: [direct, gateway] }
+      type: string
+      enum: [unavailable, direct, gateway]
 
     ContainerLog:
       type: object

@@ -101,7 +101,6 @@ router.get(
         {
           runtimeId: project.containerId,
           runtimeStatus: status,
-          endpoint: project.containerUrl,
         },
         tenantRuntimeProvider.providerId,
       ),
@@ -130,7 +129,6 @@ router.post(
           {
             runtimeId: project.containerId,
             runtimeStatus: "running",
-            endpoint: project.containerUrl,
           },
           tenantRuntimeProvider.providerId,
         ),
@@ -159,7 +157,7 @@ router.post(
       containerId: project.containerId ?? null,
       containerStatus: "starting",
       containerUrl: project.containerUrl ?? null,
-      previewAccess: { state: "unavailable" },
+      previewAccess: "unavailable",
     });
 
     // Provision asynchronously (don't await — client will poll /status)

@@ -126,6 +126,7 @@ import {
   retryProjectProvisioning,
   submitProjectQueue,
   getAuthToken,
+  type PreviewAccess,
 } from "@workspace/api-client-react";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import {
@@ -1470,6 +1471,7 @@ export default function ProjectWorkspacePage() {
   type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
   const [containerStatus, setContainerStatus] = useState<ContainerStatus>("stopped");
   const [containerUrl, setContainerUrl] = useState<string | null>(null);
+  const [previewAccess, setPreviewAccess] = useState<PreviewAccess>("unavailable");
   const [containerStarting, setContainerStarting] = useState(false);
   const containerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1479,7 +1481,8 @@ export default function ProjectWorkspacePage() {
     const st = (project as { containerStatus?: string }).containerStatus;
     if (st) setContainerStatus(st as ContainerStatus);
     const url = (project as { containerUrl?: string | null }).containerUrl;
-    if (url) setContainerUrl(url);
+    setContainerUrl(url ?? null);
+    setPreviewAccess((project as { previewAccess?: PreviewAccess }).previewAccess ?? "unavailable");
   }, [project]);
 
   // Poll container status when starting
@@ -1493,7 +1496,8 @@ export default function ProjectWorkspacePage() {
             if (!data) return;
             const newStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
             setContainerStatus(newStatus);
-            if (data.containerUrl) setContainerUrl(data.containerUrl);
+            setContainerUrl(data.containerUrl ?? null);
+            setPreviewAccess(data.previewAccess ?? "unavailable");
             if (newStatus === "running") {
               setContainerStarting(false);
               if (containerPollRef.current) {
@@ -1522,13 +1526,19 @@ export default function ProjectWorkspacePage() {
     if (!containerLayerConfigured) return;
     setContainerStarting(true);
     setContainerStatus("starting");
+    setPreviewAccess("unavailable");
     startContainer(projectId)
       .then((data) => {
         if (!data) return;
         setContainerStatus((data.containerStatus ?? "starting") as ContainerStatus);
-        if (data.containerUrl) setContainerUrl(data.containerUrl);
+        setContainerUrl(data.containerUrl ?? null);
+        setPreviewAccess(data.previewAccess ?? "unavailable");
       })
-      .catch(() => setContainerStatus("error"));
+      .catch(() => {
+        setContainerStatus("error");
+        setContainerUrl(null);
+        setPreviewAccess("unavailable");
+      });
   }, [projectId, containerLayerConfigured]);
 
   const handleStopContainer = useCallback(() => {
@@ -1536,6 +1546,8 @@ export default function ProjectWorkspacePage() {
     stopContainer(projectId)
       .then(() => {
         setContainerStatus("hibernated");
+        setContainerUrl(null);
+        setPreviewAccess("unavailable");
         setContainerStarting(false);
       })
       .catch(() => {});
@@ -5302,6 +5314,7 @@ export default function ProjectWorkspacePage() {
                   }}
                   containerStatus={containerStatus}
                   containerUrl={containerUrl}
+                  previewAccess={previewAccess}
                   onStartContainer={handleStartContainer}
                   latestReport={(() => {
                     const latest = [...(messages ?? [])].reverse().find((m) => {

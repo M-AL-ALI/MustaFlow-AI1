@@ -1,40 +1,32 @@
 import { publishedHostnameSchema } from "@workspace/tenant-runtime-contracts";
 
-export type PreviewAccess =
-  | { state: "unavailable" }
-  | { state: "reachable"; transport: "direct" | "gateway" };
+export type PreviewAccess = "unavailable" | "direct" | "gateway";
 
 export interface PreviewAccessInput {
   providerId: string;
   runtimeId: string | null | undefined;
   runtimeStatus: string | null | undefined;
-  endpoint: string | null | undefined;
   cloudflarePreviewConfigured: boolean;
 }
 
 /**
- * Derive browser-preview reachability from the selected provider's contract.
- * A missing direct endpoint is expected for Cloudflare and must not be used to
- * infer which provider owns the runtime.
+ * Derive browser-preview transport from the selected provider's contract.
+ * Runtime ownership comes from provider identity, never a nullable URL field.
  */
 export function derivePreviewAccess(input: PreviewAccessInput): PreviewAccess {
   if (!input.runtimeId || input.runtimeStatus !== "running") {
-    return { state: "unavailable" };
+    return "unavailable";
   }
 
   if (input.providerId === "fly") {
-    return input.endpoint
-      ? { state: "reachable", transport: "direct" }
-      : { state: "unavailable" };
+    return "direct";
   }
 
   if (input.providerId === "cloudflare") {
-    return input.cloudflarePreviewConfigured
-      ? { state: "reachable", transport: "gateway" }
-      : { state: "unavailable" };
+    return input.cloudflarePreviewConfigured ? "gateway" : "unavailable";
   }
 
-  return { state: "unavailable" };
+  return "unavailable";
 }
 
 export function isCloudflarePreviewDataPlaneConfigured(
@@ -63,7 +55,7 @@ export function isCloudflarePreviewDataPlaneConfigured(
 }
 
 export function deriveConfiguredPreviewAccess(
-  input: Pick<PreviewAccessInput, "runtimeId" | "runtimeStatus" | "endpoint">,
+  input: Pick<PreviewAccessInput, "runtimeId" | "runtimeStatus">,
   providerId: string,
   environment: Record<string, string | undefined> = process.env,
 ): PreviewAccess {
