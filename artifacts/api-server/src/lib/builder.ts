@@ -8739,7 +8739,9 @@ export async function runConverseStreamPipeline(
   }
 }
 
-const TEST_GENERATION_SYSTEM_PROMPT = `You are a browser test planner. Given HTML content and a project description, generate a concise test plan (3-5 steps) that verifies the key user-facing functionality.
+export const TEST_GENERATION_MAX_STEPS = 10;
+
+export const TEST_GENERATION_SYSTEM_PROMPT = `You are a browser test planner. Given HTML content and a project description, generate a concise test plan (3-${TEST_GENERATION_MAX_STEPS} steps) that verifies the key user-facing functionality.
 
 OUTPUT STRICT JSON matching this exact shape:
 {
@@ -8763,7 +8765,7 @@ RULES:
 - Keep selectors simple: h1, button, nav a, form, input[type="email"], .hero, #main, [role="main"]
 - Do NOT use XPath or complex pseudo-selectors
 - Timeout should be 5000ms for all steps
-- Maximum 5 steps total — keep the plan focused and fast
+- Maximum ${TEST_GENERATION_MAX_STEPS} steps total — use only the steps required to exercise every named outcome
 - Never include steps that require network requests to external APIs`;
 
 /**
@@ -8821,7 +8823,7 @@ export async function runTestGenerationPipeline(
           typeof (s as Record<string, unknown>).action === "string" &&
           validActions.has((s as Record<string, unknown>).action as string),
       )
-      .slice(0, 5)
+      .slice(0, TEST_GENERATION_MAX_STEPS)
       .map((s) => {
         const step = s as Record<string, unknown>;
         return {

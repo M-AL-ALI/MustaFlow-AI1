@@ -76,7 +76,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     coverageId: "live:developer-intent",
     mode: "runtime-prompt",
     sourceIds: ["prompt:builder:DEBUG_SYSTEM_PROMPT"],
-    user: "A submit button works once and then remains disabled. Identify the root cause before proposing a patch.",
+    user: "A submit button works once and then remains disabled. Identify the root cause before proposing a patch. Complete source:\n```tsx\nfunction ContactForm() {\n  const [submitting, setSubmitting] = useState(false);\n  async function submit() {\n    setSubmitting(true);\n    await sendContact();\n  }\n  return <button disabled={submitting} onClick={submit}>Send</button>;\n}\n```\nThe request resolves successfully and the component stays mounted.",
     rubric:
       "Separates evidence from hypothesis and proposes a minimal, testable diagnostic or fix.",
     jsonMode: false,
@@ -86,7 +86,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     coverageId: "live:repair",
     mode: "runtime-prompt",
     sourceIds: ["prompt:builder:BROWSER_FIX_SYSTEM_PROMPT"],
-    user: "The browser test proves the existing submit handler throws because one element lookup is null.",
+    user: 'The browser test proves app.js throws at `document.querySelector("#result").textContent = "Sent"` because that lookup is null. The complete HTML contains `<p id="status"></p>` and no element with id `result`. Return only the minimum patch that preserves every other behavior.',
     rubric: "Produces a minimal evidence-bound correction without redesigning unrelated behavior.",
     jsonMode: true,
   },
