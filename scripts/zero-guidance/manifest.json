@@ -2073,6 +2073,27 @@
         "intent-routing",
         "messages"
       ],
+      "contentBytes": 1723,
+      "contentSha256": "4e9a68055b824c3808792add54c2cae3d15cb8132e24201d7b329e230e4ab6a8",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:intent-admission"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:intent-admission:judge",
+      "kind": "context-assembler",
+      "selector": "function:judgeZeroIntent",
+      "sourcePath": "artifacts/api-server/src/lib/zero-intent-judge.ts"
+    },
+    {
+      "consumers": [
+        "intent-routing",
+        "messages"
+      ],
       "contentBytes": 81748,
       "contentSha256": "0c16b46cf05967f57aa47496d5a61647739952d3acf26938cc99d46e0131c99e",
       "coverageIds": [
@@ -3102,8 +3123,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 1519,
-      "contentSha256": "1f413063b1f8d849c00e896aa9c4131173c1c16e7e46f486e429ae22198080d1",
+      "contentBytes": 1550,
+      "contentSha256": "ee289713ad64707bc5f15592bf4a7caf6e3909b5b51c1d04683d42cb28456cd2",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:test-planning"

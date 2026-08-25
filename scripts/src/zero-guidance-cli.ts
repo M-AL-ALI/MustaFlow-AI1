@@ -79,8 +79,8 @@ async function validateLive(): Promise<void> {
   const resultPath = argument("--result");
   if (!resultPath) throw new Error("zero_guidance_live_result_path_missing");
   const releaseHead = argument("--head") ?? (await git(["rev-parse", "HEAD"]));
-  let parentHead: string | null = null;
-  let changedPathsFromParent: string[] = [];
+  let parentHead: string | null;
+  let changedPathsFromParent: string[];
   try {
     parentHead = await git(["rev-parse", `${releaseHead}^`]);
     const changed = await git(["diff", "--name-only", parentHead, releaseHead, "--"]);
