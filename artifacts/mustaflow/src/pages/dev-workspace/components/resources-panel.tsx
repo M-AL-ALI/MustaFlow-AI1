@@ -3,7 +3,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Gauge, Cpu, HardDrive, MemoryStick, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface ResourceUsage {
+interface AvailableResourceUsage {
+  metricsAvailable: true;
   cpuPercent: number;
   ramMb: number;
   ramLimitMb: number;
@@ -11,6 +12,19 @@ interface ResourceUsage {
   diskLimitMb: number;
   status: "running" | "stopped" | "unknown";
 }
+
+interface UnavailableResourceUsage {
+  metricsAvailable: false;
+  reason: "runtime_not_running" | "provider_metrics_unavailable";
+  cpuPercent: null;
+  ramMb: null;
+  ramLimitMb: null;
+  diskMb: null;
+  diskLimitMb: null;
+  status: "running" | "stopped" | "unknown";
+}
+
+type ResourceUsage = AvailableResourceUsage | UnavailableResourceUsage;
 
 const SPARKLINE_MAX = 30;
 
@@ -125,11 +139,12 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
       if (res.ok) {
         const data = (await res.json()) as ResourceUsage;
         setUsage(data);
-        // Append to sparkline history
-        cpuHistory.current = [...cpuHistory.current, data.cpuPercent].slice(-SPARKLINE_MAX);
-        ramHistory.current = [...ramHistory.current, data.ramMb].slice(-SPARKLINE_MAX);
-        diskHistory.current = [...diskHistory.current, data.diskMb].slice(-SPARKLINE_MAX);
-        forceRender((n) => n + 1);
+        if (data.metricsAvailable) {
+          cpuHistory.current = [...cpuHistory.current, data.cpuPercent].slice(-SPARKLINE_MAX);
+          ramHistory.current = [...ramHistory.current, data.ramMb].slice(-SPARKLINE_MAX);
+          diskHistory.current = [...diskHistory.current, data.diskMb].slice(-SPARKLINE_MAX);
+          forceRender((n) => n + 1);
+        }
       } else {
         setError("Failed to load resource data");
       }
@@ -186,7 +201,14 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
           </div>
         ) : error ? (
           <div className="text-[11px] text-red-400 text-center py-4">{error}</div>
-        ) : usage ? (
+        ) : usage && !usage.metricsAvailable ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
+            <Gauge className="h-8 w-8 text-muted-foreground/20" />
+            <div className="text-[11px] text-muted-foreground">
+              Live CPU, memory, and disk measurements aren&apos;t available for this runtime yet.
+            </div>
+          </div>
+        ) : usage && usage.metricsAvailable ? (
           <div className="space-y-6">
             <UsageBar
               label="CPU"

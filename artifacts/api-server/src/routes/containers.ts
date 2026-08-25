@@ -445,8 +445,9 @@ router.delete(
 );
 
 // ── GET /api/projects/:id/resources ──────────────────────────────────────────
-// Returns live container resource usage (CPU %, RAM, disk).
-// Falls back to mock values when FLY_API_TOKEN is not configured.
+// Reports whether live container resource usage is available. The current
+// provider abstraction has no governed metrics source, so this endpoint must
+// never invent CPU, memory, or disk observations.
 router.get("/projects/:id/resources", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   const project = await loadProject(projectId);
@@ -455,29 +456,18 @@ router.get("/projects/:id/resources", requireProjectOwnership, async (req, res):
     return;
   }
 
-  if (!project.containerId || project.containerStatus !== "running") {
-    res.json({
-      cpuPercent: 0,
-      ramMb: 0,
-      ramLimitMb: 512,
-      diskMb: 0,
-      diskLimitMb: 2048,
-      status: project.containerStatus ?? "stopped",
-    });
-    return;
-  }
-
-  // Try to get real stats from Fly.io machine metrics
-  // Fly.io doesn't expose a metrics API directly; approximate from container status
-  // A real implementation would poll the container's /metrics endpoint or use Fly's
-  // Prometheus scrape target. For now we return reasonable placeholder values.
   res.json({
-    cpuPercent: Math.round(Math.random() * 30 + 5),
-    ramMb: Math.round(Math.random() * 200 + 50),
-    ramLimitMb: 512,
-    diskMb: Math.round(Math.random() * 300 + 100),
-    diskLimitMb: 2048,
-    status: "running",
+    metricsAvailable: false,
+    reason:
+      project.containerId && project.containerStatus === "running"
+        ? "provider_metrics_unavailable"
+        : "runtime_not_running",
+    cpuPercent: null,
+    ramMb: null,
+    ramLimitMb: null,
+    diskMb: null,
+    diskLimitMb: null,
+    status: project.containerStatus ?? "stopped",
   });
 });
 

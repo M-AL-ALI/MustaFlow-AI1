@@ -124,4 +124,23 @@ describe("container status read purity", () => {
     expect(response.status).toBe(503);
     expect(state.updateCalls).toBe(0);
   });
+
+  it("reports unavailable metrics instead of fabricating resource usage", async () => {
+    const app = express();
+    app.use(containersRouter);
+
+    const response = await request(app).get("/projects/52/resources");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      metricsAvailable: false,
+      reason: "provider_metrics_unavailable",
+      cpuPercent: null,
+      ramMb: null,
+      ramLimitMb: null,
+      diskMb: null,
+      diskLimitMb: null,
+      status: "running",
+    });
+  });
 });
