@@ -159,6 +159,36 @@ export const ZERO_GUIDANCE_COVERAGE: ZeroGuidanceCoverageDefinition[] = [
     description:
       "Sealed generation uses capabilities, fixed runtime contracts, and no tenant credentials.",
   },
+  {
+    id: "live:intent-admission",
+    layer: "live",
+    description:
+      "Mutation-capable work is admitted only after a typed, durable intent receipt binds the request to its task.",
+  },
+  {
+    id: "live:terminal-honesty",
+    layer: "live",
+    description:
+      "Zero's user-facing past tense is derived from typed terminal evidence and cannot turn interruption or failure into success.",
+  },
+  {
+    id: "live:snapshot-observe",
+    layer: "live",
+    description:
+      "Snapshot observation carries captured pixels through an observe-only path without silently entering mutation.",
+  },
+  {
+    id: "live:workspace-readiness",
+    layer: "live",
+    description:
+      "Workspace readiness is version-bound, fail-closed, and cannot say ready over missing or failed evidence.",
+  },
+  {
+    id: "live:preview-handoff",
+    layer: "live",
+    description:
+      "Preview access is derived from server truth and preserves a private authenticated embedded handoff without inventing reachability.",
+  },
 ];
 
 const EXPLICIT_SOURCES: ExplicitSourceSpec[] = [
@@ -332,6 +362,87 @@ const EXPLICIT_SOURCES: ExplicitSourceSpec[] = [
     consumers: ["jobs", "sealed-generation"],
     deliveryModes: ["sealed"],
     liveCoverageId: "live:sealed-generation",
+  },
+  {
+    id: "contract:intent-admission:governor",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/lib/zero-intent-admission.ts",
+    selector: { type: "function", name: "createIntentAdmissionGovernor" },
+    consumers: ["messages", "jobs", "mutations"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:intent-admission",
+  },
+  {
+    id: "contract:intent-admission:routing",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/routes/messages.ts",
+    selector: { type: "file" },
+    consumers: ["messages", "intent-routing"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:intent-admission",
+  },
+  {
+    id: "contract:terminal-honesty:presenter",
+    kind: "context-assembler",
+    sourcePath: "lib/ora-contracts/src/zero-terminal.ts",
+    selector: { type: "function", name: "presentZeroTerminalV1" },
+    consumers: ["messages", "jobs", "workspace"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:terminal-honesty",
+  },
+  {
+    id: "contract:snapshot-observe:server",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/routes/snapshot-observe.ts",
+    selector: { type: "function", name: "createSnapshotObserveRouter" },
+    consumers: ["snapshot-observe", "vision"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:snapshot-observe",
+  },
+  {
+    id: "contract:snapshot-observe:client",
+    kind: "context-assembler",
+    sourcePath: "artifacts/mustaflow/src/lib/snapshot-observe.ts",
+    selector: { type: "function", name: "requestSnapshotObservation" },
+    consumers: ["workspace", "snapshot-observe"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:snapshot-observe",
+  },
+  {
+    id: "contract:workspace-readiness:deriver",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/lib/workspace-readiness.ts",
+    selector: { type: "function", name: "deriveWorkspaceReadiness" },
+    consumers: ["workspace", "publish"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:workspace-readiness",
+  },
+  {
+    id: "contract:workspace-readiness:presenter",
+    kind: "context-assembler",
+    sourcePath: "lib/ora-contracts/src/workspace-readiness.ts",
+    selector: { type: "function", name: "presentWorkspaceReadiness" },
+    consumers: ["workspace", "publish"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:workspace-readiness",
+  },
+  {
+    id: "contract:preview-handoff:server",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/lib/preview-access.ts",
+    selector: { type: "function", name: "deriveConfiguredPreviewAccess" },
+    consumers: ["preview-route", "workspace"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:preview-handoff",
+  },
+  {
+    id: "contract:preview-handoff:client",
+    kind: "context-assembler",
+    sourcePath: "artifacts/mustaflow/src/lib/preview-access-ui.ts",
+    selector: { type: "function", name: "getPreviewAddress" },
+    consumers: ["workspace", "preview-iframe"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:preview-handoff",
   },
 ];
 

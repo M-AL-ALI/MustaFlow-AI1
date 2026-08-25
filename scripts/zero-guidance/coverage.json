@@ -36,6 +36,11 @@
       "layer": "live"
     },
     {
+      "description": "Mutation-capable work is admitted only after a typed, durable intent receipt binds the request to its task.",
+      "id": "live:intent-admission",
+      "layer": "live"
+    },
+    {
       "description": "Job, repair, and memory context reaches generation with the intended precedence.",
       "id": "live:jobs-context",
       "layer": "live"
@@ -48,6 +53,11 @@
     {
       "description": "Planning instructions produce structured, actionable plans without generating code.",
       "id": "live:planning",
+      "layer": "live"
+    },
+    {
+      "description": "Preview access is derived from server truth and preserves a private authenticated embedded handoff without inventing reachability.",
+      "id": "live:preview-handoff",
       "layer": "live"
     },
     {
@@ -86,8 +96,23 @@
       "layer": "live"
     },
     {
+      "description": "Snapshot observation carries captured pixels through an observe-only path without silently entering mutation.",
+      "id": "live:snapshot-observe",
+      "layer": "live"
+    },
+    {
+      "description": "Zero's user-facing past tense is derived from typed terminal evidence and cannot turn interruption or failure into success.",
+      "id": "live:terminal-honesty",
+      "layer": "live"
+    },
+    {
       "description": "Test-planning instructions cover the requested user-visible behavior.",
       "id": "live:test-planning",
+      "layer": "live"
+    },
+    {
+      "description": "Workspace readiness is version-bound, fail-closed, and cannot say ready over missing or failed evidence.",
+      "id": "live:workspace-readiness",
       "layer": "live"
     }
   ],

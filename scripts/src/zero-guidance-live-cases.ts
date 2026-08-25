@@ -183,6 +183,56 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
       "Requires capabilities instead of tenant credentials, dependency-complete output, the declared runtime port/health contract, and no tenant install step.",
     jsonMode: false,
   },
+  {
+    id: "intent-admission-contract",
+    coverageId: "live:intent-admission",
+    mode: "source-audit",
+    sourceIds: ["contract:intent-admission:governor", "contract:intent-admission:routing"],
+    user: "Explain what must exist before Zero may mutate a project, and what happens when the user's request is observational or ambiguous.",
+    rubric:
+      "Requires a typed request-bound intent receipt before mutation, keeps observe and answer requests out of the write path, and routes ambiguity to one focused clarification rather than guessing.",
+    jsonMode: false,
+  },
+  {
+    id: "terminal-honesty-contract",
+    coverageId: "live:terminal-honesty",
+    mode: "source-audit",
+    sourceIds: ["contract:terminal-honesty:presenter"],
+    user: "State exactly when Zero may tell a person that a change was applied, and how interruption, failure, and changed-with-issues are described.",
+    rubric:
+      "Says mutation success requires version and diff evidence, preserves interrupted and failed outcomes, distinguishes changed-with-issues, and never converts missing evidence into successful past tense.",
+    jsonMode: false,
+  },
+  {
+    id: "snapshot-observe-contract",
+    coverageId: "live:snapshot-observe",
+    mode: "source-audit",
+    sourceIds: ["contract:snapshot-observe:client", "contract:snapshot-observe:server"],
+    user: "Explain what Snapshot-to-Zero sends, which intent path receives it, and what must never happen invisibly after capture fails.",
+    rubric:
+      "Identifies captured image bytes and the preview class, keeps the path observe-only with zero project writes, and says a consumed grant followed by capture failure is reported unavailable without an invisible retry or mutation.",
+    jsonMode: false,
+  },
+  {
+    id: "workspace-readiness-contract",
+    coverageId: "live:workspace-readiness",
+    mode: "source-audit",
+    sourceIds: ["contract:workspace-readiness:deriver", "contract:workspace-readiness:presenter"],
+    user: "Explain how Zero decides whether a workspace is ready and what it says when validation, preview, or publish evidence is missing or failed.",
+    rubric:
+      "Binds readiness to the exact task/version/revision, requires the complete evidence set for ready, fails closed to blocked or unknown, and makes ready wording unreachable when validation, preview, or publish evidence is unresolved.",
+    jsonMode: false,
+  },
+  {
+    id: "preview-handoff-contract",
+    coverageId: "live:preview-handoff",
+    mode: "source-audit",
+    sourceIds: ["contract:preview-handoff:server", "contract:preview-handoff:client"],
+    user: "Explain how the workspace chooses a preview address and why the embedded preview must not claim availability from a display-state guess.",
+    rubric:
+      "Derives access from server configuration and runtime truth, distinguishes unavailable/direct/gateway states, and requires an authenticated private handoff instead of inventing a reachable URL from client display state.",
+    jsonMode: false,
+  },
 ];
 
 export const ZERO_GUIDANCE_FIXTURE_SET_SHA256 = sha256(stableJson(ZERO_GUIDANCE_LIVE_CASES));

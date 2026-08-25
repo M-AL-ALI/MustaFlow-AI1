@@ -125,8 +125,8 @@
         "jobs",
         "knowledge"
       ],
-      "contentBytes": 8309,
-      "contentSha256": "65dd496fa52ace9363396860a35ceaf1ef67e3e25c55664f00bbfb100655f09b",
+      "contentBytes": 2799,
+      "contentSha256": "f74fe23b1043dfdb4562ce89227bce409df5c97017742d1b5b88cfebe3fcb06a",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:jobs-context"
@@ -167,8 +167,8 @@
         "generation",
         "jobs"
       ],
-      "contentBytes": 222582,
-      "contentSha256": "39219d5d5308c04cb47e59c7b60434cd8ddeda72cc422cd72f04f3f64b60c7be",
+      "contentBytes": 230036,
+      "contentSha256": "2d160c6a3be6ffc15cb4ed5d363bcdc2e506294ae5d3eb52e0eca35853fef14a",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:jobs-context"
@@ -209,8 +209,8 @@
         "intent-routing",
         "messages"
       ],
-      "contentBytes": 71558,
-      "contentSha256": "a836a54d9cd7d6afb0351e871eb4c51a7c8d2507da94fddfab1ce7f97b820c87",
+      "contentBytes": 81748,
+      "contentSha256": "0c16b46cf05967f57aa47496d5a61647739952d3acf26938cc99d46e0131c99e",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:message-routing"
@@ -2049,6 +2049,197 @@
     {
       "consumers": [
         "jobs",
+        "messages",
+        "mutations"
+      ],
+      "contentBytes": 3299,
+      "contentSha256": "d98583bc76798caaababbd9499d13dfb5c668475bda7ea6c2ce02550074cdbd3",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:intent-admission"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:intent-admission:governor",
+      "kind": "context-assembler",
+      "selector": "function:createIntentAdmissionGovernor",
+      "sourcePath": "artifacts/api-server/src/lib/zero-intent-admission.ts"
+    },
+    {
+      "consumers": [
+        "intent-routing",
+        "messages"
+      ],
+      "contentBytes": 81748,
+      "contentSha256": "0c16b46cf05967f57aa47496d5a61647739952d3acf26938cc99d46e0131c99e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:intent-admission"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:intent-admission:routing",
+      "kind": "context-assembler",
+      "selector": "file",
+      "sourcePath": "artifacts/api-server/src/routes/messages.ts"
+    },
+    {
+      "consumers": [
+        "preview-iframe",
+        "workspace"
+      ],
+      "contentBytes": 474,
+      "contentSha256": "607a8d93a664ffa4d0ea6a3d03ce58d22bf624e79016bfa2c15b68a1cf0e269e",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:preview-handoff"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:preview-handoff:client",
+      "kind": "context-assembler",
+      "selector": "function:getPreviewAddress",
+      "sourcePath": "artifacts/mustaflow/src/lib/preview-access-ui.ts"
+    },
+    {
+      "consumers": [
+        "preview-route",
+        "workspace"
+      ],
+      "contentBytes": 410,
+      "contentSha256": "fe84dd2999e141139035db5a80a7e58e53d4b95bc0588b435ce1c7279fb010a2",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:preview-handoff"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:preview-handoff:server",
+      "kind": "context-assembler",
+      "selector": "function:deriveConfiguredPreviewAccess",
+      "sourcePath": "artifacts/api-server/src/lib/preview-access.ts"
+    },
+    {
+      "consumers": [
+        "snapshot-observe",
+        "workspace"
+      ],
+      "contentBytes": 942,
+      "contentSha256": "f04968dd9ee85d9fb1d25092a4cc4577f923e2a896ceeea934134e5f66deb0e6",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:snapshot-observe"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:snapshot-observe:client",
+      "kind": "context-assembler",
+      "selector": "function:requestSnapshotObservation",
+      "sourcePath": "artifacts/mustaflow/src/lib/snapshot-observe.ts"
+    },
+    {
+      "consumers": [
+        "snapshot-observe",
+        "vision"
+      ],
+      "contentBytes": 2708,
+      "contentSha256": "33f598ce0ed8fec160fce532deadc3bfc14a93d85ee42984e4b8fada481d7f06",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:snapshot-observe"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:snapshot-observe:server",
+      "kind": "context-assembler",
+      "selector": "function:createSnapshotObserveRouter",
+      "sourcePath": "artifacts/api-server/src/routes/snapshot-observe.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "messages",
+        "workspace"
+      ],
+      "contentBytes": 3411,
+      "contentSha256": "165d962ee0af7c15543a40a7185610b63eb5243e2d74e7c2998973848adb7d53",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:terminal-honesty"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:terminal-honesty:presenter",
+      "kind": "context-assembler",
+      "selector": "function:presentZeroTerminalV1",
+      "sourcePath": "lib/ora-contracts/src/zero-terminal.ts"
+    },
+    {
+      "consumers": [
+        "publish",
+        "workspace"
+      ],
+      "contentBytes": 6235,
+      "contentSha256": "8a39dd183722201246b95136d3b3f8c6a315a0feb4f3b211981ec3dcf61b7fdb",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:workspace-readiness"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:workspace-readiness:deriver",
+      "kind": "context-assembler",
+      "selector": "function:deriveWorkspaceReadiness",
+      "sourcePath": "artifacts/api-server/src/lib/workspace-readiness.ts"
+    },
+    {
+      "consumers": [
+        "publish",
+        "workspace"
+      ],
+      "contentBytes": 941,
+      "contentSha256": "b9233b5a3f8596aaa0269b955dba146c5f5dc98debc11e466e58582dde1ddb36",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:workspace-readiness"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:workspace-readiness:presenter",
+      "kind": "context-assembler",
+      "selector": "function:presentWorkspaceReadiness",
+      "sourcePath": "lib/ora-contracts/src/workspace-readiness.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
         "sealed-generation"
       ],
       "contentBytes": 3099,
@@ -2449,8 +2640,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4584,
-      "contentSha256": "ab4c43c0b20405fc2096b280566dab8234692bf16e7453297a83e69d438ad50f",
+      "contentBytes": 2205,
+      "contentSha256": "7dc67700efcbebf94f0b0795c9b49236da906c7ccca86afc88b4d5fdbb05ac75",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:intent"
