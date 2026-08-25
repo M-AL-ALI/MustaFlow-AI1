@@ -87,7 +87,8 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     mode: "runtime-prompt",
     sourceIds: ["prompt:builder:BROWSER_FIX_SYSTEM_PROMPT"],
     user: 'The browser test proves app.js throws at `document.querySelector("#result").textContent = "Sent"` because that lookup is null. The complete HTML contains `<p id="status"></p>` and no element with id `result`. Return only the minimum patch that preserves every other behavior.',
-    rubric: "Produces a minimal evidence-bound correction without redesigning unrelated behavior.",
+    rubric:
+      "Passes when the minimum patch either adds the missing #result element to the supplied HTML or changes the supplied script lookup to the existing #status element, while preserving unrelated behavior. Do not require an unchanged app.js file to be returned when the HTML-only patch fixes the proven null lookup.",
     jsonMode: true,
   },
   {
