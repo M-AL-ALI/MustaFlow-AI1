@@ -8588,6 +8588,7 @@ export async function runConverseStreamPipeline(
     agentMode: AgentMode;
     isAmbiguous?: boolean;
     imageAttachments?: ConverseImageAttachment[];
+    conversationSummary?: string;
     signal?: AbortSignal;
     systemPromptOverride?: string;
   },
@@ -8601,6 +8602,7 @@ export async function runConverseStreamPipeline(
     agentMode,
     isAmbiguous,
     imageAttachments,
+    conversationSummary,
     signal,
     systemPromptOverride,
   } = args;
@@ -8679,6 +8681,13 @@ export async function runConverseStreamPipeline(
       content: `Project: "${projectName}"\n\nCurrent files:\n${fileContext}`,
     },
   ];
+
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `Earlier conversation context (summary of prior exchanges):\n${conversationSummary}`,
+    });
+  }
 
   for (const turn of conversationHistory.slice(-6)) {
     messages.push({ role: turn.role, content: turn.content });

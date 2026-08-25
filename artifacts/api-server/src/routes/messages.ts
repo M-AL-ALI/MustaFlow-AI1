@@ -42,6 +42,7 @@ import { describeConverseFailure } from "../lib/converse-failure";
 import { ConverseCompletionInterruptedError } from "../lib/converse-completion";
 import { writeKnowledge } from "../lib/knowledge";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { zeroProjectMemoryContext } from "../lib/zero-project-memory";
 import { fetchAttachmentAsDataUri } from "./images";
 import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
 import {
@@ -339,6 +340,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   ]);
 
   const conversationSummary = summaryEntry[0]?.content;
+  const projectMemoryContext = zeroProjectMemoryContext({
+    projectId: project.id,
+    projectName: project.name,
+    description: project.description,
+    summary: project.summary,
+    lastTaskSummary: project.lastTaskSummary,
+    conversationSummary,
+  });
 
   const conversationHistory: ConversationTurn[] = recentMessages
     .filter((m) => m.role === "user" || m.role === "assistant")
@@ -574,7 +583,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         agentMode: mode,
         isAmbiguous,
         imageAttachments: visionParts.length > 0 ? visionParts : undefined,
-        conversationSummary,
+        conversationSummary: projectMemoryContext,
         systemPromptOverride,
       });
 
@@ -1583,11 +1592,33 @@ router.post(
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, project.id));
 
-    const recentMessages = await db
-      .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
-      .from(chatMessagesTable)
-      .where(eq(chatMessagesTable.projectId, project.id))
-      .orderBy(asc(chatMessagesTable.createdAt));
+    const [recentMessages, summaryEntry] = await Promise.all([
+      db
+        .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
+        .from(chatMessagesTable)
+        .where(eq(chatMessagesTable.projectId, project.id))
+        .orderBy(asc(chatMessagesTable.createdAt)),
+      db
+        .select({ content: knowledgeEntriesTable.content })
+        .from(knowledgeEntriesTable)
+        .where(
+          and(
+            eq(knowledgeEntriesTable.projectId, project.id),
+            eq(knowledgeEntriesTable.type, "conversation_summary"),
+          ),
+        )
+        .orderBy(desc(knowledgeEntriesTable.createdAt))
+        .limit(1),
+    ]);
+
+    const projectMemoryContext = zeroProjectMemoryContext({
+      projectId: project.id,
+      projectName: project.name,
+      description: project.description,
+      summary: project.summary,
+      lastTaskSummary: project.lastTaskSummary,
+      conversationSummary: summaryEntry[0]?.content,
+    });
 
     const conversationHistory: ConversationTurn[] = recentMessages
       .filter((m) => m.role === "user" || m.role === "assistant")
@@ -1820,6 +1851,7 @@ router.post(
           imageAttachments: visionParts.length > 0 ? visionParts : undefined,
           signal: abortController.signal,
           systemPromptOverride,
+          conversationSummary: projectMemoryContext,
         },
         (token) => {
           streamSession.tokens.push(token);

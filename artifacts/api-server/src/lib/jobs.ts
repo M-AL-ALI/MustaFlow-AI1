@@ -68,6 +68,7 @@ import { generateEmbedding } from "./embeddings";
 import { selectKnowledgeContext, type KnowledgeContextResult } from "./knowledge-context-selection";
 import { recordKnowledgeContextUsage } from "./knowledge-context-usage";
 import { projectSummaryProvenance } from "./project-summary-provenance";
+import { zeroProjectMemoryContext } from "./zero-project-memory";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
@@ -2414,7 +2415,7 @@ export async function runJob(input: JobInput): Promise<void> {
 
     const [
       { context: rawKnowledgeContext, applied: knowledgeApplied },
-      conversationSummary,
+      rawConversationSummary,
       blueprintContext,
     ] = await Promise.all([
       loadKnowledgeContext(projectId, userPrompt),
@@ -2440,6 +2441,15 @@ export async function runJob(input: JobInput): Promise<void> {
       })(),
       getInstalledBlueprintKnowledge(projectId, zeroGenerationTarget),
     ]);
+
+    const conversationSummary = zeroProjectMemoryContext({
+      projectId,
+      projectName: project.name,
+      description: project.description,
+      summary: project.summary,
+      lastTaskSummary: project.lastTaskSummary,
+      conversationSummary: rawConversationSummary,
+    });
 
     // Knowledge selection is a read. Usage telemetry is an explicit, task-bound,
     // idempotent mutation so retries cannot turn retrieval into a hidden write.
