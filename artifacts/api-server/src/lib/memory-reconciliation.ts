@@ -67,7 +67,7 @@ export type MemoryReconciliationResult = {
 };
 
 export const PROJECT_MEMORY_RECONCILIATION_SUMMARY_SEMANTICS =
-  "zero-project-memory-reconciliation-summary-v1" as const;
+  "zero-project-memory-reconciliation-summary-v2" as const;
 export const PROJECT_MEMORY_RECONCILIATION_STATUSES = [
   "current",
   "review-needed",
@@ -93,6 +93,11 @@ export type ProjectMemoryReconciliationSummary = {
     confirmed: number;
     stale: number;
     unverifiable: number;
+  };
+  coverage: {
+    complete: boolean;
+    rowLimit: number | null;
+    limitedSurfaces: readonly MemorySurfaceId[];
   };
   surfaces: readonly ProjectMemoryReconciliationSurfaceSummary[];
 };
@@ -329,6 +334,10 @@ function statusForCounts(input: {
  */
 export function summarizeProjectMemoryReconciliation(
   results: readonly MemoryReconciliationResult[],
+  options: {
+    limitedSurfaces?: readonly MemorySurfaceId[];
+    rowLimit?: number | null;
+  } = {},
 ): ProjectMemoryReconciliationSummary {
   const counts = { confirmed: 0, stale: 0, unverifiable: 0 };
   const bySurface = new Map<MemorySurfaceId, typeof counts>();
@@ -346,19 +355,40 @@ export function summarizeProjectMemoryReconciliation(
     if (observedAt === null || result.observedAt > observedAt) observedAt = result.observedAt;
   }
 
+  const limitedSurfaces = [...new Set(options.limitedSurfaces ?? [])].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  for (const surfaceId of limitedSurfaces) {
+    if (!bySurface.has(surfaceId)) {
+      bySurface.set(surfaceId, { confirmed: 0, stale: 0, unverifiable: 0 });
+    }
+  }
+  const limitedSurfaceSet = new Set(limitedSurfaces);
   const surfaces = [...bySurface.entries()]
     .map(([surfaceId, surfaceCounts]) => ({
       surfaceId,
-      status: statusForCounts(surfaceCounts),
+      status: limitedSurfaceSet.has(surfaceId)
+        ? ("limited" as const)
+        : statusForCounts(surfaceCounts),
       ...surfaceCounts,
     }))
     .sort((left, right) => left.surfaceId.localeCompare(right.surfaceId));
 
   return {
     semantics: PROJECT_MEMORY_RECONCILIATION_SUMMARY_SEMANTICS,
-    status: results.length === 0 ? "empty" : statusForCounts(counts),
+    status:
+      limitedSurfaces.length > 0
+        ? "limited"
+        : results.length === 0
+          ? "empty"
+          : statusForCounts(counts),
     observedAt,
     counts,
+    coverage: {
+      complete: limitedSurfaces.length === 0,
+      rowLimit: options.rowLimit ?? null,
+      limitedSurfaces,
+    },
     surfaces,
   };
 }

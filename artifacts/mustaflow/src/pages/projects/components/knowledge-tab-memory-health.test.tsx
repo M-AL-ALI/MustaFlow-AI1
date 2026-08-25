@@ -38,10 +38,11 @@ describe("KnowledgeTab memory health", () => {
     mocks.authFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
-        semantics: "zero-project-memory-reconciliation-summary-v1",
+        semantics: "zero-project-memory-reconciliation-summary-v2",
         status: "review-needed",
         observedAt: "2026-08-25T23:00:00.000Z",
         counts: { confirmed: 3, stale: 1, unverifiable: 2 },
+        coverage: { complete: true, rowLimit: 500, limitedSurfaces: [] },
       }),
     });
 
@@ -66,6 +67,34 @@ describe("KnowledgeTab memory health", () => {
     expect(
       await screen.findByText(
         "Some saved context could not be verified. Zero will rely on the current app instead of uncertain summaries.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Saved app context matches the project evidence the platform can verify."),
+    ).toBeNull();
+  });
+
+  it("explains when the bounded check cannot cover every saved record", async () => {
+    mocks.authFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        semantics: "zero-project-memory-reconciliation-summary-v2",
+        status: "limited",
+        observedAt: "2026-08-25T23:00:00.000Z",
+        counts: { confirmed: 500, stale: 0, unverifiable: 0 },
+        coverage: {
+          complete: false,
+          rowLimit: 500,
+          limitedSurfaces: ["chat-messages"],
+        },
+      }),
+    });
+
+    renderTab();
+
+    expect(
+      await screen.findByText(
+        "This project has more saved context than one safe check can cover. Zero will rely on the current app instead of treating a partial check as complete.",
       ),
     ).toBeVisible();
     expect(

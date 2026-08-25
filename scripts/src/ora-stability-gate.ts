@@ -667,6 +667,7 @@ const WEB_ORA_UI = [
 ].join(" ");
 
 const WEB_RELEASE_EXTENDED = [
+  "src/components/builder-chunk-error-boundary.test.tsx",
   "src/components/admin/__tests__/ora-routing-diagnostics-panel.test.ts",
   "src/components/ora/__tests__/ora-edit-quality-card.test.tsx",
   "src/components/ora/__tests__/ora-file-citations-chip.test.tsx",
@@ -678,6 +679,7 @@ const WEB_RELEASE_EXTENDED = [
   "src/hooks/__tests__/ora-stream-diagnostics.test.ts",
   "src/hooks/__tests__/ora-upload-gating.test.ts",
   "src/lib/file-generation/__tests__/analyst-workflow-export.test.ts",
+  "src/lib/builder-chunk-recovery.test.ts",
   "src/lib/__tests__/ora-project-scope.test.ts",
 ].join(" ");
 
@@ -705,6 +707,15 @@ const MOBILE_LIB_CRITICAL = [
 ].join(" ");
 
 const CHECKS: GateCheck[] = [
+  {
+    id: "release-operational-contracts",
+    title: "Release verification and serial-test contracts",
+    area: "build/release",
+    command: "pnpm --filter @workspace/scripts run test:release-contracts",
+    profiles: ["fast", "release"],
+    critical: true,
+    why: "Prevents stale publish panels, unsupported Vitest worker flags, and stale-chunk recovery from silently weakening release evidence.",
+  },
   {
     id: "libs-build",
     title: "Workspace lib type outputs (tsc --build --force)",
@@ -781,7 +792,7 @@ const CHECKS: GateCheck[] = [
     id: "web-realtime-voice",
     title: "Website Talk to Ora realtime tests",
     area: "web/voice",
-    command: `pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts ${WEB_REALTIME}`,
+    command: `pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts ${WEB_REALTIME} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
     why: "Protects web voice focus, settle window, reconnect ladder, watchdogs, and multi-turn stability.",
@@ -790,7 +801,7 @@ const CHECKS: GateCheck[] = [
     id: "web-ora-ui-critical",
     title: "Website Ora UI/account/billing wiring tests",
     area: "web/ui",
-    command: `pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts ${WEB_ORA_UI}`,
+    command: `pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts ${WEB_ORA_UI} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
     why: "Protects composer/file cards, account sync, billing cards, realtime UI, privacy, and pricing deep links.",
@@ -799,7 +810,7 @@ const CHECKS: GateCheck[] = [
     id: "mobile-lib-critical",
     title: "Mobile Ora parity and wiring tests",
     area: "mobile/ui",
-    command: `pnpm --filter @workspace/ora-mobile exec vitest run ${MOBILE_LIB_CRITICAL}`,
+    command: `pnpm --filter @workspace/ora-mobile exec vitest run ${MOBILE_LIB_CRITICAL} --no-file-parallelism`,
     profiles: ["fast", "mobile"],
     critical: true,
     why: "Protects mobile web parity, file-generation wiring, billing compliance, account sync, safe URLs, and voice privacy.",
@@ -809,7 +820,7 @@ const CHECKS: GateCheck[] = [
     title: "Mobile Talk to Ora reconnect hook tests",
     area: "mobile/voice",
     command:
-      "pnpm --filter @workspace/ora-mobile exec vitest run --config vitest.config.hooks.ts hooks/__tests__/ora-mobile-reconnect.test.ts",
+      "pnpm --filter @workspace/ora-mobile exec vitest run --config vitest.config.hooks.ts hooks/__tests__/ora-mobile-reconnect.test.ts --no-file-parallelism",
     profiles: ["fast", "mobile"],
     critical: true,
     why: "Protects native Talk to Ora reconnect/time-budget behavior on mobile.",
@@ -838,7 +849,7 @@ const CHECKS: GateCheck[] = [
     id: "web-release-extended",
     title: "Website extended Ora UI/file/source/history tests",
     area: "web/release",
-    command: `pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts ${WEB_RELEASE_EXTENDED}`,
+    command: `pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts ${WEB_RELEASE_EXTENDED} --no-file-parallelism`,
     profiles: ["release", "website"],
     timeoutMs: 240_000,
     critical: true,

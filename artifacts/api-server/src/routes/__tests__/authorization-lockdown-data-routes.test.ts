@@ -54,10 +54,11 @@ describe("authorization lockdown: data routes reject hostile resource identifier
     mocks.checkProjectAccess.mockResolvedValue("not_member");
     mocks.listAccessibleProjectIds.mockResolvedValue([]);
     mocks.readProjectMemoryReconciliationSummary.mockResolvedValue({
-      semantics: "zero-project-memory-reconciliation-summary-v1",
+      semantics: "zero-project-memory-reconciliation-summary-v2",
       status: "current",
       observedAt: "2026-08-25T23:00:00.000Z",
       counts: { confirmed: 2, stale: 0, unverifiable: 0 },
+      coverage: { complete: true, rowLimit: 500, limitedSurfaces: [] },
       surfaces: [],
     });
   });
@@ -96,10 +97,11 @@ describe("authorization lockdown: data routes reject hostile resource identifier
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
-      semantics: "zero-project-memory-reconciliation-summary-v1",
+      semantics: "zero-project-memory-reconciliation-summary-v2",
       status: "current",
       observedAt: "2026-08-25T23:00:00.000Z",
       counts: { confirmed: 2, stale: 0, unverifiable: 0 },
+      coverage: { complete: true, rowLimit: 500, limitedSurfaces: [] },
       surfaces: [],
     });
     expect(JSON.stringify(response.body)).not.toMatch(

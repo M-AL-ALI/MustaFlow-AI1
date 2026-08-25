@@ -19,10 +19,11 @@ const completeInput = {
 } as const;
 
 const currentMemoryTruth = {
-  semantics: "zero-project-memory-reconciliation-summary-v1",
+  semantics: "zero-project-memory-reconciliation-summary-v2",
   status: "current",
   observedAt: "2026-08-25T23:00:00.000Z",
   counts: { confirmed: 2, stale: 0, unverifiable: 0 },
+  coverage: { complete: true, rowLimit: 500, limitedSurfaces: [] },
   surfaces: [
     {
       surfaceId: "project-summary",

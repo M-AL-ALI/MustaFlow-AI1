@@ -622,10 +622,15 @@ function NewEntryForm({
 }
 
 type MemoryHealthResponse = {
-  semantics: "zero-project-memory-reconciliation-summary-v1";
+  semantics: "zero-project-memory-reconciliation-summary-v2";
   status: "current" | "review-needed" | "limited" | "empty";
   observedAt: string | null;
   counts: { confirmed: number; stale: number; unverifiable: number };
+  coverage: {
+    complete: boolean;
+    rowLimit: number | null;
+    limitedSurfaces: string[];
+  };
 };
 
 function MemoryHealthPanel({ projectId }: { projectId: number }) {
@@ -643,16 +648,19 @@ function MemoryHealthPanel({ projectId }: { projectId: number }) {
   const status = query.data?.status;
   const needsReview = status === "review-needed";
   const limited = status === "limited" || query.isError;
+  const coverageLimited = query.data?.coverage.complete === false;
   const current = status === "current";
-  const message = needsReview
-    ? "Some saved context no longer matches the app. Zero is withholding it; edit or archive the affected entries below, then check again."
-    : limited
-      ? "Some saved context could not be verified. Zero will rely on the current app instead of uncertain summaries."
-      : status === "empty"
-        ? "There is no saved app context to check yet."
-        : current
-          ? "Saved app context matches the project evidence the platform can verify."
-          : "Checking saved context against the current app…";
+  const message = coverageLimited
+    ? "This project has more saved context than one safe check can cover. Zero will rely on the current app instead of treating a partial check as complete."
+    : needsReview
+      ? "Some saved context no longer matches the app. Zero is withholding it; edit or archive the affected entries below, then check again."
+      : limited
+        ? "Some saved context could not be verified. Zero will rely on the current app instead of uncertain summaries."
+        : status === "empty"
+          ? "There is no saved app context to check yet."
+          : current
+            ? "Saved app context matches the project evidence the platform can verify."
+            : "Checking saved context against the current app…";
 
   return (
     <div
