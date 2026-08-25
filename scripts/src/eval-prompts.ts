@@ -177,7 +177,7 @@ const FIXTURES: Fixture[] = [
   {
     id: "refine-dark-mode",
     stage: "refine",
-    user: 'Current project file index.html contains a basic landing page. Apply this change: "Add a dark mode toggle that remembers the choice."',
+    user: 'Project: "Landing" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><h1>Welcome</h1><p>Our product helps small teams.</p></main></body></html>\n\nApply this change: Add a dark mode toggle that remembers the choice.',
     rubric:
       "Valid JSON with a `files` array (changed files only); change implements a toggle (class swap or CSS vars) AND uses localStorage; includes `unchangedFiles` array.",
     jsonMode: true,
@@ -185,7 +185,7 @@ const FIXTURES: Fixture[] = [
   {
     id: "refine-mobile",
     stage: "refine",
-    user: 'Current project has index.html (desktop dashboard with cards). Apply: "Make it look good on phones too without losing any data."',
+    user: 'Project: "Dashboard" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><h1>Dashboard</h1><section class="cards"><article><h2>Revenue</h2><p>$12,400</p></article><article><h2>Users</h2><p>842</p></article></section></main></body></html>\n\nApply this change: Make it look good on phones too without losing any data.',
     rubric:
       "Valid JSON with `files`; HTML/CSS uses responsive breakpoints (media queries / flex / grid); no data fields removed.",
     jsonMode: true,
@@ -193,7 +193,7 @@ const FIXTURES: Fixture[] = [
   {
     id: "refine-validation",
     stage: "refine",
-    user: 'Current project has index.html signup form (name+email). Apply: "Show a friendly inline error if the email is missing or invalid."',
+    user: 'Project: "Signup" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><form id="signup"><label>Name<input name="name"></label><label>Email<input name="email" type="email"></label><button type="submit">Join</button></form></body></html>\n\nApply this change: Show a friendly inline error if the email is missing or invalid.',
     rubric:
       "Valid JSON with `files`; change references an inline error message and email format check; no blocking alert().",
     jsonMode: true,
@@ -201,7 +201,7 @@ const FIXTURES: Fixture[] = [
   {
     id: "refine-typo",
     stage: "refine",
-    user: 'Current project has index.html with the headline "Wlcome". Apply: "Fix the typo — should be Welcome."',
+    user: 'Project: "Welcome" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><h1>Wlcome</h1><p>Existing copy stays here.</p></body></html>\n\nApply this change: Fix the typo — should be Welcome.',
     rubric:
       "Valid JSON with `files`; only changes Wlcome → Welcome; `unchangedFiles` excludes index.html OR `files` contains it with the corrected headline.",
     jsonMode: true,
@@ -209,7 +209,7 @@ const FIXTURES: Fixture[] = [
   {
     id: "refine-add-row",
     stage: "refine",
-    user: 'Current project has a 3-tier pricing page in index.html. Apply: "Add a fourth tier called Team at $49/mo."',
+    user: 'Project: "Pricing" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><section id="pricing"><article>Free — $0/mo</article><article>Pro — $19/mo</article><article>Enterprise — Contact us</article></section></main></body></html>\n\nApply this change: Add a fourth tier called Team at $49/mo.',
     rubric:
       "Valid JSON with `files`; new 'Team' card with $49/mo added; existing tier names preserved.",
     jsonMode: true,
@@ -369,7 +369,7 @@ const FIXTURES: Fixture[] = [
   {
     id: "architect-fine",
     stage: "architect",
-    user: "Review: builder produced `export const greet = (name) => `Hello, ${name}!`;` in greet.ts (full feature: a greet utility). Decide verdict.",
+    user: 'USER REQUEST:\nCreate a greet utility that returns "Hello, <name>!".\n\nDIFF SUMMARY:\nFiles added (1): greet.ts\nFiles modified (0): —\nFiles removed (0): —\n\nCOMMANDS RUN:\n- npm test (exit 0)\n\nFILE EXCERPTS:\n--- greet.ts ---\nexport const greet = (name: string) => `Hello, ${name}!`;',
     rubric: "Valid JSON; verdict is exactly 'pass'; findings empty or trivially short.",
     jsonMode: true,
   },

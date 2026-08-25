@@ -4,7 +4,7 @@ import {
   parsePromptEvalJudgeDecision,
 } from "./prompt-eval-evidence";
 
-const longContent = `HEAD_SENTINEL${"x".repeat(20_000)}TAIL_SENTINEL`;
+const longContent = `HEAD_SENTINEL${"x".repeat(40_000)}TAIL_SENTINEL`;
 const validJson = JSON.stringify({
   files: [{ path: "index.html", content: longContent, mimeType: "text/html" }],
   unchangedFiles: [],
@@ -24,6 +24,14 @@ assert.match(first.outputSha256, /^[0-9a-f]{64}$/u);
 const invalid = buildPromptEvalCandidateEvidence('{"files":[', true);
 assert.equal(invalid.jsonValid, false);
 assert.match(invalid.display, /did not parse/u);
+
+const fitsWhole = buildPromptEvalCandidateEvidence(
+  JSON.stringify({ content: `HEAD${"m".repeat(14_000)}MIDDLE_SENTINEL${"n".repeat(3_000)}TAIL` }),
+  true,
+);
+assert.equal(fitsWhole.jsonValid, true);
+assert.match(fitsWhole.display, /MIDDLE_SENTINEL/u);
+assert.doesNotMatch(fitsWhole.display, /"truncated": true/u);
 
 const plain = buildPromptEvalCandidateEvidence(longContent, false);
 assert.equal(plain.jsonValid, null);

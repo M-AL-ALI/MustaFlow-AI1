@@ -79,7 +79,9 @@ export function buildPromptEvalCandidateEvidence(
       body = [
         "AUTHORITATIVE STRUCTURAL PRECHECK: candidate JSON parsed successfully.",
         "The projection below is bounded evidence. Never treat a truncation marker as invalid JSON or end-of-file.",
-        JSON.stringify(projectValue(parsed), null, 2),
+        output.length <= MAX_EVIDENCE_CHARS
+          ? output
+          : JSON.stringify(projectValue(parsed), null, 2),
       ].join("\n\n");
     } catch {
       jsonValid = false;
