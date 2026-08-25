@@ -60,6 +60,8 @@ assert.ok(refinementPrompt, "the production refinement prompt must be inventorie
 assert.match(refinementPrompt, /MINIMUM-DIFF DISCIPLINE/u);
 assert.match(refinementPrompt, /Preserve all content, structure, styling, and behavior unrelated/u);
 assert.match(refinementPrompt, /do not rewrite, restyle, reorganize, add meta tags or scripts/u);
+assert.match(refinementPrompt, /localised change in a file of ANY size/u);
+assert.match(refinementPrompt, /exact copy, selector, or value correction/u);
 assert.doesNotMatch(refinementPrompt, /\$\{REFINE_BIAS_TO_ACTION\}/u);
 assert.doesNotMatch(refinementPrompt, /\$\{CODE_QUALITY_RULES\}/u);
 const refinementPrompts = [...first.contentBySourceId.entries()].filter(([id]) =>

@@ -38,6 +38,7 @@ import { fileURLToPath } from "url";
 import OpenAI from "openai";
 import {
   buildPromptEvalCandidateEvidence,
+  classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
 } from "./prompt-eval-evidence";
 
@@ -77,6 +78,7 @@ interface FixtureResult {
   outputSha256: string;
   candidateEvidenceChars: number;
   jsonValid: boolean | null;
+  generationAttempts: number;
   error?: string;
 }
 
@@ -203,7 +205,7 @@ const FIXTURES: Fixture[] = [
     stage: "refine",
     user: 'Project: "Welcome" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><h1>Wlcome</h1><p>Existing copy stays here.</p></body></html>\n\nApply this change: Fix the typo — should be Welcome.',
     rubric:
-      "Valid JSON with `files`; only changes Wlcome → Welcome; `unchangedFiles` excludes index.html OR `files` contains it with the corrected headline.",
+      "Valid JSON with `files` and/or `patches`; only changes Wlcome → Welcome. A surgical patch with find=Wlcome and replace=Welcome is perfect; a full file passes only when every other byte is preserved.",
     jsonMode: true,
   },
   {
@@ -418,17 +420,28 @@ async function judgeCandidate(
 }
 
 async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
+  let generationAttempts = 0;
   try {
-    const gen = await client.chat.completions.create({
-      model: MODEL,
-      ...(fx.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
-      messages: [
-        { role: "system", content: STAGE_PROMPT[fx.stage] },
-        { role: "user", content: fx.user },
-      ],
-      max_completion_tokens: MAX_GENERATION_TOKENS,
-    });
-    const output = gen.choices[0]?.message?.content?.trim() ?? "";
+    let output = "";
+    let generationIssue: ReturnType<typeof classifyPromptEvalGeneration> = "empty";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      generationAttempts = attempt;
+      const gen = await client.chat.completions.create({
+        model: MODEL,
+        ...(fx.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
+        messages: [
+          { role: "system", content: STAGE_PROMPT[fx.stage] },
+          { role: "user", content: fx.user },
+        ],
+        max_completion_tokens: MAX_GENERATION_TOKENS,
+      });
+      output = gen.choices[0]?.message?.content?.trim() ?? "";
+      generationIssue = classifyPromptEvalGeneration(output, fx.jsonMode);
+      if (generationIssue === null) break;
+    }
+    if (generationIssue !== null) {
+      throw new Error(`prompt_eval_generation_${generationIssue}_after_retry`);
+    }
 
     const evidence = buildPromptEvalCandidateEvidence(output, fx.jsonMode);
     const parsed = await judgeCandidate(client, fx.rubric, evidence.display);
@@ -444,6 +457,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
       outputSha256: evidence.outputSha256,
       candidateEvidenceChars: evidence.evidenceChars,
       jsonValid: evidence.jsonValid,
+      generationAttempts,
     };
   } catch (err) {
     return {
@@ -457,6 +471,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
       outputSha256: "0".repeat(64),
       candidateEvidenceChars: 0,
       jsonValid: fx.jsonMode ? false : null,
+      generationAttempts,
       error: err instanceof Error ? err.message : String(err),
     };
   }

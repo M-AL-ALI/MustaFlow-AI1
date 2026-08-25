@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildPromptEvalCandidateEvidence,
+  classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
 } from "./prompt-eval-evidence";
 
@@ -45,6 +46,12 @@ assert.deepEqual(parsePromptEvalJudgeDecision('{"score":8,"reasoning":"Meets the
 assert.equal(parsePromptEvalJudgeDecision("not-json"), null);
 assert.equal(parsePromptEvalJudgeDecision('{"score":11,"reasoning":"Invalid score."}'), null);
 assert.equal(parsePromptEvalJudgeDecision('{"score":8,"reasoning":""}'), null);
+
+assert.equal(classifyPromptEvalGeneration("", true), "empty");
+assert.equal(classifyPromptEvalGeneration("  \n", false), "empty");
+assert.equal(classifyPromptEvalGeneration('{"files":[', true), "invalid_json");
+assert.equal(classifyPromptEvalGeneration('{"files":[]}', true), null);
+assert.equal(classifyPromptEvalGeneration("A complete plain-text reply.", false), null);
 
 console.log("prompt_eval_evidence_tests=PASS");
 console.log("database=not consulted");

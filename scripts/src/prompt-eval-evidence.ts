@@ -19,6 +19,23 @@ export interface PromptEvalJudgeDecision {
   reasoning: string;
 }
 
+export type PromptEvalGenerationIssue = "empty" | "invalid_json";
+
+export function classifyPromptEvalGeneration(
+  output: string,
+  jsonMode: boolean,
+): PromptEvalGenerationIssue | null {
+  const trimmed = output.trim();
+  if (trimmed.length === 0) return "empty";
+  if (!jsonMode) return null;
+  try {
+    JSON.parse(trimmed);
+    return null;
+  } catch {
+    return "invalid_json";
+  }
+}
+
 function boundedText(value: string, limit = MAX_EVIDENCE_CHARS): string {
   if (value.length <= limit) return value;
   const marker = `\n[EVALUATION EVIDENCE TRUNCATED: ${value.length - limit} CHARS OMITTED; THIS IS NOT END-OF-FILE]\n`;

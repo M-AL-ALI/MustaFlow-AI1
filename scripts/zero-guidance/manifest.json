@@ -2322,8 +2322,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 1108,
-      "contentSha256": "fdfdaadc66dbd44fe0743e61d23f83fd08fde7ee0a29c7a9f9f7155b32b20787",
+      "contentBytes": 1298,
+      "contentSha256": "ddbc865802de457001300dfd44fd2a52c94a9cfd99e2c1345213eb2a699b88c3",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2362,8 +2362,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 1075,
-      "contentSha256": "f4e520f73a43f9ca3e3b24f77fd354b6145d48cca6fdb506232d379bfc1e7aae",
+      "contentBytes": 1265,
+      "contentSha256": "718c44ba8dcd8561eb88d2895776e545c5048a03dd84217f36636ac8e97f14ac",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2562,8 +2562,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4417,
-      "contentSha256": "c86d636e5b2e57d54996c91b8f53e742027ac1bb56159be38831783a3c9e3989",
+      "contentBytes": 4607,
+      "contentSha256": "665154f154bfe014f105073bc13102a3fa33756eb40282e2b4000ec50c9c60db",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2602,8 +2602,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4377,
-      "contentSha256": "ed5187bcbb3610d201ee3887ae0ef4ed950d2d76f2c9487244dd12e7e3d59391",
+      "contentBytes": 4567,
+      "contentSha256": "575af5e34a19b023acc758346b0115ccfcb78c09ba2490a3a3ae316548643eba",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2642,8 +2642,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4446,
-      "contentSha256": "40cf67d5936352246eb4b6543a502bc2e5e87bf2995a4c0363aeecbaa990d359",
+      "contentBytes": 4636,
+      "contentSha256": "b9084eac287403b591fcb329f3d66f83cc1aae4f180b658383e8bdd069d905a4",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2742,8 +2742,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 8664,
-      "contentSha256": "e288d3c69a7097aa3fb6d5074c8379602f438b287b9e44fe7658d0bc3f644de6",
+      "contentBytes": 8854,
+      "contentSha256": "d9b22875c8deb83cb31e4f40bbc71f8f7eb34025351dc3f49f823814adfdc19f",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2782,8 +2782,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4685,
-      "contentSha256": "d3cf1e765c8d1a36ca44293ef2a43da20d2e311bddfdf3cda99b1dcd986c6116",
+      "contentBytes": 4875,
+      "contentSha256": "1622bb7e0fc19c16aa8678bdbb256347cf374074939f7aa86986aae369b0d5e1",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2822,8 +2822,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4411,
-      "contentSha256": "3db7acceefbc7d0e7866e6d0a460dd52e5836b96eef8dc5d97ac5161bdce6b75",
+      "contentBytes": 4601,
+      "contentSha256": "ea2cce9b2e2d8ee03ab7f46cdf13744bb53add58e6d8df53ccadf587835743cc",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2862,8 +2862,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4636,
-      "contentSha256": "f51af642a5fc9801b52bdd7c26d7f618de0aa1d4759d3c19a27588d78ecf907a",
+      "contentBytes": 4826,
+      "contentSha256": "790ce98f1b2407641c4bd12ed9523f637b89de55b4c4e83e17d8a800c935b427",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2942,8 +2942,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4645,
-      "contentSha256": "8dd2d4c1a93f6ca07ffce6823635251366ab9283444af825e80a2074fa9bc8e1",
+      "contentBytes": 4835,
+      "contentSha256": "fe4388cbc73108a2d5f13739910739a4531a390a9d5d32c19ca94d3f66e1bc35",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -2982,8 +2982,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 4957,
-      "contentSha256": "96410ae3857f242ecd11c0ef468034a0f770cf6c273aa85d106c7d1965d7efaf",
+      "contentBytes": 5147,
+      "contentSha256": "a36ce80e7e67514d1fc61a78ac128dd38afba84b60c8c89e9e8a36781558525a",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -3022,8 +3022,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 12298,
-      "contentSha256": "34312779df1b17bb19c9a456dcc865f43890dd588618dbffc12e91b05d6896a3",
+      "contentBytes": 12598,
+      "contentSha256": "2cb27a980aaad1f000a8739068eb60636fcc1bb980c50fde65fa9a9b822cfbf1",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"
@@ -3082,8 +3082,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 1141,
-      "contentSha256": "b571d829d08bd95dc766ee93a1163394b04cb43da682fc63be89dd8d66ddcfdf",
+      "contentBytes": 1331,
+      "contentSha256": "7deb60bbc76d51038df357f0a8dee4585297a89ff1530bef7d9b18d60b246755",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"

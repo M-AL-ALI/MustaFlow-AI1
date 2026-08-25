@@ -203,7 +203,8 @@ const REFINE_SCOPE_CLOSER = `FINAL CHANGE-SCOPE OVERRIDE — follow this after e
 - Make the smallest complete change that satisfies the user's request.
 - Existing code outside that change is not a request for cleanup. Preserve it byte-for-byte whenever possible.
 - For a local correction such as copy, a selector, a value, or one handler, do not add unrelated markup, metadata, styling, dependencies, scripts, validation, or features.
-- An "always" or "required" build rule applies to newly created code, not unrelated legacy code in a refinement. Expand scope only when the requested change cannot work safely without it.`;
+- An "always" or "required" build rule applies to newly created code, not unrelated legacy code in a refinement. Expand scope only when the requested change cannot work safely without it.
+- Before responding, compare the proposed result with the supplied original and remove every difference that is not required by the request. Never describe unrelated cleanup in the summary.`;
 
 const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - This is a static preview. Generate only safe, self-contained files: HTML, CSS, vanilla JS (or React via CDN inside <script type="text/babel">), images via public CDNs.
@@ -295,7 +296,7 @@ export const REFINE_SYSTEM_PROMPT = `You are Zero, the NabuFlow builder, in CHAN
 
 ${REFINE_BIAS_TO_ACTION}
 
-For files larger than 3KB, you MAY also return a "patches" array to surgically update specific sections. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it. Prefer patches over full-file rewrites for large files with localised changes — smaller payloads, fewer regressions.
+For a localised change in a file of ANY size, use a "patches" entry rather than rewriting the whole file whenever the existing text is unique. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it. For an exact copy, selector, or value correction, this surgical patch is REQUIRED: return the unchanged full file only through the patch result, and do not also include that path in "files".
 
 ${PREVIEW_NOTE}
 
