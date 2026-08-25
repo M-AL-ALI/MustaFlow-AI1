@@ -80,17 +80,12 @@ router.get(
       return;
     }
 
-    // If we have a machine ID, refresh from Fly
+    // Observe the provider without mutating durable project state. Reads never write;
+    // reconciliation belongs behind an explicit mutation path.
     let status = project.containerStatus as string;
     if (project.containerId && (status === "running" || status === "starting")) {
       const live = await getContainerStatus(project.containerId);
-      if (live !== status) {
-        await db
-          .update(projectsTable)
-          .set({ containerStatus: live })
-          .where(eq(projectsTable.id, projectId));
-        status = live;
-      }
+      status = live;
     }
 
     res.json({
