@@ -1,6 +1,6 @@
 {
-  "startedAt": "2026-05-24T00:00:00.000Z",
-  "finishedAt": "2026-05-24T00:00:00.000Z",
+  "startedAt": "2026-08-25T11:06:04.752Z",
+  "finishedAt": "2026-08-25T11:10:45.725Z",
   "model": "gpt-5-mini",
   "totalFixtures": 30,
   "passed": 30,
@@ -10,275 +10,394 @@
     "build": {
       "passed": 5,
       "failed": 0,
-      "avgScore": 7
+      "avgScore": 10
     },
     "refine": {
       "passed": 5,
       "failed": 0,
-      "avgScore": 7
+      "avgScore": 10
     },
     "plan": {
       "passed": 5,
       "failed": 0,
-      "avgScore": 7
+      "avgScore": 10
     },
     "intent": {
       "passed": 5,
       "failed": 0,
-      "avgScore": 7
+      "avgScore": 10
     },
     "converse": {
       "passed": 5,
       "failed": 0,
-      "avgScore": 7
+      "avgScore": 10
     },
     "architect": {
       "passed": 5,
       "failed": 0,
-      "avgScore": 7
+      "avgScore": 10
     }
   },
   "results": [
     {
       "id": "build-todo",
       "stage": "build",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "files includes index.html; JS implements add (submitAdd), complete (toggleComplete), delete (deleteTodo); uses localStorage for persistence and stateful re-render; files array non-empty.",
+      "outputPreview": "{\n  \"blueprint\": {\n    \"projectName\": \"Zero Todos\",\n    \"projectType\": \"Single-page web app\",\n    \"targetPlatforms\": [\n      \"Desktop\",\n      \"Mobile\"\n    ],\n    \"pages\": [\n      {\n        \"name\": \"Home\",\n        \"route\": \"index.html\"\n      }\n    ],\n    \"components\": [\n      \"Header\",\n      \"AddTodoForm\",\n      \"FilterBar\",\n      \"TodoList\",\n      \"TodoItem\",\n      \"StatsFooter\"\n    ],\n    \"data\":",
+      "outputChars": 16325,
+      "outputSha256": "0f1a2be561769db41821866757a2081d24583ca93a839056f7a6633b1f15ebe0",
+      "candidateEvidenceChars": 16504,
+      "jsonValid": true
     },
     {
       "id": "build-pricing",
       "stage": "build",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "All checks pass. JSON includes files with index.html; HTML/meta reference Free, Pro, Enterprise; pricing cards use a 3-column grid and blueprint/summary describe a feature-comparison matrix.",
+      "outputPreview": "{\n  \"blueprint\": {\n    \"projectName\": \"Nimbus Pricing\",\n    \"projectType\": \"Marketing / Pricing Page\",\n    \"targetPlatforms\": [\n      \"desktop\",\n      \"mobile\",\n      \"tablet\"\n    ],\n    \"pages\": [\n      {\n        \"name\": \"Pricing\",\n        \"route\": \"./index.html\"\n      }\n    ],\n    \"components\": [\n      \"Header / Nav\",\n      \"Pricing Tier Cards (Free / Pro / Enterprise)\",\n      \"Billing Cycle Tog",
+      "outputChars": 26531,
+      "outputSha256": "4735932e1d486bbb27b7cbe6175f752f93b997df815e6884b42efc1ecdbc0bf5",
+      "candidateEvidenceChars": 12427,
+      "jsonValid": true
     },
     {
       "id": "build-portfolio",
       "stage": "build",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "All rubric checks met: JSON contains files with index.html; markup includes a hero section, a gallery grid (populated by JS/lightbox) and contact form fields with client-side validation.",
+      "outputPreview": "{\n  \"blueprint\": {\n    \"projectName\": \"Photographica Portfolio\",\n    \"projectType\": \"Single-page portfolio\",\n    \"targetPlatforms\": [\n      \"desktop\",\n      \"mobile\",\n      \"tablet\"\n    ],\n    \"pages\": [\n      {\n        \"name\": \"Home\",\n        \"route\": \"./index.html\"\n      }\n    ],\n    \"components\": [\n      \"Header (nav)\",\n      \"Hero\",\n      \"Gallery grid\",\n      \"Lightbox / image viewer\",\n      ",
+      "outputChars": 19927,
+      "outputSha256": "606d11dfb8608a56759a629b2cc70c063994cbc4a62a2119a83bd76b4c7d4603",
+      "candidateEvidenceChars": 20106,
+      "jsonValid": true
     },
     {
       "id": "build-counter",
       "stage": "build",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Contains a files array with index.html and the in-file JavaScript explicitly uses localStorage (getItem/setItem/setItem) to persist count and step — meets rubric.",
+      "outputPreview": "{\n  \"blueprint\": {\n    \"projectName\": \"Persistent Click Counter\",\n    \"projectType\": \"Single-page web app\",\n    \"targetPlatforms\": [\n      \"desktop\",\n      \"mobile\"\n    ],\n    \"pages\": [\n      {\n        \"name\": \"Home\",\n        \"route\": \"index.html\"\n      }\n    ],\n    \"components\": [\n      \"Header\",\n      \"CounterPanel\",\n      \"Controls (increment, decrement, reset)\",\n      \"StepForm\",\n      \"Reset",
+      "outputChars": 15886,
+      "outputSha256": "4c7dbf2a48df808ade6e656280d2e1b42421a52b5b38f04dbed401ae2e5c5bbe",
+      "candidateEvidenceChars": 16065,
+      "jsonValid": true
     },
     {
       "id": "build-form",
       "stage": "build",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "All rubric checks satisfied: JSON includes files with index.html; form contains name, email, and message inputs; email validation is present (type=\"email\" and a JS regex).",
+      "outputPreview": "{\n  \"blueprint\": {\n    \"projectName\": \"Zero Contact Form\",\n    \"projectType\": \"Static web contact form\",\n    \"targetPlatforms\": [\n      \"desktop\",\n      \"mobile\",\n      \"tablet\"\n    ],\n    \"pages\": [\n      {\n        \"name\": \"Contact\",\n        \"route\": \"index.html\"\n      }\n    ],\n    \"components\": [\n      \"Header\",\n      \"Contact form (name, email, message)\",\n      \"Client-side validation\",\n      \"",
+      "outputChars": 17308,
+      "outputSha256": "7784cbb8c79f850495735b52553a43eac1dbe715430909fe97a6db86d9cde6a6",
+      "candidateEvidenceChars": 17487,
+      "jsonValid": true
     },
     {
       "id": "refine-dark-mode",
       "stage": "refine",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets all rubric checks: valid JSON with a files array (changed file only), implements a class-based dark-mode toggle, persists choice via localStorage, and includes an unchangedFiles array.",
+      "outputPreview": "{\n  \"files\": [\n    {\n      \"path\": \"index.html\",\n      \"mimeType\": \"text/html\",\n      \"content\": \"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"UTF-8\\\">\\n  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n  <meta name=\\\"description\\\" content=\\\"Landing — a simple marketing landing page with a dark mode toggle that remembers your choice.\\\">\\n  <title>Landi",
+      "outputChars": 8892,
+      "outputSha256": "7b7ccb96dfb88650ef4b190b2efe800ac23db73ed1d522e189fbb96c79a4b61c",
+      "candidateEvidenceChars": 9071,
+      "jsonValid": true
     },
     {
       "id": "refine-mobile",
       "stage": "refine",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Pass: index.html present and parsed; uses responsive layout (Tailwind grid: grid-cols-1 sm:grid-cols-2 and flex), includes ARIA attributes, interactivity preserved, no files removed.",
+      "outputPreview": "{\n  \"files\": [\n    {\n      \"path\": \"index.html\",\n      \"content\": \"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"UTF-8\\\">\\n  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n  <meta name=\\\"description\\\" content=\\\"Dashboard showing key metrics — Revenue and Users, responsive and mobile-friendly.\\\">\\n  <title>Dashboard</title>\\n  <script src=\\\"https://cdn.",
+      "outputChars": 11402,
+      "outputSha256": "e82e770903c9acac8ed12a28472a869f485e679d6bb674f39a666cb5a4d7c6bc",
+      "candidateEvidenceChars": 11581,
+      "jsonValid": true
     },
     {
       "id": "refine-validation",
       "stage": "refine",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON with files; index.html includes an inline error element (email-error) and isValidEmail(email) check; no blocking alert() calls present.",
+      "outputPreview": "{\n  \"files\": [\n    {\n      \"path\": \"index.html\",\n      \"content\": \"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"UTF-8\\\">\\n  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n  <meta name=\\\"description\\\" content=\\\"Signup page with friendly inline email validation and accessible feedback.\\\">\\n  <title>Signup</title>\\n  <script src=\\\"https://cdn.tailwindcss",
+      "outputChars": 8116,
+      "outputSha256": "a4e78a43661ac60486cd54d4f817f5f9edef69d689ba00489f98cbba769874e6",
+      "candidateEvidenceChars": 8295,
+      "jsonValid": true
     },
     {
       "id": "refine-typo",
       "stage": "refine",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets rubric: valid JSON with files; index.html is present and the <h1> corrected to 'Welcome'; unchangedFiles excludes index.html, so only the allowed change was applied.",
+      "outputPreview": "{\n  \"files\": [\n    {\n      \"path\": \"index.html\",\n      \"content\": \"<!doctype html>\\n<html lang=\\\"en\\\">\\n  <head>\\n    <meta charset=\\\"UTF-8\\\">\\n    <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n    <meta name=\\\"description\\\" content=\\\"Welcome page for the Welcome project.\\\">\\n    <title>Welcome</title>\\n  </head>\\n  <body>\\n    <header>\\n      <h1>Welcome</h1>\\n    </",
+      "outputChars": 997,
+      "outputSha256": "a7aa17218af9b8b7f2c7ddd5690d8429c3663b4e416764c602a1c5664db71a2f",
+      "candidateEvidenceChars": 1176,
+      "jsonValid": true
     },
     {
       "id": "refine-add-row",
       "stage": "refine",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "All checks pass: JSON includes 'files'; index.html contains Free, Pro, Team ($49/mo), and Enterprise. The Team card with $49/mo is present and existing tier names are preserved.",
+      "outputPreview": "{\n  \"files\": [\n    {\n      \"path\": \"index.html\",\n      \"content\": \"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"UTF-8\\\">\\n  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n  <meta name=\\\"description\\\" content=\\\"Pricing tiers for the Pricing project: Free, Pro, Team, and Enterprise.\\\">\\n  <title>Pricing</title>\\n</head>\\n<body>\\n  <header>\\n    <h1>Pric",
+      "outputChars": 2742,
+      "outputSha256": "dd3a5567099fc734f2d69b1ed838d415c317bfa397d03f64dad87b641d9e15de",
+      "candidateEvidenceChars": 2921,
+      "jsonValid": true
     },
     {
       "id": "plan-blog",
       "stage": "plan",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Candidate JSON parsed; includes a 'summary' string and a 'pages' array containing 'Home', 'Post Detail', and 'About' (≥3 pages). Meets rubric.",
+      "outputPreview": "{\n  \"summary\": \"A lightweight personal blog built as a static site (Next.js or similar) that serves a homepage listing posts, a post detail page for reading individual posts (Markdown/MDX), and an about page. It supports responsive layout, basic SEO, RSS, optional comments, and a dark/light theme preference persisted in localStorage.\",\n  \"goal\": \"Deliver a minimal, fast, accessible personal blog w",
+      "outputChars": 8809,
+      "outputSha256": "ac99909b7ba164bee7a37a0742bfbc2b0c415d9d39913852d7eea0dbfa96a45c",
+      "candidateEvidenceChars": 8988,
+      "jsonValid": true
     },
     {
       "id": "plan-ecom",
       "stage": "plan",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets rubric: includes a summary, pages (includes Home/Product Listing, Cart, Checkout), and an explicit dataModel. Candidate JSON parsed successfully per precheck.",
+      "outputPreview": "{\n  \"summary\": \"A small e-commerce storefront supporting product listing, product details, client-side cart (persisted to localStorage), and a checkout flow that creates an order and charges with Stripe. Includes a lightweight Node/Express backend for product APIs, order creation, and Stripe PaymentIntent handling, and a PostgreSQL database for products and orders. Focus on clear UX, mobile-respon",
+      "outputChars": 12907,
+      "outputSha256": "6362bb7d1c8ec1a631ccd424c6fda36f62af4f6565297e2d338a3831e88291ad",
+      "candidateEvidenceChars": 13086,
+      "jsonValid": true
     },
     {
       "id": "plan-events",
       "stage": "plan",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets all requirements: valid JSON with summary and pages, includes search, event detail, and RSVP flows. Provides complete, consistent API, data model, pages, and implementation details.",
+      "outputPreview": "{\n  \"summary\": \"A web-based events directory where visitors can search and filter events, view event details, and RSVP. Includes user authentication (optional social login), RSVP management, admin/event organizer flows for creating and editing events, and email confirmations. Built as a React single-page app with a lightweight Node/Express REST API and a relational database for persistence.\",\n  \"g",
+      "outputChars": 15900,
+      "outputSha256": "8d35b62ce9e17c7eeddb2048b07d97caff8c2ddca314f0aff8dbd7af0fb04566",
+      "candidateEvidenceChars": 16079,
+      "jsonValid": true
     },
     {
       "id": "plan-faq",
       "stage": "plan",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Pass: JSON includes 'summary' and 'pages', explicitly mentions categories and search (full-text/Algolia), and provides comprehensive sitemap, API, and data model covering required items.",
+      "outputPreview": "{\n  \"summary\": \"A customer support FAQ site with categorized articles, a fast full-text search, user feedback on articles, and an optional admin interface for content management. The plan covers frontend pages and components, a small backend API with CRUD for FAQs and categories, a relational data model (Postgres), optional search indexing (Algolia or Postgres full-text), integrations for notifica",
+      "outputChars": 15715,
+      "outputSha256": "f4ada64a2df1b5b1ee7fe7534f6358b5f30e3d2f29a6b677fdebb0eb9f8ab594",
+      "candidateEvidenceChars": 15894,
+      "jsonValid": true
     },
     {
       "id": "plan-dashboard",
       "stage": "plan",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON with required 'summary' and 'pages' fields; explicitly mentions budgets, transactions, and charts throughout the document.",
+      "outputPreview": "{\n  \"summary\": \"A responsive personal finance dashboard web app with user authentication, bank connections, transaction import, budgeting, and interactive charts to visualize spending and progress toward budgets.\",\n  \"goal\": \"Provide a single-pane financial overview where users can connect accounts, track transactions, create budgets, and analyze spending through charts and reports to make better ",
+      "outputChars": 16737,
+      "outputSha256": "bd773167c4e3e3f70c3e21190248d9bd20730e7aa5dee00ac4a0e63dcc59e99c",
+      "candidateEvidenceChars": 16916,
+      "jsonValid": true
     },
     {
       "id": "intent-build-new",
       "stage": "intent",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON and the intent field equals exactly \"mutate\" as required; passes the authoritative structural precheck.",
+      "outputPreview": "{\"intent\":\"mutate\",\"confidence\":0.89}",
+      "outputChars": 37,
+      "outputSha256": "b7423c93ae7978b3f585c167835eda521216cc0fe529ec72a7b0e14bed6f1333",
+      "candidateEvidenceChars": 216,
+      "jsonValid": true
     },
     {
       "id": "intent-refine",
       "stage": "intent",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON and 'intent' field exactly equals \"mutate\"; authoritative structural precheck confirms the candidate JSON parsed successfully.",
+      "outputPreview": "{\"intent\":\"mutate\",\"confidence\":0.98}",
+      "outputChars": 37,
+      "outputSha256": "ea2402710ea4e4e1043f22541041a1d5007aa89284b3062918fece5e854b81dd",
+      "candidateEvidenceChars": 216,
+      "jsonValid": true
     },
     {
       "id": "intent-question",
       "stage": "intent",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON and 'intent' equals exactly \"answer\"; authoritative structural precheck passed.",
+      "outputPreview": "{\"intent\":\"answer\",\"confidence\":0.92}",
+      "outputChars": 37,
+      "outputSha256": "3cd78e00efcb657e22e94c8602c754dc9f9f8116f4589b05f9773b2ff5d734b2",
+      "candidateEvidenceChars": 216,
+      "jsonValid": true
     },
     {
       "id": "intent-meta",
       "stage": "intent",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON and intent equals exactly \"answer\" as required; authoritative structural precheck confirms candidate JSON parsed successfully.",
+      "outputPreview": "{\"intent\":\"answer\",\"confidence\":0.93}",
+      "outputChars": 37,
+      "outputSha256": "a4f4b885f56da64587f9388cd6169247272cb4a14b884ff79fe145676ca06536",
+      "candidateEvidenceChars": 216,
+      "jsonValid": true
     },
     {
       "id": "intent-plan",
       "stage": "intent",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Valid JSON parsed and the intent field equals exactly \"plan\", satisfying the rubric.",
+      "outputPreview": "{\"intent\":\"plan\",\"confidence\":0.95}",
+      "outputChars": 35,
+      "outputSha256": "191ac9d4490037eff46a232fc6251092ecd17d8cfab53d7b99ef36350b8c9043",
+      "candidateEvidenceChars": 214,
+      "jsonValid": true
     },
     {
       "id": "converse-greeting",
       "stage": "converse",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets all rubric points: friendly and focused, clearly lists app-building capabilities, invites a concrete idea with next steps, contains no code, and makes no unsupported claims.",
+      "outputPreview": "Great — I can build pretty much any small-to-medium web or mobile app inside this workspace. Tell me what you want and I’ll either produce a plan or start building it. A quick overview of what I can do and how to get started:\n\nWhat I can build\n- Static sites (HTML/CSS/JS using Tailwind + lucide via CDN) — best for landing pages, marketing sites, docs.\n- Single-page apps (React + Vite) — full clien",
+      "outputChars": 2616,
+      "outputSha256": "ae084d29ddb158933ef98ba976cdced1a801d744296d44e50ed8f3e3da662b8f",
+      "candidateEvidenceChars": 2704,
+      "jsonValid": null
     },
     {
       "id": "converse-clarify",
       "stage": "converse",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets all rubric criteria: plain language, clear useful app categories, focused on NabuFlow, invites a concrete next step, and contains no code.",
+      "outputPreview": "Short answer: almost anything web or cross-platform mobile — from simple marketing sites to full SPAs, APIs, and native-feeling mobile apps. Below is a quick mapping so you can pick the right NabuFlow project kind for your idea.\n\nWhat NabuFlow can build (and which project kind to choose)\n- Static marketing sites / landing pages: Static HTML/CSS/JS (Tailwind + lucide via CDN). Fast, low-cost, ideal",
+      "outputChars": 2579,
+      "outputSha256": "536517f9f822b326cf133bf199f4c87dce8fab85e1ae89628053a9ce34d7b6a4",
+      "candidateEvidenceChars": 2667,
+      "jsonValid": null
     },
     {
       "id": "converse-confirm",
       "stage": "converse",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Acknowledges the publish and provides concrete, actionable next steps (verify public URL, check readiness gate/logs) and specific tasks like adding a custom domain or secrets.",
+      "outputPreview": "Nice — congrats on the publish! Here’s a concise checklist of important next steps inside NabuFlow and a few recommended production actions.\n\nQuick verification (what to check now)\n- Open the Publishing tab and copy the public URL (stable snapshot URL: /api/p/<slug>/). Visit it in a private browser window to verify the live site.\n- Check the Publish readiness gate on the Publishing tab for any blo",
+      "outputChars": 2436,
+      "outputSha256": "22d38e99a827b7d153247d16c650f7b8a164c5160adbe3130d4165f8029fe2a0",
+      "candidateEvidenceChars": 2524,
+      "jsonValid": null
     },
     {
       "id": "converse-blocked",
       "stage": "converse",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Clearly refuses paywall circumvention, recommends legal alternatives (APIs, RSS, NewsAPI, etc.), and gives practical, non-evading guidance and safe scraping examples.",
+      "outputPreview": "I can’t help with bypassing paywalls or giving instructions to circumvent a publisher’s paywall — that’s illegal and unethical. I can, however, show legal, ethical ways to get news content and give safe code examples for scraping only content that’s public and allowed by the site’s terms of service.\n\nLegal alternatives\n- Subscribe or get a press/partner API from the publisher (many have developer ",
+      "outputChars": 3234,
+      "outputSha256": "5351d069766fc1556c6c2a0e8e3dc50b81e83bfddc26e61136ee837b94128b3b",
+      "candidateEvidenceChars": 3322,
+      "jsonValid": null
     },
     {
       "id": "converse-frustrated",
       "stage": "converse",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Acknowledges frustration without grovelling; provides concrete next steps (files to inspect) and lists checks; asks one diagnostic question (project kind); no excessive apology.",
+      "outputPreview": "Ugh — let's get this fixed. I need to inspect the app files to see why the login button's onClick is a no-op (missing handler, wrong selector, prevented by overlay, failing event binding, or front-end not calling the auth API). Tell me nothing else and I’ll run an automated inspection and fix loop — just send any message and I’ll start.\n\nBefore I run it, these are the specific files I’ll look at (",
+      "outputChars": 1364,
+      "outputSha256": "ae9b56a8d5b304efc943ed91f60d7850f9c9e40710273fc05f3d09419d5c3c1b",
+      "candidateEvidenceChars": 1452,
+      "jsonValid": null
     },
     {
       "id": "architect-sql",
       "stage": "architect",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Compliant: verdict is 'fail' and findings clearly identify SQL injection and recommend parameterized/ prepared queries; JSON parsed successfully per precheck.",
+      "outputPreview": "{\n  \"verdict\": \"fail\",\n  \"summary\": \"The implementation builds an SQL query by interpolating user input into a string, introducing a critical SQL injection vulnerability; it also lacks error handling and other best practices.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"SQL injection via string interpolation\",\n      \"detail\": \"The code constructs SQL with string interpolat",
+      "outputChars": 2629,
+      "outputSha256": "1353a18e96aeccf431ee7393999e589a74c115a24bcdad5fd7420096f52d1126",
+      "candidateEvidenceChars": 2808,
+      "jsonValid": true
     },
     {
       "id": "architect-eval",
       "stage": "architect",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets rubric: valid JSON, verdict is 'fail', findings explicitly describe arbitrary code execution (eval(userInput) -> RCE) and provide remediation; passes all checks.",
+      "outputPreview": "{\n  \"verdict\": \"fail\",\n  \"summary\": \"The build contains a direct call to eval(userInput) in app.js which creates an immediate remote code execution vulnerability; this must be removed or replaced before production deployment.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Arbitrary code execution via eval(userInput)\",\n      \"detail\": \"The code calls eval(userInput) (app.js).",
+      "outputChars": 2896,
+      "outputSha256": "4991b7226fe7d5e3eb2663825448f00c85b12a3994266a4770010de7f4f0217a",
+      "candidateEvidenceChars": 3075,
+      "jsonValid": true
     },
     {
       "id": "architect-const",
       "stage": "architect",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Meets rubric: valid JSON parsed, verdict is 'fail', and findings explicitly cite reassignment of const causing a runtime error with appropriate remediation steps.",
+      "outputPreview": "{\n  \"verdict\": \"fail\",\n  \"summary\": \"The produced code contains a reassignment to a const (const x = 5; x = 6;) which will throw at runtime (TypeError: Assignment to constant variable), so the build is broken and must be fixed.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Reassignment to const causes runtime error\",\n      \"detail\": \"The code snippet 'const x = 5; x = 6;' a",
+      "outputChars": 1765,
+      "outputSha256": "e12f0166406209df68662830187751f6eceb6fb48d727a310e38b0af8d868104",
+      "candidateEvidenceChars": 1944,
+      "jsonValid": true
     },
     {
       "id": "architect-localstorage-token",
       "stage": "architect",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Matches rubric: verdict 'fail' is allowed; findings explicitly describe XSS risk from localStorage, token theft, and recommend HttpOnly Secure SameSite cookies and in-memory token use; parsed OK.",
+      "outputPreview": "{\n  \"verdict\": \"fail\",\n  \"summary\": \"Storing a session token in localStorage is a critical security vulnerability (exposes tokens to theft via XSS); this must be removed and replaced with a secure storage pattern (httpOnly Secure SameSite cookies or safe in-memory + refresh cookie).\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Session token persisted to localStorage — vuln",
+      "outputChars": 3059,
+      "outputSha256": "2df68ca9ce26ae618fa2dfae7584b4ba03e444c0da88f023589f0a27e0528c42",
+      "candidateEvidenceChars": 3238,
+      "jsonValid": true
     },
     {
       "id": "architect-fine",
       "stage": "architect",
-      "score": 7,
+      "score": 10,
       "passed": true,
-      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
-      "outputPreview": ""
+      "reasoning": "Candidate JSON parsed; verdict is exactly 'pass'; no critical or high findings present—only allowed low-severity findings with clear evidence and actions.",
+      "outputPreview": "{\n  \"verdict\": \"pass\",\n  \"summary\": \"The greet utility correctly returns \\\"Hello, <name>!\\\" and tests passed; implementation is simple and functional.\",\n  \"findings\": [\n    {\n      \"severity\": \"low\",\n      \"title\": \"No handling for null/undefined or non-string inputs\",\n      \"detail\": \"greet(name: string) assumes callers pass a string; if callers pass null/undefined (e.g., from JS code) the runtim",
+      "outputChars": 1428,
+      "outputSha256": "fb62d5b376ae29f24f4e2bb4754964a52fe92935937fd821f8f1a3997260f16a",
+      "candidateEvidenceChars": 1607,
+      "jsonValid": true
     }
-  ],
-  "_note": "Synthetic committed baseline (Task #545). Every fixture is pinned at score 7 — any production run that drops a fixture below 6 will register as a loser and, beyond the 10% regression threshold, will fail CI. Refresh via --update-baseline once a real production run is available."
+  ]
 }
