@@ -5,6 +5,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
 import {
+  buildPromptEvalCandidateEvidence,
+  parsePromptEvalJudgeDecision,
+} from "./prompt-eval-evidence";
+import {
   buildZeroGuidanceInventory,
   stableJson,
   zeroGuidanceRepoRoot,
@@ -21,7 +25,7 @@ const MODEL = process.env["EVAL_MODEL"] ?? "gpt-5-mini";
 const CONCURRENCY = Math.max(1, Number(process.env["EVAL_CONCURRENCY"] ?? "4"));
 const SOURCE_EXCERPT_CHARS = 12_000;
 const MAX_GENERATION_TOKENS = 8_000;
-const MAX_JUDGE_TOKENS = 1_000;
+const MAX_JUDGE_TOKENS = 2_000;
 const RESULTS_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -33,7 +37,7 @@ function getOpenAI(): OpenAI {
   const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
   const baseURL = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
   if (!apiKey) throw new Error("AI_INTEGRATIONS_OPENAI_API_KEY is not set");
-  return new OpenAI({ apiKey, baseURL });
+  return new OpenAI({ apiKey, baseURL, timeout: 120_000, maxRetries: 1 });
 }
 
 function unwrapRuntimePrompt(content: string): string {
@@ -51,7 +55,55 @@ function unwrapRuntimePrompt(content: string): string {
 
 function boundedSource(id: string, content: string): string {
   if (content.length <= SOURCE_EXCERPT_CHARS) return `SOURCE ${id}\n${content}`;
-  return `SOURCE ${id}\n${content.slice(0, SOURCE_EXCERPT_CHARS)}\n[ZERO GUIDANCE SOURCE TRUNCATED: ${content.length - SOURCE_EXCERPT_CHARS} CHARS OMITTED]`;
+  const head = Math.ceil(SOURCE_EXCERPT_CHARS / 2);
+  const tail = Math.floor(SOURCE_EXCERPT_CHARS / 2);
+  return `SOURCE ${id}\n${content.slice(0, head)}\n[ZERO GUIDANCE SOURCE TRUNCATED: ${content.length - SOURCE_EXCERPT_CHARS} CHARS OMITTED; THIS IS NOT END-OF-FILE]\n${content.slice(-tail)}`;
+}
+
+async function judgeCandidate(
+  client: OpenAI,
+  rubric: string,
+  candidate: string,
+): Promise<{ score: number; reasoning: string }> {
+  const messages = [
+    {
+      role: "system" as const,
+      content:
+        'Return strict JSON: {"score": integer 0-10, "reasoning": string no longer than 200 characters}. A score of 6 passes. Judge only against the supplied rubric. Treat authoritative structural prechecks as facts. A bounded projection or truncation marker is not end-of-file and is never, by itself, a defect.',
+    },
+    {
+      role: "user" as const,
+      content: `Rubric: ${rubric}\n\nCandidate evidence:\n${candidate}`,
+    },
+  ];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const judged = await client.chat.completions.create({
+      model: MODEL,
+      response_format: { type: "json_object" },
+      messages,
+      max_completion_tokens: MAX_JUDGE_TOKENS,
+    });
+    const parsed = parsePromptEvalJudgeDecision(judged.choices[0]?.message?.content ?? "");
+    if (parsed) return parsed;
+  }
+  throw new Error("zero_guidance_judge_invalid_after_retry");
+}
+
+function errorSpecimen(error: unknown): string {
+  if (!(error instanceof Error)) return "UnknownError:status=none:code=none";
+  const candidate = error as Error & {
+    status?: unknown;
+    code?: unknown;
+    cause?: { code?: unknown };
+  };
+  const status = typeof candidate.status === "number" ? candidate.status : "none";
+  const code =
+    typeof candidate.code === "string"
+      ? candidate.code
+      : typeof candidate.cause?.code === "string"
+        ? candidate.cause.code
+        : "none";
+  return `${candidate.name || "Error"}:status=${status}:code=${code}`;
 }
 
 function systemPromptForCase(
@@ -92,36 +144,19 @@ async function runCase(
       max_completion_tokens: MAX_GENERATION_TOKENS,
     });
     const output = generated.choices[0]?.message?.content?.trim() ?? "";
-    const judged = await client.chat.completions.create({
-      model: MODEL,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            'Return strict JSON: {"score": integer 0-10, "reasoning": string no longer than 200 characters}. A score of 6 passes. Judge only against the supplied rubric.',
-        },
-        {
-          role: "user",
-          content: `Rubric: ${liveCase.rubric}\n\nCandidate:\n${output.slice(0, 6_000)}`,
-        },
-      ],
-      max_completion_tokens: MAX_JUDGE_TOKENS,
-    });
-    const judgeText = judged.choices[0]?.message?.content ?? "{}";
-    let parsed: { score?: number; reasoning?: string } = {};
-    try {
-      parsed = JSON.parse(judgeText) as { score?: number; reasoning?: string };
-    } catch {
-      parsed = {};
-    }
-    const score = Math.max(0, Math.min(10, Math.round(Number(parsed.score ?? 0))));
+    const evidence = buildPromptEvalCandidateEvidence(output, liveCase.jsonMode);
+    const parsed = await judgeCandidate(client, liveCase.rubric, evidence.display);
+    const score = parsed.score;
     return {
       id: liveCase.id,
       coverageId: liveCase.coverageId,
       score,
       passed: score >= 6,
-      reasoning: String(parsed.reasoning ?? "").slice(0, 200),
+      reasoning: parsed.reasoning,
+      outputChars: evidence.outputChars,
+      outputSha256: evidence.outputSha256,
+      candidateEvidenceChars: evidence.evidenceChars,
+      jsonValid: evidence.jsonValid,
     };
   } catch (error) {
     return {
@@ -130,7 +165,11 @@ async function runCase(
       score: 0,
       passed: false,
       reasoning: "",
-      error: error instanceof Error ? error.name : "UnknownError",
+      outputChars: 0,
+      outputSha256: "0".repeat(64),
+      candidateEvidenceChars: 0,
+      jsonValid: liveCase.jsonMode ? false : null,
+      error: errorSpecimen(error),
     };
   }
 }

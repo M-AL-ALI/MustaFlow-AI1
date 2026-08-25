@@ -12,6 +12,8 @@ import {
 } from "./zero-guidance-live-cases";
 import {
   requiredLiveCoverageIds,
+  expectedZeroGuidanceEvaluatedHead,
+  ZERO_GUIDANCE_LIVE_RECEIPT_PATH,
   validateZeroGuidanceLiveResult,
   zeroGuidanceChangeRequiresLiveEval,
   type ZeroGuidanceLiveResult,
@@ -26,6 +28,10 @@ const results = ZERO_GUIDANCE_LIVE_CASES.map((liveCase) => ({
   score: 8,
   passed: true,
   reasoning: "Simulated deterministic release receipt.",
+  outputChars: 120,
+  outputSha256: "e".repeat(64),
+  candidateEvidenceChars: 180,
+  jsonValid: liveCase.jsonMode ? true : null,
 }));
 const valid: ZeroGuidanceLiveResult = {
   schemaVersion: 1,
@@ -60,6 +66,23 @@ const validate = (result: ZeroGuidanceLiveResult) =>
   });
 
 assert.deepEqual(validate(valid), { ok: true, code: "zero_guidance_live_result_valid" });
+
+assert.equal(
+  expectedZeroGuidanceEvaluatedHead({
+    releaseHead: "f".repeat(40),
+    parentHead: head,
+    changedPathsFromParent: [ZERO_GUIDANCE_LIVE_RECEIPT_PATH],
+  }),
+  head,
+);
+assert.equal(
+  expectedZeroGuidanceEvaluatedHead({
+    releaseHead: "f".repeat(40),
+    parentHead: head,
+    changedPathsFromParent: [ZERO_GUIDANCE_LIVE_RECEIPT_PATH, "artifacts/api-server/src/app.ts"],
+  }),
+  "f".repeat(40),
+);
 
 const stale = structuredClone(valid);
 stale.gitSha = "b".repeat(40);
@@ -139,6 +162,16 @@ assert.match(
   promptEvalJob,
   /fetch-depth:\s*0/u,
   "The release evaluator must fetch the full commit graph so a multi-commit push can inspect its exact before SHA",
+);
+assert.doesNotMatch(
+  promptEvalJob,
+  /AI_INTEGRATIONS_OPENAI_(?:API_KEY|BASE_URL)/u,
+  "GitHub must not receive network-bound production AI credentials",
+);
+assert.match(
+  promptEvalJob,
+  /Validate the governed live-eval receipt/u,
+  "Changed release heads must validate the governed receipt",
 );
 
 console.log(`required_live_coverage=${requiredCoverage.length}`);

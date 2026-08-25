@@ -56,7 +56,7 @@
     "eval-prompts": "tsx ./src/eval-prompts.ts",
     "zero-guidance:write": "tsx ./src/zero-guidance-cli.ts write",
     "zero-guidance:check": "tsx ./src/zero-guidance-cli.ts check",
-    "zero-guidance:test": "tsx ./src/zero-guidance-manifest.test.ts && tsx ./src/zero-guidance-release.test.ts",
+    "zero-guidance:test": "tsx ./src/prompt-eval-evidence.test.ts && tsx ./src/zero-guidance-manifest.test.ts && tsx ./src/zero-guidance-release.test.ts",
     "zero-guidance:changed": "tsx ./src/zero-guidance-cli.ts changed",
     "zero-guidance:live": "tsx ./src/zero-guidance-live-eval.ts",
     "zero-guidance:validate-live": "tsx ./src/zero-guidance-cli.ts validate-live",

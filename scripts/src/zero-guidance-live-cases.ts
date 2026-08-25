@@ -26,7 +26,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     coverageId: "live:refinement",
     mode: "runtime-prompt",
     sourceIds: ["prompt:builder:REFINE_SYSTEM_PROMPT"],
-    user: "The current page has a working event schedule. Add a high-contrast toggle without removing or rewriting unrelated sections.",
+    user: 'Project: "Event demo" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><h1>Community Day</h1><section id="schedule"><h2>Schedule</h2><p>10:00 Welcome</p></section></main></body></html>\n\nApply this change: Add a high-contrast toggle without removing or rewriting unrelated sections.',
     rubric:
       "Returns the refinement shape, changes only affected files, preserves the schedule, and implements a usable high-contrast toggle.",
     jsonMode: true,
@@ -95,7 +95,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     coverageId: "live:test-planning",
     mode: "runtime-prompt",
     sourceIds: ["prompt:builder:TEST_GENERATION_SYSTEM_PROMPT"],
-    user: "Plan tests for a contact form with validation, successful submission, and an error retry.",
+    user: 'Project description: Contact form with invalid-input feedback, successful submission, and an error retry.\n\nHTML content:\n<form id="contact"><input name="email" type="email" required><button type="submit">Send</button><p id="error" hidden>Check your email</p><p id="success" hidden>Message sent</p><button id="retry" hidden>Try again</button></form>',
     rubric: "Returns a concise plan that covers the three requested user-visible outcomes.",
     jsonMode: true,
   },
@@ -197,7 +197,7 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     id: "terminal-honesty-contract",
     coverageId: "live:terminal-honesty",
     mode: "source-audit",
-    sourceIds: ["contract:terminal-honesty:presenter"],
+    sourceIds: ["contract:terminal-honesty:parser", "contract:terminal-honesty:presenter"],
     user: "State exactly when Zero may tell a person that a change was applied, and how interruption, failure, and changed-with-issues are described.",
     rubric:
       "Says mutation success requires version and diff evidence, preserves interrupted and failed outcomes, distinguishes changed-with-issues, and never converts missing evidence into successful past tense.",

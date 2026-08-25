@@ -1,0 +1,42 @@
+import assert from "node:assert/strict";
+import {
+  buildPromptEvalCandidateEvidence,
+  parsePromptEvalJudgeDecision,
+} from "./prompt-eval-evidence";
+
+const longContent = `HEAD_SENTINEL${"x".repeat(20_000)}TAIL_SENTINEL`;
+const validJson = JSON.stringify({
+  files: [{ path: "index.html", content: longContent, mimeType: "text/html" }],
+  unchangedFiles: [],
+});
+const first = buildPromptEvalCandidateEvidence(validJson, true);
+const second = buildPromptEvalCandidateEvidence(validJson, true);
+
+assert.deepEqual(first, second, "candidate evidence must be deterministic");
+assert.equal(first.jsonValid, true);
+assert.match(first.display, /parsed successfully/u);
+assert.match(first.display, /HEAD_SENTINEL/u);
+assert.match(first.display, /TAIL_SENTINEL/u);
+assert.match(first.display, /"truncated": true/u);
+assert.ok(first.display.length <= 24_000);
+assert.match(first.outputSha256, /^[0-9a-f]{64}$/u);
+
+const invalid = buildPromptEvalCandidateEvidence('{"files":[', true);
+assert.equal(invalid.jsonValid, false);
+assert.match(invalid.display, /did not parse/u);
+
+const plain = buildPromptEvalCandidateEvidence(longContent, false);
+assert.equal(plain.jsonValid, null);
+assert.match(plain.display, /HEAD_SENTINEL/u);
+assert.match(plain.display, /TAIL_SENTINEL/u);
+
+assert.deepEqual(parsePromptEvalJudgeDecision('{"score":8,"reasoning":"Meets the rubric."}'), {
+  score: 8,
+  reasoning: "Meets the rubric.",
+});
+assert.equal(parsePromptEvalJudgeDecision("not-json"), null);
+assert.equal(parsePromptEvalJudgeDecision('{"score":11,"reasoning":"Invalid score."}'), null);
+assert.equal(parsePromptEvalJudgeDecision('{"score":8,"reasoning":""}'), null);
+
+console.log("prompt_eval_evidence_tests=PASS");
+console.log("database=not consulted");

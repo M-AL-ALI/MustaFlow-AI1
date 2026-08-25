@@ -9,6 +9,10 @@ export interface ZeroGuidanceLiveCaseResult {
   score: number;
   passed: boolean;
   reasoning: string;
+  outputChars: number;
+  outputSha256: string;
+  candidateEvidenceChars: number;
+  jsonValid: boolean | null;
   error?: string;
 }
 
@@ -28,6 +32,9 @@ export interface ZeroGuidanceLiveResult {
   results: ZeroGuidanceLiveCaseResult[];
 }
 
+export const ZERO_GUIDANCE_LIVE_RECEIPT_PATH =
+  "scripts/eval-results/zero-guidance-latest.json" as const;
+
 export type ZeroGuidanceReleaseValidation =
   | { ok: true; code: "zero_guidance_live_result_valid" }
   | {
@@ -44,7 +51,11 @@ export type ZeroGuidanceReleaseValidation =
 
 const TOOLING_PATHS = new Set([
   ".github/workflows/ci.yml",
+  "scripts/eval-results/baseline.json",
+  "scripts/package.json",
   "scripts/src/eval-prompts.ts",
+  "scripts/src/prompt-eval-evidence.test.ts",
+  "scripts/src/prompt-eval-evidence.ts",
   "scripts/src/zero-guidance-cli.ts",
   "scripts/src/zero-guidance-live-eval.ts",
   "scripts/src/zero-guidance-live-cases.ts",
@@ -52,9 +63,23 @@ const TOOLING_PATHS = new Set([
   "scripts/src/zero-guidance-manifest.ts",
   "scripts/src/zero-guidance-release.test.ts",
   "scripts/src/zero-guidance-release.ts",
+  ZERO_GUIDANCE_LIVE_RECEIPT_PATH,
   "scripts/zero-guidance/coverage.json",
   "scripts/zero-guidance/manifest.json",
 ]);
+
+export function expectedZeroGuidanceEvaluatedHead(input: {
+  releaseHead: string;
+  parentHead: string | null;
+  changedPathsFromParent: readonly string[];
+}): string {
+  const normalized = input.changedPathsFromParent.map(normalizePath);
+  return input.parentHead !== null &&
+    normalized.length === 1 &&
+    normalized[0] === ZERO_GUIDANCE_LIVE_RECEIPT_PATH
+    ? input.parentHead
+    : input.releaseHead;
+}
 
 function normalizePath(value: string): string {
   return value.replace(/\\/gu, "/").replace(/^\.\//u, "");
@@ -186,6 +211,23 @@ export function validateZeroGuidanceLiveResult(input: {
       ok: false,
       code: "zero_guidance_live_result_invalid",
       detail: "The aggregate counts do not match the case results.",
+    };
+  }
+  if (
+    result.results.some(
+      (entry) =>
+        !Number.isInteger(entry.outputChars) ||
+        entry.outputChars < 0 ||
+        !/^[0-9a-f]{64}$/u.test(entry.outputSha256) ||
+        !Number.isInteger(entry.candidateEvidenceChars) ||
+        entry.candidateEvidenceChars < 0 ||
+        ![true, false, null].includes(entry.jsonValid),
+    )
+  ) {
+    return {
+      ok: false,
+      code: "zero_guidance_live_result_invalid",
+      detail: "A case result is missing bounded candidate evidence identity.",
     };
   }
   if (failed > 0 || errored > 0) {

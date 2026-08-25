@@ -7782,6 +7782,8 @@ export const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder 
 - "observe": The user asks to inspect, diagnose, review, test, verify, or explain observed project state without asking for a change.
 - "mutate": The user unambiguously instructs you to change code or project state now. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar".
 
+Direct requests such as "build a...", "create a...", or "I want to build..." are "mutate" unless the user explicitly asks for a plan first.
+
 Reasoning principles (apply in order, BEFORE judging):
 1. A question or explanation request with no explicit change instruction is "answer".
 2. Short reactions and meta-comments are "answer" unless they contain an explicit change instruction.
@@ -8722,6 +8724,7 @@ RULES:
 - First step MUST be waitForSelector for a prominent element (h1, main, [role="main"], header, nav, or .container)
 - Include expectTitle to verify the page has a meaningful title
 - Add 2-4 interaction steps: click a button/link, fill a form if present, expect visible content
+- When the description names both invalid and successful form outcomes, exercise both: submit invalid input and assert its user-visible error, then fill valid input, submit, and assert the user-visible success state
 - Use CSS selectors that are robust — prefer tag names and roles over fragile class hashes
 - Keep selectors simple: h1, button, nav a, form, input[type="email"], .hero, #main, [role="main"]
 - Do NOT use XPath or complex pseudo-selectors

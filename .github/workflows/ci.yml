@@ -96,27 +96,12 @@ jobs:
           test "$RUN" = "true" || test "$RUN" = "false"
           echo "run=$RUN" >> "$GITHUB_OUTPUT"
 
-      - name: Require live-eval credentials for changed release heads
-        if: github.ref == 'refs/heads/main' && steps.changed.outputs.run == 'true'
-        env:
-          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
-        run: test -n "$AI_INTEGRATIONS_OPENAI_API_KEY"
-
-      - name: Run existing prompt depth evals
-        if: github.ref == 'refs/heads/main' && steps.changed.outputs.run == 'true'
-        env:
-          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
-          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
-        run: pnpm --filter @workspace/scripts run eval-prompts
-
-      - name: Run representative instruction evals
-        if: github.ref == 'refs/heads/main' && steps.changed.outputs.run == 'true'
-        env:
-          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
-          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
-        run: pnpm --filter @workspace/scripts run zero-guidance:live
-
-      - name: Validate the named release-head result
+      # The production AI integration is network-bound to the governed Replit
+      # environment.  That environment evaluates the exact code commit and a
+      # receipt-only child commit carries the bounded result into GitHub.  The
+      # validator accepts that one-file child and rejects any lookalike with an
+      # additional changed path.
+      - name: Validate the governed live-eval receipt
         if: github.ref == 'refs/heads/main' && steps.changed.outputs.run == 'true'
         run: >-
           pnpm --filter @workspace/scripts run zero-guidance:validate-live --
@@ -129,7 +114,6 @@ jobs:
         with:
           name: zero-guidance-eval-${{ github.sha }}
           path: |
-            scripts/eval-results/latest.json
             scripts/eval-results/zero-guidance-latest.json
           if-no-files-found: ignore
 

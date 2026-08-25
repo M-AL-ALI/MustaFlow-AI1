@@ -15,6 +15,8 @@ import {
 } from "./zero-guidance-live-cases";
 import {
   requiredLiveCoverageIds,
+  expectedZeroGuidanceEvaluatedHead,
+  ZERO_GUIDANCE_LIVE_RECEIPT_PATH,
   validateZeroGuidanceLiveResult,
   zeroGuidanceChangeRequiresLiveEval,
   type ZeroGuidanceLiveResult,
@@ -76,7 +78,22 @@ async function changed(): Promise<void> {
 async function validateLive(): Promise<void> {
   const resultPath = argument("--result");
   if (!resultPath) throw new Error("zero_guidance_live_result_path_missing");
-  const expectedHead = argument("--head") ?? (await git(["rev-parse", "HEAD"]));
+  const releaseHead = argument("--head") ?? (await git(["rev-parse", "HEAD"]));
+  let parentHead: string | null = null;
+  let changedPathsFromParent: string[] = [];
+  try {
+    parentHead = await git(["rev-parse", `${releaseHead}^`]);
+    const changed = await git(["diff", "--name-only", parentHead, releaseHead, "--"]);
+    changedPathsFromParent = changed ? changed.split(/\r?\n/u) : [];
+  } catch {
+    parentHead = null;
+    changedPathsFromParent = [];
+  }
+  const expectedHead = expectedZeroGuidanceEvaluatedHead({
+    releaseHead,
+    parentHead,
+    changedPathsFromParent,
+  });
   const inventory = await buildZeroGuidanceInventory(root);
   const result = JSON.parse(
     await readFile(join(root, resultPath), "utf8"),
@@ -90,6 +107,14 @@ async function validateLive(): Promise<void> {
     requiredCases: ZERO_GUIDANCE_LIVE_CASES,
   });
   console.log(JSON.stringify(validation));
+  console.log(
+    JSON.stringify({
+      releaseHead,
+      evaluatedHead: expectedHead,
+      receiptPath: ZERO_GUIDANCE_LIVE_RECEIPT_PATH,
+      receiptOnlyChild: expectedHead !== releaseHead,
+    }),
+  );
   if (!validation.ok) process.exitCode = 1;
 }
 

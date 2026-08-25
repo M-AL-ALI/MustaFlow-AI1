@@ -2179,6 +2179,28 @@
         "messages",
         "workspace"
       ],
+      "contentBytes": 4161,
+      "contentSha256": "156d6538a33e920bf6c15fca37ac69dba1ab80d6136d88f64d7518fe75671eec",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:terminal-honesty"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:terminal-honesty:parser",
+      "kind": "context-assembler",
+      "selector": "function:parseZeroTerminalV1",
+      "sourcePath": "lib/ora-contracts/src/zero-terminal.ts"
+    },
+    {
+      "consumers": [
+        "jobs",
+        "messages",
+        "workspace"
+      ],
       "contentBytes": 3411,
       "contentSha256": "165d962ee0af7c15543a40a7185610b63eb5243e2d74e7c2998973848adb7d53",
       "coverageIds": [
@@ -2640,8 +2662,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 2205,
-      "contentSha256": "7dc67700efcbebf94f0b0795c9b49236da906c7ccca86afc88b4d5fdbb05ac75",
+      "contentBytes": 2346,
+      "contentSha256": "ef43aed98d7a2c77d46f2ca89745928f5b0bda88365234eb36499e0924c5112b",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:intent"
@@ -3080,8 +3102,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 1305,
-      "contentSha256": "229c2016f0ce6d7d6aaedd019e5f1f4f40f9b6e6bba32bbcc1ea511faf2bd430",
+      "contentBytes": 1521,
+      "contentSha256": "1cac75e8934e03e3cca30ec617bac17a3149edf302250e4af4abe402bb5444b6",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:test-planning"

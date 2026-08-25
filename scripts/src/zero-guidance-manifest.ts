@@ -382,6 +382,15 @@ const EXPLICIT_SOURCES: ExplicitSourceSpec[] = [
     liveCoverageId: "live:intent-admission",
   },
   {
+    id: "contract:terminal-honesty:parser",
+    kind: "context-assembler",
+    sourcePath: "lib/ora-contracts/src/zero-terminal.ts",
+    selector: { type: "function", name: "parseZeroTerminalV1" },
+    consumers: ["messages", "jobs", "workspace"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:terminal-honesty",
+  },
+  {
     id: "contract:terminal-honesty:presenter",
     kind: "context-assembler",
     sourcePath: "lib/ora-contracts/src/zero-terminal.ts",
