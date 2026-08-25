@@ -55,6 +55,14 @@ assert.ok(!rendered.includes("ENCRYPTION_KEY"));
 const syntheticCredentialPrefix = ["sk", "test"].join("_") + "_";
 assert.ok(!rendered.includes(syntheticCredentialPrefix));
 
+const refinementPrompt = first.contentBySourceId.get("prompt:builder:REFINE_SYSTEM_PROMPT");
+assert.ok(refinementPrompt, "the production refinement prompt must be inventoried");
+assert.match(refinementPrompt, /MINIMUM-DIFF DISCIPLINE/u);
+assert.match(refinementPrompt, /Preserve all content, structure, styling, and behavior unrelated/u);
+assert.match(refinementPrompt, /do not rewrite, restyle, reorganize, add meta tags or scripts/u);
+assert.doesNotMatch(refinementPrompt, /\$\{REFINE_BIAS_TO_ACTION\}/u);
+assert.doesNotMatch(refinementPrompt, /\$\{CODE_QUALITY_RULES\}/u);
+
 console.log(`manifest_sources=${first.manifest.sources.length}`);
 console.log(`manifest_sha256=${first.manifestSha256}`);
 console.log("skills=31 blueprints=40");

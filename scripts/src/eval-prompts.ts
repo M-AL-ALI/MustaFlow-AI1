@@ -370,7 +370,8 @@ const FIXTURES: Fixture[] = [
     id: "architect-fine",
     stage: "architect",
     user: 'USER REQUEST:\nCreate a greet utility that returns "Hello, <name>!".\n\nDIFF SUMMARY:\nFiles added (1): greet.ts\nFiles modified (0): —\nFiles removed (0): —\n\nCOMMANDS RUN:\n- npm test (exit 0)\n\nFILE EXCERPTS:\n--- greet.ts ---\nexport const greet = (name: string) => `Hello, ${name}!`;',
-    rubric: "Valid JSON; verdict is exactly 'pass'; findings empty or trivially short.",
+    rubric:
+      "Valid JSON; verdict is exactly 'pass'; no critical or high findings. Evidence-backed low findings are allowed by the production Architect verdict contract.",
     jsonMode: true,
   },
 ];

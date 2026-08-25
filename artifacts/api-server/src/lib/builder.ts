@@ -144,7 +144,7 @@ export type ValidationResult = {
   warnings: string[];
 };
 
-const CODE_QUALITY_RULES = `CODE QUALITY RULES — apply unconditionally to every file you generate:
+const CODE_QUALITY_RULES = `CODE QUALITY RULES — apply to every new build. In CHANGE MODE, apply them to new or directly changed code; the minimum-diff discipline takes precedence over cleanup of unrelated existing code:
 
 SEMANTIC HTML:
 - Use correct heading hierarchy (h1→h2→h3). One h1 per page.
@@ -187,6 +187,11 @@ const REFINE_BIAS_TO_ACTION = `BIAS TO ACTION — this is a CHANGE request, not 
     2. Provide a concrete next step the user can take in "nextRecommendation" (rephrase, share the failing input, configure a secret, etc.).
 - If the user's intent is ambiguous, make your best interpretation and ship a change — do not refuse. The user can always rollback to the previous version.
 - Never claim "your app is already up to date" unless you genuinely inspected every relevant file and confirmed no change is warranted.
+
+MINIMUM-DIFF DISCIPLINE — the requested scope is a contract:
+- Preserve all content, structure, styling, and behavior unrelated to the requested change.
+- For a local correction, do not rewrite, restyle, reorganize, add meta tags or scripts, or otherwise "improve" unrelated existing code merely to satisfy general build-quality guidance.
+- Apply quality and safety rules to the code you add or directly change. Expand the change only when that is required to keep the requested behavior working or safe, and explain that necessity in the summary.
 
 PROACTIVE DIAGNOSIS — when the user reports a symptom without naming the cause:
 - Phrases like "the app is not running", "it's broken", "something is wrong", "there's a bug", "it's not loading", "nothing happens", "the button doesn't work", "I see an error" are fix requests. Do NOT ask the user to describe the problem in more detail.

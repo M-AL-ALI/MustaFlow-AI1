@@ -531,7 +531,41 @@ function promptCoverage(name: string): string {
 
 function promptDeclarations(text: string, path: string): { name: string; content: string }[] {
   const file = sourceFile(path, text);
+  const initializers = new Map<string, ts.Expression>();
   const found: { name: string; content: string }[] = [];
+  const collect = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      initializers.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(file);
+
+  const render = (node: ts.Expression, stack: ReadonlySet<string>): string => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isParenthesizedExpression(node)) return render(node.expression, stack);
+    if (ts.isIdentifier(node)) {
+      const referenced = initializers.get(node.text);
+      if (!referenced || stack.has(node.text)) return node.getText(file);
+      return render(referenced, new Set([...stack, node.text]));
+    }
+    if (ts.isTemplateExpression(node)) {
+      return (
+        node.head.text +
+        node.templateSpans
+          .map((span) => {
+            const expression = render(span.expression, stack);
+            return expression + span.literal.text;
+          })
+          .join("")
+      );
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      return render(node.left, stack) + render(node.right, stack);
+    }
+    return node.getText(file);
+  };
+
   const visit = (node: ts.Node): void => {
     if (
       ts.isVariableDeclaration(node) &&
@@ -539,7 +573,10 @@ function promptDeclarations(text: string, path: string): { name: string; content
       node.initializer &&
       (node.name.text.endsWith("_SYSTEM_PROMPT") || node.name.text === "INTENT_CLASSIFIER_SYSTEM")
     ) {
-      found.push({ name: node.name.text, content: node.initializer.getText(file) });
+      found.push({
+        name: node.name.text,
+        content: render(node.initializer, new Set([node.name.text])),
+      });
     }
     ts.forEachChild(node, visit);
   };
