@@ -12,6 +12,7 @@ import { NabuflowSandbox } from "./runtime-backend";
 
 const PREVIEW_COOKIE_PREFIX = "__Host-nabuflow_preview_";
 const PREVIEW_EMBEDDING_POLICY = "same-site";
+const PREVIEW_EMBEDDER_POLICY = "require-corp";
 const CLOCK_SKEW_SECONDS = 5;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -105,6 +106,7 @@ export async function handlePreviewDataPlaneRequest(
         status: 302,
         headers: {
           "cache-control": "no-store",
+          "cross-origin-embedder-policy": PREVIEW_EMBEDDER_POLICY,
           "cross-origin-resource-policy": PREVIEW_EMBEDDING_POLICY,
           location: url.toString(),
           "referrer-policy": "no-referrer",
@@ -386,6 +388,7 @@ function sanitizeUpstreamResponse(upstream: Response): Response {
     if (!unsafeCookieDomain(setCookie)) headers.append("set-cookie", setCookie);
   }
   headers.set("cache-control", "private, no-store");
+  headers.set("cross-origin-embedder-policy", PREVIEW_EMBEDDER_POLICY);
   headers.set("cross-origin-resource-policy", PREVIEW_EMBEDDING_POLICY);
   return new Response(upstream.body, {
     status: upstream.status,
@@ -406,6 +409,7 @@ function previewErrorResponse(
       status,
       headers: {
         "cache-control": "no-store",
+        "cross-origin-embedder-policy": PREVIEW_EMBEDDER_POLICY,
         "cross-origin-resource-policy": PREVIEW_EMBEDDING_POLICY,
         "content-type": "application/json; charset=utf-8",
         ...(status === 401 ? { "www-authenticate": 'Preview realm="nabuflow-staging"' } : {}),
