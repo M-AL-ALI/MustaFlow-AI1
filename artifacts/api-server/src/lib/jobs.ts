@@ -69,6 +69,7 @@ import { selectKnowledgeContext, type KnowledgeContextResult } from "./knowledge
 import { recordKnowledgeContextUsage } from "./knowledge-context-usage";
 import { projectSummaryProvenance } from "./project-summary-provenance";
 import { zeroProjectMemoryContext } from "./zero-project-memory";
+import { loadZeroProjectChoices } from "./zero-project-choice-store";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
@@ -2417,6 +2418,7 @@ export async function runJob(input: JobInput): Promise<void> {
       { context: rawKnowledgeContext, applied: knowledgeApplied },
       rawConversationSummary,
       blueprintContext,
+      projectChoices,
     ] = await Promise.all([
       loadKnowledgeContext(projectId, userPrompt),
       (async () => {
@@ -2440,6 +2442,7 @@ export async function runJob(input: JobInput): Promise<void> {
         }
       })(),
       getInstalledBlueprintKnowledge(projectId, zeroGenerationTarget),
+      loadZeroProjectChoices(projectId),
     ]);
 
     const conversationSummary = zeroProjectMemoryContext({
@@ -2449,6 +2452,7 @@ export async function runJob(input: JobInput): Promise<void> {
       summary: project.summary,
       lastTaskSummary: project.lastTaskSummary,
       conversationSummary: rawConversationSummary,
+      choices: projectChoices,
     });
 
     // Knowledge selection is a read. Usage telemetry is an explicit, task-bound,

@@ -30,6 +30,8 @@ export const KNOWLEDGE_TYPES = [
   "note",
   "conversation_summary",
   "style_memory",
+  "decision",
+  "rejection",
 ] as const;
 export type KnowledgeType = (typeof KNOWLEDGE_TYPES)[number];
 

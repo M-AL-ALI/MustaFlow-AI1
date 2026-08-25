@@ -1,3 +1,5 @@
+import { presentZeroProjectChoices, type ZeroProjectChoiceProfile } from "./zero-project-choices";
+
 export const ZERO_PROJECT_MEMORY_SEMANTICS = "zero-project-memory-v1" as const;
 
 export const ZERO_PROJECT_MEMORY_FACT_KINDS = [
@@ -25,6 +27,7 @@ export type ZeroProjectMemoryInput = {
   summary?: string | null;
   lastTaskSummary?: string | null;
   conversationSummary?: string | null;
+  choices?: ZeroProjectChoiceProfile | null;
 };
 
 export type ZeroProjectMemoryFact = {
@@ -38,6 +41,7 @@ export type ZeroProjectMemoryProfile = {
   subject: { projectId: number };
   projectName: string;
   facts: readonly ZeroProjectMemoryFact[];
+  choices?: ZeroProjectChoiceProfile;
 };
 
 const SOURCE_LIMITS: Readonly<Record<ZeroProjectMemorySourceKind, number>> = {
@@ -105,17 +109,20 @@ export function buildZeroProjectMemoryProfile(
     subject: { projectId: input.projectId },
     projectName: input.projectName.trim().slice(0, 200),
     facts,
+    choices: input.choices?.subject.projectId === input.projectId ? input.choices : undefined,
   };
 }
 
 export function presentZeroProjectMemory(profile: ZeroProjectMemoryProfile): string | undefined {
-  if (profile.facts.length === 0) return undefined;
+  const choices = profile.choices ? presentZeroProjectChoices(profile.choices) : undefined;
+  if (profile.facts.length === 0 && !choices) return undefined;
   const facts = profile.facts.map(
     ({ kind, source, text }) => `- ${FACT_LABELS[kind]} [${source}]: ${text}`,
   );
   return [
     `PROJECT MEMORY — ${profile.projectName || "this app"}`,
     ...facts,
+    ...(choices ? ["", choices] : []),
     "Use this saved context to continue the app without asking the user to repeat it.",
     "Current project files and the user's newest message outrank an older summary if they differ.",
     "Do not present an inference as something the user previously said.",

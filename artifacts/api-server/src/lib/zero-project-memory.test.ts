@@ -43,6 +43,45 @@ describe("Zero per-app memory", () => {
     expect(text).toContain("Do not present an inference");
   });
 
+  it("includes source-bound decisions and rejections in the one coherent project memory", () => {
+    const text = zeroProjectMemoryContext({
+      projectId: 52,
+      projectName: "IRQ TEL",
+      choices: {
+        semantics: "zero-project-choices-v1",
+        subject: { projectId: 52 },
+        choices: [
+          {
+            kind: "explicit-rejection",
+            text: "No database",
+            source: { kind: "user-message", id: 900 },
+          },
+        ],
+      },
+    });
+    expect(text).toContain("VERIFIED PROJECT DECISIONS AND REJECTIONS");
+    expect(text).toContain("Explicit rejection [user-message#900]: No database");
+  });
+
+  it("fails closed when choice evidence belongs to another project", () => {
+    const text = zeroProjectMemoryContext({
+      projectId: 52,
+      projectName: "IRQ TEL",
+      choices: {
+        semantics: "zero-project-choices-v1",
+        subject: { projectId: 7 },
+        choices: [
+          {
+            kind: "accepted-decision",
+            text: "Wrong project",
+            source: { kind: "project-knowledge", id: 1 },
+          },
+        ],
+      },
+    });
+    expect(text).toBeUndefined();
+  });
+
   it("is deterministic, serialization-ready, bounded, and does not mutate its input", () => {
     const input = {
       ...completeInput,
@@ -97,8 +136,10 @@ describe("Zero per-app memory", () => {
     const builder = readFileSync(fileURLToPath(new URL("./builder.ts", import.meta.url)), "utf8");
 
     expect(messages).toContain("zeroProjectMemoryContext({");
+    expect(messages.match(/loadZeroProjectChoices\(project\.id\)/g)).toHaveLength(2);
     expect(messages.match(/conversationSummary: projectMemoryContext/g)).toHaveLength(2);
     expect(jobs).toContain("zeroProjectMemoryContext({");
+    expect(jobs).toContain("loadZeroProjectChoices(projectId)");
     expect(builder).toContain("conversationSummary?: string;");
     expect(builder.match(/Earlier conversation context/g)?.length).toBeGreaterThanOrEqual(2);
   });
