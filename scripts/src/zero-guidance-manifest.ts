@@ -427,6 +427,15 @@ const EXPLICIT_SOURCES: ExplicitSourceSpec[] = [
     liveCoverageId: "live:snapshot-observe",
   },
   {
+    id: "contract:snapshot-observe:class",
+    kind: "context-assembler",
+    sourcePath: "artifacts/api-server/src/routes/snapshot-observe.ts",
+    selector: { type: "function", name: "snapshotPreviewClass" },
+    consumers: ["snapshot-observe", "vision"],
+    deliveryModes: ALL_DELIVERY_MODES,
+    liveCoverageId: "live:snapshot-observe",
+  },
+  {
     id: "contract:workspace-readiness:deriver",
     kind: "context-assembler",
     sourcePath: "artifacts/api-server/src/lib/workspace-readiness.ts",

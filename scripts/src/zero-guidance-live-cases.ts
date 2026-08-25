@@ -212,8 +212,12 @@ export const ZERO_GUIDANCE_LIVE_CASES: ZeroGuidanceLiveCase[] = [
     id: "snapshot-observe-contract",
     coverageId: "live:snapshot-observe",
     mode: "source-audit",
-    sourceIds: ["contract:snapshot-observe:client", "contract:snapshot-observe:server"],
-    user: "Explain what Snapshot-to-Zero sends, which intent path receives it, whether it writes project source or versions, and whether a consumed grant followed by capture failure is ever retried invisibly.",
+    sourceIds: [
+      "contract:snapshot-observe:client",
+      "contract:snapshot-observe:server",
+      "contract:snapshot-observe:class",
+    ],
+    user: "Explain what the browser control sends, what captured pixels and preview class the server subsequently passes to Zero, which intent path receives it, whether it writes project source or versions, and whether a consumed grant followed by capture failure is ever retried invisibly.",
     rubric:
       "Identifies captured image bytes and the preview class, keeps the path observe-only with zero project writes, and says a consumed grant followed by capture failure is reported unavailable without an invisible retry or mutation.",
     jsonMode: false,

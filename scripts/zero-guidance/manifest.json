@@ -2155,6 +2155,27 @@
     {
       "consumers": [
         "snapshot-observe",
+        "vision"
+      ],
+      "contentBytes": 472,
+      "contentSha256": "89b9956b66883e263ae239d450ec5fe82a6dea83fa47b546bce12cb137340ff9",
+      "coverageIds": [
+        "deterministic:manifest-integrity",
+        "live:snapshot-observe"
+      ],
+      "deliveryModes": [
+        "direct",
+        "existing",
+        "sealed"
+      ],
+      "id": "contract:snapshot-observe:class",
+      "kind": "context-assembler",
+      "selector": "function:snapshotPreviewClass",
+      "sourcePath": "artifacts/api-server/src/routes/snapshot-observe.ts"
+    },
+    {
+      "consumers": [
+        "snapshot-observe",
         "workspace"
       ],
       "contentBytes": 942,
