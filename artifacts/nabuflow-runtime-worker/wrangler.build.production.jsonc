@@ -10,34 +10,34 @@
     "TRUSTED_BUILD_MAX_ACTIVE": "2",
     "TRUSTED_BUILD_PLATFORM": "{\"runtime\":\"node\",\"runtimeVersion\":\"22.18.0\",\"nodeAbi\":\"127\",\"os\":\"linux\",\"cpu\":\"x64\",\"libc\":\"glibc\",\"toolchainImageDigest\":\"sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738\"}",
     "TRUSTED_BUILD_SIGNING_KEY_ID": "build-production-2026-08-v1",
-    "TRUSTED_BUILD_PUBLIC_KEYS": "{\"build-production-2026-08-v1\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKlMXFtbtobMd1XRbhLdBy9f4zbuu\\nsqs0gArg6sSdSP5zW467HD6pI5qfalr9bisVGJ7QeH2TV9stBtjgvLRNLw==\\n-----END PUBLIC KEY-----\\n\",\"pantry-production-2026-08-v1\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1P58KktrdgRUUWyGSdghLSSeHUs1\\n7G87MLs45fYb+MA4GG7RUSu2BR3+OEksIhKNu+lG38sGbM1qfYXAXR2nPQ==\\n-----END PUBLIC KEY-----\\n\"}"
+    "TRUSTED_BUILD_PUBLIC_KEYS": "{\"build-production-2026-08-v1\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKlMXFtbtobMd1XRbhLdBy9f4zbuu\\nsqs0gArg6sSdSP5zW467HD6pI5qfalr9bisVGJ7QeH2TV9stBtjgvLRNLw==\\n-----END PUBLIC KEY-----\\n\",\"pantry-production-2026-08-v1\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1P58KktrdgRUUWyGSdghLSSeHUs1\\n7G87MLs45fYb+MA4GG7RUSu2BR3+OEksIhKNu+lG38sGbM1qfYXAXR2nPQ==\\n-----END PUBLIC KEY-----\\n\"}",
   },
   "containers": [
     {
       "class_name": "TrustedBuildSandbox",
       "image": "docker.io/cloudflare/sandbox:0.12.4",
       "instance_type": "standard-1",
-      "max_instances": 2
-    }
+      "max_instances": 2,
+    },
   ],
   "r2_buckets": [
     {
       "binding": "TRUSTED_BUILD_OBJECTS",
-      "bucket_name": "nabuflow-trusted-build-production"
-    }
+      "bucket_name": "nabuflow-trusted-build-production",
+    },
   ],
   "services": [
     {
       "binding": "PANTRY_CATALOG",
-      "service": "nabuflow-pantry-production"
-    }
+      "service": "nabuflow-pantry-production",
+    },
   ],
   "queues": {
     "producers": [
       {
         "binding": "TRUSTED_BUILD_QUEUE",
-        "queue": "nabuflow-trusted-build-production"
-      }
+        "queue": "nabuflow-trusted-build-production",
+      },
     ],
     "consumers": [
       {
@@ -45,26 +45,26 @@
         "max_batch_size": 2,
         "max_batch_timeout": 2,
         "max_retries": 3,
-        "dead_letter_queue": "nabuflow-trusted-build-dead-letter-production"
-      }
-    ]
+        "dead_letter_queue": "nabuflow-trusted-build-dead-letter-production",
+      },
+    ],
   },
   "durable_objects": {
     "bindings": [
       {
         "name": "TRUSTED_BUILD_SANDBOX",
-        "class_name": "TrustedBuildSandbox"
+        "class_name": "TrustedBuildSandbox",
       },
       {
         "name": "TRUSTED_BUILD_COORDINATOR",
-        "class_name": "TrustedBuildDurableObject"
-      }
-    ]
+        "class_name": "TrustedBuildDurableObject",
+      },
+    ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["TrustedBuildSandbox", "TrustedBuildDurableObject"]
-    }
-  ]
+      "new_sqlite_classes": ["TrustedBuildSandbox", "TrustedBuildDurableObject"],
+    },
+  ],
 }
