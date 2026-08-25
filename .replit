@@ -165,6 +165,6 @@ NABUFLOW_PANTRY_TRUSTED_PUBLIC_KEYS = "{\"pantry-production-2026-08-v1\":\"-----
 PLATFORM_DOMAIN = "apps.mustaflow.com"
 STRIPE_CORE_PRICE_ID = "price_1Tg8OsDf10Zq7SrDgELV4lIw"
 STRIPE_WAVE_PRICE_ID = "price_1Tg8OtDf10Zq7SrDl8q9CvT7"
-BUILDER_ALLOWLIST = "mus_192@yahoo.com"
+BUILDER_ALLOWLIST = "mus_192@yahoo.com,alialmshhdany0@gmail.com"
 CREDITS_ENFORCEMENT = "true"
 LEGACY_ADOPTION_OWNER_ID = "user_3EBE0elOH8G6UXbaISITn6SjKvj"

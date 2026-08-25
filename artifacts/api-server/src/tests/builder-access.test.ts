@@ -35,6 +35,23 @@ describe("AI Builder cohort access", () => {
     ]).toEqual(["owner@example.com", "tester@example.com"]);
   });
 
+  it("keeps the production Builder cohort limited to the two approved accounts", () => {
+    const configPath = fileURLToPath(new URL("../../../../.replit", import.meta.url));
+    const config = readFileSync(configPath, "utf8");
+    const productionSection = config.match(
+      /\[userenv\.production\]([\s\S]*?)(?=\n\[[^\]]+\]|$)/,
+    )?.[1];
+
+    expect(productionSection).toBeDefined();
+    const configuredAllowlist = productionSection?.match(
+      /^BUILDER_ALLOWLIST\s*=\s*"([^"]*)"$/m,
+    )?.[1];
+    expect([...parseBuilderAllowlist(configuredAllowlist)]).toEqual([
+      "mus_192@yahoo.com",
+      "alialmshhdany0@gmail.com",
+    ]);
+  });
+
   it("allows only matching emails when the launch override is off", () => {
     const options = {
       allowlist: " owner@example.com ",
