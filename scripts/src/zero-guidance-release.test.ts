@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   ZERO_GUIDANCE_COVERAGE,
   buildZeroGuidanceInventory,
@@ -126,6 +128,17 @@ assert.equal(
 assert.equal(
   zeroGuidanceChangeRequiresLiveEval(inventory.manifest, ["docs/unrelated-release-note.md"]),
   false,
+);
+
+const ciWorkflow = await readFile(join(zeroGuidanceRepoRoot(), ".github/workflows/ci.yml"), "utf8");
+const promptEvalJob = ciWorkflow.slice(
+  ciWorkflow.indexOf("  prompt-evals:"),
+  ciWorkflow.indexOf("  # ── Task #753"),
+);
+assert.match(
+  promptEvalJob,
+  /fetch-depth:\s*0/u,
+  "The release evaluator must fetch the full commit graph so a multi-commit push can inspect its exact before SHA",
 );
 
 console.log(`required_live_coverage=${requiredCoverage.length}`);

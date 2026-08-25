@@ -52,7 +52,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # The push event's `before` SHA may be several commits behind when a
+          # reviewed slice is fast-forwarded as a multi-commit chain.  The
+          # change detector must be able to inspect that exact object.
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
