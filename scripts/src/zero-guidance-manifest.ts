@@ -714,6 +714,6 @@ export function renderZeroGuidanceCoverage(): string {
   });
 }
 
-export function repoRelativePath(root: string, value: string): string {
+function repoRelativePath(root: string, value: string): string {
   return normalizePath(relative(resolve(root), resolve(value)));
 }
