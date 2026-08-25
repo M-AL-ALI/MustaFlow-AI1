@@ -182,11 +182,24 @@ export async function loadZeroEligibilityInventory(
 ): Promise<ZeroEligibilityInventory> {
   const blueprintsRoot = path.join(root, "blueprints");
   const skillsRoot = path.join(root, "skills");
-  const [blueprintIds, skillIds] = await Promise.all([
+  const inventoryRoots = await Promise.allSettled([
     entriesWithMarker(blueprintsRoot, "blueprint.json", "blueprint"),
     entriesWithMarker(skillsRoot, "SKILL.md", "skill"),
   ]);
   const missing: string[] = [];
+  for (const result of inventoryRoots) {
+    if (result.status === "rejected") {
+      if (result.reason instanceof ZeroEligibilityInventoryError) {
+        missing.push(...result.reason.entries);
+        continue;
+      }
+      throw result.reason;
+    }
+  }
+  if (missing.length > 0) throw new ZeroEligibilityInventoryError(missing.sort());
+  const [blueprintIds, skillIds] = inventoryRoots.map((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
   const blueprints = new Map<string, ZeroCapabilityEligibilityMetadata>();
   const skills = new Map<string, ZeroCapabilityEligibilityMetadata>();
   for (const [kind, ids, sourceRoot, destination] of [

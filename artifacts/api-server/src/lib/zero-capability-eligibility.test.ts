@@ -101,14 +101,14 @@ describe("Zero blueprint and skill capability eligibility", () => {
     );
   });
 
-  it("returns a typed inventory error when deployment assets are unavailable", async () => {
+  it("returns one deterministic typed inventory error when deployment assets are unavailable", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "zero-eligibility-missing-"));
     temporaryRoots.push(root);
 
     await expect(loadZeroEligibilityInventory(root)).rejects.toMatchObject({
       name: "ZeroEligibilityInventoryError",
       code: "zero_eligibility_unclassified",
-      entries: ["blueprint:inventory_unavailable"],
+      entries: ["blueprint:inventory_unavailable", "skill:inventory_unavailable"],
     });
   });
 

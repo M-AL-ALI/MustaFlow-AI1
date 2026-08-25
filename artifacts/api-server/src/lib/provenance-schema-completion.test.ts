@@ -21,6 +21,12 @@ function typescriptFiles(root: string): string[] {
   });
 }
 
+function countProjectSummaryWriterFields(text: string, field: string): number {
+  return text
+    .split("\n")
+    .filter((line) => line.includes(`${field}:`) && !line.includes(`${field}: project.`)).length;
+}
+
 describe("Zero provenance schema completion", () => {
   it("adds exactly three named boot steps and keeps both historical usage step names", () => {
     const migration = source("./startup-migrations.ts");
@@ -79,8 +85,8 @@ describe("Zero provenance schema completion", () => {
       "./jobs.ts",
     ]) {
       const text = source(relative);
-      expect(text.match(/lastTaskSummary:/g)?.length ?? 0, relative).toBe(
-        text.match(/lastTaskSummaryProvenance:/g)?.length ?? 0,
+      expect(countProjectSummaryWriterFields(text, "lastTaskSummary"), relative).toBe(
+        countProjectSummaryWriterFields(text, "lastTaskSummaryProvenance"),
       );
     }
     const jobs = source("./jobs.ts");
