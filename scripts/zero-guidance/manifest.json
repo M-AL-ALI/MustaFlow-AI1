@@ -3022,8 +3022,8 @@
       "consumers": [
         "builder"
       ],
-      "contentBytes": 12598,
-      "contentSha256": "2cb27a980aaad1f000a8739068eb60636fcc1bb980c50fde65fa9a9b822cfbf1",
+      "contentBytes": 12929,
+      "contentSha256": "0b98799c7eb51f8c0660c61c06fb4ccc9e660e6100574b4594ee561935446d29",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:refinement"

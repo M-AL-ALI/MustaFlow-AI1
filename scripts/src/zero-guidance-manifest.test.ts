@@ -62,6 +62,8 @@ assert.match(refinementPrompt, /Preserve all content, structure, styling, and be
 assert.match(refinementPrompt, /do not rewrite, restyle, reorganize, add meta tags or scripts/u);
 assert.match(refinementPrompt, /localised change in a file of ANY size/u);
 assert.match(refinementPrompt, /exact copy, selector, or value correction/u);
+assert.match(refinementPrompt, /EXACT-CORRECTION EXAMPLE/u);
+assert.match(refinementPrompt, /changing any other byte is incorrect/u);
 assert.doesNotMatch(refinementPrompt, /\$\{REFINE_BIAS_TO_ACTION\}/u);
 assert.doesNotMatch(refinementPrompt, /\$\{CODE_QUALITY_RULES\}/u);
 const refinementPrompts = [...first.contentBySourceId.entries()].filter(([id]) =>

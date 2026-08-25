@@ -298,6 +298,8 @@ ${REFINE_BIAS_TO_ACTION}
 
 For a localised change in a file of ANY size, use a "patches" entry rather than rewriting the whole file whenever the existing text is unique. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it. For an exact copy, selector, or value correction, this surgical patch is REQUIRED: return the unchanged full file only through the patch result, and do not also include that path in "files".
 
+EXACT-CORRECTION EXAMPLE — if the supplied file contains \`<h1>Wlcome</h1>\` and the user asks to fix that typo, the only acceptable content change is \`{"path":"index.html","find":"Wlcome","replace":"Welcome"}\` in "patches", with "files": []. Rewriting the document, adding head metadata, or changing any other byte is incorrect.
+
 ${PREVIEW_NOTE}
 
 ${CODE_QUALITY_RULES}

@@ -181,7 +181,7 @@ const FIXTURES: Fixture[] = [
     stage: "refine",
     user: 'Project: "Landing" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><h1>Welcome</h1><p>Our product helps small teams.</p></main></body></html>\n\nApply this change: Add a dark mode toggle that remembers the choice.',
     rubric:
-      "Valid JSON with a `files` array (changed files only); change implements a toggle (class swap or CSS vars) AND uses localStorage; includes `unchangedFiles` array.",
+      "Valid JSON with `files` and/or `patches` for changed content; change implements a toggle (class swap or CSS vars) AND uses localStorage; includes `unchangedFiles` array.",
     jsonMode: true,
   },
   {
@@ -189,7 +189,7 @@ const FIXTURES: Fixture[] = [
     stage: "refine",
     user: 'Project: "Dashboard" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><h1>Dashboard</h1><section class="cards"><article><h2>Revenue</h2><p>$12,400</p></article><article><h2>Users</h2><p>842</p></article></section></main></body></html>\n\nApply this change: Make it look good on phones too without losing any data.',
     rubric:
-      "Valid JSON with `files`; HTML/CSS uses responsive breakpoints (media queries / flex / grid); no data fields removed.",
+      "Valid JSON with `files` and/or `patches`; HTML/CSS uses responsive breakpoints (media queries / flex / grid); no data fields removed.",
     jsonMode: true,
   },
   {
@@ -197,7 +197,7 @@ const FIXTURES: Fixture[] = [
     stage: "refine",
     user: 'Project: "Signup" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><form id="signup"><label>Name<input name="name"></label><label>Email<input name="email" type="email"></label><button type="submit">Join</button></form></body></html>\n\nApply this change: Show a friendly inline error if the email is missing or invalid.',
     rubric:
-      "Valid JSON with `files`; change references an inline error message and email format check; no blocking alert().",
+      "Valid JSON with `files` and/or `patches`; change references an inline error message and email format check; no blocking alert().",
     jsonMode: true,
   },
   {
@@ -213,7 +213,7 @@ const FIXTURES: Fixture[] = [
     stage: "refine",
     user: 'Project: "Pricing" (kind: web).\n\nCURRENT PROJECT FILES:\n--- index.html (text/html) ---\n<!doctype html><html><body><main><section id="pricing"><article>Free — $0/mo</article><article>Pro — $19/mo</article><article>Enterprise — Contact us</article></section></main></body></html>\n\nApply this change: Add a fourth tier called Team at $49/mo.',
     rubric:
-      "Valid JSON with `files`; new 'Team' card with $49/mo added; existing tier names preserved.",
+      "Valid JSON with `files` and/or `patches`; new 'Team' card with $49/mo added; existing tier names preserved.",
     jsonMode: true,
   },
 
