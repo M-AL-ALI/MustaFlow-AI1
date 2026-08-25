@@ -62,6 +62,14 @@ assert.match(refinementPrompt, /Preserve all content, structure, styling, and be
 assert.match(refinementPrompt, /do not rewrite, restyle, reorganize, add meta tags or scripts/u);
 assert.doesNotMatch(refinementPrompt, /\$\{REFINE_BIAS_TO_ACTION\}/u);
 assert.doesNotMatch(refinementPrompt, /\$\{CODE_QUALITY_RULES\}/u);
+const refinementPrompts = [...first.contentBySourceId.entries()].filter(([id]) =>
+  id.endsWith("REFINE_SYSTEM_PROMPT"),
+);
+assert.equal(refinementPrompts.length, 13);
+for (const [id, content] of refinementPrompts) {
+  assert.match(content, /FINAL CHANGE-SCOPE OVERRIDE/u, `${id} must close on minimum-diff law`);
+  assert.doesNotMatch(content, /\$\{REFINE_SCOPE_CLOSER\}/u, `${id} must resolve its closer`);
+}
 
 console.log(`manifest_sources=${first.manifest.sources.length}`);
 console.log(`manifest_sha256=${first.manifestSha256}`);
