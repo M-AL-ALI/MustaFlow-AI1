@@ -70,6 +70,7 @@ import { recordKnowledgeContextUsage } from "./knowledge-context-usage";
 import { projectSummaryProvenance } from "./project-summary-provenance";
 import { zeroProjectMemoryContext } from "./zero-project-memory";
 import { loadZeroProjectChoices } from "./zero-project-choice-store";
+import { readProjectMemoryReconciliationSummary } from "./memory-reconciliation-reader";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
@@ -2427,6 +2428,7 @@ export async function runJob(input: JobInput): Promise<void> {
       rawConversationSummary,
       blueprintContext,
       projectChoices,
+      memoryTruth,
     ] = await Promise.all([
       loadKnowledgeContext(projectId, userPrompt),
       (async () => {
@@ -2451,6 +2453,17 @@ export async function runJob(input: JobInput): Promise<void> {
       })(),
       getInstalledBlueprintKnowledge(projectId, zeroGenerationTarget),
       loadZeroProjectChoices(projectId),
+      readProjectMemoryReconciliationSummary(projectId).catch((err) => {
+        logger.warn(
+          {
+            component: "zero-project-memory-reconciliation",
+            errorClass: err instanceof Error ? err.name : "UnknownError",
+            projectId,
+          },
+          "Zero withheld unverified app-state memory",
+        );
+        return null;
+      }),
     ]);
 
     const conversationSummary = zeroProjectMemoryContext({
@@ -2461,6 +2474,7 @@ export async function runJob(input: JobInput): Promise<void> {
       lastTaskSummary: project.lastTaskSummary,
       conversationSummary: rawConversationSummary,
       choices: projectChoices,
+      reconciliation: memoryTruth,
     });
 
     // Knowledge selection is a read. Usage telemetry is an explicit, task-bound,

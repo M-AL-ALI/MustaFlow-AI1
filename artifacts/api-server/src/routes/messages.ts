@@ -44,6 +44,7 @@ import { writeKnowledge } from "../lib/knowledge";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { zeroProjectMemoryContext } from "../lib/zero-project-memory";
 import { loadZeroProjectChoices } from "../lib/zero-project-choice-store";
+import { readProjectMemoryReconciliationSummary } from "../lib/memory-reconciliation-reader";
 import { fetchAttachmentAsDataUri } from "./images";
 import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
 import {
@@ -77,6 +78,22 @@ import {
 } from "../lib/zero-terminal-persistence";
 
 const router: IRouter = Router();
+
+async function readZeroProjectMemoryTruth(projectId: number) {
+  try {
+    return await readProjectMemoryReconciliationSummary(projectId);
+  } catch (err) {
+    logger.warn(
+      {
+        component: "zero-project-memory-reconciliation",
+        errorClass: err instanceof Error ? err.name : "UnknownError",
+        projectId,
+      },
+      "Zero withheld unverified app-state memory",
+    );
+    return null;
+  }
+}
 
 async function persistAuthoritativeIntent(input: {
   projectId: number;
@@ -323,7 +340,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
   // Load recent conversation history for AI context (last 8 user/assistant turns)
   // Also load the most recent conversation summary for long-range context injection.
-  const [recentMessages, summaryEntry, projectChoices] = await Promise.all([
+  const [recentMessages, summaryEntry, projectChoices, memoryTruth] = await Promise.all([
     db
       .select({
         role: chatMessagesTable.role,
@@ -344,6 +361,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       .orderBy(desc(knowledgeEntriesTable.createdAt))
       .limit(1),
     loadZeroProjectChoices(project.id),
+    readZeroProjectMemoryTruth(project.id),
   ]);
 
   const conversationSummary = summaryEntry[0]?.content;
@@ -355,6 +373,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     lastTaskSummary: project.lastTaskSummary,
     conversationSummary,
     choices: projectChoices,
+    reconciliation: memoryTruth,
   });
 
   const conversationHistory: ConversationTurn[] = recentMessages
@@ -1605,7 +1624,7 @@ router.post(
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, project.id));
 
-    const [recentMessages, summaryEntry, projectChoices] = await Promise.all([
+    const [recentMessages, summaryEntry, projectChoices, memoryTruth] = await Promise.all([
       db
         .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
         .from(chatMessagesTable)
@@ -1623,6 +1642,7 @@ router.post(
         .orderBy(desc(knowledgeEntriesTable.createdAt))
         .limit(1),
       loadZeroProjectChoices(project.id),
+      readZeroProjectMemoryTruth(project.id),
     ]);
 
     const projectMemoryContext = zeroProjectMemoryContext({
@@ -1633,6 +1653,7 @@ router.post(
       lastTaskSummary: project.lastTaskSummary,
       conversationSummary: summaryEntry[0]?.content,
       choices: projectChoices,
+      reconciliation: memoryTruth,
     });
 
     const conversationHistory: ConversationTurn[] = recentMessages

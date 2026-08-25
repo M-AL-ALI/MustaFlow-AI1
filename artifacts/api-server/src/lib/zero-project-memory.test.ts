@@ -18,6 +18,29 @@ const completeInput = {
   conversationSummary: "The founder chose a dark background and no sign-in.",
 } as const;
 
+const currentMemoryTruth = {
+  semantics: "zero-project-memory-reconciliation-summary-v1",
+  status: "current",
+  observedAt: "2026-08-25T23:00:00.000Z",
+  counts: { confirmed: 2, stale: 0, unverifiable: 0 },
+  surfaces: [
+    {
+      surfaceId: "project-summary",
+      status: "current",
+      confirmed: 1,
+      stale: 0,
+      unverifiable: 0,
+    },
+    {
+      surfaceId: "conversation-summaries",
+      status: "current",
+      confirmed: 1,
+      stale: 0,
+      unverifiable: 0,
+    },
+  ],
+} as const;
+
 describe("Zero per-app memory", () => {
   it("assembles the four durable app-context facts with their sources", () => {
     const profile = buildZeroProjectMemoryProfile(completeInput);
@@ -33,7 +56,7 @@ describe("Zero per-app memory", () => {
   });
 
   it("presents human-readable continuity while keeping source truth explicit", () => {
-    const text = zeroProjectMemoryContext(completeInput);
+    const text = zeroProjectMemoryContext({ ...completeInput, reconciliation: currentMemoryTruth });
     expect(text).toContain("Purpose and audience [project-description]");
     expect(text).toContain("What is built now [project-summary]");
     expect(text).toContain("Latest work [last-task-summary]");
@@ -41,6 +64,60 @@ describe("Zero per-app memory", () => {
     expect(text).toContain("without asking the user to repeat it");
     expect(text).toContain("Current project files");
     expect(text).toContain("Do not present an inference");
+    expect(text).toContain("checked against current project records");
+  });
+
+  it("withholds stale and unverifiable app-state summaries while preserving current files and choices", () => {
+    const text = zeroProjectMemoryContext({
+      ...completeInput,
+      reconciliation: {
+        ...currentMemoryTruth,
+        status: "review-needed",
+        counts: { confirmed: 0, stale: 1, unverifiable: 1 },
+        surfaces: [
+          {
+            surfaceId: "project-summary",
+            status: "review-needed",
+            confirmed: 0,
+            stale: 1,
+            unverifiable: 0,
+          },
+          {
+            surfaceId: "conversation-summaries",
+            status: "limited",
+            confirmed: 0,
+            stale: 0,
+            unverifiable: 1,
+          },
+        ],
+      },
+      choices: {
+        semantics: "zero-project-choices-v1",
+        subject: { projectId: 52 },
+        choices: [
+          {
+            kind: "explicit-rejection",
+            text: "No database",
+            source: { kind: "user-message", id: 900 },
+          },
+        ],
+      },
+    });
+
+    expect(text).toContain("Purpose and audience [project-description]");
+    expect(text).not.toContain("What is built now [project-summary]");
+    expect(text).not.toContain("Latest work [last-task-summary]");
+    expect(text).not.toContain("Earlier conversation [conversation-summary]");
+    expect(text).toContain("Explicit rejection [user-message#900]: No database");
+    expect(text).toContain("was withheld because current project records did not confirm it");
+  });
+
+  it("fails closed on a reconciliation read failure instead of injecting old app-state prose", () => {
+    const text = zeroProjectMemoryContext({ ...completeInput, reconciliation: null });
+    expect(text).toContain("Purpose and audience [project-description]");
+    expect(text).not.toContain("What is built now [project-summary]");
+    expect(text).not.toContain("Earlier conversation [conversation-summary]");
+    expect(text).toContain("was withheld because current project records did not confirm it");
   });
 
   it("includes source-bound decisions and rejections in the one coherent project memory", () => {
@@ -137,9 +214,13 @@ describe("Zero per-app memory", () => {
 
     expect(messages).toContain("zeroProjectMemoryContext({");
     expect(messages.match(/loadZeroProjectChoices\(project\.id\)/g)).toHaveLength(2);
+    expect(messages.match(/readZeroProjectMemoryTruth\(project\.id\)/g)).toHaveLength(2);
     expect(messages.match(/conversationSummary: projectMemoryContext/g)).toHaveLength(2);
     expect(jobs).toContain("zeroProjectMemoryContext({");
     expect(jobs).toContain("loadZeroProjectChoices(projectId)");
+    expect(jobs).toContain("readProjectMemoryReconciliationSummary(projectId)");
+    expect(messages.match(/reconciliation: memoryTruth/g)).toHaveLength(2);
+    expect(jobs).toContain("reconciliation: memoryTruth");
     expect(builder).toContain("conversationSummary?: string;");
     expect(builder.match(/Earlier conversation context/g)?.length).toBeGreaterThanOrEqual(2);
   });

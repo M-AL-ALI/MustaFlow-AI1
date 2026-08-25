@@ -1,4 +1,8 @@
 import { presentZeroProjectChoices, type ZeroProjectChoiceProfile } from "./zero-project-choices";
+import type {
+  ProjectMemoryReconciliationStatus,
+  ProjectMemoryReconciliationSummary,
+} from "./memory-reconciliation";
 
 export const ZERO_PROJECT_MEMORY_SEMANTICS = "zero-project-memory-v1" as const;
 
@@ -28,6 +32,8 @@ export type ZeroProjectMemoryInput = {
   lastTaskSummary?: string | null;
   conversationSummary?: string | null;
   choices?: ZeroProjectChoiceProfile | null;
+  /** Undefined is legacy/test construction; runtime callers must pass a result or null on read failure. */
+  reconciliation?: ProjectMemoryReconciliationSummary | null;
 };
 
 export type ZeroProjectMemoryFact = {
@@ -42,6 +48,10 @@ export type ZeroProjectMemoryProfile = {
   projectName: string;
   facts: readonly ZeroProjectMemoryFact[];
   choices?: ZeroProjectChoiceProfile;
+  memoryTruth?: {
+    status: ProjectMemoryReconciliationStatus | "unavailable";
+    withheldSources: readonly ZeroProjectMemorySourceKind[];
+  };
 };
 
 const SOURCE_LIMITS: Readonly<Record<ZeroProjectMemorySourceKind, number>> = {
@@ -67,6 +77,19 @@ function normalizeBoundedText(
   if (!normalized) return null;
   const limit = SOURCE_LIMITS[source];
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
+}
+
+function reconciledSourceIsCurrent(
+  source: ZeroProjectMemorySourceKind,
+  reconciliation: ProjectMemoryReconciliationSummary | null | undefined,
+): boolean {
+  if (source === "project-description" || reconciliation === undefined) return true;
+  if (reconciliation === null) return false;
+  const surfaceId =
+    source === "conversation-summary" ? "conversation-summaries" : "project-summary";
+  return reconciliation.surfaces.some(
+    (surface) => surface.surfaceId === surfaceId && surface.status === "current",
+  );
 }
 
 export function buildZeroProjectMemoryProfile(
@@ -97,9 +120,14 @@ export function buildZeroProjectMemoryProfile(
 
   const seen = new Set<string>();
   const facts: ZeroProjectMemoryFact[] = [];
+  const withheldSources: ZeroProjectMemorySourceKind[] = [];
   for (const candidate of candidates) {
     const text = normalizeBoundedText(candidate.value, candidate.source);
     if (!text || seen.has(text)) continue;
+    if (!reconciledSourceIsCurrent(candidate.source, input.reconciliation)) {
+      withheldSources.push(candidate.source);
+      continue;
+    }
     seen.add(text);
     facts.push({ kind: candidate.kind, source: candidate.source, text });
   }
@@ -110,12 +138,19 @@ export function buildZeroProjectMemoryProfile(
     projectName: input.projectName.trim().slice(0, 200),
     facts,
     choices: input.choices?.subject.projectId === input.projectId ? input.choices : undefined,
+    memoryTruth:
+      input.reconciliation === undefined
+        ? undefined
+        : {
+            status: input.reconciliation?.status ?? "unavailable",
+            withheldSources,
+          },
   };
 }
 
 export function presentZeroProjectMemory(profile: ZeroProjectMemoryProfile): string | undefined {
   const choices = profile.choices ? presentZeroProjectChoices(profile.choices) : undefined;
-  if (profile.facts.length === 0 && !choices) return undefined;
+  if (profile.facts.length === 0 && !choices && !profile.memoryTruth) return undefined;
   const facts = profile.facts.map(
     ({ kind, source, text }) => `- ${FACT_LABELS[kind]} [${source}]: ${text}`,
   );
@@ -123,6 +158,14 @@ export function presentZeroProjectMemory(profile: ZeroProjectMemoryProfile): str
     `PROJECT MEMORY — ${profile.projectName || "this app"}`,
     ...facts,
     ...(choices ? ["", choices] : []),
+    ...(profile.memoryTruth?.withheldSources.length
+      ? [
+          "",
+          "Some older app-state memory was withheld because current project records did not confirm it. Rely on the current files and explain any uncertainty plainly.",
+        ]
+      : profile.memoryTruth?.status === "current"
+        ? ["", "Saved app-state memory was checked against current project records."]
+        : []),
     "Use this saved context to continue the app without asking the user to repeat it.",
     "Current project files and the user's newest message outrank an older summary if they differ.",
     "Do not present an inference as something the user previously said.",

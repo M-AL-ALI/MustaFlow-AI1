@@ -13,9 +13,11 @@ import { eq, sql } from "drizzle-orm";
 import { buildMemoryTruthRecord, type MemorySurfaceId } from "./memory-truth";
 import {
   reconcileMemoryRecords,
+  summarizeProjectMemoryReconciliation,
   type MemoryReconciliationCheck,
   type MemoryReconciliationObservation,
   type MemoryReconciliationResult,
+  type ProjectMemoryReconciliationSummary,
 } from "./memory-reconciliation";
 
 type ProjectRow = {
@@ -523,4 +525,13 @@ export async function readProjectMemoryReconciliation(
   source: MemoryReconciliationObservationSource = databaseObservationSource,
 ): Promise<readonly MemoryReconciliationResult[]> {
   return reconcileProjectMemorySnapshot(await source.readProjectSnapshot(projectId));
+}
+
+export async function readProjectMemoryReconciliationSummary(
+  projectId: number,
+  source: MemoryReconciliationObservationSource = databaseObservationSource,
+): Promise<ProjectMemoryReconciliationSummary> {
+  return summarizeProjectMemoryReconciliation(
+    await readProjectMemoryReconciliation(projectId, source),
+  );
 }

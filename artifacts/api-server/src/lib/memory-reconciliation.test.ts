@@ -6,6 +6,7 @@ import {
   MemoryReconciliationContractError,
   reconcileMemoryRecord,
   reconcileMemoryRecords,
+  summarizeProjectMemoryReconciliation,
   type MemoryReconciliationCheck,
   type MemoryReconciliationReason,
   type MemoryReconciliationVerdict,
@@ -283,5 +284,58 @@ describe("Zero memory reconciliation decision engine", () => {
     ]) {
       expect(json).not.toContain(forbidden);
     }
+  });
+
+  it("summarizes reconciliation without exposing record identities or checks", () => {
+    const results = [
+      reconcile({}, { surfaceId: "project-summary", recordId: 1 }),
+      reconcile(
+        { "content-hash": "contradicted" },
+        { surfaceId: "conversation-summaries", recordId: 2 },
+      ),
+      reconcile({ "source-exists": "missing" }, { surfaceId: "knowledge-entries", recordId: 3 }),
+    ];
+
+    const summary = summarizeProjectMemoryReconciliation(results);
+    expect(summary).toEqual({
+      semantics: "zero-project-memory-reconciliation-summary-v1",
+      status: "review-needed",
+      observedAt,
+      counts: { confirmed: 1, stale: 1, unverifiable: 1 },
+      surfaces: [
+        {
+          surfaceId: "conversation-summaries",
+          status: "review-needed",
+          confirmed: 0,
+          stale: 1,
+          unverifiable: 0,
+        },
+        {
+          surfaceId: "knowledge-entries",
+          status: "limited",
+          confirmed: 0,
+          stale: 0,
+          unverifiable: 1,
+        },
+        {
+          surfaceId: "project-summary",
+          status: "current",
+          confirmed: 1,
+          stale: 0,
+          unverifiable: 0,
+        },
+      ],
+    });
+    expect(JSON.stringify(summary)).not.toMatch(/memoryRecord|evidenceIdentity|checks|projectId/);
+  });
+
+  it("reports an honest empty state when the project has no saved memory", () => {
+    expect(summarizeProjectMemoryReconciliation([])).toEqual({
+      semantics: "zero-project-memory-reconciliation-summary-v1",
+      status: "empty",
+      observedAt: null,
+      counts: { confirmed: 0, stale: 0, unverifiable: 0 },
+      surfaces: [],
+    });
   });
 });

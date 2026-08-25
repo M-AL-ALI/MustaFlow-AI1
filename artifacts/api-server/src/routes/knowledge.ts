@@ -12,6 +12,8 @@ import { getOrCreateCredits } from "./credits";
 import { buildEmbeddingInput, generateEmbedding } from "../lib/embeddings";
 import { anonymiseContent } from "../lib/knowledge-promotion";
 import { checkProjectAccess, listAccessibleProjectIds } from "../lib/auth";
+import { logger } from "../lib/logger";
+import { readProjectMemoryReconciliationSummary } from "../lib/memory-reconciliation-reader";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -95,6 +97,43 @@ const LESSON_CONTRIBUTION_THRESHOLD = Math.max(
   1,
   parseInt(process.env.LESSON_CONTRIBUTION_THRESHOLD ?? "5", 10) || 5,
 );
+
+// GET /api/knowledge/reconciliation — content-free project memory health.
+// This read never repairs, archives, reinforces, or otherwise mutates memory.
+router.get("/knowledge/reconciliation", async (req, res): Promise<void> => {
+  const projectIdParam = req.query.projectId;
+  const projectId =
+    typeof projectIdParam === "string" && /^\d+$/.test(projectIdParam)
+      ? Number(projectIdParam)
+      : null;
+
+  if (projectId === null || !Number.isSafeInteger(projectId) || projectId <= 0) {
+    res.status(400).json({ error: "A valid project is required" });
+    return;
+  }
+  if (!req.userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  if ((await checkProjectAccess(req.userId, projectId, "viewer")) !== "granted") {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  try {
+    res.json(await readProjectMemoryReconciliationSummary(projectId));
+  } catch (err) {
+    logger.error(
+      {
+        component: "knowledge-memory-reconciliation",
+        errorClass: err instanceof Error ? err.name : "UnknownError",
+        projectId,
+      },
+      "Failed to read project memory health",
+    );
+    res.status(503).json({ error: "Project memory could not be checked right now" });
+  }
+});
 
 // GET /api/knowledge — list knowledge entries visible to the current user.
 // Query params:
