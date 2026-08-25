@@ -175,6 +175,7 @@ describe("authenticated preview data plane", () => {
     expect(redeemed?.headers.get("set-cookie")).toMatch(
       /HttpOnly; Secure; SameSite=None; Max-Age=300; Path=\/$/,
     );
+    expect(redeemed?.headers.get("cross-origin-resource-policy")).toBe("same-site");
 
     const replay = await redeem(token, "/hello");
     expect(replay?.status).toBe(409);
@@ -188,6 +189,7 @@ describe("authenticated preview data plane", () => {
       { coordinator, sandbox, nowMs: TEST_NOW_MS },
     );
     expect(session?.status).toBe(200);
+    expect(session?.headers.get("cross-origin-resource-policy")).toBe("same-site");
     expect(sandbox.httpRequests[0]?.url).toBe("https://tenant.preview.invalid/hello?value=1");
   });
 
@@ -215,6 +217,7 @@ describe("authenticated preview data plane", () => {
       nowMs: TEST_NOW_MS,
     });
     expect(missing?.status).toBe(401);
+    expect(missing?.headers.get("cross-origin-resource-policy")).toBe("same-site");
     await expect(missing?.json()).resolves.toMatchObject({ code: "preview_auth_required" });
 
     const token = await grant({ jti: "unredeemed-cookie-jti" });
