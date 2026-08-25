@@ -3,6 +3,7 @@ import {
   builderCreditCost,
   mapIntentToSendOptions,
   resolveBuilderComposerIntent,
+  shouldShowBuilderUpgradeNudge,
 } from "./builder-followup-submit";
 
 describe("Deep Reasoning pricing", () => {
@@ -47,6 +48,7 @@ describe("resolveBuilderComposerIntent", () => {
   it("does not let a completed task override a new undecided request", () => {
     expect(
       resolveBuilderComposerIntent({
+        messageText: "Maybe update this",
         activeIntent: null,
         localIntent: null,
         hasCompletedTask: true,
@@ -58,6 +60,7 @@ describe("resolveBuilderComposerIntent", () => {
   it("preserves explicit local intent and does not force an initial message into build", () => {
     expect(
       resolveBuilderComposerIntent({
+        messageText: "What does this do?",
         activeIntent: null,
         localIntent: "converse",
         hasCompletedTask: true,
@@ -66,11 +69,63 @@ describe("resolveBuilderComposerIntent", () => {
     ).toBe("answer");
     expect(
       resolveBuilderComposerIntent({
+        messageText: "Maybe the header",
         activeIntent: null,
         localIntent: null,
         hasCompletedTask: false,
         routingAgentIdentity: "main",
       }),
     ).toBeUndefined();
+  });
+
+  it("routes an explicit project-choice capture to answer despite negated build keywords", () => {
+    const messageText =
+      "Save this as a project decision: keep the site static. Save this as a project rejection: never add a database or authentication unless I explicitly reverse it. Do not build or change files.";
+    expect(
+      resolveBuilderComposerIntent({
+        messageText,
+        activeIntent: null,
+        localIntent: "build",
+        hasCompletedTask: true,
+        routingAgentIdentity: "main",
+      }),
+    ).toBe("answer");
+    expect(mapIntentToSendOptions({ intent: "answer", hasImages: false })).toEqual({
+      agentIntent: "answer",
+    });
+  });
+
+  it("does not downgrade a project-choice capture that also requests a real mutation", () => {
+    expect(
+      resolveBuilderComposerIntent({
+        messageText:
+          "Save this as a project decision: keep the site static. Then change the header.",
+        activeIntent: null,
+        localIntent: "build",
+        hasCompletedTask: true,
+        routingAgentIdentity: "main",
+      }),
+    ).toBe("mutate");
+  });
+});
+
+describe("shouldShowBuilderUpgradeNudge", () => {
+  it("does not advertise full-stack mode for a recorded rejection", () => {
+    expect(
+      shouldShowBuilderUpgradeNudge({
+        messageText:
+          "Save this as a project rejection: never add a database or authentication unless I explicitly reverse it. Do not build or change files.",
+        intent: "answer",
+      }),
+    ).toBe(false);
+  });
+
+  it("still offers the upgrade for a real backend mutation", () => {
+    expect(
+      shouldShowBuilderUpgradeNudge({
+        messageText: "Add database authentication",
+        intent: "mutate",
+      }),
+    ).toBe(true);
   });
 });

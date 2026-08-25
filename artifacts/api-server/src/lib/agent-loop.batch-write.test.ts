@@ -32,6 +32,7 @@ function makeToolCtx(files: unknown[]): ToolCtx {
       agentMode: "lite",
       existingFiles: [],
       onEvent: vi.fn(),
+      onFileMutation: vi.fn(),
       signal: new AbortController().signal,
     },
     commandsRun: [],
@@ -87,6 +88,9 @@ describe("write_files", () => {
     expect(ctx.workspace.read("package.json")?.content).toContain("vite");
     expect(ctx.workspace.read("src/App.tsx")?.content).toContain("Hello");
     expect(ctx.workspace.read("src/main.tsx")?.content).toBe("import './App'");
+    expect(ctx.input.onFileMutation).toHaveBeenNthCalledWith(1, "package.json");
+    expect(ctx.input.onFileMutation).toHaveBeenNthCalledWith(2, "src/App.tsx");
+    expect(ctx.input.onFileMutation).toHaveBeenNthCalledWith(3, "src/main.tsx");
     expect(ctx.input.onEvent).toHaveBeenCalledWith(
       "loop:phase",
       JSON.stringify({
@@ -121,6 +125,7 @@ describe("write_files", () => {
     expect(ctx.workspace.read("src/first.ts")).toBeDefined();
     expect(ctx.workspace.read("../outside.ts")).toBeUndefined();
     expect(ctx.workspace.read("src/last.ts")).toBeDefined();
+    expect(ctx.input.onFileMutation).toHaveBeenCalledTimes(2);
   });
 
   it("stops at the byte bound and explicitly returns the continuation paths", async () => {

@@ -65,6 +65,7 @@ import {
   presentPersistedZeroTerminal,
   presentZeroTerminalV1,
   responseSucceededTerminal,
+  isZeroProjectChoiceCaptureOnlyMessage,
   type IntentReceipt,
   type ZeroTerminalV1,
 } from "@workspace/ora-contracts";
@@ -237,6 +238,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   }
 
   const {
+    content,
     agentMode,
     planMode,
     agentIdentity: explicitAgentIdentity,
@@ -247,8 +249,11 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     brainstormContext,
     deepReasoning: requestedDeepReasoning,
   } = parsed.data;
-  const { content } = parsed.data;
-
+  // A stale or compromised client must not turn an explicit project-choice
+  // capture into a mutation by attaching an authoritative-looking override.
+  const authoritativeExplicitAgentIntent = isZeroProjectChoiceCaptureOnlyMessage(content)
+    ? "answer"
+    : explicitAgentIntent;
   // Idempotency dedup — if this key was already processed, return the cached result
   if (idempotencyKey) {
     const existing = idempotencyStore.get(idempotencyKey);
@@ -384,7 +389,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     /\b(?:generate|draw|render|produce|create|make|design|show\s+me)\s+(?:(?:a|an|me|us|some|my|the|few|several)\s+){0,3}(?:logo|logos|banner|banners|icon|icons|thumbnail|thumbnails|avatar|avatars|hero\s+images?|images?|pictures?|illustrations?|photos?|wallpapers?|background\s+images?|cover\s+(?:art|images?)|mockups?|posters?|flyers?|badges?|graphics?|visuals?|artworks?|artwork|paintings?|portraits?|murals?|watercolors?|sketches?)\b(?!\s+(?:component|element|widget|button|tab|panel|section|function|class|style|color|handler|hook|hooks|template|route|page|view|modal|menu|form|input|type|types|prop|props|state|util|utils|helper|helpers|module|library|lib|file|folder|dir|container|context|provider|reducer|action|slice|store|service|controller|model|schema|interface|enum|const|var|let))|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?)\s+(?:of|showing|depicting|featuring|with)\b|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:photorealistic\s+images?|ai\s+art)\b/i;
 
   const imageGenerationRequested =
-    explicitAgentIntent === undefined && !planMode && IMAGE_GENERATE_PATTERNS.test(content);
+    authoritativeExplicitAgentIntent === undefined &&
+    !planMode &&
+    IMAGE_GENERATE_PATTERNS.test(content);
   let classifiedForReceipt: IntentResult | null = null;
   const classify = async (): Promise<IntentResult> => {
     classifiedForReceipt ??= await runIntentClassifierPipeline(
@@ -403,13 +410,13 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         if (imageAttachments.length > 0 || stagedBackgroundPlanStep || imageGenerationRequested) {
           return "build";
         }
-        if (explicitAgentIntent) {
-          return explicitAgentIntent;
+        if (authoritativeExplicitAgentIntent) {
+          return authoritativeExplicitAgentIntent;
         }
         if (planMode) return "plan";
         return classifiedForReceipt?.legacyIntent ?? "converse";
       },
-      explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
+      explicitControl: authoritativeExplicitAgentIntent as ZeroIntentExplicitControl | undefined,
       planMode: Boolean(planMode),
       approvedPlanStep: Boolean(stagedBackgroundPlanStep),
       imageGenerationRequested,
@@ -1538,6 +1545,9 @@ router.post(
       idempotencyKey: streamIdempotencyKey,
       brainstormContext: streamBrainstormContext,
     } = parsed.data;
+    const authoritativeExplicitAgentIntent = isZeroProjectChoiceCaptureOnlyMessage(content)
+      ? "answer"
+      : explicitAgentIntent;
     const streamHasBrainstormContext =
       Array.isArray(streamBrainstormContext) && streamBrainstormContext.length > 0;
     const mode = agentMode as AgentMode;
@@ -1645,12 +1655,12 @@ router.post(
         projectId: project.id,
         requestId: streamIdempotencyKey ?? randomUUID(),
         legacyIntent: () =>
-          explicitAgentIntent
-            ? explicitAgentIntent
+          authoritativeExplicitAgentIntent
+            ? authoritativeExplicitAgentIntent
             : planMode
               ? "plan"
               : (classifiedForReceipt?.legacyIntent ?? "converse"),
-        explicitControl: explicitAgentIntent as ZeroIntentExplicitControl | undefined,
+        explicitControl: authoritativeExplicitAgentIntent as ZeroIntentExplicitControl | undefined,
         planMode: Boolean(planMode),
         approvedPlanStep: false,
         imageGenerationRequested: false,

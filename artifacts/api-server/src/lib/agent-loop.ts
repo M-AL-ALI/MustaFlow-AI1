@@ -162,6 +162,8 @@ export interface AgentLoopInput {
    */
   projectMode?: string | null;
   onEvent: AgentLoopEvent;
+  /** Synchronous receipt emitted before every in-memory or runtime file mutation. */
+  onFileMutation?: (path: string) => void;
   signal: AbortSignal;
   /**
    * When true, the agent loop pauses before executing any run_command or
@@ -5158,6 +5160,7 @@ async function executeSingleFileWrite(
   }
   const mime = typeof rawArgs.mime_type === "string" ? rawArgs.mime_type : undefined;
   const prior = workspace.read(path)?.content ?? "";
+  input.onFileMutation?.(path);
   workspace.write(path, content, mime);
   void invalidateEmbeddingSafe(input.projectId, path);
   void emitFileDiffEvent(input.onEvent, input.projectId, {
@@ -5459,6 +5462,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         };
       }
       const next = f.content.slice(0, idx) + newText + f.content.slice(idx + oldText.length);
+      input.onFileMutation?.(path);
       workspace.write(path, next, f.mimeType);
       void invalidateEmbeddingSafe(input.projectId, path);
       // Task #733: apply_patch has an exact before/after pair already, so the
@@ -5502,6 +5506,8 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       const path = sanitizePath(args.path);
       if (!path) return { ok: false, observation: "ERROR: invalid path" };
       const priorFile = workspace.read(path);
+      if (!priorFile) return { ok: false, observation: `ERROR: file not found: ${path}` };
+      input.onFileMutation?.(path);
       const removed = workspace.delete(path);
       if (!removed) return { ok: false, observation: `ERROR: file not found: ${path}` };
       void invalidateEmbeddingSafe(input.projectId, path);

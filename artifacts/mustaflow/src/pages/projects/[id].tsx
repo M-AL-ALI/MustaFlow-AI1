@@ -153,6 +153,7 @@ import { cn } from "@/lib/utils";
 import {
   getCreditCost,
   mapIntentToSendOptions,
+  shouldShowBuilderUpgradeNudge,
   toBuilderReceiptIntent,
   useBuilderCreditCosts,
   type BuilderComposerIntent,
@@ -698,41 +699,6 @@ const QUICK_ACTIONS = [
   "Add dark mode",
   "Fix the last error",
   "Add a contact form",
-];
-
-const BACKEND_KEYWORDS = [
-  "database",
-  "postgres",
-  "postgresql",
-  "mysql",
-  "sqlite",
-  "mongodb",
-  "redis",
-  "api",
-  "rest api",
-  "graphql",
-  "backend",
-  "server",
-  "express",
-  "fastapi",
-  "django",
-  "flask",
-  "node.js",
-  "nodejs",
-  "auth",
-  "authentication",
-  "login",
-  "sign in",
-  "user account",
-  "jwt",
-  "oauth",
-  "session",
-  "endpoint",
-  "crud",
-  "migration",
-  "drizzle",
-  "prisma",
-  "sequelize",
 ];
 
 /**
@@ -1715,10 +1681,9 @@ export default function ProjectWorkspacePage() {
   );
 
   const checkUpgradeNudge = useCallback(
-    (messageText: string) => {
+    (messageText: string, intent: BuilderComposerIntent | undefined) => {
       if (!project || project.builderMode === "agentic" || upgradeNudgeDismissed) return;
-      const lower = messageText.toLowerCase();
-      if (BACKEND_KEYWORDS.some((kw) => lower.includes(kw))) {
+      if (shouldShowBuilderUpgradeNudge({ messageText, intent })) {
         setUpgradeNudgeVisible(true);
       }
     },
@@ -4857,7 +4822,7 @@ export default function ProjectWorkspacePage() {
                         brainstormContext,
                         clearComposer,
                       ) => {
-                        checkUpgradeNudge(content);
+                        checkUpgradeNudge(content, intent);
                         if (chatScrolledUp) {
                           setChatScrolledUp(false);
                           chatAtBottomRef.current = true;

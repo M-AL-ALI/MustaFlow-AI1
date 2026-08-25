@@ -22,4 +22,9 @@ describe("authoritative message intent wiring", () => {
     expect(source).toContain('type: "intent"');
     expect(source).toContain("receiptId: intentReceipt.receiptId");
   });
+
+  it("keeps tagged project-choice captures answer-only even when an old client requests mutation", () => {
+    expect(source.match(/isZeroProjectChoiceCaptureOnlyMessage\(content\)/g)).toHaveLength(2);
+    expect(source.match(/explicitControl: authoritativeExplicitAgentIntent/g)).toHaveLength(2);
+  });
 });
