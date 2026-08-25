@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -446,10 +446,6 @@ const EXPLICIT_SOURCES: ExplicitSourceSpec[] = [
   },
 ];
 
-function normalizePath(value: string): string {
-  return value.split(sep).join("/");
-}
-
 function normalizeText(value: string): string {
   return value
     .replace(/^\uFEFF/u, "")
@@ -712,8 +708,4 @@ export function renderZeroGuidanceCoverage(): string {
     schemaVersion: ZERO_GUIDANCE_MANIFEST_SCHEMA_VERSION,
     coverage: [...ZERO_GUIDANCE_COVERAGE].sort((left, right) => left.id.localeCompare(right.id)),
   });
-}
-
-function repoRelativePath(root: string, value: string): string {
-  return normalizePath(relative(resolve(root), resolve(value)));
 }
