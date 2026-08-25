@@ -13,6 +13,8 @@ export interface ZeroGuidanceLiveCaseResult {
   outputSha256: string;
   candidateEvidenceChars: number;
   jsonValid: boolean | null;
+  generationAttempts: number;
+  failureEvidence?: string;
   error?: string;
 }
 
@@ -221,6 +223,12 @@ export function validateZeroGuidanceLiveResult(input: {
         !/^[0-9a-f]{64}$/u.test(entry.outputSha256) ||
         !Number.isInteger(entry.candidateEvidenceChars) ||
         entry.candidateEvidenceChars < 0 ||
+        !Number.isInteger(entry.generationAttempts) ||
+        entry.generationAttempts < 1 ||
+        entry.generationAttempts > 2 ||
+        (entry.failureEvidence !== undefined &&
+          (entry.failureEvidence.length === 0 || entry.failureEvidence.length > 4_000)) ||
+        (!entry.passed && !entry.error && !entry.failureEvidence) ||
         ![true, false, null].includes(entry.jsonValid),
     )
   ) {

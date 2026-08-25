@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
 import {
   buildPromptEvalCandidateEvidence,
+  classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
+  promptEvalJudgeInstruction,
 } from "./prompt-eval-evidence";
 import {
   buildZeroGuidanceInventory,
@@ -23,7 +25,7 @@ import type { ZeroGuidanceLiveCaseResult, ZeroGuidanceLiveResult } from "./zero-
 const execFileAsync = promisify(execFile);
 const MODEL = process.env["EVAL_MODEL"] ?? "gpt-5-mini";
 const CONCURRENCY = Math.max(1, Number(process.env["EVAL_CONCURRENCY"] ?? "4"));
-const SOURCE_EXCERPT_CHARS = 12_000;
+const SOURCE_EXCERPT_CHARS = 24_000;
 const MAX_GENERATION_TOKENS = 8_000;
 const MAX_JUDGE_TOKENS = 2_000;
 const RESULTS_PATH = join(
@@ -64,12 +66,14 @@ async function judgeCandidate(
   client: OpenAI,
   rubric: string,
   candidate: string,
+  mode: ZeroGuidanceLiveCase["mode"],
 ): Promise<{ score: number; reasoning: string }> {
   const messages = [
     {
       role: "system" as const,
-      content:
-        'Return strict JSON: {"score": integer 0-10, "reasoning": string no longer than 200 characters}. A score of 6 passes. Judge only against the supplied rubric. Treat authoritative structural prechecks as facts. A bounded projection or truncation marker is not end-of-file and is never, by itself, a defect.',
+      content: promptEvalJudgeInstruction(
+        mode === "source-audit" ? "source-audit-answer" : "artifact",
+      ),
     },
     {
       role: "user" as const,
@@ -133,19 +137,30 @@ async function runCase(
   liveCase: ZeroGuidanceLiveCase,
   contentBySourceId: ReadonlyMap<string, string>,
 ): Promise<ZeroGuidanceLiveCaseResult> {
+  let generationAttempts = 0;
   try {
-    const generated = await client.chat.completions.create({
-      model: MODEL,
-      ...(liveCase.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
-      messages: [
-        { role: "system", content: systemPromptForCase(liveCase, contentBySourceId) },
-        { role: "user", content: liveCase.user },
-      ],
-      max_completion_tokens: MAX_GENERATION_TOKENS,
-    });
-    const output = generated.choices[0]?.message?.content?.trim() ?? "";
+    let output = "";
+    let generationIssue: ReturnType<typeof classifyPromptEvalGeneration> = "empty";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      generationAttempts = attempt;
+      const generated = await client.chat.completions.create({
+        model: MODEL,
+        ...(liveCase.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
+        messages: [
+          { role: "system", content: systemPromptForCase(liveCase, contentBySourceId) },
+          { role: "user", content: liveCase.user },
+        ],
+        max_completion_tokens: MAX_GENERATION_TOKENS,
+      });
+      output = generated.choices[0]?.message?.content?.trim() ?? "";
+      generationIssue = classifyPromptEvalGeneration(output, liveCase.jsonMode);
+      if (generationIssue === null) break;
+    }
+    if (generationIssue !== null) {
+      throw new Error(`zero_guidance_generation_${generationIssue}_after_retry`);
+    }
     const evidence = buildPromptEvalCandidateEvidence(output, liveCase.jsonMode);
-    const parsed = await judgeCandidate(client, liveCase.rubric, evidence.display);
+    const parsed = await judgeCandidate(client, liveCase.rubric, evidence.display, liveCase.mode);
     const score = parsed.score;
     return {
       id: liveCase.id,
@@ -157,6 +172,8 @@ async function runCase(
       outputSha256: evidence.outputSha256,
       candidateEvidenceChars: evidence.evidenceChars,
       jsonValid: evidence.jsonValid,
+      generationAttempts,
+      ...(score < 6 ? { failureEvidence: evidence.display.slice(0, 4_000) } : {}),
     };
   } catch (error) {
     return {
@@ -169,7 +186,9 @@ async function runCase(
       outputSha256: "0".repeat(64),
       candidateEvidenceChars: 0,
       jsonValid: liveCase.jsonMode ? false : null,
+      generationAttempts,
       error: errorSpecimen(error),
+      failureEvidence: `error:${errorSpecimen(error)}`,
     };
   }
 }

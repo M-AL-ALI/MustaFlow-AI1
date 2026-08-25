@@ -3,6 +3,7 @@ import {
   buildPromptEvalCandidateEvidence,
   classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
+  promptEvalJudgeInstruction,
 } from "./prompt-eval-evidence";
 
 const longContent = `HEAD_SENTINEL${"x".repeat(40_000)}TAIL_SENTINEL`;
@@ -52,6 +53,10 @@ assert.equal(classifyPromptEvalGeneration("  \n", false), "empty");
 assert.equal(classifyPromptEvalGeneration('{"files":[', true), "invalid_json");
 assert.equal(classifyPromptEvalGeneration('{"files":[]}', true), null);
 assert.equal(classifyPromptEvalGeneration("A complete plain-text reply.", false), null);
+
+assert.match(promptEvalJudgeInstruction("source-audit-answer"), /explanatory answer/u);
+assert.match(promptEvalJudgeInstruction("source-audit-answer"), /Do not require source files/u);
+assert.doesNotMatch(promptEvalJudgeInstruction("artifact"), /Do not require source files/u);
 
 console.log("prompt_eval_evidence_tests=PASS");
 console.log("database=not consulted");

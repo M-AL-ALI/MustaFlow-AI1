@@ -20,6 +20,16 @@ export interface PromptEvalJudgeDecision {
 }
 
 export type PromptEvalGenerationIssue = "empty" | "invalid_json";
+export type PromptEvalCandidateKind = "artifact" | "source-audit-answer";
+
+export function promptEvalJudgeInstruction(kind: PromptEvalCandidateKind): string {
+  const common =
+    'Return strict JSON: {"score": integer 0-10, "reasoning": string no longer than 200 characters}. A score of 6 passes. Judge only against the supplied rubric. Treat authoritative structural prechecks as facts. A bounded projection or truncation marker is not end-of-file and is never, by itself, a defect.';
+  if (kind === "source-audit-answer") {
+    return `${common} The candidate is an explanatory answer derived from supplied source, not an application artifact. Judge the accuracy and completeness of its prose. Do not require source files, JSON fields, or runnable code unless the rubric explicitly asks for them.`;
+  }
+  return common;
+}
 
 export function classifyPromptEvalGeneration(
   output: string,

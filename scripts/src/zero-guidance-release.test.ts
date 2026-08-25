@@ -32,6 +32,7 @@ const results = ZERO_GUIDANCE_LIVE_CASES.map((liveCase) => ({
   outputSha256: "e".repeat(64),
   candidateEvidenceChars: 180,
   jsonValid: liveCase.jsonMode ? true : null,
+  generationAttempts: 1,
 }));
 const valid: ZeroGuidanceLiveResult = {
   schemaVersion: 1,
@@ -109,9 +110,14 @@ assert.equal(validate(wrongCaseSet).code, "zero_guidance_live_result_incomplete"
 const failed = structuredClone(valid);
 failed.results[0]!.passed = false;
 failed.results[0]!.score = 2;
+failed.results[0]!.failureEvidence = "Bounded failed candidate specimen.";
 failed.passed -= 1;
 failed.failed = 1;
 assert.equal(validate(failed).code, "zero_guidance_live_result_failed");
+
+const failedWithoutEvidence = structuredClone(failed);
+delete failedWithoutEvidence.results[0]!.failureEvidence;
+assert.equal(validate(failedWithoutEvidence).code, "zero_guidance_live_result_invalid");
 
 assert.equal(ZERO_GUIDANCE_LIVE_CASES.length, requiredCoverage.length);
 assert.deepEqual(

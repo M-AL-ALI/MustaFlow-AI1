@@ -40,6 +40,7 @@ import {
   buildPromptEvalCandidateEvidence,
   classifyPromptEvalGeneration,
   parsePromptEvalJudgeDecision,
+  promptEvalJudgeInstruction,
 } from "./prompt-eval-evidence";
 
 // Import the REAL production prompts. If any of these moves or is renamed
@@ -398,8 +399,7 @@ async function judgeCandidate(
   const messages = [
     {
       role: "system" as const,
-      content:
-        'You are a strict evaluation judge. Return STRICT JSON: { "score": integer 0-10, "reasoning": string ≤ 200 chars }. Score 10 = perfect; 6 = passes; <6 = fails. Treat authoritative structural prechecks as facts. A bounded projection or truncation marker is not end-of-file and is never, by itself, a defect.',
+      content: `You are a strict evaluation judge. ${promptEvalJudgeInstruction("artifact")} Score 10 = perfect; scores below 6 fail.`,
     },
     {
       role: "user" as const,
